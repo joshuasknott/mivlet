@@ -13,8 +13,9 @@
 - In progress: approval history with once, session, rule, modify, and deny.
 - Done: imported local knowledge appears in source inspection, pinned context, and composer directives.
 - Done: composer search returns cited workspace sources with provenance, freshness, trust, and snippets.
+- Done: memory can be edited, pinned, forgotten, disabled, and exported through Rust-backed state controls.
 - In progress: session recovery for drafts, pinned sources, automations, and approval audit.
-- Next: memory edit, forget, export, disable, and provenance controls backed by encrypted local state.
+- Next: provenance controls backed by encrypted local state and approval-driven memory promotion.
 
 ## Milestone 3: Real Connectors
 

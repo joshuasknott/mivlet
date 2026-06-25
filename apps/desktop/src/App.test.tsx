@@ -100,6 +100,43 @@ describe("Praxis home", () => {
     expect(screen.getByText("Product Design mockup - Updated today - trusted")).toBeInTheDocument();
   });
 
+  it("edits and forgets memory records", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
+    await user.click(screen.getByRole("button", { name: /edit concise updates/i }));
+    await user.clear(screen.getByLabelText("Memory value"));
+    await user.type(screen.getByLabelText("Memory value"), "Josh prefers direct updates with next actions.");
+    await user.click(screen.getByRole("button", { name: /save concise updates/i }));
+
+    expect(screen.getByText("Josh prefers direct updates with next actions.")).toBeInTheDocument();
+    expect(screen.getByText("Edited by Josh - Updated now")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /forget current build status/i }));
+
+    expect(screen.queryByText("Current build status")).not.toBeInTheDocument();
+    expect(screen.getByText(/Forgot memory: Current build status/i)).toBeInTheDocument();
+  });
+
+  it("disables and exports memory without deleting records", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
+    await user.click(screen.getByRole("button", { name: /disable memory/i }));
+
+    expect(screen.getByText(/Memory is disabled/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /enable memory/i })).toBeInTheDocument();
+    expect(screen.getByText("Concise updates")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /export memory/i }));
+
+    const exported = screen.getByLabelText("Memory export") as HTMLTextAreaElement;
+    expect(exported.value).toContain("praxis.memory.export.v1");
+    expect(exported.value).toContain("Concise updates");
+  });
+
   it("recovers composer drafts from local persistence", async () => {
     const user = userEvent.setup();
     const firstRender = render(<App />);

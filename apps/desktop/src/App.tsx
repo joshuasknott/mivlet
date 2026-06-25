@@ -4,21 +4,27 @@ import {
   CaretDown,
   CaretRight,
   ChatCircle,
+  Check,
   Clock,
   Database,
+  DownloadSimple,
   FileText,
   FolderOpen,
   Lightning,
   MagnifyingGlass,
   Paperclip,
+  PencilSimple,
   Plus,
+  Power,
   PuzzlePiece,
   ShieldCheck,
   SidebarSimple,
   Sparkle,
   Stack,
+  Trash,
   UploadSimple,
-  Waveform
+  Waveform,
+  X
 } from "@phosphor-icons/react";
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -31,6 +37,7 @@ import type {
   KnowledgeCitation,
   KnowledgeSource,
   LocalFileImport,
+  MemoryControlState,
   MemoryRecord,
   ThreadSummary,
   WorkspaceDirective
@@ -54,9 +61,12 @@ import {
 import { PraxisLogo } from "./components/PraxisLogo";
 import {
   importRuntimeLocalKnowledgeSource,
+  exportRuntimeMemoryState,
   loadRuntimeApprovalAudit,
   loadRuntimeImportedKnowledgeSources,
+  loadRuntimeMemoryState,
   recordRuntimeApprovalDecision,
+  saveRuntimeMemoryState,
   searchRuntimeKnowledgeSources
 } from "./runtime";
 
@@ -79,6 +89,8 @@ interface PersistedShellState {
   automationStatuses: Record<string, AutomationStatus>;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
+  memoryDisabled: boolean;
+  memoryRecords: MemoryRecord[];
 }
 
 const utilityItems = [
@@ -95,7 +107,9 @@ const defaultShellState: PersistedShellState = {
   dismissedApprovalIds: [],
   automationStatuses: {},
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id),
-  importedKnowledgeSources: []
+  importedKnowledgeSources: [],
+  memoryDisabled: false,
+  memoryRecords
 };
 
 function prependAuditEntry(current: ApprovalAuditEntry[], entry: ApprovalAuditEntry) {
@@ -142,6 +156,18 @@ function readFileAsText(file: File) {
     reader.onerror = () => reject(new Error("Praxis could not read that file."));
     reader.readAsText(file);
   });
+}
+
+function encodeMemoryExportFallback(state: MemoryControlState) {
+  return JSON.stringify(
+    {
+      format: "praxis.memory.export.v1",
+      disabled: state.disabled,
+      records: state.records
+    },
+    null,
+    2
+  );
 }
 
 function readPersistedShellState(): PersistedShellState {
@@ -347,13 +373,39 @@ function ApprovalPanel({
 function KnowledgePanel({
   sources,
   memory,
+  memoryDisabled,
+  editingMemoryId,
+  editingMemoryDraft,
+  memoryExportText,
+  memoryStatus,
   pinnedSourceIds,
-  onTogglePin
+  onTogglePin,
+  onStartMemoryEdit,
+  onUpdateMemoryDraft,
+  onSaveMemoryEdit,
+  onCancelMemoryEdit,
+  onForgetMemory,
+  onToggleMemoryPin,
+  onToggleMemoryDisabled,
+  onExportMemory
 }: {
   sources: KnowledgeSource[];
   memory: MemoryRecord[];
+  memoryDisabled: boolean;
+  editingMemoryId: string | null;
+  editingMemoryDraft: Pick<MemoryRecord, "title" | "value">;
+  memoryExportText: string;
+  memoryStatus: string;
   pinnedSourceIds: string[];
   onTogglePin: (sourceId: string) => void;
+  onStartMemoryEdit: (record: MemoryRecord) => void;
+  onUpdateMemoryDraft: (draft: Pick<MemoryRecord, "title" | "value">) => void;
+  onSaveMemoryEdit: (recordId: string) => void;
+  onCancelMemoryEdit: () => void;
+  onForgetMemory: (recordId: string) => void;
+  onToggleMemoryPin: (recordId: string) => void;
+  onToggleMemoryDisabled: () => void;
+  onExportMemory: () => void;
 }) {
   return (
     <section className="context-panel context-panel--split" aria-label="Knowledge">
@@ -382,20 +434,119 @@ function KnowledgePanel({
       </div>
 
       <div>
-        <SectionHeading title="Memory" meta="inspectable" />
+        <div className="memory-heading">
+          <SectionHeading title="Memory" meta={memoryDisabled ? "disabled" : `${memory.length} saved`} />
+          <div className="memory-toolbar">
+            <button type="button" onClick={onExportMemory} aria-label="Export memory">
+              <DownloadSimple size={15} />
+              <span>Export</span>
+            </button>
+            <button
+              type="button"
+              onClick={onToggleMemoryDisabled}
+              aria-label={memoryDisabled ? "Enable memory" : "Disable memory"}
+            >
+              <Power size={15} />
+              <span>{memoryDisabled ? "Enable" : "Disable"}</span>
+            </button>
+          </div>
+        </div>
+        {memoryDisabled ? (
+          <div className="memory-banner" role="status">
+            Memory is disabled. Records stay local for inspection and export.
+          </div>
+        ) : null}
         <div className="memory-list">
           {memory.map((record) => (
             <article className="memory-row" key={record.id}>
-              <span className="label-row">
-                <Database size={17} />
-                {record.kind}
-              </span>
-              <strong>{record.title}</strong>
-              <p>{record.value}</p>
-              <small>{record.source} - {record.freshness}</small>
+              {editingMemoryId === record.id ? (
+                <div className="memory-edit">
+                  <label>
+                    <span>Memory title</span>
+                    <input
+                      value={editingMemoryDraft.title}
+                      onChange={(event) =>
+                        onUpdateMemoryDraft({
+                          ...editingMemoryDraft,
+                          title: event.target.value
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Memory value</span>
+                    <textarea
+                      value={editingMemoryDraft.value}
+                      onChange={(event) =>
+                        onUpdateMemoryDraft({
+                          ...editingMemoryDraft,
+                          value: event.target.value
+                        })
+                      }
+                    />
+                  </label>
+                  <div className="memory-actions">
+                    <button
+                      type="button"
+                      onClick={() => onSaveMemoryEdit(record.id)}
+                      aria-label={`Save ${record.title}`}
+                    >
+                      <Check size={15} />
+                      <span>Save</span>
+                    </button>
+                    <button type="button" onClick={onCancelMemoryEdit} aria-label={`Cancel ${record.title}`}>
+                      <X size={15} />
+                      <span>Cancel</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <span className="label-row">
+                    <Database size={17} />
+                    {record.kind}
+                    {record.pinned ? " - pinned" : ""}
+                  </span>
+                  <strong>{record.title}</strong>
+                  <p>{record.value}</p>
+                  <small>{record.source} - {record.freshness}</small>
+                  <div className="memory-actions">
+                    <button
+                      type="button"
+                      onClick={() => onStartMemoryEdit(record)}
+                      aria-label={`Edit ${record.title}`}
+                    >
+                      <PencilSimple size={15} />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onToggleMemoryPin(record.id)}
+                      aria-label={`${record.pinned ? "Unpin" : "Pin"} ${record.title}`}
+                    >
+                      <Stack size={15} />
+                      <span>{record.pinned ? "Unpin" : "Pin"}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onForgetMemory(record.id)}
+                      aria-label={`Forget ${record.title}`}
+                    >
+                      <Trash size={15} />
+                      <span>Forget</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </article>
           ))}
         </div>
+        <p className="memory-status" aria-live="polite">
+          {memoryStatus}
+        </p>
+        {memoryExportText ? (
+          <textarea className="memory-export" aria-label="Memory export" readOnly value={memoryExportText} />
+        ) : null}
       </div>
     </section>
   );
@@ -501,6 +652,17 @@ export function App() {
   const [knowledgeCitations, setKnowledgeCitations] = useState<KnowledgeCitation[]>([]);
   const [knowledgeSearchMode, setKnowledgeSearchMode] = useState("lexical-fallback");
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [managedMemoryRecords, setManagedMemoryRecords] = useState<MemoryRecord[]>(
+    initialState.memoryRecords
+  );
+  const [memoryDisabled, setMemoryDisabled] = useState(initialState.memoryDisabled);
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const [editingMemoryDraft, setEditingMemoryDraft] = useState<Pick<MemoryRecord, "title" | "value">>({
+    title: "",
+    value: ""
+  });
+  const [memoryExportText, setMemoryExportText] = useState("");
+  const [memoryStatus, setMemoryStatus] = useState("Memory ready");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -531,6 +693,13 @@ export function App() {
     ...rule,
     status: automationStatuses[rule.id] ?? rule.status
   }));
+  const memoryState = useMemo<MemoryControlState>(
+    () => ({
+      disabled: memoryDisabled,
+      records: managedMemoryRecords
+    }),
+    [managedMemoryRecords, memoryDisabled]
+  );
 
   useEffect(() => {
     persistShellState({
@@ -541,7 +710,9 @@ export function App() {
       dismissedApprovalIds,
       automationStatuses,
       pinnedSourceIds,
-      importedKnowledgeSources
+      importedKnowledgeSources,
+      memoryDisabled,
+      memoryRecords: managedMemoryRecords
     });
   }, [
     activeItem,
@@ -550,6 +721,8 @@ export function App() {
     composerValue,
     dismissedApprovalIds,
     importedKnowledgeSources,
+    managedMemoryRecords,
+    memoryDisabled,
     pinnedSourceIds,
     voiceEnabled
   ]);
@@ -580,6 +753,23 @@ export function App() {
 
       setImportedKnowledgeSources(sources);
       setPinnedSourceIds((current) => Array.from(new Set([...current, ...sources.map((source) => source.id)])));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    void loadRuntimeMemoryState().then((state) => {
+      if (!active || !state || (!state.disabled && state.records.length === 0)) {
+        return;
+      }
+
+      setMemoryDisabled(state.disabled);
+      setManagedMemoryRecords(state.records);
     });
 
     return () => {
@@ -650,6 +840,98 @@ export function App() {
         ? `Found ${result.citations.length} cited workspace sources`
         : "No matching workspace sources found"
     );
+  };
+
+  const commitMemoryState = (state: MemoryControlState, status: string) => {
+    setMemoryDisabled(state.disabled);
+    setManagedMemoryRecords(state.records);
+    setMemoryStatus(status);
+
+    void saveRuntimeMemoryState(state)
+      .then((runtimeState) => {
+        if (!runtimeState) {
+          return;
+        }
+
+        setMemoryDisabled(runtimeState.disabled);
+        setManagedMemoryRecords(runtimeState.records);
+      })
+      .catch((error) => {
+        setMemoryStatus(error instanceof Error ? error.message : "Praxis could not save memory state.");
+      });
+  };
+
+  const startMemoryEdit = (record: MemoryRecord) => {
+    setEditingMemoryId(record.id);
+    setEditingMemoryDraft({
+      title: record.title,
+      value: record.value
+    });
+    setMemoryStatus(`Editing memory: ${record.title}`);
+  };
+
+  const saveMemoryEdit = (recordId: string) => {
+    const title = editingMemoryDraft.title.trim();
+    const value = editingMemoryDraft.value.trim();
+
+    if (!title || !value) {
+      setMemoryStatus("Memory title and value are required.");
+      return;
+    }
+
+    const nextRecords = managedMemoryRecords.map((record) =>
+      record.id === recordId
+        ? {
+            ...record,
+            title,
+            value,
+            freshness: "Updated now",
+            source: "Edited by Josh"
+          }
+        : record
+    );
+
+    setEditingMemoryId(null);
+    setEditingMemoryDraft({ title: "", value: "" });
+    commitMemoryState({ disabled: memoryDisabled, records: nextRecords }, "Memory updated.");
+  };
+
+  const forgetMemory = (recordId: string) => {
+    const nextRecords = managedMemoryRecords.filter((record) => record.id !== recordId);
+    const removed = managedMemoryRecords.find((record) => record.id === recordId);
+    setEditingMemoryId((current) => (current === recordId ? null : current));
+    commitMemoryState(
+      { disabled: memoryDisabled, records: nextRecords },
+      removed ? `Forgot memory: ${removed.title}` : "Memory forgotten."
+    );
+  };
+
+  const toggleMemoryPin = (recordId: string) => {
+    const nextRecords = managedMemoryRecords.map((record) =>
+      record.id === recordId ? { ...record, pinned: !record.pinned } : record
+    );
+    const changed = nextRecords.find((record) => record.id === recordId);
+    commitMemoryState(
+      { disabled: memoryDisabled, records: nextRecords },
+      changed?.pinned ? "Memory pinned." : "Memory unpinned."
+    );
+  };
+
+  const toggleMemoryDisabled = () => {
+    commitMemoryState(
+      { disabled: !memoryDisabled, records: managedMemoryRecords },
+      memoryDisabled ? "Memory enabled." : "Memory disabled."
+    );
+  };
+
+  const exportMemory = async () => {
+    try {
+      const exported = (await exportRuntimeMemoryState(memoryState)) ?? encodeMemoryExportFallback(memoryState);
+      setMemoryExportText(exported);
+      setMemoryStatus("Memory export ready.");
+    } catch (error) {
+      setMemoryStatus(error instanceof Error ? error.message : "Praxis could not export memory.");
+    }
   };
 
   const useDirective = (directive: WorkspaceDirective) => {
@@ -753,9 +1035,26 @@ export function App() {
       return (
         <KnowledgePanel
           sources={workspaceKnowledgeSources}
-          memory={memoryRecords}
+          memory={managedMemoryRecords}
+          memoryDisabled={memoryDisabled}
+          editingMemoryId={editingMemoryId}
+          editingMemoryDraft={editingMemoryDraft}
+          memoryExportText={memoryExportText}
+          memoryStatus={memoryStatus}
           pinnedSourceIds={pinnedSourceIds}
           onTogglePin={toggleSourcePin}
+          onStartMemoryEdit={startMemoryEdit}
+          onUpdateMemoryDraft={setEditingMemoryDraft}
+          onSaveMemoryEdit={saveMemoryEdit}
+          onCancelMemoryEdit={() => {
+            setEditingMemoryId(null);
+            setEditingMemoryDraft({ title: "", value: "" });
+            setMemoryStatus("Memory edit cancelled.");
+          }}
+          onForgetMemory={forgetMemory}
+          onToggleMemoryPin={toggleMemoryPin}
+          onToggleMemoryDisabled={toggleMemoryDisabled}
+          onExportMemory={exportMemory}
         />
       );
     }
@@ -1130,7 +1429,7 @@ export function App() {
 
           {renderWorkspaceContext()}
           <p className="sr-only" aria-live="polite">
-            {lastAction}. {memoryRecords.length} memory items. {workspaceKnowledgeSources.length} sources. {openApprovals.length} approvals pending.
+            {lastAction}. {managedMemoryRecords.length} memory items. {workspaceKnowledgeSources.length} sources. {openApprovals.length} approvals pending.
           </p>
         </div>
       </section>

@@ -24,7 +24,7 @@ Core domains:
 - `AutomationRule`: scheduled or event-driven workflow metadata with approval requirements.
 - `RuntimeSnapshot`: resumable app state after restart.
 
-Implemented runtime commands currently cover approval audit persistence, local text-file import, imported knowledge persistence, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
+Implemented runtime commands currently cover approval audit persistence, local text-file import, imported knowledge persistence, memory control state, memory export formatting, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
 
 ## Offline Behavior
 
@@ -32,7 +32,7 @@ Implemented runtime commands currently cover approval audit persistence, local t
 - Plugin actions requiring network or missing credentials queue as resumable jobs.
 - Recovered sessions show what was pending, what completed, and what needs fresh approval.
 
-The current desktop preview implements approval audit and imported-knowledge persistence in the Tauri app data folder, with browser storage for composer drafts, pinned sources, automation status, and preview fallback. The next storage step is moving those local JSON stores into encrypted SQLite and OS secure storage as live connectors are added.
+The current desktop preview implements approval audit, imported-knowledge, and memory-control persistence in the Tauri app data folder, with browser storage for composer drafts, pinned sources, automation status, and preview fallback. The next storage step is moving those local JSON stores into encrypted SQLite and OS secure storage as live connectors are added.
 
 ## Convex Boundary
 

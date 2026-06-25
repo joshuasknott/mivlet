@@ -12,6 +12,10 @@ const MAX_SNIPPET_CHARACTERS: usize = 240;
 const MAX_APPROVAL_AUDIT_ENTRIES: usize = 200;
 const MAX_APPROVAL_AUDIT_NOTE_CHARACTERS: usize = 240;
 const MAX_IMPORTED_KNOWLEDGE_SOURCES: usize = 100;
+const MAX_MEMORY_RECORDS: usize = 200;
+const MAX_MEMORY_TITLE_CHARACTERS: usize = 120;
+const MAX_MEMORY_VALUE_CHARACTERS: usize = 2_000;
+const MEMORY_KINDS: [&str; 4] = ["fact", "inference", "preference", "imported"];
 const SUPPORTED_LOCAL_FILE_EXTENSIONS: [&str; 7] =
     ["txt", "md", "markdown", "json", "csv", "yaml", "yml"];
 const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", "deny"];
@@ -101,6 +105,34 @@ struct ApprovalAuditRecordResponse {
     audit_len: usize,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryRecord {
+    id: String,
+    kind: String,
+    title: String,
+    value: String,
+    source: String,
+    freshness: String,
+    approved: bool,
+    pinned: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryControlState {
+    disabled: bool,
+    records: Vec<MemoryRecord>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryExportEnvelope {
+    format: &'static str,
+    disabled: bool,
+    records: Vec<MemoryRecord>,
+}
+
 #[tauri::command]
 fn runtime_status() -> RuntimeStatus {
     RuntimeStatus {
@@ -136,6 +168,10 @@ fn approval_audit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 fn imported_knowledge_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_data_file_path(app, "imported-knowledge.json")
+}
+
+fn memory_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "memory-state.json")
 }
 
 fn normalize_spaces(value: &str) -> String {
@@ -283,6 +319,127 @@ fn persist_imported_knowledge_source(
     Ok(source)
 }
 
+fn default_memory_state() -> MemoryControlState {
+    MemoryControlState {
+        disabled: false,
+        records: Vec::new(),
+    }
+}
+
+fn normalize_memory_record(record: MemoryRecord) -> Result<MemoryRecord, String> {
+    let id = normalize_spaces(&record.id);
+    let kind = normalize_spaces(&record.kind).to_ascii_lowercase();
+    let title = truncate_characters(
+        &normalize_spaces(&record.title),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let value = truncate_characters(
+        &normalize_spaces(&record.value),
+        MAX_MEMORY_VALUE_CHARACTERS,
+    );
+    let source = truncate_characters(
+        &normalize_spaces(&record.source),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let freshness = truncate_characters(
+        &normalize_spaces(&record.freshness),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+
+    if id.is_empty() || title.is_empty() || value.is_empty() {
+        return Err("Memory records need stable identifiers, titles, and values.".to_string());
+    }
+
+    if !MEMORY_KINDS.contains(&kind.as_str()) {
+        return Err("Memory kind is not recognized.".to_string());
+    }
+
+    Ok(MemoryRecord {
+        id,
+        kind,
+        title,
+        value,
+        source: if source.is_empty() {
+            "Praxis memory".to_string()
+        } else {
+            source
+        },
+        freshness: if freshness.is_empty() {
+            "Updated now".to_string()
+        } else {
+            freshness
+        },
+        approved: record.approved,
+        pinned: record.pinned,
+    })
+}
+
+fn normalize_memory_state(state: MemoryControlState) -> Result<MemoryControlState, String> {
+    let mut records = Vec::new();
+
+    for record in state.records {
+        let normalized = normalize_memory_record(record)?;
+        if !records
+            .iter()
+            .any(|existing: &MemoryRecord| existing.id == normalized.id)
+        {
+            records.push(normalized);
+        }
+
+        if records.len() >= MAX_MEMORY_RECORDS {
+            break;
+        }
+    }
+
+    Ok(MemoryControlState {
+        disabled: state.disabled,
+        records,
+    })
+}
+
+fn read_memory_state(path: &Path) -> Result<MemoryControlState, String> {
+    if !path.exists() {
+        return Ok(default_memory_state());
+    }
+
+    let contents =
+        fs::read_to_string(path).map_err(|_| "Praxis could not read memory state.".to_string())?;
+
+    if contents.trim().is_empty() {
+        return Ok(default_memory_state());
+    }
+
+    let parsed = serde_json::from_str::<MemoryControlState>(&contents)
+        .map_err(|_| "Praxis could not parse memory state.".to_string())?;
+
+    normalize_memory_state(parsed)
+}
+
+fn write_memory_state(
+    path: &Path,
+    state: MemoryControlState,
+) -> Result<MemoryControlState, String> {
+    let normalized = normalize_memory_state(state)?;
+    let encoded = serde_json::to_string_pretty(&normalized)
+        .map_err(|_| "Praxis could not encode memory state.".to_string())?;
+
+    fs::write(path, encoded).map_err(|_| "Praxis could not save memory state.".to_string())?;
+
+    Ok(normalized)
+}
+
+fn encode_memory_export(state: MemoryControlState) -> Result<String, String> {
+    let normalized = normalize_memory_state(state)?;
+    let envelope = MemoryExportEnvelope {
+        format: "praxis.memory.export.v1",
+        disabled: normalized.disabled,
+        records: normalized.records,
+    };
+
+    serde_json::to_string_pretty(&envelope)
+        .map_err(|_| "Praxis could not encode memory export.".to_string())
+}
+
 #[tauri::command]
 fn list_approval_audit(app: tauri::AppHandle) -> Result<Vec<ApprovalAuditEntry>, String> {
     let path = approval_audit_path(&app)?;
@@ -312,6 +469,26 @@ fn import_local_knowledge_source(
     let imported = import_local_text_file(candidate)?;
     let path = imported_knowledge_path(&app)?;
     persist_imported_knowledge_source(&path, imported)
+}
+
+#[tauri::command]
+fn list_memory_state(app: tauri::AppHandle) -> Result<MemoryControlState, String> {
+    let path = memory_state_path(&app)?;
+    read_memory_state(&path)
+}
+
+#[tauri::command]
+fn save_memory_state(
+    app: tauri::AppHandle,
+    state: MemoryControlState,
+) -> Result<MemoryControlState, String> {
+    let path = memory_state_path(&app)?;
+    write_memory_state(&path, state)
+}
+
+#[tauri::command]
+fn export_memory_state(state: MemoryControlState) -> Result<String, String> {
+    encode_memory_export(state)
 }
 
 fn extension_for(file_name: &str) -> String {
@@ -574,7 +751,10 @@ pub fn run() {
             list_approval_audit,
             record_approval_decision,
             list_imported_knowledge_sources,
-            import_local_knowledge_source
+            import_local_knowledge_source,
+            list_memory_state,
+            save_memory_state,
+            export_memory_state
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Praxis desktop runtime");
@@ -771,5 +951,97 @@ mod tests {
         );
 
         let _ = fs::remove_file(&path);
+    }
+
+    fn memory_record(id: &str, value: &str) -> MemoryRecord {
+        MemoryRecord {
+            id: id.to_string(),
+            kind: "preference".to_string(),
+            title: format!("Memory {id}"),
+            value: value.to_string(),
+            source: "Approved durable memory".to_string(),
+            freshness: "Updated now".to_string(),
+            approved: true,
+            pinned: true,
+        }
+    }
+
+    #[test]
+    fn saves_and_reads_memory_state() {
+        let path = temp_audit_path("memory-state-saves");
+        let _ = fs::remove_file(&path);
+        let state = MemoryControlState {
+            disabled: true,
+            records: vec![memory_record("concise-updates", "Prefer concise updates.")],
+        };
+
+        let saved = write_memory_state(&path, state).expect("memory state should save");
+        let read = read_memory_state(&path).expect("memory state should read");
+
+        assert!(saved.disabled);
+        assert_eq!(read.records.len(), 1);
+        assert_eq!(read.records[0].id, "concise-updates");
+        assert_eq!(read.records[0].kind, "preference");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rejects_unknown_memory_kinds() {
+        let path = temp_audit_path("memory-state-rejects-kind");
+        let _ = fs::remove_file(&path);
+        let mut record = memory_record("bad-kind", "Invalid kind");
+        record.kind = "rumor".to_string();
+
+        let error = write_memory_state(
+            &path,
+            MemoryControlState {
+                disabled: false,
+                records: vec![record],
+            },
+        )
+        .expect_err("unknown memory kinds should fail");
+
+        assert!(error.contains("not recognized"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn deduplicates_and_caps_memory_records() {
+        let path = temp_audit_path("memory-state-caps");
+        let _ = fs::remove_file(&path);
+        let mut records = (0..(MAX_MEMORY_RECORDS + 8))
+            .map(|index| memory_record(&format!("memory-{index}"), &format!("Value {index}")))
+            .collect::<Vec<_>>();
+        records.insert(0, memory_record("memory-10", "Duplicate should be ignored"));
+
+        let saved = write_memory_state(
+            &path,
+            MemoryControlState {
+                disabled: false,
+                records,
+            },
+        )
+        .expect("memory state should save");
+
+        assert_eq!(saved.records.len(), MAX_MEMORY_RECORDS);
+        assert_eq!(saved.records[0].id, "memory-10");
+        assert_eq!(saved.records[1].id, "memory-0");
+        assert_eq!(saved.records[MAX_MEMORY_RECORDS - 1].id, "memory-199");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn exports_memory_state_with_stable_format() {
+        let encoded = encode_memory_export(MemoryControlState {
+            disabled: false,
+            records: vec![memory_record("exported", "Exported value")],
+        })
+        .expect("memory export should encode");
+
+        assert!(encoded.contains("praxis.memory.export.v1"));
+        assert!(encoded.contains("Exported value"));
+        assert!(encoded.contains("\"disabled\": false"));
     }
 }

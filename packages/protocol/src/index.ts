@@ -26,6 +26,11 @@ export interface MemoryRecord {
   pinned: boolean;
 }
 
+export interface MemoryControlState {
+  disabled: boolean;
+  records: MemoryRecord[];
+}
+
 export type ConnectorStatus = "connected" | "needs-auth" | "unavailable" | "fixture";
 
 export interface ConnectorManifest {
