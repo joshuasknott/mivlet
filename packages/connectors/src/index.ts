@@ -7,13 +7,23 @@ import type {
   WorkspaceDirective
 } from "@praxis/protocol";
 
+export {
+  importLocalTextFile,
+  localFileFingerprint,
+  MAX_LOCAL_FILE_BYTES,
+  MAX_LOCAL_FILE_PREVIEW_CHARACTERS,
+  SUPPORTED_LOCAL_FILE_EXTENSIONS
+} from "./local-files";
+export type { LocalTextFileCandidate } from "./local-files";
+export { searchKnowledgeSources } from "./knowledge-search";
+
 export const connectorFixtures = [
   {
     id: "local-files",
     name: "Local Files",
-    status: "fixture",
-    permissions: ["read selected folders", "index document metadata"],
-    healthSummary: "Ready with fixture workspace files",
+    status: "connected",
+    permissions: ["read files you explicitly select", "index imported source metadata"],
+    healthSummary: "Native text-file import ready",
     lastCheckedAt: "2026-06-25T21:00:00.000Z"
   },
   {
@@ -185,7 +195,9 @@ export const knowledgeSourceFixtures = [
     connectorId: "local-files",
     provenance: "Goal objective file",
     freshness: "Read this session",
-    pinned: true
+    pinned: true,
+    trust: "trusted",
+    origin: "fixture"
   },
   {
     id: "selected-concept",
@@ -194,7 +206,9 @@ export const knowledgeSourceFixtures = [
     connectorId: "local-files",
     provenance: "Product Design mockup",
     freshness: "Updated today",
-    pinned: true
+    pinned: true,
+    trust: "trusted",
+    origin: "fixture"
   },
   {
     id: "codex-manual",
@@ -203,7 +217,9 @@ export const knowledgeSourceFixtures = [
     connectorId: "local-files",
     provenance: "Research source",
     freshness: "Fixture",
-    pinned: false
+    pinned: false,
+    trust: "trusted",
+    origin: "fixture"
   },
   {
     id: "market-research-pdf",
@@ -212,7 +228,9 @@ export const knowledgeSourceFixtures = [
     connectorId: "local-files",
     provenance: "Imported source fixture",
     freshness: "Added 2 days ago",
-    pinned: false
+    pinned: false,
+    trust: "untrusted",
+    origin: "fixture"
   }
 ] satisfies KnowledgeSource[];
 

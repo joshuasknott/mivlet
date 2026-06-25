@@ -62,6 +62,7 @@ export interface ProjectWorkspace {
 }
 
 export type KnowledgeSourceKind = "document" | "folder" | "web" | "memory";
+export type KnowledgeTrust = "trusted" | "untrusted";
 
 export interface KnowledgeSource {
   id: string;
@@ -71,6 +72,40 @@ export interface KnowledgeSource {
   provenance: string;
   freshness: string;
   pinned: boolean;
+  trust?: KnowledgeTrust;
+  contentPreview?: string;
+  contentFingerprint?: string;
+  sizeBytes?: number;
+  importedAt?: string;
+  origin?: "fixture" | "local-import";
+}
+
+export interface LocalFileImport extends KnowledgeSource {
+  kind: "document";
+  connectorId: "local-files";
+  trust: "untrusted";
+  contentPreview: string;
+  contentFingerprint: string;
+  sizeBytes: number;
+  importedAt: string;
+  origin: "local-import";
+}
+
+export interface KnowledgeCitation {
+  sourceId: string;
+  title: string;
+  snippet: string;
+  provenance: string;
+  freshness: string;
+  trust: KnowledgeTrust;
+  pinned: boolean;
+  score: number;
+}
+
+export interface KnowledgeSearchResponse {
+  query: string;
+  mode: "lexical-fallback" | "hybrid";
+  citations: KnowledgeCitation[];
 }
 
 export type AutomationStatus = "draft" | "active" | "paused";
@@ -100,6 +135,8 @@ export interface RuntimeSnapshot {
   pendingApprovals: ApprovalRequest[];
   approvalAudit: ApprovalAuditEntry[];
   memory: MemoryRecord[];
+  knowledge: KnowledgeSource[];
+  attachedSourceIds: string[];
   connectors: ConnectorManifest[];
   directives: WorkspaceDirective[];
 }

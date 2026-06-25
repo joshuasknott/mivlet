@@ -11,7 +11,7 @@
     "dev": "npm run dev --workspace @praxis/desktop",
     "build": "npm run build --workspace @praxis/protocol && npm run build --workspace @praxis/connectors && npm run build --workspace @praxis/desktop",
     "typecheck": "npm run build --workspace @praxis/protocol && npm run typecheck --workspace @praxis/connectors && npm run typecheck --workspace @praxis/desktop",
-    "test": "npm run test --workspace @praxis/desktop",
+    "test": "npm run test --workspace @praxis/connectors && npm run test --workspace @praxis/desktop",
     "lint": "npm run lint --workspaces --if-present",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "npm run tauri --workspace @praxis/desktop -- build",
