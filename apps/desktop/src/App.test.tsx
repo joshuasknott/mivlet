@@ -1,9 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 
 describe("Praxis home", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("writes a contextual directive into the composer", async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -64,6 +68,36 @@ describe("Praxis home", () => {
     await user.click(screen.getByRole("button", { name: "/goal" }));
 
     expect(screen.getByLabelText(/universal composer/i)).toHaveValue("/goal ");
+  });
+
+  it("imports local text files as pinned knowledge and contextual directives", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const file = new File(["Launch risks, connector recovery, and approval notes"], "launch-notes.md", {
+      type: "text/markdown"
+    });
+
+    await user.upload(screen.getByLabelText(/import local knowledge file/i), file);
+
+    expect(await screen.findByText(/Imported launch-notes.md/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /summarize launch-notes.md/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
+
+    expect(screen.getByText("launch-notes.md")).toBeInTheDocument();
+    expect(screen.getByText(/Local file -/i)).toBeInTheDocument();
+  });
+
+  it("shows citations from workspace sources when the composer is submitted", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.type(screen.getByLabelText(/universal composer/i), "selected visual direction");
+    await user.click(screen.getByRole("button", { name: /send prompt/i }));
+
+    expect(await screen.findByText("Sources used")).toBeInTheDocument();
+    expect(screen.getByText("Selected visual direction")).toBeInTheDocument();
+    expect(screen.getByText("Product Design mockup - Updated today - trusted")).toBeInTheDocument();
   });
 
   it("recovers composer drafts from local persistence", async () => {

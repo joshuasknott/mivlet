@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ApprovalAuditEntry } from "@praxis/protocol";
+import type { LocalTextFileCandidate } from "@praxis/connectors";
+import type {
+  ApprovalAuditEntry,
+  KnowledgeSearchResponse,
+  KnowledgeSource,
+  LocalFileImport
+} from "@praxis/protocol";
 
 interface ApprovalAuditRecordResponse {
   persisted: boolean;
@@ -14,6 +20,14 @@ function hasTauriRuntime() {
   );
 }
 
+function toRuntimeError(error: unknown) {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(typeof error === "string" ? error : "Praxis runtime request failed.");
+}
+
 export async function loadRuntimeApprovalAudit() {
   if (!hasTauriRuntime()) {
     return null;
@@ -21,6 +35,52 @@ export async function loadRuntimeApprovalAudit() {
 
   try {
     return await invoke<ApprovalAuditEntry[]>("list_approval_audit");
+  } catch {
+    return null;
+  }
+}
+
+export async function loadRuntimeImportedKnowledgeSources() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<LocalFileImport[]>("list_imported_knowledge_sources");
+  } catch {
+    return null;
+  }
+}
+
+export async function importRuntimeLocalKnowledgeSource(candidate: LocalTextFileCandidate) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<LocalFileImport>("import_local_knowledge_source", {
+      candidate
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function searchRuntimeKnowledgeSources(
+  query: string,
+  sources: KnowledgeSource[],
+  limit?: number
+) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<KnowledgeSearchResponse>("search_knowledge_sources", {
+      query,
+      sources,
+      limit
+    });
   } catch {
     return null;
   }

@@ -11,6 +11,7 @@ const DEFAULT_RESULT_LIMIT: usize = 5;
 const MAX_SNIPPET_CHARACTERS: usize = 240;
 const MAX_APPROVAL_AUDIT_ENTRIES: usize = 200;
 const MAX_APPROVAL_AUDIT_NOTE_CHARACTERS: usize = 240;
+const MAX_IMPORTED_KNOWLEDGE_SOURCES: usize = 100;
 const SUPPORTED_LOCAL_FILE_EXTENSIONS: [&str; 7] =
     ["txt", "md", "markdown", "json", "csv", "yaml", "yml"];
 const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", "deny"];
@@ -31,22 +32,22 @@ struct LocalTextFileCandidate {
     imported_at: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct LocalFileImport {
     id: String,
     title: String,
-    kind: &'static str,
-    connector_id: &'static str,
+    kind: String,
+    connector_id: String,
     provenance: String,
-    freshness: &'static str,
+    freshness: String,
     pinned: bool,
-    trust: &'static str,
+    trust: String,
     content_preview: String,
     content_fingerprint: String,
     size_bytes: usize,
     imported_at: String,
-    origin: &'static str,
+    origin: String,
 }
 
 #[derive(Deserialize)]
@@ -117,7 +118,7 @@ fn runtime_status() -> RuntimeStatus {
     }
 }
 
-fn approval_audit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+fn app_data_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<PathBuf, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -126,7 +127,15 @@ fn approval_audit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     fs::create_dir_all(&app_data_dir)
         .map_err(|_| "Praxis could not prepare the app data folder.".to_string())?;
 
-    Ok(app_data_dir.join("approval-audit.json"))
+    Ok(app_data_dir.join(file_name))
+}
+
+fn approval_audit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "approval-audit.json")
+}
+
+fn imported_knowledge_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "imported-knowledge.json")
 }
 
 fn normalize_spaces(value: &str) -> String {
@@ -226,6 +235,54 @@ fn persist_approval_audit_entry(
     })
 }
 
+fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFileImport>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs::read_to_string(path)
+        .map_err(|_| "Praxis could not read imported knowledge sources.".to_string())?;
+
+    if contents.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    serde_json::from_str::<Vec<LocalFileImport>>(&contents)
+        .map_err(|_| "Praxis could not parse imported knowledge sources.".to_string())
+}
+
+fn append_imported_knowledge_source(
+    mut sources: Vec<LocalFileImport>,
+    source: LocalFileImport,
+) -> Vec<LocalFileImport> {
+    sources.retain(|existing| existing.id != source.id);
+    sources.insert(0, source);
+    sources.truncate(MAX_IMPORTED_KNOWLEDGE_SOURCES);
+    sources
+}
+
+fn write_imported_knowledge_sources(
+    path: &Path,
+    sources: &[LocalFileImport],
+) -> Result<(), String> {
+    let encoded = serde_json::to_string_pretty(sources)
+        .map_err(|_| "Praxis could not encode imported knowledge sources.".to_string())?;
+
+    fs::write(path, encoded)
+        .map_err(|_| "Praxis could not save imported knowledge sources.".to_string())
+}
+
+fn persist_imported_knowledge_source(
+    path: &Path,
+    source: LocalFileImport,
+) -> Result<LocalFileImport, String> {
+    let sources = read_imported_knowledge_sources(path)?;
+    let sources = append_imported_knowledge_source(sources, source.clone());
+    write_imported_knowledge_sources(path, &sources)?;
+
+    Ok(source)
+}
+
 #[tauri::command]
 fn list_approval_audit(app: tauri::AppHandle) -> Result<Vec<ApprovalAuditEntry>, String> {
     let path = approval_audit_path(&app)?;
@@ -239,6 +296,22 @@ fn record_approval_decision(
 ) -> Result<ApprovalAuditRecordResponse, String> {
     let path = approval_audit_path(&app)?;
     persist_approval_audit_entry(&path, entry)
+}
+
+#[tauri::command]
+fn list_imported_knowledge_sources(app: tauri::AppHandle) -> Result<Vec<LocalFileImport>, String> {
+    let path = imported_knowledge_path(&app)?;
+    read_imported_knowledge_sources(&path)
+}
+
+#[tauri::command]
+fn import_local_knowledge_source(
+    app: tauri::AppHandle,
+    candidate: LocalTextFileCandidate,
+) -> Result<LocalFileImport, String> {
+    let imported = import_local_text_file(candidate)?;
+    let path = imported_knowledge_path(&app)?;
+    persist_imported_knowledge_source(&path, imported)
 }
 
 fn extension_for(file_name: &str) -> String {
@@ -343,19 +416,19 @@ fn import_local_text_file(candidate: LocalTextFileCandidate) -> Result<LocalFile
     Ok(LocalFileImport {
         id: format!("local-{}-{}", file_slug(&file_name), short_fingerprint),
         title: file_name,
-        kind: "document",
-        connector_id: "local-files",
+        kind: "document".to_string(),
+        connector_id: "local-files".to_string(),
         provenance: format!("Local file - {}", format_file_size(actual_size_bytes)),
-        freshness: "Imported now",
+        freshness: "Imported now".to_string(),
         pinned: true,
-        trust: "untrusted",
+        trust: "untrusted".to_string(),
         content_preview: preview_text(&candidate.content),
         content_fingerprint: fingerprint,
         size_bytes: actual_size_bytes,
         imported_at: candidate
             .imported_at
             .unwrap_or_else(|| "runtime-generated".to_string()),
-        origin: "local-import",
+        origin: "local-import".to_string(),
     })
 }
 
@@ -499,7 +572,9 @@ pub fn run() {
             import_local_text_file,
             search_knowledge_sources,
             list_approval_audit,
-            record_approval_decision
+            record_approval_decision,
+            list_imported_knowledge_sources,
+            import_local_knowledge_source
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Praxis desktop runtime");
@@ -641,6 +716,59 @@ mod tests {
         assert_eq!(entries.len(), MAX_APPROVAL_AUDIT_ENTRIES);
         assert_eq!(entries[0].id, "entry-204");
         assert_eq!(entries[MAX_APPROVAL_AUDIT_ENTRIES - 1].id, "entry-5");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn persists_imported_knowledge_sources_latest_first() {
+        let path = temp_audit_path("imported-knowledge-latest-first");
+        let _ = fs::remove_file(&path);
+        let first = import_local_text_file(candidate("first.md", "First launch source"))
+            .expect("first source should import");
+        let second = import_local_text_file(candidate("second.md", "Second launch source"))
+            .expect("second source should import");
+
+        persist_imported_knowledge_source(&path, first).expect("first source should persist");
+        persist_imported_knowledge_source(&path, second).expect("second source should persist");
+        let sources = read_imported_knowledge_sources(&path).expect("sources should read");
+
+        assert_eq!(sources.len(), 2);
+        assert_eq!(sources[0].title, "second.md");
+        assert_eq!(sources[1].title, "first.md");
+        assert_eq!(sources[0].origin, "local-import");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn deduplicates_and_caps_imported_knowledge_sources() {
+        let path = temp_audit_path("imported-knowledge-caps");
+        let _ = fs::remove_file(&path);
+
+        for index in 0..(MAX_IMPORTED_KNOWLEDGE_SOURCES + 5) {
+            let source = import_local_text_file(candidate(
+                &format!("source-{index}.md"),
+                &format!("Knowledge source {index}"),
+            ))
+            .expect("source should import");
+            persist_imported_knowledge_source(&path, source).expect("source should persist");
+        }
+
+        let replacement =
+            import_local_text_file(candidate("source-104.md", "Knowledge source 104"))
+                .expect("replacement should import");
+        persist_imported_knowledge_source(&path, replacement).expect("replacement should persist");
+
+        let sources = read_imported_knowledge_sources(&path).expect("sources should read");
+
+        assert_eq!(sources.len(), MAX_IMPORTED_KNOWLEDGE_SOURCES);
+        assert_eq!(sources[0].title, "source-104.md");
+        assert_eq!(sources[1].title, "source-103.md");
+        assert_eq!(
+            sources[MAX_IMPORTED_KNOWLEDGE_SOURCES - 1].title,
+            "source-5.md"
+        );
 
         let _ = fs::remove_file(&path);
     }

@@ -11,13 +11,14 @@
 ## Milestone 2: Approvals, Memory, And Recovery
 
 - In progress: approval history with once, session, rule, modify, and deny.
-- In progress: memory/source inspection and pinning.
+- Done: imported local knowledge appears in source inspection, pinned context, and composer directives.
+- Done: composer search returns cited workspace sources with provenance, freshness, trust, and snippets.
 - In progress: session recovery for drafts, pinned sources, automations, and approval audit.
-- Next: memory edit, forget, export, disable, citations, and provenance controls backed by encrypted local state.
+- Next: memory edit, forget, export, disable, and provenance controls backed by encrypted local state.
 
 ## Milestone 3: Real Connectors
 
-- Local files connector with import and summarization fixtures.
+- Done: Local files connector imports selected text/Markdown/JSON/CSV/YAML through the Rust runtime with browser fallback tests.
 - GitHub connector with repo/PR draft boundaries.
 - Vercel connector with project/deployment status.
 - Add Google Drive, Slack, Notion, and Linear adapter boundaries with auth states.
