@@ -11,3 +11,4 @@ Thumbs.db
 apps/desktop/src-tauri/target/
 output/
 coverage/
+.npm-cache/

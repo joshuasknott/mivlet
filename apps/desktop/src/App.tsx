@@ -11,8 +11,10 @@ import {
   Lightning,
   MagnifyingGlass,
   Paperclip,
+  Plus,
   PuzzlePiece,
   ShieldCheck,
+  SidebarSimple,
   Sparkle,
   Stack,
   UploadSimple,
@@ -268,7 +270,7 @@ function KnowledgePanel({
                 <FileText size={19} />
                 <span>
                   <strong>{source.title}</strong>
-                  <small>{source.provenance} · {source.freshness}</small>
+                  <small>{source.provenance} - {source.freshness}</small>
                 </span>
                 <span>{pinned ? "Pinned" : "Pin"}</span>
               </button>
@@ -288,7 +290,7 @@ function KnowledgePanel({
               </span>
               <strong>{record.title}</strong>
               <p>{record.value}</p>
-              <small>{record.source} · {record.freshness}</small>
+              <small>{record.source} - {record.freshness}</small>
             </article>
           ))}
         </div>
@@ -351,7 +353,7 @@ function AutomationPanel({
             <Clock size={19} />
             <span>
               <strong>{rule.title}</strong>
-              <small>{rule.trigger} · {rule.destination}</small>
+              <small>{rule.trigger} - {rule.destination}</small>
             </span>
             <span className="automation-status">
               <StatusDot tone={rule.status === "active" ? "ready" : rule.status === "paused" ? "paused" : "draft"} />
@@ -370,6 +372,10 @@ function AutomationPanel({
 export function App() {
   const initialState = useMemo(readPersistedShellState, []);
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
+  const [expandedCollections, setExpandedCollections] = useState({
+    projects: true,
+    chats: true
+  });
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({
     praxis: true,
     site: false
@@ -379,6 +385,7 @@ export function App() {
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [lastAction, setLastAction] = useState("Workspace ready");
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(initialState.dismissedApprovalIds);
@@ -436,6 +443,20 @@ export function App() {
     setComposerValue(directive.prompt);
     setLastAction(`Loaded directive: ${directive.label}`);
     focusComposer(directive.prompt);
+  };
+
+  const openThread = (thread: ThreadSummary, label: string) => {
+    setActiveItem(thread.id);
+    setMobileNavOpen(false);
+    setLastAction(`Opened ${label}: ${thread.title}`);
+  };
+
+  const startNewChat = () => {
+    setActiveItem("new-chat");
+    setComposerValue("");
+    setMobileNavOpen(false);
+    setLastAction("New chat ready");
+    focusComposer("");
   };
 
   const submitComposer = (event: FormEvent) => {
@@ -543,74 +564,101 @@ export function App() {
 
         <PraxisLogo />
 
+        <button className="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}>
+          <SidebarSimple size={20} />
+        </button>
+
+        <button className="new-chat-button" type="button" onClick={startNewChat}>
+          <ChatCircle size={16} />
+          <span>New chat</span>
+          <Plus size={14} />
+        </button>
+
         <div className="sidebar-body">
-          <section className="nav-group" aria-labelledby="chats-heading">
-            <div className="nav-group-heading" id="chats-heading">
-              <ChatCircle size={17} />
-              <span>Chats</span>
-            </div>
-            <div className="thread-list">
-              {chatThreads.map((thread) => (
-                <button
-                  key={thread.id}
-                  type="button"
-                  className={`thread-row${activeItem === thread.id ? " thread-row--active" : ""}`}
-                  onClick={() => {
-                    setActiveItem(thread.id);
-                    setLastAction(`Opened chat: ${thread.title}`);
-                  }}
-                >
-                  {thread.title}
-                </button>
-              ))}
-            </div>
+          <section className="nav-group" aria-labelledby="projects-heading">
+            <button
+              type="button"
+              className="nav-group-heading"
+              id="projects-heading"
+              aria-expanded={expandedCollections.projects}
+              onClick={() => setExpandedCollections((current) => ({ ...current, projects: !current.projects }))}
+            >
+              <span className="nav-group-title">
+                <FolderOpen size={15} />
+                <span>Projects</span>
+              </span>
+              <CaretRight className="collection-caret" size={13} weight="bold" />
+            </button>
+            {expandedCollections.projects ? (
+              <div className="project-list">
+                {projects.map((project) => {
+                  const expanded = expandedProjects[project.id];
+                  return (
+                    <div className="project-block" key={project.id}>
+                      <button
+                        type="button"
+                        className="project-row"
+                        aria-expanded={expanded}
+                        onClick={() => {
+                          setExpandedProjects((current) => ({ ...current, [project.id]: !expanded }));
+                          setLastAction(`${expanded ? "Collapsed" : "Expanded"} project: ${project.title}`);
+                        }}
+                      >
+                        <CaretRight className="project-caret" size={12} weight="bold" />
+                        <FolderOpen size={15} />
+                        <span>{project.title}</span>
+                      </button>
+                      {expanded ? (
+                        <div className="nested-thread-list">
+                          {project.threads.map((thread) => (
+                            <button
+                              key={thread.id}
+                              type="button"
+                              className={`thread-row thread-row--nested${
+                                activeItem === thread.id ? " thread-row--active" : ""
+                              }`}
+                              onClick={() => openThread(thread, project.title)}
+                            >
+                              {thread.title}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </section>
 
-          <section className="nav-group" aria-labelledby="projects-heading">
-            <div className="nav-group-heading" id="projects-heading">
-              <FolderOpen size={17} />
-              <span>Projects</span>
-            </div>
-            <div className="project-list">
-              {projects.map((project) => {
-                const expanded = expandedProjects[project.id];
-                return (
-                  <div className="project-block" key={project.id}>
-                    <button
-                      type="button"
-                      className="project-row"
-                      aria-expanded={expanded}
-                      onClick={() => {
-                        setExpandedProjects((current) => ({ ...current, [project.id]: !expanded }));
-                        setLastAction(`${expanded ? "Collapsed" : "Expanded"} project: ${project.title}`);
-                      }}
-                    >
-                      <CaretRight className="project-caret" size={14} weight="bold" />
-                      <span>{project.title}</span>
-                    </button>
-                    {expanded ? (
-                      <div className="nested-thread-list">
-                        {project.threads.map((thread) => (
-                          <button
-                            key={thread.id}
-                            type="button"
-                            className={`thread-row thread-row--nested${
-                              activeItem === thread.id ? " thread-row--active" : ""
-                            }`}
-                            onClick={() => {
-                              setActiveItem(thread.id);
-                              setLastAction(`Opened ${project.title}: ${thread.title}`);
-                            }}
-                          >
-                            {thread.title}
-                          </button>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
+          <section className="nav-group" aria-labelledby="chats-heading">
+            <button
+              type="button"
+              className="nav-group-heading"
+              id="chats-heading"
+              aria-expanded={expandedCollections.chats}
+              onClick={() => setExpandedCollections((current) => ({ ...current, chats: !current.chats }))}
+            >
+              <span className="nav-group-title">
+                <ChatCircle size={15} />
+                <span>Chats</span>
+              </span>
+              <CaretRight className="collection-caret" size={13} weight="bold" />
+            </button>
+            {expandedCollections.chats ? (
+              <div className="thread-list">
+                {chatThreads.map((thread) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    className={`thread-row${activeItem === thread.id ? " thread-row--active" : ""}`}
+                    onClick={() => openThread(thread, "chat")}
+                  >
+                    {thread.title}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </section>
 
           <nav className="utility-nav" aria-label="Workspace tools">
@@ -645,10 +693,7 @@ export function App() {
             }}
           >
             <span className="avatar">J</span>
-            <span>
-              <strong>Josh</strong>
-              <small>Settings</small>
-            </span>
+            <strong>Josh</strong>
             <CaretDown size={16} weight="bold" />
           </button>
           {accountOpen ? (
@@ -659,6 +704,74 @@ export function App() {
             </div>
           ) : null}
         </div>
+
+        {mobileNavOpen ? (
+          <div className="mobile-drawer" aria-label="Mobile navigation">
+            <button className="mobile-new-chat" type="button" onClick={startNewChat}>
+              <ChatCircle size={16} />
+              <span>New chat</span>
+              <Plus size={14} />
+            </button>
+
+            <section className="mobile-drawer-section" aria-label="Projects">
+              <strong>Projects</strong>
+              {projects.map((project) => (
+                <div className="mobile-project" key={project.id}>
+                  <span>
+                    <FolderOpen size={14} />
+                    {project.title}
+                  </span>
+                  {project.threads.map((thread) => (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      className={`thread-row thread-row--nested${
+                        activeItem === thread.id ? " thread-row--active" : ""
+                      }`}
+                      onClick={() => openThread(thread, project.title)}
+                    >
+                      {thread.title}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </section>
+
+            <section className="mobile-drawer-section" aria-label="Chats">
+              <strong>Chats</strong>
+              {chatThreads.map((thread) => (
+                <button
+                  key={thread.id}
+                  type="button"
+                  className={`thread-row${activeItem === thread.id ? " thread-row--active" : ""}`}
+                  onClick={() => openThread(thread, "chat")}
+                >
+                  {thread.title}
+                </button>
+              ))}
+            </section>
+
+            <nav className="mobile-utilities" aria-label="Mobile workspace tools">
+              {utilityItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() => {
+                      setActiveItem(item.label);
+                      setMobileNavOpen(false);
+                      setLastAction(`${item.label} selected`);
+                    }}
+                  >
+                    <Icon size={15} />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        ) : null}
       </aside>
 
       <section className="workspace" aria-label="Praxis workspace">
