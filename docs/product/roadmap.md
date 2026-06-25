@@ -34,4 +34,5 @@
 - Brand and marketing site.
 - Security docs, legal pages, downloads, and Vercel preview.
 - CI for lint, type, Rust, unit, integration, E2E, and security checks.
-- Windows build, then macOS/Linux preparation.
+- Done: local Windows MSI and NSIS build.
+- Next: signing, release notes, updater flow, and macOS/Linux preparation.

@@ -40,6 +40,7 @@ browser verification: in-app browser at `http://127.0.0.1:1420/`.
 - Interaction tests passed.
 - Production build passed.
 - Tauri/Rust check passed.
+- Windows Tauri bundle passed and produced MSI and NSIS installers.
 - Browser verification confirmed prompt cards fill the composer.
 - Browser verification confirmed `/goal` writes into the composer.
 - Browser verification confirmed Knowledge opens sources and memory.

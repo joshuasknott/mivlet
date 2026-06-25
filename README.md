@@ -37,3 +37,14 @@ Tauri checks use:
 ```bash
 npm run tauri:check
 ```
+
+Windows bundles use:
+
+```bash
+npm run tauri:build
+```
+
+Current local build outputs:
+
+- `apps/desktop/src-tauri/target/release/bundle/msi/Praxis_0.1.0_x64_en-US.msi`
+- `apps/desktop/src-tauri/target/release/bundle/nsis/Praxis_0.1.0_x64-setup.exe`
