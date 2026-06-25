@@ -1,11 +1,19 @@
 use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+use tauri::Manager;
 
 const MAX_LOCAL_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LOCAL_FILE_PREVIEW_CHARACTERS: usize = 6_000;
 const DEFAULT_RESULT_LIMIT: usize = 5;
 const MAX_SNIPPET_CHARACTERS: usize = 240;
+const MAX_APPROVAL_AUDIT_ENTRIES: usize = 200;
+const MAX_APPROVAL_AUDIT_NOTE_CHARACTERS: usize = 240;
 const SUPPORTED_LOCAL_FILE_EXTENSIONS: [&str; 7] =
     ["txt", "md", "markdown", "json", "csv", "yaml", "yml"];
+const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", "deny"];
 
 #[derive(Serialize)]
 struct RuntimeStatus {
@@ -74,6 +82,24 @@ struct KnowledgeSearchResponse {
     citations: Vec<KnowledgeCitation>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalAuditEntry {
+    id: String,
+    request_id: String,
+    decision: String,
+    decided_at: String,
+    note: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalAuditRecordResponse {
+    persisted: bool,
+    entry: ApprovalAuditEntry,
+    audit_len: usize,
+}
+
 #[tauri::command]
 fn runtime_status() -> RuntimeStatus {
     RuntimeStatus {
@@ -89,6 +115,130 @@ fn runtime_status() -> RuntimeStatus {
             "vercel",
         ],
     }
+}
+
+fn approval_audit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Praxis could not resolve the app data folder.".to_string())?;
+
+    fs::create_dir_all(&app_data_dir)
+        .map_err(|_| "Praxis could not prepare the app data folder.".to_string())?;
+
+    Ok(app_data_dir.join("approval-audit.json"))
+}
+
+fn normalize_spaces(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn truncate_characters(value: &str, max_characters: usize) -> String {
+    if value.chars().count() <= max_characters {
+        return value.to_string();
+    }
+
+    value.chars().take(max_characters).collect()
+}
+
+fn normalize_approval_audit_entry(entry: ApprovalAuditEntry) -> Result<ApprovalAuditEntry, String> {
+    let id = normalize_spaces(&entry.id);
+    let request_id = normalize_spaces(&entry.request_id);
+    let decision = normalize_spaces(&entry.decision).to_ascii_lowercase();
+    let decided_at = normalize_spaces(&entry.decided_at);
+    let note = truncate_characters(
+        &normalize_spaces(&entry.note),
+        MAX_APPROVAL_AUDIT_NOTE_CHARACTERS,
+    );
+
+    if id.is_empty() || request_id.is_empty() {
+        return Err("Approval audit entries need stable request identifiers.".to_string());
+    }
+
+    if !APPROVAL_DECISIONS.contains(&decision.as_str()) {
+        return Err("Approval decision is not recognized.".to_string());
+    }
+
+    if decided_at.is_empty() {
+        return Err("Approval audit entries need a decision time.".to_string());
+    }
+
+    if note.is_empty() {
+        return Err("Approval audit entries need a short note.".to_string());
+    }
+
+    Ok(ApprovalAuditEntry {
+        id,
+        request_id,
+        decision,
+        decided_at,
+        note,
+    })
+}
+
+fn read_approval_audit_entries(path: &Path) -> Result<Vec<ApprovalAuditEntry>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs::read_to_string(path)
+        .map_err(|_| "Praxis could not read the approval audit log.".to_string())?;
+
+    if contents.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    serde_json::from_str::<Vec<ApprovalAuditEntry>>(&contents)
+        .map_err(|_| "Praxis could not parse the approval audit log.".to_string())
+}
+
+fn append_approval_audit_entry(
+    mut entries: Vec<ApprovalAuditEntry>,
+    entry: ApprovalAuditEntry,
+) -> Vec<ApprovalAuditEntry> {
+    entries.retain(|existing| existing.id != entry.id);
+    entries.insert(0, entry);
+    entries.truncate(MAX_APPROVAL_AUDIT_ENTRIES);
+    entries
+}
+
+fn write_approval_audit_entries(path: &Path, entries: &[ApprovalAuditEntry]) -> Result<(), String> {
+    let encoded = serde_json::to_string_pretty(entries)
+        .map_err(|_| "Praxis could not encode the approval audit log.".to_string())?;
+
+    fs::write(path, encoded)
+        .map_err(|_| "Praxis could not save the approval audit log.".to_string())
+}
+
+fn persist_approval_audit_entry(
+    path: &Path,
+    entry: ApprovalAuditEntry,
+) -> Result<ApprovalAuditRecordResponse, String> {
+    let entry = normalize_approval_audit_entry(entry)?;
+    let entries = read_approval_audit_entries(path)?;
+    let entries = append_approval_audit_entry(entries, entry.clone());
+    write_approval_audit_entries(path, &entries)?;
+
+    Ok(ApprovalAuditRecordResponse {
+        persisted: true,
+        entry,
+        audit_len: entries.len(),
+    })
+}
+
+#[tauri::command]
+fn list_approval_audit(app: tauri::AppHandle) -> Result<Vec<ApprovalAuditEntry>, String> {
+    let path = approval_audit_path(&app)?;
+    read_approval_audit_entries(&path)
+}
+
+#[tauri::command]
+fn record_approval_decision(
+    app: tauri::AppHandle,
+    entry: ApprovalAuditEntry,
+) -> Result<ApprovalAuditRecordResponse, String> {
+    let path = approval_audit_path(&app)?;
+    persist_approval_audit_entry(&path, entry)
 }
 
 fn extension_for(file_name: &str) -> String {
@@ -347,7 +497,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             runtime_status,
             import_local_text_file,
-            search_knowledge_sources
+            search_knowledge_sources,
+            list_approval_audit,
+            record_approval_decision
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Praxis desktop runtime");
@@ -427,5 +579,69 @@ mod tests {
         assert_eq!(result.mode, "lexical-fallback");
         assert_eq!(result.citations.len(), 1);
         assert_eq!(result.citations[0].source_id, "memory");
+    }
+
+    fn audit_entry(id: &str, decision: &str) -> ApprovalAuditEntry {
+        ApprovalAuditEntry {
+            id: id.to_string(),
+            request_id: "weekly-digest-rule".to_string(),
+            decision: decision.to_string(),
+            decided_at: "2026-06-25T22:30:00.000Z".to_string(),
+            note: "Praxis Automations Enable weekly workspace digest".to_string(),
+        }
+    }
+
+    fn temp_audit_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("praxis-{name}-{}.json", std::process::id()))
+    }
+
+    #[test]
+    fn persists_approval_audit_entries_latest_first() {
+        let path = temp_audit_path("approval-audit-latest-first");
+        let _ = fs::remove_file(&path);
+
+        persist_approval_audit_entry(&path, audit_entry("first", "once"))
+            .expect("first entry should persist");
+        let response = persist_approval_audit_entry(&path, audit_entry("second", "deny"))
+            .expect("second entry should persist");
+        let entries = read_approval_audit_entries(&path).expect("entries should read");
+
+        assert!(response.persisted);
+        assert_eq!(response.audit_len, 2);
+        assert_eq!(entries[0].id, "second");
+        assert_eq!(entries[1].id, "first");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rejects_unknown_approval_decisions() {
+        let path = temp_audit_path("approval-audit-rejects-decision");
+        let _ = fs::remove_file(&path);
+
+        let error = persist_approval_audit_entry(&path, audit_entry("bad", "forever"))
+            .expect_err("unknown decisions should be rejected");
+
+        assert!(error.contains("not recognized"));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn caps_approval_audit_entries() {
+        let path = temp_audit_path("approval-audit-caps");
+        let _ = fs::remove_file(&path);
+
+        for index in 0..(MAX_APPROVAL_AUDIT_ENTRIES + 5) {
+            persist_approval_audit_entry(&path, audit_entry(&format!("entry-{index}"), "session"))
+                .expect("entry should persist");
+        }
+
+        let entries = read_approval_audit_entries(&path).expect("entries should read");
+
+        assert_eq!(entries.len(), MAX_APPROVAL_AUDIT_ENTRIES);
+        assert_eq!(entries[0].id, "entry-204");
+        assert_eq!(entries[MAX_APPROVAL_AUDIT_ENTRIES - 1].id, "entry-5");
+
+        let _ = fs::remove_file(&path);
     }
 }

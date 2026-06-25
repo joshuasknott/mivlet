@@ -44,8 +44,10 @@ import {
   workspaceDirectives
 } from "./data/workspace";
 import { PraxisLogo } from "./components/PraxisLogo";
+import { loadRuntimeApprovalAudit, recordRuntimeApprovalDecision } from "./runtime";
 
 const STORAGE_KEY = "praxis.shell.v1";
+const MAX_APPROVAL_AUDIT_ENTRIES = 200;
 
 type UtilityItem = "Knowledge" | "Plugins" | "Automations";
 type AutomationRuleView = Omit<AutomationRule, "status"> & { status: AutomationStatus };
@@ -75,6 +77,13 @@ const defaultShellState: PersistedShellState = {
   automationStatuses: {},
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id)
 };
+
+function prependAuditEntry(current: ApprovalAuditEntry[], entry: ApprovalAuditEntry) {
+  return [entry, ...current.filter((existing) => existing.id !== entry.id)].slice(
+    0,
+    MAX_APPROVAL_AUDIT_ENTRIES
+  );
+}
 
 function readPersistedShellState(): PersistedShellState {
   if (typeof window === "undefined") {
@@ -432,6 +441,22 @@ export function App() {
     voiceEnabled
   ]);
 
+  useEffect(() => {
+    let active = true;
+
+    void loadRuntimeApprovalAudit().then((entries) => {
+      if (!active || !entries || entries.length === 0) {
+        return;
+      }
+
+      setApprovalAudit(entries.slice(0, MAX_APPROVAL_AUDIT_ENTRIES));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const focusComposer = (value: string) => {
     window.requestAnimationFrame(() => {
       composerRef.current?.focus();
@@ -488,9 +513,17 @@ export function App() {
       decidedAt: new Date().toISOString(),
       note: `${approval.service} ${approval.action}`
     };
-    setApprovalAudit((current) => [entry, ...current]);
+    setApprovalAudit((current) => prependAuditEntry(current, entry));
     setDismissedApprovalIds((current) => (current.includes(approval.id) ? current : [...current, approval.id]));
     setLastAction(`${decision} recorded for ${approval.service}`);
+
+    void recordRuntimeApprovalDecision(entry).then((runtimeEntry) => {
+      if (!runtimeEntry) {
+        return;
+      }
+
+      setApprovalAudit((current) => prependAuditEntry(current, runtimeEntry));
+    });
   };
 
   const toggleSourcePin = (sourceId: string) => {
