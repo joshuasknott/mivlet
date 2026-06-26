@@ -5,7 +5,7 @@ import type {
   ProjectWorkspace,
   ThreadSummary,
   WorkspaceDirective
-} from "@praxis/protocol";
+} from "@arden/protocol";
 
 export {
   importLocalTextFile,
@@ -31,7 +31,7 @@ export const connectorFixtures = [
     name: "GitHub",
     status: "fixture",
     permissions: ["read repositories", "prepare draft pull requests"],
-    healthSummary: "Fixture repo josh-praxis is available",
+    healthSummary: "Fixture repo josh-arden is available",
     lastCheckedAt: "2026-06-25T21:00:00.000Z"
   },
   {
@@ -88,7 +88,7 @@ export const directiveFixtures = [
   {
     id: "review-draft-pr",
     label: "Review the draft PR before GitHub publish",
-    source: "josh-praxis / feature-memory",
+    source: "josh-arden / feature-memory",
     prompt:
       "Review the draft PR for the feature-memory branch before publishing. Check screenshots, tests, secrets, and remaining work.",
     connectorIds: ["github"]
@@ -140,12 +140,12 @@ export const chatThreadFixtures = [
 
 export const projectFixtures = [
   {
-    id: "praxis",
-    title: "Praxis desktop",
+    id: "arden",
+    title: "Arden desktop",
     description: "Initial desktop workspace, memory, approvals, and connector foundations.",
     threads: [
       {
-        id: "praxis-initial-build",
+        id: "arden-initial-build",
         title: "Initial build",
         kind: "project",
         description: "Selected visual direction, shell implementation, checks, and desktop packaging.",
@@ -153,7 +153,7 @@ export const projectFixtures = [
         pinnedContextIds: ["prd", "codex-manual", "selected-concept"]
       },
       {
-        id: "praxis-memory",
+        id: "arden-memory",
         title: "Memory and approvals",
         kind: "project",
         description: "Durable memory controls, consequence-aware approvals, and audit history.",
@@ -165,7 +165,7 @@ export const projectFixtures = [
   {
     id: "site",
     title: "Marketing site",
-    description: "Praxis positioning, security narrative, demos, downloads, and docs.",
+    description: "Arden positioning, security narrative, demos, downloads, and docs.",
     threads: [
       {
         id: "site-positioning",
@@ -190,7 +190,7 @@ export const projectFixtures = [
 export const knowledgeSourceFixtures = [
   {
     id: "prd",
-    title: "Praxis product brief",
+    title: "Arden product brief",
     kind: "document",
     connectorId: "local-files",
     provenance: "Goal objective file",
@@ -254,7 +254,7 @@ export const automationFixtures = [
   {
     id: "connector-health",
     title: "Connector health check",
-    trigger: "Daily when Praxis opens",
+    trigger: "Daily when Arden opens",
     destination: "Knowledge log",
     status: "active",
     requiresApproval: false

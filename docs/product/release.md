@@ -10,9 +10,9 @@ npm run tauri:build
 
 Verified local artifacts:
 
-- `apps/desktop/src-tauri/target/release/praxis-desktop.exe`
-- `apps/desktop/src-tauri/target/release/bundle/msi/Praxis_0.1.0_x64_en-US.msi`
-- `apps/desktop/src-tauri/target/release/bundle/nsis/Praxis_0.1.0_x64-setup.exe`
+- `apps/desktop/src-tauri/target/release/arden-desktop.exe`
+- `apps/desktop/src-tauri/target/release/bundle/msi/Arden_0.1.0_x64_en-US.msi`
+- `apps/desktop/src-tauri/target/release/bundle/nsis/Arden_0.1.0_x64-setup.exe`
 
 ## Distribution Gaps
 

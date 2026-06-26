@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      "@praxis/protocol": fileURLToPath(new URL("../../packages/protocol/src/index.ts", import.meta.url)),
-      "@praxis/connectors": fileURLToPath(new URL("../../packages/connectors/src/index.ts", import.meta.url))
+      "@arden/protocol": fileURLToPath(new URL("../../packages/protocol/src/index.ts", import.meta.url)),
+      "@arden/connectors": fileURLToPath(new URL("../../packages/connectors/src/index.ts", import.meta.url))
     }
   },
   clearScreen: false,

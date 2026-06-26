@@ -21,8 +21,8 @@ import { useRef, useState } from "react";
 
 const projects = [
   {
-    id: "praxis",
-    title: "Praxis",
+    id: "arden",
+    title: "Arden",
     threads: [
       { id: "initial-build", title: "Initial build" },
       { id: "memory", title: "Memory and approvals" },
@@ -58,9 +58,9 @@ const directives = [
     id: "review-pr",
     icon: PuzzlePiece,
     title: "Review the draft PR before publishing",
-    context: "Praxis repository - initial-build",
+    context: "Arden repository - initial-build",
     prompt:
-      "Review the current Praxis draft PR. Check tests, screenshots, permissions, and anything that should be resolved before publishing.",
+      "Review the current Arden draft PR. Check tests, screenshots, permissions, and anything that should be resolved before publishing.",
   },
   {
     id: "research",
@@ -107,7 +107,7 @@ export function App() {
   const [composer, setComposer] = useState("");
   const [activeThread, setActiveThread] = useState("initial-build");
   const [collections, setCollections] = useState({ projects: true, chats: true });
-  const [openProjects, setOpenProjects] = useState({ praxis: true, website: false });
+  const [openProjects, setOpenProjects] = useState({ arden: true, website: false });
   const [accountOpen, setAccountOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [voiceActive, setVoiceActive] = useState(false);
@@ -134,7 +134,7 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar" aria-label="Praxis navigation">
+      <aside className="sidebar" aria-label="Arden navigation">
         <div className="window-dots" aria-hidden="true">
           <span />
           <span />
@@ -143,9 +143,9 @@ export function App() {
 
         <div className="brand">
           <span className="brand-image">
-            <img src="/praxis-mark.png" alt="" />
+            <img src="/brand/arden-mark.svg" alt="" />
           </span>
-          <span>Praxis</span>
+          <span>Arden</span>
         </div>
 
         <button
@@ -372,7 +372,7 @@ export function App() {
               <span>Good evening, Josh</span>
             </div>
             <h1>Bring the work into one place</h1>
-            <p>Ask Praxis to work with your tools, knowledge, and files.</p>
+            <p>Ask Arden to work with your tools, knowledge, and files.</p>
           </section>
 
           <form
@@ -382,12 +382,12 @@ export function App() {
               setStatus(composer.trim() ? "Ready to work" : "Add a prompt or choose a suggestion");
             }}
           >
-            <label className="sr-only" htmlFor="praxis-composer">
-              Ask Praxis
+            <label className="sr-only" htmlFor="arden-composer">
+              Ask Arden
             </label>
             <textarea
               ref={composerRef}
-              id="praxis-composer"
+              id="arden-composer"
               value={composer}
               onChange={(event) => setComposer(event.target.value)}
               placeholder="Ask anything, attach context, or run a command..."

@@ -1,5 +1,5 @@
 {
-  "name": "@praxis/desktop",
+  "name": "@arden/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -16,8 +16,8 @@
     "@fontsource/inter": "^5.2.8",
     "@fontsource/newsreader": "^5.2.8",
     "@phosphor-icons/react": "^2.1.10",
-    "@praxis/connectors": "0.1.0",
-    "@praxis/protocol": "0.1.0",
+    "@arden/connectors": "0.1.0",
+    "@arden/protocol": "0.1.0",
     "@tauri-apps/api": "^2.9.0",
     "convex": "^1.30.0",
     "react": "^19.1.1",

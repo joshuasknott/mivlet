@@ -1,20 +1,20 @@
 {
-  "name": "praxis",
+  "name": "arden",
   "version": "0.1.0",
   "private": true,
-  "description": "Praxis is an AI-native workspace for tools, knowledge, memory, and work.",
+  "description": "Arden is an open-source AI workspace for real work.",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace @praxis/desktop",
-    "build": "npm run build --workspace @praxis/protocol && npm run build --workspace @praxis/connectors && npm run build --workspace @praxis/desktop",
-    "typecheck": "npm run build --workspace @praxis/protocol && npm run typecheck --workspace @praxis/connectors && npm run typecheck --workspace @praxis/desktop",
-    "test": "npm run test --workspace @praxis/connectors && npm run test --workspace @praxis/desktop",
+    "dev": "npm run dev --workspace @arden/desktop",
+    "build": "npm run build --workspace @arden/protocol && npm run build --workspace @arden/connectors && npm run build --workspace @arden/desktop",
+    "typecheck": "npm run build --workspace @arden/protocol && npm run typecheck --workspace @arden/connectors && npm run typecheck --workspace @arden/desktop",
+    "test": "npm run test --workspace @arden/connectors && npm run test --workspace @arden/desktop",
     "lint": "npm run lint --workspaces --if-present",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
-    "tauri:build": "npm run tauri --workspace @praxis/desktop -- build",
+    "tauri:build": "npm run tauri --workspace @arden/desktop -- build",
     "check": "npm run typecheck && npm run test && npm run build && npm run tauri:check"
   },
   "engines": {

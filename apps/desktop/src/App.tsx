@@ -1,6 +1,5 @@
 import {
   At,
-  Bell,
   CaretDown,
   CaretRight,
   ChatCircle,
@@ -47,13 +46,13 @@ import type {
   RuntimeSnapshot,
   ThreadSummary,
   WorkspaceDirective
-} from "@praxis/protocol";
+} from "@arden/protocol";
 import {
   importLocalTextFile,
   searchKnowledgeSources,
   SUPPORTED_LOCAL_FILE_EXTENSIONS,
   type LocalTextFileCandidate
-} from "@praxis/connectors";
+} from "@arden/connectors";
 import {
   automations,
   chatThreads,
@@ -64,7 +63,7 @@ import {
   projects,
   workspaceDirectives
 } from "./data/workspace";
-import { PraxisLogo } from "./components/PraxisLogo";
+import { ArdenLogo } from "./components/ArdenLogo";
 import {
   importRuntimeLocalKnowledgeSource,
   exportRuntimeMemoryState,
@@ -80,7 +79,8 @@ import {
   searchRuntimeKnowledgeSources
 } from "./runtime";
 
-const STORAGE_KEY = "praxis.shell.v1";
+const STORAGE_KEY = "arden.shell.v1";
+const LEGACY_STORAGE_KEY = "praxis.shell.v1";
 const RUNTIME_SNAPSHOT_VERSION = 1 as const;
 const MAX_APPROVAL_AUDIT_ENTRIES = 200;
 const MAX_IMPORTED_KNOWLEDGE_SOURCES = 100;
@@ -128,7 +128,7 @@ const utilityItems = [
 ] as const;
 
 const defaultShellState: PersistedShellState = {
-  activeItem: "praxis-initial-build",
+  activeItem: "arden-initial-build",
   composerValue: "",
   voiceEnabled: false,
   approvalAudit: [],
@@ -146,6 +146,25 @@ function prependAuditEntry(current: ApprovalAuditEntry[], entry: ApprovalAuditEn
     0,
     MAX_APPROVAL_AUDIT_ENTRIES
   );
+}
+
+function normalizeActiveItem(activeItem: string) {
+  if (activeItem === "praxis-initial-build") {
+    return "arden-initial-build";
+  }
+
+  if (activeItem === "praxis-memory") {
+    return "arden-memory";
+  }
+
+  return activeItem;
+}
+
+function normalizePersistedShellState(state: PersistedShellState): PersistedShellState {
+  return {
+    ...state,
+    activeItem: normalizeActiveItem(state.activeItem)
+  };
 }
 
 function mergeKnowledgeSources(
@@ -182,7 +201,7 @@ function readFileAsText(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Praxis could not read that file."));
+    reader.onerror = () => reject(new Error("Arden could not read that file."));
     reader.readAsText(file);
   });
 }
@@ -190,7 +209,7 @@ function readFileAsText(file: File) {
 function encodeMemoryExportFallback(state: MemoryControlState) {
   return JSON.stringify(
     {
-      format: "praxis.memory.export.v1",
+      format: "arden.memory.export.v1",
       disabled: state.disabled,
       records: state.records
     },
@@ -246,7 +265,7 @@ function promoteKnowledgeSourceFallback(request: MemoryPromotionRequest) {
       requestId: `memory-promotion-${source.id}`,
       decision: request.decision,
       decidedAt: request.decidedAt,
-      note: `Praxis Memory Approve ${source.provenance} into durable memory`
+      note: `Arden Memory Approve ${source.provenance} into durable memory`
     }
   };
 }
@@ -322,12 +341,15 @@ function readPersistedShellState(): PersistedShellState {
   }
 
   try {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!stored) {
       return defaultShellState;
     }
 
-    return { ...defaultShellState, ...JSON.parse(stored) } as PersistedShellState;
+    return normalizePersistedShellState({
+      ...defaultShellState,
+      ...JSON.parse(stored)
+    } as PersistedShellState);
   } catch {
     return defaultShellState;
   }
@@ -362,7 +384,7 @@ function shellStateToRuntimeSnapshot(state: PersistedShellState): RuntimeSnapsho
 function shellStateFromRuntimeSnapshot(snapshot: RuntimeSnapshot): PersistedShellState {
   return {
     ...defaultShellState,
-    activeItem: snapshot.activeItem || defaultShellState.activeItem,
+    activeItem: normalizeActiveItem(snapshot.activeItem || defaultShellState.activeItem),
     composerValue: snapshot.composerDraft,
     voiceEnabled: snapshot.voiceEnabled,
     approvalAudit: snapshot.approvalAudit,
@@ -946,11 +968,12 @@ export function App() {
   const initialState = useMemo(readPersistedShellState, []);
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
   const [expandedCollections, setExpandedCollections] = useState({
+    utilities: true,
     projects: true,
     chats: true
   });
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({
-    praxis: true,
+    arden: true,
     site: false
   });
   const [composerValue, setComposerValue] = useState(initialState.composerValue);
@@ -1013,10 +1036,6 @@ export function App() {
     ].slice(0, 4),
     [importedKnowledgeSources]
   );
-  const connectedCount = useMemo(
-    () => connectorManifests.filter((connector) => connector.status === "fixture" || connector.status === "connected").length,
-    []
-  );
   const openApprovals = pendingApprovals.filter((approval) => !dismissedApprovalIds.includes(approval.id));
   const automationRules: AutomationRuleView[] = automations.map((rule) => ({
     ...rule,
@@ -1068,7 +1087,7 @@ export function App() {
     }
 
     void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellState)).catch((error) => {
-      setLastAction(error instanceof Error ? error.message : "Praxis could not save runtime snapshot.");
+      setLastAction(error instanceof Error ? error.message : "Arden could not save runtime snapshot.");
     });
   }, [runtimeSnapshotReady, shellState]);
 
@@ -1207,7 +1226,7 @@ export function App() {
       setImportStatus(`Imported ${imported.title}. It is pinned as untrusted knowledge.`);
       setLastAction(`Imported source: ${imported.title}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Praxis could not import that file.";
+      const message = error instanceof Error ? error.message : "Arden could not import that file.";
       setImportStatus(message);
       setLastAction(message);
     }
@@ -1252,7 +1271,7 @@ export function App() {
         setManagedMemoryRecords(runtimeState.records);
       })
       .catch((error) => {
-        setMemoryStatus(error instanceof Error ? error.message : "Praxis could not save memory state.");
+        setMemoryStatus(error instanceof Error ? error.message : "Arden could not save memory state.");
       });
   };
 
@@ -1325,7 +1344,7 @@ export function App() {
       setMemoryExportText(exported);
       setMemoryStatus("Memory export ready.");
     } catch (error) {
-      setMemoryStatus(error instanceof Error ? error.message : "Praxis could not export memory.");
+      setMemoryStatus(error instanceof Error ? error.message : "Arden could not export memory.");
     }
   };
 
@@ -1345,7 +1364,7 @@ export function App() {
       setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
       setLastAction(`Approved ${source.title} into memory`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Praxis could not approve that source into memory.";
+      const message = error instanceof Error ? error.message : "Arden could not approve that source into memory.";
       setMemoryStatus(message);
       setLastAction(message);
     }
@@ -1462,7 +1481,7 @@ export function App() {
       );
     } catch (error) {
       setLastAction(
-        error instanceof Error ? error.message : "Praxis could not resolve that approval."
+        error instanceof Error ? error.message : "Arden could not resolve that approval."
       );
     }
   };
@@ -1539,7 +1558,7 @@ export function App() {
     if (rule.requiresApproval && rule.status === "draft") {
       const prompt = `/schedule ${rule.title} with pinned memory, connector health, and active projects.`;
       setComposerValue(prompt);
-      setActiveItem("praxis-memory");
+      setActiveItem("arden-memory");
       setLastAction("Automation needs approval before it can run");
       focusComposer(prompt);
       return;
@@ -1590,7 +1609,7 @@ export function App() {
       return <AutomationPanel rules={automationRules} onToggle={toggleAutomation} />;
     }
 
-    if (activeItem === "praxis-memory") {
+    if (activeItem === "arden-memory") {
       return (
         <ApprovalPanel
           approvals={openApprovals}
@@ -1627,13 +1646,7 @@ export function App() {
   return (
     <main className="desktop-frame">
       <aside className="sidebar" aria-label="Workspace navigation">
-        <div className="traffic-lights" aria-hidden="true">
-          <span className="traffic traffic--red" />
-          <span className="traffic traffic--yellow" />
-          <span className="traffic traffic--green" />
-        </div>
-
-        <PraxisLogo />
+        <ArdenLogo />
 
         <button className="mobile-nav-toggle" type="button" aria-label="Open navigation" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}>
           <SidebarSimple size={20} />
@@ -1644,6 +1657,60 @@ export function App() {
           <span>New chat</span>
           <Plus size={14} />
         </button>
+
+        <div className="sidebar-action-stack">
+          <button
+            className="sidebar-action-card sidebar-action-card--search"
+            type="button"
+            onClick={() => {
+              setLastAction("Search ready");
+              focusComposer("Search ");
+            }}
+          >
+            <MagnifyingGlass size={16} />
+            <span>Search</span>
+            <kbd>Ctrl</kbd>
+            <kbd>K</kbd>
+          </button>
+
+          <section className="utility-folder" aria-labelledby="utilities-heading">
+            <button
+              type="button"
+              className="nav-group-heading utility-folder-heading"
+              id="utilities-heading"
+              aria-expanded={expandedCollections.utilities}
+              onClick={() => setExpandedCollections((current) => ({ ...current, utilities: !current.utilities }))}
+            >
+              <span className="nav-group-title">
+                <Stack size={15} />
+                <span>Utilities</span>
+              </span>
+              <CaretRight className="collection-caret" size={13} weight="bold" />
+            </button>
+            {expandedCollections.utilities ? (
+              <nav className="utility-nav" aria-label="Workspace tools">
+                {utilityItems.map((item) => {
+                  const Icon = item.icon;
+                  const active = activeItem === item.label;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      className={`sidebar-action-card utility-row${active ? " utility-row--active" : ""}`}
+                      onClick={() => {
+                        setActiveItem(item.label);
+                        setLastAction(`${item.label} selected`);
+                      }}
+                    >
+                      <Icon size={17} />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                })}
+              </nav>
+            ) : null}
+          </section>
+        </div>
 
         <div className="sidebar-body">
           <section className="nav-group" aria-labelledby="projects-heading">
@@ -1731,27 +1798,6 @@ export function App() {
               </div>
             ) : null}
           </section>
-
-          <nav className="utility-nav" aria-label="Workspace tools">
-            {utilityItems.map((item) => {
-              const Icon = item.icon;
-              const active = activeItem === item.label;
-              return (
-                <button
-                  key={item.label}
-                  type="button"
-                  className={`utility-row${active ? " utility-row--active" : ""}`}
-                  onClick={() => {
-                    setActiveItem(item.label);
-                    setLastAction(`${item.label} selected`);
-                  }}
-                >
-                  <Icon size={17} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
         </div>
 
         <div className="sidebar-footer">
@@ -1768,10 +1814,27 @@ export function App() {
             <CaretDown size={16} weight="bold" />
           </button>
           {accountOpen ? (
-            <div className="account-popover" role="status">
-              <span>Read-only by default</span>
-              <span>{connectedCount} bridges ready</span>
-              <span>{pinnedSourceIds.length} pinned sources</span>
+            <div className="account-popover" role="menu" aria-label="Josh account menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setAccountOpen(false);
+                  setLastAction("Profile selected");
+                }}
+              >
+                Profile
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setAccountOpen(false);
+                  setLastAction("Settings selected");
+                }}
+              >
+                Settings
+              </button>
             </div>
           ) : null}
         </div>
@@ -1822,46 +1885,33 @@ export function App() {
               ))}
             </section>
 
-            <nav className="mobile-utilities" aria-label="Mobile workspace tools">
-              {utilityItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => {
-                      setActiveItem(item.label);
-                      setMobileNavOpen(false);
-                      setLastAction(`${item.label} selected`);
-                    }}
-                  >
-                    <Icon size={15} />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
+            <section className="mobile-drawer-section" aria-label="Utilities">
+              <strong>Utilities</strong>
+              <nav className="mobile-utilities" aria-label="Mobile workspace tools">
+                {utilityItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => {
+                        setActiveItem(item.label);
+                        setMobileNavOpen(false);
+                        setLastAction(`${item.label} selected`);
+                      }}
+                    >
+                      <Icon size={15} />
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </nav>
+            </section>
           </div>
         ) : null}
       </aside>
 
-      <section className="workspace" aria-label="Praxis workspace">
-        <header className="topbar">
-          <button className="search-control" type="button">
-            <MagnifyingGlass size={18} />
-            <span>Search</span>
-            <kbd>Ctrl</kbd>
-            <kbd>K</kbd>
-          </button>
-          <button className="notification-button" type="button" aria-label="Notifications">
-            <Bell size={23} />
-            <span />
-          </button>
-          <button className="mini-avatar" type="button" aria-label="Josh profile">
-            J
-          </button>
-        </header>
-
+      <section className="workspace" aria-label="Arden workspace">
         <div className="workspace-center">
           <section className="hero" aria-labelledby="hero-title">
             <div className="greeting">
@@ -1869,7 +1919,7 @@ export function App() {
               <span>Good evening, Josh</span>
             </div>
             <h1 id="hero-title">Bring the work into one place</h1>
-            <p>Ask Praxis to work with your tools, memory, and files</p>
+            <p>Ask Arden to work with your tools, memory, and files</p>
           </section>
 
           <form className="composer" onSubmit={submitComposer}>

@@ -5,8 +5,8 @@ import {
   directiveFixtures,
   knowledgeSourceFixtures,
   projectFixtures
-} from "@praxis/connectors";
-import type { ApprovalRequest, MemoryRecord } from "@praxis/protocol";
+} from "@arden/connectors";
+import type { ApprovalRequest, MemoryRecord } from "@arden/protocol";
 
 export const workspaceDirectives = directiveFixtures;
 export const connectors = connectorFixtures;
@@ -27,9 +27,9 @@ export const memoryRecords: MemoryRecord[] = [
     pinned: true
   },
   {
-    id: "praxis-research",
+    id: "arden-research",
     kind: "fact",
-    title: "Praxis research workspace",
+    title: "Arden research workspace",
     value: "The current workspace contains Codex, OpenCode, Cursor, ChatGPT, and Grok research.",
     source: "Project brief",
     freshness: "Current",
@@ -40,7 +40,7 @@ export const memoryRecords: MemoryRecord[] = [
     id: "selected-direction",
     kind: "imported",
     title: "Selected design direction",
-    value: "Praxis should feel closer to Cursor, ChatGPT, and Codex: minimal dark gray chrome, off-white canvas, fewer nav items, and contextual directives below the composer.",
+    value: "Arden should feel closer to Cursor, ChatGPT, and Codex: minimal dark gray chrome, off-white canvas, fewer nav items, and contextual directives below the composer.",
     source: "Approved product-design direction",
     freshness: "Updated today",
     approved: true,
@@ -72,7 +72,7 @@ export const pendingApprovals: ApprovalRequest[] = [
   },
   {
     id: "weekly-digest-rule",
-    service: "Praxis Automations",
+    service: "Arden Automations",
     action: "Enable weekly workspace digest",
     mode: "trusted-scope",
     riskLevel: "medium",
@@ -84,13 +84,13 @@ export const pendingApprovals: ApprovalRequest[] = [
   {
     id: "vercel-production-release",
     service: "Vercel",
-    action: "Promote Praxis preview to production",
+    action: "Promote Arden preview to production",
     mode: "full-access",
     riskLevel: "high",
     dataUsed: ["production project", "deployment metadata", "domain routing"],
     consequence: "Makes the selected deployment public at the production domain.",
     requestedAt: "2026-06-26T00:30:00.000Z",
     decisions: ["once", "session", "rule", "modify", "deny"],
-    confirmationPhrase: "publish Praxis"
+    confirmationPhrase: "publish Arden"
   }
 ];

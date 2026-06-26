@@ -71,31 +71,6 @@ button {
   border-right: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.traffic-lights {
-  display: flex;
-  gap: 7px;
-  height: 10px;
-  margin: 1px 0 19px 9px;
-}
-
-.traffic {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-}
-
-.traffic--red {
-  background: #ed6a5e;
-}
-
-.traffic--yellow {
-  background: #f4bf4f;
-}
-
-.traffic--green {
-  background: #61c554;
-}
-
 .brand-lockup {
   display: flex;
   align-items: center;
@@ -126,9 +101,8 @@ button {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 74px;
-  height: 74px;
-  max-width: none;
+  width: 29px;
+  height: 29px;
   transform: translate(-50%, -50%);
 }
 
@@ -158,13 +132,61 @@ button {
   border-color: #3a3c3c;
 }
 
+.sidebar-action-stack {
+  display: grid;
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.sidebar-action-card {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-height: 33px;
+  gap: 8px;
+  padding: 7px 9px;
+  color: rgba(245, 241, 231, 0.72);
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 7px;
+  font-size: 12.5px;
+  line-height: 1.2;
+  text-align: left;
+}
+
+.sidebar-action-card:hover {
+  color: #f0f1ec;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.sidebar-action-card--search {
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+}
+
+.sidebar-action-card span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.utility-folder {
+  display: grid;
+  gap: 4px;
+}
+
+.utility-folder-heading {
+  margin-top: 2px;
+}
+
 .sidebar-body {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 13px;
+  gap: 12px;
   min-height: 0;
-  margin-top: 17px;
+  margin-top: 11px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -296,25 +318,21 @@ button {
 
 .utility-nav {
   display: grid;
-  gap: 1px;
-  margin-top: auto;
-  padding-top: 10px;
-  border-top: 0;
+  gap: 5px;
 }
 
 .utility-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 8px;
+  grid-template-columns: 18px minmax(0, 1fr);
 }
 
 .utility-row--active {
   color: #fffef8;
   background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.11);
 }
 
 .sidebar-footer {
+  position: relative;
   margin-top: 8px;
   padding-top: 7px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
@@ -361,15 +379,35 @@ button {
 }
 
 .account-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 12;
   display: grid;
-  gap: 6px;
-  margin: 7px 6px 0;
-  padding: 10px 12px;
-  color: rgba(245, 241, 231, 0.7);
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 3px;
+  margin: 0;
+  padding: 6px;
+  background: #222526;
+  border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: var(--radius);
+  box-shadow: 0 18px 36px rgb(0 0 0 / 32%);
   font-size: 12px;
+}
+
+.account-popover button {
+  min-height: 32px;
+  padding: 0 9px;
+  color: rgba(245, 241, 231, 0.78);
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.account-popover button:hover {
+  color: #fffef8;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .workspace {
@@ -1334,6 +1372,8 @@ kbd {
   .brand-name,
   .new-chat-button span,
   .new-chat-button svg:last-child,
+  .sidebar-action-card span,
+  .sidebar-action-card kbd,
   .sidebar-body,
   .utility-row span,
   .account-row strong,
@@ -1348,16 +1388,32 @@ kbd {
     padding: 0;
   }
 
+  .sidebar-action-stack {
+    width: 40px;
+    justify-items: center;
+  }
+
+  .sidebar-action-card,
+  .sidebar-action-card--search,
+  .utility-row {
+    width: 40px;
+    grid-template-columns: 1fr;
+    place-items: center;
+    padding: 0;
+  }
+
+  .utility-folder {
+    width: 40px;
+  }
+
+  .utility-folder-heading {
+    display: none;
+  }
+
   .utility-nav {
     border-top: 0;
     justify-items: center;
     padding-top: 4px;
-  }
-
-  .utility-row {
-    justify-content: center;
-    width: 44px;
-    padding: 0;
   }
 
   .account-row {
@@ -1409,6 +1465,7 @@ kbd {
 
   .traffic-lights,
   .new-chat-button,
+  .sidebar-action-stack,
   .sidebar-body,
   .utility-nav {
     display: none;
@@ -1467,6 +1524,8 @@ kbd {
     position: absolute;
     top: 46px;
     right: 12px;
+    bottom: auto;
+    left: auto;
     width: 180px;
     margin: 0;
     background: #242626;

@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { RuntimeSnapshot } from "@praxis/protocol";
+import type { RuntimeSnapshot } from "@arden/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -32,7 +32,7 @@ vi.mock("./runtime", () => ({
   searchRuntimeKnowledgeSources: vi.fn(async () => null)
 }));
 
-describe("Praxis home", () => {
+describe("Arden home", () => {
   beforeEach(() => {
     window.localStorage.clear();
     runtimeMocks.snapshot = null;
@@ -71,7 +71,7 @@ describe("Praxis home", () => {
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
     expect(screen.getByRole("heading", { name: "Sources" })).toBeInTheDocument();
-    expect(screen.getByText("Praxis product brief")).toBeInTheDocument();
+    expect(screen.getByText("Arden product brief")).toBeInTheDocument();
     expect(screen.getByText("Selected design direction")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByText("Concise updates")).toBeInTheDocument();
@@ -170,7 +170,7 @@ describe("Praxis home", () => {
 
     await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
     const releaseApproval = screen
-      .getByText("Promote Praxis preview to production")
+      .getByText("Promote Arden preview to production")
       .closest("article");
 
     expect(releaseApproval).not.toBeNull();
@@ -178,23 +178,23 @@ describe("Praxis home", () => {
     await user.click(approval.getByRole("button", { name: /^once$/i }));
 
     const confirmation = approval.getByLabelText(
-      /confirmation for promote praxis preview to production/i
+      /confirmation for promote Arden preview to production/i
     );
     await user.type(confirmation, "publish preview");
     await user.click(approval.getByRole("button", { name: /^confirm$/i }));
 
     expect(screen.getByText(/Confirmation phrase did not match/i)).toBeInTheDocument();
-    expect(screen.getByText("Promote Praxis preview to production")).toBeInTheDocument();
+    expect(screen.getByText("Promote Arden preview to production")).toBeInTheDocument();
 
     await user.clear(confirmation);
-    await user.type(confirmation, "publish Praxis");
+    await user.type(confirmation, "publish Arden");
     await user.click(approval.getByRole("button", { name: /^confirm$/i }));
 
     expect(
-      screen.queryByText("Promote Praxis preview to production")
+      screen.queryByText("Promote Arden preview to production")
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/once: Vercel Promote Praxis preview to production/i)
+      screen.getByText(/once: Vercel Promote Arden preview to production/i)
     ).toBeInTheDocument();
   });
 
@@ -271,7 +271,7 @@ describe("Praxis home", () => {
     await user.click(screen.getByRole("button", { name: /export memory/i }));
 
     const exported = screen.getByLabelText("Memory export") as HTMLTextAreaElement;
-    expect(exported.value).toContain("praxis.memory.export.v1");
+    expect(exported.value).toContain("arden.memory.export.v1");
     expect(exported.value).toContain("Concise updates");
   });
 
@@ -288,7 +288,7 @@ describe("Praxis home", () => {
 
     await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
 
-    expect(screen.getByText(/once: Praxis Memory Approve Imported source fixture into durable memory/i)).toBeInTheDocument();
+    expect(screen.getByText(/once: Arden Memory Approve Imported source fixture into durable memory/i)).toBeInTheDocument();
   });
 
   it("recovers composer drafts from local persistence", async () => {

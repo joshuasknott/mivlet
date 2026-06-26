@@ -1,16 +1,16 @@
 [package]
-name = "praxis-desktop"
+name = "arden-desktop"
 version = "0.1.0"
-description = "Praxis desktop runtime"
-authors = ["Praxis"]
+description = "Arden desktop runtime"
+authors = ["Arden"]
 edition = "2021"
 
 [lib]
-name = "praxis_desktop_lib"
+name = "arden_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "praxis-desktop"
+name = "arden-desktop"
 path = "src/main.rs"
 
 [build-dependencies]

@@ -2,7 +2,7 @@
 
 Source visual truth: `docs/design/praxis-selected-concept.png`.
 
-The selected Praxis first screen blends the attached reference with these changes:
+The selected Arden first screen blends the attached reference with these changes:
 
 - Use a Cursor-like neutral palette: graphite shell, off-white workspace, low-saturation accent colors.
 - Use Codex-like lightweight navigation: Chats and Projects are sections, each containing threads.
@@ -19,13 +19,13 @@ The selected Praxis first screen blends the attached reference with these change
 
 ## Visible Copy
 
-- Praxis
+- Arden
 - Chats
 - Daily catch-up
 - Market research notes
 - Voice drafts
 - Projects
-- Praxis desktop
+- Arden desktop
 - Initial build
 - Memory and approvals
 - Marketing site
@@ -35,7 +35,7 @@ The selected Praxis first screen blends the attached reference with these change
 - Josh / Settings
 - Good evening, Josh
 - Bring the work into one place
-- Ask Praxis to work with your tools, memory, and files
+- Ask Arden to work with your tools, memory, and files
 - Ask anything, speak, attach, or run a command...
 - Voice
 - Attach
@@ -44,7 +44,7 @@ The selected Praxis first screen blends the attached reference with these change
 - Turn Codex notes into a launch plan
 - From OpenAI Codex Manual + PRD
 - Review the draft PR before GitHub publish
-- josh-praxis / feature-memory
+- josh-arden / feature-memory
 - Summarize market-research.pdf into decisions
 - Added 2 days ago
 - Schedule a weekly workspace digest

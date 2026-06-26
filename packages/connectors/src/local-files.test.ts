@@ -68,6 +68,6 @@ describe("local files connector", () => {
         content: "notes",
         sizeBytes: 4
       })
-    ).toThrow("changed while Praxis was reading it");
+    ).toThrow("changed while Arden was reading it");
   });
 });

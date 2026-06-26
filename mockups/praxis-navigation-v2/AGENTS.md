@@ -6,7 +6,7 @@ Before making substantial visual changes, use the Product Design plugin's `get-c
 
 When implementing from a selected generated mock, treat that image as the source of truth for layout, component anatomy, density, spacing, color, typography, visible content, and hierarchy.
 
-## Praxis navigation direction
+## Arden navigation direction
 
 - Use a lightweight ChatGPT/Codex-style sidebar rather than a dashboard navigation.
 - Projects contain project-specific threads; Chats contain non-project threads.

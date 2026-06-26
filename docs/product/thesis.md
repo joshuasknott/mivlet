@@ -1,6 +1,8 @@
-# Praxis Thesis
+# Arden Thesis
 
-Praxis is Codex expanded beyond coding: an open, minimal workspace where nontechnical people can ask, speak, attach context, invoke plugins, approve consequential actions, inspect memory, and coordinate work.
+Arden is an open-source AI workspace for real work. It extends the coding-agent model beyond code so people can chat with their computer, delegate tasks across tools and files, and stay in control at every step.
+
+Arden is local-first, private by default, permissioned, transparent, and built for everyone, not just developers.
 
 ## Product Principles
 
@@ -18,4 +20,4 @@ Praxis is Codex expanded beyond coding: an open, minimal workspace where nontech
 - ChatGPT: accessible composer, voice, memory controls, and nontechnical language.
 - Grok: direct visual answers and low-friction prompt-to-action flow.
 
-Praxis must remain visually and structurally distinct from these products.
+Arden must remain visually and structurally distinct from these products.

@@ -1,5 +1,5 @@
 {
-  "name": "@praxis/connectors",
+  "name": "@arden/connectors",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@praxis/protocol": "0.1.0"
+    "@arden/protocol": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

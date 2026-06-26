@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { LocalTextFileCandidate } from "@praxis/connectors";
+import type { LocalTextFileCandidate } from "@arden/connectors";
 import type {
   ApprovalAuditEntry,
   ApprovalGrant,
@@ -12,7 +12,7 @@ import type {
   MemoryPromotionRequest,
   MemoryPromotionResponse,
   RuntimeSnapshot
-} from "@praxis/protocol";
+} from "@arden/protocol";
 
 interface ApprovalAuditRecordResponse {
   persisted: boolean;
@@ -32,7 +32,7 @@ function toRuntimeError(error: unknown) {
     return error;
   }
 
-  return new Error(typeof error === "string" ? error : "Praxis runtime request failed.");
+  return new Error(typeof error === "string" ? error : "Arden runtime request failed.");
 }
 
 export async function loadRuntimeApprovalAudit() {

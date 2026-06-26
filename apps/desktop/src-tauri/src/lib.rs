@@ -256,10 +256,10 @@ fn app_data_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<PathBuf
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|_| "Praxis could not resolve the app data folder.".to_string())?;
+        .map_err(|_| "Arden could not resolve the app data folder.".to_string())?;
 
     fs::create_dir_all(&app_data_dir)
-        .map_err(|_| "Praxis could not prepare the app data folder.".to_string())?;
+        .map_err(|_| "Arden could not prepare the app data folder.".to_string())?;
 
     Ok(app_data_dir.join(file_name))
 }
@@ -337,14 +337,14 @@ fn read_approval_audit_entries(path: &Path) -> Result<Vec<ApprovalAuditEntry>, S
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Praxis could not read the approval audit log.".to_string())?;
+        .map_err(|_| "Arden could not read the approval audit log.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     serde_json::from_str::<Vec<ApprovalAuditEntry>>(&contents)
-        .map_err(|_| "Praxis could not parse the approval audit log.".to_string())
+        .map_err(|_| "Arden could not parse the approval audit log.".to_string())
 }
 
 fn append_approval_audit_entry(
@@ -359,10 +359,9 @@ fn append_approval_audit_entry(
 
 fn write_approval_audit_entries(path: &Path, entries: &[ApprovalAuditEntry]) -> Result<(), String> {
     let encoded = serde_json::to_string_pretty(entries)
-        .map_err(|_| "Praxis could not encode the approval audit log.".to_string())?;
+        .map_err(|_| "Arden could not encode the approval audit log.".to_string())?;
 
-    fs::write(path, encoded)
-        .map_err(|_| "Praxis could not save the approval audit log.".to_string())
+    fs::write(path, encoded).map_err(|_| "Arden could not save the approval audit log.".to_string())
 }
 
 fn persist_approval_audit_entry(
@@ -517,14 +516,14 @@ fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, String> {
         return Ok(Vec::new());
     }
 
-    let contents = fs::read_to_string(path)
-        .map_err(|_| "Praxis could not read approval rules.".to_string())?;
+    let contents =
+        fs::read_to_string(path).map_err(|_| "Arden could not read approval rules.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     let parsed = serde_json::from_str::<Vec<ApprovalGrant>>(&contents)
-        .map_err(|_| "Praxis could not parse approval rules.".to_string())?;
+        .map_err(|_| "Arden could not parse approval rules.".to_string())?;
     parsed
         .into_iter()
         .map(normalize_approval_grant)
@@ -533,8 +532,8 @@ fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, String> {
 
 fn write_approval_rules(path: &Path, rules: &[ApprovalGrant]) -> Result<(), String> {
     let encoded = serde_json::to_string_pretty(rules)
-        .map_err(|_| "Praxis could not encode approval rules.".to_string())?;
-    fs::write(path, encoded).map_err(|_| "Praxis could not save approval rules.".to_string())
+        .map_err(|_| "Arden could not encode approval rules.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Arden could not save approval rules.".to_string())
 }
 
 fn persist_approval_rule(path: &Path, grant: ApprovalGrant) -> Result<ApprovalGrant, String> {
@@ -672,14 +671,14 @@ fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFileImport>, 
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Praxis could not read imported knowledge sources.".to_string())?;
+        .map_err(|_| "Arden could not read imported knowledge sources.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     serde_json::from_str::<Vec<LocalFileImport>>(&contents)
-        .map_err(|_| "Praxis could not parse imported knowledge sources.".to_string())
+        .map_err(|_| "Arden could not parse imported knowledge sources.".to_string())
 }
 
 fn append_imported_knowledge_source(
@@ -765,10 +764,10 @@ fn write_imported_knowledge_sources(
     sources: &[LocalFileImport],
 ) -> Result<(), String> {
     let encoded = serde_json::to_string_pretty(sources)
-        .map_err(|_| "Praxis could not encode imported knowledge sources.".to_string())?;
+        .map_err(|_| "Arden could not encode imported knowledge sources.".to_string())?;
 
     fs::write(path, encoded)
-        .map_err(|_| "Praxis could not save imported knowledge sources.".to_string())
+        .map_err(|_| "Arden could not save imported knowledge sources.".to_string())
 }
 
 fn persist_imported_knowledge_source(
@@ -824,7 +823,7 @@ fn normalize_memory_record(record: MemoryRecord) -> Result<MemoryRecord, String>
         title,
         value,
         source: if source.is_empty() {
-            "Praxis memory".to_string()
+            "Arden memory".to_string()
         } else {
             source
         },
@@ -867,14 +866,14 @@ fn read_memory_state(path: &Path) -> Result<MemoryControlState, String> {
     }
 
     let contents =
-        fs::read_to_string(path).map_err(|_| "Praxis could not read memory state.".to_string())?;
+        fs::read_to_string(path).map_err(|_| "Arden could not read memory state.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(default_memory_state());
     }
 
     let parsed = serde_json::from_str::<MemoryControlState>(&contents)
-        .map_err(|_| "Praxis could not parse memory state.".to_string())?;
+        .map_err(|_| "Arden could not parse memory state.".to_string())?;
 
     normalize_memory_state(parsed)
 }
@@ -885,9 +884,9 @@ fn write_memory_state(
 ) -> Result<MemoryControlState, String> {
     let normalized = normalize_memory_state(state)?;
     let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Praxis could not encode memory state.".to_string())?;
+        .map_err(|_| "Arden could not encode memory state.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Praxis could not save memory state.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Arden could not save memory state.".to_string())?;
 
     Ok(normalized)
 }
@@ -895,13 +894,13 @@ fn write_memory_state(
 fn encode_memory_export(state: MemoryControlState) -> Result<String, String> {
     let normalized = normalize_memory_state(state)?;
     let envelope = MemoryExportEnvelope {
-        format: "praxis.memory.export.v1",
+        format: "arden.memory.export.v1",
         disabled: normalized.disabled,
         records: normalized.records,
     };
 
     serde_json::to_string_pretty(&envelope)
-        .map_err(|_| "Praxis could not encode memory export.".to_string())
+        .map_err(|_| "Arden could not encode memory export.".to_string())
 }
 
 fn promote_knowledge_source(
@@ -998,7 +997,7 @@ fn promote_knowledge_source(
         request_id: format!("memory-promotion-{source_id}"),
         decision,
         decided_at,
-        note: format!("Praxis Memory Approve {provenance} into durable memory"),
+        note: format!("Arden Memory Approve {provenance} into durable memory"),
     })?;
 
     Ok(MemoryPromotionResponse {
@@ -1157,14 +1156,14 @@ fn read_runtime_snapshot(path: &Path) -> Result<Option<RuntimeSnapshot>, String>
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Praxis could not read runtime snapshot.".to_string())?;
+        .map_err(|_| "Arden could not read runtime snapshot.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(None);
     }
 
     let parsed = serde_json::from_str::<RuntimeSnapshot>(&contents)
-        .map_err(|_| "Praxis could not parse runtime snapshot.".to_string())?;
+        .map_err(|_| "Arden could not parse runtime snapshot.".to_string())?;
 
     normalize_runtime_snapshot(parsed).map(Some)
 }
@@ -1175,9 +1174,9 @@ fn write_runtime_snapshot(
 ) -> Result<RuntimeSnapshot, String> {
     let normalized = normalize_runtime_snapshot(snapshot)?;
     let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Praxis could not encode runtime snapshot.".to_string())?;
+        .map_err(|_| "Arden could not encode runtime snapshot.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Praxis could not save runtime snapshot.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Arden could not save runtime snapshot.".to_string())?;
 
     Ok(normalized)
 }
@@ -1376,13 +1375,13 @@ fn import_local_text_file(candidate: LocalTextFileCandidate) -> Result<LocalFile
     }
 
     if !is_supported_local_file(&file_name) {
-        return Err("Praxis supports text, Markdown, JSON, CSV, and YAML files.".to_string());
+        return Err("Arden supports text, Markdown, JSON, CSV, and YAML files.".to_string());
     }
 
-    let actual_size_bytes = candidate.content.as_bytes().len();
+    let actual_size_bytes = candidate.content.len();
     if actual_size_bytes != candidate.size_bytes {
         return Err(
-            "The selected file changed while Praxis was reading it. Choose it again.".to_string(),
+            "The selected file changed while Arden was reading it. Choose it again.".to_string(),
         );
     }
 
@@ -1569,7 +1568,7 @@ pub fn run() {
             save_runtime_snapshot
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Praxis desktop runtime");
+        .expect("failed to run Arden desktop runtime");
 }
 
 #[cfg(test)]
@@ -1615,7 +1614,7 @@ mod tests {
 
         let error = import_local_text_file(changed).expect_err("changed file should be rejected");
 
-        assert!(error.contains("changed while Praxis was reading"));
+        assert!(error.contains("changed while Arden was reading"));
     }
 
     #[test]
@@ -1654,12 +1653,12 @@ mod tests {
             request_id: "weekly-digest-rule".to_string(),
             decision: decision.to_string(),
             decided_at: "2026-06-25T22:30:00.000Z".to_string(),
-            note: "Praxis Automations Enable weekly workspace digest".to_string(),
+            note: "Arden Automations Enable weekly workspace digest".to_string(),
         }
     }
 
     fn temp_audit_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("praxis-{name}-{}.json", std::process::id()))
+        std::env::temp_dir().join(format!("arden-{name}-{}.json", std::process::id()))
     }
 
     fn approval_request(
@@ -1778,7 +1777,7 @@ mod tests {
     #[test]
     fn requires_exact_confirmation_for_high_risk_approvals() {
         let wrong = resolve_approval(approval_resolution(
-            approval_request("full-access", "high", Some("publish Praxis")),
+            approval_request("full-access", "high", Some("publish Arden")),
             "once",
             Some("publish preview"),
             None,
@@ -1788,9 +1787,9 @@ mod tests {
         assert!(wrong.contains("did not match"));
 
         let response = resolve_approval(approval_resolution(
-            approval_request("full-access", "high", Some("publish Praxis")),
+            approval_request("full-access", "high", Some("publish Arden")),
             "once",
-            Some("publish Praxis"),
+            Some("publish Arden"),
             None,
         ))
         .expect("exact confirmation should resolve");
@@ -2030,7 +2029,7 @@ mod tests {
         })
         .expect("memory export should encode");
 
-        assert!(encoded.contains("praxis.memory.export.v1"));
+        assert!(encoded.contains("arden.memory.export.v1"));
         assert!(encoded.contains("Exported value"));
         assert!(encoded.contains("\"disabled\": false"));
     }
