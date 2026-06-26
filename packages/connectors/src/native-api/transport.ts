@@ -48,3 +48,35 @@ export class FixtureTransport implements HttpTransport {
     }
   }
 }
+
+/**
+ * A transport that serves a different fixture per `stream()` call, advancing
+ * through a sequence. The agent loop calls `stream()` once per turn (each a
+ * fresh request in production); this lets multi-turn tests script turn 1, 2, …
+ * without re-reading the same lines.
+ */
+export class SequencedFixtureTransport implements HttpTransport {
+  private readonly turns: readonly (readonly string[])[];
+  private index = 0;
+
+  constructor(turns: readonly (readonly string[])[]) {
+    this.turns = turns;
+  }
+
+  /** Build from a sequence of fixture texts (one per turn). */
+  static fromTexts(texts: readonly string[]): SequencedFixtureTransport {
+    return new SequencedFixtureTransport(texts.map((text) => text.split(/\r?\n/)));
+  }
+
+  async *stream(_request: NativeTransportRequest): AsyncIterable<string> {
+    const lines = this.turns[this.index] ?? [];
+    this.index += 1;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) {
+        continue;
+      }
+      yield trimmed;
+    }
+  }
+}

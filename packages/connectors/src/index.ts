@@ -60,7 +60,12 @@ export { COPILOT_AUTH_MODES } from "./backends/copilot";
 // native-API agent loop (pure shaping + orchestration; the transport seam
 // injects egress — Rust owns the key + HTTP/SSE in production). No network, no
 // key in any of these modules; tests use recorded fixtures.
-export { FixtureTransport, type HttpTransport, type NativeTransportRequest } from "./native-api/transport";
+export {
+  FixtureTransport,
+  SequencedFixtureTransport,
+  type HttpTransport,
+  type NativeTransportRequest
+} from "./native-api/transport";
 export {
   parseOpenAiLine,
   shapeOpenAiRequest,
@@ -80,3 +85,5 @@ export {
 export { buildToolApproval } from "./native-api/approvals";
 export { lookupTool, registeredToolSpecs } from "./native-api/tools";
 export { priceFor } from "./native-api/pricing";
+export { runAgentLoop, type ToolExecutor, type RunAgentLoopOptions } from "./native-api/agent-loop";
+export { buildContextPrefix } from "./native-api/memory-context";

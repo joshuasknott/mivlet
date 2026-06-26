@@ -1,0 +1,132 @@
+/**
+ * The Arden-owned agent loop for native-API providers.
+ *
+ * Pure over an injectable HttpTransport + ToolExecutor. One turn = stream a
+ * completion; if it finishes with `tool-calls`, the shell must approve + execute
+ * each tool (via the executor) and the loop continues with the results appended;
+ * otherwise it finishes.
+ *
+ * Model tool calls NEVER auto-execute — the tool-call event carries an
+ * ApprovalRequest that the shell routes through the existing approval queue; the
+ * executor only runs once that approval is granted (and refuses otherwise).
+ *
+ * Cancellation is cooperative: `shouldCancel` is checked between events. Real
+ * in-flight cancellation of the HTTP request happens at the Rust boundary.
+ */
+
+import type {
+  ApprovalRequest,
+  BackendAgentEvent,
+  NativeCompletionRequest,
+  NativeMessage
+} from "@arden/protocol";
+import { streamAnthropicEvents } from "./anthropic";
+import { streamGeminiEvents } from "./gemini";
+import { streamOpenAiEvents } from "./openai-compat";
+import { registeredToolSpecs } from "./tools";
+import type { HttpTransport } from "./transport";
+
+type FinishReason = "stop" | "tool-calls" | "length" | "error";
+
+/** Executes an approved tool. Production wires this to Arden runtime functions;
+ *  tests inject a fake. Throws if the approval was not granted (fail-closed). */
+export type ToolExecutor = (approval: ApprovalRequest, args: string) => Promise<string>;
+
+export interface RunAgentLoopOptions {
+  execute: ToolExecutor;
+  /** Cooperative cancellation hook, checked between events. */
+  shouldCancel?: () => boolean;
+  /** Max turns before the loop stops (safety). */
+  maxTurns?: number;
+  /** Optional system-context prefix (pinned memory/knowledge by trust level). */
+  contextPrefix?: string;
+}
+
+function streamFor(
+  providerId: string
+): (transport: HttpTransport, request: NativeCompletionRequest) => AsyncIterable<BackendAgentEvent> {
+  if (providerId === "anthropic") return streamAnthropicEvents;
+  if (providerId === "gemini") return streamGeminiEvents;
+  return streamOpenAiEvents; // openai, xai, openrouter share this path
+}
+
+interface PendingToolCall {
+  callId: string;
+  tool: string;
+  arguments: string;
+  approval: ApprovalRequest;
+}
+
+/** Run the agent loop, yielding every BackendAgentEvent in order. */
+export async function* runAgentLoop(
+  transport: HttpTransport,
+  request: NativeCompletionRequest,
+  options: RunAgentLoopOptions
+): AsyncIterable<BackendAgentEvent> {
+  const tools = registeredToolSpecs();
+  const maxTurns = options.maxTurns ?? 8;
+  let messages: NativeMessage[] = options.contextPrefix
+    ? [{ role: "system", content: options.contextPrefix }, ...request.messages]
+    : [...request.messages];
+
+  for (let turn = 0; turn < maxTurns; turn += 1) {
+    const turnRequest: NativeCompletionRequest = { ...request, messages, tools };
+    const stream = streamFor(request.providerId)(transport, turnRequest);
+
+    let finishReason: FinishReason = "stop";
+    const pendingToolCalls: PendingToolCall[] = [];
+
+    for await (const event of stream) {
+      if (options.shouldCancel?.()) {
+        yield { type: "cancelled" };
+        return;
+      }
+      if (event.type === "done") {
+        finishReason = event.finishReason;
+        continue; // hold the done event; decide whether to continue after the turn
+      }
+      if (event.type === "tool-call") {
+        pendingToolCalls.push({
+          callId: event.callId,
+          tool: event.tool,
+          arguments: event.arguments,
+          approval: event.approval
+        });
+      }
+      yield event;
+    }
+
+    if (finishReason !== "tool-calls" || pendingToolCalls.length === 0) {
+      yield { type: "done", finishReason };
+      return;
+    }
+
+    // Append the assistant turn (with tool calls) + execute each tool.
+    messages = [
+      ...messages,
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: pendingToolCalls.map((call) => ({
+          callId: call.callId,
+          tool: call.tool,
+          arguments: call.arguments
+        }))
+      }
+    ];
+
+    for (const call of pendingToolCalls) {
+      try {
+        const result = await options.execute(call.approval, call.arguments);
+        yield { type: "tool-result", callId: call.callId, ok: true, output: result };
+        messages = [...messages, { role: "tool", content: result, toolCallId: call.callId }];
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Tool execution failed.";
+        yield { type: "tool-result", callId: call.callId, ok: false, output: message };
+        messages = [...messages, { role: "tool", content: message, toolCallId: call.callId }];
+      }
+    }
+  }
+
+  yield { type: "done", finishReason: "length" };
+}
