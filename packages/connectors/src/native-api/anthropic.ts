@@ -166,7 +166,7 @@ export async function* streamAnthropicEvents(
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
   const state = newAnthropicState();
-  for await (const line of transport.stream(request as never)) {
+  for await (const line of transport.stream(request)) {
     if (line.startsWith("event:")) {
       continue; // Anthropic event labels are informational; data carries the type.
     }

@@ -123,7 +123,7 @@ export async function* streamGeminiEvents(
   transport: HttpTransport,
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
-  for await (const line of transport.stream(request as never)) {
+  for await (const line of transport.stream(request)) {
     for (const event of parseGeminiLine(request.providerId, line)) {
       yield event;
     }

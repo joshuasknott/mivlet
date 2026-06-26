@@ -125,7 +125,7 @@ export async function* streamOpenAiEvents(
   transport: HttpTransport,
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
-  for await (const line of transport.stream(request as never)) {
+  for await (const line of transport.stream(request)) {
     for (const event of parseOpenAiLine(request.providerId, line)) {
       yield event;
     }

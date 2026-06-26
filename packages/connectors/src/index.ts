@@ -63,8 +63,7 @@ export { COPILOT_AUTH_MODES } from "./backends/copilot";
 export {
   FixtureTransport,
   SequencedFixtureTransport,
-  type HttpTransport,
-  type NativeTransportRequest
+  type HttpTransport
 } from "./native-api/transport";
 export {
   parseOpenAiLine,

@@ -405,6 +405,33 @@ describe("Arden home", () => {
       expect(runtimeMocks.savedSnapshots.at(-1)?.composerDraft).toBe("/schedule recovered weekly digest");
     });
   });
+
+  it("surfaces the native agent activity panel when a connected native backend runs", async () => {
+    const user = userEvent.setup();
+    // Serve a connected native provider so the composer drives the agent loop.
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+        models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+      }
+    ];
+    render(<App />);
+
+    // Wait for the onboarding gate to clear (the connected provider resolves).
+    const composer = await screen.findByLabelText(/universal composer/i);
+    await user.type(composer, "summarize the project");
+    await user.click(screen.getByRole("button", { name: /send prompt/i }));
+
+    // Outside Tauri there is no transport; the panel surfaces the no-transport
+    // notice so the agent surface is visible and testable.
+    expect(await screen.findByLabelText(/agent activity/i)).toBeInTheDocument();
+    expect(screen.getByText(/native agent needs a connected desktop backend/i)).toBeInTheDocument();
+  });
 });
 
 /**

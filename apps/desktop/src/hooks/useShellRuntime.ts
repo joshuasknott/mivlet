@@ -5,6 +5,8 @@ import type {
   ApprovalGrant,
   ApprovalModification,
   ApprovalRequest,
+  BackendConsequentialEvent,
+  BackendProvider,
   ConnectorManifest,
   KnowledgeCitation,
   KnowledgeSource,
@@ -18,6 +20,7 @@ import type {
 } from "@arden/protocol";
 import {
   importLocalTextFile,
+  listBackendProviders,
   searchKnowledgeSources,
   type LocalTextFileCandidate
 } from "@arden/connectors";
@@ -32,14 +35,18 @@ import {
   workspaceDirectives
 } from "../data/workspace";
 import {
+  clearRuntimeBackend,
+  connectRuntimeBackend,
   exportRuntimeMemoryState,
   importRuntimeLocalKnowledgeSource,
+  listRuntimeBackends,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
   promoteRuntimeKnowledgeSourceToMemory,
+  recordRuntimeBackendEvent,
   resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
   saveRuntimeSnapshot,
@@ -51,6 +58,7 @@ import {
 } from "../lib/constants";
 import {
   EMPTY_APPROVAL_MODIFICATION,
+  type WorkspacePage,
   type ApprovalModificationDraft,
   type AutomationRuleView,
   type PendingApprovalConfirmation,
@@ -92,7 +100,8 @@ const defaultShellState: PersistedShellState = {
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id),
   importedKnowledgeSources: [],
   memoryDisabled: false,
-  memoryRecords
+  memoryRecords,
+  connectedBackendIds: []
 };
 
 export interface ShellRuntime {
@@ -100,7 +109,7 @@ export interface ShellRuntime {
   activeItem: string;
   setActiveItem: (value: string) => void;
   activeUtility: string | undefined;
-  activePage: "Knowledge" | "Automations" | "Plugins" | null;
+  activePage: WorkspacePage | null;
   isChatView: boolean;
   activeThread: ThreadSummary | undefined;
   allThreads: ThreadSummary[];
@@ -168,6 +177,25 @@ export interface ShellRuntime {
   // automations
   automationRules: AutomationRuleView[];
   toggleAutomation: (rule: AutomationRuleView) => void;
+  // agent-runtime backends
+  backendProviders: BackendProvider[];
+  connectedBackendIds: string[];
+  backendStatus: string | null;
+  onboardingRequired: boolean;
+  connectBackend: (providerId: string, secret?: string) => Promise<void>;
+  disconnectBackend: (providerId: string) => Promise<void>;
+  /**
+   * Record a native-API model tool call as an approval audit entry. Model tool
+   * calls never auto-execute — they surface here so the existing approval UI
+   * handles the grant/rule/deny decision before Arden dispatches the tool.
+   */
+  recordBackendToolCall: (event: {
+    callId: string;
+    tool: string;
+    arguments: string;
+    approval: ApprovalRequest;
+  }) => void;
+  dismissOnboarding: () => void;
   // shell-level status
   lastAction: string;
   mobileNavOpen: boolean;
@@ -199,6 +227,9 @@ export function useShellRuntime(): ShellRuntime {
     initialState.automationStatuses
   );
   const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(initialState.pinnedSourceIds);
+  const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
+    initialState.connectedBackendIds
+  );
   const [importedKnowledgeSources, setImportedKnowledgeSources] = useState<LocalFileImport[]>(
     initialState.importedKnowledgeSources
   );
@@ -218,6 +249,15 @@ export function useShellRuntime(): ShellRuntime {
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
   const [runtimeSnapshotReady, setRuntimeSnapshotReady] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Agent-runtime backends. The Rust credential boundary resolves auth state
+  // + capabilities; outside Tauri the preview registry is used so the onboarding
+  // shell stays testable. `onboardingDismissed` lets users reach the preview
+  // workspace without a connected backend.
+  const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(() =>
+    listBackendProviders()
+  );
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -227,11 +267,15 @@ export function useShellRuntime(): ShellRuntime {
   );
   const activeThread = allThreads.find((thread) => thread.id === activeItem);
   const activeUtility = utilityItems.find((item) => item.label === activeItem)?.label;
-  // A page view is any of the three first-class utility pages. When a page is
-  // active the composer is hidden and the dedicated page renders instead.
-  const activePage: "Knowledge" | "Automations" | "Plugins" | null =
-    activeUtility === "Knowledge" || activeUtility === "Automations" || activeUtility === "Plugins"
-      ? (activeUtility as "Knowledge" | "Automations" | "Plugins")
+  // A page view is any first-class utility page or account page. When a page
+  // is active the composer is hidden and the dedicated page renders instead.
+  const activePage: WorkspacePage | null =
+    activeUtility === "Knowledge" ||
+    activeUtility === "Schedules" ||
+    activeUtility === "Connectors"
+      ? (activeUtility as WorkspacePage)
+      : activeItem === "Profile" || activeItem === "Settings"
+        ? activeItem
       : null;
   // Chat views: the default home, a selected thread/project, or a new chat.
   const isChatView = activePage === null;
@@ -270,7 +314,8 @@ export function useShellRuntime(): ShellRuntime {
       pinnedSourceIds,
       importedKnowledgeSources,
       memoryDisabled,
-      memoryRecords: managedMemoryRecords
+      memoryRecords: managedMemoryRecords,
+      connectedBackendIds
     }),
     [
       activeItem,
@@ -278,6 +323,7 @@ export function useShellRuntime(): ShellRuntime {
       approvalRules,
       automationStatuses,
       composerValue,
+      connectedBackendIds,
       dismissedApprovalIds,
       importedKnowledgeSources,
       managedMemoryRecords,
@@ -322,6 +368,7 @@ export function useShellRuntime(): ShellRuntime {
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
         setManagedMemoryRecords(recovered.memoryRecords);
+        setConnectedBackendIds(recovered.connectedBackendIds);
         setLastAction("Recovered workspace from local runtime");
       })
       .finally(() => {
@@ -394,6 +441,28 @@ export function useShellRuntime(): ShellRuntime {
 
       setMemoryDisabled(state.disabled);
       setManagedMemoryRecords(state.records);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Resolve agent-runtime backend auth state + capabilities from the Rust
+  // credential boundary. Outside Tauri the preview registry is kept. Secrets
+  // never reach this layer — only auth state and capabilities.
+  useEffect(() => {
+    let active = true;
+
+    void listRuntimeBackends().then((providers) => {
+      if (!active || !providers) {
+        return;
+      }
+
+      setBackendProviders(providers);
+      setConnectedBackendIds(
+        providers.filter((provider) => provider.authState === "connected").map((provider) => provider.id)
+      );
     });
 
     return () => {
@@ -637,6 +706,128 @@ export function useShellRuntime(): ShellRuntime {
     focusComposer(prompt);
   };
 
+  // Agent-runtime backend connect/disconnect. The secret is handed to the Rust
+  // credential boundary; React only ever sees the resulting auth state. Outside
+  // Tauri we record a local preview connection so the onboarding gate clears
+  // and the UI stays testable.
+  const connectBackend = async (providerId: string, secret = "preview-connection") => {
+    setBackendStatus(`Connecting ${providerId}…`);
+    try {
+      const stored = await connectRuntimeBackend({ providerId, secret });
+      if (stored === null) {
+        // Preview mode (no Tauri runtime): record a local connection only.
+        setConnectedBackendIds((current) =>
+          current.includes(providerId) ? current : [...current, providerId]
+        );
+        setBackendProviders((current) =>
+          current.map((provider) =>
+            provider.id === providerId ? { ...provider, authState: "connected" } : provider
+          )
+        );
+        setBackendStatus(`${providerId} connected (preview).`);
+        setLastAction(`${providerId} connected (preview)`);
+        return;
+      }
+
+      // Re-read the boundary so auth state + capabilities reflect the stored
+      // credential (Rust resolves it; no secret crosses back).
+      const refreshed = await listRuntimeBackends();
+      if (refreshed) {
+        setBackendProviders(refreshed);
+        setConnectedBackendIds(
+          refreshed
+            .filter((provider) => provider.authState === "connected")
+            .map((provider) => provider.id)
+        );
+      }
+      setBackendStatus(`${providerId} connected.`);
+      setLastAction(`${providerId} connected`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Could not connect ${providerId}.`;
+      setBackendStatus(message);
+      setLastAction(message);
+    }
+  };
+
+  const disconnectBackend = async (providerId: string) => {
+    setBackendStatus(`Disconnecting ${providerId}…`);
+    try {
+      const cleared = await clearRuntimeBackend(providerId);
+      if (cleared === null) {
+        setConnectedBackendIds((current) => current.filter((id) => id !== providerId));
+        setBackendProviders((current) =>
+          current.map((provider) =>
+            provider.id === providerId
+              ? {
+                  ...provider,
+                  authState:
+                    provider.backendType === "acp" ? "install-required" : "needs-auth",
+                  capabilities: []
+                }
+              : provider
+          )
+        );
+        setBackendStatus(`${providerId} disconnected (preview).`);
+        setLastAction(`${providerId} disconnected (preview)`);
+        return;
+      }
+
+      const refreshed = await listRuntimeBackends();
+      if (refreshed) {
+        setBackendProviders(refreshed);
+        setConnectedBackendIds(
+          refreshed
+            .filter((provider) => provider.authState === "connected")
+            .map((provider) => provider.id)
+        );
+      }
+      setBackendStatus(`${providerId} disconnected.`);
+      setLastAction(`${providerId} disconnected`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Could not disconnect ${providerId}.`;
+      setBackendStatus(message);
+      setLastAction(message);
+    }
+  };
+
+  const dismissOnboarding = () => {
+    setOnboardingDismissed(true);
+    setLastAction("Onboarding skipped (preview)");
+  };
+
+  // Record a native-API model tool call as a backend consequential event. The
+  // model wanted to run a tool; Arden records it (never auto-executes) so the
+  // approval audit trail captures the request. The pre-shaped ApprovalRequest
+  // is available to route through the approval UI before any tool dispatch.
+  const recordBackendToolCall = (event: {
+    callId: string;
+    tool: string;
+    arguments: string;
+    approval: ApprovalRequest;
+  }) => {
+    const consequential: BackendConsequentialEvent = {
+      providerId: event.approval.service,
+      service: event.approval.service,
+      action: event.approval.action,
+      mode: event.approval.mode,
+      riskLevel: event.approval.riskLevel,
+      dataUsed: event.approval.dataUsed,
+      consequence: event.approval.consequence,
+      backendPreapproved: false
+    };
+    void recordRuntimeBackendEvent(consequential, new Date().toISOString()).then((entry) => {
+      if (entry) {
+        setApprovalAudit((current) => prependAuditEntry(current, entry));
+      }
+    });
+    setLastAction(`Tool call from ${event.approval.service}: ${event.tool}`);
+  };
+
+  // The onboarding gate: required until at least one backend is connected,
+  // unless the user explicitly skips in preview mode.
+  const onboardingRequired =
+    connectedBackendIds.length === 0 && !onboardingDismissed;
+
   const runCommand = (command: string) => {
     const prompt = `${command} `;
     setComposerValue(prompt);
@@ -787,7 +978,7 @@ export function useShellRuntime(): ShellRuntime {
       const prompt = `/schedule ${rule.title} with pinned memory, connector health, and active projects.`;
       setComposerValue(prompt);
       setActiveItem("arden-memory");
-      setLastAction("Automation needs approval before it can run");
+      setLastAction("Schedule needs approval before it can run");
       focusComposer(prompt);
       return;
     }
@@ -863,6 +1054,14 @@ export function useShellRuntime(): ShellRuntime {
     cancelMemoryEdit,
     automationRules,
     toggleAutomation,
+    backendProviders,
+    connectedBackendIds,
+    backendStatus,
+    onboardingRequired,
+    connectBackend,
+    disconnectBackend,
+    recordBackendToolCall,
+    dismissOnboarding,
     lastAction,
     mobileNavOpen,
     setMobileNavOpen,

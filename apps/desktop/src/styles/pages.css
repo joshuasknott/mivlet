@@ -666,6 +666,46 @@
   color: var(--ink-muted);
 }
 
+/* Native-API agent activity panel — streamed deltas, usage/cost, status. */
+
+.agent-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-raised, var(--canvas));
+}
+
+.agent-panel__transcript {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.agent-panel__usage {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.agent-panel__running {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.agent-panel__error,
+.agent-panel__notice {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
 /* Connected AI backends panel (Connectors page) */
 
 .backends-panel {

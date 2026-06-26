@@ -14,6 +14,7 @@ import type { Icon } from "@phosphor-icons/react";
 import { chatThreads, connectors, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
 import { useShellRuntime } from "./hooks/useShellRuntime";
+import { useNativeAgent } from "./hooks/useNativeAgent";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ApprovalPanel } from "./components/ApprovalPanel";
@@ -49,6 +50,14 @@ const googleConnectorCards: Array<{ label: string; icon: Icon; tone: string }> =
 export function App() {
   const runtime = useShellRuntime();
   const workspaceName = "Josh's Arden";
+  const agent = useNativeAgent({
+    providers: runtime.backendProviders,
+    onToolCall: (event) => {
+      // Route model tool calls into Arden's existing approval queue. The shell's
+      // approval UI handles the grant/rule/deny decision; nothing auto-executes.
+      void runtime.recordBackendToolCall(event);
+    }
+  });
   const [expandedCollections, setExpandedCollections] = useState({
     projects: true,
     chats: true
@@ -134,6 +143,32 @@ export function App() {
             connectors={connectors}
             onUseDirective={runtime.useDirective}
           />
+        ) : null}
+        {agent.state.transcript ||
+        agent.state.usage ||
+        agent.state.lastError ||
+        agent.state.running ||
+        agent.state.noTransport ? (
+          <section className="agent-panel" aria-label="Agent activity">
+            {agent.state.transcript ? (
+              <p className="agent-panel__transcript">{agent.state.transcript}</p>
+            ) : null}
+            {agent.state.usage ? (
+              <p className="agent-panel__usage">
+                {agent.state.usage.inputTokens} in · {agent.state.usage.outputTokens} out · $
+                {agent.state.usage.costUsd.toFixed(6)}
+              </p>
+            ) : null}
+            {agent.state.running ? <p className="agent-panel__running">Running…</p> : null}
+            {agent.state.lastError ? (
+              <p className="agent-panel__error">{agent.state.lastError}</p>
+            ) : null}
+            {agent.state.noTransport && !agent.state.transcript ? (
+              <p className="agent-panel__notice">
+                Native agent needs a connected desktop backend to run.
+              </p>
+            ) : null}
+          </section>
         ) : null}
       </>
     );
@@ -268,7 +303,33 @@ export function App() {
               fileInputRef={runtime.fileInputRef}
               composerValue={runtime.composerValue}
               onComposerChange={runtime.setComposerValue}
-              onSubmit={runtime.submitComposer}
+              onSubmit={(event) => {
+                // When a native-API backend is connected, the composer drives the
+                // Arden-owned agent loop; otherwise fall back to the workspace
+                // knowledge-search submit.
+                const nativeConnected = runtime.backendProviders.find(
+                  (provider) =>
+                    provider.backendType === "native-api" &&
+                    provider.authState === "connected" &&
+                    provider.capabilities.includes("streaming")
+                );
+                if (nativeConnected) {
+                  event.preventDefault();
+                  const prompt = runtime.composerValue.trim();
+                  if (!prompt) return;
+                  void agent.run({
+                    providerId: nativeConnected.id,
+                    model: nativeConnected.models.find((model) => model.available)?.id ??
+                      nativeConnected.models[0]?.id ??
+                      "",
+                    messages: [{ role: "user", content: prompt }],
+                    tools: [],
+                    maxTokens: 2048
+                  });
+                  return;
+                }
+                runtime.submitComposer(event);
+              }}
               voiceEnabled={runtime.voiceEnabled}
               onToggleVoice={runtime.toggleVoice}
               onAttach={runtime.triggerAttach}
