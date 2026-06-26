@@ -1,13 +1,15 @@
 //! Arden desktop runtime entrypoint.
 //!
 //! Feature logic lives in focused modules (`models`, `paths`, `approvals`,
-//! `knowledge`, `memory`, `snapshot`). This crate root only declares those
-//! modules and registers the Tauri command handlers on startup.
+//! `knowledge`, `memory`, `snapshot`, `backends`). This crate root only
+//! declares those modules and registers the Tauri command handlers on startup.
 
 mod approvals;
+mod backends;
 mod knowledge;
 mod memory;
 mod models;
+mod native_api;
 mod paths;
 mod snapshot;
 
@@ -32,7 +34,13 @@ pub fn run() {
             memory::export_memory_state,
             memory::promote_knowledge_source_to_memory,
             snapshot::load_runtime_snapshot,
-            snapshot::save_runtime_snapshot
+            snapshot::save_runtime_snapshot,
+            backends::list_backends,
+            backends::store_backend_credential,
+            backends::clear_backend_credential,
+            backends::record_backend_event,
+            native_api::stream_backend_completion,
+            native_api::cancel_backend_completion
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Arden desktop runtime");

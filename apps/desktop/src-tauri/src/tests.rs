@@ -908,6 +908,82 @@ fn runtime_snapshot_round_trips_connected_backend_ids_without_secrets() {
 }
 
 // ---------------------------------------------------------------------------
+// Native-API transport (Stage 5): pure-helper tests for the key/egress boundary.
+// No socket is opened — only the pure shaping helpers are unit-tested.
+// ---------------------------------------------------------------------------
+
+use crate::native_api::{
+    auth_header_for, endpoint_for, extra_headers, normalize_sse_line, provider_kind, ProviderKind,
+};
+
+#[test]
+fn auth_header_uses_bearer_for_openai_compat_and_custom_for_anthropic_gemini() {
+    assert_eq!(
+        auth_header_for("openai", "sk-x"),
+        ("Authorization".to_string(), "Bearer sk-x".to_string())
+    );
+    assert_eq!(
+        auth_header_for("xai", "xai-x"),
+        ("Authorization".to_string(), "Bearer xai-x".to_string())
+    );
+    assert_eq!(
+        auth_header_for("openrouter", "or-x"),
+        ("Authorization".to_string(), "Bearer or-x".to_string())
+    );
+    assert_eq!(
+        auth_header_for("anthropic", "sk-ant-x"),
+        ("x-api-key".to_string(), "sk-ant-x".to_string())
+    );
+    assert_eq!(
+        auth_header_for("gemini", "AIzaX"),
+        ("x-goog-api-key".to_string(), "AIzaX".to_string())
+    );
+}
+
+#[test]
+fn endpoint_for_returns_provider_chat_or_messages_url() {
+    assert!(endpoint_for("openai").contains("chat/completions"));
+    assert!(endpoint_for("anthropic").contains("messages"));
+    assert!(endpoint_for("gemini").contains("streamGenerateContent"));
+    assert!(endpoint_for("xai").contains("chat/completions"));
+    assert!(endpoint_for("openrouter").contains("chat/completions"));
+    // Distinct hosts per provider.
+    assert!(endpoint_for("xai").contains("api.x.ai"));
+    assert!(endpoint_for("openrouter").contains("openrouter.ai"));
+}
+
+#[test]
+fn extra_headers_add_anthropic_version_only_for_anthropic() {
+    assert_eq!(
+        extra_headers("anthropic"),
+        vec![("anthropic-version".to_string(), "2023-06-01".to_string())]
+    );
+    assert!(extra_headers("openai").is_empty());
+    assert!(extra_headers("gemini").is_empty());
+}
+
+#[test]
+fn provider_kind_groups_openai_compat_vs_anthropic_vs_gemini() {
+    assert_eq!(provider_kind("openai"), ProviderKind::OpenAiCompat);
+    assert_eq!(provider_kind("xai"), ProviderKind::OpenAiCompat);
+    assert_eq!(provider_kind("openrouter"), ProviderKind::OpenAiCompat);
+    assert_eq!(provider_kind("anthropic"), ProviderKind::Anthropic);
+    assert_eq!(provider_kind("gemini"), ProviderKind::Gemini);
+}
+
+#[test]
+fn normalize_sse_line_strips_data_prefix_and_drops_blanks_and_done() {
+    assert_eq!(
+        normalize_sse_line("data: {\"x\":1}"),
+        Some("{\"x\":1}".to_string())
+    );
+    assert_eq!(normalize_sse_line(""), None);
+    assert_eq!(normalize_sse_line("data: [DONE]"), None);
+    assert_eq!(normalize_sse_line(": heartbeat"), None);
+    assert_eq!(normalize_sse_line("  "), None);
+}
+
+// ---------------------------------------------------------------------------
 // Native API provider catalog (Stage 4): the five native providers are served
 // from the credential boundary, fail-closed until a key exists.
 // ---------------------------------------------------------------------------

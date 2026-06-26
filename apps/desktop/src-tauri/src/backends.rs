@@ -198,7 +198,10 @@ const CATALOG: &[BackendCatalogEntry] = &[
 static CREDENTIAL_STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static PRE_RELEASE_WARNING_LOGGED: OnceLock<()> = OnceLock::new();
 
-fn credential_store() -> &'static Mutex<HashMap<String, String>> {
+/// Exposed crate-wide so the native-API transport (`native_api.rs`) can look up
+/// a stored key to add it as an Authorization header — without duplicating the
+/// store. The store itself (OnceLock + Mutex) is unchanged.
+pub(crate) fn credential_store() -> &'static Mutex<HashMap<String, String>> {
     CREDENTIAL_STORE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
