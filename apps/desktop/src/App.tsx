@@ -1,18 +1,40 @@
-import { useState } from "react";
-import { Sparkle } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import {
+  CalendarBlank,
+  ChatCircle,
+  Checks,
+  EnvelopeSimple,
+  FileText,
+  HardDrive,
+  PresentationChart,
+  Sparkle,
+  Table
+} from "@phosphor-icons/react";
+import type { Icon } from "@phosphor-icons/react";
 import { chatThreads, connectors, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ApprovalPanel } from "./components/ApprovalPanel";
-import { KnowledgePanel } from "./components/KnowledgePanel";
-import { PluginPanel } from "./components/PluginPanel";
-import { AutomationPanel } from "./components/AutomationPanel";
-import { CitationResults, DirectiveCards, ThreadContext } from "./components/workspace-cards";
+import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
 import { AutomationsPage } from "./components/pages/AutomationsPage";
+import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { PluginsPage } from "./components/pages/PluginsPage";
+import { ProfilePage } from "./components/pages/ProfilePage";
+import { SettingsPage } from "./components/pages/SettingsPage";
+
+const googleConnectorCards: Array<{ label: string; icon: Icon; tone: string }> = [
+  { label: "Google Docs", icon: FileText, tone: "docs" },
+  { label: "Google Sheets", icon: Table, tone: "sheets" },
+  { label: "Google Slides", icon: PresentationChart, tone: "slides" },
+  { label: "Google Drive", icon: HardDrive, tone: "drive" },
+  { label: "Gmail", icon: EnvelopeSimple, tone: "gmail" },
+  { label: "Google Calendar", icon: CalendarBlank, tone: "calendar" },
+  { label: "Google Chat", icon: ChatCircle, tone: "chat" },
+  { label: "Google Tasks", icon: Checks, tone: "tasks" }
+];
 
 /**
  * Root composition for the Arden desktop shell.
@@ -20,12 +42,13 @@ import { PluginsPage } from "./components/pages/PluginsPage";
  * useShellRuntime owns runtime/data state and effects. This component owns
  * shell-local UI state (collection expansion, the account popover, tool/command
  * picker visibility) and routes between chat views and the standalone
- * Knowledge / Automations / Plugins pages. The composer renders only on chat
+ * Connectors / Knowledge / Schedules pages. The composer renders only on chat
  * views.
  */
 
 export function App() {
   const runtime = useShellRuntime();
+  const workspaceName = "Josh's Arden";
   const [expandedCollections, setExpandedCollections] = useState({
     projects: true,
     chats: true
@@ -35,17 +58,22 @@ export function App() {
     site: false
   });
   const [accountOpen, setAccountOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
-  const [commandOpen, setCommandOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
 
   const renderPage = () => {
     switch (runtime.activePage) {
-      case "Knowledge":
-        return <KnowledgePage runtime={runtime} />;
-      case "Automations":
-        return <AutomationsPage runtime={runtime} />;
-      case "Plugins":
+      case "Connectors":
         return <PluginsPage runtime={runtime} />;
+      case "Knowledge":
+        return <KnowledgePage />;
+      case "Schedules":
+        return <AutomationsPage runtime={runtime} />;
+      case "Profile":
+        return <ProfilePage />;
+      case "Settings":
+        return <SettingsPage />;
       default:
         return null;
     }
@@ -77,9 +105,36 @@ export function App() {
 
     return (
       <>
-        <CitationResults citations={runtime.knowledgeCitations} mode={runtime.knowledgeSearchMode} />
-        <DirectiveCards directives={runtime.contextualDirectives} onUseDirective={runtime.useDirective} />
-        <ThreadContext thread={runtime.activeThread} />
+        <div className="connector-rail" aria-label="Available Google connectors">
+          {googleConnectorCards.map((connector) => {
+            const ConnectorIcon = connector.icon;
+            return (
+              <button
+              key={connector.label}
+              type="button"
+              className={`connector-pill connector-pill--${connector.tone}`}
+              onClick={() => {
+                const prompt = `Use ${connector.label} to `;
+                runtime.setComposerValue(prompt);
+                runtime.focusComposer(prompt);
+              }}
+            >
+                <ConnectorIcon size={15} weight="fill" />
+                <span>{connector.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        {runtime.knowledgeCitations.length > 0 ? (
+          <CitationResults citations={runtime.knowledgeCitations} mode={runtime.knowledgeSearchMode} />
+        ) : null}
+        {runtime.importStatus ? (
+          <DirectiveCards
+            directives={runtime.contextualDirectives}
+            connectors={connectors}
+            onUseDirective={runtime.useDirective}
+          />
+        ) : null}
       </>
     );
   };
@@ -88,9 +143,49 @@ export function App() {
     ? runtime.lastAction
     : `${runtime.lastAction}.`;
 
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "k") {
+        event.preventDefault();
+        runtime.setLastAction("Search ready");
+        runtime.focusComposer("Search ");
+      }
+
+      if (key === "n") {
+        event.preventDefault();
+        runtime.startNewChat();
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [runtime]);
+
+  // Onboarding gate: until one AI backend is connected (or the user skips in
+  // preview), render the three-path onboarding shell instead of the workspace.
+  if (runtime.onboardingRequired) {
+    return (
+      <OnboardingPage
+        providers={runtime.backendProviders}
+        connectedBackendIds={runtime.connectedBackendIds}
+        status={runtime.backendStatus}
+        onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
+        onSkip={runtime.dismissOnboarding}
+      />
+    );
+  }
+
   return (
-    <main className="desktop-frame">
+    <main
+      className={`desktop-frame${sidebarCollapsed ? " desktop-frame--sidebar-collapsed" : ""}`}
+    >
       <WorkspaceSidebar
+        workspaceName={workspaceName}
         utilityItems={utilityItems}
         activeItem={runtime.activeItem}
         expandedCollections={expandedCollections}
@@ -99,11 +194,18 @@ export function App() {
         chatThreads={chatThreads}
         mobileNavOpen={runtime.mobileNavOpen}
         accountOpen={accountOpen}
+        collapsed={sidebarCollapsed}
         onNewChat={runtime.startNewChat}
+        onAddProject={() => {
+          runtime.setActiveItem("new-project");
+          runtime.setLastAction("New project ready");
+          runtime.focusComposer("Create a project for ");
+        }}
         onSearch={() => {
           runtime.setLastAction("Search ready");
           runtime.focusComposer("Search ");
         }}
+        onSelectWorkspace={() => runtime.setLastAction("Workspace selector ready")}
         onToggleProjects={() =>
           setExpandedCollections((current) => ({ ...current, projects: !current.projects }))
         }
@@ -120,6 +222,15 @@ export function App() {
           runtime.setLastAction(`${expanded ? "Collapsed" : "Expanded"} project: ${projectTitle}`);
         }}
         onToggleMobileNav={() => runtime.setMobileNavOpen((open) => !open)}
+        onToggleCollapsed={() => {
+          setSidebarCollapsed((collapsed) => !collapsed);
+          setAccountOpen(false);
+          runtime.setLastAction(sidebarCollapsed ? "Navigation opened" : "Navigation closed");
+        }}
+        onOpenMobileConnection={() => {
+          setAccountOpen(false);
+          runtime.setLastAction("Mobile connection selected");
+        }}
         onSelectThread={(thread) => runtime.openThread(thread, "chat")}
         onToggleAccount={() => {
           setAccountOpen((open) => !open);
@@ -127,7 +238,15 @@ export function App() {
         }}
         onAccountMenu={(item) => {
           setAccountOpen(false);
-          runtime.setLastAction(item === "profile" ? "Profile selected" : "Settings selected");
+          if (item === "logout") {
+            runtime.setLastAction("Log out selected");
+            return;
+          }
+
+          const page = item === "profile" ? "Profile" : "Settings";
+          runtime.setActiveItem(page);
+          runtime.setMobileNavOpen(false);
+          runtime.setLastAction(`${page} selected`);
         }}
       />
 
@@ -141,8 +260,7 @@ export function App() {
                 <Sparkle size={25} weight="regular" />
                 <span>Good evening, Josh</span>
               </div>
-              <h1 id="hero-title">Bring the work into one place</h1>
-              <p>Ask Arden to work with your tools, memory, and files</p>
+              <h1 id="hero-title">What are we building today in {workspaceName}?</h1>
             </section>
 
             <Composer
@@ -154,20 +272,23 @@ export function App() {
               voiceEnabled={runtime.voiceEnabled}
               onToggleVoice={runtime.toggleVoice}
               onAttach={runtime.triggerAttach}
-              toolPickerOpen={toolPickerOpen}
-              commandOpen={commandOpen}
-              onToggleTools={() => {
+              addMenuOpen={addMenuOpen}
+              permissionsOpen={toolPickerOpen}
+              onTogglePermissions={() => {
                 setToolPickerOpen((open) => !open);
-                setCommandOpen(false);
+                setAddMenuOpen(false);
                 runtime.setLastAction("Tool picker toggled");
               }}
-              onToggleCommands={() => {
-                setCommandOpen((open) => !open);
+              onToggleAddMenu={() => {
+                setAddMenuOpen((open) => !open);
                 setToolPickerOpen(false);
-                runtime.setLastAction("Command palette toggled");
+                runtime.setLastAction("Add menu toggled");
               }}
-              connectors={connectors}
-              onUseConnector={runtime.useConnector}
+              onOpenTool={(tool) => {
+                setAddMenuOpen(false);
+                runtime.setActiveItem(tool);
+                runtime.setLastAction(`${tool} selected`);
+              }}
               onRunCommand={runtime.runCommand}
               onFileChange={runtime.handleLocalKnowledgeFileChange}
               voiceState={

@@ -1,10 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import type { LocalTextFileCandidate } from "@arden/connectors";
 import type {
   ApprovalAuditEntry,
   ApprovalGrant,
   ApprovalResolutionRequest,
   ApprovalResolutionResponse,
+  BackendConsequentialEvent,
+  BackendCredentialRequest,
+  BackendProvider,
   KnowledgeSearchResponse,
   KnowledgeSource,
   LocalFileImport,
@@ -209,6 +213,135 @@ export async function recordRuntimeApprovalDecision(entry: ApprovalAuditEntry) {
       entry
     });
     return response.persisted ? response.entry : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent-runtime backends (Codex, Cursor, Copilot, Grok)
+//
+// The Rust credential boundary owns secrets. These wrappers expose auth state
+// + capabilities only. Outside Tauri they return null so the shell falls back
+// to the preview backend registry and stays testable.
+// ---------------------------------------------------------------------------
+
+export async function listRuntimeBackends() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<BackendProvider[]>("list_backends");
+  } catch {
+    return null;
+  }
+}
+
+export async function connectRuntimeBackend(request: BackendCredentialRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<string>("store_backend_credential", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function clearRuntimeBackend(providerId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<string>("clear_backend_credential", { providerId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Record a backend-originated consequential event as an approval audit entry.
+ * Backends that already approved something internally are recorded as `once`
+ * audit; they never bypass Arden's approval layer for future actions.
+ */
+export async function recordRuntimeBackendEvent(
+  event: BackendConsequentialEvent,
+  decidedAt: string
+) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<ApprovalAuditEntry>("record_backend_event", {
+      event,
+      decidedAt
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Native-API agent-loop transport bridge.
+//
+// The TypeScript layer owns orchestration (loop control, tool-call handling,
+// approval routing) as pure logic; Rust owns the API key + HTTP/SSE egress.
+// `streamRuntimeCompletion` hands Rust an opaque request (no key) and Rust emits
+// normalized SSE lines on the `arden://backend/<requestId>` channel. Outside
+// Tauri these return null so the loop stays fixture-testable.
+// ---------------------------------------------------------------------------
+
+export interface RuntimeStreamRequest {
+  providerId: string;
+  requestId: string;
+  model: string;
+  body: unknown;
+}
+
+/** Begin a streaming completion. Rust adds the key + performs the HTTP call. */
+export async function streamRuntimeCompletion(request: RuntimeStreamRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<null>("stream_backend_completion", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/** Cancel an in-flight completion (real cancellation at the Rust boundary). */
+export async function cancelRuntimeCompletion(requestId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<boolean>("cancel_backend_completion", { requestId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Listen for normalized SSE lines for a request. Returns an unlisten function
+ * (or null outside Tauri).
+ */
+export async function listenRuntimeBackendEvents(
+  requestId: string,
+  onLine: (line: string) => void
+) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    const unlisten = await listen<string>(`arden://backend/${requestId}`, (event) => {
+      onLine(event.payload as string);
+    });
+    return unlisten;
   } catch {
     return null;
   }
