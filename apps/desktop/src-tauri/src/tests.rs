@@ -4,6 +4,7 @@
 //! helpers via `use` so the test bodies are unchanged.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -561,6 +562,7 @@ fn runtime_snapshot() -> RuntimeSnapshot {
             "recovery",
             "Recover the workspace after restart.",
         )],
+        connected_backend_ids: vec!["codex".to_string()],
         saved_at: "2026-06-26T10:30:00.000Z".to_string(),
     }
 }
@@ -638,6 +640,400 @@ fn caps_runtime_snapshot_recovery_lists() {
         saved.pinned_source_ids[MAX_RUNTIME_SNAPSHOT_IDS - 1],
         "source-199"
     );
+
+    let _ = fs::remove_file(&path);
+}
+
+// ---------------------------------------------------------------------------
+// Agent-runtime backend credential boundary
+// ---------------------------------------------------------------------------
+
+use crate::backends::{
+    clear_credential_into, list_providers_from, normalize_backend_event, read_connected_backends,
+    store_credential_into,
+};
+use crate::models::{BackendConsequentialEvent, BackendCredentialRequest};
+
+fn temp_backends_path(name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "arden-{name}-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ))
+}
+
+fn credential_request(provider_id: &str, secret: &str) -> BackendCredentialRequest {
+    BackendCredentialRequest {
+        provider_id: provider_id.to_string(),
+        secret: secret.to_string(),
+    }
+}
+
+#[test]
+fn runtime_backends_are_fail_closed_before_any_credential() {
+    let path = temp_backends_path("backends-list");
+    let _ = fs::remove_file(&path);
+
+    let store = HashMap::new();
+    let providers = list_providers_from(&store, &path).expect("providers should list");
+
+    // The four runtime providers (codex/cursor/copilot/grok) are present...
+    let runtime_ids: Vec<&str> = providers
+        .iter()
+        .filter(|p| p.backend_type != "native-api")
+        .map(|p| p.id.as_str())
+        .collect();
+    assert_eq!(runtime_ids, vec!["codex", "cursor", "copilot", "grok"]);
+
+    // ...and without credentials every provider is fail-closed: no capabilities.
+    for provider in &providers {
+        assert!(
+            provider.capabilities.is_empty(),
+            "{} should declare no capabilities before auth",
+            provider.id
+        );
+        assert!(provider.auth_state != "connected");
+        // Grok entitlements must never be pre-populated.
+        if provider.id == "grok" {
+            let entitlements = provider.entitlements.clone().unwrap_or_default();
+            assert!(entitlements.is_empty());
+        }
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn acp_providers_are_install_required_without_a_credential() {
+    let path = temp_backends_path("backends-acp");
+    let _ = fs::remove_file(&path);
+
+    let store = HashMap::new();
+    let providers = list_providers_from(&store, &path).expect("providers should list");
+    let cursor = providers
+        .iter()
+        .find(|p| p.id == "cursor")
+        .expect("cursor provider exists");
+    let grok = providers
+        .iter()
+        .find(|p| p.id == "grok")
+        .expect("grok provider exists");
+
+    assert_eq!(cursor.auth_state, "install-required");
+    assert_eq!(grok.auth_state, "install-required");
+    assert!(cursor
+        .install_hint
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase()
+        .contains("cursor cli"));
+    assert!(grok
+        .install_hint
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase()
+        .contains("grok cli"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn storing_a_credential_connects_the_provider_and_serves_capabilities() {
+    let path = temp_backends_path("backends-connect");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    let provider_id = store_credential_into(
+        &mut store,
+        &path,
+        credential_request("codex", "super-secret-token"),
+    )
+    .expect("credential should store");
+    assert_eq!(provider_id, "codex");
+
+    let providers = list_providers_from(&store, &path).expect("providers should list");
+    let codex = providers
+        .iter()
+        .find(|p| p.id == "codex")
+        .expect("codex provider exists");
+
+    assert_eq!(codex.auth_state, "connected");
+    assert!(codex.capabilities.contains(&"streaming".to_string()));
+    assert!(codex.capabilities.contains(&"tool-requests".to_string()));
+    assert!(codex.models.iter().all(|model| model.available));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn stored_secrets_never_appear_in_list_or_connected_manifest() {
+    let path = temp_backends_path("backends-secrets");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    store_credential_into(
+        &mut store,
+        &path,
+        credential_request("copilot", "do-not-leak-me-12345"),
+    )
+    .expect("credential should store");
+
+    // The provider list must not contain the raw secret.
+    let serialized =
+        serde_json::to_string(&list_providers_from(&store, &path).expect("providers list"))
+            .expect("serialize");
+    assert!(
+        !serialized.contains("do-not-leak-me-12345"),
+        "secret must not leak through list_backends"
+    );
+
+    // The persisted connected-backends manifest is ids only.
+    let connected = read_connected_backends(&path).expect("connected backends read");
+    let manifest = serde_json::to_string(&connected).expect("serialize");
+    assert!(manifest.contains("copilot"));
+    assert!(!manifest.contains("do-not-leak-me-12345"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn clearing_a_credential_drops_the_provider_from_the_manifest() {
+    let path = temp_backends_path("backends-clear");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    store_credential_into(&mut store, &path, credential_request("grok", "grok-token"))
+        .expect("store grok");
+    let connected = read_connected_backends(&path).expect("read");
+    assert!(connected.has("grok"));
+
+    clear_credential_into(&mut store, &path, "grok").expect("clear grok");
+    let connected = read_connected_backends(&path).expect("read after clear");
+    assert!(!connected.has("grok"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn rejects_unsupported_backend_provider_ids() {
+    let path = temp_backends_path("backends-reject");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    let error = store_credential_into(&mut store, &path, credential_request("claude", "nope"))
+        .expect_err("unsupported provider should fail");
+    assert!(error.contains("not a supported"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn rejects_empty_backend_secrets() {
+    let path = temp_backends_path("backends-empty");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    let error = store_credential_into(&mut store, &path, credential_request("codex", "   "))
+        .expect_err("empty secret should fail");
+    assert!(error.contains("non-empty"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn records_backend_consequential_event_as_audit_without_bypassing() {
+    let event = BackendConsequentialEvent {
+        provider_id: "cursor".to_string(),
+        service: "Cursor".to_string(),
+        action: "Edit src/index.ts".to_string(),
+        mode: "trusted-scope".to_string(),
+        risk_level: "medium".to_string(),
+        data_used: vec!["open file".to_string()],
+        consequence: "Patches a source file.".to_string(),
+        backend_preapproved: Some(true),
+    };
+
+    let entry =
+        normalize_backend_event(event, "2026-06-26T12:00:00.000Z").expect("event normalizes");
+    // A backend that pre-approved is recorded as `once` audit — never bypasses
+    // Arden's layer for future actions.
+    assert_eq!(entry.decision, "once");
+    assert!(entry.note.contains("Cursor"));
+    assert!(entry.note.contains("Edit src/index.ts"));
+    assert!(entry.note.contains("cursor"));
+}
+
+#[test]
+fn records_unapproved_backend_event_as_deny_audit() {
+    let event = BackendConsequentialEvent {
+        provider_id: "codex".to_string(),
+        service: "Codex".to_string(),
+        action: "Run shell command".to_string(),
+        mode: "full-access".to_string(),
+        risk_level: "high".to_string(),
+        data_used: vec![],
+        consequence: String::new(),
+        backend_preapproved: Some(false),
+    };
+
+    let entry =
+        normalize_backend_event(event, "2026-06-26T12:01:00.000Z").expect("event normalizes");
+    assert_eq!(entry.decision, "deny");
+}
+
+#[test]
+fn runtime_snapshot_round_trips_connected_backend_ids_without_secrets() {
+    let path = temp_audit_path("runtime-snapshot-backends");
+    let _ = fs::remove_file(&path);
+
+    let mut snapshot = runtime_snapshot();
+    snapshot.connected_backend_ids = vec!["codex".to_string(), "cursor".to_string()];
+
+    let saved =
+        write_runtime_snapshot(&path, snapshot).expect("snapshot should save with backends");
+    assert_eq!(saved.connected_backend_ids, vec!["codex", "cursor"]);
+
+    let read = read_runtime_snapshot(&path).expect("read").expect("exists");
+    assert_eq!(read.connected_backend_ids, vec!["codex", "cursor"]);
+
+    // No secret-shaped data should be present anywhere in the snapshot file.
+    let file_contents = fs::read_to_string(&path).expect("snapshot file readable");
+    assert!(!file_contents.contains("secret"));
+    assert!(!file_contents.contains("token"));
+
+    let _ = fs::remove_file(&path);
+}
+
+// ---------------------------------------------------------------------------
+// Native API provider catalog (Stage 4): the five native providers are served
+// from the credential boundary, fail-closed until a key exists.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() {
+    let path = temp_backends_path("backends-native-list");
+    let _ = fs::remove_file(&path);
+
+    let store = HashMap::new();
+    let providers = list_providers_from(&store, &path).expect("providers should list");
+
+    let ids: Vec<&str> = providers.iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "codex",
+            "cursor",
+            "copilot",
+            "grok",
+            "openai",
+            "anthropic",
+            "gemini",
+            "xai",
+            "openrouter",
+        ]
+    );
+
+    // Native providers are needs-auth + fail-closed before a credential.
+    for provider in &providers {
+        let is_native = matches!(
+            provider.id.as_str(),
+            "openai" | "anthropic" | "gemini" | "xai" | "openrouter"
+        );
+        if is_native {
+            assert_eq!(provider.auth_state, "needs-auth");
+            assert!(
+                provider.capabilities.is_empty(),
+                "{} should fail closed before a credential",
+                provider.id
+            );
+            assert_eq!(provider.backend_type, "native-api");
+        }
+    }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn storing_a_native_credential_serves_full_capabilities_including_usage_cost() {
+    let path = temp_backends_path("backends-native-connect");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    store_credential_into(
+        &mut store,
+        &path,
+        credential_request("anthropic", "sk-ant-secret"),
+    )
+    .expect("credential should store");
+
+    let providers = list_providers_from(&store, &path).expect("providers list");
+    let anthropic = providers
+        .iter()
+        .find(|p| p.id == "anthropic")
+        .expect("anthropic exists");
+    assert_eq!(anthropic.auth_state, "connected");
+    assert!(anthropic.capabilities.contains(&"usage-cost".to_string()));
+    assert!(anthropic
+        .capabilities
+        .contains(&"tool-requests".to_string()));
+    assert!(anthropic.capabilities.contains(&"streaming".to_string()));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn native_secrets_never_leak_through_list_backends() {
+    let path = temp_backends_path("backends-native-secrets");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    store_credential_into(
+        &mut store,
+        &path,
+        credential_request("openai", "sk-openai-do-not-leak"),
+    )
+    .expect("store");
+
+    let serialized = serde_json::to_string(&list_providers_from(&store, &path).expect("list"))
+        .expect("serialize");
+    assert!(
+        !serialized.contains("sk-openai-do-not-leak"),
+        "native secret must not leak through list_backends"
+    );
+
+    // The connected-backends manifest is ids only.
+    let connected = read_connected_backends(&path).expect("connected backends read");
+    let manifest = serde_json::to_string(&connected).expect("serialize");
+    assert!(manifest.contains("openai"));
+    assert!(!manifest.contains("sk-openai-do-not-leak"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn native_catalog_copy_carries_no_forbidden_subscription_phrases() {
+    let path = temp_backends_path("backends-native-compliance");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    // Connect every native provider so the full copy is served.
+    for id in ["openai", "anthropic", "gemini", "xai", "openrouter"] {
+        store_credential_into(&mut store, &path, credential_request(id, "key"))
+            .expect("store native");
+    }
+
+    let serialized = serde_json::to_string(&list_providers_from(&store, &path).expect("list"))
+        .expect("serialize");
+    let lower = serialized.to_lowercase();
+    // No Claude.ai subscription login offered; no Google AI Pro/Ultra reuse.
+    assert!(!lower.contains("claude.ai"));
+    assert!(!lower.contains("google ai pro"));
+    assert!(!lower.contains("google ai ultra"));
+    // Anthropic + Gemini copy must name an allowed key/vertex/bedrock path.
+    assert!(lower.contains("vertex") || lower.contains("api key"));
 
     let _ = fs::remove_file(&path);
 }
