@@ -5,16 +5,19 @@ import {
   FolderOpen,
   MagnifyingGlass,
   Plus,
-  SidebarSimple,
-  Stack
+  SidebarSimple
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import type { ProjectWorkspace, ThreadSummary } from "@arden/protocol";
 import { ArdenLogo } from "./ArdenLogo";
 
 /**
- * Workspace sidebar / shell navigation. Pure presentational component driven
- * by props from the root orchestration component.
+ * Workspace sidebar / shell navigation.
+ *
+ * Knowledge, Automations, and Plugins are first-class top-level nav items
+ * (no "Utilities" grouping). Projects and Chats keep their collapsible groups
+ * but with plain-text labels (no icons). The profile + settings control lives
+ * in one bottom-left dropdown.
  */
 
 export interface UtilityNavItem {
@@ -33,7 +36,6 @@ export function WorkspaceSidebar({
   accountOpen,
   onNewChat,
   onSearch,
-  onToggleUtilityGroup,
   onToggleProjects,
   onToggleChats,
   onSelectUtility,
@@ -46,7 +48,7 @@ export function WorkspaceSidebar({
 }: {
   utilityItems: readonly UtilityNavItem[];
   activeItem: string;
-  expandedCollections: { utilities: boolean; projects: boolean; chats: boolean };
+  expandedCollections: { projects: boolean; chats: boolean };
   expandedProjects: Record<string, boolean>;
   projects: ProjectWorkspace[];
   chatThreads: ThreadSummary[];
@@ -54,7 +56,6 @@ export function WorkspaceSidebar({
   accountOpen: boolean;
   onNewChat: () => void;
   onSearch: () => void;
-  onToggleUtilityGroup: () => void;
   onToggleProjects: () => void;
   onToggleChats: () => void;
   onSelectUtility: (label: string) => void;
@@ -97,53 +98,36 @@ export function WorkspaceSidebar({
           <kbd>K</kbd>
         </button>
 
-        <section className="utility-folder" aria-labelledby="utilities-heading">
-          <button
-            type="button"
-            className="nav-group-heading utility-folder-heading"
-            id="utilities-heading"
-            aria-expanded={expandedCollections.utilities}
-            onClick={onToggleUtilityGroup}
-          >
-            <span className="nav-group-title">
-              <Stack size={15} />
-              <span>Utilities</span>
-            </span>
-            <CaretRight className="collection-caret" size={13} weight="bold" />
-          </button>
-          {expandedCollections.utilities ? (
-            <nav className="utility-nav" aria-label="Workspace tools">
-              {utilityItems.map((item) => {
-                const Icon = item.icon;
-                const active = activeItem === item.label;
-                return (
-                  <button
-                    key={item.label}
-                    type="button"
-                    className={`sidebar-action-card utility-row${active ? " utility-row--active" : ""}`}
-                    onClick={() => onSelectUtility(item.label)}
-                  >
-                    <Icon size={17} />
-                    <span>{item.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          ) : null}
-        </section>
+        <nav className="primary-utility-nav" aria-label="Workspace tools">
+          {utilityItems.map((item) => {
+            const Icon = item.icon;
+            const active = activeItem === item.label;
+            return (
+              <button
+                key={item.label}
+                type="button"
+                className={`sidebar-action-card utility-row${active ? " utility-row--active" : ""}`}
+                onClick={() => onSelectUtility(item.label)}
+                aria-current={active ? "page" : undefined}
+              >
+                <Icon size={17} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </div>
 
       <div className="sidebar-body">
         <section className="nav-group" aria-labelledby="projects-heading">
           <button
             type="button"
-            className="nav-group-heading"
+            className="nav-group-heading nav-group-heading--plain"
             id="projects-heading"
             aria-expanded={expandedCollections.projects}
             onClick={onToggleProjects}
           >
-            <span className="nav-group-title">
-              <FolderOpen size={15} />
+            <span className="nav-group-title nav-group-title--plain">
               <span>Projects</span>
             </span>
             <CaretRight className="collection-caret" size={13} weight="bold" />
@@ -190,13 +174,12 @@ export function WorkspaceSidebar({
         <section className="nav-group" aria-labelledby="chats-heading">
           <button
             type="button"
-            className="nav-group-heading"
+            className="nav-group-heading nav-group-heading--plain"
             id="chats-heading"
             aria-expanded={expandedCollections.chats}
             onClick={onToggleChats}
           >
-            <span className="nav-group-title">
-              <ChatCircle size={15} />
+            <span className="nav-group-title nav-group-title--plain">
               <span>Chats</span>
             </span>
             <CaretRight className="collection-caret" size={13} weight="bold" />
@@ -223,6 +206,8 @@ export function WorkspaceSidebar({
           type="button"
           className={`account-row${accountOpen ? " account-row--open" : ""}`}
           onClick={onToggleAccount}
+          aria-expanded={accountOpen}
+          aria-haspopup="menu"
         >
           <span className="avatar">J</span>
           <strong>Josh</strong>
@@ -247,6 +232,21 @@ export function WorkspaceSidebar({
             <span>New chat</span>
             <Plus size={14} />
           </button>
+
+          <section className="mobile-drawer-section" aria-label="Workspace tools">
+            <strong>Workspace</strong>
+            <nav className="mobile-utilities" aria-label="Mobile workspace tools">
+              {utilityItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button key={item.label} type="button" onClick={() => onSelectUtility(item.label)}>
+                    <Icon size={15} />
+                    {item.label}
+                  </button>
+                );
+              })}
+            </nav>
+          </section>
 
           <section className="mobile-drawer-section" aria-label="Projects">
             <strong>Projects</strong>
@@ -284,21 +284,6 @@ export function WorkspaceSidebar({
                 {thread.title}
               </button>
             ))}
-          </section>
-
-          <section className="mobile-drawer-section" aria-label="Utilities">
-            <strong>Utilities</strong>
-            <nav className="mobile-utilities" aria-label="Mobile workspace tools">
-              {utilityItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button key={item.label} type="button" onClick={() => onSelectUtility(item.label)}>
-                    <Icon size={15} />
-                    {item.label}
-                  </button>
-                );
-              })}
-            </nav>
           </section>
         </div>
       ) : null}

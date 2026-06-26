@@ -96,9 +96,9 @@ kbd {
 .greeting {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   color: var(--ink-muted);
-  font-size: 21px;
+  font-size: 19px;
   line-height: 1.2;
 }
 
@@ -108,13 +108,13 @@ kbd {
 
 .hero h1 {
   max-width: 940px;
-  margin: 24px 0 15px;
+  margin: 20px 0 14px;
   color: #1c1f20;
   font-family: "Newsreader", Georgia, serif;
-  font-size: clamp(48px, 4.45vw, 62px);
+  font-size: clamp(44px, 4.2vw, 58px);
   font-weight: 600;
-  letter-spacing: 0;
-  line-height: 1.02;
+  letter-spacing: -0.01em;
+  line-height: 1.03;
 }
 
 .hero p {

@@ -100,6 +100,8 @@ export interface ShellRuntime {
   activeItem: string;
   setActiveItem: (value: string) => void;
   activeUtility: string | undefined;
+  activePage: "Knowledge" | "Automations" | "Plugins" | null;
+  isChatView: boolean;
   activeThread: ThreadSummary | undefined;
   allThreads: ThreadSummary[];
   // composer
@@ -225,6 +227,14 @@ export function useShellRuntime(): ShellRuntime {
   );
   const activeThread = allThreads.find((thread) => thread.id === activeItem);
   const activeUtility = utilityItems.find((item) => item.label === activeItem)?.label;
+  // A page view is any of the three first-class utility pages. When a page is
+  // active the composer is hidden and the dedicated page renders instead.
+  const activePage: "Knowledge" | "Automations" | "Plugins" | null =
+    activeUtility === "Knowledge" || activeUtility === "Automations" || activeUtility === "Plugins"
+      ? (activeUtility as "Knowledge" | "Automations" | "Plugins")
+      : null;
+  // Chat views: the default home, a selected thread/project, or a new chat.
+  const isChatView = activePage === null;
   const workspaceKnowledgeSources = useMemo(
     () => mergeKnowledgeSources(knowledgeSources, importedKnowledgeSources),
     [importedKnowledgeSources]
@@ -793,6 +803,8 @@ export function useShellRuntime(): ShellRuntime {
     activeItem,
     setActiveItem,
     activeUtility,
+    activePage,
+    isChatView,
     activeThread,
     allThreads,
     composerValue,

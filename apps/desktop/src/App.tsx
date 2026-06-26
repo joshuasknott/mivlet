@@ -10,20 +10,23 @@ import { KnowledgePanel } from "./components/KnowledgePanel";
 import { PluginPanel } from "./components/PluginPanel";
 import { AutomationPanel } from "./components/AutomationPanel";
 import { CitationResults, DirectiveCards, ThreadContext } from "./components/workspace-cards";
+import { KnowledgePage } from "./components/pages/KnowledgePage";
+import { AutomationsPage } from "./components/pages/AutomationsPage";
+import { PluginsPage } from "./components/pages/PluginsPage";
 
 /**
  * Root composition for the Arden desktop shell.
  *
- * The runtime/data state and runtime-backed effects live in useShellRuntime.
- * This component owns only shell-local UI state (collection expansion, the
- * account popover, tool/command picker visibility, voice) and wires the
- * shell, composer, and active context view together.
+ * useShellRuntime owns runtime/data state and effects. This component owns
+ * shell-local UI state (collection expansion, the account popover, tool/command
+ * picker visibility) and routes between chat views and the standalone
+ * Knowledge / Automations / Plugins pages. The composer renders only on chat
+ * views.
  */
 
 export function App() {
   const runtime = useShellRuntime();
   const [expandedCollections, setExpandedCollections] = useState({
-    utilities: true,
     projects: true,
     chats: true
   });
@@ -35,40 +38,20 @@ export function App() {
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
 
-  const renderWorkspaceContext = () => {
-    if (runtime.activeUtility === "Knowledge") {
-      return (
-        <KnowledgePanel
-          sources={runtime.workspaceKnowledgeSources}
-          memory={runtime.managedMemoryRecords}
-          memoryDisabled={runtime.memoryDisabled}
-          editingMemoryId={runtime.editingMemoryId}
-          editingMemoryDraft={runtime.editingMemoryDraft}
-          memoryExportText={runtime.memoryExportText}
-          memoryStatus={runtime.memoryStatus}
-          pinnedSourceIds={runtime.pinnedSourceIds}
-          onTogglePin={runtime.toggleSourcePin}
-          onPromoteSource={runtime.promoteSourceToMemory}
-          onStartMemoryEdit={runtime.startMemoryEdit}
-          onUpdateMemoryDraft={runtime.setEditingMemoryDraft}
-          onSaveMemoryEdit={runtime.saveMemoryEdit}
-          onCancelMemoryEdit={runtime.cancelMemoryEdit}
-          onForgetMemory={runtime.forgetMemory}
-          onToggleMemoryPin={runtime.toggleMemoryPin}
-          onToggleMemoryDisabled={runtime.toggleMemoryDisabled}
-          onExportMemory={runtime.exportMemory}
-        />
-      );
+  const renderPage = () => {
+    switch (runtime.activePage) {
+      case "Knowledge":
+        return <KnowledgePage runtime={runtime} />;
+      case "Automations":
+        return <AutomationsPage runtime={runtime} />;
+      case "Plugins":
+        return <PluginsPage runtime={runtime} />;
+      default:
+        return null;
     }
+  };
 
-    if (runtime.activeUtility === "Plugins") {
-      return <PluginPanel manifests={connectors} onUseConnector={runtime.useConnector} />;
-    }
-
-    if (runtime.activeUtility === "Automations") {
-      return <AutomationPanel rules={runtime.automationRules} onToggle={runtime.toggleAutomation} />;
-    }
-
+  const renderChatContext = () => {
     if (runtime.activeItem === "arden-memory") {
       return (
         <ApprovalPanel
@@ -121,9 +104,6 @@ export function App() {
           runtime.setLastAction("Search ready");
           runtime.focusComposer("Search ");
         }}
-        onToggleUtilityGroup={() =>
-          setExpandedCollections((current) => ({ ...current, utilities: !current.utilities }))
-        }
         onToggleProjects={() =>
           setExpandedCollections((current) => ({ ...current, projects: !current.projects }))
         }
@@ -152,50 +132,60 @@ export function App() {
       />
 
       <section className="workspace" aria-label="Arden workspace">
-        <div className="workspace-center">
-          <section className="hero" aria-labelledby="hero-title">
-            <div className="greeting">
-              <Sparkle size={25} weight="regular" />
-              <span>Good evening, Josh</span>
-            </div>
-            <h1 id="hero-title">Bring the work into one place</h1>
-            <p>Ask Arden to work with your tools, memory, and files</p>
-          </section>
+        {runtime.activePage ? (
+          <div className="workspace-center workspace-center--page">{renderPage()}</div>
+        ) : (
+          <div className="workspace-center">
+            <section className="hero" aria-labelledby="hero-title">
+              <div className="greeting">
+                <Sparkle size={25} weight="regular" />
+                <span>Good evening, Josh</span>
+              </div>
+              <h1 id="hero-title">Bring the work into one place</h1>
+              <p>Ask Arden to work with your tools, memory, and files</p>
+            </section>
 
-          <Composer
-            composerRef={runtime.composerRef}
-            fileInputRef={runtime.fileInputRef}
-            composerValue={runtime.composerValue}
-            onComposerChange={runtime.setComposerValue}
-            onSubmit={runtime.submitComposer}
-            voiceEnabled={runtime.voiceEnabled}
-            onToggleVoice={runtime.toggleVoice}
-            onAttach={runtime.triggerAttach}
-            toolPickerOpen={toolPickerOpen}
-            commandOpen={commandOpen}
-            onToggleTools={() => {
-              setToolPickerOpen((open) => !open);
-              setCommandOpen(false);
-              runtime.setLastAction("Tool picker toggled");
-            }}
-            onToggleCommands={() => {
-              setCommandOpen((open) => !open);
-              setToolPickerOpen(false);
-              runtime.setLastAction("Command palette toggled");
-            }}
-            connectors={connectors}
-            onUseConnector={runtime.useConnector}
-            onRunCommand={runtime.runCommand}
-            onFileChange={runtime.handleLocalKnowledgeFileChange}
-            voiceState={runtime.voiceEnabled ? "Push-to-talk ready. Transcript stays local until you send it." : undefined}
-            importStatus={runtime.importStatus}
-          />
+            <Composer
+              composerRef={runtime.composerRef}
+              fileInputRef={runtime.fileInputRef}
+              composerValue={runtime.composerValue}
+              onComposerChange={runtime.setComposerValue}
+              onSubmit={runtime.submitComposer}
+              voiceEnabled={runtime.voiceEnabled}
+              onToggleVoice={runtime.toggleVoice}
+              onAttach={runtime.triggerAttach}
+              toolPickerOpen={toolPickerOpen}
+              commandOpen={commandOpen}
+              onToggleTools={() => {
+                setToolPickerOpen((open) => !open);
+                setCommandOpen(false);
+                runtime.setLastAction("Tool picker toggled");
+              }}
+              onToggleCommands={() => {
+                setCommandOpen((open) => !open);
+                setToolPickerOpen(false);
+                runtime.setLastAction("Command palette toggled");
+              }}
+              connectors={connectors}
+              onUseConnector={runtime.useConnector}
+              onRunCommand={runtime.runCommand}
+              onFileChange={runtime.handleLocalKnowledgeFileChange}
+              voiceState={
+                runtime.voiceEnabled
+                  ? "Push-to-talk ready. Transcript stays local until you send it."
+                  : undefined
+              }
+              importStatus={runtime.importStatus}
+            />
 
-          {renderWorkspaceContext()}
-          <p className="sr-only" aria-live="polite">
-            {liveStatusLead} {runtime.managedMemoryRecords.length} memory items. {runtime.workspaceKnowledgeSources.length} sources. {runtime.openApprovals.length} approvals pending.
-          </p>
-        </div>
+            {renderChatContext()}
+          </div>
+        )}
+        <p className="sr-only" aria-live="polite">
+          {liveStatusLead} {runtime.managedMemoryRecords.length} memory items.{" "}
+          {runtime.workspaceKnowledgeSources.length} sources. {runtime.openApprovals.length} approvals
+          pending.
+        </p>
       </section>
     </main>
   );

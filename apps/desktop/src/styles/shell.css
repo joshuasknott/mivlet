@@ -8,7 +8,7 @@
   display: flex;
   flex-direction: column;
   min-height: 100%;
-  padding: 14px 10px 10px;
+  padding: 16px 12px 12px;
   color: #eef0ec;
   background: #181a1b;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
@@ -17,9 +17,9 @@
 .brand-lockup {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   height: 36px;
-  margin: 0 7px 16px;
+  margin: 0 6px 18px;
 }
 
 .brand-name {
@@ -114,9 +114,9 @@
   white-space: nowrap;
 }
 
-.utility-folder {
+.primary-utility-nav {
   display: grid;
-  gap: 4px;
+  gap: 5px;
 }
 
 .utility-folder-heading {
@@ -127,9 +127,11 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-height: 0;
-  margin-top: 11px;
+  margin-top: 16px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -165,6 +167,16 @@
   display: flex;
   align-items: center;
   gap: 7px;
+}
+
+/* Projects and Chats use plain text labels (no leading icon). */
+.nav-group-title--plain {
+  gap: 0;
+}
+
+.nav-group-heading--plain .nav-group-title--plain {
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
 }
 
 .collection-caret {

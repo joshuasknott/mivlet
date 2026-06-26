@@ -314,20 +314,32 @@
   }
 
   .composer {
-    min-height: 220px;
+    padding: 12px;
   }
 
-  .composer-actions,
-  .composer-left-actions {
-    align-items: stretch;
+  .composer-input {
+    font-size: 16px;
   }
 
-  .composer-actions {
-    flex-direction: column;
+  .composer-menu {
+    right: 8px;
+    left: 8px;
+    min-width: 0;
   }
 
   .send-button {
-    width: 100%;
+    width: 38px;
+    height: 38px;
+  }
+
+  .page-header {
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .page-header__meta {
+    align-items: flex-start;
+    flex-direction: row;
   }
 
   .directive-card {

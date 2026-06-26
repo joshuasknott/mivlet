@@ -303,9 +303,10 @@ describe("Arden home", () => {
   });
 
   it("recovers shell state from a runtime snapshot", async () => {
+    const user = userEvent.setup();
     runtimeMocks.snapshot = {
       version: 1,
-      activeItem: "Automations",
+      activeItem: "arden-initial-build",
       composerDraft: "/schedule recovered weekly digest",
       voiceEnabled: true,
       approvalAudit: [],
@@ -323,7 +324,12 @@ describe("Arden home", () => {
 
     render(<App />);
 
+    // Composer draft is recovered into a chat view (the composer lives only
+    // on chat views in the new page-based navigation).
     expect(await screen.findByDisplayValue("/schedule recovered weekly digest")).toBeInTheDocument();
+
+    // Recovered automation status is reflected on the standalone Automations page.
+    await user.click(screen.getByRole("button", { name: /^automations$/i }));
     const weeklyAutomation = screen.getByText("Weekly workspace digest").closest("article");
 
     expect(weeklyAutomation).not.toBeNull();
