@@ -31,3 +31,28 @@ export {
   knowledgeSourceFixtures,
   projectFixtures
 } from "./fixtures";
+
+// agent-runtime backends (logic + data split, mirroring the connector pattern)
+export {
+  BACKEND_PROVIDER_IDS,
+  listBackendProviders,
+  resolveAcpProvider,
+  resolveCapabilities,
+  resolveCodexProvider,
+  resolveCopilotProvider,
+  resolveCursorProvider,
+  resolveGrokProvider,
+  resolveNativeProvider,
+  NATIVE_BACKEND_TYPE
+} from "./backends/registry";
+export { hasCapability } from "./backends/capabilities";
+export type {
+  CapabilitySet
+} from "./backends/capabilities";
+export type {
+  AcpProviderId,
+  BackendProviderId,
+  NativeProviderId
+} from "./backends/registry";
+export type { CopilotAuthMode } from "./backends/fixtures";
+export { COPILOT_AUTH_MODES } from "./backends/copilot";

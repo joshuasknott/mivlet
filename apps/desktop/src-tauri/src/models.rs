@@ -33,11 +33,100 @@ pub const APPROVAL_MODES: [&str; 3] = ["read-only", "trusted-scope", "full-acces
 pub const APPROVAL_RISK_LEVELS: [&str; 4] = ["low", "medium", "high", "critical"];
 pub const AUTOMATION_STATUSES: [&str; 3] = ["draft", "active", "paused"];
 
+// Agent-runtime backend vocabularies (controlled, used for validation).
+pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", "native-api"];
+pub const BACKEND_AUTH_STATES: [&str; 5] = [
+    "connected",
+    "needs-auth",
+    "install-required",
+    "entitlement-pending",
+    "unavailable",
+];
+pub const BACKEND_CAPABILITIES: [&str; 9] = [
+    "authentication",
+    "threads",
+    "streaming",
+    "tool-requests",
+    "approvals",
+    "file-changes",
+    "usage-cost",
+    "model-availability",
+    "cancellation",
+];
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 9] = [
+    "codex",
+    "cursor",
+    "copilot",
+    "grok",
+    "openai",
+    "anthropic",
+    "gemini",
+    "xai",
+    "openrouter",
+];
+/// Marker that backend credential storage is pre-release (OS keychain not
+/// wired yet). Logged once on first credential write.
+pub const BACKENDS_PRE_RELEASE: bool = true;
+pub const MAX_BACKEND_SECRET_CHARACTERS: usize = 8_000;
+pub const MAX_BACKEND_MODELS: usize = 32;
+pub const MAX_BACKEND_CAPABILITIES: usize = 16;
+
 #[derive(Serialize)]
 pub struct RuntimeStatus {
     pub permission_mode: &'static str,
     pub offline_ready: bool,
     pub connector_boundaries: [&'static str; 7],
+}
+
+/// A selectable model exposed by a backend. `available` is resolved from auth
+/// state; the secret itself never appears here.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendModel {
+    pub id: String,
+    pub label: String,
+    pub available: bool,
+}
+
+/// Describes a connected (or connectable) agent-runtime backend. The Rust
+/// credential boundary returns this shape to JavaScript — auth state and
+/// capabilities only, never raw tokens.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendProvider {
+    pub id: String,
+    pub backend_type: String,
+    pub label: String,
+    pub description: String,
+    pub auth_state: String,
+    pub capabilities: Vec<String>,
+    pub models: Vec<BackendModel>,
+    pub install_hint: Option<String>,
+    pub entitlements: Option<Vec<String>>,
+}
+
+/// Request to store a backend credential. The secret is written to the
+/// process-scoped store and never read back across the Tauri boundary.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendCredentialRequest {
+    pub provider_id: String,
+    pub secret: String,
+}
+
+/// A consequential action a backend wants to perform. Arden records it as an
+/// approval audit entry rather than letting the backend execute it directly.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendConsequentialEvent {
+    pub provider_id: String,
+    pub service: String,
+    pub action: String,
+    pub mode: String,
+    pub risk_level: String,
+    pub data_used: Vec<String>,
+    pub consequence: String,
+    pub backend_preapproved: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -235,5 +324,9 @@ pub struct RuntimeSnapshot {
     pub imported_knowledge_sources: Vec<LocalFileImport>,
     pub memory_disabled: bool,
     pub memory_records: Vec<MemoryRecord>,
+    /// Provider ids of connected agent-runtime backends. Credentials themselves
+    /// never live here — only *which* backends were connected, so the Rust
+    /// boundary can re-resolve auth state on recovery.
+    pub connected_backend_ids: Vec<String>,
     pub saved_at: String,
 }

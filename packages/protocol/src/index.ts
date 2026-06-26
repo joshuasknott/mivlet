@@ -91,6 +91,109 @@ export interface ConnectorManifest {
   permissions: string[];
   healthSummary: string;
   lastCheckedAt: string;
+  /**
+   * Optional backend facet. When present, this connector entry surfaces an
+   * agent-runtime AI backend (Codex, Cursor, Copilot, Grok) whose auth state
+   * and capabilities are owned by the Rust credential boundary. The frontend
+   * only ever sees `authState` and `capabilities` — never raw tokens.
+   */
+  backend?: BackendProvider;
+}
+
+/**
+ * The transport a backend speaks. Codex reaches its app-server, Cursor and
+ * Grok share a generic ACP (stdio/JSON-RPC) adapter, Copilot uses its SDK, and
+ * the native-API providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) speak
+ * their HTTP/SSE APIs directly — with Arden owning the entire agent loop.
+ */
+export type BackendType = "codex-app-server" | "acp" | "copilot-sdk" | "native-api";
+
+/**
+ * Resolved auth state for a backend instance. `install-required` and
+ * `entitlement-pending` are fail-closed states: the adapter declares no
+ * capabilities it cannot honor.
+ */
+export type BackendAuthState =
+  | "connected"
+  | "needs-auth"
+  | "install-required"
+  | "entitlement-pending"
+  | "unavailable";
+
+/**
+ * The closed capability set an adapter may declare dynamically. The UI may
+ * only render a control for a capability the adapter actually reported.
+ */
+export type BackendCapability =
+  | "authentication"
+  | "threads"
+  | "streaming"
+  | "tool-requests"
+  | "approvals"
+  | "file-changes"
+  | "usage-cost"
+  | "model-availability"
+  | "cancellation";
+
+/** A selectable model exposed by a backend. */
+export interface BackendModel {
+  id: string;
+  label: string;
+  available: boolean;
+}
+
+/**
+ * Describes a connected (or connectable) agent-runtime backend. Capabilities
+ * and entitlements are resolved dynamically from the current auth state —
+ * adapters must never fake a capability they lack.
+ */
+export interface BackendProvider {
+  id: string;
+  backendType: BackendType;
+  label: string;
+  description: string;
+  authState: BackendAuthState;
+  capabilities: BackendCapability[];
+  models: BackendModel[];
+  /** Shown when `authState === "install-required"` (e.g. a missing CLI). */
+  installHint?: string;
+  /**
+   * Entitlements detected post-login only. Grok Build is never promised for any
+   * tier in fixture/preview data — it only appears here after a real check.
+   */
+  entitlements?: string[];
+}
+
+/**
+ * Request to store a backend credential. The secret is handed to the Rust
+ * credential boundary and never read back into JavaScript.
+ */
+export interface BackendCredentialRequest {
+  providerId: string;
+  secret: string;
+}
+
+/**
+ * A consequential action a backend wants to perform (tool call, file write,
+ * shell command). Arden routes these into its existing ApprovalRequest system
+ * rather than letting the backend execute them directly.
+ */
+export interface BackendConsequentialEvent {
+  providerId: string;
+  service: string;
+  action: string;
+  mode: PermissionMode;
+  riskLevel: ApprovalRiskLevel;
+  dataUsed: string[];
+  consequence: string;
+  /** When the backend already approved this internally, record it as audit. */
+  backendPreapproved?: boolean;
+}
+
+/** An audit entry recording a backend-originated action. */
+export interface BackendEventAudit {
+  providerId: string;
+  auditEntry: ApprovalAuditEntry;
 }
 
 export interface WorkspaceDirective {
@@ -196,5 +299,88 @@ export interface RuntimeSnapshot {
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;
   memoryRecords: MemoryRecord[];
+  /**
+   * Provider ids of connected agent-runtime backends. Credentials themselves
+   * never live here — this only records *which* backends were connected so the
+   * Rust boundary can re-resolve their auth state on recovery.
+   */
+  connectedBackendIds: string[];
   savedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Native-API agent loop: events + request shaping.
+//
+// The TypeScript layer owns request/response shaping + the agent loop as pure,
+// fixture-testable logic; the Rust boundary owns the API key + HTTP/SSE egress.
+// The API key NEVER appears in any of these types — it is added as an
+// Authorization/x-api-key/x-goog-api-key header inside Rust only.
+// ---------------------------------------------------------------------------
+
+/** A message role in the normalized conversation. */
+export type NativeMessageRole = "system" | "user" | "assistant" | "tool";
+
+/** A single conversation message. `toolCallId` pairs a tool result to its call. */
+export interface NativeMessage {
+  role: NativeMessageRole;
+  content: string;
+  /** Assistant tool calls, when role === "assistant" and the model requested tools. */
+  toolCalls?: NativeToolCall[];
+  /** Tool-result call id, when role === "tool". */
+  toolCallId?: string;
+}
+
+/** A tool call the model emitted. The arguments are the raw model JSON string. */
+export interface NativeToolCall {
+  callId: string;
+  tool: string;
+  arguments: string;
+}
+
+/** A tool the loop advertises to the model (Arden-owned, from the registry). */
+export interface NativeToolSpec {
+  name: string;
+  description: string;
+  /** JSON-schema parameter shape, serialized as a string for transport. */
+  parameters: string;
+}
+
+/** An Arden-owned tool the native loop may dispatch after approval. */
+export interface BackendTool {
+  name: string;
+  description: string;
+  defaultMode: PermissionMode;
+  defaultRisk: ApprovalRiskLevel;
+  parameters: string;
+}
+
+/** Normalized completion request the loop shapes per provider. No key, no URL. */
+export interface NativeCompletionRequest {
+  providerId: string;
+  model: string;
+  messages: NativeMessage[];
+  tools: NativeToolSpec[];
+  /** Max output tokens; provider shapers clamp to the provider's limit. */
+  maxTokens: number;
+}
+
+/**
+ * A normalized agent-loop event streamed back to the shell — the shared event
+ * surface for the native-API loop. Model tool calls arrive as `tool-call`
+ * carrying a pre-shaped ApprovalRequest so they route through Arden's existing
+ * approval queue before the tool is executed.
+ */
+export type BackendAgentEvent =
+  | { type: "text-delta"; text: string }
+  | {
+      type: "tool-call";
+      callId: string;
+      tool: string;
+      arguments: string;
+      approval: ApprovalRequest;
+    }
+  | { type: "tool-result"; callId: string; ok: boolean; output: string }
+  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number }
+  | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
+  | { type: "error"; message: string }
+  | { type: "cancelled" };
