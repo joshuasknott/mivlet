@@ -133,15 +133,16 @@ export interface ApprovalAuditEntry {
 }
 
 export interface RuntimeSnapshot {
-  activeWorkspaceId: string;
+  version: 1;
+  activeItem: string;
   composerDraft: string;
-  selectedConnectorIds: string[];
-  permissionMode: PermissionMode;
-  pendingApprovals: ApprovalRequest[];
+  voiceEnabled: boolean;
   approvalAudit: ApprovalAuditEntry[];
-  memory: MemoryRecord[];
-  knowledge: KnowledgeSource[];
-  attachedSourceIds: string[];
-  connectors: ConnectorManifest[];
-  directives: WorkspaceDirective[];
+  dismissedApprovalIds: string[];
+  automationStatuses: Record<string, AutomationStatus>;
+  pinnedSourceIds: string[];
+  importedKnowledgeSources: LocalFileImport[];
+  memoryDisabled: boolean;
+  memoryRecords: MemoryRecord[];
+  savedAt: string;
 }

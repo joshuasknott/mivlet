@@ -39,6 +39,7 @@ import type {
   LocalFileImport,
   MemoryControlState,
   MemoryRecord,
+  RuntimeSnapshot,
   ThreadSummary,
   WorkspaceDirective
 } from "@praxis/protocol";
@@ -65,12 +66,15 @@ import {
   loadRuntimeApprovalAudit,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
+  loadRuntimeSnapshot,
   recordRuntimeApprovalDecision,
   saveRuntimeMemoryState,
+  saveRuntimeSnapshot,
   searchRuntimeKnowledgeSources
 } from "./runtime";
 
 const STORAGE_KEY = "praxis.shell.v1";
+const RUNTIME_SNAPSHOT_VERSION = 1 as const;
 const MAX_APPROVAL_AUDIT_ENTRIES = 200;
 const MAX_IMPORTED_KNOWLEDGE_SOURCES = 100;
 const ACCEPTED_LOCAL_KNOWLEDGE_FILES = SUPPORTED_LOCAL_FILE_EXTENSIONS.map(
@@ -193,6 +197,39 @@ function persistShellState(state: PersistedShellState) {
   } catch {
     // Local persistence is best-effort in preview and private browsing modes.
   }
+}
+
+function shellStateToRuntimeSnapshot(state: PersistedShellState): RuntimeSnapshot {
+  return {
+    version: RUNTIME_SNAPSHOT_VERSION,
+    activeItem: state.activeItem,
+    composerDraft: state.composerValue,
+    voiceEnabled: state.voiceEnabled,
+    approvalAudit: state.approvalAudit,
+    dismissedApprovalIds: state.dismissedApprovalIds,
+    automationStatuses: state.automationStatuses,
+    pinnedSourceIds: state.pinnedSourceIds,
+    importedKnowledgeSources: state.importedKnowledgeSources,
+    memoryDisabled: state.memoryDisabled,
+    memoryRecords: state.memoryRecords,
+    savedAt: new Date().toISOString()
+  };
+}
+
+function shellStateFromRuntimeSnapshot(snapshot: RuntimeSnapshot): PersistedShellState {
+  return {
+    ...defaultShellState,
+    activeItem: snapshot.activeItem || defaultShellState.activeItem,
+    composerValue: snapshot.composerDraft,
+    voiceEnabled: snapshot.voiceEnabled,
+    approvalAudit: snapshot.approvalAudit,
+    dismissedApprovalIds: snapshot.dismissedApprovalIds,
+    automationStatuses: snapshot.automationStatuses,
+    pinnedSourceIds: snapshot.pinnedSourceIds,
+    importedKnowledgeSources: snapshot.importedKnowledgeSources,
+    memoryDisabled: snapshot.memoryDisabled,
+    memoryRecords: snapshot.memoryRecords
+  };
 }
 
 function ShellButton({
@@ -663,6 +700,7 @@ export function App() {
   });
   const [memoryExportText, setMemoryExportText] = useState("");
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
+  const [runtimeSnapshotReady, setRuntimeSnapshotReady] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -700,9 +738,8 @@ export function App() {
     }),
     [managedMemoryRecords, memoryDisabled]
   );
-
-  useEffect(() => {
-    persistShellState({
+  const shellState = useMemo<PersistedShellState>(
+    () => ({
       activeItem,
       composerValue,
       voiceEnabled,
@@ -713,19 +750,67 @@ export function App() {
       importedKnowledgeSources,
       memoryDisabled,
       memoryRecords: managedMemoryRecords
+    }),
+    [
+      activeItem,
+      approvalAudit,
+      automationStatuses,
+      composerValue,
+      dismissedApprovalIds,
+      importedKnowledgeSources,
+      managedMemoryRecords,
+      memoryDisabled,
+      pinnedSourceIds,
+      voiceEnabled
+    ]
+  );
+
+  useEffect(() => {
+    persistShellState(shellState);
+  }, [shellState]);
+
+  useEffect(() => {
+    if (!runtimeSnapshotReady) {
+      return;
+    }
+
+    void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellState)).catch((error) => {
+      setLastAction(error instanceof Error ? error.message : "Praxis could not save runtime snapshot.");
     });
-  }, [
-    activeItem,
-    approvalAudit,
-    automationStatuses,
-    composerValue,
-    dismissedApprovalIds,
-    importedKnowledgeSources,
-    managedMemoryRecords,
-    memoryDisabled,
-    pinnedSourceIds,
-    voiceEnabled
-  ]);
+  }, [runtimeSnapshotReady, shellState]);
+
+  useEffect(() => {
+    let active = true;
+
+    void loadRuntimeSnapshot()
+      .then((snapshot) => {
+        if (!active || !snapshot) {
+          return;
+        }
+
+        const recovered = shellStateFromRuntimeSnapshot(snapshot);
+        setActiveItem(recovered.activeItem);
+        setComposerValue(recovered.composerValue);
+        setVoiceEnabled(recovered.voiceEnabled);
+        setApprovalAudit(recovered.approvalAudit);
+        setDismissedApprovalIds(recovered.dismissedApprovalIds);
+        setAutomationStatuses(recovered.automationStatuses);
+        setPinnedSourceIds(recovered.pinnedSourceIds);
+        setImportedKnowledgeSources(recovered.importedKnowledgeSources);
+        setMemoryDisabled(recovered.memoryDisabled);
+        setManagedMemoryRecords(recovered.memoryRecords);
+        setLastAction("Recovered workspace from local runtime");
+      })
+      .finally(() => {
+        if (active) {
+          setRuntimeSnapshotReady(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;

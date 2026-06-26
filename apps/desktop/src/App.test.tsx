@@ -1,11 +1,40 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import type { RuntimeSnapshot } from "@praxis/protocol";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+
+const runtimeMocks = vi.hoisted(() => ({
+  snapshot: null as RuntimeSnapshot | null,
+  savedSnapshots: [] as RuntimeSnapshot[]
+}));
+
+vi.mock("./runtime", () => ({
+  exportRuntimeMemoryState: vi.fn(async () => null),
+  importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
+  loadRuntimeApprovalAudit: vi.fn(async () => null),
+  loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
+  loadRuntimeMemoryState: vi.fn(async () => null),
+  loadRuntimeSnapshot: vi.fn(
+    () =>
+      runtimeMocks.snapshot
+        ? Promise.resolve(runtimeMocks.snapshot)
+        : new Promise<RuntimeSnapshot | null>(() => {})
+  ),
+  recordRuntimeApprovalDecision: vi.fn(async () => null),
+  saveRuntimeMemoryState: vi.fn(async () => null),
+  saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
+    runtimeMocks.savedSnapshots.push(snapshot);
+    return snapshot;
+  }),
+  searchRuntimeKnowledgeSources: vi.fn(async () => null)
+}));
 
 describe("Praxis home", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    runtimeMocks.snapshot = null;
+    runtimeMocks.savedSnapshots = [];
   });
 
   it("writes a contextual directive into the composer", async () => {
@@ -146,5 +175,36 @@ describe("Praxis home", () => {
     render(<App />);
 
     expect(screen.getByLabelText(/universal composer/i)).toHaveValue("Plan the onboarding journey");
+  });
+
+  it("recovers shell state from a runtime snapshot", async () => {
+    runtimeMocks.snapshot = {
+      version: 1,
+      activeItem: "Automations",
+      composerDraft: "/schedule recovered weekly digest",
+      voiceEnabled: true,
+      approvalAudit: [],
+      dismissedApprovalIds: ["github-draft-pr"],
+      automationStatuses: {
+        "weekly-digest": "active"
+      },
+      pinnedSourceIds: ["codex-manual"],
+      importedKnowledgeSources: [],
+      memoryDisabled: false,
+      memoryRecords: [],
+      savedAt: "2026-06-26T10:30:00.000Z"
+    };
+
+    render(<App />);
+
+    expect(await screen.findByDisplayValue("/schedule recovered weekly digest")).toBeInTheDocument();
+    const weeklyAutomation = screen.getByText("Weekly workspace digest").closest("article");
+
+    expect(weeklyAutomation).not.toBeNull();
+    expect(within(weeklyAutomation as HTMLElement).getByText("active")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(runtimeMocks.savedSnapshots.at(-1)?.composerDraft).toBe("/schedule recovered weekly digest");
+    });
   });
 });

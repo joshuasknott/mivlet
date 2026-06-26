@@ -5,7 +5,8 @@ import type {
   KnowledgeSearchResponse,
   KnowledgeSource,
   LocalFileImport,
-  MemoryControlState
+  MemoryControlState,
+  RuntimeSnapshot
 } from "@praxis/protocol";
 
 interface ApprovalAuditRecordResponse {
@@ -96,6 +97,32 @@ export async function loadRuntimeMemoryState() {
     return await invoke<MemoryControlState>("list_memory_state");
   } catch {
     return null;
+  }
+}
+
+export async function loadRuntimeSnapshot() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot");
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<RuntimeSnapshot>("save_runtime_snapshot", {
+      snapshot
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
   }
 }
 
