@@ -6,6 +6,8 @@ import type {
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
+  MemoryPromotionRequest,
+  MemoryPromotionResponse,
   RuntimeSnapshot
 } from "@praxis/protocol";
 
@@ -148,6 +150,20 @@ export async function exportRuntimeMemoryState(state: MemoryControlState) {
   try {
     return await invoke<string>("export_memory_state", {
       state
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function promoteRuntimeKnowledgeSourceToMemory(request: MemoryPromotionRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<MemoryPromotionResponse>("promote_knowledge_source_to_memory", {
+      request
     });
   } catch (error) {
     throw toRuntimeError(error);

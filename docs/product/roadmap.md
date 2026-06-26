@@ -15,7 +15,8 @@
 - Done: composer search returns cited workspace sources with provenance, freshness, trust, and snippets.
 - Done: memory can be edited, pinned, forgotten, disabled, and exported through Rust-backed state controls.
 - Done: runtime snapshots recover drafts, active view, pinned sources, automations, dismissed approvals, imported sources, and memory through Rust-backed state.
-- Next: provenance controls backed by encrypted local state and approval-driven memory promotion.
+- Done: knowledge sources can be approved into pinned durable memory with provenance and approval audit history through a Rust-backed promotion command.
+- Next: richer provenance controls backed by encrypted local state.
 
 ## Milestone 3: Real Connectors
 

@@ -140,6 +140,24 @@ struct MemoryExportEnvelope {
     records: Vec<MemoryRecord>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryPromotionRequest {
+    source: KnowledgeSource,
+    decision: String,
+    decided_at: String,
+    state: MemoryControlState,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MemoryPromotionResponse {
+    persisted: bool,
+    record: MemoryRecord,
+    audit_entry: ApprovalAuditEntry,
+    state: MemoryControlState,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeSnapshot {
@@ -537,6 +555,111 @@ fn encode_memory_export(state: MemoryControlState) -> Result<String, String> {
         .map_err(|_| "Praxis could not encode memory export.".to_string())
 }
 
+fn promote_knowledge_source(
+    request: MemoryPromotionRequest,
+) -> Result<MemoryPromotionResponse, String> {
+    let decision = normalize_spaces(&request.decision).to_ascii_lowercase();
+    if !["once", "session", "rule"].contains(&decision.as_str()) {
+        return Err("Memory promotion requires once, session, or rule approval.".to_string());
+    }
+
+    let decided_at = normalize_spaces(&request.decided_at);
+    if decided_at.is_empty() {
+        return Err("Memory promotion needs an approval time.".to_string());
+    }
+
+    let source_id = truncate_characters(
+        &normalize_spaces(&request.source.id),
+        MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    );
+    let title = truncate_characters(
+        &normalize_spaces(&request.source.title),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let provenance = truncate_characters(
+        &normalize_spaces(&request.source.provenance),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let freshness = truncate_characters(
+        &normalize_spaces(&request.source.freshness),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let trust = normalize_spaces(
+        &request
+            .source
+            .trust
+            .unwrap_or_else(|| "untrusted".to_string()),
+    )
+    .to_ascii_lowercase();
+    let preview = request
+        .source
+        .content_preview
+        .as_deref()
+        .map(normalize_spaces)
+        .unwrap_or_default();
+
+    if source_id.is_empty() || title.is_empty() || provenance.is_empty() {
+        return Err("Memory promotion needs source identity and provenance.".to_string());
+    }
+
+    if trust != "trusted" && trust != "untrusted" {
+        return Err("Memory promotion source trust is not recognized.".to_string());
+    }
+
+    let current_state = normalize_memory_state(request.state)?;
+    if current_state.disabled {
+        return Err("Memory is disabled.".to_string());
+    }
+
+    let value = if preview.is_empty() {
+        format!("{title} from {provenance}. Freshness: {freshness}.")
+    } else {
+        preview
+    };
+    let record_id = format!("memory-from-{}", file_slug(&source_id));
+    let source_label = if trust == "untrusted" {
+        format!("Approved from untrusted source: {provenance}")
+    } else {
+        format!("Approved from trusted source: {provenance}")
+    };
+    let record = normalize_memory_record(MemoryRecord {
+        id: record_id.clone(),
+        kind: "imported".to_string(),
+        title,
+        value,
+        source: source_label,
+        freshness: "Approved now".to_string(),
+        approved: true,
+        pinned: true,
+    })?;
+
+    let mut records = current_state.records;
+    records.retain(|existing| existing.id != record_id);
+    records.insert(0, record.clone());
+    let state = normalize_memory_state(MemoryControlState {
+        disabled: false,
+        records,
+    })?;
+    let audit_entry = normalize_approval_audit_entry(ApprovalAuditEntry {
+        id: format!(
+            "memory-promotion-{}-{}",
+            file_slug(&source_id),
+            file_slug(&decided_at)
+        ),
+        request_id: format!("memory-promotion-{source_id}"),
+        decision,
+        decided_at,
+        note: format!("Praxis Memory Approve {provenance} into durable memory"),
+    })?;
+
+    Ok(MemoryPromotionResponse {
+        persisted: false,
+        record,
+        audit_entry,
+        state,
+    })
+}
+
 fn normalize_snapshot_id_list(values: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut normalized_values = Vec::new();
@@ -740,6 +863,25 @@ fn save_memory_state(
 #[tauri::command]
 fn export_memory_state(state: MemoryControlState) -> Result<String, String> {
     encode_memory_export(state)
+}
+
+#[tauri::command]
+fn promote_knowledge_source_to_memory(
+    app: tauri::AppHandle,
+    request: MemoryPromotionRequest,
+) -> Result<MemoryPromotionResponse, String> {
+    let response = promote_knowledge_source(request)?;
+    let memory_path = memory_state_path(&app)?;
+    let state = write_memory_state(&memory_path, response.state)?;
+    let audit_path = approval_audit_path(&app)?;
+    let audit_response = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
+
+    Ok(MemoryPromotionResponse {
+        persisted: true,
+        record: response.record,
+        audit_entry: audit_response.entry,
+        state,
+    })
 }
 
 #[tauri::command]
@@ -1021,6 +1163,7 @@ pub fn run() {
             list_memory_state,
             save_memory_state,
             export_memory_state,
+            promote_knowledge_source_to_memory,
             load_runtime_snapshot,
             save_runtime_snapshot
         ])
@@ -1234,6 +1377,34 @@ mod tests {
         }
     }
 
+    fn knowledge_source(id: &str, trust: &str, preview: Option<&str>) -> KnowledgeSource {
+        KnowledgeSource {
+            id: id.to_string(),
+            title: "Launch notes".to_string(),
+            provenance: "Imported source fixture".to_string(),
+            freshness: "Added today".to_string(),
+            pinned: true,
+            trust: Some(trust.to_string()),
+            content_preview: preview.map(str::to_string),
+        }
+    }
+
+    fn promotion_request(
+        source: KnowledgeSource,
+        decision: &str,
+        disabled: bool,
+    ) -> MemoryPromotionRequest {
+        MemoryPromotionRequest {
+            source,
+            decision: decision.to_string(),
+            decided_at: "2026-06-26T10:45:00.000Z".to_string(),
+            state: MemoryControlState {
+                disabled,
+                records: vec![memory_record("existing", "Existing approved memory.")],
+            },
+        }
+    }
+
     #[test]
     fn saves_and_reads_memory_state() {
         let path = temp_audit_path("memory-state-saves");
@@ -1311,6 +1482,59 @@ mod tests {
         assert!(encoded.contains("praxis.memory.export.v1"));
         assert!(encoded.contains("Exported value"));
         assert!(encoded.contains("\"disabled\": false"));
+    }
+
+    #[test]
+    fn promotes_untrusted_source_to_approved_memory() {
+        let response = promote_knowledge_source(promotion_request(
+            knowledge_source(
+                "market-research-pdf",
+                "untrusted",
+                Some("Market launch risk notes."),
+            ),
+            "once",
+            false,
+        ))
+        .expect("approved source should promote to memory");
+
+        assert!(!response.persisted);
+        assert_eq!(response.record.id, "memory-from-market-research-pdf");
+        assert_eq!(response.record.kind, "imported");
+        assert!(response.record.approved);
+        assert!(response.record.pinned);
+        assert_eq!(response.record.value, "Market launch risk notes.");
+        assert!(response.record.source.contains("untrusted source"));
+        assert_eq!(response.audit_entry.decision, "once");
+        assert_eq!(
+            response.audit_entry.request_id,
+            "memory-promotion-market-research-pdf"
+        );
+        assert_eq!(response.state.records[0].id, response.record.id);
+        assert_eq!(response.state.records[1].id, "existing");
+    }
+
+    #[test]
+    fn rejects_non_approval_memory_promotion_decisions() {
+        let error = promote_knowledge_source(promotion_request(
+            knowledge_source("market-research-pdf", "untrusted", None),
+            "deny",
+            false,
+        ))
+        .expect_err("denied source should not promote to memory");
+
+        assert!(error.contains("requires once, session, or rule"));
+    }
+
+    #[test]
+    fn rejects_memory_promotion_when_memory_is_disabled() {
+        let error = promote_knowledge_source(promotion_request(
+            knowledge_source("market-research-pdf", "untrusted", None),
+            "session",
+            true,
+        ))
+        .expect_err("disabled memory should block promotion");
+
+        assert!(error.contains("disabled"));
     }
 
     fn imported_source(name: &str) -> LocalFileImport {

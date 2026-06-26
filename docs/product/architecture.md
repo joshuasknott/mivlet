@@ -19,12 +19,13 @@ Core domains:
 - `ApprovalRequest`: consequence-aware approval prompts with once, session, rule, modify, and deny outcomes.
 - `ApprovalAuditEntry`: local audit history for user decisions and resumable follow-up.
 - `MemoryRecord`: facts, inferences, provenance, freshness, permissions, and user controls.
+- `MemoryPromotionRequest`: approval-gated conversion of trusted or untrusted knowledge sources into durable memory.
 - `ConnectorManifest`: install/auth/permission/health metadata for bridges.
 - `KnowledgeSource`: imported or indexed source metadata that can be pinned into context.
 - `AutomationRule`: scheduled or event-driven workflow metadata with approval requirements.
 - `RuntimeSnapshot`: resumable app state after restart, including active view, draft text, approvals, pinned sources, imported knowledge, automation status, and memory controls.
 
-Implemented runtime commands currently cover approval audit persistence, local text-file import, imported knowledge persistence, memory control state, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
+Implemented runtime commands currently cover approval audit persistence, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
 
 ## Offline Behavior
 

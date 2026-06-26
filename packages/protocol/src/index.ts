@@ -31,6 +31,20 @@ export interface MemoryControlState {
   records: MemoryRecord[];
 }
 
+export interface MemoryPromotionRequest {
+  source: KnowledgeSource;
+  decision: ApprovalDecision;
+  decidedAt: string;
+  state: MemoryControlState;
+}
+
+export interface MemoryPromotionResponse {
+  persisted: boolean;
+  record: MemoryRecord;
+  auditEntry: ApprovalAuditEntry;
+  state: MemoryControlState;
+}
+
 export type ConnectorStatus = "connected" | "needs-auth" | "unavailable" | "fixture";
 
 export interface ConnectorManifest {

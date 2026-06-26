@@ -21,6 +21,7 @@ vi.mock("./runtime", () => ({
         ? Promise.resolve(runtimeMocks.snapshot)
         : new Promise<RuntimeSnapshot | null>(() => {})
   ),
+  promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
   recordRuntimeApprovalDecision: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
@@ -164,6 +165,22 @@ describe("Praxis home", () => {
     const exported = screen.getByLabelText("Memory export") as HTMLTextAreaElement;
     expect(exported.value).toContain("praxis.memory.export.v1");
     expect(exported.value).toContain("Concise updates");
+  });
+
+  it("approves a source into durable memory with audit history", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
+    await user.click(screen.getByRole("button", { name: /approve to memory market-research\.pdf/i }));
+
+    expect(screen.getAllByText("market-research.pdf").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Approved from untrusted source: Imported source fixture/i)).toBeInTheDocument();
+    expect(screen.getByText(/Approved memory: market-research\.pdf/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
+
+    expect(screen.getByText(/once: Praxis Memory Approve Imported source fixture into durable memory/i)).toBeInTheDocument();
   });
 
   it("recovers composer drafts from local persistence", async () => {

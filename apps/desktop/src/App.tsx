@@ -38,6 +38,7 @@ import type {
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
+  MemoryPromotionRequest,
   MemoryRecord,
   RuntimeSnapshot,
   ThreadSummary,
@@ -67,6 +68,7 @@ import {
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
+  promoteRuntimeKnowledgeSourceToMemory,
   recordRuntimeApprovalDecision,
   saveRuntimeMemoryState,
   saveRuntimeSnapshot,
@@ -172,6 +174,58 @@ function encodeMemoryExportFallback(state: MemoryControlState) {
     null,
     2
   );
+}
+
+function toSlug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "source";
+}
+
+function promoteKnowledgeSourceFallback(request: MemoryPromotionRequest) {
+  if (!["once", "session", "rule"].includes(request.decision)) {
+    throw new Error("Memory promotion requires once, session, or rule approval.");
+  }
+
+  if (request.state.disabled) {
+    throw new Error("Memory is disabled.");
+  }
+
+  const source = request.source;
+  const trust = source.trust ?? "untrusted";
+  const record: MemoryRecord = {
+    id: `memory-from-${toSlug(source.id)}`,
+    kind: "imported",
+    title: source.title,
+    value:
+      source.contentPreview?.trim() ||
+      `${source.title} from ${source.provenance}. Freshness: ${source.freshness}.`,
+    source:
+      trust === "untrusted"
+        ? `Approved from untrusted source: ${source.provenance}`
+        : `Approved from trusted source: ${source.provenance}`,
+    freshness: "Approved now",
+    approved: true,
+    pinned: true
+  };
+  const state: MemoryControlState = {
+    disabled: false,
+    records: [record, ...request.state.records.filter((current) => current.id !== record.id)]
+  };
+
+  return {
+    persisted: false,
+    record,
+    state,
+    auditEntry: {
+      id: `memory-promotion-${toSlug(source.id)}-${toSlug(request.decidedAt)}`,
+      requestId: `memory-promotion-${source.id}`,
+      decision: request.decision,
+      decidedAt: request.decidedAt,
+      note: `Praxis Memory Approve ${source.provenance} into durable memory`
+    }
+  };
 }
 
 function readPersistedShellState(): PersistedShellState {
@@ -417,6 +471,7 @@ function KnowledgePanel({
   memoryStatus,
   pinnedSourceIds,
   onTogglePin,
+  onPromoteSource,
   onStartMemoryEdit,
   onUpdateMemoryDraft,
   onSaveMemoryEdit,
@@ -435,6 +490,7 @@ function KnowledgePanel({
   memoryStatus: string;
   pinnedSourceIds: string[];
   onTogglePin: (sourceId: string) => void;
+  onPromoteSource: (source: KnowledgeSource) => void;
   onStartMemoryEdit: (record: MemoryRecord) => void;
   onUpdateMemoryDraft: (draft: Pick<MemoryRecord, "title" | "value">) => void;
   onSaveMemoryEdit: (recordId: string) => void;
@@ -452,19 +508,34 @@ function KnowledgePanel({
           {sources.map((source) => {
             const pinned = pinnedSourceIds.includes(source.id);
             return (
-              <button
+              <article
                 className={`source-row${pinned ? " source-row--pinned" : ""}`}
                 key={source.id}
-                type="button"
-                onClick={() => onTogglePin(source.id)}
               >
                 <FileText size={19} />
                 <span>
                   <strong>{source.title}</strong>
                   <small>{source.provenance} - {source.freshness}</small>
                 </span>
-                <span>{pinned ? "Pinned" : "Pin"}</span>
-              </button>
+                <div className="source-actions">
+                  <button
+                    type="button"
+                    onClick={() => onTogglePin(source.id)}
+                    aria-label={`${pinned ? "Unpin" : "Pin"} ${source.title}`}
+                  >
+                    {pinned ? "Pinned" : "Pin"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onPromoteSource(source)}
+                    disabled={memoryDisabled}
+                    aria-label={`Approve to memory ${source.title}`}
+                  >
+                    <ShieldCheck size={14} />
+                    <span>Memory</span>
+                  </button>
+                </div>
+              </article>
             );
           })}
         </div>
@@ -1019,6 +1090,28 @@ export function App() {
     }
   };
 
+  const promoteSourceToMemory = async (source: KnowledgeSource) => {
+    const request: MemoryPromotionRequest = {
+      source,
+      decision: "once",
+      decidedAt: new Date().toISOString(),
+      state: memoryState
+    };
+
+    try {
+      const response =
+        (await promoteRuntimeKnowledgeSourceToMemory(request)) ?? promoteKnowledgeSourceFallback(request);
+      setApprovalAudit((current) => prependAuditEntry(current, response.auditEntry));
+      commitMemoryState(response.state, `Approved memory: ${response.record.title}`);
+      setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
+      setLastAction(`Approved ${source.title} into memory`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Praxis could not approve that source into memory.";
+      setMemoryStatus(message);
+      setLastAction(message);
+    }
+  };
+
   const useDirective = (directive: WorkspaceDirective) => {
     setComposerValue(directive.prompt);
     setLastAction(`Loaded directive: ${directive.label}`);
@@ -1128,6 +1221,7 @@ export function App() {
           memoryStatus={memoryStatus}
           pinnedSourceIds={pinnedSourceIds}
           onTogglePin={toggleSourcePin}
+          onPromoteSource={promoteSourceToMemory}
           onStartMemoryEdit={startMemoryEdit}
           onUpdateMemoryDraft={setEditingMemoryDraft}
           onSaveMemoryEdit={saveMemoryEdit}
