@@ -17,6 +17,7 @@ Core domains:
 
 - `Directive`: workspace-aware prompt starters that write into the universal composer.
 - `ApprovalRequest`: consequence-aware approval prompts with once, session, rule, modify, and deny outcomes.
+- `ApprovalGrant`: scoped approval grants, either temporary for the current session or persisted as standing rules.
 - `ApprovalAuditEntry`: local audit history for user decisions and resumable follow-up.
 - `MemoryRecord`: facts, inferences, provenance, freshness, permissions, and user controls.
 - `MemoryPromotionRequest`: approval-gated conversion of trusted or untrusted knowledge sources into durable memory.
@@ -25,7 +26,7 @@ Core domains:
 - `AutomationRule`: scheduled or event-driven workflow metadata with approval requirements.
 - `RuntimeSnapshot`: resumable app state after restart, including active view, draft text, approvals, pinned sources, imported knowledge, automation status, and memory controls.
 
-Implemented runtime commands currently cover approval audit persistence, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
+Implemented runtime commands currently cover approval resolution, standing approval rules, approval audit persistence, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
 
 ## Offline Behavior
 
@@ -33,7 +34,7 @@ Implemented runtime commands currently cover approval audit persistence, local t
 - Plugin actions requiring network or missing credentials queue as resumable jobs.
 - Recovered sessions show what was pending, what completed, and what needs fresh approval.
 
-The current desktop preview implements approval audit, imported-knowledge, memory-control, and runtime-snapshot persistence in the Tauri app data folder, with browser storage retained as preview fallback. The next storage step is moving those local JSON stores into encrypted SQLite and OS secure storage as live connectors are added.
+The current desktop preview implements approval audit, standing approval rules, imported-knowledge, memory-control, and runtime-snapshot persistence in the Tauri app data folder, with browser storage retained as preview fallback. Session approval grants remain ephemeral, while high-risk full-access approvals fail closed unless the required confirmation phrase is provided. The next storage step is moving those local JSON stores into encrypted SQLite and OS secure storage as live connectors are added.
 
 ## Convex Boundary
 

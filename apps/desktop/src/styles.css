@@ -917,6 +917,114 @@ kbd {
   background: rgba(139, 148, 141, 0.23);
 }
 
+.approval-edit,
+.approval-confirmation {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.approval-edit > span,
+.approval-edit label > span {
+  color: #70767a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.approval-edit label {
+  display: grid;
+  gap: 6px;
+}
+
+.permission-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permission-segments button {
+  min-height: 30px;
+  padding: 0 9px;
+  color: #60686b;
+  background: transparent;
+  border: 1px solid rgba(25, 27, 28, 0.12);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.permission-segments button[aria-pressed="true"] {
+  color: #26302b;
+  background: rgba(139, 148, 141, 0.18);
+  border-color: rgba(57, 69, 61, 0.28);
+}
+
+.approval-edit textarea,
+.approval-confirmation input {
+  width: 100%;
+  color: #222629;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(25, 27, 28, 0.12);
+  border-radius: 7px;
+  outline: 0;
+}
+
+.approval-edit textarea {
+  min-height: 72px;
+  resize: vertical;
+  padding: 9px 10px;
+  line-height: 1.4;
+}
+
+.approval-confirmation {
+  padding: 12px;
+  background: rgba(189, 138, 36, 0.08);
+  border-block: 1px solid rgba(189, 138, 36, 0.2);
+}
+
+.approval-confirmation strong {
+  color: #37352f;
+  font-size: 13px;
+}
+
+.approval-confirmation p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.approval-confirmation code {
+  color: #403b2f;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.approval-confirmation input {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.approval-edit textarea:focus,
+.approval-confirmation input:focus {
+  border-color: rgba(57, 69, 61, 0.42);
+  box-shadow: 0 0 0 3px rgba(139, 148, 141, 0.1);
+}
+
+.approval-grants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 2px;
+}
+
+.approval-grants span {
+  padding: 6px 9px;
+  color: #46514b;
+  background: rgba(104, 125, 112, 0.1);
+  border: 1px solid rgba(57, 69, 61, 0.1);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
 .empty-state {
   display: flex;
   align-items: center;

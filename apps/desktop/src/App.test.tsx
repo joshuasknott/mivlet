@@ -13,6 +13,7 @@ vi.mock("./runtime", () => ({
   exportRuntimeMemoryState: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   loadRuntimeApprovalAudit: vi.fn(async () => null),
+  loadRuntimeApprovalRules: vi.fn(async () => null),
   loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
   loadRuntimeMemoryState: vi.fn(async () => null),
   loadRuntimeSnapshot: vi.fn(
@@ -22,7 +23,7 @@ vi.mock("./runtime", () => ({
         : new Promise<RuntimeSnapshot | null>(() => {})
   ),
   promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
-  recordRuntimeApprovalDecision: vi.fn(async () => null),
+  resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
     runtimeMocks.savedSnapshots.push(snapshot);
@@ -88,6 +89,113 @@ describe("Praxis home", () => {
     expect(screen.queryByText("Create draft PR for feature-memory")).not.toBeInTheDocument();
     expect(screen.getByText("Enable weekly workspace digest")).toBeInTheDocument();
     expect(screen.getByText(/deny: GitHub Create draft PR/i)).toBeInTheDocument();
+  });
+
+  it("keeps session approvals visible without turning them into standing rules", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
+    const githubApproval = screen
+      .getByText("Create draft PR for feature-memory")
+      .closest("article");
+
+    expect(githubApproval).not.toBeNull();
+    await user.click(
+      within(githubApproval as HTMLElement).getByRole("button", { name: /^session$/i })
+    );
+
+    expect(screen.queryByText("Create draft PR for feature-memory")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Session: GitHub - Create draft PR for feature-memory")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Rule: GitHub - Create draft PR for feature-memory")
+    ).not.toBeInTheDocument();
+  });
+
+  it("creates a standing rule from an approval request", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
+    const githubApproval = screen
+      .getByText("Create draft PR for feature-memory")
+      .closest("article");
+
+    expect(githubApproval).not.toBeNull();
+    await user.click(
+      within(githubApproval as HTMLElement).getByRole("button", { name: /^rule$/i })
+    );
+
+    expect(
+      screen.getByText("Rule: GitHub - Create draft PR for feature-memory")
+    ).toBeInTheDocument();
+  });
+
+  it("modifies an approval before resolving it", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
+    const githubApproval = screen
+      .getByText("Create draft PR for feature-memory")
+      .closest("article");
+
+    expect(githubApproval).not.toBeNull();
+    const approval = within(githubApproval as HTMLElement);
+    await user.click(approval.getByRole("button", { name: /^modify$/i }));
+    await user.click(approval.getByRole("button", { name: "read-only" }));
+    await user.clear(approval.getByLabelText(/allowed data for create draft pr/i));
+    await user.type(
+      approval.getByLabelText(/allowed data for create draft pr/i),
+      "branch diff"
+    );
+    await user.clear(approval.getByLabelText(/consequence for create draft pr/i));
+    await user.type(
+      approval.getByLabelText(/consequence for create draft pr/i),
+      "Reviews the branch without publishing."
+    );
+    await user.click(approval.getByRole("button", { name: /save changes/i }));
+
+    expect(screen.queryByText("Create draft PR for feature-memory")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/modify: GitHub Create draft PR for feature-memory modified to read-only using branch diff/i)
+    ).toBeInTheDocument();
+  });
+
+  it("requires an exact phrase for high-risk full-access approvals", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
+    const releaseApproval = screen
+      .getByText("Promote Praxis preview to production")
+      .closest("article");
+
+    expect(releaseApproval).not.toBeNull();
+    const approval = within(releaseApproval as HTMLElement);
+    await user.click(approval.getByRole("button", { name: /^once$/i }));
+
+    const confirmation = approval.getByLabelText(
+      /confirmation for promote praxis preview to production/i
+    );
+    await user.type(confirmation, "publish preview");
+    await user.click(approval.getByRole("button", { name: /^confirm$/i }));
+
+    expect(screen.getByText(/Confirmation phrase did not match/i)).toBeInTheDocument();
+    expect(screen.getByText("Promote Praxis preview to production")).toBeInTheDocument();
+
+    await user.clear(confirmation);
+    await user.type(confirmation, "publish Praxis");
+    await user.click(approval.getByRole("button", { name: /^confirm$/i }));
+
+    expect(
+      screen.queryByText("Promote Praxis preview to production")
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/once: Vercel Promote Praxis preview to production/i)
+    ).toBeInTheDocument();
   });
 
   it("turns slash commands into composer text", async () => {
@@ -202,6 +310,7 @@ describe("Praxis home", () => {
       voiceEnabled: true,
       approvalAudit: [],
       dismissedApprovalIds: ["github-draft-pr"],
+      approvalRules: [],
       automationStatuses: {
         "weekly-digest": "active"
       },

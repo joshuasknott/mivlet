@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type { LocalTextFileCandidate } from "@praxis/connectors";
 import type {
   ApprovalAuditEntry,
+  ApprovalGrant,
+  ApprovalResolutionRequest,
+  ApprovalResolutionResponse,
   KnowledgeSearchResponse,
   KnowledgeSource,
   LocalFileImport,
@@ -41,6 +44,32 @@ export async function loadRuntimeApprovalAudit() {
     return await invoke<ApprovalAuditEntry[]>("list_approval_audit");
   } catch {
     return null;
+  }
+}
+
+export async function loadRuntimeApprovalRules() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<ApprovalGrant[]>("list_approval_rules");
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveRuntimeApprovalRequest(request: ApprovalResolutionRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<ApprovalResolutionResponse>("resolve_approval_request", {
+      request
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
   }
 }
 

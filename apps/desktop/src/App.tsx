@@ -30,7 +30,11 @@ import { ChangeEvent, FormEvent, ReactNode, useEffect, useMemo, useRef, useState
 import type {
   ApprovalAuditEntry,
   ApprovalDecision,
+  ApprovalGrant,
+  ApprovalModification,
   ApprovalRequest,
+  ApprovalResolutionRequest,
+  ApprovalResolutionResponse,
   AutomationRule,
   AutomationStatus,
   ConnectorManifest,
@@ -65,11 +69,12 @@ import {
   importRuntimeLocalKnowledgeSource,
   exportRuntimeMemoryState,
   loadRuntimeApprovalAudit,
+  loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
   promoteRuntimeKnowledgeSourceToMemory,
-  recordRuntimeApprovalDecision,
+  resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
   saveRuntimeSnapshot,
   searchRuntimeKnowledgeSources
@@ -85,6 +90,22 @@ const ACCEPTED_LOCAL_KNOWLEDGE_FILES = SUPPORTED_LOCAL_FILE_EXTENSIONS.map(
 
 type UtilityItem = "Knowledge" | "Plugins" | "Automations";
 type AutomationRuleView = Omit<AutomationRule, "status"> & { status: AutomationStatus };
+type ApprovalModificationDraft = {
+  mode: ApprovalModification["mode"];
+  dataUsed: string;
+  consequence: string;
+};
+type PendingApprovalConfirmation = {
+  request: ApprovalRequest;
+  decision: ApprovalDecision;
+  modification?: ApprovalModification;
+};
+
+const EMPTY_APPROVAL_MODIFICATION: ApprovalModificationDraft = {
+  mode: "read-only",
+  dataUsed: "",
+  consequence: ""
+};
 
 interface PersistedShellState {
   activeItem: string;
@@ -92,6 +113,7 @@ interface PersistedShellState {
   voiceEnabled: boolean;
   approvalAudit: ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
+  approvalRules: ApprovalGrant[];
   automationStatuses: Record<string, AutomationStatus>;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
@@ -111,6 +133,7 @@ const defaultShellState: PersistedShellState = {
   voiceEnabled: false,
   approvalAudit: [],
   dismissedApprovalIds: [],
+  approvalRules: [],
   automationStatuses: {},
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id),
   importedKnowledgeSources: [],
@@ -228,6 +251,71 @@ function promoteKnowledgeSourceFallback(request: MemoryPromotionRequest) {
   };
 }
 
+function resolveApprovalFallback(request: ApprovalResolutionRequest): ApprovalResolutionResponse {
+  if (!request.request.decisions.includes(request.decision)) {
+    throw new Error("Approval decision is not available for this request.");
+  }
+
+  const effectiveRequest =
+    request.decision === "modify" && request.modification
+      ? {
+          ...request.request,
+          mode: request.modification.mode,
+          dataUsed: request.modification.dataUsed,
+          consequence: request.modification.consequence
+        }
+      : request.request;
+  const approving = ["once", "session", "rule", "modify"].includes(request.decision);
+  const highRisk =
+    effectiveRequest.mode === "full-access" ||
+    effectiveRequest.riskLevel === "high" ||
+    effectiveRequest.riskLevel === "critical";
+
+  if (request.decision === "modify" && !request.modification) {
+    throw new Error("Modified approvals need a narrowed permission scope.");
+  }
+  if (approving && highRisk) {
+    if (!effectiveRequest.confirmationPhrase) {
+      throw new Error("High-risk approvals need a confirmation phrase.");
+    }
+    if (request.confirmationText?.trim() !== effectiveRequest.confirmationPhrase) {
+      throw new Error("Confirmation phrase did not match.");
+    }
+  }
+
+  const grant: ApprovalGrant | undefined =
+    request.decision === "session" || request.decision === "rule"
+      ? {
+          id: `approval-${request.decision}-${toSlug(`${effectiveRequest.service}-${effectiveRequest.action}`)}`,
+          requestId: effectiveRequest.id,
+          scope: request.decision,
+          service: effectiveRequest.service,
+          action: effectiveRequest.action,
+          mode: effectiveRequest.mode,
+          dataUsed: effectiveRequest.dataUsed,
+          createdAt: request.decidedAt
+        }
+      : undefined;
+  const note =
+    request.decision === "modify"
+      ? `${effectiveRequest.service} ${effectiveRequest.action} modified to ${effectiveRequest.mode} using ${effectiveRequest.dataUsed.join(", ")}`
+      : `${effectiveRequest.service} ${effectiveRequest.action}`;
+
+  return {
+    persisted: false,
+    effectiveRequest,
+    dismissed: true,
+    grant,
+    auditEntry: {
+      id: `${effectiveRequest.id}-${request.decision}-${toSlug(request.decidedAt)}`,
+      requestId: effectiveRequest.id,
+      decision: request.decision,
+      decidedAt: request.decidedAt,
+      note
+    }
+  };
+}
+
 function readPersistedShellState(): PersistedShellState {
   if (typeof window === "undefined") {
     return defaultShellState;
@@ -261,6 +349,7 @@ function shellStateToRuntimeSnapshot(state: PersistedShellState): RuntimeSnapsho
     voiceEnabled: state.voiceEnabled,
     approvalAudit: state.approvalAudit,
     dismissedApprovalIds: state.dismissedApprovalIds,
+    approvalRules: state.approvalRules,
     automationStatuses: state.automationStatuses,
     pinnedSourceIds: state.pinnedSourceIds,
     importedKnowledgeSources: state.importedKnowledgeSources,
@@ -278,6 +367,7 @@ function shellStateFromRuntimeSnapshot(snapshot: RuntimeSnapshot): PersistedShel
     voiceEnabled: snapshot.voiceEnabled,
     approvalAudit: snapshot.approvalAudit,
     dismissedApprovalIds: snapshot.dismissedApprovalIds,
+    approvalRules: snapshot.approvalRules,
     automationStatuses: snapshot.automationStatuses,
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
@@ -401,12 +491,46 @@ function ThreadContext({ thread }: { thread?: ThreadSummary }) {
 function ApprovalPanel({
   approvals,
   audit,
-  onDecision
+  sessionGrants,
+  approvalRules,
+  editingApprovalId,
+  modificationDraft,
+  pendingConfirmation,
+  confirmationText,
+  onDecision,
+  onStartModify,
+  onUpdateModification,
+  onSaveModify,
+  onCancelModify,
+  onUpdateConfirmation,
+  onConfirmDecision,
+  onCancelConfirmation
 }: {
   approvals: ApprovalRequest[];
   audit: ApprovalAuditEntry[];
+  sessionGrants: ApprovalGrant[];
+  approvalRules: ApprovalGrant[];
+  editingApprovalId: string | null;
+  modificationDraft: ApprovalModificationDraft;
+  pendingConfirmation: PendingApprovalConfirmation | null;
+  confirmationText: string;
   onDecision: (request: ApprovalRequest, decision: ApprovalDecision) => void;
+  onStartModify: (request: ApprovalRequest) => void;
+  onUpdateModification: (draft: ApprovalModificationDraft) => void;
+  onSaveModify: (request: ApprovalRequest) => void;
+  onCancelModify: () => void;
+  onUpdateConfirmation: (value: string) => void;
+  onConfirmDecision: () => void;
+  onCancelConfirmation: () => void;
 }) {
+  const decisionLabel: Record<ApprovalDecision, string> = {
+    once: "Once",
+    session: "Session",
+    rule: "Rule",
+    modify: "Modify",
+    deny: "Deny"
+  };
+
   return (
     <section className="context-panel" aria-label="Approvals and memory">
       <SectionHeading title="Approvals" meta={`${approvals.length} waiting`} />
@@ -422,7 +546,7 @@ function ApprovalPanel({
               <div>
                 <span className="label-row">
                   <ShieldCheck size={18} />
-                  {approval.mode}
+                  {approval.mode} - {approval.riskLevel} risk
                 </span>
                 <h3>{approval.action}</h3>
                 <p>{approval.consequence}</p>
@@ -437,17 +561,105 @@ function ApprovalPanel({
                   <dd>{approval.dataUsed.join(", ")}</dd>
                 </div>
               </dl>
-              <div className="approval-actions">
-                {approval.decisions.map((decision) => (
-                  <button key={decision} type="button" onClick={() => onDecision(approval, decision)}>
-                    {decision}
-                  </button>
-                ))}
-              </div>
+              {editingApprovalId === approval.id ? (
+                <div className="approval-edit">
+                  <span>Permission mode</span>
+                  <div className="permission-segments" aria-label={`Permission mode for ${approval.action}`}>
+                    {(["read-only", "trusted-scope", "full-access"] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        aria-pressed={modificationDraft.mode === mode}
+                        onClick={() => onUpdateModification({ ...modificationDraft, mode })}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                  <label>
+                    <span>Allowed data</span>
+                    <textarea
+                      aria-label={`Allowed data for ${approval.action}`}
+                      value={modificationDraft.dataUsed}
+                      onChange={(event) =>
+                        onUpdateModification({ ...modificationDraft, dataUsed: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>Consequence</span>
+                    <textarea
+                      aria-label={`Consequence for ${approval.action}`}
+                      value={modificationDraft.consequence}
+                      onChange={(event) =>
+                        onUpdateModification({ ...modificationDraft, consequence: event.target.value })
+                      }
+                    />
+                  </label>
+                  <div className="approval-actions">
+                    <button type="button" onClick={() => onSaveModify(approval)}>
+                      Save changes
+                    </button>
+                    <button type="button" onClick={onCancelModify}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : pendingConfirmation?.request.id === approval.id ? (
+                <div className="approval-confirmation">
+                  <strong>Confirm high-risk action</strong>
+                  <p>
+                    Type <code>{approval.confirmationPhrase}</code> to continue with{" "}
+                    {decisionLabel[pendingConfirmation.decision].toLowerCase()} approval.
+                  </p>
+                  <input
+                    aria-label={`Confirmation for ${approval.action}`}
+                    value={confirmationText}
+                    onChange={(event) => onUpdateConfirmation(event.target.value)}
+                    autoFocus
+                  />
+                  <div className="approval-actions">
+                    <button type="button" onClick={onConfirmDecision}>
+                      Confirm
+                    </button>
+                    <button type="button" onClick={onCancelConfirmation}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="approval-actions">
+                  {approval.decisions.map((decision) => (
+                    <button
+                      key={decision}
+                      type="button"
+                      onClick={() =>
+                        decision === "modify" ? onStartModify(approval) : onDecision(approval, decision)
+                      }
+                    >
+                      {decisionLabel[decision]}
+                    </button>
+                  ))}
+                </div>
+              )}
             </article>
           ))
         )}
       </div>
+      {sessionGrants.length > 0 || approvalRules.length > 0 ? (
+        <div className="approval-grants" aria-label="Active approval grants">
+          {sessionGrants.map((grant) => (
+            <span key={grant.id}>
+              Session: {grant.service} - {grant.action}
+            </span>
+          ))}
+          {approvalRules.map((grant) => (
+            <span key={grant.id}>
+              Rule: {grant.service} - {grant.action}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {audit.length > 0 ? (
         <div className="audit-strip" aria-label="Approval audit history">
           {audit.slice(0, 3).map((entry) => (
@@ -750,6 +962,14 @@ export function App() {
   const [lastAction, setLastAction] = useState("Workspace ready");
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(initialState.dismissedApprovalIds);
+  const [approvalRules, setApprovalRules] = useState<ApprovalGrant[]>(initialState.approvalRules);
+  const [sessionApprovalGrants, setSessionApprovalGrants] = useState<ApprovalGrant[]>([]);
+  const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
+  const [approvalModificationDraft, setApprovalModificationDraft] =
+    useState<ApprovalModificationDraft>(EMPTY_APPROVAL_MODIFICATION);
+  const [pendingApprovalConfirmation, setPendingApprovalConfirmation] =
+    useState<PendingApprovalConfirmation | null>(null);
+  const [approvalConfirmationText, setApprovalConfirmationText] = useState("");
   const [automationStatuses, setAutomationStatuses] = useState<Record<string, AutomationStatus>>(
     initialState.automationStatuses
   );
@@ -816,6 +1036,7 @@ export function App() {
       voiceEnabled,
       approvalAudit,
       dismissedApprovalIds,
+      approvalRules,
       automationStatuses,
       pinnedSourceIds,
       importedKnowledgeSources,
@@ -825,6 +1046,7 @@ export function App() {
     [
       activeItem,
       approvalAudit,
+      approvalRules,
       automationStatuses,
       composerValue,
       dismissedApprovalIds,
@@ -865,6 +1087,7 @@ export function App() {
         setVoiceEnabled(recovered.voiceEnabled);
         setApprovalAudit(recovered.approvalAudit);
         setDismissedApprovalIds(recovered.dismissedApprovalIds);
+        setApprovalRules(recovered.approvalRules);
         setAutomationStatuses(recovered.automationStatuses);
         setPinnedSourceIds(recovered.pinnedSourceIds);
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
@@ -892,6 +1115,22 @@ export function App() {
       }
 
       setApprovalAudit(entries.slice(0, MAX_APPROVAL_AUDIT_ENTRIES));
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    void loadRuntimeApprovalRules().then((rules) => {
+      if (!active || !rules || rules.length === 0) {
+        return;
+      }
+
+      setApprovalRules(rules);
     });
 
     return () => {
@@ -1159,25 +1398,130 @@ export function App() {
     focusComposer(prompt);
   };
 
-  const decideApproval = (approval: ApprovalRequest, decision: ApprovalDecision) => {
-    const entry: ApprovalAuditEntry = {
-      id: `${approval.id}-${decision}-${Date.now()}`,
-      requestId: approval.id,
+  const approvalNeedsConfirmation = (
+    approval: ApprovalRequest,
+    modification?: ApprovalModification
+  ) => {
+    const mode = modification?.mode ?? approval.mode;
+    return (
+      mode === "full-access" ||
+      approval.riskLevel === "high" ||
+      approval.riskLevel === "critical"
+    );
+  };
+
+  const clearApprovalInteraction = () => {
+    setEditingApprovalId(null);
+    setApprovalModificationDraft(EMPTY_APPROVAL_MODIFICATION);
+    setPendingApprovalConfirmation(null);
+    setApprovalConfirmationText("");
+  };
+
+  const resolveApprovalDecision = async (
+    approval: ApprovalRequest,
+    decision: ApprovalDecision,
+    modification?: ApprovalModification,
+    confirmationText?: string
+  ) => {
+    const request: ApprovalResolutionRequest = {
+      request: approval,
       decision,
       decidedAt: new Date().toISOString(),
-      note: `${approval.service} ${approval.action}`
+      modification,
+      confirmationText
     };
-    setApprovalAudit((current) => prependAuditEntry(current, entry));
-    setDismissedApprovalIds((current) => (current.includes(approval.id) ? current : [...current, approval.id]));
-    setLastAction(`${decision} recorded for ${approval.service}`);
 
-    void recordRuntimeApprovalDecision(entry).then((runtimeEntry) => {
-      if (!runtimeEntry) {
-        return;
+    try {
+      const response =
+        (await resolveRuntimeApprovalRequest(request)) ?? resolveApprovalFallback(request);
+
+      setApprovalAudit((current) => prependAuditEntry(current, response.auditEntry));
+      if (response.dismissed) {
+        setDismissedApprovalIds((current) =>
+          current.includes(approval.id) ? current : [...current, approval.id]
+        );
+      }
+      if (response.grant?.scope === "session") {
+        setSessionApprovalGrants((current) => [
+          response.grant as ApprovalGrant,
+          ...current.filter((grant) => grant.id !== response.grant?.id)
+        ]);
+      }
+      if (response.grant?.scope === "rule") {
+        setApprovalRules((current) => [
+          response.grant as ApprovalGrant,
+          ...current.filter((grant) => grant.id !== response.grant?.id)
+        ]);
       }
 
-      setApprovalAudit((current) => prependAuditEntry(current, runtimeEntry));
+      clearApprovalInteraction();
+      setLastAction(
+        decision === "modify"
+          ? `Modified approval for ${approval.service}`
+          : `${decision} recorded for ${approval.service}`
+      );
+    } catch (error) {
+      setLastAction(
+        error instanceof Error ? error.message : "Praxis could not resolve that approval."
+      );
+    }
+  };
+
+  const requestApprovalDecision = (
+    approval: ApprovalRequest,
+    decision: ApprovalDecision,
+    modification?: ApprovalModification
+  ) => {
+    if (decision !== "deny" && approvalNeedsConfirmation(approval, modification)) {
+      setPendingApprovalConfirmation({ request: approval, decision, modification });
+      setApprovalConfirmationText("");
+      return;
+    }
+
+    void resolveApprovalDecision(approval, decision, modification);
+  };
+
+  const startApprovalModify = (approval: ApprovalRequest) => {
+    setPendingApprovalConfirmation(null);
+    setApprovalConfirmationText("");
+    setEditingApprovalId(approval.id);
+    setApprovalModificationDraft({
+      mode: approval.mode,
+      dataUsed: approval.dataUsed.join(", "),
+      consequence: approval.consequence
     });
+  };
+
+  const saveApprovalModify = (approval: ApprovalRequest) => {
+    const dataUsed = approvalModificationDraft.dataUsed
+      .split(/[\n,]/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const consequence = approvalModificationDraft.consequence.trim();
+
+    if (dataUsed.length === 0 || !consequence) {
+      setLastAction("Modified approvals need allowed data and a consequence.");
+      return;
+    }
+
+    requestApprovalDecision(approval, "modify", {
+      mode: approvalModificationDraft.mode,
+      dataUsed,
+      consequence
+    });
+  };
+
+  const confirmApprovalDecision = () => {
+    if (!pendingApprovalConfirmation) {
+      return;
+    }
+
+    void resolveApprovalDecision(
+      pendingApprovalConfirmation.request,
+      pendingApprovalConfirmation.decision,
+      pendingApprovalConfirmation.modification,
+      approvalConfirmationText
+    );
   };
 
   const toggleSourcePin = (sourceId: string) => {
@@ -1247,7 +1591,26 @@ export function App() {
     }
 
     if (activeItem === "praxis-memory") {
-      return <ApprovalPanel approvals={openApprovals} audit={approvalAudit} onDecision={decideApproval} />;
+      return (
+        <ApprovalPanel
+          approvals={openApprovals}
+          audit={approvalAudit}
+          sessionGrants={sessionApprovalGrants}
+          approvalRules={approvalRules}
+          editingApprovalId={editingApprovalId}
+          modificationDraft={approvalModificationDraft}
+          pendingConfirmation={pendingApprovalConfirmation}
+          confirmationText={approvalConfirmationText}
+          onDecision={requestApprovalDecision}
+          onStartModify={startApprovalModify}
+          onUpdateModification={setApprovalModificationDraft}
+          onSaveModify={saveApprovalModify}
+          onCancelModify={clearApprovalInteraction}
+          onUpdateConfirmation={setApprovalConfirmationText}
+          onConfirmDecision={confirmApprovalDecision}
+          onCancelConfirmation={clearApprovalInteraction}
+        />
+      );
     }
 
     return (
@@ -1258,6 +1621,8 @@ export function App() {
       </>
     );
   };
+
+  const liveStatusLead = /[.!?]$/.test(lastAction) ? lastAction : `${lastAction}.`;
 
   return (
     <main className="desktop-frame">
@@ -1608,7 +1973,7 @@ export function App() {
 
           {renderWorkspaceContext()}
           <p className="sr-only" aria-live="polite">
-            {lastAction}. {managedMemoryRecords.length} memory items. {workspaceKnowledgeSources.length} sources. {openApprovals.length} approvals pending.
+            {liveStatusLead} {managedMemoryRecords.length} memory items. {workspaceKnowledgeSources.length} sources. {openApprovals.length} approvals pending.
           </p>
         </div>
       </section>

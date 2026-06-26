@@ -64,6 +64,7 @@ export const pendingApprovals: ApprovalRequest[] = [
     service: "GitHub",
     action: "Create draft PR for feature-memory",
     mode: "trusted-scope",
+    riskLevel: "medium",
     dataUsed: ["branch diff", "screenshots", "test summary"],
     consequence: "Creates a private draft PR that can later be shared or merged.",
     requestedAt: "2026-06-25T21:00:00.000Z",
@@ -74,9 +75,22 @@ export const pendingApprovals: ApprovalRequest[] = [
     service: "Praxis Automations",
     action: "Enable weekly workspace digest",
     mode: "trusted-scope",
+    riskLevel: "medium",
     dataUsed: ["pinned memory", "active projects", "connector health", "open approvals"],
     consequence: "Creates a scheduled summary that can inspect selected workspace context each week.",
     requestedAt: "2026-06-25T21:20:00.000Z",
     decisions: ["once", "session", "rule", "modify", "deny"]
+  },
+  {
+    id: "vercel-production-release",
+    service: "Vercel",
+    action: "Promote Praxis preview to production",
+    mode: "full-access",
+    riskLevel: "high",
+    dataUsed: ["production project", "deployment metadata", "domain routing"],
+    consequence: "Makes the selected deployment public at the production domain.",
+    requestedAt: "2026-06-26T00:30:00.000Z",
+    decisions: ["once", "session", "rule", "modify", "deny"],
+    confirmationPhrase: "publish Praxis"
   }
 ];

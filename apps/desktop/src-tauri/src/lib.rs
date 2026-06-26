@@ -12,6 +12,7 @@ const DEFAULT_RESULT_LIMIT: usize = 5;
 const MAX_SNIPPET_CHARACTERS: usize = 240;
 const MAX_APPROVAL_AUDIT_ENTRIES: usize = 200;
 const MAX_APPROVAL_AUDIT_NOTE_CHARACTERS: usize = 240;
+const MAX_APPROVAL_RULES: usize = 100;
 const MAX_IMPORTED_KNOWLEDGE_SOURCES: usize = 100;
 const MAX_MEMORY_RECORDS: usize = 200;
 const MAX_MEMORY_TITLE_CHARACTERS: usize = 120;
@@ -25,6 +26,8 @@ const MEMORY_KINDS: [&str; 4] = ["fact", "inference", "preference", "imported"];
 const SUPPORTED_LOCAL_FILE_EXTENSIONS: [&str; 7] =
     ["txt", "md", "markdown", "json", "csv", "yaml", "yml"];
 const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", "deny"];
+const APPROVAL_MODES: [&str; 3] = ["read-only", "trusted-scope", "full-access"];
+const APPROVAL_RISK_LEVELS: [&str; 4] = ["low", "medium", "high", "critical"];
 const AUTOMATION_STATUSES: [&str; 3] = ["draft", "active", "paused"];
 
 #[derive(Serialize)]
@@ -114,6 +117,62 @@ struct ApprovalAuditRecordResponse {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ApprovalRequest {
+    id: String,
+    service: String,
+    action: String,
+    mode: String,
+    risk_level: String,
+    data_used: Vec<String>,
+    consequence: String,
+    requested_at: String,
+    decisions: Vec<String>,
+    confirmation_phrase: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalModification {
+    mode: String,
+    data_used: Vec<String>,
+    consequence: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalGrant {
+    id: String,
+    request_id: String,
+    scope: String,
+    service: String,
+    action: String,
+    mode: String,
+    data_used: Vec<String>,
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalResolutionRequest {
+    request: ApprovalRequest,
+    decision: String,
+    decided_at: String,
+    confirmation_text: Option<String>,
+    modification: Option<ApprovalModification>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApprovalResolutionResponse {
+    persisted: bool,
+    audit_entry: ApprovalAuditEntry,
+    effective_request: ApprovalRequest,
+    dismissed: bool,
+    grant: Option<ApprovalGrant>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct MemoryRecord {
     id: String,
     kind: String,
@@ -167,6 +226,7 @@ struct RuntimeSnapshot {
     voice_enabled: bool,
     approval_audit: Vec<ApprovalAuditEntry>,
     dismissed_approval_ids: Vec<String>,
+    approval_rules: Vec<ApprovalGrant>,
     automation_statuses: BTreeMap<String, String>,
     pinned_source_ids: Vec<String>,
     imported_knowledge_sources: Vec<LocalFileImport>,
@@ -206,6 +266,10 @@ fn app_data_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<PathBuf
 
 fn approval_audit_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_data_file_path(app, "approval-audit.json")
+}
+
+fn approval_rules_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "approval-rules.json")
 }
 
 fn imported_knowledge_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -314,6 +378,291 @@ fn persist_approval_audit_entry(
         persisted: true,
         entry,
         audit_len: entries.len(),
+    })
+}
+
+fn normalize_approval_data(values: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized_values = Vec::new();
+
+    for value in values {
+        let normalized = truncate_characters(
+            &normalize_spaces(&value),
+            MAX_APPROVAL_AUDIT_NOTE_CHARACTERS,
+        );
+        if normalized.is_empty() || !seen.insert(normalized.clone()) {
+            continue;
+        }
+        normalized_values.push(normalized);
+    }
+
+    normalized_values
+}
+
+fn normalize_approval_request(request: ApprovalRequest) -> Result<ApprovalRequest, String> {
+    let id = truncate_characters(
+        &normalize_spaces(&request.id),
+        MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    );
+    let service = truncate_characters(
+        &normalize_spaces(&request.service),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let action = truncate_characters(
+        &normalize_spaces(&request.action),
+        MAX_APPROVAL_AUDIT_NOTE_CHARACTERS,
+    );
+    let mode = normalize_spaces(&request.mode).to_ascii_lowercase();
+    let risk_level = normalize_spaces(&request.risk_level).to_ascii_lowercase();
+    let consequence = truncate_characters(
+        &normalize_spaces(&request.consequence),
+        MAX_MEMORY_VALUE_CHARACTERS,
+    );
+    let requested_at = normalize_spaces(&request.requested_at);
+    let decisions = request
+        .decisions
+        .into_iter()
+        .map(|decision| normalize_spaces(&decision).to_ascii_lowercase())
+        .filter(|decision| APPROVAL_DECISIONS.contains(&decision.as_str()))
+        .collect::<Vec<_>>();
+    let confirmation_phrase = request
+        .confirmation_phrase
+        .map(|phrase| truncate_characters(&normalize_spaces(&phrase), 120))
+        .filter(|phrase| !phrase.is_empty());
+
+    if id.is_empty()
+        || service.is_empty()
+        || action.is_empty()
+        || consequence.is_empty()
+        || requested_at.is_empty()
+    {
+        return Err(
+            "Approval requests need identity, service, action, consequence, and time.".to_string(),
+        );
+    }
+    if !APPROVAL_MODES.contains(&mode.as_str()) {
+        return Err("Approval mode is not recognized.".to_string());
+    }
+    if !APPROVAL_RISK_LEVELS.contains(&risk_level.as_str()) {
+        return Err("Approval risk level is not recognized.".to_string());
+    }
+    if decisions.is_empty() {
+        return Err("Approval requests need at least one available decision.".to_string());
+    }
+
+    Ok(ApprovalRequest {
+        id,
+        service,
+        action,
+        mode,
+        risk_level,
+        data_used: normalize_approval_data(request.data_used),
+        consequence,
+        requested_at,
+        decisions,
+        confirmation_phrase,
+    })
+}
+
+fn normalize_approval_grant(grant: ApprovalGrant) -> Result<ApprovalGrant, String> {
+    let id = truncate_characters(
+        &normalize_spaces(&grant.id),
+        MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    );
+    let request_id = truncate_characters(
+        &normalize_spaces(&grant.request_id),
+        MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    );
+    let scope = normalize_spaces(&grant.scope).to_ascii_lowercase();
+    let service = truncate_characters(
+        &normalize_spaces(&grant.service),
+        MAX_MEMORY_TITLE_CHARACTERS,
+    );
+    let action = truncate_characters(
+        &normalize_spaces(&grant.action),
+        MAX_APPROVAL_AUDIT_NOTE_CHARACTERS,
+    );
+    let mode = normalize_spaces(&grant.mode).to_ascii_lowercase();
+    let created_at = normalize_spaces(&grant.created_at);
+
+    if id.is_empty()
+        || request_id.is_empty()
+        || service.is_empty()
+        || action.is_empty()
+        || created_at.is_empty()
+    {
+        return Err("Approval grants need stable request and scope metadata.".to_string());
+    }
+    if scope != "session" && scope != "rule" {
+        return Err("Approval grant scope is not recognized.".to_string());
+    }
+    if !APPROVAL_MODES.contains(&mode.as_str()) {
+        return Err("Approval grant mode is not recognized.".to_string());
+    }
+
+    Ok(ApprovalGrant {
+        id,
+        request_id,
+        scope,
+        service,
+        action,
+        mode,
+        data_used: normalize_approval_data(grant.data_used),
+        created_at,
+    })
+}
+
+fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let contents = fs::read_to_string(path)
+        .map_err(|_| "Praxis could not read approval rules.".to_string())?;
+    if contents.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let parsed = serde_json::from_str::<Vec<ApprovalGrant>>(&contents)
+        .map_err(|_| "Praxis could not parse approval rules.".to_string())?;
+    parsed
+        .into_iter()
+        .map(normalize_approval_grant)
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn write_approval_rules(path: &Path, rules: &[ApprovalGrant]) -> Result<(), String> {
+    let encoded = serde_json::to_string_pretty(rules)
+        .map_err(|_| "Praxis could not encode approval rules.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Praxis could not save approval rules.".to_string())
+}
+
+fn persist_approval_rule(path: &Path, grant: ApprovalGrant) -> Result<ApprovalGrant, String> {
+    let grant = normalize_approval_grant(grant)?;
+    if grant.scope != "rule" {
+        return Err("Only standing rule grants can be persisted.".to_string());
+    }
+
+    let mut rules = read_approval_rules(path)?;
+    rules.retain(|existing| {
+        !(existing.service == grant.service
+            && existing.action == grant.action
+            && existing.mode == grant.mode)
+    });
+    rules.insert(0, grant.clone());
+    rules.truncate(MAX_APPROVAL_RULES);
+    write_approval_rules(path, &rules)?;
+    Ok(grant)
+}
+
+fn resolve_approval(
+    request: ApprovalResolutionRequest,
+) -> Result<ApprovalResolutionResponse, String> {
+    let original = normalize_approval_request(request.request)?;
+    let decision = normalize_spaces(&request.decision).to_ascii_lowercase();
+    let decided_at = normalize_spaces(&request.decided_at);
+
+    if !APPROVAL_DECISIONS.contains(&decision.as_str()) || !original.decisions.contains(&decision) {
+        return Err("Approval decision is not available for this request.".to_string());
+    }
+    if decided_at.is_empty() {
+        return Err("Approval decisions need a decision time.".to_string());
+    }
+
+    let effective_request = if decision == "modify" {
+        let modification = request
+            .modification
+            .ok_or_else(|| "Modified approvals need a narrowed permission scope.".to_string())?;
+        let mode = normalize_spaces(&modification.mode).to_ascii_lowercase();
+        if !APPROVAL_MODES.contains(&mode.as_str()) {
+            return Err("Modified approval mode is not recognized.".to_string());
+        }
+
+        ApprovalRequest {
+            mode,
+            data_used: normalize_approval_data(modification.data_used),
+            consequence: truncate_characters(
+                &normalize_spaces(&modification.consequence),
+                MAX_MEMORY_VALUE_CHARACTERS,
+            ),
+            ..original.clone()
+        }
+    } else {
+        original.clone()
+    };
+
+    if effective_request.consequence.is_empty() {
+        return Err("Modified approvals need a consequence explanation.".to_string());
+    }
+
+    let approving = matches!(decision.as_str(), "once" | "session" | "rule" | "modify");
+    let high_risk = matches!(effective_request.risk_level.as_str(), "high" | "critical")
+        || effective_request.mode == "full-access";
+    if approving && high_risk {
+        let expected = effective_request
+            .confirmation_phrase
+            .as_deref()
+            .ok_or_else(|| "High-risk approvals need a confirmation phrase.".to_string())?;
+        let provided = request
+            .confirmation_text
+            .as_deref()
+            .map(normalize_spaces)
+            .unwrap_or_default();
+        if provided != expected {
+            return Err("Confirmation phrase did not match.".to_string());
+        }
+    }
+
+    let grant = match decision.as_str() {
+        "session" | "rule" => Some(normalize_approval_grant(ApprovalGrant {
+            id: format!(
+                "approval-{}-{}",
+                decision,
+                file_slug(&format!(
+                    "{}-{}",
+                    effective_request.service, effective_request.action
+                ))
+            ),
+            request_id: effective_request.id.clone(),
+            scope: decision.clone(),
+            service: effective_request.service.clone(),
+            action: effective_request.action.clone(),
+            mode: effective_request.mode.clone(),
+            data_used: effective_request.data_used.clone(),
+            created_at: decided_at.clone(),
+        })?),
+        _ => None,
+    };
+    let note = if decision == "modify" {
+        format!(
+            "{} {} modified to {} using {}",
+            effective_request.service,
+            effective_request.action,
+            effective_request.mode,
+            effective_request.data_used.join(", ")
+        )
+    } else {
+        format!("{} {}", effective_request.service, effective_request.action)
+    };
+    let audit_entry = normalize_approval_audit_entry(ApprovalAuditEntry {
+        id: format!(
+            "{}-{}-{}",
+            effective_request.id,
+            decision,
+            file_slug(&decided_at)
+        ),
+        request_id: effective_request.id.clone(),
+        decision,
+        decided_at,
+        note,
+    })?;
+
+    Ok(ApprovalResolutionResponse {
+        persisted: false,
+        audit_entry,
+        effective_request,
+        dismissed: true,
+        grant,
     })
 }
 
@@ -747,6 +1096,24 @@ fn normalize_runtime_snapshot(snapshot: RuntimeSnapshot) -> Result<RuntimeSnapsh
         }
     }
 
+    let mut approval_rules = Vec::new();
+    for grant in snapshot.approval_rules {
+        let normalized = normalize_approval_grant(grant)?;
+        if normalized.scope != "rule" {
+            continue;
+        }
+        if !approval_rules.iter().any(|existing: &ApprovalGrant| {
+            existing.service == normalized.service
+                && existing.action == normalized.action
+                && existing.mode == normalized.mode
+        }) {
+            approval_rules.push(normalized);
+        }
+        if approval_rules.len() >= MAX_APPROVAL_RULES {
+            break;
+        }
+    }
+
     let mut imported_knowledge_sources = Vec::new();
     for source in snapshot.imported_knowledge_sources {
         let normalized = normalize_imported_knowledge_source(source)?;
@@ -774,6 +1141,7 @@ fn normalize_runtime_snapshot(snapshot: RuntimeSnapshot) -> Result<RuntimeSnapsh
         voice_enabled: snapshot.voice_enabled,
         approval_audit,
         dismissed_approval_ids: normalize_snapshot_id_list(snapshot.dismissed_approval_ids),
+        approval_rules,
         automation_statuses: normalize_runtime_automation_statuses(snapshot.automation_statuses)?,
         pinned_source_ids: normalize_snapshot_id_list(snapshot.pinned_source_ids),
         imported_knowledge_sources,
@@ -821,12 +1189,43 @@ fn list_approval_audit(app: tauri::AppHandle) -> Result<Vec<ApprovalAuditEntry>,
 }
 
 #[tauri::command]
+fn list_approval_rules(app: tauri::AppHandle) -> Result<Vec<ApprovalGrant>, String> {
+    let path = approval_rules_path(&app)?;
+    read_approval_rules(&path)
+}
+
+#[tauri::command]
 fn record_approval_decision(
     app: tauri::AppHandle,
     entry: ApprovalAuditEntry,
 ) -> Result<ApprovalAuditRecordResponse, String> {
     let path = approval_audit_path(&app)?;
     persist_approval_audit_entry(&path, entry)
+}
+
+#[tauri::command]
+fn resolve_approval_request(
+    app: tauri::AppHandle,
+    request: ApprovalResolutionRequest,
+) -> Result<ApprovalResolutionResponse, String> {
+    let response = resolve_approval(request)?;
+    let audit_path = approval_audit_path(&app)?;
+    let audit = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
+    let grant = match response.grant {
+        Some(grant) if grant.scope == "rule" => {
+            let path = approval_rules_path(&app)?;
+            Some(persist_approval_rule(&path, grant)?)
+        }
+        grant => grant,
+    };
+
+    Ok(ApprovalResolutionResponse {
+        persisted: true,
+        audit_entry: audit.entry,
+        effective_request: response.effective_request,
+        dismissed: response.dismissed,
+        grant,
+    })
 }
 
 #[tauri::command]
@@ -1157,7 +1556,9 @@ pub fn run() {
             import_local_text_file,
             search_knowledge_sources,
             list_approval_audit,
+            list_approval_rules,
             record_approval_decision,
+            resolve_approval_request,
             list_imported_knowledge_sources,
             import_local_knowledge_source,
             list_memory_state,
@@ -1259,6 +1660,156 @@ mod tests {
 
     fn temp_audit_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("praxis-{name}-{}.json", std::process::id()))
+    }
+
+    fn approval_request(
+        mode: &str,
+        risk_level: &str,
+        confirmation_phrase: Option<&str>,
+    ) -> ApprovalRequest {
+        ApprovalRequest {
+            id: "github-draft-pr".to_string(),
+            service: "GitHub".to_string(),
+            action: "Create draft PR for feature-memory".to_string(),
+            mode: mode.to_string(),
+            risk_level: risk_level.to_string(),
+            data_used: vec!["branch diff".to_string(), "test summary".to_string()],
+            consequence: "Creates a private draft PR.".to_string(),
+            requested_at: "2026-06-26T10:00:00.000Z".to_string(),
+            decisions: APPROVAL_DECISIONS
+                .iter()
+                .map(|decision| decision.to_string())
+                .collect(),
+            confirmation_phrase: confirmation_phrase.map(str::to_string),
+        }
+    }
+
+    fn approval_resolution(
+        request: ApprovalRequest,
+        decision: &str,
+        confirmation_text: Option<&str>,
+        modification: Option<ApprovalModification>,
+    ) -> ApprovalResolutionRequest {
+        ApprovalResolutionRequest {
+            request,
+            decision: decision.to_string(),
+            decided_at: "2026-06-26T10:30:00.000Z".to_string(),
+            confirmation_text: confirmation_text.map(str::to_string),
+            modification,
+        }
+    }
+
+    fn approval_rule() -> ApprovalGrant {
+        ApprovalGrant {
+            id: "approval-rule-github-create-draft-pr".to_string(),
+            request_id: "github-draft-pr".to_string(),
+            scope: "rule".to_string(),
+            service: "GitHub".to_string(),
+            action: "Create draft PR for feature-memory".to_string(),
+            mode: "trusted-scope".to_string(),
+            data_used: vec!["branch diff".to_string()],
+            created_at: "2026-06-26T10:30:00.000Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn creates_ephemeral_session_approval_grants() {
+        let response = resolve_approval(approval_resolution(
+            approval_request("trusted-scope", "medium", None),
+            "session",
+            None,
+            None,
+        ))
+        .expect("session approval should resolve");
+        let grant = response
+            .grant
+            .expect("session approval should create a grant");
+
+        assert!(!response.persisted);
+        assert!(response.dismissed);
+        assert_eq!(grant.scope, "session");
+        assert_eq!(grant.mode, "trusted-scope");
+        assert_eq!(response.audit_entry.decision, "session");
+    }
+
+    #[test]
+    fn persists_standing_approval_rules() {
+        let path = temp_audit_path("approval-rules-persist");
+        let _ = fs::remove_file(&path);
+        let response = resolve_approval(approval_resolution(
+            approval_request("trusted-scope", "medium", None),
+            "rule",
+            None,
+            None,
+        ))
+        .expect("rule approval should resolve");
+        let grant = response.grant.expect("rule approval should create a grant");
+
+        persist_approval_rule(&path, grant).expect("rule should persist");
+        let rules = read_approval_rules(&path).expect("rules should read");
+
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].scope, "rule");
+        assert_eq!(rules[0].service, "GitHub");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn applies_modified_approval_scope_before_auditing() {
+        let response = resolve_approval(approval_resolution(
+            approval_request("trusted-scope", "medium", None),
+            "modify",
+            None,
+            Some(ApprovalModification {
+                mode: "read-only".to_string(),
+                data_used: vec!["branch diff".to_string()],
+                consequence: "Reviews the branch without publishing.".to_string(),
+            }),
+        ))
+        .expect("modified approval should resolve");
+
+        assert_eq!(response.effective_request.mode, "read-only");
+        assert_eq!(response.effective_request.data_used, vec!["branch diff"]);
+        assert!(response.audit_entry.note.contains("modified to read-only"));
+        assert!(response.grant.is_none());
+    }
+
+    #[test]
+    fn requires_exact_confirmation_for_high_risk_approvals() {
+        let wrong = resolve_approval(approval_resolution(
+            approval_request("full-access", "high", Some("publish Praxis")),
+            "once",
+            Some("publish preview"),
+            None,
+        ))
+        .expect_err("wrong confirmation should fail closed");
+
+        assert!(wrong.contains("did not match"));
+
+        let response = resolve_approval(approval_resolution(
+            approval_request("full-access", "high", Some("publish Praxis")),
+            "once",
+            Some("publish Praxis"),
+            None,
+        ))
+        .expect("exact confirmation should resolve");
+
+        assert_eq!(response.audit_entry.decision, "once");
+    }
+
+    #[test]
+    fn denial_never_requires_high_risk_confirmation() {
+        let response = resolve_approval(approval_resolution(
+            approval_request("full-access", "critical", None),
+            "deny",
+            None,
+            None,
+        ))
+        .expect("denial should always remain available");
+
+        assert_eq!(response.audit_entry.decision, "deny");
+        assert!(response.grant.is_none());
     }
 
     #[test]
@@ -1556,6 +2107,7 @@ mod tests {
                 "github-draft-pr".to_string(),
                 "github-draft-pr".to_string(),
             ],
+            approval_rules: vec![approval_rule()],
             automation_statuses,
             pinned_source_ids: vec![
                 "codex-manual".to_string(),
@@ -1589,6 +2141,8 @@ mod tests {
         assert!(read.voice_enabled);
         assert_eq!(read.approval_audit.len(), 1);
         assert_eq!(read.dismissed_approval_ids, vec!["github-draft-pr"]);
+        assert_eq!(read.approval_rules.len(), 1);
+        assert_eq!(read.approval_rules[0].scope, "rule");
         assert_eq!(
             read.automation_statuses.get("weekly-digest"),
             Some(&"active".to_string())

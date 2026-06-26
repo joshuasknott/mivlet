@@ -1,16 +1,53 @@
 export type PermissionMode = "read-only" | "trusted-scope" | "full-access";
 
 export type ApprovalDecision = "once" | "session" | "rule" | "modify" | "deny";
+export type ApprovalRiskLevel = "low" | "medium" | "high" | "critical";
+export type ApprovalGrantScope = "session" | "rule";
 
 export interface ApprovalRequest {
   id: string;
   service: string;
   action: string;
   mode: PermissionMode;
+  riskLevel: ApprovalRiskLevel;
   dataUsed: string[];
   consequence: string;
   requestedAt: string;
   decisions: ApprovalDecision[];
+  confirmationPhrase?: string;
+}
+
+export interface ApprovalModification {
+  mode: PermissionMode;
+  dataUsed: string[];
+  consequence: string;
+}
+
+export interface ApprovalGrant {
+  id: string;
+  requestId: string;
+  scope: ApprovalGrantScope;
+  service: string;
+  action: string;
+  mode: PermissionMode;
+  dataUsed: string[];
+  createdAt: string;
+}
+
+export interface ApprovalResolutionRequest {
+  request: ApprovalRequest;
+  decision: ApprovalDecision;
+  decidedAt: string;
+  confirmationText?: string;
+  modification?: ApprovalModification;
+}
+
+export interface ApprovalResolutionResponse {
+  persisted: boolean;
+  auditEntry: ApprovalAuditEntry;
+  effectiveRequest: ApprovalRequest;
+  dismissed: boolean;
+  grant?: ApprovalGrant;
 }
 
 export type MemoryKind = "fact" | "inference" | "preference" | "imported";
@@ -153,6 +190,7 @@ export interface RuntimeSnapshot {
   voiceEnabled: boolean;
   approvalAudit: ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
+  approvalRules: ApprovalGrant[];
   automationStatuses: Record<string, AutomationStatus>;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];

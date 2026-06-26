@@ -10,7 +10,7 @@
 
 ## Milestone 2: Approvals, Memory, And Recovery
 
-- In progress: approval history with once, session, rule, modify, and deny remains visible while rule/session semantics are expanded.
+- Done: approval history, once/session/rule grants, modify flows, deny handling, and high-risk confirmation are backed by Rust runtime resolution.
 - Done: imported local knowledge appears in source inspection, pinned context, and composer directives.
 - Done: composer search returns cited workspace sources with provenance, freshness, trust, and snippets.
 - Done: memory can be edited, pinned, forgotten, disabled, and exported through Rust-backed state controls.
