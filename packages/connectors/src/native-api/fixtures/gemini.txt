@@ -1,0 +1,3 @@
+{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":0}}
+{"candidates":[{"content":{"role":"model","parts":[{"text":", world"}]}}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":4}}
+{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"read-file","args":{"path":"README.md"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":12,"candidatesTokenCount":8}}
