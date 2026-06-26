@@ -1,0 +1,369 @@
+/*
+ * Responsive / mobile layouts. Extracted verbatim from styles.css — both the
+ * narrow (<=980px) and phone (<=700px) breakpoints, in the same cascade
+ * order as the original file.
+ */
+
+@media (max-width: 980px) {
+  body {
+    overflow: auto;
+  }
+
+  .desktop-frame {
+    grid-template-columns: 76px minmax(0, 1fr);
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    align-items: center;
+    padding-inline: 8px;
+  }
+
+  .brand-lockup {
+    margin-inline: 0;
+  }
+
+  .brand-name,
+  .new-chat-button span,
+  .new-chat-button svg:last-child,
+  .sidebar-action-card span,
+  .sidebar-action-card kbd,
+  .sidebar-body,
+  .utility-row span,
+  .account-row strong,
+  .account-row svg {
+    display: none;
+  }
+
+  .new-chat-button {
+    width: 40px;
+    grid-template-columns: 1fr;
+    place-items: center;
+    padding: 0;
+  }
+
+  .sidebar-action-stack {
+    width: 40px;
+    justify-items: center;
+  }
+
+  .sidebar-action-card,
+  .sidebar-action-card--search,
+  .utility-row {
+    width: 40px;
+    grid-template-columns: 1fr;
+    place-items: center;
+    padding: 0;
+  }
+
+  .utility-folder {
+    width: 40px;
+  }
+
+  .utility-folder-heading {
+    display: none;
+  }
+
+  .utility-nav {
+    border-top: 0;
+    justify-items: center;
+    padding-top: 4px;
+  }
+
+  .account-row {
+    width: 40px;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .workspace-center {
+    width: min(100% - 32px, 820px);
+    margin-top: 42px;
+  }
+
+  .context-panel--split,
+  .connector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    padding: 0 24px;
+  }
+}
+
+@media (max-width: 700px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .desktop-frame {
+    display: block;
+    width: 100%;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: grid;
+    grid-template-columns: 1fr 38px 38px;
+    align-items: center;
+    min-height: 58px;
+    padding: 9px 12px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .traffic-lights,
+  .new-chat-button,
+  .sidebar-action-stack,
+  .sidebar-body,
+  .utility-nav {
+    display: none;
+  }
+
+  .brand-lockup {
+    margin: 0;
+  }
+
+  .brand-name {
+    display: inline;
+    font-size: 22px;
+  }
+
+  .mobile-nav-toggle {
+    display: grid;
+    width: 36px;
+    height: 36px;
+    place-items: center;
+    padding: 0;
+    color: #d5d7d2;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+  }
+
+  .mobile-nav-toggle:hover,
+  .mobile-nav-toggle[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .sidebar-footer {
+    padding: 0;
+    border: 0;
+    margin: 0;
+  }
+
+  .account-row {
+    width: 36px;
+    height: 36px;
+    grid-template-columns: 1fr;
+    padding: 0;
+  }
+
+  .account-row strong,
+  .account-row svg {
+    display: none;
+  }
+
+  .avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .account-popover {
+    position: absolute;
+    top: 46px;
+    right: 12px;
+    bottom: auto;
+    left: auto;
+    width: 180px;
+    margin: 0;
+    background: #242626;
+    box-shadow: 0 18px 32px rgb(0 0 0 / 28%);
+  }
+
+  .mobile-drawer {
+    position: absolute;
+    top: 57px;
+    right: 0;
+    left: 0;
+    z-index: 30;
+    display: grid;
+    max-height: calc(100vh - 57px);
+    gap: 14px;
+    padding: 12px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    color: #eef0ec;
+    background: #181a1b;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 18px 32px rgb(0 0 0 / 28%);
+  }
+
+  .mobile-new-chat {
+    display: grid;
+    grid-template-columns: 18px 1fr 14px;
+    align-items: center;
+    min-height: 38px;
+    gap: 8px;
+    padding: 7px 9px;
+    color: #e3e4df;
+    background: #242626;
+    border: 1px solid #343636;
+    border-radius: 7px;
+    text-align: left;
+  }
+
+  .mobile-drawer-section {
+    display: grid;
+    gap: 3px;
+  }
+
+  .mobile-drawer-section > strong {
+    padding: 4px 8px;
+    color: rgba(245, 241, 231, 0.5);
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .mobile-project {
+    display: grid;
+    gap: 1px;
+  }
+
+  .mobile-project > span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 29px;
+    padding: 5px 8px;
+    color: rgba(245, 241, 231, 0.68);
+    font-size: 12.5px;
+  }
+
+  .mobile-drawer .thread-row {
+    padding-left: 31px;
+  }
+
+  .mobile-drawer .thread-row--nested {
+    margin-left: 18px;
+    padding-left: 10px;
+  }
+
+  .mobile-utilities {
+    display: grid;
+    gap: 2px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .mobile-utilities button {
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    gap: 8px;
+    padding: 6px 8px;
+    color: rgba(245, 241, 231, 0.68);
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    text-align: left;
+  }
+
+  .mobile-utilities button:hover {
+    color: #e5e6e1;
+    background: rgba(255, 255, 255, 0.045);
+  }
+
+  .workspace {
+    width: 100%;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 36px 36px;
+    align-items: center;
+    height: 72px;
+    gap: 10px;
+    padding: 0 14px;
+  }
+
+  .search-control {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .notification-button,
+  .mini-avatar {
+    justify-self: center;
+  }
+
+  .workspace-center {
+    width: min(100% - 28px, 820px);
+    margin-top: 38px;
+  }
+
+  .hero h1 {
+    font-size: 42px;
+  }
+
+  .composer {
+    min-height: 220px;
+  }
+
+  .composer-actions,
+  .composer-left-actions {
+    align-items: stretch;
+  }
+
+  .composer-actions {
+    flex-direction: column;
+  }
+
+  .send-button {
+    width: 100%;
+  }
+
+  .directive-card {
+    grid-template-columns: 1fr;
+  }
+
+  .thread-context {
+    grid-template-columns: 1fr;
+  }
+
+  .thread-context p {
+    grid-column: auto;
+    white-space: normal;
+  }
+
+  .approval-details,
+  .automation-row,
+  .source-row {
+    grid-template-columns: 1fr;
+  }
+
+  .automation-status {
+    justify-self: start;
+  }
+
+  .source-actions {
+    justify-content: flex-start;
+  }
+
+  .memory-toolbar {
+    justify-content: flex-start;
+  }
+
+  .source-actions button,
+  .memory-actions button,
+  .memory-toolbar button {
+    min-height: 34px;
+  }
+}

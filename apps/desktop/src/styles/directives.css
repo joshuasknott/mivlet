@@ -1,0 +1,162 @@
+/*
+ * Composer-adjacent cards: citation results, directive prompt starters, and
+ * the active thread context strip. Extracted verbatim from styles.css.
+ */
+
+.citation-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 24px;
+}
+
+.citation-results__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.citation-results__top strong {
+  color: #252b2d;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.citation-results__top span {
+  color: #767c80;
+  font-size: 12px;
+}
+
+.citation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.citation-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(25, 27, 28, 0.11);
+  border-radius: var(--radius);
+}
+
+.citation-card strong {
+  color: #17202a;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.citation-card small {
+  display: block;
+  margin-top: 4px;
+  color: #747a7f;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.citation-card p {
+  margin: 0;
+  color: #51585c;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.directives {
+  display: grid;
+  gap: 8px;
+  margin-top: 39px;
+}
+
+.citation-results + .directives {
+  margin-top: 18px;
+}
+
+.directive-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: center;
+  width: 100%;
+  min-height: 64px;
+  gap: 6px;
+  padding: 13px 18px;
+  color: #17202a;
+  background: rgba(255, 255, 255, 0.24);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
+}
+
+.directive-card:hover {
+  background: rgba(255, 255, 255, 0.5);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+.directive-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.directive-copy strong {
+  color: #17202a;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.directive-copy small {
+  color: #656b70;
+  font-size: 14px;
+}
+
+.thread-context {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+  margin-top: 18px;
+  padding: 14px 16px;
+  color: #495052;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(25, 27, 28, 0.1);
+  border-radius: var(--radius);
+}
+
+.thread-context span,
+.label-row,
+.section-heading span,
+.automation-status {
+  color: #70767a;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.thread-context strong {
+  overflow: hidden;
+  color: #1d2224;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-context p {
+  grid-column: 2 / 3;
+  margin: -2px 0 0;
+  overflow: hidden;
+  color: #697075;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-context small {
+  color: #8a8f94;
+  font-size: 12px;
+}

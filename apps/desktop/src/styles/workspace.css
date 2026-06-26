@@ -1,0 +1,125 @@
+/*
+ * Workspace canvas, topbar, hero, and search control. Extracted verbatim
+ * from styles.css.
+ */
+
+.workspace {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 82% 6%, rgba(133, 142, 135, 0.08), transparent 26%),
+    linear-gradient(180deg, var(--canvas-warm) 0%, var(--canvas) 100%);
+}
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 18px;
+  height: 88px;
+  padding: 0 62px;
+  background: linear-gradient(180deg, rgba(251, 247, 239, 0.96), rgba(251, 247, 239, 0.74));
+  backdrop-filter: blur(16px);
+}
+
+.search-control {
+  display: flex;
+  align-items: center;
+  min-width: 236px;
+  height: 44px;
+  gap: 10px;
+  padding: 0 13px;
+  color: #4c5054;
+  background: rgba(255, 255, 255, 0.42);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.search-control span {
+  margin-right: auto;
+  font-size: 15px;
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  color: #71767a;
+  background: rgba(20, 22, 23, 0.055);
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.notification-button,
+.mini-avatar {
+  width: 44px;
+  height: 44px;
+  color: #1d2022;
+  background: transparent;
+  border: 0;
+}
+
+.notification-button {
+  position: relative;
+}
+
+.notification-button span {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  background: #6e936e;
+  border: 2px solid var(--canvas-warm);
+  border-radius: 50%;
+}
+
+.mini-avatar {
+  background: rgba(20, 22, 23, 0.1);
+  font-weight: 600;
+}
+
+.workspace-center {
+  width: min(100% - 80px, 920px);
+  margin: 72px auto 48px;
+}
+
+.hero {
+  margin-bottom: 28px;
+}
+
+.greeting {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  color: var(--ink-muted);
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.greeting svg {
+  color: #6f866f;
+}
+
+.hero h1 {
+  max-width: 940px;
+  margin: 24px 0 15px;
+  color: #1c1f20;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: clamp(48px, 4.45vw, 62px);
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.02;
+}
+
+.hero p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 21px;
+  line-height: 1.4;
+}

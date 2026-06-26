@@ -1,0 +1,508 @@
+/*
+ * Context panels: section headings and the approvals, knowledge/memory,
+ * plugins, and automations panels. Includes the shared card/row base styles
+ * and the status dot tones. Extracted verbatim from styles.css.
+ */
+
+.context-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 38px;
+  padding-bottom: 48px;
+}
+
+.context-panel--split {
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 22px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 4px;
+}
+
+.section-heading h2 {
+  margin: 0;
+  color: #1c2022;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 30px;
+  font-weight: 560;
+  line-height: 1.05;
+}
+
+.approval-list,
+.source-list,
+.memory-list,
+.automation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.approval-card,
+.memory-row,
+.connector-card,
+.automation-row,
+.source-row,
+.empty-state,
+.audit-strip {
+  background: rgba(255, 255, 255, 0.24);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.approval-card {
+  display: grid;
+  gap: 14px;
+  padding: 17px;
+}
+
+.approval-card h3,
+.memory-row strong,
+.connector-card strong,
+.automation-row strong,
+.source-row strong {
+  margin: 0;
+  color: #17202a;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.approval-card p,
+.memory-row p {
+  margin: 6px 0 0;
+  color: #61686c;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.approval-details {
+  display: grid;
+  grid-template-columns: 0.35fr 1fr;
+  gap: 10px 16px;
+  margin: 0;
+  padding: 12px 0;
+  border-block: 1px solid rgba(25, 27, 28, 0.08);
+}
+
+.approval-details div {
+  display: contents;
+}
+
+.approval-details dt,
+.approval-details dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.approval-details dt {
+  color: #7b8185;
+}
+
+.approval-details dd {
+  color: #363d40;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.approval-actions button,
+.connector-card button,
+.automation-row button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #28312c;
+  background: rgba(139, 148, 141, 0.14);
+  border: 1px solid rgba(57, 69, 61, 0.16);
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.approval-actions button:hover,
+.connector-card button:hover,
+.automation-row button:hover {
+  background: rgba(139, 148, 141, 0.23);
+}
+
+.approval-edit,
+.approval-confirmation {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.approval-edit > span,
+.approval-edit label > span {
+  color: #70767a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.approval-edit label {
+  display: grid;
+  gap: 6px;
+}
+
+.permission-segments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permission-segments button {
+  min-height: 30px;
+  padding: 0 9px;
+  color: #60686b;
+  background: transparent;
+  border: 1px solid rgba(25, 27, 28, 0.12);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.permission-segments button[aria-pressed="true"] {
+  color: #26302b;
+  background: rgba(139, 148, 141, 0.18);
+  border-color: rgba(57, 69, 61, 0.28);
+}
+
+.approval-edit textarea,
+.approval-confirmation input {
+  width: 100%;
+  color: #222629;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(25, 27, 28, 0.12);
+  border-radius: 7px;
+  outline: 0;
+}
+
+.approval-edit textarea {
+  min-height: 72px;
+  resize: vertical;
+  padding: 9px 10px;
+  line-height: 1.4;
+}
+
+.approval-confirmation {
+  padding: 12px;
+  background: rgba(189, 138, 36, 0.08);
+  border-block: 1px solid rgba(189, 138, 36, 0.2);
+}
+
+.approval-confirmation strong {
+  color: #37352f;
+  font-size: 13px;
+}
+
+.approval-confirmation p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.approval-confirmation code {
+  color: #403b2f;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.approval-confirmation input {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.approval-edit textarea:focus,
+.approval-confirmation input:focus {
+  border-color: rgba(57, 69, 61, 0.42);
+  box-shadow: 0 0 0 3px rgba(139, 148, 141, 0.1);
+}
+
+.approval-grants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 0 2px;
+}
+
+.approval-grants span {
+  padding: 6px 9px;
+  color: #46514b;
+  background: rgba(104, 125, 112, 0.1);
+  border: 1px solid rgba(57, 69, 61, 0.1);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 0 16px;
+  color: #5c6468;
+}
+
+.audit-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+}
+
+.audit-strip span {
+  padding: 6px 9px;
+  color: #4f575a;
+  background: rgba(20, 22, 23, 0.04);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 66px;
+  padding: 11px 13px;
+  color: #495052;
+  text-align: left;
+}
+
+.source-row--pinned {
+  border-color: rgba(57, 69, 61, 0.28);
+}
+
+.source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.source-actions button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 5px;
+  padding: 0 9px;
+  color: #4c5655;
+  background: rgba(20, 22, 23, 0.045);
+  border: 1px solid rgba(25, 27, 28, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.source-actions button:hover:not(:disabled) {
+  color: #26302b;
+  background: rgba(139, 148, 141, 0.16);
+}
+
+.source-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.source-row small,
+.connector-card small,
+.automation-row small,
+.memory-row small {
+  display: block;
+  margin-top: 4px;
+  color: #70767a;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.source-actions button:first-child {
+  color: #6d7477;
+}
+
+.memory-row {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+}
+
+.memory-heading {
+  display: grid;
+  gap: 10px;
+}
+
+.memory-toolbar,
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.memory-toolbar {
+  justify-content: flex-end;
+}
+
+.memory-toolbar button,
+.memory-actions button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  gap: 6px;
+  padding: 0 9px;
+  color: #4c5655;
+  background: rgba(20, 22, 23, 0.045);
+  border: 1px solid rgba(25, 27, 28, 0.08);
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.memory-toolbar button:hover,
+.memory-actions button:hover {
+  color: #26302b;
+  background: rgba(139, 148, 141, 0.16);
+}
+
+.memory-banner,
+.memory-status {
+  margin: 0;
+  color: #59625f;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.memory-banner {
+  padding: 10px 12px;
+  background: rgba(189, 138, 36, 0.09);
+  border: 1px solid rgba(189, 138, 36, 0.22);
+  border-radius: var(--radius);
+}
+
+.memory-edit {
+  display: grid;
+  gap: 10px;
+}
+
+.memory-edit label {
+  display: grid;
+  gap: 6px;
+}
+
+.memory-edit label span {
+  color: #70767a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.memory-edit input,
+.memory-edit textarea,
+.memory-export {
+  width: 100%;
+  color: #222629;
+  background: rgba(255, 255, 255, 0.34);
+  border: 1px solid rgba(25, 27, 28, 0.12);
+  border-radius: 7px;
+  outline: 0;
+}
+
+.memory-edit input {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.memory-edit textarea {
+  min-height: 88px;
+  resize: vertical;
+  padding: 10px;
+  line-height: 1.45;
+}
+
+.memory-export {
+  min-height: 150px;
+  resize: vertical;
+  padding: 10px;
+  color: #40484b;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.connector-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.connector-card {
+  display: grid;
+  gap: 14px;
+  padding: 15px;
+}
+
+.connector-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.permission-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permission-list span {
+  padding: 5px 7px;
+  color: #5f676b;
+  background: rgba(20, 22, 23, 0.045);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  margin-top: 5px;
+  border-radius: 50%;
+}
+
+.status-dot--ready {
+  background: #587c5a;
+}
+
+.status-dot--needs-auth,
+.status-dot--draft {
+  background: #bd8a24;
+}
+
+.status-dot--paused {
+  background: #8c9297;
+}
+
+.automation-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 13px;
+  min-height: 68px;
+  padding: 12px 14px;
+}
+
+.automation-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
