@@ -150,7 +150,14 @@ fn connector_target_summary(action: &ConnectorActionRequest, account_id: &str) -
             "threadTimestamp",
             "targetId",
         ],
-        "notion" => &["workspace", "targetId", "destination", "title", "subject", "body"],
+        "notion" => &[
+            "workspace",
+            "targetId",
+            "destination",
+            "title",
+            "subject",
+            "body",
+        ],
         _ => &[
             "target",
             "to",

@@ -28,7 +28,7 @@ describe("GitHub production adapter", () => {
   });
 
   it("maps permissions, expired access, rate limits, network errors, and malformed bodies", async () => {
-    for (const [status, code] of [[401, "needs-auth"], [403, "permission-denied"], [429, "rate-limited"]] as const) {
+    for (const [status, code] of [[401, "expired-auth"], [403, "permission-denied"], [429, "rate-limited"]] as const) {
       const adapter = createGitHubAdapter({ ...common, fetch: vi.fn(async () => response({ message: "secret provider detail" }, status)) });
       await expect(adapter.read({ capability: "identity.read", input: {} }, tokens)).rejects.toMatchObject({ code });
     }
@@ -51,7 +51,7 @@ describe("GitHub production adapter", () => {
 
 describe("Vercel production adapter", () => {
   it("never returns environment variable values", async () => {
-    const fetcher = vi.fn(async () => response({ envs: [{ id: "env_1", key: "DATABASE_URL", value: "postgres://secret", target: ["production"] }] }));
+    const fetcher = vi.fn(async (_url: string) => response({ envs: [{ id: "env_1", key: "DATABASE_URL", value: "postgres://secret", target: ["production"] }] }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
     const result = await adapter.read({ capability: "environment-metadata.read", input: { project: "fable", teamId: "team_1" } }, tokens);
     expect(fetcher.mock.calls[0][0]).toContain("/v9/projects/fable/env");
@@ -99,7 +99,7 @@ describe("developer connector capability and approval registration", () => {
     const fetcher = vi.fn(async () => response({ id: 1 }));
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
     const boundary: ConnectorApprovalBoundary = {
-      approve: vi.fn(async (record: ConnectorApprovalRecord) => ({ ...record, result: "denied", decidedAt: new Date().toISOString() })),
+      approve: vi.fn(async (record: ConnectorApprovalRecord) => ({ ...record, result: "denied" as const, decidedAt: new Date().toISOString() })),
       complete: vi.fn(async () => undefined)
     };
     const runtime = new ConnectorRuntime({ approvals: boundary }); runtime.register(adapter);

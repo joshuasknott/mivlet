@@ -975,13 +975,14 @@ pub async fn import_connector_item(
     if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
         return crate::google::import(&app, request).await;
     }
-    if !matches!(entry.id, "github" | "vercel" | "linear" | "notion" | "slack") {
+    if !matches!(
+        entry.id,
+        "github" | "vercel" | "linear" | "notion" | "slack"
+    ) {
         return Err(configuration_required(entry.id));
     }
     let kind = match request.item.kind.as_str() {
-        "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => {
-            "folder"
-        }
+        "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => "folder",
         "deployment" => "web",
         _ => "document",
     };

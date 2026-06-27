@@ -17,6 +17,10 @@ use crate::{
 
 const MAX_RETRIES: usize = 2;
 
+type QueryParams = Vec<(String, String)>;
+type ReadRequestSpec = (Method, String, QueryParams, Option<Value>);
+type WriteRequestSpec = (Method, String, QueryParams, Value);
+
 struct ApiResponse {
     value: Value,
     next_cursor: Option<String>,
@@ -296,7 +300,7 @@ fn normalize_search(
         "github" => response
             .value
             .get("items")
-            .or_else(|| Some(&response.value))
+            .or(Some(&response.value))
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default(),
@@ -443,7 +447,7 @@ pub(crate) async fn read_capability(
 
 fn map_read(
     request: &ConnectorCapabilityRequest,
-) -> Result<(Method, String, Vec<(String, String)>, Option<Value>), ConnectorCommandError> {
+) -> Result<ReadRequestSpec, ConnectorCommandError> {
     let id = request.connector_id.as_str();
     let cap = request.capability.as_str();
     let input = &request.input;
@@ -573,7 +577,7 @@ fn linear_read(
     capability: &str,
     input: &BTreeMap<String, Value>,
     cursor: Option<&str>,
-) -> Result<(Method, String, Vec<(String, String)>, Option<Value>), ConnectorCommandError> {
+) -> Result<ReadRequestSpec, ConnectorCommandError> {
     let first = input
         .get("limit")
         .and_then(Value::as_u64)
@@ -699,9 +703,7 @@ pub(crate) async fn execute_action(
         }))
 }
 
-fn map_write(
-    action: &ConnectorActionRequest,
-) -> Result<(Method, String, Vec<(String, String)>, Value), ConnectorCommandError> {
+fn map_write(action: &ConnectorActionRequest) -> Result<WriteRequestSpec, ConnectorCommandError> {
     let p = &action.payload;
     let id = action.connector_id.as_str();
     let json_payload = || {
@@ -739,7 +741,7 @@ fn linear_mutation(
     _root: &str,
     query: &str,
     variables: Value,
-) -> Result<(Method, String, Vec<(String, String)>, Value), ConnectorCommandError> {
+) -> Result<WriteRequestSpec, ConnectorCommandError> {
     Ok((
         Method::POST,
         "https://api.linear.app/graphql".into(),

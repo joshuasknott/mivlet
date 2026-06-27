@@ -13,7 +13,7 @@ import type {
 } from "../sdk";
 
 export type JsonObject = Record<string, unknown>;
-export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+export type ProviderFetch = (input: string, init?: RequestInit) => Promise<Response>;
 export type FetchLike = ProviderFetch;
 
 export interface OAuthClientOptions {
@@ -202,7 +202,7 @@ export function providerError(
 ): ConnectorError {
   const lowerCode = providerCode?.toLowerCase() ?? "";
   const code = status === 401
-    ? (lowerCode.includes("expired") || lowerCode.includes("refresh") ? "expired-auth" : "needs-auth")
+    ? "expired-auth"
     : status === 403 ? "permission-denied"
     : status === 404 ? "not-found"
     : status === 429 || lowerCode.includes("ratelimit") ? "rate-limited"
@@ -217,11 +217,10 @@ export function providerError(
     code,
     message: (code === "permission-denied" ? "The provider denied the required scope or permission."
       : code === "expired-auth" ? "The provider authorization expired; reconnect the account."
-      : code === "needs-auth" ? "Connect the provider account before trying again."
       : code === "rate-limited" ? "The provider rate limit was reached."
       : code === "not-found" ? "The requested provider resource was not found."
       : code === "invalid-request" ? "The provider rejected the request."
-      : code === "provider-unavailable" ? "The provider is temporarily unavailable."
+      : code === "provider-unavailable" ? (status === 0 ? "The provider network request failed." : "The provider is temporarily unavailable.")
       : "The connector request failed.") + missingScope,
     retryable: code === "rate-limited" || code === "provider-unavailable",
     ...(retryAfter ? { retryAfter: String(Number(retryAfter) * 1000) } : {})
