@@ -490,6 +490,17 @@ export interface RuntimeSnapshot {
    * Rust boundary can re-resolve their auth state on recovery.
    */
   connectedBackendIds: string[];
+  /**
+   * The model id last chosen in the composer's model picker, so the same model
+   * drives the next agent run. Re-validated against the connected backend's
+   * available models before use (empty string = let Fable pick).
+   */
+  selectedModelId: string;
+  /**
+   * The composer's permission level, driving how the agent loop gates tool
+   * approvals (read-only suppresses write/shell tool calls, etc.).
+   */
+  permissionMode: PermissionMode;
   savedAt: string;
 }
 

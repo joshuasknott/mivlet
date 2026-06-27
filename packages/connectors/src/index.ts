@@ -111,3 +111,13 @@ export { lookupTool, registeredToolSpecs } from "./native-api/tools";
 export { priceFor } from "./native-api/pricing";
 export { runAgentLoop, type ToolExecutor, type RunAgentLoopOptions } from "./native-api/agent-loop";
 export { buildContextPrefix } from "./native-api/memory-context";
+export {
+  createApprovalGate,
+  createToolExecutor,
+  ProductionApprovalGate,
+  type ApprovalGate,
+  type CreateToolExecutorOptions,
+  type DecisionResult,
+  type ToolApprovalGate,
+  type ToolRuntime
+} from "./native-api/tool-executor";

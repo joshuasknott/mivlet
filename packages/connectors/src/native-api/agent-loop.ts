@@ -18,7 +18,8 @@ import type {
   ApprovalRequest,
   BackendAgentEvent,
   NativeCompletionRequest,
-  NativeMessage
+  NativeMessage,
+  PermissionMode
 } from "@fable/protocol";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
@@ -40,6 +41,48 @@ export interface RunAgentLoopOptions {
   maxTurns?: number;
   /** Optional system-context prefix (pinned memory/knowledge by trust level). */
   contextPrefix?: string;
+  /**
+   * The composer's permission level, used to gate tool execution before the
+   * approval queue. `read-only` suppresses `full-access` (write/shell) tool
+   * calls — they surface as a denied tool-result rather than executing. Defaults
+   * to `full-access` (the executor/approval flow still gates everything).
+   *
+   * NOTE: this only decides whether a tool call reaches the executor. The
+   * executor itself (actually running read-file/write-file/run-shell) is wired
+   * by the tool-execution goal; until then the executor refuses (fail-closed).
+   */
+  permissionMode?: PermissionMode;
+}
+
+/** Permission rank so a stricter mode forbids tools requiring a looser one. */
+const PERMISSION_RANK: Record<PermissionMode, number> = {
+  "read-only": 0,
+  "trusted-scope": 1,
+  "full-access": 2
+};
+
+/**
+ * Does the current permission mode allow a tool whose approval requires the
+ * given mode? A read-only run forbids full-access tools (write/shell); a
+ * full-access run allows everything.
+ */
+function modeAllows(running: PermissionMode, required: PermissionMode): boolean {
+  return PERMISSION_RANK[running] >= PERMISSION_RANK[required];
+}
+
+/** Wrap the executor so the permission mode gates tool dispatch before approval. */
+function permissionGatedExecutor(
+  execute: ToolExecutor,
+  permissionMode: PermissionMode
+): ToolExecutor {
+  return async (approval, args) => {
+    if (!modeAllows(permissionMode, approval.mode)) {
+      throw new Error(
+        `Permission denied: ${permissionMode} mode forbids ${approval.mode} tool (${approval.action}).`
+      );
+    }
+    return execute(approval, args);
+  };
 }
 
 function streamFor(
@@ -65,6 +108,8 @@ export async function* runAgentLoop(
 ): AsyncIterable<BackendAgentEvent> {
   const tools = registeredToolSpecs();
   const maxTurns = options.maxTurns ?? 8;
+  const permissionMode = options.permissionMode ?? "full-access";
+  const execute = permissionGatedExecutor(options.execute, permissionMode);
   let messages: NativeMessage[] = options.contextPrefix
     ? [{ role: "system", content: options.contextPrefix }, ...request.messages]
     : [...request.messages];
@@ -117,7 +162,7 @@ export async function* runAgentLoop(
 
     for (const call of pendingToolCalls) {
       try {
-        const result = await options.execute(call.approval, call.arguments);
+        const result = await execute(call.approval, call.arguments);
         yield { type: "tool-result", callId: call.callId, ok: true, output: result };
         messages = [...messages, { role: "tool", content: result, toolCallId: call.callId }];
       } catch (error) {
