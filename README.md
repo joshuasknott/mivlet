@@ -1,8 +1,8 @@
-# Arden
+# Fable
 
-Arden is an open-source AI workspace for real work. It lets you chat with your computer, delegate tasks across your tools and files, and stay in control at every step.
+Fable is an open-source AI workspace for real work. It lets you chat with your computer, delegate tasks across your tools and files, and stay in control at every step.
 
-Local-first and private by default, Arden is built for people who want powerful AI assistance without giving up ownership of their work.
+Local-first and private by default, Fable is built for people who want powerful AI assistance without giving up ownership of their work.
 
 ## Current Slice
 
@@ -21,20 +21,21 @@ Local-first and private by default, Arden is built for people who want powerful 
 
 Brand assets live in `apps/desktop/public/brand`:
 
-- `arden-mark.svg`
-- `arden-wordmark.svg`
-- `arden-logo.svg`
-- `arden-logo-dark.svg`
+- `fable-mark.svg`
+- `fable-mark-graphite.svg`
+- `fable-wordmark.svg`
+- `fable-logo.svg`
+- `fable-logo-dark.svg`
+- `fable-app-icon.svg`
 
 The product position and usage notes are documented in `docs/brand.md`.
 
 ## QA Evidence
 
-- Desktop screenshot: `output/qa/praxis-home-1440x1024-v6.png`
-- Mobile screenshot: `output/qa/praxis-home-390x844-v6.png`
+- Desktop screenshot: `docs/design/qa/fable-after-1440x1024.png`
+- Mobile screenshot: `docs/design/qa/fable-after-390x844.png`
+- Connectors screenshot: `docs/design/qa/fable-after-connectors-1440x1024.png`
 - Visual QA report: `design-qa.md`
-
-The screenshot filenames are historical artifacts from the pre-Arden working name.
 
 ## Commands
 
@@ -58,6 +59,6 @@ pnpm tauri:build
 
 Expected local build outputs:
 
-- `apps/desktop/src-tauri/target/release/arden-desktop.exe`
-- `apps/desktop/src-tauri/target/release/bundle/msi/Arden_0.1.0_x64_en-US.msi`
-- `apps/desktop/src-tauri/target/release/bundle/nsis/Arden_0.1.0_x64-setup.exe`
+- `apps/desktop/src-tauri/target/release/fable-desktop.exe`
+- `apps/desktop/src-tauri/target/release/bundle/msi/Fable_0.1.0_x64_en-US.msi`
+- `apps/desktop/src-tauri/target/release/bundle/nsis/Fable_0.1.0_x64-setup.exe`

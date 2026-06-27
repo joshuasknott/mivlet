@@ -1,11 +1,11 @@
-import type { ConnectorActionKind, ConnectorManifest } from "@arden/protocol";
-import { SectionHeading, StatusDot } from "./primitives";
+import { useMemo, useState } from "react";
+import type { ConnectorActionKind, ConnectorManifest } from "@fable/protocol";
+import { ConnectorIcon } from "./ConnectorIcon";
 
 /**
- * Connectors context panel: connector manifests with health status, permission
- * chips, and a "use in composer" / "prepare auth" action.
+ * Icon-first connector cards with one expanded detail panel. Keep the cards
+ * quiet; advanced permissions and actions only appear after selection.
  */
-
 export function PluginPanel({
   manifests,
   onUseConnector,
@@ -23,97 +23,168 @@ export function PluginPanel({
   onSelect: (connector: ConnectorManifest) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
+    manifests[0]?.id ?? null
+  );
+  const selectedConnector = useMemo(
+    () => manifests.find((connector) => connector.id === selectedConnectorId) ?? manifests[0],
+    [manifests, selectedConnectorId]
+  );
+
   return (
-    <section className="context-panel" aria-label="Connectors">
-      <SectionHeading title="Connectors" meta="bridges and permissions" />
+    <section className="context-panel connectors-panel" aria-label="Connectors">
       <div className="connector-grid">
         {manifests.map((connector) => {
-          const ready = connector.status === "connected" || connector.status === "fixture";
-          const firstAction = connector.supportedActions?.[0];
+          const connected = connector.status === "connected";
+          const selected = selectedConnector?.id === connector.id;
+
           return (
-            <article className="connector-card" key={connector.id} data-connector-id={connector.id}>
-              <div className="connector-card__top">
-                <span>
-                  <strong>{connector.name}</strong>
-                  <small>{connector.healthSummary}</small>
+            <article
+              className="connector-card"
+              key={connector.id}
+              data-connector-id={connector.id}
+              data-selected={selected}
+              tabIndex={0}
+              onClick={() => {
+                setSelectedConnectorId(connector.id);
+                onSelect(connector);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setSelectedConnectorId(connector.id);
+                  onSelect(connector);
+                }
+              }}
+            >
+              <span className="sr-only">{connector.status}</span>
+              <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
+                <ConnectorIcon id={connector.id} />
+              </span>
+              <strong>{connector.name}</strong>
+
+              {connected ? (
+                <span className="connector-card__connected">
+                  <span aria-hidden="true" />
+                  Connected
                 </span>
-                <StatusDot tone={ready ? "ready" : "needs-auth"} />
-              </div>
-              <dl className="connector-card__meta">
-                <div>
-                  <dt>Status</dt>
-                  <dd>{connector.status}</dd>
-                </div>
-                <div>
-                  <dt>Health</dt>
-                  <dd>{connector.health?.state ?? "unknown"}</dd>
-                </div>
-                <div>
-                  <dt>Checked</dt>
-                  <dd>{connector.lastCheckedAt}</dd>
-                </div>
-                <div>
-                  <dt>Account</dt>
-                  <dd>
-                    {connector.authMode === "none"
-                      ? "Local device"
-                      : connector.account?.displayName ?? "Not connected"}
-                  </dd>
-                </div>
-              </dl>
-              <div className="permission-list">
-                {(connector.scopes?.map((scope) => scope.label) ?? connector.permissions).map((permission) => (
-                  <span key={permission}>{permission}</span>
-                ))}
-              </div>
-              {connector.setupMessage && connector.status !== "connected" ? (
-                <p className="connector-card__setup">{connector.setupMessage}</p>
-              ) : null}
-              <div className="connector-card__actions">
-                {connector.supportsSearch ? (
-                  <button type="button" onClick={() => onSelect(connector)}>
-                    Search / import
-                  </button>
-                ) : (
-                  <button type="button" onClick={() => onUseConnector(connector)}>
-                    Use in composer
-                  </button>
-                )}
-                {connector.status === "connected" && connector.authMode !== "none" ? (
-                  <button type="button" onClick={() => onDisconnect(connector.id)}>
-                    Disconnect
-                  </button>
-                ) : connector.authMode !== "none" ? (
-                  <button type="button" onClick={() => onConnect(connector)}>
-                    {connector.status === "fixture" ? "Live setup" : "Connect"}
-                  </button>
-                ) : null}
-                {connector.status === "expired" ||
-                connector.status === "error" ||
-                connector.status === "unavailable" ? (
-                  <button type="button" onClick={() => onRefresh(connector.id)}>
-                    Retry
-                  </button>
-                ) : null}
-                {firstAction ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onPrepareAction(firstAction, {
-                        targetId: `${connector.id}-fixture-selection`
-                      })
-                    }
-                  >
-                    Prepare {actionLabel(firstAction)}
-                  </button>
-                ) : null}
-              </div>
+              ) : connector.authMode !== "none" ? (
+                <button
+                  type="button"
+                  className="connector-card__connect button button--secondary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onConnect(connector);
+                  }}
+                >
+                  Connect
+                </button>
+              ) : (
+                <span className="connector-card__connected">Available</span>
+              )}
             </article>
           );
         })}
       </div>
+
+      {selectedConnector ? (
+        <ConnectorDetails
+          connector={selectedConnector}
+          onUseConnector={onUseConnector}
+          onDisconnect={onDisconnect}
+          onRefresh={onRefresh}
+          onPrepareAction={onPrepareAction}
+        />
+      ) : null}
     </section>
   );
+}
+
+function ConnectorDetails({
+  connector,
+  onUseConnector,
+  onDisconnect,
+  onRefresh,
+  onPrepareAction
+}: {
+  connector: ConnectorManifest;
+  onUseConnector: (connector: ConnectorManifest) => void;
+  onDisconnect: (connectorId: string) => void;
+  onRefresh: (connectorId: string) => void;
+  onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
+}) {
+  const firstAction = connector.supportedActions?.[0];
+  const permissions = connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
+
+  return (
+    <article className="connector-detail" aria-label={`${connector.name} details`}>
+      <div className="connector-detail__header">
+        <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
+          <ConnectorIcon id={connector.id} />
+        </span>
+        <div>
+          <h2>{connector.name}</h2>
+          <p>{connector.setupMessage ?? connector.healthSummary}</p>
+        </div>
+        <span className={`connector-detail__status connector-detail__status--${connector.status}`}>
+          {statusLabel(connector)}
+        </span>
+      </div>
+
+      <div className="connector-detail__body">
+        <div>
+          <span>Access</span>
+          <ul>
+            {permissions.slice(0, 3).map((permission) => (
+              <li key={permission}>{permission}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <span>Health</span>
+          <p>{connector.health?.summary ?? connector.healthSummary}</p>
+        </div>
+      </div>
+
+      <div className="connector-detail__actions">
+        {connector.status === "connected" || connector.status === "fixture" ? (
+          <button type="button" onClick={() => onUseConnector(connector)}>
+            Use in composer
+          </button>
+        ) : null}
+        <button type="button" onClick={() => onRefresh(connector.id)}>
+          Refresh
+        </button>
+        {firstAction ? (
+          <button
+            type="button"
+            onClick={() =>
+              onPrepareAction(firstAction, {
+                targetId: `${connector.id}-fixture-selection`
+              })
+            }
+          >
+            Prepare {actionLabel(firstAction)}
+          </button>
+        ) : null}
+        {connector.status === "connected" && connector.authMode !== "none" ? (
+          <button type="button" onClick={() => onDisconnect(connector.id)}>
+            Disconnect
+          </button>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function statusLabel(connector: ConnectorManifest) {
+  if (connector.status === "connected") {
+    return "Connected";
+  }
+  if (connector.status === "fixture") {
+    return "Preview";
+  }
+  return "Not connected";
 }
 
 function actionLabel(action: ConnectorActionKind) {

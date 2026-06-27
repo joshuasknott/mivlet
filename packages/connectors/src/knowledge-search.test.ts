@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource } from "@arden/protocol";
+import type { KnowledgeSource } from "@fable/protocol";
 import { searchKnowledgeSources } from "./knowledge-search";
 
 const sources: KnowledgeSource[] = [

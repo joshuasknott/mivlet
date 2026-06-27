@@ -1,0 +1,105 @@
+/* Shared Fable control variants. Feature classes may add layout only. */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  font-size: var(--text-13);
+  font-weight: 600;
+  line-height: 1;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.button--primary {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+
+.button--primary:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  box-shadow: var(--shadow-2);
+}
+
+.button--secondary {
+  color: var(--ink);
+  background: var(--surface-raised);
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-1);
+}
+
+.button--secondary:hover {
+  color: var(--accent);
+  background: var(--surface-hover);
+  border-color: var(--accent-line);
+}
+
+.button--ghost {
+  color: var(--ink-muted);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.button--ghost:hover {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.button--destructive {
+  color: var(--destructive);
+  background: var(--destructive-subtle);
+  border-color: var(--destructive-subtle);
+}
+
+.button--destructive:hover {
+  color: var(--surface);
+  background: var(--destructive);
+  border-color: var(--destructive);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:disabled {
+  box-shadow: none;
+}
+
+.button[aria-busy="true"] {
+  cursor: progress;
+}
+
+.button[aria-busy="true"]::after {
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-pill);
+  content: "";
+  animation: fable-spin 700ms linear infinite;
+}
+
+@keyframes fable-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

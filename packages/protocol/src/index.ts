@@ -288,7 +288,7 @@ export interface ConnectorAuthResult {
  * The transport a backend speaks. Codex reaches its app-server, Cursor and
  * Grok share a generic ACP (stdio/JSON-RPC) adapter, Copilot uses its SDK, and
  * the native-API providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) speak
- * their HTTP/SSE APIs directly — with Arden owning the entire agent loop.
+ * their HTTP/SSE APIs directly — with Fable owning the entire agent loop.
  */
 export type BackendType = "codex-app-server" | "acp" | "copilot-sdk" | "native-api";
 
@@ -359,7 +359,7 @@ export interface BackendCredentialRequest {
 
 /**
  * A consequential action a backend wants to perform (tool call, file write,
- * shell command). Arden routes these into its existing ApprovalRequest system
+ * shell command). Fable routes these into its existing ApprovalRequest system
  * rather than letting the backend execute them directly.
  */
 export interface BackendConsequentialEvent {
@@ -522,7 +522,7 @@ export interface NativeToolCall {
   arguments: string;
 }
 
-/** A tool the loop advertises to the model (Arden-owned, from the registry). */
+/** A tool the loop advertises to the model (Fable-owned, from the registry). */
 export interface NativeToolSpec {
   name: string;
   description: string;
@@ -530,7 +530,7 @@ export interface NativeToolSpec {
   parameters: string;
 }
 
-/** An Arden-owned tool the native loop may dispatch after approval. */
+/** An Fable-owned tool the native loop may dispatch after approval. */
 export interface BackendTool {
   name: string;
   description: string;
@@ -552,7 +552,7 @@ export interface NativeCompletionRequest {
 /**
  * A normalized agent-loop event streamed back to the shell — the shared event
  * surface for the native-API loop. Model tool calls arrive as `tool-call`
- * carrying a pre-shaped ApprovalRequest so they route through Arden's existing
+ * carrying a pre-shaped ApprovalRequest so they route through Fable's existing
  * approval queue before the tool is executed.
  */
 export type BackendAgentEvent =

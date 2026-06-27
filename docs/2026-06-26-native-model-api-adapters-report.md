@@ -1,6 +1,6 @@
 # Goal Report — Native Model API Adapters (OpenAI, Anthropic, Gemini, xAI, OpenRouter)
 
-Completed: 2026-06-26. Builds the native model API adapter family where **Arden
+Completed: 2026-06-26. Builds the native model API adapter family where **Fable
 owns the entire agent loop** — tool dispatch, streaming, approval routing, memory
 integration, usage/cost, and cancellation. Extends — does not rebuild — the prior
 goal's `BackendProvider`/capability surface, credential boundary, approval routing,
@@ -17,7 +17,7 @@ Plan: `docs/2026-06-26-native-model-api-adapters-plan.md` + `docs/superpowers/pl
 |---|---|---|---|
 | 1 | Extend (not rebuild) `SUPPORTED_BACKEND_PROVIDER_IDS` + catalog + `BackendType` with the native providers and a native-API type | `models.rs`: `SUPPORTED_BACKEND_PROVIDER_IDS` = 9 ids, `BACKEND_TYPES` includes `"native-api"`. `protocol/index.ts`: `BackendType` includes `"native-api"`. `backends.rs` `CATALOG` serves the 5 native entries. | ✅ |
 | 2 | One shared OpenAI-compatible client with per-provider shaping, behind an injectable HTTP-transport seam; OpenAI/OpenRouter/xAI share the path; Anthropic + Gemini provider-specific | `packages/connectors/src/native-api/`: `openai-compat.ts` (shared), `anthropic.ts`, `gemini.ts` (provider-specific), `transport.ts` (`HttpTransport` seam + `FixtureTransport`/`SequencedFixtureTransport`) | ✅ |
-| 3 | Network egress + key handling owned by Rust; TS never sees the key, never opens a socket | `native_api.rs::stream_backend_completion`: looks up the key from the store, adds the provider header, issues the streaming `reqwest` call, emits SSE lines on `arden://backend/<id>`. Key never in any TS type/request/event | ✅ |
+| 3 | Network egress + key handling owned by Rust; TS never sees the key, never opens a socket | `native_api.rs::stream_backend_completion`: looks up the key from the store, adds the provider header, issues the streaming `reqwest` call, emits SSE lines on `fable://backend/<id>`. Key never in any TS type/request/event | ✅ |
 | 4 | Real cancellation of in-flight requests, not UI dismissal | `native_api.rs::cancel_backend_completion` + cancel map drops the in-flight future via a pinned oneshot receiver in `tokio::select!` | ✅ |
 | 5 | Tool dispatch — model tool calls don't auto-execute; each routes through the ApprovalRequest system before execution; unregistered tools fail closed | `tools.ts` registry; `approvals.ts::buildToolApproval` shapes every tool call into an ApprovalRequest (unregistered → critical, refusal consequence); `agent-loop.ts` only executes via the injected executor after the shell approves | ✅ |
 | 6 | Streaming normalized to the same event stream the runtimes emit; typed `BackendAgentEvent` in protocol | `protocol/index.ts`: `BackendAgentEvent` union (text-delta/tool-call/tool-result/usage/done/error/cancelled) emitted over the Tauri event channel | ✅ |
@@ -69,7 +69,7 @@ Pure, fixture-tested logic (no network, no key):
 - `gemini.ts` — Gemini generateContent shaper+parser.
 - `agent-loop.ts` — `runAgentLoop`: turns over the seam; tool-calls → ApprovalRequest;
   cooperative cancel; maxTurns safety.
-- `tools.ts` + `approvals.ts` — Arden-owned tool registry + tool-call→approval shaping
+- `tools.ts` + `approvals.ts` — Fable-owned tool registry + tool-call→approval shaping
   (unregistered tools fail closed).
 - `pricing.ts` — per-provider usage/cost (fail-safe to 0).
 - `memory-context.ts` — pinned memory/knowledge into context by trust level.

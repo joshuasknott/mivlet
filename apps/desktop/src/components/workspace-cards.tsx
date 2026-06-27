@@ -3,7 +3,7 @@ import type {
   KnowledgeCitation,
   ThreadSummary,
   WorkspaceDirective
-} from "@arden/protocol";
+} from "@fable/protocol";
 
 /**
  * Composer-adjacent presentational components: directive prompt starters,

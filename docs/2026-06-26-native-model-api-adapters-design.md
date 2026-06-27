@@ -2,15 +2,15 @@
 
 Status: **Proposed** — pending user approval before implementation.
 Date: 2026-06-26
-Owner: Arden desktop
+Owner: Fable desktop
 Spec of record: the goal objective for the native model API adapter family.
 
 ## 1. Objective (restated as deliverables)
 
-Build the native model API adapter family where **Arden owns the entire agent
+Build the native model API adapter family where **Fable owns the entire agent
 loop**: OpenAI, Anthropic, Gemini (API + Vertex), xAI, and OpenRouter. Unlike the
 runtime backends (Codex/Cursor/Copilot/Grok, shipped in the prior goal) that
-borrow sessions/approvals from their providers, here Arden owns tool dispatch,
+borrow sessions/approvals from their providers, here Fable owns tool dispatch,
 streaming, approval routing, memory integration, usage/cost, and cancellation.
 
 This goal **extends** the prior goal's foundation — the `BackendProvider` /
@@ -32,13 +32,13 @@ this goal.
 
 1. The credential-boundary vocabulary is **extended** (not rebuilt): the
    `SUPPORTED_BACKEND_PROVIDER_IDS` catalog in `models.rs` and the
-   `BACKEND_PROVIDER_IDS` registry in `@arden/connectors` both gain the native
+   `BACKEND_PROVIDER_IDS` registry in `@fable/connectors` both gain the native
    providers (`openai`, `anthropic`, `gemini`, `xai`, `openrouter`); the
    `BackendType` union gains a native-API type (`native-api`); the closed
    `BACKEND_CAPABILITIES` vocabulary is extended with any new capability the
    native loop requires. Existing provider ids/types keep working.
 2. **One shared OpenAI-compatible client** with per-provider shaping lives in
-   `@arden/connectors` behind an **injectable HTTP-transport seam** so tests use
+   `@fable/connectors` behind an **injectable HTTP-transport seam** so tests use
    recorded/fixture responses and never touch the network. OpenAI, OpenRouter,
    and xAI share the request/response path; Anthropic Messages and Gemini
    `generateContent` get provider-specific shaping behind the shared capability
@@ -52,10 +52,10 @@ this goal.
 5. **Tool dispatch** — model tool calls don't auto-execute; each routes through
    the `ApprovalRequest` system (read-only/trusted-scope/full-access,
    once/session/rule/modify/deny, fail-closed high-risk) before execution by an
-   Arden-owned tool registry. Unregistered/model-invented tools fail closed.
+   Fable-owned tool registry. Unregistered/model-invented tools fail closed.
 6. **Streaming** normalized to the same event stream the runtimes emit. A typed
    `BackendAgentEvent` union (text-delta, tool-call, tool-result, usage, done,
-   error, cancelled) is defined in `@arden/protocol` and emitted on a Tauri
+   error, cancelled) is defined in `@fable/protocol` and emitted on a Tauri
    event channel so the shell renders deltas/usage.
 7. **Memory** — pinned knowledge/memory enters context by trust level; approved
    inferences write back with provenance, freshness, and kind, via the existing
@@ -93,13 +93,13 @@ The objective fixes the division of responsibility precisely:
 |---|---|---|
 | **Key lookup** | Rust | never crosses into JS |
 | **HTTP/SSE egress** | Rust | "Network egress and key handling are owned by the Rust boundary" |
-| **Request/response shaping** (provider-specific body + SSE→event parse) | TS (`@arden/connectors`) | "request/response shaping as pure, fixture-testable logic" |
+| **Request/response shaping** (provider-specific body + SSE→event parse) | TS (`@fable/connectors`) | "request/response shaping as pure, fixture-testable logic" |
 | **Loop control** (turn iteration, tool-call handling, approval routing) | TS | "The TypeScript layer owns orchestration" |
 | **Cancellation** | Rust (drops the future) + TS (signals) | "Real cancellation of in-flight requests" |
 
 This is implemented as **two halves that meet at a clean seam**:
 
-**TS half — pure shapers + orchestrator.** `@arden/connectors/native-api/`
+**TS half — pure shapers + orchestrator.** `@fable/connectors/native-api/`
 contains:
 - A normalized internal request type (`NativeCompletionRequest`) and event type
   (`BackendAgentEvent`).
@@ -121,7 +121,7 @@ contains:
    `x-api-key` / `x-goog-api-key` header per provider, and issues the streaming
    `reqwest` request.
 3. Parses SSE bytes and emits each normalized line back over the Tauri event
-   channel `arden://backend/<requestId>`.
+   channel `fable://backend/<requestId>`.
 4. Holds the in-flight future in a `CancelMap` keyed by `requestId`; the
    `cancel_backend_completion(requestId)` command aborts it (real cancellation).
 
@@ -142,14 +142,14 @@ In `models.rs`:
   addition is `"usage-cost"` (already present) used at native-API granularity,
   plus **`"memory"`** and **`"tool-dispatch"`** if they aren't expressible with
   existing caps. (Decision: reuse `tool-requests` + `approvals` for tool
-  dispatch — model *requests* tool exec, Arden routes through *approvals* — so
+  dispatch — model *requests* tool exec, Fable routes through *approvals* — so
   **no new capability token is strictly required**; memory write-back rides the
   existing memory path. This keeps the closed vocabulary stable. The native
   adapter declares the full set: authentication, threads, streaming,
   tool-requests, approvals, file-changes, usage-cost, model-availability,
   cancellation.)
 
-In `@arden/connectors/src/backends/registry.ts`:
+In `@fable/connectors/src/backends/registry.ts`:
 - `BACKEND_PROVIDER_IDS` grows to match.
 - A new `native-api.ts` adapter exposes `resolveNativeProvider(id, authState)`
   for each of the five, with fixture catalogs (models + compliant copy) in
@@ -183,7 +183,7 @@ packages/connectors/src/native-api/
   *.test.ts             fixture-driven, never network
 ```
 
-`BackendAgentEvent` is defined in `@arden/protocol` (so the shell imports it)
+`BackendAgentEvent` is defined in `@fable/protocol` (so the shell imports it)
 and is the "same event surface" generalized — there is no pre-existing runtime
 event union, so this becomes it:
 
@@ -199,9 +199,9 @@ export type BackendAgentEvent =
   | { type: "cancelled" };
 ```
 
-### 2.5 Tool dispatch (Arden owns it)
+### 2.5 Tool dispatch (Fable owns it)
 
-A small Arden-owned tool registry in `@arden/connectors/native-api/tools.ts`:
+A small Fable-owned tool registry in `@fable/connectors/native-api/tools.ts`:
 `read-file`, `write-file`, `run-shell`, `web-fetch`. Each declares its
 default `mode`/`riskLevel`. The loop:
 
@@ -211,7 +211,7 @@ default `mode`/`riskLevel`. The loop:
    mode/risk from the tool registry default, modifiable by the user).
 3. The shell pushes that `ApprovalRequest` into the **existing** approval queue
    — same UI, same grants/rules/audit/fail-closed confirmation as today.
-4. On approval, Arden executes the tool via a runtime function and feeds a
+4. On approval, Fable executes the tool via a runtime function and feeds a
    `tool-result` back into the next loop turn.
 5. **Unregistered tools fail closed**: the loop emits a `tool-result` with
    `ok:false` and "tool not registered" rather than executing anything. Model-

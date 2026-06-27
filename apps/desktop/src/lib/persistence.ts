@@ -1,12 +1,11 @@
 import type {
   ApprovalAuditEntry,
   ApprovalGrant,
-  AutomationStatus,
   LocalFileImport,
   MemoryRecord,
   RuntimeSnapshot
-} from "@arden/protocol";
-import { LEGACY_STORAGE_KEY, STORAGE_KEY, RUNTIME_SNAPSHOT_VERSION } from "./constants";
+} from "@fable/protocol";
+import { LEGACY_STORAGE_KEYS, STORAGE_KEY, RUNTIME_SNAPSHOT_VERSION } from "./constants";
 import { normalizeActiveItem } from "./helpers";
 import type { PersistedShellState } from "./types";
 
@@ -14,6 +13,11 @@ import type { PersistedShellState } from "./types";
  * LocalStorage persistence and Tauri runtime snapshot conversion. These are
  * pure functions over shell state so they can be tested and reused without
  * React.
+ *
+ * Schedules are shell-local and persist only via localStorage (they are not
+ * part of the shared RuntimeSnapshot contract). The snapshot still carries
+ * the legacy `automationStatuses` field for protocol compatibility, defaulted
+ * to an empty record on round-trip.
  */
 
 export function readPersistedShellState(defaultShellState: PersistedShellState): PersistedShellState {
@@ -22,16 +26,24 @@ export function readPersistedShellState(defaultShellState: PersistedShellState):
   }
 
   try {
-    const stored =
-      window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    const currentStored = window.localStorage.getItem(STORAGE_KEY);
+    const legacyStored = currentStored
+      ? null
+      : LEGACY_STORAGE_KEYS.map((key) => window.localStorage.getItem(key)).find(Boolean) ?? null;
+    const stored = currentStored ?? legacyStored;
     if (!stored) {
       return defaultShellState;
     }
 
-    return normalizePersistedShellState({
+    const normalized = normalizePersistedShellState({
       ...defaultShellState,
       ...JSON.parse(stored)
     } as PersistedShellState);
+    if (!currentStored && legacyStored) {
+      // Copy forward without deleting the old key so downgrade/rollback remains safe.
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch {
     return defaultShellState;
   }
@@ -54,7 +66,9 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     approvalAudit: state.approvalAudit,
     dismissedApprovalIds: state.dismissedApprovalIds,
     approvalRules: state.approvalRules,
-    automationStatuses: state.automationStatuses,
+    // Schedules are shell-local; the shared snapshot keeps the legacy field
+    // defaulted empty for protocol compatibility.
+    automationStatuses: {},
     pinnedSourceIds: state.pinnedSourceIds,
     importedKnowledgeSources: state.importedKnowledgeSources,
     memoryDisabled: state.memoryDisabled,
@@ -76,7 +90,6 @@ export function shellStateFromRuntimeSnapshot(
     approvalAudit: snapshot.approvalAudit,
     dismissedApprovalIds: snapshot.dismissedApprovalIds,
     approvalRules: snapshot.approvalRules,
-    automationStatuses: snapshot.automationStatuses,
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
@@ -96,7 +109,6 @@ function normalizePersistedShellState(state: PersistedShellState): PersistedShel
 export type {
   ApprovalAuditEntry,
   ApprovalGrant,
-  AutomationStatus,
   LocalFileImport,
   MemoryRecord
 };

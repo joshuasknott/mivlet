@@ -1,5 +1,5 @@
 /**
- * The Arden-owned agent loop for native-API providers.
+ * The Fable-owned agent loop for native-API providers.
  *
  * Pure over an injectable HttpTransport + ToolExecutor. One turn = stream a
  * completion; if it finishes with `tool-calls`, the shell must approve + execute
@@ -19,7 +19,7 @@ import type {
   BackendAgentEvent,
   NativeCompletionRequest,
   NativeMessage
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
 import { streamOpenAiEvents } from "./openai-compat";
@@ -28,7 +28,7 @@ import type { HttpTransport } from "./transport";
 
 type FinishReason = "stop" | "tool-calls" | "length" | "error";
 
-/** Executes an approved tool. Production wires this to Arden runtime functions;
+/** Executes an approved tool. Production wires this to Fable runtime functions;
  *  tests inject a fake. Throws if the approval was not granted (fail-closed). */
 export type ToolExecutor = (approval: ApprovalRequest, args: string) => Promise<string>;
 

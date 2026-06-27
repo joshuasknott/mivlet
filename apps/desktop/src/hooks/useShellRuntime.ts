@@ -23,7 +23,7 @@ import type {
   RuntimeSnapshot,
   ThreadSummary,
   WorkspaceDirective
-} from "@arden/protocol";
+} from "@fable/protocol";
 import {
   FIRST_WAVE_CONNECTOR_IDS,
   importFixtureConnectorItem,
@@ -33,9 +33,8 @@ import {
   searchFixtureConnector,
   searchKnowledgeSources,
   type LocalTextFileCandidate
-} from "@arden/connectors";
+} from "@fable/connectors";
 import {
-  automations,
   chatThreads,
   connectors,
   knowledgeSources,
@@ -77,15 +76,17 @@ import {
   EMPTY_APPROVAL_MODIFICATION,
   type WorkspacePage,
   type ApprovalModificationDraft,
-  type AutomationRuleView,
   type PendingApprovalConfirmation,
-  type PersistedShellState
+  type PersistedShellState,
+  type Schedule,
+  type Weekday
 } from "../lib/types";
 import {
   importedSourceDirective,
   mergeKnowledgeSources,
   prependAuditEntry,
-  readFileAsText
+  readFileAsText,
+  toSlug
 } from "../lib/helpers";
 import {
   encodeMemoryExportFallback,
@@ -107,13 +108,13 @@ import {
  */
 
 const defaultShellState: PersistedShellState = {
-  activeItem: "arden-initial-build",
+  activeItem: "new-chat",
   composerValue: "",
   voiceEnabled: false,
   approvalAudit: [],
   dismissedApprovalIds: [],
   approvalRules: [],
-  automationStatuses: {},
+  schedules: [],
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id),
   importedKnowledgeSources: [],
   memoryDisabled: false,
@@ -209,9 +210,11 @@ export interface ShellRuntime {
   toggleMemoryDisabled: () => void;
   exportMemory: () => Promise<void>;
   cancelMemoryEdit: () => void;
-  // automations
-  automationRules: AutomationRuleView[];
-  toggleAutomation: (rule: AutomationRuleView) => void;
+  // schedules
+  schedules: Schedule[];
+  createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;
+  toggleSchedule: (schedule: Schedule) => void;
+  deleteSchedule: (schedule: Schedule) => void;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -222,7 +225,7 @@ export interface ShellRuntime {
   /**
    * Record a native-API model tool call as an approval audit entry. Model tool
    * calls never auto-execute — they surface here so the existing approval UI
-   * handles the grant/rule/deny decision before Arden dispatches the tool.
+   * handles the grant/rule/deny decision before Fable dispatches the tool.
    */
   recordBackendToolCall: (event: {
     callId: string;
@@ -258,9 +261,7 @@ export function useShellRuntime(): ShellRuntime {
   const [pendingApprovalConfirmation, setPendingApprovalConfirmation] =
     useState<PendingApprovalConfirmation | null>(null);
   const [approvalConfirmationText, setApprovalConfirmationText] = useState("");
-  const [automationStatuses, setAutomationStatuses] = useState<Record<string, string>>(
-    initialState.automationStatuses
-  );
+  const [schedules, setSchedules] = useState<Schedule[]>(initialState.schedules);
   const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(initialState.pinnedSourceIds);
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
     initialState.connectedBackendIds
@@ -339,10 +340,6 @@ export function useShellRuntime(): ShellRuntime {
   );
   const openApprovals = [...preparedConnectorActions.map((request) => request.approval), ...pendingApprovals]
     .filter((approval) => !dismissedApprovalIds.includes(approval.id));
-  const automationRules: AutomationRuleView[] = automations.map((rule) => ({
-    ...rule,
-    status: (automationStatuses[rule.id] ?? rule.status) as AutomationRuleView["status"]
-  }));
   const memoryState = useMemo<MemoryControlState>(
     () => ({
       disabled: memoryDisabled,
@@ -358,7 +355,7 @@ export function useShellRuntime(): ShellRuntime {
       approvalAudit,
       dismissedApprovalIds,
       approvalRules,
-      automationStatuses: automationStatuses as PersistedShellState["automationStatuses"],
+      schedules,
       pinnedSourceIds,
       importedKnowledgeSources,
       memoryDisabled,
@@ -369,7 +366,7 @@ export function useShellRuntime(): ShellRuntime {
       activeItem,
       approvalAudit,
       approvalRules,
-      automationStatuses,
+      schedules,
       composerValue,
       connectedBackendIds,
       dismissedApprovalIds,
@@ -391,7 +388,7 @@ export function useShellRuntime(): ShellRuntime {
     }
 
     void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellState)).catch((error) => {
-      setLastAction(error instanceof Error ? error.message : "Arden could not save runtime snapshot.");
+      setLastAction(error instanceof Error ? error.message : "Fable could not save runtime snapshot.");
     });
   }, [runtimeSnapshotReady, shellState]);
 
@@ -411,7 +408,7 @@ export function useShellRuntime(): ShellRuntime {
         setApprovalAudit(recovered.approvalAudit);
         setDismissedApprovalIds(recovered.dismissedApprovalIds);
         setApprovalRules(recovered.approvalRules);
-        setAutomationStatuses(recovered.automationStatuses);
+        setSchedules(recovered.schedules);
         setPinnedSourceIds(recovered.pinnedSourceIds);
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
@@ -526,9 +523,13 @@ export function useShellRuntime(): ShellRuntime {
       }
 
       setBackendProviders(providers);
-      setConnectedBackendIds(
-        providers.filter((provider) => provider.authState === "connected").map((provider) => provider.id)
-      );
+      const connectedIds = providers
+        .filter((provider) => provider.authState === "connected")
+        .map((provider) => provider.id);
+      setConnectedBackendIds(connectedIds);
+      if (connectedIds.length > 0) {
+        setOnboardingDismissed(true);
+      }
     });
 
     return () => {
@@ -583,7 +584,7 @@ export function useShellRuntime(): ShellRuntime {
       setImportStatus(`Imported ${imported.title}. It is pinned as untrusted knowledge.`);
       setLastAction(`Imported source: ${imported.title}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Arden could not import that file.";
+      const message = error instanceof Error ? error.message : "Fable could not import that file.";
       setImportStatus(message);
       setLastAction(message);
     }
@@ -628,7 +629,7 @@ export function useShellRuntime(): ShellRuntime {
         setManagedMemoryRecords(runtimeState.records);
       })
       .catch((error) => {
-        setMemoryStatus(error instanceof Error ? error.message : "Arden could not save memory state.");
+        setMemoryStatus(error instanceof Error ? error.message : "Fable could not save memory state.");
       });
   };
 
@@ -707,7 +708,7 @@ export function useShellRuntime(): ShellRuntime {
       setMemoryExportText(exported);
       setMemoryStatus("Memory export ready.");
     } catch (error) {
-      setMemoryStatus(error instanceof Error ? error.message : "Arden could not export memory.");
+      setMemoryStatus(error instanceof Error ? error.message : "Fable could not export memory.");
     }
   };
 
@@ -727,7 +728,7 @@ export function useShellRuntime(): ShellRuntime {
       setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
       setLastAction(`Approved ${source.title} into memory`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Arden could not approve that source into memory.";
+      const message = error instanceof Error ? error.message : "Fable could not approve that source into memory.";
       setMemoryStatus(message);
       setLastAction(message);
     }
@@ -1018,7 +1019,7 @@ export function useShellRuntime(): ShellRuntime {
   };
 
   // Record a native-API model tool call as a backend consequential event. The
-  // model wanted to run a tool; Arden records it (never auto-executes) so the
+  // model wanted to run a tool; Fable records it (never auto-executes) so the
   // approval audit trail captures the request. The pre-shaped ApprovalRequest
   // is available to route through the approval UI before any tool dispatch.
   const recordBackendToolCall = (event: {
@@ -1045,10 +1046,8 @@ export function useShellRuntime(): ShellRuntime {
     setLastAction(`Tool call from ${event.approval.service}: ${event.tool}`);
   };
 
-  // The onboarding gate: required until at least one backend is connected,
-  // unless the user explicitly skips in preview mode.
-  const onboardingRequired =
-    connectedBackendIds.length === 0 && !onboardingDismissed;
+  // The onboarding gate: required unless explicitly dismissed or skipped.
+  const onboardingRequired = !onboardingDismissed;
 
   const runCommand = (command: string) => {
     const prompt = `${command} `;
@@ -1122,7 +1121,7 @@ export function useShellRuntime(): ShellRuntime {
       );
     } catch (error) {
       setLastAction(
-        error instanceof Error ? error.message : "Arden could not resolve that approval."
+        error instanceof Error ? error.message : "Fable could not resolve that approval."
       );
     }
   };
@@ -1195,21 +1194,42 @@ export function useShellRuntime(): ShellRuntime {
     });
   };
 
-  const toggleAutomation = (rule: AutomationRuleView) => {
-    if (rule.requiresApproval && rule.status === "draft") {
-      const prompt = `/schedule ${rule.title} with pinned memory, connector health, and active projects.`;
-      setComposerValue(prompt);
-      setActiveItem("arden-memory");
-      setLastAction("Schedule needs approval before it can run");
-      focusComposer(prompt);
-      return;
-    }
+  const createSchedule = ({
+    name,
+    description,
+    day,
+    time
+  }: {
+    name: string;
+    description: string;
+    day: Weekday;
+    time: string;
+  }) => {
+    const schedule: Schedule = {
+      id: `schedule-${toSlug(name)}-${toSlug(new Date().toISOString())}`,
+      name,
+      description,
+      day,
+      time,
+      enabled: true,
+      createdAt: new Date().toISOString()
+    };
+    setSchedules((current) => [schedule, ...current]);
+    setLastAction(`Schedule created: ${name}`);
+  };
 
-    setAutomationStatuses((current) => ({
-      ...current,
-      [rule.id]: (current[rule.id] ?? rule.status) === "active" ? "paused" : "active"
-    }));
-    setLastAction(`${rule.title} updated`);
+  const toggleSchedule = (schedule: Schedule) => {
+    setSchedules((current) =>
+      current.map((entry) =>
+        entry.id === schedule.id ? { ...entry, enabled: !entry.enabled } : entry
+      )
+    );
+    setLastAction(`${schedule.name} ${schedule.enabled ? "paused" : "resumed"}`);
+  };
+
+  const deleteSchedule = (schedule: Schedule) => {
+    setSchedules((current) => current.filter((entry) => entry.id !== schedule.id));
+    setLastAction(`Schedule deleted: ${schedule.name}`);
   };
 
   return {
@@ -1284,8 +1304,10 @@ export function useShellRuntime(): ShellRuntime {
     toggleMemoryDisabled,
     exportMemory,
     cancelMemoryEdit,
-    automationRules,
-    toggleAutomation,
+    schedules,
+    createSchedule,
+    toggleSchedule,
+    deleteSchedule,
     backendProviders,
     connectedBackendIds,
     backendStatus,

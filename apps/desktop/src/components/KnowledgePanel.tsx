@@ -13,7 +13,7 @@ import {
 import type {
   KnowledgeSource,
   MemoryRecord
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { SectionHeading } from "./primitives";
 
 /**

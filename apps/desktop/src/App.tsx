@@ -1,22 +1,11 @@
 import { useEffect, useState } from "react";
-import {
-  CalendarBlank,
-  ChatCircle,
-  Checks,
-  EnvelopeSimple,
-  FileText,
-  HardDrive,
-  PresentationChart,
-  Sparkle,
-  Table
-} from "@phosphor-icons/react";
-import type { Icon } from "@phosphor-icons/react";
-import { chatThreads, connectors, projects } from "./data/workspace";
+import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
+import { ConnectorIcon } from "./components/ConnectorIcon";
 import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
@@ -26,19 +15,8 @@ import { PluginsPage } from "./components/pages/PluginsPage";
 import { ProfilePage } from "./components/pages/ProfilePage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 
-const googleConnectorCards: Array<{ label: string; icon: Icon; tone: string }> = [
-  { label: "Google Docs", icon: FileText, tone: "docs" },
-  { label: "Google Sheets", icon: Table, tone: "sheets" },
-  { label: "Google Slides", icon: PresentationChart, tone: "slides" },
-  { label: "Google Drive", icon: HardDrive, tone: "drive" },
-  { label: "Gmail", icon: EnvelopeSimple, tone: "gmail" },
-  { label: "Google Calendar", icon: CalendarBlank, tone: "calendar" },
-  { label: "Google Chat", icon: ChatCircle, tone: "chat" },
-  { label: "Google Tasks", icon: Checks, tone: "tasks" }
-];
-
 /**
- * Root composition for the Arden desktop shell.
+ * Root composition for the Fable desktop shell.
  *
  * useShellRuntime owns runtime/data state and effects. This component owns
  * shell-local UI state (collection expansion, the account popover, tool/command
@@ -49,11 +27,12 @@ const googleConnectorCards: Array<{ label: string; icon: Icon; tone: string }> =
 
 export function App() {
   const runtime = useShellRuntime();
-  const workspaceName = "Josh's Arden";
+  const [profile, setProfile] = useState(profileFixture);
+  const workspaceName = `${profile.name.split(" ")[0]}'s Fable`;
   const agent = useNativeAgent({
     providers: runtime.backendProviders,
     onToolCall: (event) => {
-      // Route model tool calls into Arden's existing approval queue. The shell's
+      // Route model tool calls into Fable's existing approval queue. The shell's
       // approval UI handles the grant/rule/deny decision; nothing auto-executes.
       void runtime.recordBackendToolCall(event);
     }
@@ -63,13 +42,20 @@ export function App() {
     chats: true
   });
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({
-    arden: true,
+    fable: true,
     site: false
   });
   const [accountOpen, setAccountOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+
+  // Connected connectors shown on the home rail. Real provider marks only;
+  // local-files is always available so it is not surfaced as a connector. If
+  // nothing is connected, the rail renders nothing.
+  const connectedConnectorCards = runtime.connectorManifests.filter(
+    (connector) => connector.status === "connected" && connector.id !== "local-files"
+  );
 
   const renderPage = () => {
     switch (runtime.activePage) {
@@ -80,7 +66,7 @@ export function App() {
       case "Schedules":
         return <AutomationsPage runtime={runtime} />;
       case "Profile":
-        return <ProfilePage />;
+        return <ProfilePage profile={profile} onProfileChange={setProfile} />;
       case "Settings":
         return <SettingsPage />;
       default:
@@ -89,51 +75,49 @@ export function App() {
   };
 
   const renderChatContext = () => {
-    if (runtime.activeItem === "arden-memory") {
-      return (
-        <ApprovalPanel
-          approvals={runtime.openApprovals}
-          audit={runtime.approvalAudit}
-          sessionGrants={runtime.sessionApprovalGrants}
-          approvalRules={runtime.approvalRules}
-          editingApprovalId={runtime.editingApprovalId}
-          modificationDraft={runtime.approvalModificationDraft}
-          pendingConfirmation={runtime.pendingApprovalConfirmation}
-          confirmationText={runtime.approvalConfirmationText}
-          onDecision={runtime.requestApprovalDecision}
-          onStartModify={runtime.startApprovalModify}
-          onUpdateModification={runtime.setApprovalModificationDraft}
-          onSaveModify={runtime.saveApprovalModify}
-          onCancelModify={runtime.clearApprovalInteraction}
-          onUpdateConfirmation={runtime.setApprovalConfirmationText}
-          onConfirmDecision={runtime.confirmApprovalDecision}
-          onCancelConfirmation={runtime.clearApprovalInteraction}
-        />
-      );
-    }
-
     return (
       <>
-        <div className="connector-rail" aria-label="Available Google connectors">
-          {googleConnectorCards.map((connector) => {
-            const ConnectorIcon = connector.icon;
-            return (
+        {connectedConnectorCards.length > 0 ? (
+          <div className="connector-rail" aria-label="Connected connectors">
+            {connectedConnectorCards.map((connector) => (
               <button
-              key={connector.label}
-              type="button"
-              className={`connector-pill connector-pill--${connector.tone}`}
-              onClick={() => {
-                const prompt = `Use ${connector.label} to `;
-                runtime.setComposerValue(prompt);
-                runtime.focusComposer(prompt);
-              }}
-            >
-                <ConnectorIcon size={15} weight="fill" />
-                <span>{connector.label}</span>
+                key={connector.id}
+                type="button"
+                className={`connector-pill connector-pill--${connector.id}`}
+                onClick={() => {
+                  const prompt = `Use ${connector.name} to `;
+                  runtime.setComposerValue(prompt);
+                  runtime.focusComposer(prompt);
+                }}
+              >
+                <ConnectorIcon id={connector.id} />
+                <span>{connector.name}</span>
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        ) : null}
+        {runtime.openApprovals.length > 0 ||
+        runtime.editingApprovalId ||
+        runtime.pendingApprovalConfirmation ? (
+          <ApprovalPanel
+            approvals={runtime.openApprovals}
+            audit={runtime.approvalAudit}
+            sessionGrants={runtime.sessionApprovalGrants}
+            approvalRules={runtime.approvalRules}
+            editingApprovalId={runtime.editingApprovalId}
+            modificationDraft={runtime.approvalModificationDraft}
+            pendingConfirmation={runtime.pendingApprovalConfirmation}
+            confirmationText={runtime.approvalConfirmationText}
+            onDecision={runtime.requestApprovalDecision}
+            onStartModify={runtime.startApprovalModify}
+            onUpdateModification={runtime.setApprovalModificationDraft}
+            onSaveModify={runtime.saveApprovalModify}
+            onCancelModify={runtime.clearApprovalInteraction}
+            onUpdateConfirmation={runtime.setApprovalConfirmationText}
+            onConfirmDecision={runtime.confirmApprovalDecision}
+            onCancelConfirmation={runtime.clearApprovalInteraction}
+          />
+        ) : null}
         {runtime.knowledgeCitations.length > 0 ? (
           <CitationResults citations={runtime.knowledgeCitations} mode={runtime.knowledgeSearchMode} />
         ) : null}
@@ -211,6 +195,19 @@ export function App() {
         status={runtime.backendStatus}
         onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
         onSkip={runtime.dismissOnboarding}
+        onSubmitCredentials={(name, email) => {
+          setProfile((current) => ({
+            ...current,
+            name,
+            email,
+            photoInitials: name
+              .split(" ")
+              .map((n) => n[0])
+              .join("")
+              .toUpperCase()
+              .slice(0, 2)
+          }));
+        }}
       />
     );
   }
@@ -223,6 +220,7 @@ export function App() {
         workspaceName={workspaceName}
         utilityItems={utilityItems}
         activeItem={runtime.activeItem}
+        profile={profile}
         expandedCollections={expandedCollections}
         expandedProjects={expandedProjects}
         projects={projects}
@@ -230,6 +228,7 @@ export function App() {
         mobileNavOpen={runtime.mobileNavOpen}
         accountOpen={accountOpen}
         collapsed={sidebarCollapsed}
+        loadingItemIds={agent.state.running && runtime.activeItem ? [runtime.activeItem] : []}
         onNewChat={runtime.startNewChat}
         onAddProject={() => {
           runtime.setActiveItem("new-project");
@@ -285,16 +284,12 @@ export function App() {
         }}
       />
 
-      <section className="workspace" aria-label="Arden workspace">
+      <section className="workspace" aria-label="Fable workspace">
         {runtime.activePage ? (
           <div className="workspace-center workspace-center--page">{renderPage()}</div>
         ) : (
           <div className="workspace-center">
             <section className="hero" aria-labelledby="hero-title">
-              <div className="greeting">
-                <Sparkle size={25} weight="regular" />
-                <span>Good evening, Josh</span>
-              </div>
               <h1 id="hero-title">What are we building today in {workspaceName}?</h1>
             </section>
 
@@ -305,7 +300,7 @@ export function App() {
               onComposerChange={runtime.setComposerValue}
               onSubmit={(event) => {
                 // When a native-API backend is connected, the composer drives the
-                // Arden-owned agent loop; otherwise fall back to the workspace
+                // Fable-owned agent loop; otherwise fall back to the workspace
                 // knowledge-search submit.
                 const nativeConnected = runtime.backendProviders.find(
                   (provider) =>
@@ -358,6 +353,7 @@ export function App() {
                   : undefined
               }
               importStatus={runtime.importStatus}
+              inThread={!!runtime.activeThread}
             />
 
             {renderChatContext()}

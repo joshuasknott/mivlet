@@ -2,14 +2,14 @@
 
 Status: **Proposed** — pending user approval before implementation.
 Date: 2026-06-26
-Owner: Arden desktop
+Owner: Fable desktop
 
 ## 1. Objective (restated as deliverables)
 
-Add four agent-runtime AI backends to Arden — **Codex, Cursor, GitHub Copilot, Grok** —
+Add four agent-runtime AI backends to Fable — **Codex, Cursor, GitHub Copilot, Grok** —
 that reach users' *existing* subscriptions through each vendor's official
 transport (Codex app-server, ACP over stdio/JSON-RPC, Copilot SDK). Each backend
-owns its own sessions, streaming, approvals, and file-change events. Arden
+owns its own sessions, streaming, approvals, and file-change events. Fable
 **normalizes** them into its protocol and **routes every consequential action
 through the existing Rust approval system**.
 
@@ -32,9 +32,9 @@ and the three-path onboarding shell.
 7. Adapters declare capabilities **dynamically**; never fake a capability they
    lack — fail closed instead.
 8. Every tool call / file write / consequential action from any backend routes
-   through Arden's `ApprovalRequest` system, grants, rules, audit, and
+   through Fable's `ApprovalRequest` system, grants, rules, audit, and
    fail-closed high-risk confirmation. Backend-originated approvals are recorded
-   as audit entries, never used to bypass Arden's layer.
+   as audit entries, never used to bypass Fable's layer.
 9. Credentials in OS secure storage; until wired, the local-store boundary is
    flagged pre-release. **Never log, snapshot, or persist tokens into
    `RuntimeSnapshot`.**
@@ -44,7 +44,7 @@ and the three-path onboarding shell.
 11. Onboarding: subscription path functional (Codex/Cursor/Copilot/Grok),
     API-key path shown pending, local-model path disabled-but-present. Gate on
     "Connect one AI backend to continue."
-12. Deferred (out of scope): native API keys + Arden-owned agent loop (next
+12. Deferred (out of scope): native API keys + Fable-owned agent loop (next
     goal), local models, enterprise backends, OpenCode, real OAuth for existing
     fixture connectors, voice/realtime, marketing/CI/release-signing.
 13. Green: `npm run check`, `cargo fmt --check`, `cargo check`, `cargo clippy`,
@@ -58,9 +58,9 @@ and the three-path onboarding shell.
 
 | Concern | Package | New modules | Pattern source |
 |---|---|---|---|
-| Capability/provider/auth types | `@arden/protocol` | (extend `index.ts`) | type-only, like `ConnectorManifest` |
-| Fixture/preview backend catalogs | `@arden/connectors` | `backends/fixtures.ts` | mirrors `fixtures.ts` |
-| Backend adapter logic (normalize + capability declaration + transport description) | `@arden/connectors` | `backends/codex.ts`, `backends/acp.ts`, `backends/copilot.ts`, `backends/registry.ts` | mirrors `local-files.ts`/`knowledge-search.ts` (pure logic, no network I/O at this stage) |
+| Capability/provider/auth types | `@fable/protocol` | (extend `index.ts`) | type-only, like `ConnectorManifest` |
+| Fixture/preview backend catalogs | `@fable/connectors` | `backends/fixtures.ts` | mirrors `fixtures.ts` |
+| Backend adapter logic (normalize + capability declaration + transport description) | `@fable/connectors` | `backends/codex.ts`, `backends/acp.ts`, `backends/copilot.ts`, `backends/registry.ts` | mirrors `local-files.ts`/`knowledge-search.ts` (pure logic, no network I/O at this stage) |
 | Credential boundary + auth-state storage | Rust runtime | `backends.rs` (models + commands) + `paths.rs` entry | mirrors `approvals.rs` + `paths.rs` |
 | Frontend runtime bridge (Tauri invoke w/ fallback) | `apps/desktop/src` | extend `runtime.ts`; new `lib/backend-capabilities.ts` | mirrors existing `runtime.ts` guards |
 | Onboarding shell UI | `apps/desktop/src/components` | `pages/OnboardingPage.tsx` (+ route) | mirrors `pages/PluginsPage.tsx` |
@@ -78,7 +78,7 @@ export type BackendCapability =
   | "authentication"      // can reach a logged-in account
   | "threads"             // session/thread lifecycle
   | "streaming"           // token streaming
-  | "tool-requests"       // requests tool execution from Arden
+  | "tool-requests"       // requests tool execution from Fable
   | "approvals"           // surfaces its own approval events
   | "file-changes"        // emits file change events
   | "usage-cost"          // reports usage/cost
@@ -143,9 +143,9 @@ into the same approval queue the UI already renders. Resolution flows through
 `resolve_approval_request` → audit + grant as today.
 
 When a backend *already* approved something internally (e.g. Cursor's own
-approval), Arden records it as an **audit entry** (`record_approval_decision`
+approval), Fable records it as an **audit entry** (`record_approval_decision`
 with `decision: "once"` and a note naming the backend) — it does **not** skip
-Arden's layer for subsequent new actions.
+Fable's layer for subsequent new actions.
 
 ### 2.5 Compliance invariants (enforced, not just documented)
 
@@ -157,7 +157,7 @@ Arden's layer for subsequent new actions.
 
 ## 3. Adapter designs
 
-Each adapter is a **pure module** in `@arden/connectors/backends/` that (a)
+Each adapter is a **pure module** in `@fable/connectors/backends/` that (a)
 declares its `BackendType` and transport description, (b) resolves capabilities
 for a given auth state, (c) provides fixture/preview catalogs. No live network
 I/O this goal — transport is described but not spawned, keeping checks green
@@ -222,7 +222,7 @@ allows reaching the workspace in fixture/preview mode for testing outside Tauri.
 
 ## 6. Non-goals / deferred
 
-Native API keys + Arden-owned agent loop (next goal), local models, enterprise
+Native API keys + Fable-owned agent loop (next goal), local models, enterprise
 backends, OpenCode, real OAuth for existing fixture connectors, voice/realtime,
 marketing/CI/release-signing, and **live transport** (spawning CLIs / opening
 app-server sockets) which is deferred to the agent-loop goal.

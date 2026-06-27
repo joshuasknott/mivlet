@@ -2,7 +2,7 @@
  * Per-provider list pricing (USD per 1M tokens) for usage/cost accounting.
  *
  * These are conservative public list rates used only for the user's own cost
- * display — Arden does not bill through these rates. Unknown providers fail-safe
+ * display — Fable does not bill through these rates. Unknown providers fail-safe
  * to 0 (never a negative or invented cost).
  */
 

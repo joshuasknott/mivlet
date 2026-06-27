@@ -1,4 +1,4 @@
-import type { ConnectorSearchItem } from "@arden/protocol";
+import type { ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   shapeConnectorSearchRequest,
@@ -21,7 +21,7 @@ export function normalizeNotionItem(payload: NotionPayload): ConnectorSearchItem
     connectorId: "notion",
     title: payload.title,
     kind: payload.object,
-    summary: `${payload.object} shared with the Arden connection`,
+    summary: `${payload.object} shared with the Fable connection`,
     provenance: `Notion · ${payload.workspace}`,
     freshness: payload.lastEditedTime ?? "Provider freshness unavailable",
     trust: "untrusted",

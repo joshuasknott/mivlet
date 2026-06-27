@@ -46,18 +46,18 @@ describe("first-wave connector registry", () => {
 });
 
 describe("provider normalizers", () => {
-  it("normalizes provider payloads into untrusted Arden search items", () => {
+  it("normalizes provider payloads into untrusted Fable search items", () => {
     const items = [
       normalizeGitHubItem({
         id: 1,
         kind: "repository",
-        name: "arden",
-        repository: "acme/arden"
+        name: "fable",
+        repository: "acme/fable"
       }),
       normalizeVercelItem({
         id: "deployment-1",
         kind: "deployment",
-        name: "arden-preview",
+        name: "fable-preview",
         team: "Acme",
         state: "READY"
       }),
@@ -167,7 +167,7 @@ describe("provider normalizers", () => {
       item: normalizeVercelItem({
         id: "project-1",
         kind: "project",
-        name: "Arden",
+        name: "Fable",
         team: "Acme"
       }),
       importedAt: "2026-06-27T10:00:00.000Z"

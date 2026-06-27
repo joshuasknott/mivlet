@@ -14,7 +14,7 @@
  * agent-loop goal.
  */
 
-import type { BackendProvider } from "@arden/protocol";
+import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
 import { copilotFixtures, type CopilotAuthMode } from "./fixtures";
 

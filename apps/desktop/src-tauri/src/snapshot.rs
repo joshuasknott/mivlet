@@ -117,14 +117,14 @@ pub(crate) fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFi
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Arden could not read imported knowledge sources.".to_string())?;
+        .map_err(|_| "Fable could not read imported knowledge sources.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     serde_json::from_str::<Vec<LocalFileImport>>(&contents)
-        .map_err(|_| "Arden could not parse imported knowledge sources.".to_string())
+        .map_err(|_| "Fable could not parse imported knowledge sources.".to_string())
 }
 
 fn append_imported_knowledge_source(
@@ -142,10 +142,10 @@ fn write_imported_knowledge_sources(
     sources: &[LocalFileImport],
 ) -> Result<(), String> {
     let encoded = serde_json::to_string_pretty(sources)
-        .map_err(|_| "Arden could not encode imported knowledge sources.".to_string())?;
+        .map_err(|_| "Fable could not encode imported knowledge sources.".to_string())?;
 
     fs::write(path, encoded)
-        .map_err(|_| "Arden could not save imported knowledge sources.".to_string())
+        .map_err(|_| "Fable could not save imported knowledge sources.".to_string())
 }
 
 pub(crate) fn persist_imported_knowledge_source(
@@ -312,14 +312,14 @@ pub(crate) fn read_runtime_snapshot(path: &Path) -> Result<Option<RuntimeSnapsho
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Arden could not read runtime snapshot.".to_string())?;
+        .map_err(|_| "Fable could not read runtime snapshot.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(None);
     }
 
     let parsed = serde_json::from_str::<RuntimeSnapshot>(&contents)
-        .map_err(|_| "Arden could not parse runtime snapshot.".to_string())?;
+        .map_err(|_| "Fable could not parse runtime snapshot.".to_string())?;
 
     normalize_runtime_snapshot(parsed).map(Some)
 }
@@ -330,9 +330,9 @@ pub(crate) fn write_runtime_snapshot(
 ) -> Result<RuntimeSnapshot, String> {
     let normalized = normalize_runtime_snapshot(snapshot)?;
     let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Arden could not encode runtime snapshot.".to_string())?;
+        .map_err(|_| "Fable could not encode runtime snapshot.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Arden could not save runtime snapshot.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Fable could not save runtime snapshot.".to_string())?;
 
     Ok(normalized)
 }

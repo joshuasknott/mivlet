@@ -20,8 +20,8 @@
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
     "baseUrl": ".",
     "paths": {
-      "@arden/protocol": ["../../packages/protocol/src/index.ts"],
-      "@arden/connectors": ["../../packages/connectors/src/index.ts"]
+      "@fable/protocol": ["../../packages/protocol/src/index.ts"],
+      "@fable/connectors": ["../../packages/connectors/src/index.ts"]
     }
   },
   "include": ["src", "../../packages/protocol/src", "../../packages/connectors/src"]

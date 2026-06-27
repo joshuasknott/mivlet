@@ -4,7 +4,7 @@ import type {
   ApprovalDecision,
   ApprovalGrant,
   ApprovalRequest
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { SectionHeading } from "./primitives";
 import type {
   ApprovalModificationDraft,

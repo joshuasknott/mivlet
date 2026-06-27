@@ -9,35 +9,53 @@
   flex-direction: column;
   min-height: 100%;
   padding: 20px 22px 18px;
-  color: #263033;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(228, 232, 243, 0.68)),
-    rgba(235, 238, 246, 0.8);
-  border-right: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 0 26px 26px 0;
-  box-shadow:
-    1px 0 0 rgba(212, 217, 232, 0.6),
-    24px 0 80px rgba(58, 72, 72, 0.08);
-  backdrop-filter: blur(28px) saturate(1.16);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.36);
+  border-right: 1px solid var(--line);
+  border-radius: 0 var(--radius-3) var(--radius-3) 0;
+  box-shadow: var(--shadow-2);
+  backdrop-filter: var(--glass-filter);
 }
 
 .sidebar-header {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
-  margin: 0 2px 12px;
+  margin: 0 2px 14px;
 }
 
-.sidebar-brand {
-  overflow: hidden;
-  color: #263033;
-  font-size: 17px;
-  font-weight: 560;
-  letter-spacing: 0;
+.sidebar-brand-row,
+.sidebar-brand-lockup {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-brand-row {
+  min-height: 48px;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sidebar-brand-lockup {
+  min-width: 0;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
   line-height: 1;
-  text-transform: lowercase;
+}
+
+.sidebar-brand-lockup .brand-lockup {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.sidebar-brand-lockup .brand-mark {
+  display: block;
+  width: 42px;
+  height: 42px;
 }
 
 .sidebar-minimize {
@@ -46,21 +64,16 @@
   height: 32px;
   place-items: center;
   padding: 0;
-  color: #66767a;
+  color: var(--ink-muted);
   background: transparent;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-1);
 }
 
 .sidebar-minimize:hover,
 .sidebar-minimize:focus-visible {
-  color: #4549ad;
-  background: rgba(255, 255, 255, 0.5);
-}
-
-.workspace-scope {
-  display: block;
-  margin: 0 0 12px;
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
 }
 
 .workspace-switcher {
@@ -71,18 +84,18 @@
   min-height: 42px;
   gap: 9px;
   padding: 5px 10px 5px 7px;
-  color: #273032;
-  background: rgba(255, 255, 255, 0.44);
-  border: 1px solid rgba(96, 111, 116, 0.14);
-  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
   box-shadow: none;
   text-align: left;
 }
 
 .workspace-switcher:hover,
 .workspace-switcher:focus-visible {
-  background: rgba(255, 255, 255, 0.62);
-  border-color: rgba(96, 111, 116, 0.24);
+  background: var(--surface-hover);
+  border-color: var(--accent-line);
 }
 
 .workspace-switcher__icon {
@@ -90,31 +103,23 @@
   width: 30px;
   height: 30px;
   place-items: center;
-  color: #454968;
-  background: rgba(91, 95, 199, 0.08);
-  border-radius: 9px;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-radius: var(--radius-1);
 }
 
-.workspace-switcher__copy {
-  display: grid;
+.workspace-switcher__name {
   min-width: 0;
-  gap: 1px;
-}
-
-.workspace-switcher__copy span {
-  color: #6b7679;
-  font-size: 11px;
-  line-height: 1.1;
-}
-
-.workspace-switcher__copy strong {
   overflow: hidden;
-  color: #232b2d;
-  font-size: 13px;
-  font-weight: 560;
-  line-height: 1.15;
+  color: var(--ink);
+  font-size: var(--text-13);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workspace-switcher__caret {
+  color: var(--ink-soft);
 }
 
 .mobile-nav-toggle,
@@ -447,19 +452,19 @@
 
 .sidebar-footer {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px;
-  align-items: end;
-  gap: 6px;
   margin-top: 12px;
   padding-top: 14px;
   border-top: 1px solid rgba(118, 136, 136, 0.18);
 }
 
 .mobile-connection-card {
+  position: absolute;
+  right: 8px;
+  bottom: 0;
+  z-index: 2;
   display: grid;
   width: 48px;
-  min-height: 54px;
+  height: 54px;
   place-items: center;
   padding: 0;
   color: #334145;
@@ -480,7 +485,7 @@
 
 .account-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) 48px;
   align-items: center;
   width: 100%;
   gap: 11px;

@@ -6,13 +6,13 @@
 ## Goal
 
 Build the native model API adapter family (OpenAI, Anthropic, Gemini API+Vertex,
-xAI, OpenRouter) where **Arden owns the entire agent loop**, extending — not
+xAI, OpenRouter) where **Fable owns the entire agent loop**, extending — not
 rebuilding — the prior goal's `BackendProvider`/capability surface, credential
 boundary, approval routing, and onboarding shell.
 
 ## Architecture (one paragraph)
 
-TypeScript (`@arden/connectors/native-api/`) owns **shaping + the loop** as pure,
+TypeScript (`@fable/connectors/native-api/`) owns **shaping + the loop** as pure,
 fixture-testable logic behind an injectable `HttpTransport` seam. Rust owns
 **key lookup + HTTP/SSE egress + real cancellation** via a new
 `stream_backend_completion` / `cancel_backend_completion` command pair that emits
@@ -20,14 +20,14 @@ normalized `BackendAgentEvent`s over a Tauri event channel. The key is added as
 an `Authorization`/`x-api-key`/`x-goog-api-key` header inside Rust; TS never sees
 it. One shared OpenAI-compatible client covers OpenAI/OpenRouter/xAI; Anthropic
 Messages and Gemini get provider-specific shaping behind the shared interface.
-Tool calls route through the existing `ApprovalRequest` system before Arden
+Tool calls route through the existing `ApprovalRequest` system before Fable
 executes them; unregistered tools fail closed.
 
 ## Tech
 
-- `@arden/protocol` — extend `BackendType`, `BackendAuthState`, vocab; add
+- `@fable/protocol` — extend `BackendType`, `BackendAuthState`, vocab; add
   `BackendAgentEvent`, `NativeCompletionRequest` request/event types.
-- `@arden/connectors` — `native-api/` modules: `openai-compat.ts`,
+- `@fable/connectors` — `native-api/` modules: `openai-compat.ts`,
   `anthropic.ts`, `gemini.ts`, `registry.ts`, `agent-loop.ts`, `transport.ts`,
   `tools.ts`, `pricing.ts`, recorded fixtures. Pure, vitest-only.
 - Rust (`src-tauri/src/`) — `native_api.rs` (key+egress+cancel), extend

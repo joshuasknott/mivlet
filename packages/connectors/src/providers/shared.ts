@@ -11,7 +11,7 @@ import type {
   ConnectorSearchResult,
   FirstWaveConnectorId,
   KnowledgeSource
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { connectorSearchFixtures } from "../fixtures";
 
 const DEFAULT_LIMIT = 20;

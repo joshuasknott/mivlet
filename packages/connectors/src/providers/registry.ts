@@ -5,7 +5,7 @@ import type {
   ConnectorManifest,
   ConnectorSearchRequest,
   FirstWaveConnectorId
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { connectorFixtures } from "../fixtures";
 import { prepareGitHubComment, prepareGitHubDraftPullRequest } from "./github";
 import { prepareGmailDraft, prepareGmailSend } from "./gmail";
@@ -52,14 +52,14 @@ export function prepareFixtureConnectorAction(
   switch (action) {
     case "github.draft-pull-request":
       return prepareGitHubDraftPullRequest({
-        repository: payload.repository ?? payload.targetId ?? "acme/arden",
+        repository: payload.repository ?? payload.targetId ?? "acme/fable",
         head: payload.head ?? "connector-wave",
         base: payload.base ?? "main",
         title: payload.title ?? "Connector wave"
       });
     case "github.comment":
       return prepareGitHubComment({
-        repository: payload.repository ?? "acme/arden",
+        repository: payload.repository ?? "acme/fable",
         targetId: payload.targetId ?? "fixture-issue",
         body: payload.body ?? "Prepared connector review comment."
       });

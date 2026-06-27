@@ -1,5 +1,5 @@
 /*
- * Arden desktop styles — index.
+ * Fable desktop styles — index.
  *
  * The visual design is split into focused layers under src/styles/. This file
  * imports them in the same cascade order the original monolithic styles.css
@@ -23,4 +23,5 @@
 @import "./styles/directives.css";
 @import "./styles/panels.css";
 @import "./styles/pages.css";
+@import "./styles/controls.css";
 @import "./styles/responsive.css";

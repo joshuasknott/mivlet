@@ -8,10 +8,10 @@ pub fn app_data_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<Pat
     let app_data_dir = app
         .path()
         .app_data_dir()
-        .map_err(|_| "Arden could not resolve the app data folder.".to_string())?;
+        .map_err(|_| "Fable could not resolve the app data folder.".to_string())?;
 
     fs::create_dir_all(&app_data_dir)
-        .map_err(|_| "Arden could not prepare the app data folder.".to_string())?;
+        .map_err(|_| "Fable could not prepare the app data folder.".to_string())?;
 
     Ok(app_data_dir.join(file_name))
 }

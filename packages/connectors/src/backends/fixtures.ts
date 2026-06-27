@@ -101,7 +101,7 @@ export interface NativeFixture {
 }
 
 /**
- * Native API provider catalogs — the providers Arden reaches directly over
+ * Native API provider catalogs — the providers Fable reaches directly over
  * HTTP/SSE, owning the entire agent loop. Compliance baked into copy:
  *   - Anthropic: API key / Vertex / Bedrock only — no Claude.ai subscription
  *     (Anthropic blocks third-party Claude.ai login without approval).
@@ -114,7 +114,7 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "openai",
     label: "OpenAI",
     description:
-      "Reach GPT models directly with an OpenAI API key. Arden owns the agent loop, tool dispatch, and approvals.",
+      "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
     authLabel: "OpenAI API key",
     models: [
       { id: "gpt-5", label: "GPT-5" },
@@ -126,7 +126,7 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "anthropic",
     label: "Anthropic",
     description:
-      "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Arden owns the agent loop.",
+      "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
     authLabel: "Anthropic API key / Vertex / Bedrock",
     models: [
       { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
@@ -137,7 +137,7 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "gemini",
     label: "Google Gemini",
     description:
-      "Reach Gemini via a Google AI API key or Vertex AI. Arden owns the agent loop.",
+      "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
     authLabel: "Google AI API key / Vertex AI",
     models: [
       { id: "gemini-2-pro", label: "Gemini 2 Pro" },
@@ -148,7 +148,7 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "xai",
     label: "xAI",
     description:
-      "Reach Grok models directly with an xAI API key. Arden owns the agent loop, tool dispatch, and approvals.",
+      "Reach Grok models directly with an xAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
     authLabel: "xAI API key",
     models: [{ id: "grok-4", label: "Grok 4" }]
   },
@@ -156,7 +156,7 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "openrouter",
     label: "OpenRouter",
     description:
-      "Reach many models through OpenRouter with an OpenRouter API key. Arden owns the agent loop.",
+      "Reach many models through OpenRouter with an OpenRouter API key. Fable owns the agent loop.",
     authLabel: "OpenRouter API key",
     models: [
       { id: "openrouter:auto", label: "OpenRouter Auto" },

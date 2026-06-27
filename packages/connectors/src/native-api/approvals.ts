@@ -1,15 +1,15 @@
 /**
- * Shape a model tool call into an ApprovalRequest that routes through Arden's
+ * Shape a model tool call into an ApprovalRequest that routes through Fable's
  * existing approval queue before execution. Model-generated tool output is
  * untrusted content crossing into trusted action — the approval gate applies
  * before any tool runs.
  *
- * Unregistered tools (anything not in Arden's tool registry) fail closed:
+ * Unregistered tools (anything not in Fable's tool registry) fail closed:
  * critical risk, consequence names the refusal, and the loop never executes
  * them.
  */
 
-import type { ApprovalRequest } from "@arden/protocol";
+import type { ApprovalRequest } from "@fable/protocol";
 import { lookupTool } from "./tools";
 
 function safeParseArgs(args: string): Record<string, unknown> {
@@ -43,7 +43,7 @@ export function buildToolApproval(
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
   const consequence = isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
-    : `Refuse unregistered tool ${toolName} — not in Arden's tool registry.`;
+    : `Refuse unregistered tool ${toolName} — not in Fable's tool registry.`;
 
   const slug = `${providerId}-${actionCore}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 

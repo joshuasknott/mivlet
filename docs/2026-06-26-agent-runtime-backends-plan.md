@@ -10,7 +10,7 @@ errors surface early. Final gate runs the full check suite + cargo gates.
   `BackendConsequentialEvent`, and `BackendEventAudit`.
 - Extend `ConnectorManifest` with optional `backend?: BackendProvider`.
 - Extend `RuntimeSnapshot` with `connectedBackendIds: string[]` (ids only — no secrets).
-- `pnpm --filter @arden/protocol build`.
+- `pnpm --filter @fable/protocol build`.
 
 ## Phase 2 — Connectors backends (logic/data split, `packages/connectors/src/backends/`)
 - `types.ts` — internal adapter types (re-exports protocol where possible).
@@ -22,7 +22,7 @@ errors surface early. Final gate runs the full check suite + cargo gates.
 - `registry.ts` — `listBackendProviders(): BackendProvider[]` merging logic + fixtures.
 - `registry.test.ts` — fail-closed, install prompt, Grok entitlement invariant, no Claude/Gemini.
 - Re-export from `packages/connectors/src/index.ts`.
-- `pnpm --filter @arden/connectors build && pnpm --filter @arden/connectors test`.
+- `pnpm --filter @fable/connectors build && pnpm --filter @fable/connectors test`.
 
 ## Phase 3 — Rust backend module (`apps/desktop/src-tauri/src/`)
 - `models.rs`: `BackendProvider` (serde), `BackendCredentialRequest`, `BackendEventAudit`,

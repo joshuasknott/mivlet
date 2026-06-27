@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@arden/protocol";
+import type { NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { parseOpenAiLine, shapeOpenAiRequest, streamOpenAiEvents } from "./openai-compat";

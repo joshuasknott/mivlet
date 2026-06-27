@@ -15,7 +15,7 @@
  * described, not opened. Activating it is deferred to the agent-loop goal.
  */
 
-import type { BackendProvider } from "@arden/protocol";
+import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
 import { codexFixtures, type CodexFixture } from "./fixtures";
 

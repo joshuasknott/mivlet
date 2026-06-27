@@ -1,5 +1,5 @@
 /**
- * Preview/demo fixture catalogs for the Arden connectors package.
+ * Preview/demo fixture catalogs for the Fable connectors package.
  *
  * These are static, fixture-only catalogs used to render the workspace before
  * real OAuth-backed connectors are wired up. They contain no credentials, live
@@ -16,7 +16,7 @@ import type {
   ProjectWorkspace,
   ThreadSummary,
   WorkspaceDirective
-} from "@arden/protocol";
+} from "@fable/protocol";
 
 export const connectorFixtures = [
   {
@@ -54,7 +54,7 @@ export const connectorFixtures = [
       summary: "Fixture adapter only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Register a GitHub App and configure the Arden auth broker.",
+    setupMessage: "Register a GitHub App and configure the Fable auth broker.",
     supportsSearch: true,
     supportsImport: true,
     supportedActions: ["github.draft-pull-request", "github.comment"]
@@ -210,15 +210,15 @@ export const connectorFixtures = [
 export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSearchItem[]> = {
   github: [
     {
-      id: "github-repo-arden",
+      id: "github-repo-fable",
       connectorId: "github",
-      title: "arden",
+      title: "fable",
       kind: "repository",
       summary: "Desktop workspace repository with connector and approval foundations.",
-      provenance: "GitHub fixture · acme/arden",
+      provenance: "GitHub fixture · acme/fable",
       freshness: "Fixture updated 2026-06-27",
       trust: "untrusted",
-      contentPreview: "README: Arden is a local-first AI workspace for real work.",
+      contentPreview: "README: Fable is a local-first AI workspace for real work.",
       providerMetadata: { owner: "acme", defaultBranch: "main", visibility: "private" }
     },
     {
@@ -227,17 +227,17 @@ export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSear
       title: "PR #42 · Add connector foundations",
       kind: "pull-request",
       summary: "Synthetic draft pull request used to verify read and approval boundaries.",
-      provenance: "GitHub fixture · acme/arden",
+      provenance: "GitHub fixture · acme/fable",
       freshness: "Fixture updated 2026-06-27",
       trust: "untrusted",
-      providerMetadata: { repository: "acme/arden", number: "42", state: "draft" }
+      providerMetadata: { repository: "acme/fable", number: "42", state: "draft" }
     }
   ],
   vercel: [
     {
-      id: "vercel-project-arden",
+      id: "vercel-project-fable",
       connectorId: "vercel",
-      title: "arden-web",
+      title: "fable-web",
       kind: "project",
       summary: "Synthetic Vercel project with preview and production deployments.",
       provenance: "Vercel fixture · Acme team",
@@ -248,13 +248,13 @@ export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSear
     {
       id: "vercel-deployment-preview",
       connectorId: "vercel",
-      title: "arden-web-preview",
+      title: "fable-web-preview",
       kind: "deployment",
       summary: "Ready preview deployment for connector UI verification.",
-      provenance: "Vercel fixture · arden-web",
+      provenance: "Vercel fixture · fable-web",
       freshness: "Fixture updated 2026-06-27",
       trust: "untrusted",
-      url: "https://example.invalid/arden-preview",
+      url: "https://example.invalid/fable-preview",
       providerMetadata: { environment: "preview", state: "READY", commitRef: "connector-wave" }
     }
   ],
@@ -278,7 +278,7 @@ export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSear
       connectorId: "notion",
       title: "Connector rollout plan",
       kind: "page",
-      summary: "Synthetic page shared with the Arden fixture connection.",
+      summary: "Synthetic page shared with the Fable fixture connection.",
       provenance: "Notion fixture · selected page",
       freshness: "Fixture updated 2026-06-27",
       trust: "untrusted",
@@ -330,187 +330,12 @@ export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSear
   ]
 };
 
-export const directiveFixtures = [
-  {
-    id: "codex-launch-plan",
-    label: "Turn Codex notes into a launch plan",
-    source: "From OpenAI Codex Manual + PRD",
-    prompt:
-      "Turn the Codex notes and PRD into a launch plan with milestones, risks, owner decisions, and the next three implementation steps.",
-    connectorIds: ["local-files", "github"]
-  },
-  {
-    id: "review-draft-pr",
-    label: "Review the draft PR before GitHub publish",
-    source: "josh-arden / feature-memory",
-    prompt:
-      "Review the draft PR for the feature-memory branch before publishing. Check screenshots, tests, secrets, and remaining work.",
-    connectorIds: ["github"]
-  },
-  {
-    id: "market-research",
-    label: "Summarize market-research.pdf into decisions",
-    source: "Added 2 days ago",
-    prompt:
-      "Summarize market-research.pdf into product decisions, unresolved assumptions, and citations I should keep attached to this workspace.",
-    connectorIds: ["local-files"]
-  },
-  {
-    id: "weekly-digest",
-    label: "Schedule a weekly workspace digest",
-    source: "Uses Memory + Automations",
-    prompt:
-      "Schedule a weekly workspace digest that summarizes active projects, new memory, connector issues, approvals, and next actions.",
-    connectorIds: ["local-files", "vercel"]
-  }
-] satisfies WorkspaceDirective[];
+export const directiveFixtures: WorkspaceDirective[] = [];
 
-export const chatThreadFixtures = [
-  {
-    id: "daily-catchup",
-    title: "Daily catch-up",
-    kind: "chat",
-    description: "A loose workspace thread for non-project updates, reminders, and follow-through.",
-    updatedAt: "Today",
-    pinnedContextIds: ["concise-updates"]
-  },
-  {
-    id: "market-notes",
-    title: "Market research notes",
-    kind: "chat",
-    description: "Notes and citations that are not yet attached to a project.",
-    updatedAt: "Yesterday",
-    pinnedContextIds: ["market-research-pdf"]
-  },
-  {
-    id: "voice-drafts",
-    title: "Voice drafts",
-    kind: "chat",
-    description: "Captured dictation and follow-up prompts from voice sessions.",
-    updatedAt: "2d ago",
-    pinnedContextIds: []
-  }
-] satisfies ThreadSummary[];
+export const chatThreadFixtures: ThreadSummary[] = [];
 
-export const projectFixtures = [
-  {
-    id: "arden",
-    title: "Arden desktop",
-    description: "Initial desktop workspace, memory, approvals, and connector foundations.",
-    threads: [
-      {
-        id: "arden-initial-build",
-        title: "Initial build",
-        kind: "project",
-        description: "Selected visual direction, shell implementation, checks, and desktop packaging.",
-        updatedAt: "Active",
-        pinnedContextIds: ["prd", "codex-manual", "selected-concept"]
-      },
-      {
-        id: "arden-memory",
-        title: "Memory and approvals",
-        kind: "project",
-        description: "Durable memory controls, consequence-aware approvals, and audit history.",
-        updatedAt: "Today",
-        pinnedContextIds: ["concise-updates", "github-draft-pr"]
-      }
-    ]
-  },
-  {
-    id: "site",
-    title: "Marketing site",
-    description: "Arden positioning, security narrative, demos, downloads, and docs.",
-    threads: [
-      {
-        id: "site-positioning",
-        title: "Positioning",
-        kind: "project",
-        description: "Homepage story, use cases, and brand voice.",
-        updatedAt: "Queued",
-        pinnedContextIds: []
-      },
-      {
-        id: "site-security",
-        title: "Security page",
-        kind: "project",
-        description: "Permissions, local-first privacy, approvals, and connector trust model.",
-        updatedAt: "Queued",
-        pinnedContextIds: ["threat-model"]
-      }
-    ]
-  }
-] satisfies ProjectWorkspace[];
+export const projectFixtures: ProjectWorkspace[] = [];
 
-export const knowledgeSourceFixtures = [
-  {
-    id: "prd",
-    title: "Arden product brief",
-    kind: "document",
-    connectorId: "local-files",
-    provenance: "Goal objective file",
-    freshness: "Read this session",
-    pinned: true,
-    trust: "trusted",
-    origin: "fixture"
-  },
-  {
-    id: "selected-concept",
-    title: "Selected visual direction",
-    kind: "document",
-    connectorId: "local-files",
-    provenance: "Product Design mockup",
-    freshness: "Updated today",
-    pinned: true,
-    trust: "trusted",
-    origin: "fixture"
-  },
-  {
-    id: "codex-manual",
-    title: "OpenAI Codex Manual",
-    kind: "web",
-    connectorId: "local-files",
-    provenance: "Research source",
-    freshness: "Fixture",
-    pinned: false,
-    trust: "trusted",
-    origin: "fixture"
-  },
-  {
-    id: "market-research-pdf",
-    title: "market-research.pdf",
-    kind: "document",
-    connectorId: "local-files",
-    provenance: "Imported source fixture",
-    freshness: "Added 2 days ago",
-    pinned: false,
-    trust: "untrusted",
-    origin: "fixture"
-  }
-] satisfies KnowledgeSource[];
+export const knowledgeSourceFixtures: KnowledgeSource[] = [];
 
-export const automationFixtures = [
-  {
-    id: "weekly-digest",
-    title: "Weekly workspace digest",
-    trigger: "Every Friday morning",
-    destination: "Josh chat",
-    status: "draft",
-    requiresApproval: true
-  },
-  {
-    id: "stale-approval-nudge",
-    title: "Nudge stale approvals",
-    trigger: "When an approval waits 24 hours",
-    destination: "Notifications",
-    status: "active",
-    requiresApproval: false
-  },
-  {
-    id: "connector-health",
-    title: "Connector health check",
-    trigger: "Daily when Arden opens",
-    destination: "Knowledge log",
-    status: "active",
-    requiresApproval: false
-  }
-] satisfies AutomationRule[];
+export const automationFixtures: AutomationRule[] = [];

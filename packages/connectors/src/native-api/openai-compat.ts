@@ -9,7 +9,7 @@
  * key is added as a Bearer header inside Rust only.
  */
 
-import type { BackendAgentEvent, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";

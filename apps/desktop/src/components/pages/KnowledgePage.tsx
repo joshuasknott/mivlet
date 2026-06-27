@@ -2,8 +2,8 @@ import { Stack } from "@phosphor-icons/react";
 import { PageHeader } from "../PageHeader";
 
 /**
- * Standalone Knowledge page placeholder while the full source and memory
- * workspace is being rebuilt.
+ * Standalone Knowledge page. Intentionally blank while the source and memory
+ * workspace is being rebuilt — no mock sources or memory are rendered here.
  */
 export function KnowledgePage() {
   return (
@@ -11,11 +11,10 @@ export function KnowledgePage() {
       <PageHeader
         icon={Stack}
         title="Knowledge"
-        description="Coming soon."
-        meta="Coming soon"
+        description="Sources and memory you pin to your workspace will live here."
       />
-      <section className="coming-soon-panel" aria-label="Knowledge coming soon">
-        <p>Coming soon</p>
+      <section className="empty-state" aria-label="Knowledge is empty">
+        <p>Nothing here yet.</p>
       </section>
     </>
   );

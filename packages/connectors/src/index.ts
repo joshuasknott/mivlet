@@ -1,5 +1,5 @@
 /**
- * Public barrel for the @arden/connectors package.
+ * Public barrel for the @fable/connectors package.
  *
  * Re-exports two concerns kept in separate modules:
  *   - logic: local-file import + lexical knowledge search (local-files.ts,
@@ -7,7 +7,7 @@
  *   - data: fixture-only connector/directive/thread/project/knowledge/automation
  *     catalogs (fixtures.ts)
  *
- * The desktop shell imports these via @arden/connectors; this surface is the
+ * The desktop shell imports these via @fable/connectors; this surface is the
  * package's public protocol and must stay stable.
  */
 

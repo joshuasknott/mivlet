@@ -1,4 +1,4 @@
-import type { ConnectorSearchItem } from "@arden/protocol";
+import type { ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   prepareConnectorAction,
@@ -55,7 +55,7 @@ export function prepareGoogleCalendarCreate(payload: {
     "google-calendar.create-draft",
     { ...payload, targetId: payload.calendarId },
     "medium",
-    "Creates a calendar event after Arden approval."
+    "Creates a calendar event after Fable approval."
   );
 }
 
@@ -72,7 +72,7 @@ export function prepareGoogleCalendarUpdate(payload: {
     "google-calendar.update-draft",
     { ...payload, targetId: payload.eventId },
     "medium",
-    "Updates the selected calendar event after Arden approval."
+    "Updates the selected calendar event after Fable approval."
   );
 }
 

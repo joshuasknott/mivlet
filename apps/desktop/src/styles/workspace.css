@@ -5,20 +5,18 @@
 
 .workspace {
   position: relative;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 78% 12%, rgba(255, 255, 255, 0.92), transparent 28%),
-    radial-gradient(circle at 32% 0%, rgba(220, 229, 227, 0.72), transparent 26%),
-    linear-gradient(180deg, #f8f7f2 0%, #eef1f1 100%);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--surface);
 }
 
 .workspace::before {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.28), transparent 34%),
-    radial-gradient(circle at 44% 34%, rgba(255, 255, 255, 0.42), transparent 24%);
+  background: transparent;
   content: "";
 }
 
@@ -32,8 +30,8 @@
   gap: 18px;
   height: 88px;
   padding: 0 62px;
-  background: linear-gradient(180deg, rgba(251, 247, 239, 0.96), rgba(251, 247, 239, 0.74));
-  backdrop-filter: blur(16px);
+  background: var(--surface-overlay);
+  backdrop-filter: var(--glass-filter);
 }
 
 .search-control {
@@ -43,15 +41,15 @@
   height: 44px;
   gap: 10px;
   padding: 0 13px;
-  color: #4c5054;
-  background: rgba(255, 255, 255, 0.42);
+  color: var(--ink-muted);
+  background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: var(--radius);
 }
 
 .search-control span {
   margin-right: auto;
-  font-size: 15px;
+  font-size: var(--text-14);
 }
 
 kbd {
@@ -59,9 +57,9 @@ kbd {
   align-items: center;
   height: 20px;
   padding: 0 6px;
-  color: #71767a;
-  background: rgba(20, 22, 23, 0.055);
-  border-radius: 5px;
+  color: var(--ink-muted);
+  background: var(--line);
+  border-radius: var(--radius-1);
   font-size: 12px;
   font-family: inherit;
 }
@@ -70,7 +68,7 @@ kbd {
 .mini-avatar {
   width: 44px;
   height: 44px;
-  color: #1d2022;
+  color: var(--ink);
   background: transparent;
   border: 0;
 }
@@ -85,13 +83,13 @@ kbd {
   right: 8px;
   width: 8px;
   height: 8px;
-  background: #6e936e;
+  background: var(--positive);
   border: 2px solid var(--canvas-warm);
-  border-radius: 50%;
+  border-radius: var(--radius-pill);
 }
 
 .mini-avatar {
-  background: rgba(20, 22, 23, 0.1);
+  background: var(--line-strong);
   font-weight: 600;
 }
 
@@ -99,7 +97,12 @@ kbd {
   position: relative;
   z-index: 1;
   width: min(100% - 80px, 900px);
-  margin: 226px auto 48px;
+  margin: auto auto;
+  padding: 48px 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: calc(100vh - 96px);
 }
 
 .hero {
@@ -112,21 +115,22 @@ kbd {
   justify-content: center;
   gap: 14px;
   color: var(--ink-muted);
-  font-size: 19px;
+  font-size: 14px;
+  font-weight: 500;
   line-height: 1.2;
 }
 
 .greeting svg {
-  color: #6f866f;
+  color: var(--accent);
 }
 
 .hero h1 {
   max-width: 940px;
   margin: 22px 0 0;
-  color: #1c1f20;
+  color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: clamp(42px, 3.8vw, 52px);
-  font-weight: 590;
+  font-size: clamp(var(--text-20), 2.4vw, var(--text-30));
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1.08;
   text-align: center;
@@ -135,7 +139,7 @@ kbd {
 .hero p {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 21px;
+  font-size: 16px;
   line-height: 1.4;
 }
 
@@ -153,51 +157,38 @@ kbd {
   height: 34px;
   gap: 8px;
   padding: 0 13px;
-  color: #2a3032;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px solid rgba(131, 146, 148, 0.22);
-  border-radius: 999px;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.78) inset,
-    0 8px 18px rgba(58, 72, 72, 0.045);
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
   font-size: 13px;
-  font-weight: 520;
+  font-weight: 500;
   line-height: 1;
 }
 
 .connector-pill:hover {
-  background: rgba(255, 255, 255, 0.82);
-  border-color: rgba(109, 128, 121, 0.3);
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-line);
 }
 
-.connector-pill--docs svg {
-  color: #4285f4;
+.connector-pill svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
 }
 
-.connector-pill--sheets svg {
-  color: #0f9d58;
+/* Brand tones only affect monochrome marks (github/vercel/notion). Multi-color
+   marks (drive/gmail/slack/calendar) carry their own fills. */
+.connector-pill--github svg {
+  color: var(--ink);
 }
 
-.connector-pill--slides svg {
-  color: #f4b400;
+.connector-pill--vercel svg {
+  color: var(--ink);
 }
 
-.connector-pill--drive svg {
-  color: #34a853;
-}
-
-.connector-pill--gmail svg {
-  color: #ea4335;
-}
-
-.connector-pill--calendar svg {
-  color: #4285f4;
-}
-
-.connector-pill--chat svg {
-  color: #00a884;
-}
-
-.connector-pill--tasks svg {
-  color: #5f8ded;
+.connector-pill--notion svg {
+  color: var(--ink);
 }

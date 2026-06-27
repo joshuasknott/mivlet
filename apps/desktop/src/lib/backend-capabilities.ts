@@ -7,8 +7,8 @@
  * operates on `BackendProvider.capabilities` (auth state + caps only).
  */
 
-import type { BackendCapability, BackendProvider } from "@arden/protocol";
-import { hasCapability } from "@arden/connectors";
+import type { BackendCapability, BackendProvider } from "@fable/protocol";
+import { hasCapability } from "@fable/connectors";
 
 /** True when the provider declares the requested capability. */
 export function providerHasCapability(

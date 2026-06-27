@@ -6,7 +6,7 @@ import type {
   MemoryControlState,
   MemoryPromotionRequest,
   MemoryRecord
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { toSlug } from "./helpers";
 
 /**
@@ -18,6 +18,8 @@ import { toSlug } from "./helpers";
 export function encodeMemoryExportFallback(state: MemoryControlState) {
   return JSON.stringify(
     {
+      // Compatibility contract: existing export consumers identify this exact
+      // format string, so the product rename must not silently break them.
       format: "arden.memory.export.v1",
       disabled: state.disabled,
       records: state.records
@@ -67,7 +69,7 @@ export function promoteKnowledgeSourceFallback(request: MemoryPromotionRequest) 
       requestId: `memory-promotion-${source.id}`,
       decision: request.decision,
       decidedAt: request.decidedAt,
-      note: `Arden Memory Approve ${source.provenance} into durable memory`
+      note: `Fable Memory Approve ${source.provenance} into durable memory`
     }
   };
 }

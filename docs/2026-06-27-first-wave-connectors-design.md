@@ -2,7 +2,7 @@
 
 ## Scope
 
-Arden's first connector wave is GitHub, Vercel, Google Drive, Notion, Gmail,
+Fable's first connector wave is GitHub, Vercel, Google Drive, Notion, Gmail,
 Slack, and Google Calendar. Local Files remains a separate, working native
 connector. This phase makes every first-wave provider visible and gives each a
 typed fixture adapter, honest setup/auth state, searchable preview data,
@@ -13,7 +13,7 @@ package. The Rust runtime owns the future credential and egress boundary.
 
 ## Connector interface
 
-`@arden/protocol` defines:
+`@fable/protocol` defines:
 
 - stable connector ids and auth states;
 - status, health, requested/granted permissions, account summary, and setup
@@ -22,7 +22,7 @@ package. The Rust runtime owns the future credential and egress boundary.
 - action risk plus the `ApprovalRequest` that must be resolved before a write,
   send, publish, delete, promote, create, or update operation can execute.
 
-`@arden/connectors` contains one pure module per provider. A module may
+`@fable/connectors` contains one pure module per provider. A module may
 normalize synthetic provider payloads, shape a request, classify an error, and
 prepare an approval-gated action. It must not read credentials or perform
 network calls.
@@ -36,18 +36,18 @@ the browser/preview adapter.
 
 | Provider | Intended mode | Initial permission boundary |
 | --- | --- | --- |
-| GitHub | GitHub App user authorization through an Arden auth broker | Read metadata, contents, branches, issues, and pull requests; draft PR/comment writes require approval |
-| Vercel | Connectable-account External Flow through an Arden auth broker | Read projects/deployments; promote and rollback require approval |
+| GitHub | GitHub App user authorization through an Fable auth broker | Read metadata, contents, branches, issues, and pull requests; draft PR/comment writes require approval |
+| Vercel | Connectable-account External Flow through an Fable auth broker | Read projects/deployments; promote and rollback require approval |
 | Google Drive | Installed desktop OAuth with PKCE and loopback redirect | `drive.file` with an explicit picker; import selected files only |
-| Notion | Public connection OAuth through an Arden auth broker | Read content capability on user-selected pages/workspaces |
+| Notion | Public connection OAuth through an Fable auth broker | Read content capability on user-selected pages/workspaces |
 | Gmail | Installed desktop OAuth with PKCE and loopback redirect | `gmail.readonly`; `gmail.compose` is optional and only used for approval-gated drafts |
-| Slack | OAuth v2 through an Arden auth broker | Read only installed/selected conversations; `chat:write` is optional and approval-gated |
+| Slack | OAuth v2 through an Fable auth broker | Read only installed/selected conversations; `chat:write` is optional and approval-gated |
 | Google Calendar | Installed desktop OAuth with PKCE and loopback redirect | Read calendar list/events; event-write scope is optional and approval-gated |
 
 Google documents desktop clients as public clients that cannot keep a client
 secret and recommends PKCE with a loopback listener. Refresh tokens must be
 stored in OS secure storage. GitHub App, Vercel, Notion, and Slack token
-exchange needs server-held credentials or signing material, so Arden must use
+exchange needs server-held credentials or signing material, so Fable must use
 an auth broker rather than embedding secrets in the frontend or desktop
 binary.
 
@@ -107,7 +107,7 @@ No test requires a network connection or real credentials.
   content capability.
 - Create and distribute a Slack app, configure an HTTPS redirect/broker,
   choose bot/user scopes, and enable token rotation.
-- Provision the Arden auth broker and production callback URLs.
+- Provision the Fable auth broker and production callback URLs.
 - Select and integrate a production OS secure-storage implementation for every
   supported platform.
 

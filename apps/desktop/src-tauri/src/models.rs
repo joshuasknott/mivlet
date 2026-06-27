@@ -1,4 +1,4 @@
-//! Shared constants and wire-format models for the Arden runtime.
+//! Shared constants and wire-format models for the Fable runtime.
 //!
 //! Every feature module (approvals, knowledge, memory, snapshot) reads from
 //! this module so the validation caps and serde shapes stay in one place.
@@ -320,7 +320,7 @@ pub struct BackendCredentialRequest {
     pub secret: String,
 }
 
-/// A consequential action a backend wants to perform. Arden records it as an
+/// A consequential action a backend wants to perform. Fable records it as an
 /// approval audit entry rather than letting the backend execute it directly.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

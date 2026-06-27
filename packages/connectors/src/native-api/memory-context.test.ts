@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, MemoryRecord } from "@arden/protocol";
+import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
 import { buildContextPrefix } from "./memory-context";
 
 const memory = (over: Partial<MemoryRecord> = {}): MemoryRecord => ({

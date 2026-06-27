@@ -2,7 +2,7 @@
 
 Completed: 2026-06-26. Adds four agent-runtime AI backends that reach users'
 existing subscriptions through each vendor's official transport, normalized into
-Arden's protocol with every consequential action routed through the existing
+Fable's protocol with every consequential action routed through the existing
 Rust approval system. This also lays the shared foundation (BackendProvider /
 capability surface, credential boundary, approval routing, three-path
 onboarding) that the next API-key goal builds on.
@@ -27,7 +27,7 @@ Plan: `docs/2026-06-26-agent-runtime-backends-plan.md`.
 | 9 | Credentials in OS secure storage; until wired, local-store boundary flagged pre-release; never log/snapshot/persist tokens into `RuntimeSnapshot` | `BACKENDS_PRE_RELEASE = true` + one-time `eprintln` warning; `RuntimeSnapshot` carries only `connected_backend_ids` (ids, not secrets); Rust test asserts snapshot file has no "secret"/"token" | ✅ |
 | 10 | Compliance: never promise any X/Premium tier includes Grok Build; no CLI redistribution; don't surface Claude/Gemini | Grok `entitlements` always empty pre-login; connectors test asserts no `premium/plus/included in` text + no `grok build`; no CLI vendored; only codex/cursor/copilot/grok surfaced | ✅ |
 | 11 | Onboarding: subscription functional (all four), API-key path shown pending, local-model path disabled-but-present; gate on "Connect one AI backend to continue" | `OnboardingPage.tsx` — three paths; gate copy exact; "Skip for now (preview)" link; `onboardingRequired` gate in `App.tsx` | ✅ |
-| 12 | Deferred: native API keys + Arden-owned agent loop (next goal), local models, enterprise, OpenCode, real OAuth for fixtures, voice/realtime, marketing/CI/signing, live transport | API-key path rendered pending (not wired); local-model card disabled; no OAuth/transport spawned; deferred explicitly in spec §6 | ✅ |
+| 12 | Deferred: native API keys + Fable-owned agent loop (next goal), local models, enterprise, OpenCode, real OAuth for fixtures, voice/realtime, marketing/CI/signing, live transport | API-key path rendered pending (not wired); local-model card disabled; no OAuth/transport spawned; deferred explicitly in spec §6 | ✅ |
 | 13 | `npm run check`, `cargo fmt --check`, `cargo check`, `cargo clippy`, `cargo test` green; no real credentials; fixture/preview fallbacks keep UI testable outside Tauri | §2 below — all gates green; `hasTauriRuntime()` guards + null fallbacks; no real secrets | ✅ |
 | 14 | Goal report added to `docs/` | This file | ✅ |
 
@@ -110,7 +110,7 @@ Logic/data split mirroring the existing connector pattern:
 
 ## 5. Deferred (explicitly out of scope this goal)
 
-Native API keys + Arden-owned agent loop (next goal), local models, enterprise
+Native API keys + Fable-owned agent loop (next goal), local models, enterprise
 backends, OpenCode, real OAuth for existing fixture connectors, voice/realtime,
 marketing/CI/release-signing, and **live transport** (spawning CLIs / opening
 app-server sockets). Adapters describe their transport and resolve capabilities

@@ -2,11 +2,9 @@ import type {
   ApprovalModification,
   ApprovalRequest,
   ApprovalDecision,
-  AutomationStatus,
   LocalFileImport,
-  MemoryRecord,
-  AutomationRule
-} from "@arden/protocol";
+  MemoryRecord
+} from "@fable/protocol";
 
 /**
  * Local shell-only types derived from protocol types. Keeping them in one
@@ -18,7 +16,25 @@ export type UtilityItem = "Connectors" | "Knowledge" | "Schedules";
 export type AccountPage = "Profile" | "Settings";
 export type WorkspacePage = UtilityItem | AccountPage;
 
-export type AutomationRuleView = Omit<AutomationRule, "status"> & { status: AutomationStatus };
+/**
+ * A user-created schedule. Shell-local (not in the shared protocol): the
+ * `name` is the queryable task name, the `description` tells the agent what
+ * to do when it fires, and `day`/`time` define when it runs. Execution is
+ * linked up so a connected model can pick it up; nothing auto-runs.
+ */
+export type Weekday = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+
+export interface Schedule {
+  id: string;
+  name: string;
+  description: string;
+  day: Weekday;
+  time: string; // "HH:MM", 24-hour
+  enabled: boolean;
+  createdAt: string;
+}
+
+export const WEEKDAYS: Weekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export type ApprovalModificationDraft = {
   mode: ApprovalModification["mode"];
@@ -36,10 +52,10 @@ export interface PersistedShellState {
   activeItem: string;
   composerValue: string;
   voiceEnabled: boolean;
-  approvalAudit: import("@arden/protocol").ApprovalAuditEntry[];
+  approvalAudit: import("@fable/protocol").ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
-  approvalRules: import("@arden/protocol").ApprovalGrant[];
-  automationStatuses: Record<string, AutomationStatus>;
+  approvalRules: import("@fable/protocol").ApprovalGrant[];
+  schedules: Schedule[];
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;

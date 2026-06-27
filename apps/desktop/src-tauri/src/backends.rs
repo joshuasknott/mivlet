@@ -79,7 +79,7 @@ const COPILOT_CAPS: &[&str] = &[
     "usage-cost",
 ];
 
-/// Native-API providers declare the full capability set when connected: Arden
+/// Native-API providers declare the full capability set when connected: Fable
 /// owns the loop, so it honors streaming, tool-requests + approvals, file
 /// changes, usage-cost (metered against the API key), model availability, and
 /// cancellation.
@@ -136,14 +136,14 @@ const CATALOG: &[BackendCatalogEntry] = &[
         models: &[("grok-default", "Grok")],
         capabilities: ACP_CAPS,
     },
-    // Native-API providers: Arden owns the entire agent loop (tool dispatch,
+    // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
     // API-key only; compliance copy names only the allowed auth paths.
     BackendCatalogEntry {
         id: "openai",
         backend_type: "native-api",
         label: "OpenAI",
-        description: "Reach GPT models directly with an OpenAI API key. Arden owns the agent loop, tool dispatch, and approvals.",
+        description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[
             ("gpt-5", "GPT-5"),
@@ -156,7 +156,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "anthropic",
         backend_type: "native-api",
         label: "Anthropic",
-        description: "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Arden owns the agent loop.",
+        description: "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
         install_hint: "",
         models: &[("claude-sonnet-4", "Claude Sonnet 4"), ("claude-opus-4", "Claude Opus 4")],
         capabilities: NATIVE_API_CAPS,
@@ -165,7 +165,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "gemini",
         backend_type: "native-api",
         label: "Google Gemini",
-        description: "Reach Gemini via a Google AI API key or Vertex AI. Arden owns the agent loop.",
+        description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
         install_hint: "",
         models: &[("gemini-2-pro", "Gemini 2 Pro"), ("gemini-2-flash", "Gemini 2 Flash")],
         capabilities: NATIVE_API_CAPS,
@@ -174,7 +174,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "xai",
         backend_type: "native-api",
         label: "xAI",
-        description: "Reach Grok models directly with an xAI API key. Arden owns the agent loop, tool dispatch, and approvals.",
+        description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[("grok-4", "Grok 4")],
         capabilities: NATIVE_API_CAPS,
@@ -183,7 +183,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "openrouter",
         backend_type: "native-api",
         label: "OpenRouter",
-        description: "Reach many models through OpenRouter with an OpenRouter API key. Arden owns the agent loop.",
+        description: "Reach many models through OpenRouter with an OpenRouter API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[
             ("openrouter:auto", "OpenRouter Auto"),
@@ -209,7 +209,7 @@ fn log_pre_release_warning_once() {
     PRE_RELEASE_WARNING_LOGGED.get_or_init(|| {
         if BACKENDS_PRE_RELEASE {
             eprintln!(
-                "arden: backend credential storage is PRE-RELEASE (local process store). \
+                "fable: backend credential storage is PRE-RELEASE (local process store). \
                  OS keychain is not wired yet. Secrets are held in memory only."
             );
         }
@@ -359,14 +359,14 @@ pub(crate) fn read_connected_backends(path: &Path) -> Result<ConnectedBackends, 
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Arden could not read connected backends.".to_string())?;
+        .map_err(|_| "Fable could not read connected backends.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(ConnectedBackends::default());
     }
 
     let parsed: BTreeSet<String> = serde_json::from_str(&contents)
-        .map_err(|_| "Arden could not parse connected backends.".to_string())?;
+        .map_err(|_| "Fable could not parse connected backends.".to_string())?;
 
     let ids: Vec<String> = parsed
         .into_iter()
@@ -380,8 +380,8 @@ pub(crate) fn read_connected_backends(path: &Path) -> Result<ConnectedBackends, 
 fn write_connected_backends(path: &Path, connected: &ConnectedBackends) -> Result<(), String> {
     let set: BTreeSet<&String> = connected.ids().iter().collect();
     let encoded = serde_json::to_string_pretty(&set)
-        .map_err(|_| "Arden could not encode connected backends.".to_string())?;
-    fs::write(path, encoded).map_err(|_| "Arden could not save connected backends.".to_string())
+        .map_err(|_| "Fable could not encode connected backends.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Fable could not save connected backends.".to_string())
 }
 
 /// Validate the secret length and write it to the given store. The secret is
@@ -453,7 +453,7 @@ pub(crate) fn list_providers_from(
 /// Normalize a backend consequential event and produce the audit entry that
 /// records it. Used when a backend reports an action it wants to take (or has
 /// already taken internally). The audit entry feeds the existing approval
-/// audit log — Arden never lets a backend bypass its approval layer.
+/// audit log — Fable never lets a backend bypass its approval layer.
 pub(crate) fn normalize_backend_event(
     event: BackendConsequentialEvent,
     decided_at: &str,
@@ -478,7 +478,7 @@ pub(crate) fn normalize_backend_event(
     }
 
     // A backend that already approved something internally is recorded as a
-    // `once` audit entry naming the backend — it does not bypass Arden's layer
+    // `once` audit entry naming the backend — it does not bypass Fable's layer
     // for future actions.
     let decision = if event.backend_preapproved.unwrap_or(false) {
         "once"
@@ -543,7 +543,7 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
     let path = connected_backends_path(&app)?;
     let store = credential_store()
         .lock()
-        .map_err(|_| "Arden could not acquire the credential store.".to_string())?;
+        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
     let store_snapshot: HashMap<String, String> = store.clone();
     drop(store);
     list_providers_from(&store_snapshot, &path)
@@ -557,7 +557,7 @@ pub fn store_backend_credential(
     let path = connected_backends_path(&app)?;
     let mut store = credential_store()
         .lock()
-        .map_err(|_| "Arden could not acquire the credential store.".to_string())?;
+        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
     store_credential_into(&mut store, &path, request)
 }
 
@@ -569,7 +569,7 @@ pub fn clear_backend_credential(
     let path = connected_backends_path(&app)?;
     let mut store = credential_store()
         .lock()
-        .map_err(|_| "Arden could not acquire the credential store.".to_string())?;
+        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
     clear_credential_into(&mut store, &path, &provider_id)
 }
 

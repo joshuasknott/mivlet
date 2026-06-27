@@ -6,7 +6,7 @@
  * path (not here).
  */
 
-import type { KnowledgeSource, MemoryRecord } from "@arden/protocol";
+import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
 
 /** Build the system-message prefix from pinned memory/sources. "" if none. */
 export function buildContextPrefix(

@@ -1,34 +1,30 @@
-# Arden Production Navigation QA
+# Fable Design QA
 
-- Source visual truth: `C:\Users\Josh\AppData\Local\Temp\codex-clipboard-778c45ef-0e2f-4e00-af41-d1c2d06404c0.png`
-- Production desktop screenshot: `C:\Users\Josh\Projects\praxis\output\product-design\praxis-production-navigation-desktop.png`
-- Production mobile screenshot: `C:\Users\Josh\Projects\praxis\output\product-design\praxis-production-navigation-mobile.png`
-- Viewports: 1488 x 1059 desktop, 390 x 844 mobile
-- State: Production desktop shell, Arden project expanded, Chats expanded, mobile drawer open
+## Evidence
 
-## Findings
+- Corrected concept: `docs/design/fable-ui-concept.png`
+- Before, desktop: `docs/design/qa/fable-before-1440x1024.png`
+- Before, narrow: `docs/design/qa/fable-before-390x844.png`
+- After, desktop: `docs/design/qa/fable-after-1440x1024.png`
+- After, connectors: `docs/design/qa/fable-after-connectors-1440x1024.png`
+- After, narrow: `docs/design/qa/fable-after-390x844.png`
+- Verified viewports: 1440 × 1024 and 390 × 844
 
-No actionable P0, P1, or P2 issues remain.
+## Result
 
-- Typography: Newsreader carries the welcoming headline, while Inter keeps the sidebar and controls compact. Text fits the sidebar, composer, and directive rows without clipping.
-- Spacing and layout: The sidebar is materially lighter than the earlier mockups, with Projects and Chats as the primary hierarchy and utilities demoted to the bottom.
-- Colors and tokens: The production app uses restrained charcoal, off-white, gray, and sage tones with no decorative gradient UI.
-- Image quality: The Arden mark is used as a real SVG asset and remains legible at sidebar scale.
-- Copy and content: Project-specific work is nested under Projects; non-project threads are nested under Chats; Knowledge, Plugins, and Automations remain available but quieter.
-- Interaction: Projects, Chats, project rows, thread rows, contextual directive rows, account menu, and the mobile drawer are interactive.
-- Responsive behavior: The mobile drawer preserves navigation access, and the verified mobile viewport has no horizontal overflow.
-- Runtime evidence: Browser console checks returned no warnings or errors.
+Passed.
 
-## Patches Made
+- Fable lockup sits above the workspace selector; navigation labels, order, hierarchy, and responsive grouping are preserved.
+- Inter is the only loaded UI family. Weights are restricted to 400, 500, 600, and 700.
+- The warm surface, graphite ink, copper interaction accent, approved radii, elevation, and blur values come from central tokens.
+- Active navigation and tabs use copper text, copper-subtle fill, and copper underline where applicable.
+- Positive, caution, and destructive colors are reserved for status and destructive actions; connector brand colors remain confined to provider marks.
+- Onboarding, home/composer, Connectors, Knowledge, Schedules, Profile, Settings, account menu, mobile navigation, and narrow-window composer were inspected.
+- The schedule create/delete flow and Settings tab interaction were exercised in the browser.
+- No horizontal overflow, clipped primary controls, stale branding, or framework overlays remain in the verified states.
 
-- Ported the Product Design navigation mockup into the production desktop app.
-- Replaced Home/Threads/Goals-style side navigation with Projects and Chats collections.
-- Added a compact mobile navigation drawer.
-- Replaced the CSS-drawn mark with an Arden SVG logo asset.
-- Added Rust-native local file import and lexical knowledge search commands for the Tauri runtime boundary.
+## Compatibility
 
-## Follow-up Polish
-
-- P3: Consider adding small directive-row icons in production if future testing shows the rows need stronger scan anchors.
-
-final result: passed
+- `com.arden.workspace` is intentionally retained as the Tauri application identifier.
+- `arden.shell.v1` and `praxis.shell.v1` are read-only migration fallbacks for `fable.shell.v1`.
+- `arden://backend/` and `arden.memory.export.v1` remain stable runtime/export contracts.

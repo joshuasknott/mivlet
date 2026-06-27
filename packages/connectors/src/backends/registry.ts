@@ -9,7 +9,7 @@
  * the gating dependency).
  */
 
-import type { BackendProvider } from "@arden/protocol";
+import type { BackendProvider } from "@fable/protocol";
 import { resolveCodexProvider } from "./codex";
 import { resolveCopilotProvider } from "./copilot";
 import { resolveAcpProvider } from "./acp";
@@ -35,7 +35,7 @@ export type { NativeProviderId } from "./fixtures";
  * resolves real auth state. Codex needs auth; the ACP providers (Cursor, Grok)
  * start install-required because their CLI is the gating dependency; Copilot
  * needs auth; the native-API providers (OpenAI, Anthropic, Gemini, xAI,
- * OpenRouter) start needs-auth — Arden owns their agent loop once a key exists.
+ * OpenRouter) start needs-auth — Fable owns their agent loop once a key exists.
  */
 export function listBackendProviders(): BackendProvider[] {
   return [

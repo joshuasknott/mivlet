@@ -1,4 +1,4 @@
-//! Arden desktop runtime entrypoint.
+//! Fable desktop runtime entrypoint.
 //!
 //! Feature logic lives in focused modules (`models`, `paths`, `approvals`,
 //! `knowledge`, `memory`, `snapshot`, `backends`). This crate root only
@@ -53,5 +53,5 @@ pub fn run() {
             native_api::cancel_backend_completion
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Arden desktop runtime");
+        .expect("failed to run Fable desktop runtime");
 }

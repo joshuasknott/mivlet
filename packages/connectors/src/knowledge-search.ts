@@ -2,7 +2,7 @@ import type {
   KnowledgeCitation,
   KnowledgeSearchResponse,
   KnowledgeSource
-} from "@arden/protocol";
+} from "@fable/protocol";
 
 const DEFAULT_RESULT_LIMIT = 5;
 const MAX_SNIPPET_CHARACTERS = 240;

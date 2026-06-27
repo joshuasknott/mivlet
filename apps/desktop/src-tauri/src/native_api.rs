@@ -1,11 +1,12 @@
 //! Native-API transport boundary: Rust owns the API key + HTTP/SSE egress.
 //!
 //! TypeScript shapes the request body (pure, fixture-tested in
-//! `@arden/connectors/native-api/`) and hands Rust an opaque
+//! `@fable/connectors/native-api/`) and hands Rust an opaque
 //! `{ providerId, requestId, model, body }`. Rust looks the key up from the
 //! credential store, adds the provider-specific auth header, issues the
 //! streaming `reqwest` request, and relays normalized SSE lines back over the
-//! Tauri event channel `arden://backend/<requestId>`. Real cancellation drops
+//! legacy Tauri event channel `arden://backend/<requestId>`. Its name remains
+//! stable so existing runtime integrations continue to receive events.
 //! the in-flight future via the cancel map.
 //!
 //! Hard invariants:
@@ -118,7 +119,7 @@ fn cancel_map() -> &'static Mutex<CancelMap> {
 fn require_key(provider_id: &str) -> Result<String, String> {
     let store = credential_store()
         .lock()
-        .map_err(|_| "Arden could not acquire the credential store.".to_string())?;
+        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
     store
         .get(provider_id)
         .cloned()
@@ -152,7 +153,7 @@ pub async fn stream_backend_completion(
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     cancel_map()
         .lock()
-        .map_err(|_| "Arden could not access the cancel map.".to_string())?
+        .map_err(|_| "Fable could not access the cancel map.".to_string())?
         .insert(request.request_id.clone(), tx);
 
     use futures_util::StreamExt;
@@ -207,7 +208,7 @@ pub async fn stream_backend_completion(
 pub fn cancel_backend_completion(request_id: String) -> Result<bool, String> {
     let removed = cancel_map()
         .lock()
-        .map_err(|_| "Arden could not access the cancel map.".to_string())?
+        .map_err(|_| "Fable could not access the cancel map.".to_string())?
         .remove(&request_id);
     Ok(removed.is_some())
 }

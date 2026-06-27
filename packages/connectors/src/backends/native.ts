@@ -1,5 +1,5 @@
 /**
- * Native model API adapter. Arden owns the full agent loop here — tool
+ * Native model API adapter. Fable owns the full agent loop here — tool
  * dispatch, streaming, approval routing, memory, usage/cost, and cancellation —
  * unlike the runtime backends (Codex/Cursor/Copilot/Grok) that borrow sessions
  * and approvals from their providers.
@@ -9,11 +9,11 @@
  * capability set, including `usage-cost`). There is no entitlement-pending
  * state for native providers.
  *
- * Per-provider HTTP/SSE shaping lives in `@arden/connectors/native-api/`; this
+ * Per-provider HTTP/SSE shaping lives in `@fable/connectors/native-api/`; this
  * module only declares the provider shape and capabilities for the registry.
  */
 
-import type { BackendProvider } from "@arden/protocol";
+import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
 import { nativeFixtures, type NativeFixture, type NativeProviderId } from "./fixtures";
 

@@ -11,7 +11,7 @@
  * so the Node `fs` import never enters the desktop browser bundle.
  */
 
-import type { NativeCompletionRequest } from "@arden/protocol";
+import type { NativeCompletionRequest } from "@fable/protocol";
 
 /** An async iterator of raw SSE lines (blank lines dropped). The transport
  *  receives the normalized request and shapes it per provider (the API key is

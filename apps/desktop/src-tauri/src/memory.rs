@@ -58,7 +58,7 @@ pub(crate) fn normalize_memory_record(record: MemoryRecord) -> Result<MemoryReco
         title,
         value,
         source: if source.is_empty() {
-            "Arden memory".to_string()
+            "Fable memory".to_string()
         } else {
             source
         },
@@ -103,14 +103,14 @@ pub(crate) fn read_memory_state(path: &Path) -> Result<MemoryControlState, Strin
     }
 
     let contents =
-        fs::read_to_string(path).map_err(|_| "Arden could not read memory state.".to_string())?;
+        fs::read_to_string(path).map_err(|_| "Fable could not read memory state.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(default_memory_state());
     }
 
     let parsed = serde_json::from_str::<MemoryControlState>(&contents)
-        .map_err(|_| "Arden could not parse memory state.".to_string())?;
+        .map_err(|_| "Fable could not parse memory state.".to_string())?;
 
     normalize_memory_state(parsed)
 }
@@ -121,9 +121,9 @@ pub(crate) fn write_memory_state(
 ) -> Result<MemoryControlState, String> {
     let normalized = normalize_memory_state(state)?;
     let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Arden could not encode memory state.".to_string())?;
+        .map_err(|_| "Fable could not encode memory state.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Arden could not save memory state.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Fable could not save memory state.".to_string())?;
 
     Ok(normalized)
 }
@@ -131,13 +131,14 @@ pub(crate) fn write_memory_state(
 pub(crate) fn encode_memory_export(state: MemoryControlState) -> Result<String, String> {
     let normalized = normalize_memory_state(state)?;
     let envelope = MemoryExportEnvelope {
+        // Compatibility contract for existing exported-memory consumers.
         format: "arden.memory.export.v1",
         disabled: normalized.disabled,
         records: normalized.records,
     };
 
     serde_json::to_string_pretty(&envelope)
-        .map_err(|_| "Arden could not encode memory export.".to_string())
+        .map_err(|_| "Fable could not encode memory export.".to_string())
 }
 
 pub(crate) fn promote_knowledge_source(
@@ -231,7 +232,7 @@ pub(crate) fn promote_knowledge_source(
         request_id: format!("memory-promotion-{source_id}"),
         decision,
         decided_at,
-        note: format!("Arden Memory Approve {provenance} into durable memory"),
+        note: format!("Fable Memory Approve {provenance} into durable memory"),
     })?;
 
     Ok(MemoryPromotionResponse {

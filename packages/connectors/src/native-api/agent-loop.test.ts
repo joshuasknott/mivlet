@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BackendAgentEvent, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport, SequencedFixtureTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { runAgentLoop, type ToolExecutor } from "./agent-loop";

@@ -1,4 +1,4 @@
-# Goal Report — Arden Rebrand, Architecture Cleanup & UI Overhaul
+# Goal Report — Fable Rebrand, Architecture Cleanup & UI Overhaul
 
 Completed: 2026-06-26. All four phases done in order, each gated on green checks.
 No deferred roadmap work was started. No real credentials/OAuth were introduced.
@@ -40,20 +40,20 @@ The pre-existing WIP was preserved, understood, and built upon.
 
 ---
 
-## 3. Arden rebrand (Phase 1)
+## 3. Fable rebrand (Phase 1)
 
 Audit found the rebrand was already ~99% complete in the WIP. The single
 product-facing stale string was the Tauri bundle identifier.
 
 - **Fixed:** `tauri.conf.json` `identifier`: `com.praxis.workspace` →
-  `com.arden.workspace`.
+  `com.fable.workspace`.
 - **Verified intentional (kept):** 3 `App.tsx` "praxis" references are
   backward-compat `localStorage` migration keys (correct behavior — migrating
   old users' data). All other "Praxis" strings are real on-disk filenames
   (QA screenshots, repo dir paths) documented as historical artifacts in
   `README.md`.
-- Package names (`@arden/*`), Cargo crate (`arden-desktop`), brand assets
-  (`public/brand/`, `ArdenLogo.tsx`), HTML title, and `docs/brand.md` are all
+- Package names (`@fable/*`), Cargo crate (`fable-desktop`), brand assets
+  (`public/brand/`, `FableLogo.tsx`), HTML title, and `docs/brand.md` are all
   consistent and present.
 
 ---
@@ -102,7 +102,7 @@ components/
   PageHeader.tsx            shared page chrome
   primitives.tsx            ShellButton, StatusDot, SectionHeading
   workspace-cards.tsx       DirectiveCards, CitationResults, ThreadContext
-  ArdenLogo.tsx             brand lockup
+  FableLogo.tsx             brand lockup
   pages/
     KnowledgePage.tsx
     AutomationsPage.tsx
@@ -143,7 +143,7 @@ All 15 Tauri command names and public TS protocol types are unchanged.
 | Hash | Message |
 |---|---|
 | d756f47 | chore: checkpoint WIP rebrand + architecture scaffolding before goal |
-| f0a6274 | feat(brand): complete Arden rebrand |
+| f0a6274 | feat(brand): complete Fable rebrand |
 | 7798338 | refactor(desktop): split App.tsx into shell/composer/panels/hooks |
 | e502dc6 | refactor(desktop): document fixture ownership for preview/demo data |
 | 03b0739 | refactor(desktop): split styles.css into focused layer files |

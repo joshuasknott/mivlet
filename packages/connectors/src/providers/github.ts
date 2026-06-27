@@ -1,4 +1,4 @@
-import type { ConnectorSearchItem } from "@arden/protocol";
+import type { ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   prepareConnectorAction,
@@ -53,7 +53,7 @@ export function prepareGitHubDraftPullRequest(payload: {
     "github.draft-pull-request",
     { ...payload, targetId: payload.repository },
     "medium",
-    "Creates a draft pull request after Arden approval."
+    "Creates a draft pull request after Fable approval."
   );
 }
 
@@ -68,7 +68,7 @@ export function prepareGitHubComment(payload: {
     "github.comment",
     payload,
     "medium",
-    "Publishes a comment to the selected GitHub item after Arden approval."
+    "Publishes a comment to the selected GitHub item after Fable approval."
   );
 }
 

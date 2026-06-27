@@ -78,14 +78,14 @@ pub(crate) fn read_approval_audit_entries(path: &Path) -> Result<Vec<ApprovalAud
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Arden could not read the approval audit log.".to_string())?;
+        .map_err(|_| "Fable could not read the approval audit log.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     serde_json::from_str::<Vec<ApprovalAuditEntry>>(&contents)
-        .map_err(|_| "Arden could not parse the approval audit log.".to_string())
+        .map_err(|_| "Fable could not parse the approval audit log.".to_string())
 }
 
 fn append_approval_audit_entry(
@@ -100,9 +100,9 @@ fn append_approval_audit_entry(
 
 fn write_approval_audit_entries(path: &Path, entries: &[ApprovalAuditEntry]) -> Result<(), String> {
     let encoded = serde_json::to_string_pretty(entries)
-        .map_err(|_| "Arden could not encode the approval audit log.".to_string())?;
+        .map_err(|_| "Fable could not encode the approval audit log.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Arden could not save the approval audit log.".to_string())
+    fs::write(path, encoded).map_err(|_| "Fable could not save the approval audit log.".to_string())
 }
 
 pub(crate) fn persist_approval_audit_entry(
@@ -242,13 +242,13 @@ pub(crate) fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, Str
     }
 
     let contents =
-        fs::read_to_string(path).map_err(|_| "Arden could not read approval rules.".to_string())?;
+        fs::read_to_string(path).map_err(|_| "Fable could not read approval rules.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     let parsed = serde_json::from_str::<Vec<ApprovalGrant>>(&contents)
-        .map_err(|_| "Arden could not parse approval rules.".to_string())?;
+        .map_err(|_| "Fable could not parse approval rules.".to_string())?;
     parsed
         .into_iter()
         .map(normalize_approval_grant)
@@ -257,8 +257,8 @@ pub(crate) fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, Str
 
 fn write_approval_rules(path: &Path, rules: &[ApprovalGrant]) -> Result<(), String> {
     let encoded = serde_json::to_string_pretty(rules)
-        .map_err(|_| "Arden could not encode approval rules.".to_string())?;
-    fs::write(path, encoded).map_err(|_| "Arden could not save approval rules.".to_string())
+        .map_err(|_| "Fable could not encode approval rules.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Fable could not save approval rules.".to_string())
 }
 
 pub(crate) fn persist_approval_rule(

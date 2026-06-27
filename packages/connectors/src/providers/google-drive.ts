@@ -1,4 +1,4 @@
-import type { ConnectorSearchItem } from "@arden/protocol";
+import type { ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   shapeConnectorSearchRequest,
@@ -22,7 +22,7 @@ export function normalizeGoogleDriveItem(payload: GoogleDrivePayload): Connector
     title: payload.name,
     kind: "file",
     summary: payload.selected
-      ? "File explicitly selected for Arden"
+      ? "File explicitly selected for Fable"
       : "File metadata; import is unavailable until selected",
     provenance: "Google Drive · selected file",
     freshness: payload.modifiedTime ?? "Provider freshness unavailable",

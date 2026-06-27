@@ -1,4 +1,4 @@
-//! Integration tests for the Arden runtime feature modules.
+//! Integration tests for the Fable runtime feature modules.
 //!
 //! These mirror the original lib.rs tests; they import the now-modularized
 //! helpers via `use` so the test bodies are unchanged.
@@ -203,7 +203,7 @@ fn rejects_changed_local_file_payloads() {
 
     let error = import_local_text_file(changed).expect_err("changed file should be rejected");
 
-    assert!(error.contains("changed while Arden was reading"));
+    assert!(error.contains("changed while Fable was reading"));
 }
 
 #[test]
@@ -242,12 +242,12 @@ fn audit_entry(id: &str, decision: &str) -> ApprovalAuditEntry {
         request_id: "weekly-digest-rule".to_string(),
         decision: decision.to_string(),
         decided_at: "2026-06-25T22:30:00.000Z".to_string(),
-        note: "Arden Automations Enable weekly workspace digest".to_string(),
+        note: "Fable Automations Enable weekly workspace digest".to_string(),
     }
 }
 
 fn temp_audit_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("arden-{name}-{}.json", std::process::id()))
+    std::env::temp_dir().join(format!("fable-{name}-{}.json", std::process::id()))
 }
 
 fn approval_request(
@@ -366,7 +366,7 @@ fn applies_modified_approval_scope_before_auditing() {
 #[test]
 fn requires_exact_confirmation_for_high_risk_approvals() {
     let wrong = resolve_approval(approval_resolution(
-        approval_request("full-access", "high", Some("publish Arden")),
+        approval_request("full-access", "high", Some("publish Fable")),
         "once",
         Some("publish preview"),
         None,
@@ -376,9 +376,9 @@ fn requires_exact_confirmation_for_high_risk_approvals() {
     assert!(wrong.contains("did not match"));
 
     let response = resolve_approval(approval_resolution(
-        approval_request("full-access", "high", Some("publish Arden")),
+        approval_request("full-access", "high", Some("publish Fable")),
         "once",
-        Some("publish Arden"),
+        Some("publish Fable"),
         None,
     ))
     .expect("exact confirmation should resolve");
@@ -798,7 +798,7 @@ use crate::models::{BackendConsequentialEvent, BackendCredentialRequest};
 
 fn temp_backends_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
-        "arden-{name}-{}-{}.json",
+        "fable-{name}-{}-{}.json",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1001,7 +1001,7 @@ fn records_backend_consequential_event_as_audit_without_bypassing() {
     let entry =
         normalize_backend_event(event, "2026-06-26T12:00:00.000Z").expect("event normalizes");
     // A backend that pre-approved is recorded as `once` audit — never bypasses
-    // Arden's layer for future actions.
+    // Fable's layer for future actions.
     assert_eq!(entry.decision, "once");
     assert!(entry.note.contains("Cursor"));
     assert!(entry.note.contains("Edit src/index.ts"));

@@ -1,17 +1,17 @@
 {
-  "name": "arden",
+  "name": "fable",
   "version": "0.1.0",
   "private": true,
-  "description": "Arden is an open-source AI workspace for real work.",
+  "description": "Fable is an open-source AI workspace for real work.",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
-    "dev": "pnpm --filter @arden/desktop dev",
-    "build": "pnpm --filter @arden/protocol build && pnpm --filter @arden/connectors build && pnpm --filter @arden/desktop build",
-    "typecheck": "pnpm --filter @arden/protocol build && pnpm --filter @arden/connectors typecheck && pnpm --filter @arden/desktop typecheck",
-    "test": "pnpm --filter @arden/connectors test && pnpm --filter @arden/desktop test",
+    "dev": "pnpm --filter @fable/desktop dev",
+    "build": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors build && pnpm --filter @fable/desktop build",
+    "typecheck": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors typecheck && pnpm --filter @fable/desktop typecheck",
+    "test": "pnpm --filter @fable/connectors test && pnpm --filter @fable/desktop test",
     "lint": "pnpm -r --if-present lint",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
-    "tauri:build": "pnpm --filter @arden/desktop tauri -- build",
+    "tauri:build": "pnpm --filter @fable/desktop tauri build",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm tauri:check"
   },
   "engines": {

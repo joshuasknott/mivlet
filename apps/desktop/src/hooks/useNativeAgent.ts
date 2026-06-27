@@ -1,5 +1,5 @@
 /**
- * Runs the Arden-owned native-API agent loop and routes its events into the shell.
+ * Runs the Fable-owned native-API agent loop and routes its events into the shell.
  *
  * The TypeScript layer owns orchestration; Rust owns the key + HTTP/SSE egress.
  * This hook builds a TauriTransport (HttpTransport over the Rust boundary) when
@@ -14,14 +14,14 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import type { BackendAgentEvent, BackendProvider, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, BackendProvider, NativeCompletionRequest } from "@fable/protocol";
 import {
   runAgentLoop,
   shapeAnthropicRequest,
   shapeGeminiRequest,
   shapeOpenAiRequest,
   type HttpTransport
-} from "@arden/connectors";
+} from "@fable/connectors";
 import {
   cancelRuntimeCompletion,
   listenRuntimeBackendEvents,

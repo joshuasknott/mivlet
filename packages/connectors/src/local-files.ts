@@ -1,4 +1,4 @@
-import type { LocalFileImport } from "@arden/protocol";
+import type { LocalFileImport } from "@fable/protocol";
 
 export const MAX_LOCAL_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_LOCAL_FILE_PREVIEW_CHARACTERS = 6_000;
@@ -61,12 +61,12 @@ export function importLocalTextFile(candidate: LocalTextFileCandidate): LocalFil
   }
 
   if (!supportedExtensions.has(extensionFor(fileName))) {
-    throw new Error("Arden supports text, Markdown, JSON, CSV, and YAML files.");
+    throw new Error("Fable supports text, Markdown, JSON, CSV, and YAML files.");
   }
 
   const actualSizeBytes = new TextEncoder().encode(candidate.content).byteLength;
   if (actualSizeBytes !== candidate.sizeBytes) {
-    throw new Error("The selected file changed while Arden was reading it. Choose it again.");
+    throw new Error("The selected file changed while Fable was reading it. Choose it again.");
   }
 
   if (actualSizeBytes === 0) {

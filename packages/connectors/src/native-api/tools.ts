@@ -1,14 +1,14 @@
 /**
- * Arden-owned tool registry. Model tool calls don't auto-execute — each is
+ * Fable-owned tool registry. Model tool calls don't auto-execute — each is
  * matched against this registry, routed through an ApprovalRequest, and executed
- * by an Arden runtime function only after the user grants. Tools the model
+ * by an Fable runtime function only after the user grants. Tools the model
  * invents that aren't registered here fail closed (critical risk, never run).
  *
  * The `defaultMode`/`defaultRisk` are the *defaults* surfaced to the user; the
  * existing approval UI lets them modify before granting.
  */
 
-import type { BackendTool, NativeToolSpec } from "@arden/protocol";
+import type { BackendTool, NativeToolSpec } from "@fable/protocol";
 
 const TOOLS: Record<string, BackendTool> = {
   "read-file": {

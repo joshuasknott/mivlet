@@ -1,4 +1,4 @@
-import type { ConnectorSearchItem } from "@arden/protocol";
+import type { ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   prepareConnectorAction,

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { LocalTextFileCandidate } from "@arden/connectors";
+import type { LocalTextFileCandidate } from "@fable/connectors";
 import type {
   ApprovalAuditEntry,
   ApprovalGrant,
@@ -25,7 +25,7 @@ import type {
   MemoryPromotionRequest,
   MemoryPromotionResponse,
   RuntimeSnapshot
-} from "@arden/protocol";
+} from "@fable/protocol";
 
 interface ApprovalAuditRecordResponse {
   persisted: boolean;
@@ -54,7 +54,7 @@ function toRuntimeError(error: unknown) {
     return new Error(error.message);
   }
 
-  return new Error(typeof error === "string" ? error : "Arden runtime request failed.");
+  return new Error(typeof error === "string" ? error : "Fable runtime request failed.");
 }
 
 export async function loadRuntimeApprovalAudit() {
@@ -393,7 +393,7 @@ export async function clearRuntimeBackend(providerId: string) {
 /**
  * Record a backend-originated consequential event as an approval audit entry.
  * Backends that already approved something internally are recorded as `once`
- * audit; they never bypass Arden's approval layer for future actions.
+ * audit; they never bypass Fable's approval layer for future actions.
  */
 export async function recordRuntimeBackendEvent(
   event: BackendConsequentialEvent,
@@ -419,7 +419,8 @@ export async function recordRuntimeBackendEvent(
 // The TypeScript layer owns orchestration (loop control, tool-call handling,
 // approval routing) as pure logic; Rust owns the API key + HTTP/SSE egress.
 // `streamRuntimeCompletion` hands Rust an opaque request (no key) and Rust emits
-// normalized SSE lines on the `arden://backend/<requestId>` channel. Outside
+// normalized SSE lines on the legacy `arden://backend/<requestId>` channel.
+// The name is intentionally stable for compatibility with existing runtimes.
 // Tauri these return null so the loop stays fixture-testable.
 // ---------------------------------------------------------------------------
 

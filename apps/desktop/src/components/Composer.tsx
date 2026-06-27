@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, RefObject, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useState } from "react";
 import {
   ArrowUp,
   Books,
@@ -13,7 +13,7 @@ import {
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
-const MODELS = ["Arden Pro", "Arden Fast", "Arden Reasoning"] as const;
+const MODELS = ["Fable Pro", "Fable Fast", "Fable Reasoning"] as const;
 const PERMISSION_PROFILES = [
   { label: "Full access", description: "Run permitted actions without asking each time" },
   { label: "Standard access", description: "Ask before sensitive or external actions" },
@@ -37,7 +37,8 @@ export function Composer({
   onRunCommand,
   onFileChange,
   voiceState,
-  importStatus
+  importStatus,
+  inThread = false
 }: {
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -56,9 +57,10 @@ export function Composer({
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   voiceState?: string;
   importStatus?: string | null;
+  inThread?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [model, setModel] = useState("Arden Pro");
+  const [model, setModel] = useState("Fable Pro");
   const [permissionMode, setPermissionMode] = useState("Full access");
 
   const closeExternalMenus = () => {
@@ -66,8 +68,11 @@ export function Composer({
     if (permissionsOpen) onTogglePermissions();
   };
 
+  const isNewThread = !inThread;
+  const menuPlacementClass = isNewThread ? "composer-glow--new-thread" : "composer-glow--in-thread";
+
   return (
-    <form className="composer-glow" onSubmit={onSubmit}>
+    <form className={`composer-glow ${menuPlacementClass}`} onSubmit={onSubmit}>
       <input
         ref={fileInputRef}
         className="sr-only"
@@ -83,6 +88,13 @@ export function Composer({
             className="composer-input"
             value={composerValue}
             onChange={(event) => onComposerChange(event.target.value)}
+            onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              // Enter sends; Shift+Enter (and IME composition) insert a newline.
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                onSubmit(event as unknown as FormEvent);
+              }
+            }}
             placeholder="Ask anything..."
             aria-label="Universal composer"
             rows={1}
@@ -218,7 +230,7 @@ export function Composer({
               <Microphone size={17} weight="fill" />
             </button>
             <button className="send-button" type="submit" aria-label="Send prompt">
-              <ArrowUp size={20} weight="bold" />
+              <ArrowUp size={16} weight="bold" />
             </button>
           </div>
         </div>

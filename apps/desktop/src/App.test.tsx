@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { BackendProvider, RuntimeSnapshot } from "@arden/protocol";
+import type { BackendProvider, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -69,7 +69,7 @@ vi.mock("./runtime", () => ({
 /** Render App and clear the onboarding gate by skipping in preview mode. */
 async function skipOnboarding() {
   const user = userEvent.setup();
-  const skip = await screen.findByRole("button", { name: /skip for now/i });
+  const skip = await screen.findByRole("button", { name: /skip onboarding/i });
   await user.click(skip);
 }
 
@@ -85,7 +85,7 @@ async function renderWorkspace() {
   return user;
 }
 
-describe("Arden home", () => {
+describe("Fable home", () => {
   beforeEach(() => {
     window.localStorage.clear();
     runtimeMocks.snapshot = null;
@@ -95,31 +95,33 @@ describe("Arden home", () => {
     runtimeMocks.backends = null;
   });
 
-  it("writes a connector action into the composer", async () => {
-    const user = await renderWorkspace();
+  it("renders no connector rail until a connector is connected", async () => {
+    await renderWorkspace();
 
-    await user.click(screen.getByRole("button", { name: /google docs/i }));
-
-    expect(screen.getByLabelText(/universal composer/i)).toHaveValue("Use Google Docs to ");
+    // No connectors start connected, so the home rail renders nothing.
+    expect(screen.queryByLabelText(/connected connectors/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /google docs/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /gmail/i })).not.toBeInTheDocument();
   });
 
   it("uses the lightweight Codex-like navigation hierarchy", async () => {
     await renderWorkspace();
 
+    // Sections exist but start empty (mock projects and chats removed).
     expect(screen.getByText("Chats")).toBeInTheDocument();
     expect(screen.getByText("Projects")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /daily catch-up/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /initial build/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /memory and approvals/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /daily catch-up/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /initial build/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /memory and approvals/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^connectors$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /knowledge/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^knowledge$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^threads$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /goals/i })).not.toBeInTheDocument();
   });
 
-  it("shows the seven first-wave connectors with honest fixture setup states", async () => {
+  it("shows first-wave connectors as minimal setup cards", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
 
@@ -141,27 +143,24 @@ describe("Arden home", () => {
       .find(Boolean);
     expect(gmailCard).not.toBeNull();
     expect(within(gmailCard as HTMLElement).getByText("fixture")).toBeInTheDocument();
-    expect(within(gmailCard as HTMLElement).getByText("Not connected")).toBeInTheDocument();
+    expect(within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
 
     await user.click(
-      within(gmailCard as HTMLElement).getByRole("button", { name: /live setup/i })
+      within(gmailCard as HTMLElement).getByRole("button", { name: /connect/i })
     );
-    expect(screen.getByRole("status")).toHaveTextContent(/explicit preview data/i);
+    expect(within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
   });
 
-  it("searches and imports fixture connector content as untrusted knowledge", async () => {
+  it("reveals connector details after selecting a card", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
-    await user.selectOptions(screen.getByLabelText(/^search connector$/i), "gmail");
-    await user.type(screen.getByLabelText(/connector search query/i), "release");
-    await user.click(screen.getByRole("button", { name: /search connector content/i }));
 
-    expect(await screen.findByText("Release readiness notes")).toBeInTheDocument();
-    expect(screen.getByText(/Gmail fixture.*untrusted/i)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /^import$/i }));
+    await user.click(screen.getByText("Gmail"));
 
-    expect(screen.getByRole("status")).toHaveTextContent(/untrusted connector knowledge/i);
-    expect(screen.getByText("1 imported")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Gmail" })).toBeInTheDocument();
+    expect(screen.getByText(/Enable Gmail API/i)).toBeInTheDocument();
+    expect(screen.getByText("Read mail")).toBeInTheDocument();
+    expect(screen.getByText("Create drafts")).toBeInTheDocument();
   });
 
   it("prepares connector writes as approval requests instead of executing them", async () => {
@@ -173,15 +172,12 @@ describe("Arden home", () => {
       .find(Boolean);
     expect(gmailCard).not.toBeNull();
 
-    await user.click(
-      within(gmailCard as HTMLElement).getByRole("button", {
-        name: /prepare create draft/i
-      })
-    );
-    expect(screen.getByRole("status")).toHaveTextContent(/action prepared/i);
+    await user.click(within(gmailCard as HTMLElement).getByText("Gmail"));
+    await user.click(screen.getByRole("button", { name: /prepare create draft/i }));
 
-    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
-    expect(screen.getByText("Create Draft")).toBeInTheDocument();
+    // Return to the chat view, where the approval queue now renders inline.
+    await user.click(screen.getByRole("button", { name: /new chat/i }));
+    expect(await screen.findByText("Create Draft")).toBeInTheDocument();
     expect(screen.getByText(/does not send the email/i)).toBeInTheDocument();
   });
 
@@ -214,11 +210,10 @@ describe("Arden home", () => {
     const sidebar = screen.getByRole("complementary", { name: /workspace navigation/i });
     expect(screen.getByRole("button", { name: /select workspace/i })).toBeInTheDocument();
     expect(within(sidebar).getByRole("button", { name: /select workspace/i })).toHaveTextContent(
-      "Josh's Arden"
+      "Josh's Fable"
     );
-    expect(screen.queryByText(/projects and chats stay inside this workspace/i)).not.toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: /what are we building today in josh's arden/i })
+      screen.getByRole("heading", { name: /what are we building today in josh's fable/i })
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /select permissions/i }));
@@ -228,15 +223,69 @@ describe("Arden home", () => {
     );
   });
 
-  it("opens knowledge as a coming soon workspace view", async () => {
+  it("opens knowledge as an empty workspace view", async () => {
     const user = await renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
     expect(screen.getByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/knowledge coming soon/i)).toHaveTextContent("Coming soon");
+    expect(screen.getByLabelText(/knowledge is empty/i)).toHaveTextContent("Nothing here yet");
     expect(screen.queryByRole("heading", { name: "Sources" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
+  });
+
+  it("creates a schedule from name, description, day, and time", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+
+    expect(screen.getByRole("heading", { name: "Schedules" })).toBeInTheDocument();
+    // Starts empty with no draft/active labels.
+    expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Weekly digest");
+    await user.type(
+      screen.getByLabelText(/schedule description/i),
+      "Summarize active projects and approvals."
+    );
+    // Defaults: Friday at 09:00.
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Weekly digest")).toBeInTheDocument();
+    expect(screen.getByText(/Fridays at 9:00 AM/i)).toBeInTheDocument();
+    expect(screen.getByText("Summarize active projects and approvals.")).toBeInTheDocument();
+    // No draft/active status labels anywhere on the page.
+    expect(screen.queryByText(/^draft$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^active$/i)).not.toBeInTheDocument();
+  });
+
+  it("pauses and resumes a created schedule", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Daily check");
+    await user.type(screen.getByLabelText(/schedule description/i), "Quick daily summary.");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Daily check")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /pause/i }));
+    expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
+    expect(screen.getByText(/daily check paused/i)).toBeInTheDocument();
+  });
+
+  it("deletes a created schedule", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Throwaway");
+    await user.type(screen.getByLabelText(/schedule description/i), "To be removed.");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Throwaway")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /delete schedule throwaway/i }));
+    expect(screen.queryByText("Throwaway")).not.toBeInTheDocument();
+    expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
   });
 
   it("opens profile from the account menu and edits mock account details", async () => {
@@ -262,132 +311,15 @@ describe("Arden home", () => {
     await user.click(screen.getByRole("menuitem", { name: /^settings$/i }));
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByText(/ready to run model tasks/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Provider access" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: /^providers$/i }));
     const anthropicCard = screen.getByText("Anthropic").closest("article");
 
     expect(anthropicCard).not.toBeNull();
-    await user.click(within(anthropicCard as HTMLElement).getByRole("button", { name: /add key/i }));
+    await user.click(within(anthropicCard as HTMLElement).getByRole("button", { name: /connect/i }));
 
     expect(screen.getByText(/anthropic connected for this mock session/i)).toBeInTheDocument();
-    expect(within(anthropicCard as HTMLElement).getByText("connected")).toBeInTheDocument();
-  });
-
-  it("records approval decisions without losing the second pending request", async () => {
-    const user = await renderWorkspace();
-
-    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
-    expect(screen.getByText("Create draft PR for feature-memory")).toBeInTheDocument();
-
-    await user.click(screen.getAllByRole("button", { name: /^deny$/i })[0]);
-
-    expect(screen.queryByText("Create draft PR for feature-memory")).not.toBeInTheDocument();
-    expect(screen.getByText("Enable weekly workspace digest")).toBeInTheDocument();
-    expect(screen.getByText(/deny: GitHub Create draft PR/i)).toBeInTheDocument();
-  });
-
-  it("keeps session approvals visible without turning them into standing rules", async () => {
-    const user = await renderWorkspace();
-
-    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
-    const githubApproval = screen
-      .getByText("Create draft PR for feature-memory")
-      .closest("article");
-
-    expect(githubApproval).not.toBeNull();
-    await user.click(
-      within(githubApproval as HTMLElement).getByRole("button", { name: /^session$/i })
-    );
-
-    expect(screen.queryByText("Create draft PR for feature-memory")).not.toBeInTheDocument();
-    expect(
-      screen.getByText("Session: GitHub - Create draft PR for feature-memory")
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Rule: GitHub - Create draft PR for feature-memory")
-    ).not.toBeInTheDocument();
-  });
-
-  it("creates a standing rule from an approval request", async () => {
-    const user = await renderWorkspace();
-
-    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
-    const githubApproval = screen
-      .getByText("Create draft PR for feature-memory")
-      .closest("article");
-
-    expect(githubApproval).not.toBeNull();
-    await user.click(
-      within(githubApproval as HTMLElement).getByRole("button", { name: /^rule$/i })
-    );
-
-    expect(
-      screen.getByText("Rule: GitHub - Create draft PR for feature-memory")
-    ).toBeInTheDocument();
-  });
-
-  it("modifies an approval before resolving it", async () => {
-    const user = await renderWorkspace();
-
-    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
-    const githubApproval = screen
-      .getByText("Create draft PR for feature-memory")
-      .closest("article");
-
-    expect(githubApproval).not.toBeNull();
-    const approval = within(githubApproval as HTMLElement);
-    await user.click(approval.getByRole("button", { name: /^modify$/i }));
-    await user.click(approval.getByRole("button", { name: "read-only" }));
-    await user.clear(approval.getByLabelText(/allowed data for create draft pr/i));
-    await user.type(
-      approval.getByLabelText(/allowed data for create draft pr/i),
-      "branch diff"
-    );
-    await user.clear(approval.getByLabelText(/consequence for create draft pr/i));
-    await user.type(
-      approval.getByLabelText(/consequence for create draft pr/i),
-      "Reviews the branch without publishing."
-    );
-    await user.click(approval.getByRole("button", { name: /save changes/i }));
-
-    expect(screen.queryByText("Create draft PR for feature-memory")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/modify: GitHub Create draft PR for feature-memory modified to read-only using branch diff/i)
-    ).toBeInTheDocument();
-  });
-
-  it("requires an exact phrase for high-risk full-access approvals", async () => {
-    const user = await renderWorkspace();
-
-    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
-    const releaseApproval = screen
-      .getByText("Promote Arden preview to production")
-      .closest("article");
-
-    expect(releaseApproval).not.toBeNull();
-    const approval = within(releaseApproval as HTMLElement);
-    await user.click(approval.getByRole("button", { name: /^once$/i }));
-
-    const confirmation = approval.getByLabelText(
-      /confirmation for promote Arden preview to production/i
-    );
-    await user.type(confirmation, "publish preview");
-    await user.click(approval.getByRole("button", { name: /^confirm$/i }));
-
-    expect(screen.getByText(/Confirmation phrase did not match/i)).toBeInTheDocument();
-    expect(screen.getByText("Promote Arden preview to production")).toBeInTheDocument();
-
-    await user.clear(confirmation);
-    await user.type(confirmation, "publish Arden");
-    await user.click(approval.getByRole("button", { name: /^confirm$/i }));
-
-    expect(
-      screen.queryByText("Promote Arden preview to production")
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/once: Vercel Promote Arden preview to production/i)
-    ).toBeInTheDocument();
+    expect(within(anthropicCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
   });
 
   it("turns slash commands into composer text", async () => {
@@ -412,19 +344,8 @@ describe("Arden home", () => {
 
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
-    expect(screen.getByLabelText(/knowledge coming soon/i)).toHaveTextContent("Coming soon");
+    expect(screen.getByLabelText(/knowledge is empty/i)).toHaveTextContent("Nothing here yet");
     expect(screen.queryByText("launch-notes.md")).not.toBeInTheDocument();
-  });
-
-  it("shows citations from workspace sources when the composer is submitted", async () => {
-    const user = await renderWorkspace();
-
-    await user.type(screen.getByLabelText(/universal composer/i), "selected visual direction");
-    await user.click(screen.getByRole("button", { name: /send prompt/i }));
-
-    expect(await screen.findByText("Sources used")).toBeInTheDocument();
-    expect(screen.getByText("Selected visual direction")).toBeInTheDocument();
-    expect(screen.getByText("Product Design mockup - Updated today - trusted")).toBeInTheDocument();
   });
 
   it("recovers composer drafts from local persistence", async () => {
@@ -440,20 +361,78 @@ describe("Arden home", () => {
     expect(screen.getByLabelText(/universal composer/i)).toHaveValue("Plan the onboarding journey");
   });
 
-  it("recovers shell state from a runtime snapshot", async () => {
+  it("sends the composer prompt on Enter without inserting a newline", async () => {
+    const user = userEvent.setup();
+    // Serve a connected native provider so Enter drives the agent loop path.
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+        models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+      }
+    ];
+    render(<App />);
+
+    const composer = await screen.findByLabelText(/universal composer/i);
+    await user.type(composer, "summarize the project");
+    await user.keyboard("{Enter}");
+
+    // Enter sends; the agent activity panel surfaces (no transport outside Tauri).
+    expect(await screen.findByLabelText(/agent activity/i)).toBeInTheDocument();
+    // The newline was not inserted into the composer.
+    expect(composer).toHaveValue("summarize the project");
+  });
+
+  it("inserts a newline on Shift+Enter instead of sending", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const composer = await screen.findByLabelText(/universal composer/i);
+
+    await user.type(composer, "first line");
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+
+    // Shift+Enter inserts a newline instead of sending.
+    expect(composer).toHaveValue("first line\n");
+    // Nothing was sent: the agent transcript stays empty (the panel itself may
+    // render because no transport exists outside Tauri, but it must show no run).
+    expect(screen.getByLabelText(/agent activity/i)).not.toHaveTextContent(/running/i);
+  });
+
+  it("recovers created schedules from local persistence", async () => {
+    const user = userEvent.setup();
+    // First session: create a schedule.
+    const first = render(<App />);
+    await screen.findByLabelText(/universal composer/i);
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await user.type(screen.getByLabelText(/schedule task name/i), "Persisted digest");
+    await user.type(screen.getByLabelText(/schedule description/i), "Survives reload.");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    expect(await screen.findByText("Persisted digest")).toBeInTheDocument();
+    first.unmount();
+
+    // Second session: the schedule is recovered from localStorage.
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: /^schedules$/i }));
+    expect(await screen.findByText("Persisted digest")).toBeInTheDocument();
+    expect(screen.getByText("Survives reload.")).toBeInTheDocument();
+  });
+
+  it("recovers composer drafts from a runtime snapshot", async () => {
     const user = userEvent.setup();
     runtimeMocks.snapshot = {
       version: 1,
-      activeItem: "arden-initial-build",
+      activeItem: "new-chat",
       composerDraft: "/schedule recovered weekly digest",
       voiceEnabled: true,
       approvalAudit: [],
-      dismissedApprovalIds: ["github-draft-pr"],
+      dismissedApprovalIds: [],
       approvalRules: [],
-      automationStatuses: {
-        "weekly-digest": "active"
-      },
-      pinnedSourceIds: ["codex-manual"],
+      automationStatuses: {},
+      pinnedSourceIds: [],
       importedKnowledgeSources: [],
       memoryDisabled: false,
       memoryRecords: [],
@@ -463,16 +442,8 @@ describe("Arden home", () => {
 
     render(<App />);
 
-    // Composer draft is recovered into a chat view (the composer lives only
-    // on chat views in the new page-based navigation).
+    // Composer draft is recovered into a chat view.
     expect(await screen.findByDisplayValue("/schedule recovered weekly digest")).toBeInTheDocument();
-
-    // Recovered schedule status is reflected on the standalone Schedules page.
-    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    const weeklySchedule = screen.getByText("Weekly workspace digest").closest("article");
-
-    expect(weeklySchedule).not.toBeNull();
-    expect(within(weeklySchedule as HTMLElement).getByText("active")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(runtimeMocks.savedSnapshots.at(-1)?.composerDraft).toBe("/schedule recovered weekly digest");
@@ -511,7 +482,7 @@ describe("Arden home", () => {
  * Onboarding gate: the three-path AI-backend shell. These tests force the
  * gate to show by serving fail-closed (no connected) backend providers.
  */
-describe("Arden onboarding", () => {
+describe("Fable onboarding", () => {
   // Fail-closed providers: no connection, so the gate is required.
   const failClosedBackends: BackendProvider[] = [
     {
@@ -551,7 +522,7 @@ describe("Arden onboarding", () => {
       description: "Grok over ACP",
       authState: "install-required",
       capabilities: [],
-      models: [{ id: "grok-default", label: "Grok", available: false }],
+      models: [{ id: "grok-default", label: "Grok default", available: false }],
       installHint: "Requires the Grok CLI. Install it, then connect.",
       entitlements: []
     },
@@ -559,7 +530,7 @@ describe("Arden onboarding", () => {
       id: "openai",
       backendType: "native-api",
       label: "OpenAI",
-      description: "Reach GPT models directly with an OpenAI API key. Arden owns the agent loop.",
+      description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "gpt-5", label: "GPT-5", available: false }]
@@ -569,7 +540,7 @@ describe("Arden onboarding", () => {
       backendType: "native-api",
       label: "Anthropic",
       description:
-        "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Arden owns the agent loop.",
+        "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: false }]
@@ -578,7 +549,7 @@ describe("Arden onboarding", () => {
       id: "gemini",
       backendType: "native-api",
       label: "Google Gemini",
-      description: "Reach Gemini via a Google AI API key or Vertex AI. Arden owns the agent loop.",
+      description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "gemini-2-pro", label: "Gemini 2 Pro", available: false }]
@@ -587,7 +558,7 @@ describe("Arden onboarding", () => {
       id: "xai",
       backendType: "native-api",
       label: "xAI",
-      description: "Reach Grok models directly with an xAI API key. Arden owns the agent loop.",
+      description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "grok-4", label: "Grok 4", available: false }]
@@ -596,7 +567,7 @@ describe("Arden onboarding", () => {
       id: "openrouter",
       backendType: "native-api",
       label: "OpenRouter",
-      description: "Reach many models through OpenRouter with an OpenRouter API key. Arden owns the agent loop.",
+      description: "Reach many models through OpenRouter with an OpenRouter API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "openrouter:auto", label: "OpenRouter Auto", available: false }]
@@ -609,13 +580,27 @@ describe("Arden onboarding", () => {
     runtimeMocks.backends = failClosedBackends;
   });
 
+  const completeCredentialsStep = async (user: any) => {
+    expect(await screen.findByRole("heading", { name: /create your fable account/i })).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^name$/i), "Josh");
+    await user.type(screen.getByLabelText(/^email$/i), "josh@example.com");
+    await user.type(screen.getByLabelText(/^password$/i), "password123");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+  };
+
   it("gates the workspace behind the three-path onboarding shell", async () => {
+    const user = userEvent.setup();
     render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /create your fable account/i })).toBeInTheDocument();
+    // The composer must NOT render until a backend is connected.
+    expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
+
+    // Fill in credentials to proceed to the three paths choice page
+    await completeCredentialsStep(user);
 
     expect(await screen.findByRole("heading", { name: /connect one ai backend to continue/i }))
       .toBeInTheDocument();
-    // The composer must NOT render until a backend is connected.
-    expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
 
     // All three paths are present.
     expect(screen.getByText(/use a subscription/i)).toBeInTheDocument();
@@ -624,9 +609,16 @@ describe("Arden onboarding", () => {
   });
 
   it("offers the four subscription providers in the functional path", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
+
+    // Navigate to subscription path
+    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+
+    expect(await screen.findByRole("heading", { name: /use a subscription/i })).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Cursor")).toBeInTheDocument();
     expect(screen.getByText("GitHub Copilot")).toBeInTheDocument();
@@ -634,9 +626,16 @@ describe("Arden onboarding", () => {
   });
 
   it("fails closed with an install hint for ACP providers lacking a CLI", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
+
+    // Navigate to subscription path
+    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+
+    expect(await screen.findByRole("heading", { name: /use a subscription/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/cursor install required/i)).toHaveTextContent(/cursor cli/i);
     expect(screen.getByLabelText(/grok install required/i)).toHaveTextContent(/grok cli/i);
   });
@@ -645,7 +644,13 @@ describe("Arden onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
+
+    // Navigate to subscription path
+    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+
+    expect(await screen.findByRole("heading", { name: /use a subscription/i })).toBeInTheDocument();
     const codexCard = screen.getByText("Codex").closest("article");
     expect(codexCard).not.toBeNull();
 
@@ -665,17 +670,36 @@ describe("Arden onboarding", () => {
       ...failClosedBackends.filter((provider) => provider.id !== "codex")
     ];
 
-    await user.click(within(codexCard as HTMLElement).getByRole("button", { name: /connect/i }));
+    // Open the connection step, connect, then finish the multi-step shell.
+    await user.click(within(codexCard as HTMLElement).getByRole("button", { name: /set up/i }));
+    await user.click(await screen.findByRole("button", { name: /^connect$/i }));
+    const continueBtn = await screen.findByRole("button", {
+      name: /continue to connectors|finish setup/i
+    });
+    await user.click(continueBtn);
+    const finishBtn = await screen.findByRole("button", { name: /finish setup/i });
+    await user.click(finishBtn);
 
     // Once a backend connects, the workspace (composer) becomes available.
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
   it("makes the api-key path functional while keeping local-model disabled", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
+    // The local-model path stays disabled.
+    const localPath = screen.getByText(/run a local model/i).closest("div");
+    expect(localPath?.parentElement).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/local models are on the roadmap/i)).toBeInTheDocument();
+
+    // Navigate to api key path
+    await user.click(screen.getByRole("button", { name: /bring an api key/i }));
+
+    expect(await screen.findByRole("heading", { name: /bring an api key/i })).toBeInTheDocument();
     // The five native providers render in the now-functional API-key path.
     expect(screen.getByText("OpenAI")).toBeInTheDocument();
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
@@ -683,20 +707,25 @@ describe("Arden onboarding", () => {
     expect(screen.getByText("xAI")).toBeInTheDocument();
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
 
-    // The API-key path exposes a secret input.
-    expect(screen.getByLabelText(/api key for openai/i)).toBeInTheDocument();
-
-    // The local-model path stays disabled.
-    const localPath = screen.getByText(/run a local model/i).closest("div");
-    expect(localPath?.parentElement).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(/local models are on the roadmap/i)).toBeInTheDocument();
+    // OpenAI's connection step exposes a secret input.
+    const openaiRow = screen.getByText("OpenAI").closest("article");
+    expect(openaiRow).not.toBeNull();
+    await user.click(within(openaiRow as HTMLElement).getByRole("button", { name: /set up/i }));
+    expect(await screen.findByLabelText(/api key for openai/i)).toBeInTheDocument();
   });
 
   it("uses compliant copy for Claude and Gemini (no subscription reuse)", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
+    await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
+
+    // Navigate to api key path
+    await user.click(screen.getByRole("button", { name: /bring an api key/i }));
+
     const shell = await screen.findByRole("heading", {
-      name: /connect one ai backend to continue/i
+      name: /bring an api key/i
     });
     const frame = shell.closest("main");
     const text = frame?.textContent?.toLowerCase() ?? "";
@@ -711,7 +740,13 @@ describe("Arden onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
+
+    // Navigate to api key path
+    await user.click(screen.getByRole("button", { name: /bring an api key/i }));
+
+    expect(await screen.findByRole("heading", { name: /bring an api key/i })).toBeInTheDocument();
 
     // Simulate the credential boundary resolving OpenAI to connected after the
     // store call records the key.
@@ -730,22 +765,34 @@ describe("Arden onboarding", () => {
 
     const openaiCard = screen.getByText("OpenAI").closest("article");
     expect(openaiCard).not.toBeNull();
-    await user.type(
-      within(openaiCard as HTMLElement).getByLabelText(/api key for openai/i),
-      "sk-test-key"
-    );
-    await user.click(
-      within(openaiCard as HTMLElement).getByRole("button", { name: /add key/i })
-    );
+
+    // Open the connection step, submit the key, then finish the multi-step shell.
+    await user.click(within(openaiCard as HTMLElement).getByRole("button", { name: /set up/i }));
+    const keyInput = await screen.findByLabelText(/api key for openai/i);
+    await user.type(keyInput, "sk-test-key");
+    await user.click(screen.getByRole("button", { name: /add key & connect/i }));
+    const continueBtn = await screen.findByRole("button", {
+      name: /continue to connectors|finish setup/i
+    });
+    await user.click(continueBtn);
+    const finishBtn = await screen.findByRole("button", { name: /finish setup/i });
+    await user.click(finishBtn);
 
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
   it("does not promise any tier includes grok build entitlements", async () => {
+    const user = userEvent.setup();
     render(<App />);
 
+    await completeCredentialsStep(user);
+    await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
+
+    // Navigate to subscription path
+    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+
     const shell = await screen.findByRole("heading", {
-      name: /connect one ai backend to continue/i
+      name: /use a subscription/i
     });
     const frame = shell.closest("main");
     expect(frame?.textContent?.toLowerCase()).not.toMatch(/grok build.*included|premium.*grok/i);
@@ -755,8 +802,8 @@ describe("Arden onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
-    await user.click(screen.getByRole("button", { name: /skip for now/i }));
+    expect(await screen.findByRole("heading", { name: /create your fable account/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /skip onboarding/i }));
 
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });

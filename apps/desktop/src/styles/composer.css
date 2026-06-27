@@ -13,21 +13,27 @@
   width: min(100%, 850px);
   margin: 31px auto 0;
   padding: 0;
-  border: 1px solid rgba(132, 146, 148, 0.24);
-  border-radius: 34px;
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.88) inset,
-    0 26px 70px rgba(70, 86, 87, 0.13);
-  backdrop-filter: blur(26px) saturate(1.2);
-  transition: background-position 600ms ease;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-3);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: var(--glass-filter);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    background 200ms ease;
+}
+
+.composer-glow:hover {
+  border-color: var(--accent-line);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-2);
 }
 
 .composer-glow:focus-within {
-  border-color: rgba(91, 95, 199, 0.34);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.9) inset,
-    0 30px 76px rgba(70, 86, 87, 0.16);
+  border-color: var(--accent);
+  background: var(--surface-overlay);
+  box-shadow: var(--focus-ring), var(--shadow-3);
 }
 
 /* The card itself — solid off-white surface that masks everything but the
@@ -36,12 +42,10 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 164px;
-  padding: 25px 22px 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.52)),
-    rgba(255, 255, 255, 0.48);
-  border-radius: 33px;
+  min-height: 180px;
+  padding: 24px 28px 20px;
+  background: transparent;
+  border-radius: var(--radius-3);
 }
 
 .composer-field {
@@ -52,20 +56,30 @@
 .composer-input {
   flex: 1 1 auto;
   width: 100%;
-  min-height: 58px;
-  max-height: 122px;
-  padding: 5px 14px 10px;
+  min-height: 72px;
+  max-height: 180px;
+  padding: 8px 10px 12px;
   resize: none;
-  color: #1f2326;
+  color: var(--ink);
   background: transparent;
   border: 0;
   outline: 0;
-  font-size: 18px;
-  line-height: 1.5;
+  font-size: 16px;
+  line-height: 1.6;
+  transition: color 150ms ease;
 }
 
 .composer-input::placeholder {
-  color: #8f949a;
+  color: var(--ink-soft);
+  transition: color 150ms ease;
+}
+
+.composer-input:focus-visible {
+  box-shadow: none;
+}
+
+.composer-glow:hover .composer-input::placeholder {
+  color: var(--ink-muted);
 }
 
 /* Control row: left group pinned left, right group pinned right. */
@@ -98,15 +112,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 42px;
+  height: 34px;
   padding: 0;
-  color: #263033;
-  background: rgba(255, 255, 255, 0.52);
-  border: 1px solid rgba(126, 140, 142, 0.18);
-  border-radius: 999px;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.8) inset,
-    0 8px 18px rgba(66, 80, 81, 0.06);
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
   transition:
     background 140ms ease,
     color 140ms ease;
@@ -114,16 +126,16 @@
 
 .composer-model {
   gap: 8px;
-  padding: 0 16px 0 18px;
-  font-size: 15px;
-  font-weight: 520;
+  padding: 0 14px 0 16px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .composer-permissions-card {
   gap: 7px;
-  padding: 0 14px;
-  font-size: 14px;
-  font-weight: 540;
+  padding: 0 12px;
+  font-size: var(--text-12);
+  font-weight: 500;
 }
 
 .composer-chip {
@@ -133,34 +145,34 @@
 .composer-model:hover,
 .composer-permissions-card:hover,
 .composer-chip:hover {
-  color: #2c3437;
-  background: rgba(255, 255, 255, 0.82);
+  color: var(--accent);
+  background: var(--accent-subtle);
 }
 
 .composer-model:focus-visible,
 .composer-permissions-card:focus-visible,
 .composer-chip:focus-visible,
 .send-button:focus-visible {
-  outline: 2px solid rgba(91, 95, 199, 0.58);
-  outline-offset: 2px;
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .composer-chip--active {
-  color: #4549ad;
-  background: rgba(91, 95, 199, 0.11);
-  border-color: rgba(91, 95, 199, 0.2);
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border-color: var(--accent-line);
 }
 
 .composer-chip--attach {
-  color: #42474b;
+  color: var(--ink-muted);
 }
 
 .composer-trigger--open {
   position: relative;
   z-index: 8;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--surface-overlay);
   border-color: var(--line-strong);
-  border-radius: 7px 7px 16px 16px;
+  border-radius: var(--radius-1) var(--radius-1) var(--radius-2) var(--radius-2);
   box-shadow: none;
 }
 
@@ -168,18 +180,18 @@
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 52px;
-  height: 52px;
-  color: #f8f6ef;
-  background: var(--accent-strong);
+  width: 36px;
+  height: 36px;
+  color: var(--surface);
+  background: var(--accent);
   border: 0;
-  border-radius: 50%;
-  box-shadow: 0 12px 24px rgba(91, 95, 199, 0.24);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
   transition: background 140ms ease;
 }
 
 .send-button:hover {
-  background: #4a4eaf;
+  background: var(--accent-strong);
 }
 
 /* Upward-opening menus anchored above the control row. */
@@ -196,10 +208,11 @@
   max-height: 60vh;
   overflow-y: auto;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--surface-overlay);
   border: 1px solid var(--line);
-  border-radius: 7px 16px 16px 16px;
-  box-shadow: 0 18px 40px rgba(25, 27, 28, 0.14);
+  border-radius: var(--radius-1) var(--radius-2) var(--radius-2) var(--radius-2);
+  box-shadow: var(--shadow-2);
+  backdrop-filter: var(--glass-filter);
 }
 
 .composer-menu__section {
@@ -209,7 +222,7 @@
 
 .composer-menu__heading {
   padding: 4px 8px 2px;
-  color: #878d92;
+  color: var(--ink-soft);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -221,16 +234,16 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
-  color: #36403d;
+  color: var(--ink);
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-2);
   text-align: left;
   transition: background 120ms ease;
 }
 
 .composer-menu button:hover {
-  background: rgba(20, 22, 23, 0.05);
+  background: var(--line);
 }
 
 .composer-add-menu button {
@@ -265,9 +278,9 @@
 
 .composer-add-menu button strong,
 .composer-model-menu button strong {
-  color: #30373d;
-  font-size: 13.5px;
-  font-weight: 650;
+  color: var(--ink);
+  font-size: var(--text-13);
+  font-weight: 600;
 }
 
 .composer-model-menu {
@@ -275,8 +288,8 @@
 }
 
 .composer-menu small {
-  color: #878d92;
-  font-size: 11.5px;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
 }
 
 .composer-menu__plugin {
@@ -286,14 +299,14 @@
 }
 
 .composer-menu__plugin strong {
-  color: #4549ad;
-  font-size: 13.5px;
-  font-weight: 650;
+  color: var(--accent-strong);
+  font-size: var(--text-13);
+  font-weight: 600;
 }
 
 .composer-menu__command {
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 13.5px;
+  font-size: var(--text-13);
 }
 
 /* Permissions view — a read-only list of connectors and their scopes. */
@@ -307,28 +320,28 @@
   align-items: baseline;
   gap: 3px 8px;
   padding: 9px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-2);
 }
 
 .composer-permissions__row:hover {
-  background: rgba(20, 22, 23, 0.04);
+  background: var(--line);
 }
 
 .composer-permissions__lead {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #4549ad;
-  font-size: 13.5px;
+  color: var(--accent-strong);
+  font-size: var(--text-13);
 }
 
 .composer-permissions__lead strong {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .composer-permissions__row small {
   grid-column: 1 / 2;
-  color: #6f757a;
+  color: var(--ink-muted);
   font-size: 12px;
   line-height: 1.35;
 }
@@ -337,22 +350,22 @@
   justify-self: end;
   align-self: start;
   padding: 2px 8px;
-  color: #4d5d54;
-  background: rgba(91, 95, 199, 0.1);
-  border-radius: 999px;
+  color: var(--ink-muted);
+  background: var(--accent-subtle);
+  border-radius: var(--radius-pill);
   font-size: 11px;
   font-weight: 600;
   text-transform: capitalize;
 }
 
 .composer-permissions__status--connected {
-  color: #4549ad;
-  background: rgba(91, 95, 199, 0.17);
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
 }
 
 .composer-permissions__status--needs-auth {
-  color: #7a5d2e;
-  background: rgba(205, 162, 86, 0.18);
+  color: var(--ink-muted);
+  background: var(--caution-subtle);
 }
 
 .composer-permissions {
@@ -369,25 +382,37 @@
 }
 
 .composer-permissions button strong {
-  color: #30373d;
-  font-size: 13.5px;
-  font-weight: 650;
+  color: var(--ink);
+  font-size: var(--text-13);
+  font-weight: 600;
 }
 
 .composer-menu button[aria-checked="true"] {
-  color: #4549ad;
-  background: rgba(91, 95, 199, 0.1);
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
 }
 
 .voice-state,
 .composer-status {
   margin-top: 12px;
   padding-top: 11px;
-  color: #52605a;
-  border-top: 1px solid rgba(25, 27, 28, 0.08);
+  color: var(--ink-muted);
+  border-top: 1px solid var(--line);
   font-size: 13px;
 }
 
 .composer-status {
-  color: #4d5d54;
+  color: var(--ink-muted);
+}
+
+/* Downward-opening menus for new threads (where input box is in the middle) */
+.composer-glow--new-thread .composer-menu {
+  top: calc(100% - 1px);
+  bottom: auto;
+  border-radius: var(--radius-2) var(--radius-2) var(--radius-2) var(--radius-1);
+  box-shadow: var(--shadow-2);
+}
+
+.composer-glow--new-thread .composer-trigger--open {
+  border-radius: var(--radius-2) var(--radius-2) var(--radius-1) var(--radius-1);
 }

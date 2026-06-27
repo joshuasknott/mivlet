@@ -89,13 +89,13 @@ pub fn import_local_text_file(
     }
 
     if !is_supported_local_file(&file_name) {
-        return Err("Arden supports text, Markdown, JSON, CSV, and YAML files.".to_string());
+        return Err("Fable supports text, Markdown, JSON, CSV, and YAML files.".to_string());
     }
 
     let actual_size_bytes = candidate.content.len();
     if actual_size_bytes != candidate.size_bytes {
         return Err(
-            "The selected file changed while Arden was reading it. Choose it again.".to_string(),
+            "The selected file changed while Fable was reading it. Choose it again.".to_string(),
         );
     }
 

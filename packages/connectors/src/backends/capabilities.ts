@@ -14,7 +14,7 @@ import type {
   BackendAuthState,
   BackendCapability,
   BackendType
-} from "@arden/protocol";
+} from "@fable/protocol";
 
 /** A capability set that supports `includes` without array copying. */
 export type CapabilitySet = readonly BackendCapability[];
@@ -66,7 +66,7 @@ const COPILOT_CAPS: CapabilitySet = [
 ];
 
 /**
- * Native-API providers declare the full capability set when connected: Arden owns
+ * Native-API providers declare the full capability set when connected: Fable owns
  * the loop, so it honors streaming, tool-requests + approvals, file-changes,
  * usage-cost (metered against the API key), model-availability, and cancellation.
  */

@@ -12,7 +12,8 @@ import {
   User
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
-import type { ProjectWorkspace, ThreadSummary } from "@arden/protocol";
+import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
+import { FableLogo } from "./FableLogo";
 
 /**
  * Workspace sidebar / shell navigation.
@@ -48,7 +49,9 @@ export function WorkspaceSidebar({
   onOpenMobileConnection,
   onSelectThread,
   onToggleAccount,
-  onAccountMenu
+  onAccountMenu,
+  loadingItemIds = [],
+  profile
 }: {
   workspaceName: string;
   utilityItems: readonly UtilityNavItem[];
@@ -75,6 +78,8 @@ export function WorkspaceSidebar({
   onSelectThread: (thread: ThreadSummary) => void;
   onToggleAccount: () => void;
   onAccountMenu: (item: "profile" | "settings" | "logout") => void;
+  loadingItemIds?: string[];
+  profile?: { name: string; email: string; photoInitials?: string; photoUrl?: string };
 }) {
   if (collapsed) {
     return (
@@ -93,19 +98,21 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-header">
-        <span className="sidebar-brand">arden</span>
-        <button
-          type="button"
-          className="sidebar-minimize"
-          aria-label="Close sidebar"
-          aria-pressed="false"
-          onClick={onToggleCollapsed}
-        >
-          <SidebarSimple size={18} />
-        </button>
-      </div>
-
-      <div className="workspace-scope" aria-label="Workspace scope">
+        <div className="sidebar-brand-row">
+          <div className="sidebar-brand-lockup" aria-label="Fable">
+            <FableLogo />
+            <span>Fable</span>
+          </div>
+          <button
+            type="button"
+            className="sidebar-minimize"
+            aria-label="Close sidebar"
+            aria-pressed="false"
+            onClick={onToggleCollapsed}
+          >
+            <SidebarSimple size={18} />
+          </button>
+        </div>
         <button
           type="button"
           className="workspace-switcher"
@@ -113,13 +120,12 @@ export function WorkspaceSidebar({
           onClick={onSelectWorkspace}
         >
           <span className="workspace-switcher__icon" aria-hidden="true">
-            <Stack size={16} />
+            <Stack size={15} />
           </span>
-          <span className="workspace-switcher__copy">
-            <span>Workspace</span>
-            <strong>{workspaceName}</strong>
+          <span className="workspace-switcher__name">
+            {workspaceName}
           </span>
-          <CaretDown size={14} />
+          <CaretDown size={12} className="workspace-switcher__caret" />
         </button>
       </div>
 
@@ -204,32 +210,36 @@ export function WorkspaceSidebar({
                 <div className="project-list">
                   {projects.map((project) => {
                     const expanded = expandedProjects[project.id];
+                    const projectLoading = loadingItemIds.includes(project.id) || project.threads.some(t => loadingItemIds.includes(t.id));
                     return (
                       <div className="project-block" key={project.id}>
                         <button
                           type="button"
-                          className="project-row"
+                          className={`project-row${projectLoading ? " project-row--loading" : ""}`}
                           aria-expanded={expanded}
                           onClick={() => onToggleProject(project.id, project.title, expanded)}
                         >
-                          <CaretRight className="project-caret" size={12} weight="bold" />
                           <FolderOpen size={15} />
                           <span>{project.title}</span>
                         </button>
                         {expanded ? (
                           <div className="nested-thread-list">
-                            {project.threads.map((thread) => (
-                              <button
-                                key={thread.id}
-                                type="button"
-                                className={`thread-row thread-row--nested${
-                                  activeItem === thread.id ? " thread-row--active" : ""
-                                }`}
-                                onClick={() => onSelectProjectThread(thread, project.title)}
-                              >
-                                {thread.title}
-                              </button>
-                            ))}
+                            {project.threads.map((thread) => {
+                              const isActive = activeItem === thread.id;
+                              const isThreadLoading = loadingItemIds.includes(thread.id);
+                              return (
+                                <button
+                                  key={thread.id}
+                                  type="button"
+                                  className={`thread-row thread-row--nested${
+                                    isActive ? " thread-row--active" : ""
+                                  }${isThreadLoading ? " thread-row--loading" : ""}`}
+                                  onClick={() => onSelectProjectThread(thread, project.title)}
+                                >
+                                  {thread.title}
+                                </button>
+                              );
+                            })}
                           </div>
                         ) : null}
                       </div>
@@ -264,16 +274,22 @@ export function WorkspaceSidebar({
               </div>
               {expandedCollections.chats ? (
                 <div className="thread-list">
-                  {chatThreads.map((thread) => (
-                    <button
-                      key={thread.id}
-                      type="button"
-                      className={`thread-row${activeItem === thread.id ? " thread-row--active" : ""}`}
-                      onClick={() => onSelectThread(thread)}
-                    >
-                      {thread.title}
-                    </button>
-                  ))}
+                  {chatThreads.map((thread) => {
+                    const isActive = activeItem === thread.id;
+                    const isThreadLoading = loadingItemIds.includes(thread.id);
+                    return (
+                      <button
+                        key={thread.id}
+                        type="button"
+                        className={`thread-row${isActive ? " thread-row--active" : ""}${
+                          isThreadLoading ? " thread-row--loading" : ""
+                        }`}
+                        onClick={() => onSelectThread(thread)}
+                      >
+                        {thread.title}
+                      </button>
+                    );
+                  })}
                 </div>
               ) : null}
             </section>
@@ -287,15 +303,30 @@ export function WorkspaceSidebar({
                 onClick={onToggleAccount}
                 aria-expanded={accountOpen}
                 aria-haspopup="menu"
+                aria-label={`${profile?.name || "Josh"} ${profile?.email || "josh@example.com"}`}
               >
-                <span className="avatar">J</span>
+                <span className="avatar">
+                  {profile?.photoUrl ? (
+                    <img src={profile.photoUrl} alt="" />
+                  ) : (
+                    profile?.photoInitials ||
+                    (profile?.name
+                      ? profile.name
+                          .split(" ")
+                          .map((n) => n[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2)
+                      : "J")
+                  )}
+                </span>
                 <span className="account-row__text">
-                  <strong>Josh</strong>
-                  <span className="account-row__email">josh@example.com</span>
+                  <strong>{profile?.name || "Josh"}</strong>
+                  <span className="account-row__email">{profile?.email || "josh@example.com"}</span>
                 </span>
               </button>
               {accountOpen ? (
-                <div className="account-popover" role="menu" aria-label="Josh account menu">
+                <div className="account-popover" role="menu" aria-label={`${profile?.name || "Josh"} account menu`}>
                   <button type="button" role="menuitem" onClick={() => onAccountMenu("profile")}>
                     <span className="account-popover__icon" aria-hidden="true">
                       <User size={16} />
@@ -367,34 +398,44 @@ export function WorkspaceSidebar({
                       <FolderOpen size={14} />
                       {project.title}
                     </span>
-                    {project.threads.map((thread) => (
-                      <button
-                        key={thread.id}
-                        type="button"
-                        className={`thread-row thread-row--nested${
-                          activeItem === thread.id ? " thread-row--active" : ""
-                        }`}
-                        onClick={() => onSelectProjectThread(thread, project.title)}
-                      >
-                        {thread.title}
-                      </button>
-                    ))}
+                    {project.threads.map((thread) => {
+                      const isActive = activeItem === thread.id;
+                      const isThreadLoading = loadingItemIds.includes(thread.id);
+                      return (
+                        <button
+                          key={thread.id}
+                          type="button"
+                          className={`thread-row thread-row--nested${
+                            isActive ? " thread-row--active" : ""
+                          }${isThreadLoading ? " thread-row--loading" : ""}`}
+                          onClick={() => onSelectProjectThread(thread, project.title)}
+                        >
+                          {thread.title}
+                        </button>
+                      );
+                    })}
                   </div>
                 ))}
               </section>
 
               <section className="mobile-drawer-section" aria-label="Chats">
                 <strong>Chats</strong>
-                {chatThreads.map((thread) => (
-                  <button
-                    key={thread.id}
-                    type="button"
-                    className={`thread-row${activeItem === thread.id ? " thread-row--active" : ""}`}
-                    onClick={() => onSelectThread(thread)}
-                  >
-                    {thread.title}
-                  </button>
-                ))}
+                {chatThreads.map((thread) => {
+                  const isActive = activeItem === thread.id;
+                  const isThreadLoading = loadingItemIds.includes(thread.id);
+                  return (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      className={`thread-row${isActive ? " thread-row--active" : ""}${
+                        isThreadLoading ? " thread-row--loading" : ""
+                      }`}
+                      onClick={() => onSelectThread(thread)}
+                    >
+                      {thread.title}
+                    </button>
+                  );
+                })}
               </section>
             </div>
           ) : null}

@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the native model API adapter family (OpenAI, Anthropic, Gemini API + Vertex, xAI, OpenRouter) where Arden owns the entire agent loop — extending, not rebuilding, the prior goal's `BackendProvider`/capability surface, credential boundary, approval routing, and onboarding shell.
+**Goal:** Build the native model API adapter family (OpenAI, Anthropic, Gemini API + Vertex, xAI, OpenRouter) where Fable owns the entire agent loop — extending, not rebuilding, the prior goal's `BackendProvider`/capability surface, credential boundary, approval routing, and onboarding shell.
 
-**Architecture:** TypeScript (`@arden/connectors/native-api/`) owns request/response shaping + the agent loop as pure, fixture-testable logic behind an injectable `HttpTransport` seam. Rust owns key lookup + HTTP/SSE egress + real cancellation via a new `stream_backend_completion`/`cancel_backend_completion` command pair that emits normalized `BackendAgentEvent`s over a Tauri event channel. The API key never enters React state, logs, or `RuntimeSnapshot`. One shared OpenAI-compatible client covers OpenAI/OpenRouter/xAI; Anthropic Messages and Gemini get provider-specific shaping behind the shared interface. Model tool calls route through the existing `ApprovalRequest` system before Arden executes them; unregistered tools fail closed.
+**Architecture:** TypeScript (`@fable/connectors/native-api/`) owns request/response shaping + the agent loop as pure, fixture-testable logic behind an injectable `HttpTransport` seam. Rust owns key lookup + HTTP/SSE egress + real cancellation via a new `stream_backend_completion`/`cancel_backend_completion` command pair that emits normalized `BackendAgentEvent`s over a Tauri event channel. The API key never enters React state, logs, or `RuntimeSnapshot`. One shared OpenAI-compatible client covers OpenAI/OpenRouter/xAI; Anthropic Messages and Gemini get provider-specific shaping behind the shared interface. Model tool calls route through the existing `ApprovalRequest` system before Fable executes them; unregistered tools fail closed.
 
-**Tech Stack:** TypeScript + React 19 + Vitest (`@arden/protocol`, `@arden/connectors`, `apps/desktop`); Rust + Tauri 2 + `reqwest` (features `json`, `rustls-no-provider`, `stream` — verified to resolve offline against the existing `Cargo.lock`).
+**Tech Stack:** TypeScript + React 19 + Vitest (`@fable/protocol`, `@fable/connectors`, `apps/desktop`); Rust + Tauri 2 + `reqwest` (features `json`, `rustls-no-provider`, `stream` — verified to resolve offline against the existing `Cargo.lock`).
 
 **Design of record:** `docs/2026-06-26-native-model-api-adapters-design.md`.
 
@@ -39,7 +39,7 @@ it("includes the native-api backend type in the catalog", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL — no provider has `backendType === "native-api"`.
 
 - [ ] **Step 3: Extend the union**
@@ -66,7 +66,7 @@ pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", 
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: still FAIL at the registry (no native provider yet) — this is fine; it passes once Task 1.3 lands the registry entry. Run `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` to confirm the Rust vocab compiles.
 
 - [ ] **Step 5: Commit**
@@ -96,7 +96,7 @@ it("surfaces the five native API providers alongside the runtime providers", () 
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL — only the four runtime ids are present.
 
 - [ ] **Step 3: Extend the Rust vocabulary**
@@ -165,7 +165,7 @@ describe("native API provider catalog", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL — `resolveNativeProvider` is not exported.
 
 - [ ] **Step 3: Add native fixtures**
@@ -193,7 +193,7 @@ export const nativeFixtures: NativeFixture[] = [
   {
     providerId: "openai",
     label: "OpenAI",
-    description: "Reach GPT models directly with an OpenAI API key. Arden owns the agent loop.",
+    description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop.",
     authLabel: "OpenAI API key",
     models: [
       { id: "gpt-5", label: "GPT-5" },
@@ -224,7 +224,7 @@ export const nativeFixtures: NativeFixture[] = [
   {
     providerId: "xai",
     label: "xAI",
-    description: "Reach Grok models directly with an xAI API key. Arden owns the agent loop.",
+    description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop.",
     authLabel: "xAI API key",
     models: [{ id: "grok-4", label: "Grok 4" }]
   },
@@ -247,7 +247,7 @@ Create `packages/connectors/src/backends/native.ts`:
 
 ```ts
 /**
- * Native model API adapter. Arden owns the full agent loop here (tool dispatch,
+ * Native model API adapter. Fable owns the full agent loop here (tool dispatch,
  * streaming, approval routing, memory, usage/cost, cancellation) — unlike the
  * runtime backends that borrow sessions from their providers.
  *
@@ -256,7 +256,7 @@ Create `packages/connectors/src/backends/native.ts`:
  * usage-cost). No entitlement-pending state.
  */
 
-import type { BackendProvider } from "@arden/protocol";
+import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
 import { nativeFixtures, type NativeFixture, type NativeProviderId } from "./fixtures";
 
@@ -351,7 +351,7 @@ and to the type re-export:
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS — all new native tests green; existing 17 tests still green.
 
 - [ ] **Step 7: Run full check**
@@ -407,7 +407,7 @@ export interface NativeToolCall {
   arguments: string;
 }
 
-/** A tool the loop advertises to the model (Arden-owned, from the registry). */
+/** A tool the loop advertises to the model (Fable-owned, from the registry). */
 export interface NativeToolSpec {
   name: string;
   description: string;
@@ -429,7 +429,7 @@ export interface NativeCompletionRequest {
  * A normalized agent-loop event streamed back to the shell. This is the shared
  * event surface for the native-API loop; model tool calls arrive as `tool-call`
  * carrying a pre-shaped ApprovalRequest so they route through the existing
- * approval queue before Arden executes anything.
+ * approval queue before Fable executes anything.
  */
 export type BackendAgentEvent =
   | { type: "text-delta"; text: string }
@@ -449,7 +449,7 @@ export type BackendAgentEvent =
 
 - [ ] **Step 2: Run typecheck**
 
-Run: `pnpm --filter @arden/protocol build && pnpm --filter @arden/connectors typecheck`
+Run: `pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors typecheck`
 Expected: clean.
 
 - [ ] **Step 3: Commit**
@@ -567,7 +567,7 @@ describe("FixtureTransport", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement the seam**
@@ -636,7 +636,7 @@ export class FixtureTransport implements HttpTransport {
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -660,7 +660,7 @@ Create `packages/connectors/src/native-api/openai-compat.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@arden/protocol";
+import type { NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport } from "./transport";
 import { parseOpenAiLine, shapeOpenAiRequest, streamOpenAiEvents } from "./openai-compat";
 
@@ -731,7 +731,7 @@ describe("openai-compatible shaping", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement the shared shaper + parser**
@@ -754,7 +754,7 @@ import type {
   NativeCompletionRequest,
   NativeMessage,
   NativeToolCall
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
@@ -885,7 +885,7 @@ Create `packages/connectors/src/native-api/anthropic.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@arden/protocol";
+import type { NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport } from "./transport";
 import { parseAnthropicLine, shapeAnthropicRequest, streamAnthropicEvents } from "./anthropic";
 
@@ -951,7 +951,7 @@ describe("anthropic shaping", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement the Anthropic shaper + parser**
@@ -971,7 +971,7 @@ Create `packages/connectors/src/native-api/anthropic.ts`. Anthropic accumulates 
  * compliance copy lives in the fixtures, not here.
  */
 
-import type { BackendAgentEvent, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
@@ -1145,7 +1145,7 @@ Create `packages/connectors/src/native-api/gemini.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@arden/protocol";
+import type { NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport } from "./transport";
 import { parseGeminiLine, shapeGeminiRequest, streamGeminiEvents } from "./gemini";
 
@@ -1195,7 +1195,7 @@ describe("gemini shaping", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement the Gemini shaper + parser**
@@ -1215,7 +1215,7 @@ Create `packages/connectors/src/native-api/gemini.ts`:
  * path-less event parse.
  */
 
-import type { BackendAgentEvent, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
@@ -1383,7 +1383,7 @@ describe("buildToolApproval", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL.
 
 - [ ] **Step 3: Create the tool registry**
@@ -1392,16 +1392,16 @@ Create `packages/connectors/src/native-api/tools.ts`:
 
 ```ts
 /**
- * Arden-owned tool registry. Model tool calls don't auto-execute — each is
+ * Fable-owned tool registry. Model tool calls don't auto-execute — each is
  * matched against this registry, routed through an ApprovalRequest, and executed
- * by an Arden runtime function. Tools the model invents that aren't registered
+ * by an Fable runtime function. Tools the model invents that aren't registered
  * here fail closed (critical risk, never executed).
  *
  * The `mode`/`riskLevel` are the *defaults* surfaced to the user; the approval
  * UI lets them modify before granting.
  */
 
-import type { BackendTool, NativeToolSpec } from "@arden/protocol";
+import type { BackendTool, NativeToolSpec } from "@fable/protocol";
 
 const TOOLS: Record<string, BackendTool> = {
   "read-file": {
@@ -1469,7 +1469,7 @@ export function lookupTool(name: string): BackendTool | undefined {
 Append to `packages/protocol/src/index.ts`:
 
 ```ts
-/** An Arden-owned tool the native loop may dispatch (after approval). */
+/** An Fable-owned tool the native loop may dispatch (after approval). */
 export interface BackendTool {
   name: string;
   description: string;
@@ -1485,12 +1485,12 @@ Create `packages/connectors/src/native-api/approvals.ts`:
 
 ```ts
 /**
- * Shape a model tool call into an ApprovalRequest that routes through Arden's
+ * Shape a model tool call into an ApprovalRequest that routes through Fable's
  * existing approval queue before execution. Untrusted model output becomes a
  * trusted action only after the user grants.
  */
 
-import type { ApprovalRequest } from "@arden/protocol";
+import type { ApprovalRequest } from "@fable/protocol";
 import { lookupTool } from "./tools";
 
 function safeParseArgs(args: string): Record<string, unknown> {
@@ -1517,7 +1517,7 @@ export function buildToolApproval(providerId: string, toolName: string, args: st
   const argDigest = `${toolName} ${dataUsed.join(" ")}`.slice(0, 80);
   const consequence = isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
-    : `Refuse unregistered tool ${toolName} (not in Arden's tool registry).`;
+    : `Refuse unregistered tool ${toolName} (not in Fable's tool registry).`;
 
   return {
     id: `native-${providerId}-${argDigest.replace(/\s+/g, "-").toLowerCase()}`.slice(0, 120),
@@ -1540,7 +1540,7 @@ export function buildToolApproval(providerId: string, toolName: string, args: st
 
 - [ ] **Step 6: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS.
 
 - [ ] **Step 7: Commit**
@@ -1580,7 +1580,7 @@ describe("priceFor", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement pricing**
@@ -1591,7 +1591,7 @@ Create `packages/connectors/src/native-api/pricing.ts`:
 /**
  * Per-provider list pricing (USD per 1M tokens) for usage/cost accounting. These
  * are conservative public list rates used only for the user's own cost display —
- * they are not billed through Arden. Unknown providers fail-safe to 0.
+ * they are not billed through Fable. Unknown providers fail-safe to 0.
  */
 
 interface Rate {
@@ -1620,7 +1620,7 @@ export function priceFor(providerId: string, inputTokens: number, outputTokens: 
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1668,7 +1668,7 @@ export { priceFor } from "./native-api/pricing";
 
 - [ ] **Step 2: Run the full connectors test suite**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS — all native-api shaper/parser/pricing/approval tests green; existing tests green.
 
 - [ ] **Step 3: Run full check**
@@ -1701,7 +1701,7 @@ Create `packages/connectors/src/native-api/agent-loop.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { BackendAgentEvent, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport, readFixture } from "./transport";
 import { runAgentLoop, type ToolExecutor } from "./agent-loop";
 
@@ -1773,7 +1773,7 @@ describe("runAgentLoop", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement the agent loop**
@@ -1782,7 +1782,7 @@ Create `packages/connectors/src/native-api/agent-loop.ts`:
 
 ```ts
 /**
- * The Arden-owned agent loop for native-API providers.
+ * The Fable-owned agent loop for native-API providers.
  *
  * Pure over an injectable HttpTransport + ToolExecutor. One turn = stream a
  * completion; if it finishes with `tool-calls`, the shell must approve + execute
@@ -1800,14 +1800,14 @@ import type {
   NativeCompletionRequest,
   NativeMessage,
   ApprovalRequest
-} from "@arden/protocol";
+} from "@fable/protocol";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
 import { streamOpenAiEvents } from "./openai-compat";
 import { registeredToolSpecs } from "./tools";
 import type { HttpTransport } from "./transport";
 
-/** Executes an approved tool. Production wires this to Arden runtime functions;
+/** Executes an approved tool. Production wires this to Fable runtime functions;
  *  tests inject a fake. Throws if the approval was not granted (fail-closed). */
 export interface ToolExecutor {
   execute(approval: ApprovalRequest, args: string): Promise<string>;
@@ -1905,7 +1905,7 @@ export async function* runAgentLoop(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS.
 
 - [ ] **Step 5: Run full check**
@@ -1933,7 +1933,7 @@ Create `packages/connectors/src/native-api/memory-context.test.ts`:
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { MemoryRecord, KnowledgeSource } from "@arden/protocol";
+import type { MemoryRecord, KnowledgeSource } from "@fable/protocol";
 import { buildContextPrefix } from "./memory-context";
 
 describe("buildContextPrefix", () => {
@@ -1963,7 +1963,7 @@ describe("buildContextPrefix", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement memory context shaping**
@@ -1978,7 +1978,7 @@ Create `packages/connectors/src/native-api/memory-context.ts`:
  * existing promote_knowledge_source_to_memory path (not here).
  */
 
-import type { KnowledgeSource, MemoryRecord } from "@arden/protocol";
+import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
 
 /** Build the system-message prefix from pinned memory/sources. "" if none. */
 export function buildContextPrefix(memory: MemoryRecord[], sources: KnowledgeSource[]): string {
@@ -2027,7 +2027,7 @@ In `agent-loop.ts`, extend `RunAgentLoopOptions` with an optional `contextPrefix
 
 - [ ] **Step 5: Run tests**
 
-Run: `pnpm --filter @arden/connectors test`
+Run: `pnpm --filter @fable/connectors test`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -2155,7 +2155,7 @@ Append five entries to `CATALOG` (after the grok entry):
         id: "openai",
         backend_type: "native-api",
         label: "OpenAI",
-        description: "Reach GPT models directly with an OpenAI API key. Arden owns the agent loop.",
+        description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[
             ("gpt-5", "GPT-5"),
@@ -2186,7 +2186,7 @@ Append five entries to `CATALOG` (after the grok entry):
         id: "xai",
         backend_type: "native-api",
         label: "xAI",
-        description: "Reach Grok models directly with an xAI API key. Arden owns the agent loop.",
+        description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[("grok-4", "Grok 4")],
         capabilities: NATIVE_API_CAPS,
@@ -2340,11 +2340,11 @@ Create `apps/desktop/src-tauri/src/native_api.rs`:
 ```rust
 //! Native-API transport boundary: Rust owns the API key + HTTP/SSE egress.
 //!
-//! TypeScript shapes the request body (pure, fixture-tested in @arden/connectors)
+//! TypeScript shapes the request body (pure, fixture-tested in @fable/connectors)
 //! and hands Rust an opaque `{ providerId, requestId, model, body }`. Rust looks
 //! up the key from the credential store, adds the provider-specific auth header,
 //! issues the streaming `reqwest` request, and relays normalized SSE lines back
-//! over the Tauri event channel `arden://backend/<requestId>`. Real cancellation
+//! over the Tauri event channel `fable://backend/<requestId>`. Real cancellation
 //! drops the in-flight future via the cancel map.
 //!
 //! Hard invariants:
@@ -2454,14 +2454,14 @@ fn pre_release_warning() {
 fn require_key(provider_id: &str) -> Result<String, String> {
     let store = credential_store()
         .lock()
-        .map_err(|_| "Arden could not acquire the credential store.".to_string())?;
+        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
     store
         .get(provider_id)
         .cloned()
         .ok_or_else(|| format!("{provider_id} has no stored credential."))
 }
 
-const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
+const EVENT_CHANNEL_PREFIX: &str = "fable://backend/";
 
 /// Stream a native-API completion. Looks up the key, issues the streaming
 /// request, and emits each normalized SSE line as a Tauri event. Real
@@ -2488,7 +2488,7 @@ pub async fn stream_backend_completion(
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
     cancel_map()
         .lock()
-        .map_err(|_| "Arden could not access the cancel map.".to_string())?
+        .map_err(|_| "Fable could not access the cancel map.".to_string())?
         .insert(request.request_id.clone(), tx);
 
     use futures_util::StreamExt;
@@ -2538,7 +2538,7 @@ pub async fn stream_backend_completion(
 pub fn cancel_backend_completion(request_id: String) -> Result<bool, String> {
     let removed = cancel_map()
         .lock()
-        .map_err(|_| "Arden could not access the cancel map.".to_string())?
+        .map_err(|_| "Fable could not access the cancel map.".to_string())?
         .remove(&request_id);
     Ok(removed.is_some())
 }
@@ -2617,7 +2617,7 @@ describe("native API runtime bridge", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/desktop test`
+Run: `pnpm --filter @fable/desktop test`
 Expected: FAIL — wrappers not exported.
 
 - [ ] **Step 3: Implement the bridge**
@@ -2632,7 +2632,7 @@ import { listen } from "@tauri-apps/api/event";
 //
 // The TypeScript layer owns orchestration; Rust owns the key + HTTP/SSE egress.
 // `streamRuntimeCompletion` hands Rust an opaque request (no key) and Rust emits
-// normalized SSE lines on the `arden://backend/<requestId>` channel. Outside
+// normalized SSE lines on the `fable://backend/<requestId>` channel. Outside
 // Tauri these return null so the loop stays fixture-testable.
 // ---------------------------------------------------------------------------
 
@@ -2676,7 +2676,7 @@ export async function listenRuntimeBackendEvents(
     return null;
   }
   try {
-    const unlisten = await listen<string>(`arden://backend/${requestId}`, (event) => {
+    const unlisten = await listen<string>(`fable://backend/${requestId}`, (event) => {
       onLine(event.payload as string);
     });
     return unlisten;
@@ -2688,7 +2688,7 @@ export async function listenRuntimeBackendEvents(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/desktop test`
+Run: `pnpm --filter @fable/desktop test`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2746,7 +2746,7 @@ And remove/replace the "connects a subscription backend" flow's reliance on `con
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/desktop test`
+Run: `pnpm --filter @fable/desktop test`
 Expected: FAIL — API-key path still disabled, native providers not rendered.
 
 - [ ] **Step 3: Make the API-key path functional**
@@ -2778,7 +2778,7 @@ In `apps/desktop/src/App.tsx`, the onboarding `onConnect` handler becomes:
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/desktop test`
+Run: `pnpm --filter @fable/desktop test`
 Expected: PASS.
 
 - [ ] **Step 6: Run full check**
@@ -2826,7 +2826,7 @@ describe("native agent loop wiring", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `pnpm --filter @arden/desktop test`
+Run: `pnpm --filter @fable/desktop test`
 Expected: FAIL — no agent activity node.
 
 - [ ] **Step 3: Implement the hook + transport**
@@ -2835,7 +2835,7 @@ Create `apps/desktop/src/hooks/useNativeAgent.ts`:
 
 ```ts
 /**
- * Runs the Arden-owned native-API agent loop and routes its events into the shell.
+ * Runs the Fable-owned native-API agent loop and routes its events into the shell.
  *
  * Outside Tauri (no transport), the hook surfaces a no-transport notice so the
  * UI stays testable. Inside Tauri it builds a TauriTransport (HttpTransport over
@@ -2847,7 +2847,7 @@ Create `apps/desktop/src/hooks/useNativeAgent.ts`:
  */
 
 import { useCallback, useRef, useState } from "react";
-import type { BackendAgentEvent, BackendProvider, NativeCompletionRequest } from "@arden/protocol";
+import type { BackendAgentEvent, BackendProvider, NativeCompletionRequest } from "@fable/protocol";
 import {
   runAgentLoop,
   shapeOpenAiRequest,
@@ -2855,7 +2855,7 @@ import {
   shapeGeminiRequest,
   type HttpTransport,
   type NativeTransportRequest
-} from "@arden/connectors";
+} from "@fable/connectors";
 import {
   cancelRuntimeCompletion,
   listenRuntimeBackendEvents,
@@ -3001,7 +3001,7 @@ In `apps/desktop/src/App.tsx`'s `renderChatContext`, add a small agent-transcrip
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `pnpm --filter @arden/desktop test`
+Run: `pnpm --filter @fable/desktop test`
 Expected: PASS.
 
 - [ ] **Step 6: Run full check**

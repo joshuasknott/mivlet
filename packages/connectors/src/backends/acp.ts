@@ -2,7 +2,7 @@
  * Generic ACP adapter (stdio/JSON-RPC) shared by Cursor and Grok.
  *
  * ACP (Agent Client Protocol) is the shared transport: a user-installed CLI
- * speaks JSON-RPC over stdio and Arden normalizes its events. This adapter
+ * speaks JSON-RPC over stdio and Fable normalizes its events. This adapter
  * depends on that CLI being installed — if it is absent the provider fails
  * closed with `authState: "install-required"` and an `installHint`. No CLI is
  * ever bundled or redistributed (licensing not yet reviewed).
@@ -13,7 +13,7 @@
  *   - The CLI absence yields zero capabilities, not a degraded fake set.
  */
 
-import type { BackendProvider } from "@arden/protocol";
+import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
 import { acpFixtures, type AcpFixture, type AcpProviderId } from "./fixtures";
 

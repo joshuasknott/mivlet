@@ -1,8 +1,8 @@
-# Arden Thesis
+# Fable Thesis
 
-Arden is an open-source AI workspace for real work. It extends the coding-agent model beyond code so people can chat with their computer, delegate tasks across tools and files, and stay in control at every step.
+Fable is an open-source AI workspace for real work. It extends the coding-agent model beyond code so people can chat with their computer, delegate tasks across tools and files, and stay in control at every step.
 
-Arden is local-first, private by default, permissioned, transparent, and built for everyone, not just developers.
+Fable is local-first, private by default, permissioned, transparent, and built for everyone, not just developers.
 
 ## Product Principles
 
@@ -20,4 +20,4 @@ Arden is local-first, private by default, permissioned, transparent, and built f
 - ChatGPT: accessible composer, voice, memory controls, and nontechnical language.
 - Grok: direct visual answers and low-friction prompt-to-action flow.
 
-Arden must remain visually and structurally distinct from these products.
+Fable must remain visually and structurally distinct from these products.

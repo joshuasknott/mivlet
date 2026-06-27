@@ -1,5 +1,5 @@
 {
-  "name": "@arden/desktop",
+  "name": "@fable/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,10 +14,9 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
-    "@fontsource/newsreader": "^5.2.8",
     "@phosphor-icons/react": "^2.1.10",
-    "@arden/connectors": "workspace:*",
-    "@arden/protocol": "workspace:*",
+    "@fable/connectors": "workspace:*",
+    "@fable/protocol": "workspace:*",
     "@tauri-apps/api": "^2.9.0",
     "convex": "^1.30.0",
     "react": "^19.1.1",
