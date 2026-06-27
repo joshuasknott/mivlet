@@ -7,10 +7,10 @@ Notion, Gmail, Slack, Google Calendar, and Linear. Local Files remains a native
 local connector.
 
 The browser preview uses synthetic fixture records and labels them `fixture`.
-The desktop runtime reports `needs-auth` until credentials are connected through
-the native auth boundary. Fable must never translate a missing credential into a
-connected state, and production desktop search/read/write paths do not silently
-fall back to fixture data.
+The desktop runtime uses authenticated production paths when provider
+configuration is available and the user connects an account. Fable must never
+translate a missing credential into a connected state, and production desktop
+search/read/write paths do not silently fall back to fixture data.
 
 Every connector exposes:
 
@@ -29,7 +29,7 @@ Every connector exposes:
 | GitHub | Register a GitHub OAuth/App client and installation policy | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Metadata, repository contents, branches, commits, issues, pull requests, checks, reviews, comments, and Actions workflow read; selected issue/comment/review/file/branch/workflow writes only when enabled |
 | Vercel | Create a connectable-account integration and select API permissions | External Flow redirect, proposed `https://auth.fable.app/oauth/vercel/callback` | Team, project, deployment, domain, log, and environment-variable metadata read; deployment/project/domain writes only when enabled |
 | Linear | Create an OAuth application and select workspace scopes | Broker callback, proposed `https://auth.fable.app/oauth/linear/callback` | Workspace, team, project, cycle, issue, comment, label, and user read; issue/comment mutation only when enabled |
-| Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `https://www.googleapis.com/auth/drive.file` |
+| Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `drive.metadata.readonly`; incremental `drive.readonly` and `drive.file` |
 | Notion | Create a public connection and select connection capabilities | Broker callback, proposed `https://auth.fable.app/oauth/notion/callback` | Read content on user-selected pages/workspaces |
 | Gmail | Enable Gmail API, create Desktop OAuth client, configure consent and verification | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `gmail.readonly`; optional `gmail.compose` |
 | Slack | Create/distribute a Slack app, configure scopes and token rotation | HTTPS broker callback, proposed `https://auth.fable.app/oauth/slack/callback` | Selected conversation read scopes; optional `chat:write` |
@@ -69,6 +69,45 @@ Google classifies `gmail.readonly` and `gmail.compose` as restricted scopes.
 Production use requires the applicable OAuth verification and, when restricted
 data is transmitted or stored on servers, may require a security assessment.
 
+## Google production connector setup
+
+Google Drive, Gmail, and Google Calendar share the desktop OAuth implementation:
+
+- create a Google Cloud project;
+- enable the Google Drive API, Gmail API, and Google Calendar API as needed;
+- configure the OAuth consent screen and add local developers as test users
+  while the app is in testing mode;
+- create an OAuth client with application type `Desktop app`;
+- provide the client id through the desktop connector configuration;
+- use the loopback redirect URI that Fable opens for the active authorization
+  attempt.
+
+The desktop flow uses Authorization Code with PKCE, validates the returned
+OAuth state and callback values, and stores access/refresh tokens only through
+the native credential boundary. Google refresh tokens are reused across
+incremental scope grants when Google returns only a new access token.
+
+Fable requests only required scopes initially and asks for optional scopes
+when a user invokes capabilities that need them:
+
+| Connector | Initial read scopes | Incremental scopes |
+| --- | --- | --- |
+| Google Drive | `https://www.googleapis.com/auth/drive.metadata.readonly` | `drive.readonly` for downloads/exports; `drive.file` for create/update/move/rename/share/delete |
+| Gmail | `https://www.googleapis.com/auth/gmail.readonly` | `gmail.compose` for drafts and sends |
+| Google Calendar | `calendar.calendarlist.readonly`, `calendar.events.readonly` | `calendar.events` for create/update/delete |
+
+Google Drive supports metadata search/read, supported file downloads,
+Google Docs/Sheets/Slides export, and approved create/update/move/rename/share/
+delete actions. Gmail supports search, message/thread reads, attachment
+metadata, draft creation, and explicit sends. Google Calendar supports calendar
+listing, event reads, event details, free/busy checks, and approved event
+create/update/delete actions.
+
+Google write actions require a fresh explicit approval. Standing session/rule
+grants are intentionally not accepted for Google mutations. Gmail sends also
+require per-message approval and show the sending account, recipients, subject,
+body preview, and attachments before execution.
+
 ## Read and write behavior
 
 Read operations list/search only the resources granted by the provider and
@@ -100,8 +139,8 @@ same explicit approval boundary.
 ## Credential storage and auth broker
 
 Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
-the authorization code; the refresh token is written to OS secure storage.
-The desktop app does not rely on a client secret.
+the authorization code; access and refresh tokens are written through OS secure
+storage/keyring. The desktop app does not rely on a client secret.
 
 GitHub App signing material and the Vercel, Notion, and Slack client secrets
 must remain in an Fable auth broker or equivalent server-side secret boundary.
@@ -115,6 +154,10 @@ id, account summary, scopes, expiry, status, health, and opaque credential
 references. Auth broker endpoints perform confidential-client exchange,
 refresh, identity lookup, and revocation for GitHub, Vercel, Linear, Notion,
 and Slack.
+The Rust `ConnectorCredentialBoundary` is fail-closed: if a credential or token
+is missing, unavailable, expired without refresh, or lacks the required scope,
+live commands return a normalized connector error instead of using fixtures or
+claiming access.
 
 ## Local cache, logging, and disconnect
 
@@ -143,6 +186,8 @@ expired/unavailable auth state.
 - GitHub/Vercel/Linear coverage intentionally targets practical high-value
   provider operations; unsupported provider features still fail closed as
   undeclared capabilities.
+- Live Google integration tests are opt-in and require deliberately supplied
+  credentials and test account data.
 
 ## Official provider references
 

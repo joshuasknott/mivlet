@@ -65,7 +65,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 7] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 10] = [
     "read-file",
     "write-file",
     "run-shell",
@@ -73,6 +73,9 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 7] = [
     "github-read",
     "vercel-read",
     "linear-read",
+    "google-drive-read",
+    "gmail-read",
+    "google-calendar-read",
 ];
 
 /// The outcome of re-validating + running a tool against the workspace root.
@@ -91,6 +94,11 @@ pub(crate) enum ToolOutcome {
     NeedsWebFetch { url: String },
     NeedsConnectorRead {
         request: crate::models::ConnectorCapabilityRequest,
+    },
+    /// An authenticated, read-only Google Workspace request owned by Rust.
+    NeedsGoogleRead {
+        tool: String,
+        arguments: serde_json::Value,
     },
 }
 
@@ -114,6 +122,9 @@ pub(crate) fn execute_tool(
         }
         ToolOutcome::NeedsConnectorRead { .. } => {
             Err("connector reads must be executed through the async command boundary.".to_string())
+        }
+        ToolOutcome::NeedsGoogleRead { .. } => {
+            Err("Google reads must be executed through the async command boundary.".to_string())
         }
     }
 }
@@ -166,6 +177,9 @@ pub(crate) fn execute_tool_outcome(
                 Err(error) => ToolOutcome::Done(Err(error)),
             }
         }
+        "google-drive-read" | "gmail-read" | "google-calendar-read" => {
+            ToolOutcome::NeedsGoogleRead { tool, arguments }
+        }
         other => ToolOutcome::Done(Err(format!("Tool {other} is not supported."))),
     }
 }
@@ -186,6 +200,9 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
         "github-read" | "vercel-read" | "linear-read" => Some(("read-only", "medium")),
+        "google-drive-read" => Some(("read-only", "low")),
+        "gmail-read" => Some(("read-only", "medium")),
+        "google-calendar-read" => Some(("read-only", "low")),
         _ => None,
     }
 }
@@ -480,6 +497,12 @@ pub async fn execute_tool_call(
             serde_json::to_string(&result)
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|_| "Fable could not encode the connector result.".to_string())
+        }
+        ToolOutcome::NeedsGoogleRead { tool, arguments } => {
+            crate::google::execute_read_tool(&app, &tool, &arguments)
+                .await
+                .map(|output| ToolResult { ok: true, output })
+                .map_err(|error| error.message)
         }
     }
 }

@@ -9,8 +9,10 @@ import type {
 import { connectorFixtures } from "../fixtures";
 import { prepareGitHubComment, prepareGitHubDraftPullRequest } from "./github";
 import { prepareGmailDraft, prepareGmailSend } from "./gmail";
+import { prepareGoogleDriveAction } from "./google-drive";
 import {
   prepareGoogleCalendarCreate,
+  prepareGoogleCalendarDelete,
   prepareGoogleCalendarUpdate
 } from "./google-calendar";
 import { prepareSlackDraft, prepareSlackPost } from "./slack";
@@ -88,6 +90,13 @@ export function prepareFixtureConnectorAction(
     case "vercel.update-domain":
     case "vercel.delete-domain":
       return prepareConnectorAction("vercel", "Vercel", action, payload, "high", "Changes the identified Vercel team or project resource after explicit approval.");
+    case "google-drive.create-file":
+    case "google-drive.update-file":
+    case "google-drive.move-file":
+    case "google-drive.rename-file":
+    case "google-drive.share-file":
+    case "google-drive.delete-file":
+      return prepareGoogleDriveAction(action, payload);
     case "gmail.create-draft":
       return prepareGmailDraft({
         to: payload.to ?? "recipient@example.invalid",
@@ -124,6 +133,12 @@ export function prepareFixtureConnectorAction(
         title: payload.title ?? "Connector review",
         start: payload.start ?? "2026-07-01T10:00:00Z",
         end: payload.end ?? "2026-07-01T10:30:00Z"
+      });
+    case "google-calendar.delete-event":
+      return prepareGoogleCalendarDelete({
+        calendarId: payload.calendarId ?? "fixture-primary",
+        eventId: payload.eventId ?? payload.targetId ?? "fixture-event",
+        title: payload.title
       });
   }
 }

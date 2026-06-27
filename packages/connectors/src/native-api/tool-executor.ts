@@ -43,6 +43,8 @@ export interface ToolRuntime {
   runShell(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   /** Fetch a URL and return its text. Returns null on a fetch failure. */
   fetchUrl(url: string): Promise<string | null>;
+  /** Execute an authenticated Google read without exposing credentials to JS. */
+  googleRead?(tool: string, input: Record<string, unknown>): Promise<string>;
 }
 
 /**
@@ -305,6 +307,14 @@ async function dispatch(
         throw new Error(`Fetch failed: ${url}`);
       }
       return text;
+    }
+    case "google-drive-read":
+    case "gmail-read":
+    case "google-calendar-read": {
+      if (!runtime.googleRead) {
+        throw new Error(`Tool ${toolName} requires the native Google runtime.`);
+      }
+      return runtime.googleRead(toolName, parsed);
     }
     default:
       // A registered tool with no dispatcher is a programming error; fail closed.

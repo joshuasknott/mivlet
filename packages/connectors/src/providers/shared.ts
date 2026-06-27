@@ -250,6 +250,15 @@ function confirmationPhrase(action: ConnectorActionKind) {
   if (action === "gmail.send") {
     return "send email";
   }
+  if (action === "google-drive.share-file") {
+    return "share drive file";
+  }
+  if (action === "google-drive.delete-file") {
+    return "delete drive file";
+  }
+  if (action === "google-calendar.delete-event") {
+    return "delete calendar event";
+  }
   if (action === "slack.post") {
     return "post message";
   }

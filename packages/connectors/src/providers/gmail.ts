@@ -1,10 +1,17 @@
-import type { ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorCapability, ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   prepareConnectorAction,
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
+
+export const GMAIL_CAPABILITIES = [
+  { id: "gmail.search", kind: "read", consequential: false, description: "Search selected mailbox results." },
+  { id: "gmail.read", kind: "read", consequential: false, description: "Read a selected message or thread." },
+  { id: "gmail.create-draft", kind: "write", consequential: true, description: "Create an approved draft." },
+  { id: "gmail.send", kind: "write", consequential: true, description: "Send one explicitly approved message." }
+] satisfies ConnectorCapability[];
 
 export interface GmailPayload {
   id: string;
@@ -55,15 +62,19 @@ export function prepareGmailDraft(payload: {
 }
 
 export function prepareGmailSend(payload: {
-  draftId: string;
+  draftId?: string;
   to: string;
   subject: string;
+  cc?: string;
+  bcc?: string;
+  body?: string;
+  attachments?: string;
 }) {
   return prepareConnectorAction(
     "gmail",
     "Gmail",
     "gmail.send",
-    { ...payload, targetId: payload.draftId },
+    { ...payload, targetId: payload.draftId ?? payload.to },
     "high",
     "Sends the selected email to external recipients."
   );

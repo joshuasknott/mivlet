@@ -183,6 +183,10 @@ fn provider_config(
         ];
         provider_scopes.extend(scopes.into_iter().map(|scope| match scope.as_str() {
             "drive.file" => "https://www.googleapis.com/auth/drive.file".to_string(),
+            "drive.metadata.readonly" => {
+                "https://www.googleapis.com/auth/drive.metadata.readonly".to_string()
+            }
+            "drive.readonly" => "https://www.googleapis.com/auth/drive.readonly".to_string(),
             "gmail.readonly" => "https://www.googleapis.com/auth/gmail.readonly".to_string(),
             "gmail.compose" => "https://www.googleapis.com/auth/gmail.compose".to_string(),
             "calendar.calendarlist.readonly" => {
@@ -334,6 +338,13 @@ fn start_with_store(
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
         .append_pair("code_challenge_method", "S256");
+    if !config.brokered {
+        authorization
+            .query_pairs_mut()
+            .append_pair("access_type", "offline")
+            .append_pair("include_granted_scopes", "true")
+            .append_pair("prompt", "consent");
+    }
     let pending = PendingOAuth {
         connector_id: connector_id.to_string(),
         state: state.clone(),
@@ -389,7 +400,17 @@ async fn complete_with_store(
             false,
         )
     })?;
-    let parameters = callback.query_pairs().collect::<BTreeMap<_, _>>();
+    let mut parameters = BTreeMap::new();
+    for (key, value) in callback.query_pairs() {
+        if parameters.insert(key.clone(), value).is_some() {
+            return Err(command_error(
+                "invalid-request",
+                connector_id,
+                &format!("OAuth callback contains duplicate {key} parameters."),
+                false,
+            ));
+        }
+    }
     if let Some(error) = parameters.get("error") {
         return Err(command_error("needs-auth", connector_id, error, false));
     }
@@ -458,6 +479,12 @@ async fn complete_with_store(
         ));
     }
 
+    // State and verifier values are single-use. Consume them before network
+    // egress so callback replay cannot trigger a second token exchange.
+    store
+        .remove(&key)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+
     let response = reqwest::Client::new()
         .post(&pending.token_endpoint)
         .form(&[
@@ -504,23 +531,36 @@ async fn complete_with_store(
             .await?
         }
     };
+    let credential_ref = token_key(connector_id, &account.id);
+    let previous = store
+        .get(&credential_ref)
+        .ok()
+        .flatten()
+        .and_then(|encoded| serde_json::from_str::<StoredTokenSet>(&encoded).ok());
+    let mut granted_scopes: Vec<String> = response
+        .scope
+        .map(|scope| scope.split_whitespace().map(str::to_string).collect())
+        .unwrap_or_else(|| pending.scopes.clone());
+    if let Some(previous) = previous.as_ref() {
+        granted_scopes.extend(previous.scopes.iter().cloned());
+        granted_scopes.sort();
+        granted_scopes.dedup();
+    }
     let tokens = StoredTokenSet {
         access_token: response.access_token,
-        refresh_token: response.refresh_token,
+        refresh_token: response
+            .refresh_token
+            .or_else(|| previous.and_then(|tokens| tokens.refresh_token)),
         token_type: response.token_type.unwrap_or_else(|| "Bearer".to_string()),
         expires_at: response
             .expires_in
             .map(|seconds| now_epoch().saturating_add(seconds)),
-        scopes: response
-            .scope
-            .map(|scope| scope.split_whitespace().map(str::to_string).collect())
-            .unwrap_or(pending.scopes),
+        scopes: granted_scopes,
         revocation_endpoint: pending.revocation_endpoint,
         token_endpoint: pending.token_endpoint,
         client_id: pending.client_id,
         brokered: pending.brokered,
     };
-    let credential_ref = token_key(connector_id, &account.id);
     store
         .set(
             &credential_ref,
@@ -533,9 +573,6 @@ async fn complete_with_store(
                 )
             })?,
         )
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    store
-        .remove(&key)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     Ok((tokens, account, credential_ref))
 }
@@ -888,12 +925,12 @@ pub(crate) async fn refresh_connection(
     Ok(updated)
 }
 
-/// Resolve a usable provider access token without exposing it across the Tauri boundary.
-/// Expiring credentials are refreshed and persisted in the OS credential store first.
-pub(crate) async fn provider_access_token(
+/// Return a usable token set to native provider code. Tokens remain inside
+/// Rust and are refreshed before use; no Tauri command exposes this value.
+pub(crate) async fn authorized_tokens(
     app: &tauri::AppHandle,
     connector_id: &str,
-) -> Result<String, ConnectorCommandError> {
+) -> Result<(ConnectorConnection, StoredTokenSet), ConnectorCommandError> {
     let connection = refresh_connection(app, connector_id).await?;
     let encoded = NativeConnectorSecretStore
         .get(&connection.credential_ref)
@@ -906,7 +943,7 @@ pub(crate) async fn provider_access_token(
                 false,
             )
         })?;
-    let tokens: StoredTokenSet = serde_json::from_str(&encoded).map_err(|_| {
+    let tokens = serde_json::from_str::<StoredTokenSet>(&encoded).map_err(|_| {
         command_error(
             "needs-auth",
             connector_id,
@@ -922,6 +959,16 @@ pub(crate) async fn provider_access_token(
             false,
         ));
     }
+    Ok((connection, tokens))
+}
+
+/// Resolve a usable provider access token without exposing it across the Tauri boundary.
+/// Expiring credentials are refreshed and persisted in the OS credential store first.
+pub(crate) async fn provider_access_token(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+) -> Result<String, ConnectorCommandError> {
+    let (_, tokens) = authorized_tokens(app, connector_id).await?;
     Ok(tokens.access_token)
 }
 

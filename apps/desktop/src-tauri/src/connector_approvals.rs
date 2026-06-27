@@ -91,6 +91,16 @@ fn all_safe_payload_fields(action: &ConnectorActionRequest) -> Vec<String> {
         .collect()
 }
 
+fn first_payload_value(action: &ConnectorActionRequest, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        action
+            .payload
+            .get(*key)
+            .map(|value| truncate_characters(&normalize_spaces(value), 500))
+            .filter(|value| !value.is_empty())
+    })
+}
+
 fn connector_target_summary(action: &ConnectorActionRequest, account_id: &str) -> String {
     let keys: &[&str] = match action.connector_id.as_str() {
         "github" => &[
@@ -122,6 +132,16 @@ fn connector_target_summary(action: &ConnectorActionRequest, account_id: &str) -
             "cycleId",
             "assigneeId",
         ],
+        "google-drive" => &[
+            "fileId",
+            "name",
+            "destinationFolderId",
+            "parents",
+            "recipient",
+            "targetId",
+        ],
+        "gmail" => &["to", "draftId", "subject", "targetId"],
+        "google-calendar" => &["calendarId", "eventId", "title", "start", "end", "targetId"],
         _ => &[
             "target",
             "to",
@@ -145,6 +165,11 @@ fn connector_preview(action: &ConnectorActionRequest, account_id: &str, target: 
         "github" => "GitHub",
         "vercel" => "Vercel",
         "linear" => "Linear",
+        "google-drive" => "Google Drive",
+        "gmail" => "Gmail",
+        "google-calendar" => "Google Calendar",
+        "slack" => "Slack",
+        "notion" => "Notion",
         _ => action.approval.service.as_str(),
     };
     let proposed = all_safe_payload_fields(action);
@@ -166,9 +191,48 @@ pub(crate) fn record_pending_connector_action(
     path: &Path,
     action: &ConnectorActionRequest,
     account_id: &str,
+    account_label: &str,
 ) -> Result<ConnectorApprovalRecord, String> {
     let target = connector_target_summary(action, account_id);
-    let preview = connector_preview(action, account_id, &target);
+    let default_preview = connector_preview(action, account_id, &target);
+    let value = |keys: &[&str], fallback: &str| {
+        first_payload_value(action, keys).unwrap_or_else(|| fallback.to_string())
+    };
+    let preview = match action.connector_id.as_str() {
+        "gmail" => format!(
+            "Account: {account_label}\nTo: {}\nCC: {}\nBCC: {}\nSubject: {}\nBody: {}\nAttachments: {}\nAction: {}",
+            value(&["to"], "(none)"),
+            value(&["cc"], "(none)"),
+            value(&["bcc"], "(none)"),
+            value(&["subject"], "(no subject)"),
+            value(&["body"], "(existing approved draft body)"),
+            value(&["attachments"], "(none)"),
+            action.action,
+        ),
+        "google-calendar" => format!(
+            "Account: {account_label}\nCalendar: {}\nTitle: {}\nDate/time: {} to {}\nTimezone: {}\nLocation: {}\nAttendees: {}\nRecurrence: {}\nChanged fields: {}\nAction: {}",
+            value(&["calendarId"], "primary"),
+            value(&["title"], "(existing event)"),
+            value(&["start"], "(unchanged)"),
+            value(&["end"], "(unchanged)"),
+            value(&["timezone"], "(unchanged)"),
+            value(&["location"], "(none)"),
+            value(&["attendees"], "(none)"),
+            value(&["recurrence"], "(none)"),
+            action.payload.keys().cloned().collect::<Vec<_>>().join(", "),
+            action.action,
+        ),
+        "google-drive" => format!(
+            "Account: {account_label}\nFile/folder: {}\nDestination: {}\nRecipients: {}\nProposed change: {}\nName/content preview: {}",
+            value(&["fileId", "name"], "new file"),
+            value(&["destinationFolderId", "parents"], "(unchanged)"),
+            value(&["recipient"], "(none)"),
+            action.action,
+            value(&["name", "content"], "(metadata only)"),
+        ),
+        _ => default_preview,
+    };
+    let preview = truncate_characters(&preview, 1_000);
     let record = ConnectorApprovalRecord {
         id: format!("connector-approval-{}", action.id),
         connector_id: action.connector_id.clone(),
@@ -289,14 +353,16 @@ mod tests {
         let _ = fs::remove_file(&path);
         let prepared = action("person@example.com");
         let record =
-            record_pending_connector_action(&path, &prepared, "account-1").expect("record");
+            record_pending_connector_action(&path, &prepared, "account-1", "person@example.com")
+                .expect("record");
         assert_eq!(record.connector_id, "gmail");
         assert_eq!(record.account_id, "account-1");
         assert_eq!(record.proposed_action, "gmail.send");
         assert!(record.target.contains("account=account-1"));
         assert!(record.target.contains("to=person@example.com"));
-        assert!(record.preview.contains("Status update"));
-        assert!(record.preview.contains("proposed="));
+        assert!(record.preview.contains("Account: person@example.com"));
+        assert!(record.preview.contains("To: person@example.com"));
+        assert!(record.preview.contains("Subject: Status update"));
         assert_eq!(record.risk_level, "high");
         assert_eq!(record.result, "pending");
         assert!(verify_prepared_connector_action(&path, &prepared).is_ok());

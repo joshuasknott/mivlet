@@ -1,10 +1,18 @@
-import type { ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorCapability, ConnectorSearchItem } from "@fable/protocol";
 import {
   classifyConnectorError,
   prepareConnectorAction,
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
+
+export const GOOGLE_CALENDAR_CAPABILITIES = [
+  { id: "calendar.list", kind: "read", consequential: false, description: "List accessible calendars." },
+  { id: "calendar.read", kind: "read", consequential: false, description: "Read events, attendees, and availability." },
+  { id: "google-calendar.create-draft", kind: "write", consequential: true, description: "Create an approved event." },
+  { id: "google-calendar.update-draft", kind: "write", consequential: true, description: "Update an approved event." },
+  { id: "google-calendar.delete-event", kind: "write", consequential: true, description: "Delete an approved event." }
+] satisfies ConnectorCapability[];
 
 export interface GoogleCalendarPayload {
   id: string;
@@ -48,6 +56,10 @@ export function prepareGoogleCalendarCreate(payload: {
   title: string;
   start: string;
   end: string;
+  timezone?: string;
+  location?: string;
+  attendees?: string;
+  recurrence?: string;
 }) {
   return prepareConnectorAction(
     "google-calendar",
@@ -65,6 +77,10 @@ export function prepareGoogleCalendarUpdate(payload: {
   title: string;
   start: string;
   end: string;
+  timezone?: string;
+  location?: string;
+  attendees?: string;
+  recurrence?: string;
 }) {
   return prepareConnectorAction(
     "google-calendar",
@@ -73,6 +89,24 @@ export function prepareGoogleCalendarUpdate(payload: {
     { ...payload, targetId: payload.eventId },
     "medium",
     "Updates the selected calendar event after Fable approval."
+  );
+}
+
+export function prepareGoogleCalendarDelete(payload: {
+  calendarId: string;
+  eventId: string;
+  title?: string;
+  start?: string;
+  end?: string;
+  timezone?: string;
+}) {
+  return prepareConnectorAction(
+    "google-calendar",
+    "Google Calendar",
+    "google-calendar.delete-event",
+    { ...payload, targetId: payload.eventId },
+    "high",
+    "Deletes or cancels the selected calendar event after explicit approval."
   );
 }
 

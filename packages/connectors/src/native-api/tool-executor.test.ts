@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@fable/protocol";
 import type { HttpTransport } from "./transport";
 import { runAgentLoop } from "./agent-loop";
+import { registeredToolSpecs } from "./tools";
 import {
   createApprovalGate,
   createToolExecutor,
@@ -226,6 +227,18 @@ describe("createToolExecutor — dispatch + grant gating", () => {
     await expect(
       executor(approvalFor("c1", "read-file"), JSON.stringify({}))
     ).rejects.toThrow(/path/i);
+  });
+});
+
+describe("Google native read tools", () => {
+  it("registers Drive, Gmail, and Calendar read-only tools", () => {
+    const tools = registeredToolSpecs().map((tool) => tool.name);
+
+    expect(tools).toEqual(expect.arrayContaining([
+      "google-drive-read",
+      "gmail-read",
+      "google-calendar-read"
+    ]));
   });
 });
 
