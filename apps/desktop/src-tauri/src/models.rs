@@ -75,7 +75,7 @@ pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;
 
 // First-wave connector vocabularies.
-pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 7] = [
+pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 8] = [
     "github",
     "vercel",
     "google-drive",
@@ -83,6 +83,7 @@ pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 7] = [
     "gmail",
     "slack",
     "google-calendar",
+    "linear",
 ];
 pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
     "fixture",
@@ -93,11 +94,26 @@ pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 10] = [
+pub const CONNECTOR_ACTIONS: [&str; 25] = [
     "github.draft-pull-request",
     "github.comment",
     "vercel.promote",
     "vercel.rollback",
+    "github.create-issue",
+    "github.update-issue",
+    "github.create-review",
+    "github.update-file",
+    "github.create-branch",
+    "github.dispatch-workflow",
+    "vercel.create-deployment",
+    "vercel.cancel-deployment",
+    "vercel.update-project",
+    "vercel.create-domain",
+    "vercel.update-domain",
+    "vercel.delete-domain",
+    "linear.create-issue",
+    "linear.update-issue",
+    "linear.comment",
     "gmail.create-draft",
     "gmail.send",
     "slack.create-draft",
@@ -115,7 +131,7 @@ pub const MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS: usize = 200_000;
 pub struct RuntimeStatus {
     pub permission_mode: &'static str,
     pub offline_ready: bool,
-    pub connector_boundaries: [&'static str; 7],
+    pub connector_boundaries: [&'static str; 9],
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -276,6 +292,27 @@ pub struct ConnectorSearchResult {
     pub next_cursor: Option<String>,
     pub source: String,
     pub searched_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorCapabilityRequest {
+    pub connector_id: String,
+    pub capability: String,
+    #[serde(default)]
+    pub input: BTreeMap<String, serde_json::Value>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorCapabilityResult {
+    pub connector_id: String,
+    pub capability: String,
+    pub items: Vec<serde_json::Value>,
+    pub next_cursor: Option<String>,
+    pub rate_limit_remaining: Option<u64>,
+    pub rate_limit_reset_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -18,7 +18,7 @@ import {
 } from "../index";
 
 describe("first-wave connector registry", () => {
-  it("keeps the seven stable connector ids in order", () => {
+  it("keeps the stable connector ids in order", () => {
     expect(FIRST_WAVE_CONNECTOR_IDS).toEqual([
       "github",
       "vercel",
@@ -26,7 +26,8 @@ describe("first-wave connector registry", () => {
       "notion",
       "gmail",
       "slack",
-      "google-calendar"
+      "google-calendar",
+      "linear"
     ]);
     expect(listFirstWaveConnectors().map((connector) => connector.id)).toEqual(
       FIRST_WAVE_CONNECTOR_IDS
@@ -92,7 +93,12 @@ describe("provider normalizers", () => {
         kind: "event",
         title: "Review",
         calendarId: "fixture-primary"
-      })
+      }),
+      searchFixtureConnector({
+        connectorId: "linear",
+        query: "",
+        limit: 1
+      }).items[0]
     ];
 
     expect(items.map((item) => item.connectorId)).toEqual(FIRST_WAVE_CONNECTOR_IDS);

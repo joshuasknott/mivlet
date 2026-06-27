@@ -16,9 +16,11 @@ import {
 import { prepareSlackDraft, prepareSlackPost } from "./slack";
 import {
   importConnectorSearchItem,
+  prepareConnectorAction,
   searchConnectorFixtures
 } from "./shared";
 import { prepareVercelPromotion, prepareVercelRollback } from "./vercel";
+import { prepareLinearAction } from "./linear-actions";
 
 export const FIRST_WAVE_CONNECTOR_IDS = [
   "github",
@@ -27,7 +29,8 @@ export const FIRST_WAVE_CONNECTOR_IDS = [
   "notion",
   "gmail",
   "slack",
-  "google-calendar"
+  "google-calendar",
+  "linear"
 ] as const satisfies readonly FirstWaveConnectorId[];
 
 export function listFirstWaveConnectors(): ConnectorManifest[] {
@@ -67,6 +70,24 @@ export function prepareFixtureConnectorAction(
       return prepareVercelPromotion(payload.targetId ?? "fixture-deployment");
     case "vercel.rollback":
       return prepareVercelRollback(payload.targetId ?? "fixture-deployment");
+    case "linear.create-issue":
+    case "linear.update-issue":
+    case "linear.comment":
+      return prepareLinearAction(action, payload);
+    case "github.create-issue":
+    case "github.update-issue":
+    case "github.create-review":
+    case "github.update-file":
+    case "github.create-branch":
+    case "github.dispatch-workflow":
+      return prepareConnectorAction("github", "GitHub", action, payload, "high", "Changes the identified GitHub repository resource after explicit approval.");
+    case "vercel.create-deployment":
+    case "vercel.cancel-deployment":
+    case "vercel.update-project":
+    case "vercel.create-domain":
+    case "vercel.update-domain":
+    case "vercel.delete-domain":
+      return prepareConnectorAction("vercel", "Vercel", action, payload, "high", "Changes the identified Vercel team or project resource after explicit approval.");
     case "gmail.create-draft":
       return prepareGmailDraft({
         to: payload.to ?? "recipient@example.invalid",

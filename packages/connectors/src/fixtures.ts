@@ -195,15 +195,21 @@ export const connectorFixtures = [
   {
     id: "linear",
     name: "Linear",
-    status: "needs-auth",
-    permissions: ["read teams and issues"],
-    healthSummary: "Adapter boundary ready",
+    status: "fixture",
+    permissions: ["read workspace data", "create and update approved issues and comments"],
+    healthSummary: "Preview data loaded; Linear OAuth setup required",
     lastCheckedAt: "2026-06-25T21:00:00.000Z",
     authMode: "oauth-broker",
-    setupMessage: "Linear remains a later-wave adapter.",
-    supportsSearch: false,
-    supportsImport: false,
-    supportedActions: []
+    scopes: [
+      { id: "read", label: "Workspace data", access: "read", required: true, granted: false },
+      { id: "write", label: "Issue updates", access: "write", required: false, granted: false },
+      { id: "comments:create", label: "Comments", access: "write", required: false, granted: false }
+    ],
+    health: { state: "unknown", summary: "Fixture adapter only", checkedAt: "2026-06-27T09:00:00.000Z" },
+    setupMessage: "Create a Linear OAuth application and configure the Fable auth broker callback.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: ["linear.create-issue", "linear.update-issue", "linear.comment"]
   }
 ] satisfies ConnectorManifest[];
 
@@ -326,6 +332,20 @@ export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSear
       trust: "untrusted",
       contentPreview: "Review provider scopes, token storage, and approval boundaries.",
       providerMetadata: { calendarId: "fixture-primary", status: "confirmed", start: "2026-07-01T10:00:00Z" }
+    }
+  ],
+  linear: [
+    {
+      id: "linear-issue-fable-12",
+      connectorId: "linear",
+      title: "FBL-12 · Ship developer connectors",
+      kind: "issue",
+      summary: "Synthetic Linear issue used only by preview and tests.",
+      provenance: "Linear fixture · Fable",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "Implement authenticated GitHub, Vercel, and Linear adapters.",
+      providerMetadata: { workspace: "Fable", team: "FBL", state: "In Progress" }
     }
   ]
 };

@@ -1,0 +1,827 @@
+//! Authenticated provider egress for developer connectors.
+//! Tokens are resolved from `connector_auth` and never returned to JavaScript.
+
+use std::{collections::BTreeMap, time::Duration};
+
+use reqwest::{Method, Response, StatusCode};
+use serde_json::{json, Map, Value};
+
+use crate::{
+    connector_auth::provider_access_token,
+    models::{
+        ConnectorActionRequest, ConnectorCapabilityRequest, ConnectorCapabilityResult,
+        ConnectorCommandError, ConnectorSearchItem, ConnectorSearchRequest, ConnectorSearchResult,
+    },
+    paths::{normalize_spaces, truncate_characters},
+};
+
+const MAX_RETRIES: usize = 2;
+
+struct ApiResponse {
+    value: Value,
+    next_cursor: Option<String>,
+    remaining: Option<u64>,
+    reset_at: Option<String>,
+}
+
+fn error(code: &str, connector_id: &str, message: &str, retryable: bool) -> ConnectorCommandError {
+    ConnectorCommandError {
+        code: code.to_string(),
+        connector_id: connector_id.to_string(),
+        message: message.to_string(),
+        retryable,
+        retry_after: None,
+    }
+}
+
+async fn request_json(
+    connector_id: &str,
+    token: &str,
+    method: Method,
+    url: &str,
+    query: &[(String, String)],
+    body: Option<Value>,
+) -> Result<ApiResponse, ConnectorCommandError> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .user_agent("Fable/0.1 connector-runtime")
+        .build()
+        .map_err(|_| {
+            error(
+                "unknown",
+                connector_id,
+                "Connector HTTP client could not start.",
+                false,
+            )
+        })?;
+    for attempt in 0..=MAX_RETRIES {
+        let mut builder = client
+            .request(method.clone(), url)
+            .bearer_auth(token)
+            .header("accept", "application/json")
+            .query(query);
+        if connector_id == "github" {
+            builder = builder
+                .header("accept", "application/vnd.github+json")
+                .header("x-github-api-version", "2022-11-28");
+        }
+        if let Some(payload) = body.clone() {
+            builder = builder.json(&payload);
+        }
+        let response = match builder.send().await {
+            Ok(response) => response,
+            Err(_) if attempt < MAX_RETRIES => {
+                tokio::time::sleep(Duration::from_millis(100 * 2_u64.pow(attempt as u32))).await;
+                continue;
+            }
+            Err(_) => {
+                return Err(error(
+                    "provider-unavailable",
+                    connector_id,
+                    "Provider network request failed.",
+                    true,
+                ))
+            }
+        };
+        if response.status().is_success() {
+            return decode_response(connector_id, response).await;
+        }
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let retryable = status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+        if retryable && attempt < MAX_RETRIES {
+            let wait = retry_after
+                .as_deref()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(1)
+                .min(10);
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            continue;
+        }
+        let code = match status {
+            StatusCode::UNAUTHORIZED => "expired-auth",
+            StatusCode::FORBIDDEN => {
+                if response
+                    .headers()
+                    .get("x-ratelimit-remaining")
+                    .and_then(|v| v.to_str().ok())
+                    == Some("0")
+                {
+                    "rate-limited"
+                } else {
+                    "permission-denied"
+                }
+            }
+            StatusCode::NOT_FOUND => "not-found",
+            StatusCode::TOO_MANY_REQUESTS => "rate-limited",
+            StatusCode::BAD_REQUEST | StatusCode::UNPROCESSABLE_ENTITY => "invalid-request",
+            status if status.is_server_error() => "provider-unavailable",
+            _ => "unknown",
+        };
+        let mut command = error(
+            code,
+            connector_id,
+            provider_message(code),
+            retryable || code == "rate-limited",
+        );
+        command.retry_after = retry_after;
+        return Err(command);
+    }
+    Err(error(
+        "provider-unavailable",
+        connector_id,
+        "Provider request failed.",
+        true,
+    ))
+}
+
+async fn decode_response(
+    connector_id: &str,
+    response: Response,
+) -> Result<ApiResponse, ConnectorCommandError> {
+    let remaining = header_u64(&response, "x-ratelimit-remaining")
+        .or_else(|| header_u64(&response, "x-ratelimit-requests-remaining"));
+    let reset_at = response
+        .headers()
+        .get("x-ratelimit-reset")
+        .or_else(|| response.headers().get("x-ratelimit-requests-reset"))
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let next_cursor = if connector_id == "github" {
+        response
+            .headers()
+            .get("link")
+            .and_then(|v| v.to_str().ok())
+            .and_then(github_next_page)
+    } else {
+        None
+    };
+    if response.status() == StatusCode::NO_CONTENT {
+        return Ok(ApiResponse {
+            value: json!({"success": true}),
+            next_cursor,
+            remaining,
+            reset_at,
+        });
+    }
+    let value = response.json::<Value>().await.map_err(|_| {
+        error(
+            "provider-unavailable",
+            connector_id,
+            "Provider returned a malformed response.",
+            true,
+        )
+    })?;
+    if connector_id == "linear" {
+        if let Some(errors) = value.get("errors").and_then(Value::as_array) {
+            if let Some(first) = errors.first() {
+                let provider_code = first
+                    .pointer("/extensions/code")
+                    .and_then(Value::as_str)
+                    .unwrap_or("invalid-request");
+                let code = match provider_code {
+                    "RATELIMITED" => "rate-limited",
+                    "AUTHENTICATION_ERROR" => "expired-auth",
+                    "FORBIDDEN" => "permission-denied",
+                    _ => "invalid-request",
+                };
+                return Err(error(
+                    code,
+                    connector_id,
+                    provider_message(code),
+                    code == "rate-limited",
+                ));
+            }
+        }
+    }
+    Ok(ApiResponse {
+        value,
+        next_cursor,
+        remaining,
+        reset_at,
+    })
+}
+
+fn provider_message(code: &str) -> &'static str {
+    match code {
+        "expired-auth" => "Provider authorization expired; reconnect the account.",
+        "permission-denied" => "Provider access lacks the required scope or permission.",
+        "not-found" => "The requested provider resource was not found.",
+        "rate-limited" => "The provider rate limit was reached.",
+        "invalid-request" => "The provider rejected the connector request.",
+        "provider-unavailable" => "The provider is temporarily unavailable.",
+        _ => "The connector request failed.",
+    }
+}
+
+fn header_u64(response: &Response, name: &str) -> Option<u64> {
+    response.headers().get(name)?.to_str().ok()?.parse().ok()
+}
+fn github_next_page(link: &str) -> Option<String> {
+    link.split(',')
+        .find(|part| part.contains("rel=\"next\""))?
+        .split("page=")
+        .nth(1)?
+        .split(['&', '>'])
+        .next()
+        .map(str::to_string)
+}
+
+pub(crate) async fn search(
+    app: &tauri::AppHandle,
+    request: ConnectorSearchRequest,
+) -> Result<ConnectorSearchResult, ConnectorCommandError> {
+    let connector_id = request.connector_id.as_str();
+    let token = provider_access_token(app, connector_id).await?;
+    let limit = request.limit.unwrap_or(20).clamp(1, 50);
+    let response = match connector_id {
+        "github" => {
+            let (url, mut query) = if request.query.trim().is_empty() {
+                (
+                    "https://api.github.com/user/repos",
+                    vec![("sort".into(), "updated".into())],
+                )
+            } else {
+                (
+                    "https://api.github.com/search/repositories",
+                    vec![("q".into(), request.query.clone())],
+                )
+            };
+            query.push(("per_page".into(), limit.to_string()));
+            if let Some(cursor) = &request.cursor {
+                query.push(("page".into(), cursor.clone()));
+            }
+            request_json(connector_id, &token, Method::GET, url, &query, None).await?
+        }
+        "vercel" => {
+            let mut query = vec![("limit".into(), limit.to_string())];
+            if let Some(cursor) = &request.cursor {
+                query.push(("until".into(), cursor.clone()));
+            }
+            request_json(
+                connector_id,
+                &token,
+                Method::GET,
+                "https://api.vercel.com/v9/projects",
+                &query,
+                None,
+            )
+            .await?
+        }
+        "linear" => {
+            let query = "query Search($term:String!,$first:Int!,$after:String){ searchIssues(term:$term,first:$first,after:$after){ nodes { id identifier title description url updatedAt team { id key name } state { id name type } } pageInfo { hasNextPage endCursor } } }";
+            request_json(connector_id, &token, Method::POST, "https://api.linear.app/graphql", &[], Some(json!({"query": query, "variables": {"term": request.query, "first": limit, "after": request.cursor}}))).await?
+        }
+        _ => {
+            return Err(error(
+                "configuration-required",
+                connector_id,
+                "This connector does not have a live developer-provider adapter.",
+                false,
+            ))
+        }
+    };
+    normalize_search(request, response)
+}
+
+fn normalize_search(
+    request: ConnectorSearchRequest,
+    response: ApiResponse,
+) -> Result<ConnectorSearchResult, ConnectorCommandError> {
+    let values: Vec<Value> = match request.connector_id.as_str() {
+        "github" => response
+            .value
+            .get("items")
+            .or_else(|| Some(&response.value))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        "vercel" => response
+            .value
+            .get("projects")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        "linear" => response
+            .value
+            .pointer("/data/searchIssues/nodes")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
+        _ => vec![],
+    };
+    let query = request.query.to_ascii_lowercase();
+    let items = values
+        .into_iter()
+        .filter_map(|value| normalize_item(&request.connector_id, value))
+        .filter(|item| {
+            query.is_empty()
+                || item.title.to_ascii_lowercase().contains(&query)
+                || item.summary.to_ascii_lowercase().contains(&query)
+        })
+        .collect();
+    let linear_cursor = response
+        .value
+        .pointer("/data/searchIssues/pageInfo/endCursor")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let vercel_cursor = response
+        .value
+        .pointer("/pagination/next")
+        .and_then(Value::as_u64)
+        .map(|v| v.to_string());
+    Ok(ConnectorSearchResult {
+        connector_id: request.connector_id,
+        query: request.query,
+        items,
+        next_cursor: response.next_cursor.or(linear_cursor).or(vercel_cursor),
+        source: "live".to_string(),
+        searched_at: unix_timestamp(),
+    })
+}
+
+fn normalize_item(connector_id: &str, value: Value) -> Option<ConnectorSearchItem> {
+    let object = value.as_object()?;
+    let id = value_string(object, &["id", "node_id"])?;
+    let (title, kind, summary, provenance, freshness, url) = match connector_id {
+        "github" => {
+            let title = value_string(object, &["full_name", "name"])?;
+            let summary = value_string(object, &["description"])
+                .unwrap_or_else(|| "Accessible GitHub repository".into());
+            let freshness = value_string(object, &["updated_at", "pushed_at"])
+                .unwrap_or_else(|| "Provider freshness unavailable".into());
+            let url = value_string(object, &["html_url"]);
+            (
+                title.clone(),
+                "repository",
+                summary,
+                format!("GitHub · {title}"),
+                freshness,
+                url,
+            )
+        }
+        "vercel" => {
+            let title = value_string(object, &["name"])?;
+            let freshness = object
+                .get("updatedAt")
+                .and_then(Value::as_u64)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "Provider freshness unavailable".into());
+            (
+                title.clone(),
+                "project",
+                "Accessible Vercel project".into(),
+                format!("Vercel · {title}"),
+                freshness,
+                None,
+            )
+        }
+        "linear" => {
+            let title = value_string(object, &["title"])?;
+            let identifier = value_string(object, &["identifier"]).unwrap_or_else(|| id.clone());
+            let summary =
+                value_string(object, &["description"]).unwrap_or_else(|| "Linear issue".into());
+            let freshness = value_string(object, &["updatedAt"])
+                .unwrap_or_else(|| "Provider freshness unavailable".into());
+            let url = value_string(object, &["url"]);
+            (
+                format!("{identifier} · {title}"),
+                "issue",
+                summary,
+                format!("Linear · {identifier}"),
+                freshness,
+                url,
+            )
+        }
+        _ => return None,
+    };
+    Some(ConnectorSearchItem {
+        id,
+        connector_id: connector_id.to_string(),
+        title,
+        kind: kind.to_string(),
+        summary: truncate_characters(&normalize_spaces(&summary), 500),
+        provenance,
+        freshness,
+        trust: "untrusted".to_string(),
+        url,
+        content_preview: None,
+        provider_metadata: BTreeMap::new(),
+    })
+}
+
+pub(crate) async fn read_capability(
+    app: &tauri::AppHandle,
+    request: ConnectorCapabilityRequest,
+) -> Result<ConnectorCapabilityResult, ConnectorCommandError> {
+    let connector_id = request.connector_id.clone();
+    if !matches!(connector_id.as_str(), "github" | "vercel" | "linear") {
+        return Err(error(
+            "invalid-request",
+            &connector_id,
+            "Unsupported live connector capability.",
+            false,
+        ));
+    }
+    let token = provider_access_token(app, &connector_id).await?;
+    let (method, url, query, body) = map_read(&request)?;
+    let response = request_json(&connector_id, &token, method, &url, &query, body).await?;
+    let (items, cursor) = extract_items(&request, &response.value);
+    Ok(ConnectorCapabilityResult {
+        connector_id,
+        capability: request.capability,
+        items,
+        next_cursor: cursor.or(response.next_cursor),
+        rate_limit_remaining: response.remaining,
+        rate_limit_reset_at: response.reset_at,
+    })
+}
+
+fn map_read(
+    request: &ConnectorCapabilityRequest,
+) -> Result<(Method, String, Vec<(String, String)>, Option<Value>), ConnectorCommandError> {
+    let id = request.connector_id.as_str();
+    let cap = request.capability.as_str();
+    let input = &request.input;
+    let limit = input
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .clamp(1, 100)
+        .to_string();
+    let mut page_query = vec![(
+        if id == "vercel" { "limit" } else { "per_page" }.into(),
+        limit,
+    )];
+    if let Some(cursor) = &request.cursor {
+        page_query.push((
+            if id == "vercel" { "until" } else { "page" }.into(),
+            cursor.clone(),
+        ));
+    }
+    let get = |url: String, query: Vec<(String, String)>| Ok((Method::GET, url, query, None));
+    match (id, cap) {
+        ("github", "identity.read") => get("https://api.github.com/user".into(), vec![]),
+        ("github", "organizations.read") => {
+            get("https://api.github.com/user/orgs".into(), page_query)
+        }
+        ("github", "repositories.list") => {
+            get("https://api.github.com/user/repos".into(), page_query)
+        }
+        ("github", "repositories.search") => {
+            page_query.push(("q".into(), required(input, "query", id)?));
+            get(
+                "https://api.github.com/search/repositories".into(),
+                page_query,
+            )
+        }
+        ("github", capability) => {
+            let repo = required(input, "repository", id)?;
+            let path = match capability {
+                "branches.read" => "branches".into(),
+                "commits.read" => "commits".into(),
+                "files.read" => format!("contents/{}", required(input, "path", id)?),
+                "issues.read" => input
+                    .get("number")
+                    .map(|v| format!("issues/{}", value_text(v)))
+                    .unwrap_or_else(|| "issues".into()),
+                "pull-requests.read" => input
+                    .get("number")
+                    .map(|v| format!("pulls/{}", value_text(v)))
+                    .unwrap_or_else(|| "pulls".into()),
+                "comments.read" => format!("issues/{}/comments", required(input, "number", id)?),
+                "reviews.read" => format!("pulls/{}/reviews", required(input, "number", id)?),
+                "checks.read" => format!("commits/{}/check-runs", required(input, "ref", id)?),
+                "actions.read" => format!(
+                    "actions/{}",
+                    input
+                        .get("resource")
+                        .and_then(Value::as_str)
+                        .unwrap_or("runs")
+                ),
+                _ => {
+                    return Err(error(
+                        "invalid-request",
+                        id,
+                        "Unsupported GitHub read capability.",
+                        false,
+                    ))
+                }
+            };
+            get(
+                format!("https://api.github.com/repos/{repo}/{path}"),
+                page_query,
+            )
+        }
+        ("vercel", "identity.read") => get("https://api.vercel.com/v2/user".into(), vec![]),
+        ("vercel", "teams.read") => get("https://api.vercel.com/v2/teams".into(), page_query),
+        ("vercel", "projects.read") => get(
+            input
+                .get("project")
+                .map(|v| format!("https://api.vercel.com/v9/projects/{}", value_text(v)))
+                .unwrap_or_else(|| "https://api.vercel.com/v9/projects".into()),
+            with_team(page_query, input),
+        ),
+        ("vercel", "deployments.read") => get(
+            input
+                .get("deploymentId")
+                .map(|v| format!("https://api.vercel.com/v13/deployments/{}", value_text(v)))
+                .unwrap_or_else(|| "https://api.vercel.com/v6/deployments".into()),
+            with_team(page_query, input),
+        ),
+        ("vercel", "domains.read") => get(
+            input
+                .get("project")
+                .map(|v| {
+                    format!(
+                        "https://api.vercel.com/v9/projects/{}/domains",
+                        value_text(v)
+                    )
+                })
+                .unwrap_or_else(|| "https://api.vercel.com/v5/domains".into()),
+            with_team(page_query, input),
+        ),
+        ("vercel", "logs.read") => get(
+            format!(
+                "https://api.vercel.com/v3/deployments/{}/events",
+                required(input, "deploymentId", id)?
+            ),
+            with_team(page_query, input),
+        ),
+        ("vercel", "environment-metadata.read") => get(
+            format!(
+                "https://api.vercel.com/v9/projects/{}/env",
+                required(input, "project", id)?
+            ),
+            with_team(page_query, input),
+        ),
+        ("linear", capability) => linear_read(capability, input, request.cursor.as_deref()),
+        _ => Err(error(
+            "invalid-request",
+            id,
+            "Unsupported connector read capability.",
+            false,
+        )),
+    }
+}
+
+fn linear_read(
+    capability: &str,
+    input: &BTreeMap<String, Value>,
+    cursor: Option<&str>,
+) -> Result<(Method, String, Vec<(String, String)>, Option<Value>), ConnectorCommandError> {
+    let first = input
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .clamp(1, 50);
+    let (root, query, mut variables) = match capability {
+        "identity.read" => ("viewer", "query { viewer { id name email avatarUrl organization { id name urlKey } } }", json!({})),
+        "teams.read" => ("teams", "query($first:Int!,$after:String){ teams(first:$first,after:$after){ nodes { id key name description } pageInfo { hasNextPage endCursor } } }", json!({})),
+        "projects.read" => ("projects", "query($first:Int!,$after:String){ projects(first:$first,after:$after){ nodes { id name description state progress url updatedAt } pageInfo { hasNextPage endCursor } } }", json!({})),
+        "cycles.read" => ("cycles", "query($first:Int!,$after:String,$teamId:ID!){ cycles(first:$first,after:$after,filter:{team:{id:{eq:$teamId}}}){ nodes { id number name startsAt endsAt progress } pageInfo { hasNextPage endCursor } } }", json!({"teamId": required(input,"teamId","linear")?})),
+        "issues.read" => ("issues", "query($first:Int!,$after:String){ issues(first:$first,after:$after,orderBy:updatedAt){ nodes { id identifier title description priority url updatedAt state { id name type } assignee { id name } team { id key name } } pageInfo { hasNextPage endCursor } } }", json!({})),
+        "issues.search" => ("searchIssues", "query($term:String!,$first:Int!,$after:String){ searchIssues(term:$term,first:$first,after:$after){ nodes { id identifier title description url updatedAt state { id name type } team { id key name } } pageInfo { hasNextPage endCursor } } }", json!({"term": required(input,"query","linear")?})),
+        "labels.read" => ("issueLabels", "query($first:Int!,$after:String){ issueLabels(first:$first,after:$after){ nodes { id name description color } pageInfo { hasNextPage endCursor } } }", json!({})),
+        "users.read" => ("users", "query($first:Int!,$after:String){ users(first:$first,after:$after){ nodes { id name displayName email active } pageInfo { hasNextPage endCursor } } }", json!({})),
+        "comments.read" => ("issue", "query($id:String!,$first:Int!,$after:String){ issue(id:$id){ id comments(first:$first,after:$after){ nodes { id body createdAt updatedAt user { id name } } pageInfo { hasNextPage endCursor } } } }", json!({"id": required(input,"issueId","linear")?})),
+        _ => return Err(error("invalid-request","linear","Unsupported Linear read capability.",false)),
+    };
+    if let Some(map) = variables.as_object_mut() {
+        map.insert("first".into(), json!(first));
+        map.insert(
+            "after".into(),
+            cursor.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert("__root".into(), json!(root));
+    }
+    Ok((
+        Method::POST,
+        "https://api.linear.app/graphql".into(),
+        vec![],
+        Some(json!({"query":query,"variables":variables})),
+    ))
+}
+
+fn extract_items(
+    request: &ConnectorCapabilityRequest,
+    value: &Value,
+) -> (Vec<Value>, Option<String>) {
+    let target = if request.connector_id == "linear" {
+        let root = match request.capability.as_str() {
+            "identity.read" => "viewer",
+            "teams.read" => "teams",
+            "projects.read" => "projects",
+            "cycles.read" => "cycles",
+            "issues.read" => "issues",
+            "issues.search" => "searchIssues",
+            "comments.read" => "issue",
+            "labels.read" => "issueLabels",
+            "users.read" => "users",
+            _ => "",
+        };
+        let mut target = value.pointer(&format!("/data/{root}"));
+        if request.capability == "comments.read" {
+            target = target.and_then(|v| v.get("comments"));
+        }
+        target
+    } else {
+        Some(value)
+    };
+    let items = target
+        .and_then(|v| {
+            v.get("items")
+                .or_else(|| v.get("nodes"))
+                .or_else(|| v.get("projects"))
+                .or_else(|| v.get("deployments"))
+                .or_else(|| v.get("teams"))
+                .or_else(|| v.get("domains"))
+                .or_else(|| v.get("events"))
+                .or_else(|| v.get("envs"))
+        })
+        .and_then(Value::as_array)
+        .cloned()
+        .or_else(|| target.and_then(Value::as_array).cloned())
+        .unwrap_or_else(|| target.cloned().into_iter().collect());
+    let items =
+        if request.connector_id == "vercel" && request.capability == "environment-metadata.read" {
+            items.into_iter().map(redact_environment).collect()
+        } else {
+            items
+        };
+    let cursor = target
+        .and_then(|v| v.pointer("/pageInfo/endCursor"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            value
+                .pointer("/pagination/next")
+                .and_then(Value::as_u64)
+                .map(|v| v.to_string())
+        });
+    (items, cursor)
+}
+
+fn redact_environment(mut value: Value) -> Value {
+    if let Some(object) = value.as_object_mut() {
+        for key in ["value", "decryptedValue", "secret"] {
+            object.remove(key);
+        }
+    }
+    value
+}
+
+pub(crate) async fn execute_action(
+    app: &tauri::AppHandle,
+    action: &ConnectorActionRequest,
+) -> Result<Option<String>, ConnectorCommandError> {
+    let id = action.connector_id.as_str();
+    let token = provider_access_token(app, id).await?;
+    let (method, url, query, body) = map_write(action)?;
+    let response = request_json(id, &token, method, &url, &query, Some(body)).await?;
+    Ok(response
+        .value
+        .get("id")
+        .or_else(|| response.value.pointer("/data/issueCreate/issue/id"))
+        .or_else(|| response.value.pointer("/data/issueUpdate/issue/id"))
+        .or_else(|| response.value.pointer("/data/commentCreate/comment/id"))
+        .and_then(|v| v.as_str().map(str::to_string))
+        .or_else(|| {
+            response
+                .value
+                .get("id")
+                .and_then(Value::as_u64)
+                .map(|v| v.to_string())
+        }))
+}
+
+fn map_write(
+    action: &ConnectorActionRequest,
+) -> Result<(Method, String, Vec<(String, String)>, Value), ConnectorCommandError> {
+    let p = &action.payload;
+    let id = action.connector_id.as_str();
+    let json_payload = || {
+        Value::Object(
+            p.iter()
+                .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                .collect(),
+        )
+    };
+    match action.action.as_str(){
+        "github.draft-pull-request"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/pulls",reqs(p,"repository",id)?),vec![],json!({"head":reqs(p,"head",id)?,"base":reqs(p,"base",id)?,"title":reqs(p,"title",id)?,"draft":true}))),
+        "github.comment"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/issues/{}/comments",reqs(p,"repository",id)?,reqs(p,"targetId",id)?),vec![],json!({"body":reqs(p,"body",id)?}))),
+        "github.create-issue"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/issues",reqs(p,"repository",id)?),vec![],without_strings(p,&["repository","targetId"]))),
+        "github.update-issue"=>Ok((Method::PATCH,format!("https://api.github.com/repos/{}/issues/{}",reqs(p,"repository",id)?,reqs(p,"targetId",id)?),vec![],without_strings(p,&["repository","targetId"]))),
+        "github.create-review"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/pulls/{}/reviews",reqs(p,"repository",id)?,reqs(p,"targetId",id)?),vec![],without_strings(p,&["repository","targetId"]))),
+        "github.update-file"=>Ok((Method::PUT,format!("https://api.github.com/repos/{}/contents/{}",reqs(p,"repository",id)?,reqs(p,"path",id)?),vec![],without_strings(p,&["repository","path","targetId"]))),
+        "github.create-branch"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/git/refs",reqs(p,"repository",id)?),vec![],json!({"ref":format!("refs/heads/{}",reqs(p,"branch",id)?),"sha":reqs(p,"sha",id)?}))),
+        "github.dispatch-workflow"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/actions/workflows/{}/dispatches",reqs(p,"repository",id)?,reqs(p,"workflow",id)?),vec![],json!({"ref":reqs(p,"ref",id)?}))),
+        "vercel.promote"=>Ok((Method::POST,format!("https://api.vercel.com/v10/projects/{}/promote/{}",reqs(p,"project",id)?,reqs(p,"targetId",id)?),team_query(p),json!({}))),
+        "vercel.rollback"=>Ok((Method::POST,format!("https://api.vercel.com/v10/projects/{}/rollback/{}",reqs(p,"project",id)?,reqs(p,"targetId",id)?),team_query(p),json!({}))),
+        "vercel.create-deployment"=>Ok((Method::POST,"https://api.vercel.com/v13/deployments".into(),team_query(p),without_strings(p,&["teamId","targetId"]))),
+        "vercel.cancel-deployment"=>Ok((Method::PATCH,format!("https://api.vercel.com/v12/deployments/{}/cancel",reqs(p,"targetId",id)?),team_query(p),json!({}))),
+        "vercel.update-project"=>Ok((Method::PATCH,format!("https://api.vercel.com/v9/projects/{}",reqs(p,"project",id)?),team_query(p),without_strings(p,&["teamId","project","targetId"]))),
+        "vercel.create-domain"=>Ok((Method::POST,format!("https://api.vercel.com/v10/projects/{}/domains",reqs(p,"project",id)?),team_query(p),json!({"name":reqs(p,"domain",id)?}))),
+        "vercel.update-domain"=>Ok((Method::PATCH,format!("https://api.vercel.com/v9/projects/{}/domains/{}",reqs(p,"project",id)?,reqs(p,"domain",id)?),team_query(p),without_strings(p,&["teamId","project","domain","targetId"]))),
+        "vercel.delete-domain"=>Ok((Method::DELETE,format!("https://api.vercel.com/v9/projects/{}/domains/{}",reqs(p,"project",id)?,reqs(p,"domain",id)?),team_query(p),json!({}))),
+        "linear.create-issue"=>linear_mutation("issueCreate","mutation($input:IssueCreateInput!){ issueCreate(input:$input){ success issue { id identifier title url } } }",json!({"input":json_payload()})),
+        "linear.update-issue"=>linear_mutation("issueUpdate","mutation($id:String!,$input:IssueUpdateInput!){ issueUpdate(id:$id,input:$input){ success issue { id identifier title url } } }",json!({"id":reqs(p,"targetId",id)?,"input":without_strings(p,&["targetId","workspace","team"])})),
+        "linear.comment"=>linear_mutation("commentCreate","mutation($input:CommentCreateInput!){ commentCreate(input:$input){ success comment { id body createdAt } } }",json!({"input":{"issueId":reqs(p,"targetId",id)?,"body":reqs(p,"body",id)?}})),
+        _=>Err(error("invalid-request",id,"Unsupported connector write action.",false)),
+    }
+}
+
+fn linear_mutation(
+    _root: &str,
+    query: &str,
+    variables: Value,
+) -> Result<(Method, String, Vec<(String, String)>, Value), ConnectorCommandError> {
+    Ok((
+        Method::POST,
+        "https://api.linear.app/graphql".into(),
+        vec![],
+        json!({"query":query,"variables":variables}),
+    ))
+}
+fn required(
+    input: &BTreeMap<String, Value>,
+    key: &str,
+    id: &str,
+) -> Result<String, ConnectorCommandError> {
+    input
+        .get(key)
+        .map(value_text)
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            error(
+                "invalid-request",
+                id,
+                &format!("Connector capability requires {key}."),
+                false,
+            )
+        })
+}
+fn reqs(
+    input: &BTreeMap<String, String>,
+    key: &str,
+    id: &str,
+) -> Result<String, ConnectorCommandError> {
+    input
+        .get(key)
+        .cloned()
+        .filter(|v| !v.trim().is_empty())
+        .ok_or_else(|| {
+            error(
+                "invalid-request",
+                id,
+                &format!("Connector action requires {key}."),
+                false,
+            )
+        })
+}
+fn value_text(v: &Value) -> String {
+    v.as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| v.to_string())
+}
+fn value_string(object: &Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| object.get(*key))
+        .map(value_text)
+        .filter(|v| v != "null")
+}
+fn with_team(
+    mut query: Vec<(String, String)>,
+    input: &BTreeMap<String, Value>,
+) -> Vec<(String, String)> {
+    if let Some(v) = input.get("teamId") {
+        query.push(("teamId".into(), value_text(v)));
+    }
+    query
+}
+fn team_query(input: &BTreeMap<String, String>) -> Vec<(String, String)> {
+    input
+        .get("teamId")
+        .map(|v| vec![("teamId".into(), v.clone())])
+        .unwrap_or_default()
+}
+fn without_strings(input: &BTreeMap<String, String>, keys: &[&str]) -> Value {
+    Value::Object(
+        input
+            .iter()
+            .filter(|(k, _)| !keys.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+            .collect(),
+    )
+}
+fn unix_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
+}

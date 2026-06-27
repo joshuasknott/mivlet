@@ -42,24 +42,87 @@ fn write_records(path: &Path, records: &[ConnectorApprovalRecord]) -> Result<(),
         .map_err(|_| "Fable could not commit connector approval records.".to_string())
 }
 
-fn first_payload_value(action: &ConnectorActionRequest, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        action
-            .payload
-            .get(*key)
-            .map(|value| truncate_characters(&normalize_spaces(value), 500))
-            .filter(|value| !value.is_empty())
-    })
+fn is_sensitive_payload_key(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.contains("authorization")
+        || lower.contains("password")
+        || lower.contains("secret")
+        || lower.contains("token")
+        || lower == "value"
+        || lower == "privatekey"
 }
 
-pub(crate) fn record_pending_connector_action(
-    path: &Path,
-    action: &ConnectorActionRequest,
-    account_id: &str,
-) -> Result<ConnectorApprovalRecord, String> {
-    let target = first_payload_value(
-        action,
-        &[
+fn payload_field(action: &ConnectorActionRequest, key: &str) -> Option<String> {
+    action
+        .payload
+        .get(key)
+        .map(|value| truncate_characters(&normalize_spaces(value), 300))
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if is_sensitive_payload_key(key) {
+                format!("{key}=[redacted]")
+            } else {
+                format!("{key}={value}")
+            }
+        })
+}
+
+fn selected_payload_fields(action: &ConnectorActionRequest, keys: &[&str]) -> Vec<String> {
+    keys.iter()
+        .filter_map(|key| payload_field(action, key))
+        .collect()
+}
+
+fn all_safe_payload_fields(action: &ConnectorActionRequest) -> Vec<String> {
+    action
+        .payload
+        .iter()
+        .filter(|(key, _)| key.as_str() != "runId")
+        .map(|(key, value)| {
+            if is_sensitive_payload_key(key) {
+                format!("{key}=[redacted]")
+            } else {
+                format!(
+                    "{key}={}",
+                    truncate_characters(&normalize_spaces(value), 300)
+                )
+            }
+        })
+        .collect()
+}
+
+fn connector_target_summary(action: &ConnectorActionRequest, account_id: &str) -> String {
+    let keys: &[&str] = match action.connector_id.as_str() {
+        "github" => &[
+            "repository",
+            "targetId",
+            "issue",
+            "pullRequest",
+            "path",
+            "branch",
+            "workflowId",
+            "ref",
+        ],
+        "vercel" => &[
+            "teamId",
+            "project",
+            "deploymentId",
+            "targetId",
+            "environment",
+            "domain",
+        ],
+        "linear" => &[
+            "workspace",
+            "team",
+            "teamId",
+            "issueId",
+            "targetId",
+            "statusId",
+            "projectId",
+            "cycleId",
+            "assigneeId",
+        ],
+        _ => &[
             "target",
             "to",
             "channel",
@@ -68,19 +131,51 @@ pub(crate) fn record_pending_connector_action(
             "calendarId",
             "targetId",
         ],
+    };
+    let mut fields = vec![format!("account={account_id}")];
+    fields.extend(selected_payload_fields(action, keys));
+    if fields.len() == 1 {
+        fields.push("target=provider-selected target".to_string());
+    }
+    truncate_characters(&fields.join("; "), 1_000)
+}
+
+fn connector_preview(action: &ConnectorActionRequest, account_id: &str, target: &str) -> String {
+    let provider_label = match action.connector_id.as_str() {
+        "github" => "GitHub",
+        "vercel" => "Vercel",
+        "linear" => "Linear",
+        _ => action.approval.service.as_str(),
+    };
+    let proposed = all_safe_payload_fields(action);
+    let proposed = if proposed.is_empty() {
+        "no provider payload fields".to_string()
+    } else {
+        proposed.join("; ")
+    };
+    truncate_characters(
+        &format!(
+            "{provider_label} action={}; account={account_id}; target=({target}); proposed=({proposed})",
+            action.action
+        ),
+        1_000,
     )
-    .unwrap_or_else(|| "provider-selected target".to_string());
-    let subject = first_payload_value(action, &["subject", "title", "summary"]);
-    let preview = subject
-        .map(|subject| format!("{} — {subject} → {target}", action.action))
-        .unwrap_or_else(|| format!("{} → {target}", action.action));
+}
+
+pub(crate) fn record_pending_connector_action(
+    path: &Path,
+    action: &ConnectorActionRequest,
+    account_id: &str,
+) -> Result<ConnectorApprovalRecord, String> {
+    let target = connector_target_summary(action, account_id);
+    let preview = connector_preview(action, account_id, &target);
     let record = ConnectorApprovalRecord {
         id: format!("connector-approval-{}", action.id),
         connector_id: action.connector_id.clone(),
         account_id: account_id.to_string(),
         proposed_action: action.action.clone(),
         target,
-        preview: truncate_characters(&preview, 1_000),
+        preview,
         risk_level: action.approval.risk_level.clone(),
         result: "pending".to_string(),
         request_id: action.approval.id.clone(),
@@ -198,8 +293,10 @@ mod tests {
         assert_eq!(record.connector_id, "gmail");
         assert_eq!(record.account_id, "account-1");
         assert_eq!(record.proposed_action, "gmail.send");
-        assert_eq!(record.target, "person@example.com");
+        assert!(record.target.contains("account=account-1"));
+        assert!(record.target.contains("to=person@example.com"));
         assert!(record.preview.contains("Status update"));
+        assert!(record.preview.contains("proposed="));
         assert_eq!(record.risk_level, "high");
         assert_eq!(record.result, "pending");
         assert!(verify_prepared_connector_action(&path, &prepared).is_ok());
