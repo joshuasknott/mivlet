@@ -20,6 +20,7 @@ import type {
   MemoryControlState,
   MemoryPromotionRequest,
   MemoryRecord,
+  PermissionMode,
   RuntimeSnapshot,
   ThreadSummary,
   WorkspaceDirective
@@ -32,8 +33,15 @@ import {
   prepareFixtureConnectorAction,
   searchFixtureConnector,
   searchKnowledgeSources,
+  type ToolApprovalGate,
   type LocalTextFileCandidate
 } from "@fable/connectors";
+import {
+  DEFAULT_PERMISSION_LABEL,
+  permissionLabelFor,
+  permissionModeFor,
+  resolveSelectedModel
+} from "../lib/agent-run";
 import {
   chatThreads,
   connectors,
@@ -119,7 +127,11 @@ const defaultShellState: PersistedShellState = {
   importedKnowledgeSources: [],
   memoryDisabled: false,
   memoryRecords,
-  connectedBackendIds: []
+  connectedBackendIds: [],
+  // "" lets Fable pick the first available model; full-access mirrors the
+  // composer's pre-existing default so behavior is unchanged until selected.
+  selectedModelId: "",
+  permissionMode: "full-access"
 };
 
 function isFirstWaveConnectorId(value: string): value is FirstWaveConnectorId {
@@ -223,6 +235,22 @@ export interface ShellRuntime {
   connectBackend: (providerId: string, secret?: string) => Promise<void>;
   disconnectBackend: (providerId: string) => Promise<void>;
   /**
+   * The connected native-API backend that owns the agent loop, if any. Drives
+   * the composer's model picker and the native run path. Null when no native
+   * backend is connected (the composer falls back to knowledge search).
+   */
+  connectedNativeBackend: BackendProvider | undefined;
+  /** Models the composer's model picker may offer (from the connected backend). */
+  selectableModels: BackendProvider["models"];
+  /** The model id that should drive the next agent run (re-validated). */
+  resolvedSelectedModelId: string;
+  /** Persisted model selection (raw; prefer resolvedSelectedModelId at run time). */
+  selectedModelId: string;
+  selectModel: (modelId: string) => void;
+  /** The current permission-level label shown in the composer. */
+  permissionLabel: string;
+  selectPermissionLabel: (label: string) => void;
+  /**
    * Record a native-API model tool call as an approval audit entry. Model tool
    * calls never auto-execute — they surface here so the existing approval UI
    * handles the grant/rule/deny decision before Fable dispatches the tool.
@@ -243,7 +271,19 @@ export interface ShellRuntime {
   setLastAction: (action: string) => void;
 }
 
-export function useShellRuntime(): ShellRuntime {
+export interface UseShellRuntimeOptions {
+  /**
+   * The shared approval gate the agent-loop executor awaits. When provided,
+   * granting/denying a tool-call approval drives the matching pending tool call
+   * on the gate so the executor proceeds or refuses — the grant -> execute
+   * bridge. Omit for the pre-tool-execution behavior (no dispatch).
+   */
+  approvalGate?: ToolApprovalGate;
+}
+
+export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRuntime {
+  const approvalGateRef = useRef<ToolApprovalGate | null>(options.approvalGate ?? null);
+  approvalGateRef.current = options.approvalGate ?? null;
   const initialState = useMemo(() => readPersistedShellState(defaultShellState), []);
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
   const [composerValue, setComposerValue] = useState(initialState.composerValue);
@@ -302,6 +342,11 @@ export function useShellRuntime(): ShellRuntime {
   );
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
+  // Composer model + permission picker selections, persisted so the next run
+  // uses them. The model is re-validated against the connected backend's
+  // available models before each run (see resolveSelectedModel).
+  const [selectedModelId, setSelectedModelId] = useState(initialState.selectedModelId);
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(initialState.permissionMode);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -330,6 +375,30 @@ export function useShellRuntime(): ShellRuntime {
         ...importedKnowledgeSources
       ]),
     [connectorImportedSources, importedKnowledgeSources]
+  );
+  // The native-API backend that owns the agent loop when one is connected. The
+  // composer's model picker lists this backend's models; selecting one drives
+  // request.model on the next agent run.
+  const connectedNativeBackend = useMemo(
+    () =>
+      backendProviders.find(
+        (provider) =>
+          provider.backendType === "native-api" &&
+          provider.authState === "connected" &&
+          provider.capabilities.includes("streaming")
+      ),
+    [backendProviders]
+  );
+  const selectableModels = useMemo(
+    () => connectedNativeBackend?.models ?? [],
+    [connectedNativeBackend]
+  );
+  // The persisted selection is re-validated against the connected backend's
+  // available models each render: keep it if still available, else fall back to
+  // the first available model (or "" when none is available).
+  const resolvedSelectedModelId = useMemo(
+    () => resolveSelectedModel(selectableModels, selectedModelId),
+    [selectableModels, selectedModelId]
   );
   const contextualDirectives = useMemo(
     () => [
@@ -360,7 +429,9 @@ export function useShellRuntime(): ShellRuntime {
       importedKnowledgeSources,
       memoryDisabled,
       memoryRecords: managedMemoryRecords,
-      connectedBackendIds
+      connectedBackendIds,
+      selectedModelId,
+      permissionMode
     }),
     [
       activeItem,
@@ -373,7 +444,9 @@ export function useShellRuntime(): ShellRuntime {
       importedKnowledgeSources,
       managedMemoryRecords,
       memoryDisabled,
+      permissionMode,
       pinnedSourceIds,
+      selectedModelId,
       voiceEnabled
     ]
   );
@@ -414,6 +487,8 @@ export function useShellRuntime(): ShellRuntime {
         setMemoryDisabled(recovered.memoryDisabled);
         setManagedMemoryRecords(recovered.memoryRecords);
         setConnectedBackendIds(recovered.connectedBackendIds);
+        setSelectedModelId(recovered.selectedModelId);
+        setPermissionMode(recovered.permissionMode);
         setLastAction("Recovered workspace from local runtime");
       })
       .finally(() => {
@@ -1057,6 +1132,20 @@ export function useShellRuntime(): ShellRuntime {
     focusComposer(prompt);
   };
 
+  // Composer picker bindings: the model picker drives request.model on the next
+  // agent run; the permission-level picker maps its label onto a PermissionMode
+  // that gates tool execution in the agent loop.
+  const selectModel = (modelId: string) => {
+    setSelectedModelId(modelId);
+    const chosen = selectableModels.find((model) => model.id === modelId);
+    setLastAction(chosen ? `${chosen.label} selected` : "Model cleared");
+  };
+
+  const selectPermissionLabel = (label: string) => {
+    setPermissionMode(permissionModeFor(label));
+    setLastAction(`Permission level set to ${label}`);
+  };
+
   const approvalNeedsConfirmation = (
     approval: ApprovalRequest,
     modification?: ApprovalModification
@@ -1111,6 +1200,20 @@ export function useShellRuntime(): ShellRuntime {
           response.grant as ApprovalGrant,
           ...current.filter((grant) => grant.id !== response.grant?.id)
         ]);
+      }
+
+      // Grant -> execute bridge: drive the matching pending tool call on the
+      // shared approval gate so the agent-loop executor proceeds (grant) or
+      // refuses (deny). Only approvals the shell registered as pending tool
+      // calls are dispatched — a regular connector approval with no pending
+      // entry is a no-op here. A deny never executes the tool.
+      const gate = approvalGateRef.current;
+      if (gate?.hasPending(approval.id)) {
+        if (decision === "deny") {
+          gate.resolveDeny(approval.id);
+        } else if (decision === "once" || decision === "session" || decision === "rule" || decision === "modify") {
+          gate.resolveGrant(approval.id);
+        }
       }
 
       clearApprovalInteraction();
@@ -1314,6 +1417,13 @@ export function useShellRuntime(): ShellRuntime {
     onboardingRequired,
     connectBackend,
     disconnectBackend,
+    connectedNativeBackend,
+    selectableModels,
+    resolvedSelectedModelId,
+    selectedModelId,
+    selectModel,
+    permissionLabel: permissionLabelFor(permissionMode) || DEFAULT_PERMISSION_LABEL,
+    selectPermissionLabel,
     recordBackendToolCall,
     dismissOnboarding,
     lastAction,

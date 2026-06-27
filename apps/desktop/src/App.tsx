@@ -1,11 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createApprovalGate } from "@fable/connectors";
+import { Moon, Sun } from "@phosphor-icons/react";
 import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
+import {
+  buildAgentRequest,
+  buildContextPrefixForRun,
+  PERMISSION_PROFILES
+} from "./lib/agent-run";
+import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
+import { FableLogo } from "./components/FableLogo";
 import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
@@ -26,14 +35,51 @@ import { SettingsPage } from "./components/pages/SettingsPage";
  */
 
 export function App() {
-  const runtime = useShellRuntime();
+  // The shared approval gate: the shell's grant/deny decisions resolve it, and
+  // the agent-loop executor awaits it. Created once before the hooks so both
+  // useShellRuntime (dispatch on grant/deny) and useNativeAgent (executor awaits
+  // it) share the same instance — a grant in the approval UI drives the tool call
+  // the loop is currently blocked on.
+  const approvalGate = useMemo(() => createApprovalGate(), []);
+  const runtime = useShellRuntime({ approvalGate });
   const [profile, setProfile] = useState(profileFixture);
   const workspaceName = `${profile.name.split(" ")[0]}'s Fable`;
+  // Re-sync the shell's standing grants into the gate so session/rule grants
+  // auto-satisfy matching tool calls without re-prompting.
+  useEffect(() => {
+    approvalGate.replaceStandingGrants([
+      ...runtime.sessionApprovalGrants,
+      ...runtime.approvalRules
+    ]);
+  }, [approvalGate, runtime.sessionApprovalGrants, runtime.approvalRules]);
+  // The real executor: awaits the gate, then runs the granted tool through the
+  // Rust boundary (which re-validates the approval and performs the side effect).
+  const executor = useMemo(
+    () => createDesktopToolExecutor(approvalGate),
+    [approvalGate]
+  );
+  // Cooperative cancellation: a cancel flag the agent hook's shouldCancel reads.
+  // The cancel() path flips it true so an in-flight loop bails between events;
+  // the real-Rust cancel (cancelRuntimeCompletion) still drops the socket. This
+  // is the cooperative layer on top of the Rust boundary drop.
+  const cancelRequestedRef = useRef(false);
   const agent = useNativeAgent({
     providers: runtime.backendProviders,
+    execute: executor,
+    shouldCancel: () => cancelRequestedRef.current,
+    onCancel: () => {
+      // Flip the cancel flag the agent hook's shouldCancel reads, so an in-flight
+      // loop bails cooperatively between events — not only via the Rust boundary
+      // drop. It is reset to false at the start of each agent.run.
+      cancelRequestedRef.current = true;
+      // Tear down any tool-call still awaiting approval on the shared gate so a
+      // cancelled-but-never-granted call does not linger for the session.
+      approvalGate.cancelPending();
+    },
     onToolCall: (event) => {
-      // Route model tool calls into Fable's existing approval queue. The shell's
-      // approval UI handles the grant/rule/deny decision; nothing auto-executes.
+      // Route model tool calls into Fable's existing approval queue + register
+      // the pending call on the shared gate so a later grant can dispatch it.
+      approvalGate.register(event.approval);
       void runtime.recordBackendToolCall(event);
     }
   });
@@ -49,6 +95,19 @@ export function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const storedTheme = window.localStorage.getItem("fable-theme");
+    if (storedTheme === "light" || storedTheme === "dark") {
+      return storedTheme;
+    }
+
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("fable-theme", theme);
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   // Connected connectors shown on the home rail. Real provider marks only;
   // local-files is always available so it is not surfaced as a connector. If
@@ -143,7 +202,18 @@ export function App() {
                 {agent.state.usage.costUsd.toFixed(6)}
               </p>
             ) : null}
-            {agent.state.running ? <p className="agent-panel__running">Running…</p> : null}
+            {agent.state.running ? (
+              <p className="agent-panel__running">
+                Running…
+                <button
+                  type="button"
+                  className="agent-panel__stop"
+                  onClick={() => void agent.cancel()}
+                >
+                  Stop
+                </button>
+              </p>
+            ) : null}
             {agent.state.lastError ? (
               <p className="agent-panel__error">{agent.state.lastError}</p>
             ) : null}
@@ -161,6 +231,11 @@ export function App() {
   const liveStatusLead = /[.!?]$/.test(runtime.lastAction)
     ? runtime.lastAction
     : `${runtime.lastAction}.`;
+  // Label for the model chip: the selected model's friendly label, or a
+  // placeholder when no model is selected/available on the connected backend.
+  const modelChipLabel =
+    runtime.selectableModels.find((model) => model.id === runtime.resolvedSelectedModelId)?.label ??
+    "Select model";
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -215,6 +290,7 @@ export function App() {
   return (
     <main
       className={`desktop-frame${sidebarCollapsed ? " desktop-frame--sidebar-collapsed" : ""}`}
+      data-theme={theme}
     >
       <WorkspaceSidebar
         workspaceName={workspaceName}
@@ -285,11 +361,32 @@ export function App() {
       />
 
       <section className="workspace" aria-label="Fable workspace">
+        <div className="theme-toggle" role="group" aria-label="Theme">
+          <button
+            type="button"
+            className={`theme-toggle__button${theme === "light" ? " theme-toggle__button--active" : ""}`}
+            aria-pressed={theme === "light"}
+            onClick={() => setTheme("light")}
+          >
+            <Sun size={17} />
+            <span>Light</span>
+          </button>
+          <button
+            type="button"
+            className={`theme-toggle__button${theme === "dark" ? " theme-toggle__button--active" : ""}`}
+            aria-pressed={theme === "dark"}
+            onClick={() => setTheme("dark")}
+          >
+            <Moon size={17} />
+            <span>Dark</span>
+          </button>
+        </div>
         {runtime.activePage ? (
           <div className="workspace-center workspace-center--page">{renderPage()}</div>
         ) : (
           <div className="workspace-center">
             <section className="hero" aria-labelledby="hero-title">
+              <FableLogo size="hero" />
               <h1 id="hero-title">What are we building today in {workspaceName}?</h1>
             </section>
 
@@ -302,25 +399,34 @@ export function App() {
                 // When a native-API backend is connected, the composer drives the
                 // Fable-owned agent loop; otherwise fall back to the workspace
                 // knowledge-search submit.
-                const nativeConnected = runtime.backendProviders.find(
-                  (provider) =>
-                    provider.backendType === "native-api" &&
-                    provider.authState === "connected" &&
-                    provider.capabilities.includes("streaming")
-                );
+                const nativeConnected = runtime.connectedNativeBackend;
                 if (nativeConnected) {
                   event.preventDefault();
                   const prompt = runtime.composerValue.trim();
                   if (!prompt) return;
-                  void agent.run({
+                  // Build the pinned-memory/knowledge system prefix (empty when
+                  // nothing is pinned or memory is disabled) and the request from
+                  // the picker-selected model — both drive the real agent run.
+                  const contextPrefix = buildContextPrefixForRun({
+                    memoryRecords: runtime.managedMemoryRecords,
+                    knowledgeSources: runtime.workspaceKnowledgeSources,
+                    pinnedSourceIds: runtime.pinnedSourceIds,
+                    memoryDisabled: runtime.memoryDisabled
+                  });
+                  const request = buildAgentRequest({
                     providerId: nativeConnected.id,
-                    model: nativeConnected.models.find((model) => model.available)?.id ??
-                      nativeConnected.models[0]?.id ??
-                      "",
-                    messages: [{ role: "user", content: prompt }],
-                    tools: [],
+                    model: runtime.resolvedSelectedModelId,
+                    prompt,
                     maxTokens: 2048
                   });
+                  // Reset the cooperative-cancel flag so a new run is not born
+                  // already cancelled, then drive the Fable-owned agent loop.
+                  cancelRequestedRef.current = false;
+                  void agent.run(
+                    request,
+                    contextPrefix || undefined,
+                    runtime.permissionLabel
+                  );
                   return;
                 }
                 runtime.submitComposer(event);
@@ -353,6 +459,13 @@ export function App() {
                   : undefined
               }
               importStatus={runtime.importStatus}
+              models={runtime.selectableModels}
+              selectedModelId={runtime.resolvedSelectedModelId}
+              selectedModelLabel={modelChipLabel}
+              onSelectModel={runtime.selectModel}
+              permissionLabel={runtime.permissionLabel}
+              permissionProfiles={PERMISSION_PROFILES}
+              onSelectPermissionLabel={runtime.selectPermissionLabel}
               inThread={!!runtime.activeThread}
             />
 

@@ -3,6 +3,7 @@ import type {
   ApprovalGrant,
   LocalFileImport,
   MemoryRecord,
+  PermissionMode,
   RuntimeSnapshot
 } from "@fable/protocol";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEY, RUNTIME_SNAPSHOT_VERSION } from "./constants";
@@ -74,6 +75,8 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     memoryDisabled: state.memoryDisabled,
     memoryRecords: state.memoryRecords,
     connectedBackendIds: state.connectedBackendIds,
+    selectedModelId: state.selectedModelId,
+    permissionMode: state.permissionMode,
     savedAt: new Date().toISOString()
   };
 }
@@ -94,7 +97,9 @@ export function shellStateFromRuntimeSnapshot(
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
     memoryRecords: snapshot.memoryRecords,
-    connectedBackendIds: snapshot.connectedBackendIds
+    connectedBackendIds: snapshot.connectedBackendIds,
+    selectedModelId: snapshot.selectedModelId ?? defaultShellState.selectedModelId,
+    permissionMode: snapshot.permissionMode ?? defaultShellState.permissionMode
   };
 }
 

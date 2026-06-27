@@ -13,7 +13,6 @@ import {
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
-import { FableLogo } from "./FableLogo";
 
 /**
  * Workspace sidebar / shell navigation.
@@ -98,11 +97,21 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-header">
-        <div className="sidebar-brand-row">
-          <div className="sidebar-brand-lockup" aria-label="Fable">
-            <FableLogo />
-            <span>Fable</span>
-          </div>
+        <div className="sidebar-top-row">
+          <button
+            type="button"
+            className="workspace-switcher"
+            aria-label="Select workspace"
+            onClick={onSelectWorkspace}
+          >
+            <span className="workspace-switcher__icon" aria-hidden="true">
+              <Stack size={15} />
+            </span>
+            <span className="workspace-switcher__name">
+              {workspaceName}
+            </span>
+            <CaretDown size={12} className="workspace-switcher__caret" />
+          </button>
           <button
             type="button"
             className="sidebar-minimize"
@@ -113,20 +122,6 @@ export function WorkspaceSidebar({
             <SidebarSimple size={18} />
           </button>
         </div>
-        <button
-          type="button"
-          className="workspace-switcher"
-          aria-label="Select workspace"
-          onClick={onSelectWorkspace}
-        >
-          <span className="workspace-switcher__icon" aria-hidden="true">
-            <Stack size={15} />
-          </span>
-          <span className="workspace-switcher__name">
-            {workspaceName}
-          </span>
-          <CaretDown size={12} className="workspace-switcher__caret" />
-        </button>
       </div>
 
           <button

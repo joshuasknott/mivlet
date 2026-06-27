@@ -15,7 +15,9 @@ const defaultState: PersistedShellState = {
   importedKnowledgeSources: [],
   memoryDisabled: false,
   memoryRecords: [],
-  connectedBackendIds: []
+  connectedBackendIds: [],
+  selectedModelId: "",
+  permissionMode: "full-access"
 };
 
 describe("Fable persistence migration", () => {

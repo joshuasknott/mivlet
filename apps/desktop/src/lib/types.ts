@@ -3,7 +3,8 @@ import type {
   ApprovalRequest,
   ApprovalDecision,
   LocalFileImport,
-  MemoryRecord
+  MemoryRecord,
+  PermissionMode
 } from "@fable/protocol";
 
 /**
@@ -62,6 +63,10 @@ export interface PersistedShellState {
   memoryRecords: MemoryRecord[];
   /** Provider ids of connected agent-runtime backends. Secrets never persist here. */
   connectedBackendIds: string[];
+  /** Model id last chosen in the composer's model picker (re-validated before use). */
+  selectedModelId: string;
+  /** Composer permission level driving agent-run tool gating. */
+  permissionMode: PermissionMode;
 }
 
 export const EMPTY_APPROVAL_MODIFICATION: ApprovalModificationDraft = {

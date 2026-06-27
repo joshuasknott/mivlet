@@ -475,3 +475,42 @@ export async function listenRuntimeBackendEvents(
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Fable-owned tool execution boundary.
+//
+// Each approved tool call crosses back into Rust, which re-validates the
+// approval and performs the side effect (read/write file, run-shell, web-fetch).
+// The shell NEVER spawns a process or writes files from JavaScript directly —
+// every consequential tool routes through executeRuntimeToolCall. Outside Tauri
+// the wrapper returns null so the executor stays fixture-testable.
+// ---------------------------------------------------------------------------
+
+export interface RuntimeToolRequest {
+  /** The registered tool name (read-file/write-file/run-shell/web-fetch). */
+  tool: string;
+  /** The tool-call arguments as a parsed JSON value. */
+  arguments: unknown;
+  /** The approval resolution request the shell used to grant the call. Rust
+   *  re-validates it before running the tool (defense in depth). */
+  approval: ApprovalResolutionRequest;
+  /** Optional explicit workspace root; Rust resolves from the app handle when absent. */
+  workspaceRoot?: string;
+}
+
+export interface RuntimeToolResult {
+  ok: boolean;
+  output: string;
+}
+
+/** Execute an approved tool call through the Rust boundary. Null outside Tauri. */
+export async function executeRuntimeToolCall(request: RuntimeToolRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<RuntimeToolResult>("execute_tool_call", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}

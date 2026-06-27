@@ -11,14 +11,9 @@ import {
   ShieldCheck
 } from "@phosphor-icons/react";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
+import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
-const MODELS = ["Fable Pro", "Fable Fast", "Fable Reasoning"] as const;
-const PERMISSION_PROFILES = [
-  { label: "Full access", description: "Run permitted actions without asking each time" },
-  { label: "Standard access", description: "Ask before sensitive or external actions" },
-  { label: "Confirm every action", description: "Request approval before using any tool" }
-] as const;
 
 export function Composer({
   composerRef,
@@ -38,6 +33,13 @@ export function Composer({
   onFileChange,
   voiceState,
   importStatus,
+  models,
+  selectedModelId,
+  selectedModelLabel,
+  onSelectModel,
+  permissionLabel,
+  permissionProfiles,
+  onSelectPermissionLabel,
   inThread = false
 }: {
   composerRef: RefObject<HTMLTextAreaElement | null>;
@@ -57,11 +59,21 @@ export function Composer({
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   voiceState?: string;
   importStatus?: string | null;
+  /** Models the connected backend exposes (id + label + availability). */
+  models: { id: string; label: string; available: boolean }[];
+  /** Currently selected model id, or "" when none is selected/available. */
+  selectedModelId: string;
+  /** Label to show on the model chip when a model is selected. */
+  selectedModelLabel: string;
+  onSelectModel: (modelId: string) => void;
+  /** Label of the active permission profile (drives the chip text). */
+  permissionLabel: string;
+  /** Permission profiles available in the picker. */
+  permissionProfiles: readonly PermissionProfile[];
+  onSelectPermissionLabel: (label: string) => void;
   inThread?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [model, setModel] = useState("Fable Pro");
-  const [permissionMode, setPermissionMode] = useState("Full access");
 
   const closeExternalMenus = () => {
     if (addMenuOpen) onToggleAddMenu();
@@ -159,25 +171,35 @@ export function Composer({
                   setModelOpen((open) => !open);
                 }}
               >
-                <span>{model}</span>
+                <span>{selectedModelLabel}</span>
                 <CaretDown size={14} weight="bold" />
               </button>
               {modelOpen ? (
                 <div className="composer-menu composer-model-menu" role="menu" aria-label="Models">
-                  {MODELS.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={model === option}
-                      onClick={() => {
-                        setModel(option);
-                        setModelOpen(false);
-                      }}
-                    >
-                      <strong>{option}</strong>
-                    </button>
-                  ))}
+                  {models.length === 0 ? (
+                    <span className="composer-menu__heading">No models available</span>
+                  ) : (
+                    models.map((option) => {
+                      const disabled = !option.available;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={selectedModelId === option.id}
+                          disabled={disabled}
+                          onClick={() => {
+                            if (disabled) return;
+                            onSelectModel(option.id);
+                            setModelOpen(false);
+                          }}
+                        >
+                          <strong>{option.label}</strong>
+                          {disabled ? <small>Unavailable</small> : null}
+                        </button>
+                      );
+                    })
+                  )}
                 </div>
               ) : null}
             </div>
@@ -194,20 +216,20 @@ export function Composer({
                 aria-label="Select permissions"
               >
                 <ShieldCheck size={16} weight="bold" />
-                <span>{permissionMode}</span>
+                <span>{permissionLabel}</span>
                 <CaretDown size={13} weight="bold" />
               </button>
               {permissionsOpen ? (
                 <div className="composer-menu composer-permissions" role="menu" aria-label="Permission level">
                   <span className="composer-menu__heading">Permission level</span>
-                  {PERMISSION_PROFILES.map((profile) => (
+                  {permissionProfiles.map((profile) => (
                     <button
                       key={profile.label}
                       type="button"
                       role="menuitemradio"
-                      aria-checked={permissionMode === profile.label}
+                      aria-checked={permissionLabel === profile.label}
                       onClick={() => {
-                        setPermissionMode(profile.label);
+                        onSelectPermissionLabel(profile.label);
                         onTogglePermissions();
                       }}
                     >

@@ -1426,3 +1426,300 @@ fn in_memory_fallback_store_implements_the_trait_contract() {
         None
     );
 }
+
+// ---------------------------------------------------------------------------
+// Fable-owned tool execution boundary (tools.rs): defense-in-depth Rust layer.
+// Each tool call must carry its own valid approval; Rust re-validates it before
+// any side effect. File paths are confined to the workspace root.
+// ---------------------------------------------------------------------------
+
+use crate::models::ApprovalModification;
+use crate::tools::{confine_path, execute_tool, ToolExecutionRequest};
+
+fn tool_approval(
+    tool: &str,
+    mode: &str,
+    risk_level: &str,
+    confirmation_phrase: Option<&str>,
+) -> ApprovalRequest {
+    let action = match tool {
+        "read-file" => "read-file path: notes.txt".to_string(),
+        "write-file" => "write-file path: out.txt content: hi".to_string(),
+        "run-shell" => "run-shell command: echo hi".to_string(),
+        "web-fetch" => "web-fetch url: https://example.test".to_string(),
+        other => format!("{other} unknown"),
+    };
+    ApprovalRequest {
+        id: format!("native-{tool}"),
+        service: "openai".to_string(),
+        action,
+        mode: mode.to_string(),
+        risk_level: risk_level.to_string(),
+        data_used: vec!["target".to_string()],
+        consequence: format!("Execute the {tool} tool via openai with the given arguments."),
+        requested_at: "2026-06-27T10:00:00.000Z".to_string(),
+        decisions: APPROVAL_DECISIONS.iter().map(|d| d.to_string()).collect(),
+        confirmation_phrase: confirmation_phrase.map(str::to_string),
+    }
+}
+
+fn tool_request(
+    tool: &str,
+    arguments: serde_json::Value,
+    approval: ApprovalRequest,
+    decision: &str,
+) -> ToolExecutionRequest {
+    ToolExecutionRequest {
+        tool: tool.to_string(),
+        arguments,
+        approval: ApprovalResolutionRequest {
+            request: approval,
+            decision: decision.to_string(),
+            decided_at: "2026-06-27T10:01:00.000Z".to_string(),
+            confirmation_text: None,
+            modification: None,
+        },
+        workspace_root: None,
+    }
+}
+
+fn temp_workspace() -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "fable-tools-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("temp workspace created");
+    dir
+}
+
+#[test]
+fn confine_path_rejects_parent_dir_and_absolute_escapes() {
+    let root = PathBuf::from("/workspace");
+    assert!(confine_path("../escape.txt", &root).is_err());
+    assert!(confine_path("sub/../../escape.txt", &root).is_err());
+    #[cfg(target_os = "windows")]
+    assert!(confine_path("C:\\Windows\\system32", &root).is_err());
+    assert!(confine_path("/etc/passwd", &root).is_err());
+    assert!(confine_path("", &root).is_err());
+
+    // A simple relative path is confined under the root.
+    let confined = confine_path("notes.txt", &root).expect("relative path confined");
+    assert_eq!(confined, root.join("notes.txt"));
+}
+
+#[test]
+fn read_file_executes_after_an_approving_decision() {
+    let root = temp_workspace();
+    fs::write(root.join("notes.txt"), "hello rust").expect("seed file");
+
+    let request = tool_request(
+        "read-file",
+        serde_json::json!({ "path": "notes.txt" }),
+        tool_approval("read-file", "read-only", "low", None),
+        "once",
+    );
+    let result = execute_tool(request, &root).expect("read-file should execute");
+    assert!(result.ok);
+    assert_eq!(result.output, "hello rust");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn read_file_fails_closed_when_the_approval_is_denied() {
+    let root = temp_workspace();
+    fs::write(root.join("notes.txt"), "secret").expect("seed file");
+
+    let request = tool_request(
+        "read-file",
+        serde_json::json!({ "path": "notes.txt" }),
+        tool_approval("read-file", "read-only", "low", None),
+        "deny",
+    );
+    // A deny resolves to a tool result marked not-ok; nothing is executed.
+    let result = execute_tool(request, &root).expect("deny resolves");
+    assert!(!result.ok);
+    assert!(result.output.to_lowercase().contains("denied"));
+    // The file was never read into a tool output.
+    assert!(!result.output.contains("secret"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn write_file_executes_after_an_approving_decision_and_confines_the_path() {
+    let root = temp_workspace();
+
+    let request = tool_request(
+        "write-file",
+        serde_json::json!({ "path": "out.txt", "content": "hi" }),
+        tool_approval(
+            "write-file",
+            "full-access",
+            "high",
+            Some("approve write-file"),
+        ),
+        "once",
+    );
+    // High-risk approvals require the confirmation phrase to match.
+    let mut with_confirmation = request;
+    with_confirmation.approval.confirmation_text = Some("approve write-file".to_string());
+    let result = execute_tool(with_confirmation, &root).expect("write-file should execute");
+    assert!(result.ok);
+    assert_eq!(fs::read_to_string(root.join("out.txt")).unwrap(), "hi");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn write_file_refuses_a_parent_dir_escape_even_when_approved() {
+    let root = temp_workspace();
+
+    let request = tool_request(
+        "write-file",
+        serde_json::json!({ "path": "../escape.txt", "content": "bad" }),
+        tool_approval(
+            "write-file",
+            "full-access",
+            "high",
+            Some("approve write-file"),
+        ),
+        "session",
+    );
+    let mut with_confirmation = request;
+    with_confirmation.approval.confirmation_text = Some("approve write-file".to_string());
+    let error = execute_tool(with_confirmation, &root).expect_err("escape should fail closed");
+    assert!(error.contains("..") || error.contains("escape") || error.contains("path"));
+
+    // Nothing escaped the workspace.
+    assert!(!root
+        .parent()
+        .map(|p| p.join("escape.txt").exists())
+        .unwrap_or(false));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn unknown_tool_fails_closed_even_after_an_approval() {
+    let root = temp_workspace();
+    let request = tool_request(
+        "rm-rf",
+        serde_json::json!({ "path": "everything" }),
+        tool_approval("rm-rf", "full-access", "critical", None),
+        "once",
+    );
+    let error = execute_tool(request, &root).expect_err("unknown tool should fail");
+    assert!(error.contains("registry") || error.contains("supported"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn reshaped_high_risk_approval_fails_closed() {
+    let root = temp_workspace();
+    // The shell tries to downgrade a high-risk write to medium risk and drop the
+    // confirmation phrase; Rust must reject the reshaped approval (fail closed).
+    let mut approval = tool_approval(
+        "write-file",
+        "full-access",
+        "high",
+        Some("approve write-file"),
+    );
+    approval.risk_level = "medium".to_string();
+    approval.confirmation_phrase = None;
+    let request = tool_request(
+        "write-file",
+        serde_json::json!({ "path": "out.txt", "content": "hi" }),
+        approval,
+        "once",
+    );
+    let error = execute_tool(request, &root).expect_err("reshaped approval must fail closed");
+    assert!(error.contains("approved") || error.contains("approval"));
+
+    // Nothing was written.
+    assert!(!root.join("out.txt").exists());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+// ---------------------------------------------------------------------------
+// web-fetch network egress (tools.rs): the pure helpers that the async Tauri
+// command composes. The command performs the reqwest GET (mirroring
+// native_api.rs); network I/O itself is not unit-tested here, exactly like the
+// streaming backend path. These tests pin the contract the command honors:
+//   - the URL argument is extracted and required to be http(s)
+//   - a 2xx response turns into a success ToolResult with the body
+//   - a non-2xx response fails closed (Err)
+//   - a missing/non-string/non-http(s) url fails closed before any egress
+// ---------------------------------------------------------------------------
+
+use crate::tools::{web_fetch_url_from_args, WebFetchOutcome};
+
+#[test]
+fn web_fetch_requires_an_http_or_https_url_argument() {
+    // Missing url.
+    assert!(web_fetch_url_from_args(&serde_json::json!({})).is_err());
+    // Non-string url.
+    assert!(web_fetch_url_from_args(&serde_json::json!({ "url": 42 })).is_err());
+    // Empty url.
+    assert!(web_fetch_url_from_args(&serde_json::json!({ "url": "   " })).is_err());
+    // Non-http(s) schemes fail closed before any network egress.
+    assert!(web_fetch_url_from_args(&serde_json::json!({ "url": "ftp://example.test" })).is_err());
+    assert!(web_fetch_url_from_args(&serde_json::json!({ "url": "file:///etc/passwd" })).is_err());
+
+    // http:// and https:// are accepted.
+    assert_eq!(
+        web_fetch_url_from_args(&serde_json::json!({ "url": "https://example.test" }))
+            .expect("https url accepted"),
+        "https://example.test"
+    );
+    assert_eq!(
+        web_fetch_url_from_args(&serde_json::json!({ "url": "http://example.test" }))
+            .expect("http url accepted"),
+        "http://example.test"
+    );
+}
+
+#[test]
+fn web_fetch_outcome_turns_a_2xx_body_into_a_success_tool_result() {
+    let result = WebFetchOutcome::success(200, "the fetched body".to_string()).into_tool_result();
+    assert!(result.ok);
+    assert_eq!(result.output, "the fetched body");
+}
+
+#[test]
+fn web_fetch_outcome_fails_closed_on_a_non_2xx_response() {
+    // A 404 / 500 is NOT a success; the tool result must surface the failure so
+    // the loop records a tool-role error message rather than a phantom body.
+    assert!(WebFetchOutcome::status(404)
+        .into_tool_result_err()
+        .contains("404"));
+    assert!(WebFetchOutcome::status(500)
+        .into_tool_result_err()
+        .contains("500"));
+}
+
+#[test]
+fn web_fetch_outcome_fails_closed_on_a_transport_error() {
+    // A transport failure (DNS, connection refused, TLS) surfaces as an error so
+    // the loop fails closed instead of pretending a fetch happened.
+    let err = WebFetchOutcome::transport_error("connection refused").into_tool_result_err();
+    assert!(err.contains("connection refused"));
+}
+
+// Suppress unused-import lint when ApprovalModification is not referenced by the
+// tool tests directly but is part of the shared approval surface exercised here.
+#[allow(dead_code)]
+fn _reference_approval_modification() -> ApprovalModification {
+    ApprovalModification {
+        mode: "read-only".to_string(),
+        data_used: vec![],
+        consequence: String::new(),
+    }
+}

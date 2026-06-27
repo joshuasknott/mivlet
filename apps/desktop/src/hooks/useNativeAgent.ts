@@ -14,14 +14,21 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import type { BackendAgentEvent, BackendProvider, NativeCompletionRequest } from "@fable/protocol";
+import type {
+  BackendAgentEvent,
+  BackendProvider,
+  NativeCompletionRequest,
+  PermissionMode
+} from "@fable/protocol";
 import {
   runAgentLoop,
   shapeAnthropicRequest,
   shapeGeminiRequest,
   shapeOpenAiRequest,
-  type HttpTransport
+  type HttpTransport,
+  type ToolExecutor
 } from "@fable/connectors";
+import { permissionModeFor } from "../lib/agent-run";
 import {
   cancelRuntimeCompletion,
   listenRuntimeBackendEvents,
@@ -109,6 +116,28 @@ export interface UseNativeAgentOptions {
   providers: BackendProvider[];
   /** Receives tool-call events so the shell can route them into its approval queue. */
   onToolCall?: (event: Extract<BackendAgentEvent, { type: "tool-call" }>) => void;
+  /**
+   * The real tool executor, wired to the shell's shared approval gate + the Rust
+   * boundary. When omitted the loop uses a fail-closed stub (tool calls surface
+   * as approvals and execution refuses) — this is the pre-tool-execution behavior
+   * and keeps the hook fixture-testable without a live approval gate.
+   */
+  execute?: ToolExecutor;
+  /**
+   * Cooperative cancellation hook, checked between events. When omitted the loop
+   * can never be cooperatively cancelled mid-turn (real in-flight cancellation
+   * still happens at the Rust boundary via cancel()). App.tsx wires this to a
+   * cancel flag so an in-flight loop can bail between events.
+   */
+  shouldCancel?: () => boolean;
+  /**
+   * Invoked once when a run is cancelled, so the shell can tear down any
+   * tool-call still awaiting approval on the shared gate (gate.cancelPending()).
+   * This prevents cancelled-but-never-granted calls (and their unresolved
+   * promises) from lingering for the session. Cooperative cancel + the Rust
+   * boundary drop stay intact — this is the gate-teardown layer on top.
+   */
+  onCancel?: () => void;
 }
 
 export function useNativeAgent(options: UseNativeAgentOptions) {
@@ -122,65 +151,94 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const cancelRef = useRef<string | null>(null);
   const onToolCallRef = useRef(options.onToolCall);
   onToolCallRef.current = options.onToolCall;
+  // The executor + cancellation hook are read live each run so App.tsx can wire
+  // the real (approval-gated) executor + cancel path without re-creating the hook.
+  const executeRef = useRef(options.execute);
+  executeRef.current = options.execute;
+  const shouldCancelRef = useRef(options.shouldCancel);
+  shouldCancelRef.current = options.shouldCancel;
+  const onCancelRef = useRef(options.onCancel);
+  onCancelRef.current = options.onCancel;
 
-  const run = useCallback(async (request: NativeCompletionRequest, contextPrefix?: string) => {
-    const transport = tauriTransport();
-    if (!transport) {
-      setState((current) => ({
-        ...current,
-        noTransport: true,
-        lastError: "Native agent needs the desktop runtime."
-      }));
-      return;
-    }
-    setState({ transcript: "", usage: null, running: true, lastError: null, noTransport: false });
-    const requestId = `req-${Date.now()}`;
-    cancelRef.current = requestId;
-    try {
-      for await (const event of runAgentLoop(transport, request, {
-        // The shell owns approval; the executor only runs after a grant. Until
-        // the shell wires a real executor, tool calls surface as approvals and
-        // execution refuses (fail-closed) rather than auto-running.
-        execute: async () => {
-          throw new Error("Tool execution pending approval in the shell.");
-        },
-        shouldCancel: () => false,
-        contextPrefix
-      })) {
-        if (event.type === "text-delta") {
-          setState((current) => ({ ...current, transcript: current.transcript + event.text }));
-        } else if (event.type === "usage") {
-          setState((current) => ({
-            ...current,
-            usage: {
-              inputTokens: event.inputTokens,
-              outputTokens: event.outputTokens,
-              costUsd: event.costUsd
-            }
-          }));
-        } else if (event.type === "tool-call") {
-          onToolCallRef.current?.(event);
-        } else if (event.type === "error") {
-          setState((current) => ({ ...current, lastError: event.message }));
-        } else if (event.type === "done" || event.type === "cancelled") {
-          setState((current) => ({ ...current, running: false }));
-        }
+  const run = useCallback(
+    async (
+      request: NativeCompletionRequest,
+      contextPrefix?: string,
+      permissionLabel?: string
+    ) => {
+      const transport = tauriTransport();
+      if (!transport) {
+        setState((current) => ({
+          ...current,
+          noTransport: true,
+          lastError: "Native agent needs the desktop runtime."
+        }));
+        return;
       }
-    } catch (error) {
-      setState((current) => ({
-        ...current,
-        running: false,
-        lastError: error instanceof Error ? error.message : "Agent run failed."
-      }));
-    } finally {
-      cancelRef.current = null;
-    }
-  }, []);
+      setState({ transcript: "", usage: null, running: true, lastError: null, noTransport: false });
+      const requestId = `req-${Date.now()}`;
+      cancelRef.current = requestId;
+      // Map the composer's permission-level label to a PermissionMode that gates
+      // tool execution in the loop (read-only suppresses write/shell, etc.).
+      const permissionMode: PermissionMode = permissionLabel
+        ? permissionModeFor(permissionLabel)
+        : "full-access";
+      try {
+        for await (const event of runAgentLoop(transport, request, {
+          // The real executor is wired by App.tsx from the shell's shared
+          // approval gate + the Rust tool boundary; until then (or in tests)
+          // the fail-closed stub keeps tool calls surfacing as approvals that
+          // refuse to execute. The permission mode still gates which tool calls
+          // may reach the executor.
+          execute:
+            executeRef.current ??
+            (async () => {
+              throw new Error("Tool execution pending approval in the shell.");
+            }),
+          shouldCancel: shouldCancelRef.current ?? (() => false),
+          contextPrefix,
+          permissionMode
+        })) {
+          if (event.type === "text-delta") {
+            setState((current) => ({ ...current, transcript: current.transcript + event.text }));
+          } else if (event.type === "usage") {
+            setState((current) => ({
+              ...current,
+              usage: {
+                inputTokens: event.inputTokens,
+                outputTokens: event.outputTokens,
+                costUsd: event.costUsd
+              }
+            }));
+          } else if (event.type === "tool-call") {
+            onToolCallRef.current?.(event);
+          } else if (event.type === "error") {
+            setState((current) => ({ ...current, lastError: event.message }));
+          } else if (event.type === "done" || event.type === "cancelled") {
+            setState((current) => ({ ...current, running: false }));
+          }
+        }
+      } catch (error) {
+        setState((current) => ({
+          ...current,
+          running: false,
+          lastError: error instanceof Error ? error.message : "Agent run failed."
+        }));
+      } finally {
+        cancelRef.current = null;
+      }
+    },
+    []
+  );
 
   const cancel = useCallback(async () => {
     if (cancelRef.current) {
       await cancelRuntimeCompletion(cancelRef.current);
     }
+    // Tear down any tool-call still awaiting approval on the shared gate so a
+    // cancelled-but-never-granted call (and its unresolved promise) does not
+    // linger for the session. No-op when no onCancel is wired.
+    onCancelRef.current?.();
     setState((current) => ({ ...current, running: false }));
   }, []);
 

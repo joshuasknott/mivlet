@@ -7,7 +7,14 @@ import { App } from "./App";
 const runtimeMocks = vi.hoisted(() => ({
   snapshot: null as RuntimeSnapshot | null,
   savedSnapshots: [] as RuntimeSnapshot[],
-  backends: null as BackendProvider[] | null
+  backends: null as BackendProvider[] | null,
+  // SSE lines the mocked listenRuntimeBackendEvents feeds to a held-open agent
+  // run. When emitDone is false the run blocks (no [DONE]) so a cancel test can
+  // target a genuinely in-flight loop.
+  lines: [] as string[],
+  emitDone: true,
+  onLine: null as ((line: string) => void) | null,
+  cancelCalls: [] as string[]
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -62,8 +69,35 @@ vi.mock("./runtime", () => ({
   searchRuntimeKnowledgeSources: vi.fn(async () => null),
   startRuntimeConnectorAuth: vi.fn(async () => null),
   streamRuntimeCompletion: vi.fn(async () => null),
-  cancelRuntimeCompletion: vi.fn(async () => null),
-  listenRuntimeBackendEvents: vi.fn(async () => null)
+  cancelRuntimeCompletion: vi.fn(async (requestId: string) => {
+    runtimeMocks.cancelCalls.push(requestId);
+    return null;
+  }),
+  executeRuntimeToolCall: vi.fn(async () => ({ ok: true, output: "ok" })),
+  listenRuntimeBackendEvents: vi.fn(
+    async (
+      _requestId: string,
+      onLine?: (line: string) => void
+    ): Promise<(() => void) | null> => {
+      // Mirror the real wrapper: outside Tauri (no __TAURI_INTERNALS__) it is a
+      // no-op returning null, keeping the loop fixture-testable. Inside the
+      // faked desktop runtime it feeds the scripted SSE lines.
+      const hasRuntime =
+        typeof window !== "undefined" &&
+        "__TAURI_INTERNALS__" in (window as Window & { __TAURI_INTERNALS__?: unknown });
+      if (!hasRuntime || !onLine) {
+        return null;
+      }
+      runtimeMocks.onLine = onLine;
+      for (const line of runtimeMocks.lines) {
+        onLine(line);
+      }
+      if (runtimeMocks.emitDone) {
+        onLine("[DONE]");
+      }
+      return () => {};
+    }
+  )
 }));
 
 /** Render App and clear the onboarding gate by skipping in preview mode. */
@@ -71,6 +105,24 @@ async function skipOnboarding() {
   const user = userEvent.setup();
   const skip = await screen.findByRole("button", { name: /skip onboarding/i });
   await user.click(skip);
+}
+
+/** Install window.__TAURI_INTERNALS__ so the agent hook sees a desktop runtime. */
+function installDesktopRuntime() {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    value: { invoke: {} },
+    configurable: true,
+    writable: true
+  });
+}
+
+/** Remove the faked desktop runtime so the agent hook sees no transport. */
+function removeDesktopRuntime() {
+  try {
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  } catch {
+    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
+  }
 }
 
 /**
@@ -93,6 +145,11 @@ describe("Fable home", () => {
     // Default to a connected backend so the onboarding gate is cleared for the
     // existing workspace tests. Onboarding tests set this to an empty list.
     runtimeMocks.backends = null;
+    runtimeMocks.lines = [];
+    runtimeMocks.emitDone = true;
+    runtimeMocks.onLine = null;
+    runtimeMocks.cancelCalls = [];
+    removeDesktopRuntime();
   });
 
   it("renders no connector rail until a connector is connected", async () => {
@@ -437,6 +494,8 @@ describe("Fable home", () => {
       memoryDisabled: false,
       memoryRecords: [],
       connectedBackendIds: ["codex"],
+      selectedModelId: "",
+      permissionMode: "full-access",
       savedAt: "2026-06-26T10:30:00.000Z"
     };
 
@@ -475,6 +534,160 @@ describe("Fable home", () => {
     // notice so the agent surface is visible and testable.
     expect(await screen.findByLabelText(/agent activity/i)).toBeInTheDocument();
     expect(screen.getByText(/native agent needs a connected desktop backend/i)).toBeInTheDocument();
+  });
+
+  it("drives a cooperative cancel from the agent panel Stop button", async () => {
+    // Drives the REAL App.tsx cancel path and proves the cooperative bail. The
+    // distinguishing assertion: after Stop (which fires onCancel → sets the
+    // cancelRequestedRef flag), a delta fed to the held-open transport is NOT
+    // accumulated — the loop's shouldCancel check bailed before processing it.
+    // Without the flag-set in onCancel, the loop would stay subscribed and the
+    // post-cancel delta WOULD accumulate once [DONE] settles the run.
+    installDesktopRuntime();
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+        models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+      }
+    ];
+    // One text-delta and NO [DONE]: the run blocks after the delta, so it is
+    // genuinely in flight when Stop is clicked.
+    runtimeMocks.lines = ['data: {"choices":[{"delta":{"content":"partial"}}]}'];
+    runtimeMocks.emitDone = false;
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    const composer = await screen.findByLabelText(/universal composer/i);
+    await user.type(composer, "summarize the project");
+    await user.click(screen.getByRole("button", { name: /send prompt/i }));
+
+    // The run is in flight: the transcript shows the first delta and a Stop
+    // button is rendered (the cooperative-cancel affordance on the agent panel).
+    expect(await screen.findByText(/^partial$/)).toBeInTheDocument();
+    const stopButton = await screen.findByRole("button", { name: /stop/i });
+
+    // Clicking Stop drives App.tsx's cancel path (agent.cancel() → onCancel flips
+    // the cancelRequestedRef flag the loop's shouldCancel reads).
+    await user.click(stopButton);
+
+    // The Rust boundary cancel fired (the real-Rust drop stays intact) and the
+    // Stop button disappears as running drops.
+    await waitFor(() => expect(runtimeMocks.cancelCalls.length).toBeGreaterThanOrEqual(1));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument()
+    );
+
+    // Feed a SECOND delta after the cancel, then settle the run. The cooperative
+    // bail (shouldCancel returned true) must prevent this delta from accumulating
+    // — the transcript stays exactly "partial". Without the flag-set, the loop
+    // would still be subscribed and "aftercancel" would append once [DONE] lands.
+    // Feed a SECOND delta after the cancel, then settle the run. The cooperative
+    // bail (shouldCancel returned true) must prevent this delta from accumulating
+    // — the transcript stays exactly "partial". Without the flag-set in onCancel,
+    // the loop stays subscribed and "aftercancel" appends (verified: the post-
+    // cancel delta IS accumulated when the flag is not flipped).
+    runtimeMocks.onLine?.('data: {"choices":[{"delta":{"content":"aftercancel"}}]}');
+    runtimeMocks.onLine?.("[DONE]");
+
+    // The cooperative bail held: a tick after the post-cancel delta + [DONE]
+    // settle the run, the transcript stays "partial" and never shows "aftercancel".
+    await waitFor(() => {
+      expect(screen.queryByText(/aftercancel/i)).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/^partial$/)).toBeInTheDocument();
+  });
+
+  it("lists the connected backend's models in the composer model picker", async () => {
+    const user = userEvent.setup();
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming"],
+        models: [
+          { id: "gpt-5", label: "GPT-5", available: true },
+          { id: "gpt-4.1", label: "GPT-4.1", available: false },
+          { id: "o3", label: "o3", available: true }
+        ]
+      }
+    ];
+    render(<App />);
+    await screen.findByLabelText(/universal composer/i);
+
+    await user.click(screen.getByRole("button", { name: /select model/i }));
+
+    // The picker lists the connected backend's models (not hardcoded labels),
+    // and the unavailable one is surfaced as disabled.
+    const menu = screen.getByRole("menu", { name: /models/i });
+    expect(within(menu).getByText("GPT-5")).toBeInTheDocument();
+    expect(within(menu).getByText("o3")).toBeInTheDocument();
+    expect(within(menu).getByText("GPT-4.1")).toBeInTheDocument();
+    expect(
+      within(menu).getByRole("menuitemradio", { name: /gpt-4\.1/i })
+    ).toBeDisabled();
+  });
+
+  it("selecting a model in the picker drives the persisted model id for the next run", async () => {
+    const user = userEvent.setup();
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming"],
+        models: [
+          { id: "gpt-5", label: "GPT-5", available: true },
+          { id: "o3", label: "o3", available: true }
+        ]
+      }
+    ];
+    // Seed a snapshot so the runtime-save path activates (it only saves after the
+    // initial load resolves), then assert the picker selection is persisted.
+    runtimeMocks.snapshot = {
+      version: 1,
+      activeItem: "new-chat",
+      composerDraft: "",
+      voiceEnabled: false,
+      approvalAudit: [],
+      dismissedApprovalIds: [],
+      approvalRules: [],
+      automationStatuses: {},
+      pinnedSourceIds: [],
+      importedKnowledgeSources: [],
+      memoryDisabled: false,
+      memoryRecords: [],
+      connectedBackendIds: ["openai"],
+      selectedModelId: "",
+      permissionMode: "full-access",
+      savedAt: "2026-06-26T10:30:00.000Z"
+    };
+    render(<App />);
+    await screen.findByLabelText(/universal composer/i);
+
+    // Default chip shows the first available model (gpt-5).
+    expect(screen.getByRole("button", { name: /select model/i })).toHaveTextContent("GPT-5");
+
+    await user.click(screen.getByRole("button", { name: /select model/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: /^o3$/i }));
+
+    // The chip now reflects the selection...
+    expect(screen.getByRole("button", { name: /select model/i })).toHaveTextContent("o3");
+    // ...and the persisted snapshot carries the chosen model id, which is what
+    // the agent.run call site turns into request.model.
+    await waitFor(() => {
+      expect(runtimeMocks.savedSnapshots.at(-1)?.selectedModelId).toBe("o3");
+    });
   });
 });
 

@@ -9,7 +9,10 @@
   flex-direction: column;
   height: 100vh;
   overflow-y: auto;
-  background: var(--surface);
+  background:
+    radial-gradient(circle at 58% 21%, rgba(255, 255, 255, 0.52), transparent 27%),
+    radial-gradient(circle at 82% 8%, rgba(221, 133, 51, 0.08), transparent 32%),
+    var(--surface);
 }
 
 .workspace::before {
@@ -96,7 +99,7 @@ kbd {
 .workspace-center {
   position: relative;
   z-index: 1;
-  width: min(100% - 80px, 900px);
+  width: min(100% - 80px, 940px);
   margin: auto auto;
   padding: 48px 0;
   display: flex;
@@ -106,7 +109,20 @@ kbd {
 }
 
 .hero {
-  margin-bottom: 34px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+/* Large dragon mark above the home greeting. Sized independently of the small
+   sidebar mark via the --hero modifier. */
+.hero .brand-mark--hero {
+  display: block;
+  width: clamp(190px, 21vw, 310px);
+  height: clamp(216px, 24vw, 350px);
+  object-fit: contain;
+  filter: drop-shadow(0 18px 34px rgba(23, 25, 26, 0.1));
 }
 
 .greeting {
@@ -126,7 +142,7 @@ kbd {
 
 .hero h1 {
   max-width: 940px;
-  margin: 22px 0 0;
+  margin: 18px 0 0;
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: clamp(var(--text-20), 2.4vw, var(--text-30));
@@ -134,6 +150,68 @@ kbd {
   letter-spacing: 0;
   line-height: 1.08;
   text-align: center;
+}
+
+.theme-toggle {
+  position: absolute;
+  top: 39px;
+  right: 38px;
+  z-index: 6;
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
+  backdrop-filter: var(--glass-filter);
+}
+
+.theme-toggle__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  height: 42px;
+  gap: 8px;
+  padding: 0 16px;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-13);
+  font-weight: 560;
+}
+
+.theme-toggle__button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.theme-toggle__button--active {
+  color: var(--ink);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-1);
+}
+
+.theme-toggle__button--active svg {
+  color: var(--accent);
+}
+
+.desktop-frame[data-theme="dark"] .workspace {
+  background:
+    radial-gradient(circle at 58% 21%, rgba(255, 106, 0, 0.13), transparent 26%),
+    radial-gradient(circle at 78% 0%, rgba(255, 174, 94, 0.06), transparent 34%),
+    radial-gradient(circle at 35% 80%, rgba(255, 106, 0, 0.045), transparent 32%),
+    var(--surface);
+}
+
+.desktop-frame[data-theme="dark"] .hero .brand-mark--hero {
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 244, 230, 0.18))
+    drop-shadow(0 28px 46px rgba(0, 0, 0, 0.42))
+    drop-shadow(0 0 34px rgba(255, 106, 0, 0.12));
 }
 
 .hero p {

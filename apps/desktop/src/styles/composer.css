@@ -10,8 +10,8 @@
  * than Google AI Studio's saturated rainbow. */
 .composer-glow {
   position: relative;
-  width: min(100%, 850px);
-  margin: 31px auto 0;
+  width: min(100%, 940px);
+  margin: 30px auto 0;
   padding: 0;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-3);
@@ -42,8 +42,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 180px;
-  padding: 24px 28px 20px;
+  min-height: 214px;
+  padding: 28px 28px 22px;
   background: transparent;
   border-radius: var(--radius-3);
 }
@@ -182,7 +182,7 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  color: var(--surface);
+  color: #ffffff;
   background: var(--accent);
   border: 0;
   border-radius: var(--radius-pill);

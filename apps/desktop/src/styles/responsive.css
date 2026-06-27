@@ -34,6 +34,12 @@
     display: none;
   }
 
+  .sidebar-top-row {
+    grid-template-columns: 40px;
+    justify-content: center;
+    justify-items: center;
+  }
+
   .sidebar-minimize {
     display: none;
   }
@@ -179,8 +185,14 @@
   }
 
   .sidebar-brand-row {
-    display: flex;
-    min-height: 36px;
+    display: none;
+    justify-content: flex-end;
+    min-height: 0;
+  }
+
+  .sidebar-top-row {
+    grid-template-columns: minmax(0, 1fr) 36px;
+    width: 100%;
   }
 
   .sidebar-brand-lockup {
@@ -387,6 +399,27 @@
 
   .hero h1 {
     font-size: 42px;
+  }
+
+  /* Keep the hero mark prominent on phones without crowding the composer. */
+  .hero .brand-mark--hero {
+    width: 164px;
+    height: 186px;
+  }
+
+  .theme-toggle {
+    top: 72px;
+    right: 14px;
+  }
+
+  .theme-toggle__button {
+    min-width: auto;
+    width: 40px;
+    padding: 0;
+  }
+
+  .theme-toggle__button span {
+    display: none;
   }
 
   .composer {

@@ -13,6 +13,7 @@ mod models;
 mod native_api;
 mod paths;
 mod snapshot;
+mod tools;
 
 #[cfg(test)]
 mod tests;
@@ -50,7 +51,8 @@ pub fn run() {
             connectors::prepare_connector_action,
             connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
-            native_api::cancel_backend_completion
+            native_api::cancel_backend_completion,
+            tools::execute_tool_call
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");

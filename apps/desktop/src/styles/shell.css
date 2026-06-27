@@ -10,7 +10,7 @@
   min-height: 100%;
   padding: 20px 22px 18px;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.36);
+  background: rgba(255, 255, 255, 0.42);
   border-right: 1px solid var(--line);
   border-radius: 0 var(--radius-3) var(--radius-3) 0;
   box-shadow: var(--shadow-2);
@@ -25,15 +25,24 @@
   margin: 0 2px 14px;
 }
 
+.sidebar-top-row,
 .sidebar-brand-row,
 .sidebar-brand-lockup {
   display: flex;
   align-items: center;
 }
 
+.sidebar-top-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 10px;
+}
+
 .sidebar-brand-row {
-  min-height: 48px;
-  justify-content: space-between;
+  display: none;
+  min-height: 0;
+  justify-content: flex-end;
   gap: var(--space-3);
 }
 
@@ -589,6 +598,108 @@
 .sidebar-reopen-card:focus-visible {
   color: #4549ad;
   background: rgba(255, 255, 255, 0.92);
+}
+
+.desktop-frame[data-theme="dark"] .sidebar {
+  background: rgba(20, 19, 17, 0.82);
+  border-right-color: var(--line);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+}
+
+.desktop-frame[data-theme="dark"] .sidebar-minimize,
+.desktop-frame[data-theme="dark"] .workspace-switcher__caret,
+.desktop-frame[data-theme="dark"] .collection-caret,
+.desktop-frame[data-theme="dark"] .nav-group-add,
+.desktop-frame[data-theme="dark"] .mobile-connection-card {
+  color: var(--ink-muted);
+}
+
+.desktop-frame[data-theme="dark"] .new-chat-button,
+.desktop-frame[data-theme="dark"] .sidebar-action-card,
+.desktop-frame[data-theme="dark"] .thread-row,
+.desktop-frame[data-theme="dark"] .project-row,
+.desktop-frame[data-theme="dark"] .utility-row,
+.desktop-frame[data-theme="dark"] .account-row,
+.desktop-frame[data-theme="dark"] .workspace-switcher__name {
+  color: var(--ink);
+}
+
+.desktop-frame[data-theme="dark"] .workspace-switcher,
+.desktop-frame[data-theme="dark"] .account-popover,
+.desktop-frame[data-theme="dark"] .account-row--open {
+  background: var(--surface-raised);
+  border-color: var(--line);
+  box-shadow: var(--shadow-1);
+}
+
+.desktop-frame[data-theme="dark"] .workspace-switcher:hover,
+.desktop-frame[data-theme="dark"] .workspace-switcher:focus-visible,
+.desktop-frame[data-theme="dark"] .new-chat-button:hover,
+.desktop-frame[data-theme="dark"] .new-chat-button:active,
+.desktop-frame[data-theme="dark"] .sidebar-action-card:hover,
+.desktop-frame[data-theme="dark"] .thread-row:hover,
+.desktop-frame[data-theme="dark"] .project-row:hover,
+.desktop-frame[data-theme="dark"] .utility-row:hover,
+.desktop-frame[data-theme="dark"] .account-row:hover,
+.desktop-frame[data-theme="dark"] .account-row--open {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.desktop-frame[data-theme="dark"] .workspace-switcher__icon {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.desktop-frame[data-theme="dark"] .sidebar-action-divider,
+.desktop-frame[data-theme="dark"] .primary-utility-nav,
+.desktop-frame[data-theme="dark"] .sidebar-footer {
+  border-color: var(--line);
+}
+
+.desktop-frame[data-theme="dark"] .sidebar-action-divider {
+  background: var(--line);
+}
+
+.desktop-frame[data-theme="dark"] .nav-group-heading,
+.desktop-frame[data-theme="dark"] .account-row__email,
+.desktop-frame[data-theme="dark"] .thread-row--nested {
+  color: var(--ink-muted);
+}
+
+.desktop-frame[data-theme="dark"] .nav-group-heading:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.desktop-frame[data-theme="dark"] .thread-row--active,
+.desktop-frame[data-theme="dark"] .utility-row--active {
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+
+.desktop-frame[data-theme="dark"] .avatar,
+.desktop-frame[data-theme="dark"] .mini-avatar,
+.desktop-frame[data-theme="dark"] .account-popover__icon {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.desktop-frame[data-theme="dark"] .account-popover button {
+  color: var(--ink);
+}
+
+.desktop-frame[data-theme="dark"] .account-popover button:hover,
+.desktop-frame[data-theme="dark"] .account-popover .account-popover__logout:hover {
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
+}
+
+.desktop-frame[data-theme="dark"] .sidebar-reopen-card {
+  color: var(--ink-muted);
+  background: var(--surface-overlay);
+  border-color: var(--line);
 }
 
 .account-popover button {

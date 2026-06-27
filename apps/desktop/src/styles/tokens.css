@@ -12,16 +12,16 @@
   --ink: #17191a;
   --ink-muted: #6b7075;
   --ink-soft: #9ba0a5;
-  --surface: #f6f2ea;
-  --surface-raised: rgba(255, 255, 255, 0.5);
-  --surface-hover: rgba(255, 255, 255, 0.7);
+  --surface: #f8f3eb;
+  --surface-raised: rgba(255, 255, 255, 0.58);
+  --surface-hover: rgba(255, 255, 255, 0.78);
   --surface-overlay: rgba(255, 255, 255, 0.95);
   --line: rgba(23, 25, 26, 0.08);
   --line-strong: rgba(23, 25, 26, 0.15);
-  --accent: #a16b3f;
-  --accent-subtle: rgba(161, 107, 63, 0.09);
-  --accent-line: rgba(161, 107, 63, 0.2);
-  --accent-strong: #8a5832;
+  --accent: #c7681d;
+  --accent-subtle: rgba(229, 108, 14, 0.1);
+  --accent-line: rgba(229, 108, 14, 0.26);
+  --accent-strong: #aa5315;
   --positive: #4a8c5e;
   --positive-subtle: rgba(74, 140, 94, 0.1);
   --caution: #b5882a;
@@ -70,6 +70,34 @@
   --radius: var(--radius-2);
 }
 
+:root[data-theme="dark"],
+.desktop-frame[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #f4f0e8;
+  --ink-muted: #b4aaa0;
+  --ink-soft: #7e756e;
+  --surface: #151412;
+  --surface-raised: rgba(255, 255, 255, 0.055);
+  --surface-hover: rgba(255, 255, 255, 0.085);
+  --surface-overlay: rgba(27, 25, 22, 0.94);
+  --line: rgba(255, 244, 230, 0.09);
+  --line-strong: rgba(255, 244, 230, 0.18);
+  --accent: #ff6a00;
+  --accent-subtle: rgba(255, 106, 0, 0.13);
+  --accent-line: rgba(255, 106, 0, 0.34);
+  --accent-strong: #ff8a2b;
+  --positive: #7ec18d;
+  --positive-subtle: rgba(126, 193, 141, 0.13);
+  --caution: #f0b452;
+  --caution-subtle: rgba(240, 180, 82, 0.14);
+  --destructive: #ff827f;
+  --destructive-subtle: rgba(255, 130, 127, 0.13);
+  --shadow-1: 0 2px 10px rgba(0, 0, 0, 0.2);
+  --shadow-2: 0 12px 34px rgba(0, 0, 0, 0.28);
+  --shadow-3: 0 22px 58px rgba(0, 0, 0, 0.42);
+  --focus-ring: 0 0 0 3px rgba(255, 106, 0, 0.32);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -88,6 +116,10 @@ body {
   overflow: hidden;
   color: var(--ink);
   background: var(--surface);
+}
+
+:root[data-theme="dark"] body {
+  background: #151412;
 }
 
 button,
