@@ -51,6 +51,21 @@ Tauri checks use:
 pnpm tauri:check
 ```
 
+### First-time build / stale cache
+
+If `pnpm tauri:check` (or `cargo check`/`cargo test` under `apps/desktop/src-tauri`)
+fails with a path referencing an old repo name — e.g. the directory was ever
+cloned/renamed from `arden` to `fable`, leaving incremental cache pointing at the
+old absolute path — clear the stale target directory once:
+
+```bash
+cargo clean --manifest-path apps/desktop/src-tauri/Cargo.toml
+```
+
+This is a cache artifact, not a code defect. A fresh rebuild after `cargo clean`
+compiles and runs all Rust tests cleanly. (CI runs against a fresh checkout and
+is unaffected.)
+
 Windows bundles use:
 
 ```bash

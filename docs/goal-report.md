@@ -1,3 +1,12 @@
+> ⚠️ **SUPERSEDED (2026-06-27).** This report captures the state of the project
+> at the completion of the Fable rebrand + architecture/UI-overhaul goal on
+> 2026-06-26. It **predates** the subsequent native-API transport, the native
+> agent loop, and the connectors (provider/first-wave) work, none of which are
+> reflected here. Treat all claims below — including the Tauri identifier
+> (`com.fable.workspace`), the "working tree clean" note, and the test counts
+> (24 Rust / 26 TS) — as **historical** snapshots, not the current state. This
+> file is retained for provenance only; it is not an authoritative status doc.
+
 # Goal Report — Fable Rebrand, Architecture Cleanup & UI Overhaul
 
 Completed: 2026-06-26. All four phases done in order, each gated on green checks.

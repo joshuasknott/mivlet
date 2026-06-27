@@ -21,3 +21,6 @@ jobs:
       - run: npm run test
       - run: npm run build
       - run: npm run tauri:check
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
