@@ -89,7 +89,8 @@ export type FirstWaveConnectorId =
   | "notion"
   | "gmail"
   | "slack"
-  | "google-calendar";
+  | "google-calendar"
+  | "linear";
 
 export type ConnectorId = "local-files" | FirstWaveConnectorId | (string & {});
 
@@ -222,6 +223,21 @@ export type ConnectorActionKind =
   | "github.comment"
   | "vercel.promote"
   | "vercel.rollback"
+  | "github.create-issue"
+  | "github.update-issue"
+  | "github.create-review"
+  | "github.update-file"
+  | "github.create-branch"
+  | "github.dispatch-workflow"
+  | "vercel.create-deployment"
+  | "vercel.cancel-deployment"
+  | "vercel.update-project"
+  | "vercel.create-domain"
+  | "vercel.update-domain"
+  | "vercel.delete-domain"
+  | "linear.create-issue"
+  | "linear.update-issue"
+  | "linear.comment"
   | "gmail.create-draft"
   | "gmail.send"
   | "slack.create-draft"

@@ -7,6 +7,7 @@
 mod agent_runs;
 mod approvals;
 mod backends;
+mod connector_api;
 mod connector_approvals;
 mod connector_auth;
 mod connectors;
@@ -55,6 +56,7 @@ pub fn run() {
             connectors::clear_connector_auth,
             connectors::refresh_connector_health,
             connectors::search_connector,
+            connectors::read_connector_capability,
             connectors::import_connector_item,
             connectors::prepare_connector_action,
             connectors::execute_approved_connector_action,

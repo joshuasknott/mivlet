@@ -31,6 +31,8 @@ export interface ConnectorRequest {
   capability: string;
   input: Record<string, unknown>;
   cursor?: string;
+  /** Cancels in-flight provider egress. */
+  signal?: AbortSignal;
 }
 
 export interface ConnectorWriteRequest extends ConnectorRequest {

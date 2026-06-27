@@ -51,6 +51,8 @@ export {
 } from "./providers/shared";
 export * from "./providers/github";
 export * from "./providers/vercel";
+export * from "./providers/linear";
+export * from "./providers/linear-actions";
 export * from "./providers/google-drive";
 export * from "./providers/notion";
 export * from "./providers/gmail";

@@ -35,11 +35,13 @@ pub fn runtime_status() -> RuntimeStatus {
         connector_boundaries: [
             "local-files",
             "github",
-            "google-drive",
-            "slack",
-            "notion",
-            "linear",
             "vercel",
+            "google-drive",
+            "notion",
+            "gmail",
+            "slack",
+            "google-calendar",
+            "linear",
         ],
     }
 }

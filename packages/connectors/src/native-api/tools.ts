@@ -54,8 +54,29 @@ const TOOLS: Record<string, BackendTool> = {
       properties: { url: { type: "string" } },
       required: ["url"]
     })
-  }
+  },
+  "github-read": connectorReadTool("github"),
+  "vercel-read": connectorReadTool("vercel"),
+  "linear-read": connectorReadTool("linear")
 };
+
+function connectorReadTool(connector: "github" | "vercel" | "linear"): BackendTool {
+  return {
+    name: `${connector}-read`,
+    description: `Read authenticated ${connector} data through a declared connector capability.`,
+    defaultMode: "read-only",
+    defaultRisk: "medium",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        capability: { type: "string" },
+        input: { type: "object", additionalProperties: true },
+        cursor: { type: "string" }
+      },
+      required: ["capability", "input"]
+    })
+  };
+}
 
 /** All registered tools, as specs advertised to the model. */
 export function registeredToolSpecs(): NativeToolSpec[] {

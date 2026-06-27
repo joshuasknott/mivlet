@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::approvals::resolve_approval;
+use crate::connector_api;
 use crate::connector_approvals::{
     record_pending_connector_action, update_connector_action_result,
     verify_prepared_connector_action,
@@ -17,8 +18,9 @@ use crate::connector_auth::{
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{
     ConnectorActionExecutionRequest, ConnectorActionRequest, ConnectorActionResult,
-    ConnectorAuthRequest, ConnectorAuthResult, ConnectorCommandError, ConnectorHealth,
-    ConnectorImportRequest, ConnectorImportResult, ConnectorManifest, ConnectorPermission,
+    ConnectorAuthRequest, ConnectorAuthResult, ConnectorCapabilityRequest,
+    ConnectorCapabilityResult, ConnectorCommandError, ConnectorHealth, ConnectorImportRequest,
+    ConnectorImportResult, ConnectorKnowledgeSource, ConnectorManifest, ConnectorPermission,
     ConnectorSearchRequest, ConnectorSearchResult, APPROVAL_DECISIONS, CONNECTOR_ACTIONS,
     CONNECTOR_AUTH_STATES, FIRST_WAVE_CONNECTOR_IDS, MAX_CONNECTOR_PAYLOAD_FIELDS,
     MAX_CONNECTOR_QUERY_CHARACTERS, MAX_CONNECTOR_RESULT_LIMIT,
@@ -101,6 +103,11 @@ const CALENDAR_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("calendar.events.readonly", "Calendar events", "read", true),
     ("calendar.events", "Create or update events", "write", false),
 ];
+const LINEAR_SCOPES: &[(&str, &str, &str, bool)] = &[
+    ("read", "Workspace data", "read", true),
+    ("write", "Issue changes", "write", false),
+    ("comments:create", "Create comments", "write", false),
+];
 
 const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
@@ -113,7 +120,16 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         ],
         scopes: GITHUB_SCOPES,
         setup_message: "Register a GitHub App and configure the Fable auth broker.",
-        actions: &["github.draft-pull-request", "github.comment"],
+        actions: &[
+            "github.draft-pull-request",
+            "github.comment",
+            "github.create-issue",
+            "github.update-issue",
+            "github.create-review",
+            "github.update-file",
+            "github.create-branch",
+            "github.dispatch-workflow",
+        ],
     },
     ConnectorCatalogEntry {
         id: "vercel",
@@ -125,7 +141,16 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         ],
         scopes: VERCEL_SCOPES,
         setup_message: "Create a Vercel integration and configure its External Flow redirect.",
-        actions: &["vercel.promote", "vercel.rollback"],
+        actions: &[
+            "vercel.promote",
+            "vercel.rollback",
+            "vercel.create-deployment",
+            "vercel.cancel-deployment",
+            "vercel.update-project",
+            "vercel.create-domain",
+            "vercel.update-domain",
+            "vercel.delete-domain",
+        ],
     },
     ConnectorCatalogEntry {
         id: "google-drive",
@@ -185,6 +210,22 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "google-calendar.update-draft",
         ],
     },
+    ConnectorCatalogEntry {
+        id: "linear",
+        name: "Linear",
+        auth_mode: "oauth-broker",
+        permissions: &[
+            "read workspace, teams, projects, cycles, issues, comments, labels, and users",
+            "create and update issues and comments after approval",
+        ],
+        scopes: LINEAR_SCOPES,
+        setup_message: "Create a Linear OAuth application and configure the Fable auth broker.",
+        actions: &[
+            "linear.create-issue",
+            "linear.update-issue",
+            "linear.comment",
+        ],
+    },
 ];
 
 fn require_connector(
@@ -227,6 +268,57 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             consequence: "Rolls production back to the selected deployment.",
             confirmation_phrase: Some("rollback deployment"),
         },
+        "github.create-issue" => external_policy(
+            "Create Issue",
+            "Changes the identified GitHub repository resource after explicit approval.",
+        ),
+        "github.update-issue" => external_policy(
+            "Update Issue",
+            "Changes the identified GitHub repository resource after explicit approval.",
+        ),
+        "github.create-review" => external_policy(
+            "Create Review",
+            "Changes the identified GitHub repository resource after explicit approval.",
+        ),
+        "github.update-file" => external_policy(
+            "Update File",
+            "Changes the identified GitHub repository resource after explicit approval.",
+        ),
+        "github.create-branch" => external_policy(
+            "Create Branch",
+            "Changes the identified GitHub repository resource after explicit approval.",
+        ),
+        "github.dispatch-workflow" => external_policy(
+            "Dispatch Workflow",
+            "Changes the identified GitHub repository resource after explicit approval.",
+        ),
+        "vercel.create-deployment" => external_policy(
+            "Create Deployment",
+            "Changes the identified Vercel team or project resource after explicit approval.",
+        ),
+        "vercel.cancel-deployment" => external_policy(
+            "Cancel Deployment",
+            "Changes the identified Vercel team or project resource after explicit approval.",
+        ),
+        "vercel.update-project" => external_policy(
+            "Update Project",
+            "Changes the identified Vercel team or project resource after explicit approval.",
+        ),
+        "vercel.create-domain" => external_policy(
+            "Create Domain",
+            "Changes the identified Vercel team or project resource after explicit approval.",
+        ),
+        "vercel.update-domain" => external_policy(
+            "Update Domain",
+            "Changes the identified Vercel team or project resource after explicit approval.",
+        ),
+        "vercel.delete-domain" => external_policy(
+            "Delete Domain",
+            "Changes the identified Vercel team or project resource after explicit approval.",
+        ),
+        "linear.create-issue" => linear_policy("Create Issue"),
+        "linear.update-issue" => linear_policy("Update Issue"),
+        "linear.comment" => linear_policy("Comment"),
         "gmail.create-draft" => ConnectorActionPolicy {
             label: "Create Draft",
             mode: "trusted-scope",
@@ -272,6 +364,26 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
         _ => return None,
     };
     Some(policy)
+}
+
+fn external_policy(label: &'static str, consequence: &'static str) -> ConnectorActionPolicy {
+    ConnectorActionPolicy {
+        label,
+        mode: "full-access",
+        risk_level: "high",
+        consequence,
+        confirmation_phrase: Some("confirm external write"),
+    }
+}
+
+fn linear_policy(label: &'static str) -> ConnectorActionPolicy {
+    ConnectorActionPolicy {
+        label,
+        mode: "trusted-scope",
+        risk_level: "medium",
+        consequence: "Creates or changes the identified Linear issue after explicit approval.",
+        confirmation_phrase: None,
+    }
 }
 
 fn command_error(
@@ -559,7 +671,8 @@ pub async fn refresh_connector_health(
 }
 
 #[tauri::command]
-pub fn search_connector(
+pub async fn search_connector(
+    app: tauri::AppHandle,
     request: ConnectorSearchRequest,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
@@ -573,8 +686,19 @@ pub fn search_connector(
             false,
         ));
     }
-    let _cursor = request.cursor.as_deref().map(normalize_spaces);
-    Err(configuration_required(entry.id))
+    connector_api::search(&app, request).await
+}
+
+#[tauri::command]
+pub async fn read_connector_capability(
+    app: tauri::AppHandle,
+    request: ConnectorCapabilityRequest,
+) -> Result<ConnectorCapabilityResult, ConnectorCommandError> {
+    let entry = require_connector(&request.connector_id)?;
+    if !matches!(entry.id, "github" | "vercel" | "linear") {
+        return Err(configuration_required(entry.id));
+    }
+    connector_api::read_capability(&app, request).await
 }
 
 #[tauri::command]
@@ -590,7 +714,29 @@ pub fn import_connector_item(
             false,
         ));
     }
-    Err(configuration_required(entry.id))
+    Ok(ConnectorImportResult {
+        source: ConnectorKnowledgeSource {
+            id: format!("connector-{}-{}", entry.id, request.item.id),
+            title: request.item.title,
+            kind: match request.item.kind.as_str() {
+                "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => {
+                    "folder".to_string()
+                }
+                "deployment" => "web".to_string(),
+                _ => "document".to_string(),
+            },
+            connector_id: entry.id.to_string(),
+            provenance: request.item.provenance,
+            freshness: request.item.freshness,
+            pinned: false,
+            trust: "untrusted".to_string(),
+            content_preview: request.item.content_preview,
+            imported_at: request.imported_at,
+            origin: "connector-import".to_string(),
+            provider_metadata: request.item.provider_metadata,
+        },
+        imported: true,
+    })
 }
 
 #[tauri::command]
@@ -615,7 +761,7 @@ pub fn prepare_connector_action(
 }
 
 #[tauri::command]
-pub fn execute_approved_connector_action(
+pub async fn execute_approved_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionExecutionRequest,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
@@ -661,14 +807,36 @@ pub fn execute_approved_connector_action(
     )
     .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
 
-    let _ = update_connector_action_result(
-        &records_path,
-        &action.approval.id,
-        "failed",
-        &resolution.audit_entry.decided_at,
-        Some("configuration-required"),
-    );
-    Err(configuration_required(&action.connector_id))
+    match connector_api::execute_action(&app, &action).await {
+        Ok(provider_resource_id) => {
+            update_connector_action_result(
+                &records_path,
+                &action.approval.id,
+                "executed",
+                &resolution.audit_entry.decided_at,
+                None,
+            )
+            .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+            Ok(ConnectorActionResult {
+                request_id: action.id,
+                connector_id: action.connector_id,
+                action: action.action,
+                status: "executed".to_string(),
+                message: "The approved connector action executed successfully.".to_string(),
+                provider_resource_id,
+            })
+        }
+        Err(error) => {
+            let _ = update_connector_action_result(
+                &records_path,
+                &action.approval.id,
+                "failed",
+                &resolution.audit_entry.decided_at,
+                Some(&error.code),
+            );
+            Err(error)
+        }
+    }
 }
 
 #[allow(dead_code)]

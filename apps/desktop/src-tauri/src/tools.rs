@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::approvals::resolve_approval;
+use crate::connector_api;
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{ApprovalResolutionRequest, APPROVAL_DECISIONS};
 use crate::paths::{execution_approvals_path, normalize_spaces, truncate_characters};
@@ -64,7 +65,15 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 4] = ["read-file", "write-file", "run-shell", "web-fetch"];
+pub(crate) const SUPPORTED_TOOLS: [&str; 7] = [
+    "read-file",
+    "write-file",
+    "run-shell",
+    "web-fetch",
+    "github-read",
+    "vercel-read",
+    "linear-read",
+];
 
 /// The outcome of re-validating + running a tool against the workspace root.
 ///
@@ -80,6 +89,9 @@ pub(crate) enum ToolOutcome {
     Done(Result<ToolResult, String>),
     /// A granted web-fetch that needs the async command to issue the GET.
     NeedsWebFetch { url: String },
+    NeedsConnectorRead {
+        request: crate::models::ConnectorCapabilityRequest,
+    },
 }
 
 /// Re-validate the approval and run the tool against the workspace root. Pure
@@ -99,6 +111,9 @@ pub(crate) fn execute_tool(
         // clear contract error instead of silently dropping the GET.
         ToolOutcome::NeedsWebFetch { .. } => {
             Err("web-fetch must be executed through the async command boundary.".to_string())
+        }
+        ToolOutcome::NeedsConnectorRead { .. } => {
+            Err("connector reads must be executed through the async command boundary.".to_string())
         }
     }
 }
@@ -144,6 +159,13 @@ pub(crate) fn execute_tool_outcome(
             Ok(url) => ToolOutcome::NeedsWebFetch { url },
             Err(error) => ToolOutcome::Done(Err(error)),
         },
+        "github-read" | "vercel-read" | "linear-read" => {
+            let connector_id = tool.trim_end_matches("-read");
+            match connector_request_from_args(connector_id, &arguments) {
+                Ok(request) => ToolOutcome::NeedsConnectorRead { request },
+                Err(error) => ToolOutcome::Done(Err(error)),
+            }
+        }
         other => ToolOutcome::Done(Err(format!("Tool {other} is not supported."))),
     }
 }
@@ -163,6 +185,7 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
+        "github-read" | "vercel-read" | "linear-read" => Some(("read-only", "medium")),
         _ => None,
     }
 }
@@ -396,6 +419,30 @@ pub(crate) fn web_fetch_url_from_args(arguments: &serde_json::Value) -> Result<S
     Ok(url)
 }
 
+fn connector_request_from_args(
+    connector_id: &str,
+    arguments: &serde_json::Value,
+) -> Result<crate::models::ConnectorCapabilityRequest, String> {
+    let capability = require_string_argument(arguments, "capability")?;
+    let input = arguments
+        .get("input")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let cursor = arguments
+        .get("cursor")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok(crate::models::ConnectorCapabilityRequest {
+        connector_id: connector_id.to_string(),
+        capability,
+        input,
+        cursor,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Tauri command wrappers.
 // ---------------------------------------------------------------------------
@@ -426,6 +473,14 @@ pub async fn execute_tool_call(
     match execute_tool_outcome(request, &root) {
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,
+        ToolOutcome::NeedsConnectorRead { request } => {
+            let result = connector_api::read_capability(&app, request)
+                .await
+                .map_err(|error| error.message)?;
+            serde_json::to_string(&result)
+                .map(|output| ToolResult { ok: true, output })
+                .map_err(|_| "Fable could not encode the connector result.".to_string())
+        }
     }
 }
 

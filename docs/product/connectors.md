@@ -3,13 +3,14 @@
 ## First wave
 
 Fable's first-wave external connectors are GitHub, Vercel, Google Drive,
-Notion, Gmail, Slack, and Google Calendar. Local Files remains a native local
-connector.
+Notion, Gmail, Slack, Google Calendar, and Linear. Local Files remains a native
+local connector.
 
 The browser preview uses synthetic fixture records and labels them `fixture`.
-The desktop runtime reports `needs-auth` until provider configuration and OS
-secure storage are available. Fable must never translate a missing credential
-into a connected state.
+The desktop runtime reports `needs-auth` until credentials are connected through
+the native auth boundary. Fable must never translate a missing credential into a
+connected state, and production desktop search/read/write paths do not silently
+fall back to fixture data.
 
 Every connector exposes:
 
@@ -25,8 +26,9 @@ Every connector exposes:
 
 | Provider | Console setup | Callback model | Initial access |
 | --- | --- | --- | --- |
-| GitHub | Register a GitHub App and installation policy | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Metadata, contents, issues, and pull requests read; issue/PR write only when enabled |
-| Vercel | Create a connectable-account integration and select API permissions | External Flow redirect, proposed `https://auth.fable.app/oauth/vercel/callback` | Project and deployment read; deployment write only when enabled |
+| GitHub | Register a GitHub OAuth/App client and installation policy | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Metadata, repository contents, branches, commits, issues, pull requests, checks, reviews, comments, and Actions workflow read; selected issue/comment/review/file/branch/workflow writes only when enabled |
+| Vercel | Create a connectable-account integration and select API permissions | External Flow redirect, proposed `https://auth.fable.app/oauth/vercel/callback` | Team, project, deployment, domain, log, and environment-variable metadata read; deployment/project/domain writes only when enabled |
+| Linear | Create an OAuth application and select workspace scopes | Broker callback, proposed `https://auth.fable.app/oauth/linear/callback` | Workspace, team, project, cycle, issue, comment, label, and user read; issue/comment mutation only when enabled |
 | Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `https://www.googleapis.com/auth/drive.file` |
 | Notion | Create a public connection and select connection capabilities | Broker callback, proposed `https://auth.fable.app/oauth/notion/callback` | Read content on user-selected pages/workspaces |
 | Gmail | Enable Gmail API, create Desktop OAuth client, configure consent and verification | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `gmail.readonly`; optional `gmail.compose` |
@@ -38,11 +40,21 @@ until the auth broker is deployed and the exact URLs are registered in each
 provider console.
 
 GitHub App permissions should start with repository Metadata read, Contents
-read, Issues read, and Pull requests read. Draft PRs/comments require the
-narrow corresponding write permission and Fable approval.
+read, Issues read, Pull requests read, Checks read, and Actions read. Issue,
+comment, review, file-content, branch, and workflow dispatch operations require
+the corresponding provider write permission and Fable approval.
 
-Vercel should request Project and Deployment read permissions. Deployment
-write is optional and only needed for approved promote/rollback actions.
+Vercel should request team/account read plus Project, Deployment, Domain, Log,
+and Environment Variable read metadata permissions. Deployment write is needed
+for approved create/cancel/promote/rollback actions; project/domain write is
+needed only for approved configuration changes. Environment-variable secret
+values must never be returned to the model, audit log, or fixture snapshots.
+
+Linear should request read scopes for workspace metadata, teams, projects,
+cycles, issues, comments, labels, and users. Issue create/update and comment
+write scopes are needed only for approved issue/comment mutations. Status,
+assignment, project, cycle, and label changes are represented as issue updates
+when the connected workspace grants them.
 
 Slack public-channel imports need `channels:read` and `channels:history`.
 Private-channel support additionally needs the corresponding `groups:*`
@@ -73,9 +85,17 @@ Imported content is not durable memory. The existing memory-promotion approval
 is the only path from connector knowledge to durable memory.
 
 Draft creation is a provider write and requires approval even when it does not
-send or publish. Sending Gmail, posting Slack, promoting or rolling back
-Vercel, and any public/destructive action use high-risk full-access
-confirmation. No adapter executes a write directly.
+send or publish. Sending Gmail, posting Slack, GitHub repository changes,
+Vercel deployment/configuration changes, Linear issue/comment changes, and any
+public/destructive action use high-risk full-access confirmation. No adapter
+executes a consequential write directly; the native runtime records a prepared
+approval preview and requires a matching explicit user decision before egress.
+
+The native AI runtime exposes read-only tools for GitHub, Vercel, and Linear
+capabilities. These call the live provider APIs after native credential
+resolution and return structured items with pagination and rate-limit metadata.
+Supported write capabilities are functional provider calls, but only after the
+same explicit approval boundary.
 
 ## Credential storage and auth broker
 
@@ -88,10 +108,13 @@ must remain in an Fable auth broker or equivalent server-side secret boundary.
 They must not be compiled into React assets, Rust binaries, logs, snapshots,
 or local JSON state.
 
-The Rust `ConnectorCredentialBoundary` is currently a fail-closed interface.
-Until a production keychain implementation is selected for Windows, macOS, and
-Linux, live auth/search/import/action commands return
-`configuration-required`.
+The Rust connector credential boundary stores access tokens, refresh tokens,
+PKCE verifier state, and account metadata through the OS credential/keyring
+boundary. The app data files hold non-secret connection state only: connector
+id, account summary, scopes, expiry, status, health, and opaque credential
+references. Auth broker endpoints perform confidential-client exchange,
+refresh, identity lookup, and revocation for GitHub, Vercel, Linear, Notion,
+and Slack.
 
 ## Local cache, logging, and disconnect
 
@@ -109,20 +132,25 @@ expired/unavailable auth state.
 
 ## Known limitations
 
-- No production OS secure-storage backend is wired for connectors.
-- The Fable auth broker and production callback URLs are not deployed.
+- The Fable auth broker and production callback URLs must be deployed and
+  registered before external users can connect GitHub, Vercel, Linear, Notion,
+  or Slack.
 - Provider apps, consent screens, distribution review, and Google restricted
   scope verification are external setup tasks.
-- Tauri provider egress is intentionally disabled; desktop commands fail
-  closed.
-- Browser search/import is synthetic fixture behavior only.
+- Browser search/import remains synthetic fixture behavior only.
 - Imported connector records are session-local until encrypted connector cache
   persistence is added.
+- GitHub/Vercel/Linear coverage intentionally targets practical high-value
+  provider operations; unsupported provider features still fail closed as
+  undeclared capabilities.
 
 ## Official provider references
 
 - [GitHub OAuth scopes and GitHub App recommendation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps)
 - [Vercel integration API scopes and redirect](https://vercel.com/docs/integrations/create-integration/submit-integration)
+- [Vercel REST API](https://vercel.com/docs/rest-api)
+- [Linear OAuth 2.0 authentication](https://linear.app/developers/oauth-2-0-authentication)
+- [Linear GraphQL API](https://linear.app/developers/graphql)
 - [Google desktop OAuth and PKCE](https://developers.google.com/identity/protocols/oauth2/native-app)
 - [Google Drive scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)
 - [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes)

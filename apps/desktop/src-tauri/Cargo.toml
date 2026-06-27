@@ -26,6 +26,7 @@ tauri = { version = "2", features = [] }
 reqwest = { version = "0.13", default-features = false, features = [
     "json",
     "form",
+    "query",
     "rustls-no-provider",
     "stream",
 ] }
