@@ -36,6 +36,13 @@ pub fn runtime_snapshot_path(app: &tauri::AppHandle) -> Result<PathBuf, String> 
     app_data_file_path(app, "runtime-snapshot.json")
 }
 
+/// Path for the connected-backend id manifest. Stores *which* backends are
+/// connected (provider ids only), never secrets. Secrets live in the
+/// process-scoped in-memory credential store.
+pub fn connected_backends_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "connected-backends.json")
+}
+
 /// Collapse runs of whitespace into single spaces.
 pub fn normalize_spaces(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")

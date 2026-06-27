@@ -59,6 +59,7 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     importedKnowledgeSources: state.importedKnowledgeSources,
     memoryDisabled: state.memoryDisabled,
     memoryRecords: state.memoryRecords,
+    connectedBackendIds: state.connectedBackendIds,
     savedAt: new Date().toISOString()
   };
 }
@@ -79,7 +80,8 @@ export function shellStateFromRuntimeSnapshot(
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
-    memoryRecords: snapshot.memoryRecords
+    memoryRecords: snapshot.memoryRecords,
+    connectedBackendIds: snapshot.connectedBackendIds
   };
 }
 

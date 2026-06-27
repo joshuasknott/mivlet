@@ -7,7 +7,13 @@ import type {
   ApprovalRequest,
   BackendConsequentialEvent,
   BackendProvider,
+  ConnectorActionKind,
+  ConnectorActionRequest,
   ConnectorManifest,
+  ConnectorSearchItem,
+  ConnectorSearchRequest,
+  ConnectorSearchResult,
+  FirstWaveConnectorId,
   KnowledgeCitation,
   KnowledgeSource,
   LocalFileImport,
@@ -19,8 +25,12 @@ import type {
   WorkspaceDirective
 } from "@arden/protocol";
 import {
+  FIRST_WAVE_CONNECTOR_IDS,
+  importFixtureConnectorItem,
   importLocalTextFile,
   listBackendProviders,
+  prepareFixtureConnectorAction,
+  searchFixtureConnector,
   searchKnowledgeSources,
   type LocalTextFileCandidate
 } from "@arden/connectors";
@@ -35,22 +45,29 @@ import {
   workspaceDirectives
 } from "../data/workspace";
 import {
+  clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
   exportRuntimeMemoryState,
+  importRuntimeConnectorItem,
   importRuntimeLocalKnowledgeSource,
+  listRuntimeConnectorStatuses,
   listRuntimeBackends,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
+  prepareRuntimeConnectorAction,
   promoteRuntimeKnowledgeSourceToMemory,
   recordRuntimeBackendEvent,
+  refreshRuntimeConnectorHealth,
   resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
   saveRuntimeSnapshot,
-  searchRuntimeKnowledgeSources
+  searchRuntimeConnector,
+  searchRuntimeKnowledgeSources,
+  startRuntimeConnectorAuth
 } from "../runtime";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
@@ -104,6 +121,10 @@ const defaultShellState: PersistedShellState = {
   connectedBackendIds: []
 };
 
+function isFirstWaveConnectorId(value: string): value is FirstWaveConnectorId {
+  return (FIRST_WAVE_CONNECTOR_IDS as readonly string[]).includes(value);
+}
+
 export interface ShellRuntime {
   // navigation
   activeItem: string;
@@ -133,6 +154,20 @@ export interface ShellRuntime {
   useDirective: (directive: WorkspaceDirective) => void;
   useConnector: (connector: ConnectorManifest) => void;
   runCommand: (command: string) => void;
+  // first-wave connectors
+  connectorManifests: ConnectorManifest[];
+  connectorStatus: string | null;
+  connectorSearchResult: ConnectorSearchResult | null;
+  connectorImportedSources: KnowledgeSource[];
+  connectConnector: (connector: ConnectorManifest) => Promise<void>;
+  disconnectConnector: (connectorId: string) => Promise<void>;
+  refreshConnector: (connectorId: string) => Promise<void>;
+  searchConnector: (request: ConnectorSearchRequest) => Promise<void>;
+  importConnectorItem: (item: ConnectorSearchItem) => Promise<void>;
+  prepareConnectorAction: (
+    action: ConnectorActionKind,
+    payload: Record<string, string>
+  ) => Promise<void>;
   // approvals
   openApprovals: ApprovalRequest[];
   approvalAudit: ApprovalAuditEntry[];
@@ -236,6 +271,14 @@ export function useShellRuntime(): ShellRuntime {
   const [knowledgeCitations, setKnowledgeCitations] = useState<KnowledgeCitation[]>([]);
   const [knowledgeSearchMode, setKnowledgeSearchMode] = useState("lexical-fallback");
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [connectorManifests, setConnectorManifests] =
+    useState<ConnectorManifest[]>(connectors);
+  const [connectorStatus, setConnectorStatus] = useState<string | null>(null);
+  const [connectorSearchResult, setConnectorSearchResult] =
+    useState<ConnectorSearchResult | null>(null);
+  const [connectorImportedSources, setConnectorImportedSources] = useState<KnowledgeSource[]>([]);
+  const [preparedConnectorActions, setPreparedConnectorActions] =
+    useState<ConnectorActionRequest[]>([]);
   const [managedMemoryRecords, setManagedMemoryRecords] = useState<MemoryRecord[]>(
     initialState.memoryRecords
   );
@@ -280,8 +323,12 @@ export function useShellRuntime(): ShellRuntime {
   // Chat views: the default home, a selected thread/project, or a new chat.
   const isChatView = activePage === null;
   const workspaceKnowledgeSources = useMemo(
-    () => mergeKnowledgeSources(knowledgeSources, importedKnowledgeSources),
-    [importedKnowledgeSources]
+    () =>
+      mergeKnowledgeSources(knowledgeSources, [
+        ...connectorImportedSources,
+        ...importedKnowledgeSources
+      ]),
+    [connectorImportedSources, importedKnowledgeSources]
   );
   const contextualDirectives = useMemo(
     () => [
@@ -290,7 +337,8 @@ export function useShellRuntime(): ShellRuntime {
     ].slice(0, 4),
     [importedKnowledgeSources]
   );
-  const openApprovals = pendingApprovals.filter((approval) => !dismissedApprovalIds.includes(approval.id));
+  const openApprovals = [...preparedConnectorActions.map((request) => request.approval), ...pendingApprovals]
+    .filter((approval) => !dismissedApprovalIds.includes(approval.id));
   const automationRules: AutomationRuleView[] = automations.map((rule) => ({
     ...rule,
     status: (automationStatuses[rule.id] ?? rule.status) as AutomationRuleView["status"]
@@ -451,6 +499,24 @@ export function useShellRuntime(): ShellRuntime {
   // Resolve agent-runtime backend auth state + capabilities from the Rust
   // credential boundary. Outside Tauri the preview registry is kept. Secrets
   // never reach this layer — only auth state and capabilities.
+  useEffect(() => {
+    let active = true;
+
+    void listRuntimeConnectorStatuses().then((manifests) => {
+      if (!active || !manifests) {
+        return;
+      }
+      const runtimeById = new Map(manifests.map((manifest) => [manifest.id, manifest]));
+      setConnectorManifests((current) =>
+        current.map((manifest) => runtimeById.get(manifest.id) ?? manifest)
+      );
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   useEffect(() => {
     let active = true;
 
@@ -704,6 +770,162 @@ export function useShellRuntime(): ShellRuntime {
     setComposerValue(prompt);
     setLastAction(`${connector.name} is ready in the composer`);
     focusComposer(prompt);
+  };
+
+  const replaceConnectorManifest = (manifest: ConnectorManifest) => {
+    setConnectorManifests((current) =>
+      current.map((connector) => (connector.id === manifest.id ? manifest : connector))
+    );
+  };
+
+  const connectConnector = async (connector: ConnectorManifest) => {
+    if (!isFirstWaveConnectorId(connector.id)) {
+      setConnectorStatus(
+        connector.id === "local-files"
+          ? "Local Files is already available."
+          : connector.setupMessage ?? `${connector.name} is not in the first connector wave.`
+      );
+      return;
+    }
+
+    setConnectorStatus(`Preparing ${connector.name} authorization...`);
+    try {
+      const result = await startRuntimeConnectorAuth({ connectorId: connector.id });
+      if (!result) {
+        const message =
+          connector.status === "fixture"
+            ? `${connector.name} is using explicit preview data. ${connector.setupMessage ?? "Live provider setup is required."}`
+            : connector.setupMessage ?? `${connector.name} provider setup is required.`;
+        setConnectorStatus(message);
+        setLastAction(message);
+        return;
+      }
+      setConnectorStatus(result.message);
+      setLastAction(result.message);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : `${connector.name} authorization is unavailable.`;
+      setConnectorStatus(message);
+      setLastAction(message);
+    }
+  };
+
+  const disconnectConnector = async (connectorId: string) => {
+    const connector = connectorManifests.find((manifest) => manifest.id === connectorId);
+    if (!connector || !isFirstWaveConnectorId(connectorId)) {
+      return;
+    }
+
+    try {
+      const manifest = await clearRuntimeConnectorAuth(connectorId);
+      if (manifest) {
+        replaceConnectorManifest(manifest);
+        setConnectorStatus(`${connector.name} disconnected.`);
+      } else {
+        setConnectorStatus(`${connector.name} fixture has no live credentials to clear.`);
+      }
+    } catch (error) {
+      setConnectorStatus(
+        error instanceof Error ? error.message : `${connector.name} could not be disconnected.`
+      );
+    }
+  };
+
+  const refreshConnector = async (connectorId: string) => {
+    const connector = connectorManifests.find((manifest) => manifest.id === connectorId);
+    if (!connector || !isFirstWaveConnectorId(connectorId)) {
+      return;
+    }
+
+    try {
+      const manifest = await refreshRuntimeConnectorHealth(connectorId);
+      if (manifest) {
+        replaceConnectorManifest(manifest);
+        setConnectorStatus(`${connector.name} health refreshed.`);
+      } else {
+        setConnectorStatus(`${connector.name} fixture health is static preview data.`);
+      }
+    } catch (error) {
+      setConnectorStatus(
+        error instanceof Error ? error.message : `${connector.name} health is unavailable.`
+      );
+    }
+  };
+
+  const searchConnector = async (request: ConnectorSearchRequest) => {
+    const connector = connectorManifests.find(
+      (manifest) => manifest.id === request.connectorId
+    );
+    setConnectorStatus(`Searching ${connector?.name ?? request.connectorId}...`);
+    try {
+      const result =
+        (await searchRuntimeConnector(request)) ?? searchFixtureConnector(request);
+      setConnectorSearchResult(result);
+      setConnectorStatus(
+        result.items.length > 0
+          ? `Found ${result.items.length} ${result.source} result${result.items.length === 1 ? "" : "s"}.`
+          : `No ${result.source} results matched.`
+      );
+    } catch (error) {
+      setConnectorSearchResult({
+        connectorId: request.connectorId,
+        query: request.query,
+        items: [],
+        source: "live",
+        searchedAt: new Date().toISOString()
+      });
+      setConnectorStatus(
+        error instanceof Error ? error.message : "Connector search is unavailable."
+      );
+    }
+  };
+
+  const importConnectorItem = async (item: ConnectorSearchItem) => {
+    const request = {
+      connectorId: item.connectorId,
+      item,
+      importedAt: new Date().toISOString()
+    };
+
+    try {
+      const imported =
+        (await importRuntimeConnectorItem(request)) ?? importFixtureConnectorItem(request);
+      setConnectorImportedSources((current) => [
+        imported.source,
+        ...current.filter((source) => source.id !== imported.source.id)
+      ]);
+      setConnectorStatus(
+        `Imported ${imported.source.title} as untrusted connector knowledge.`
+      );
+      setLastAction(`Imported connector source: ${imported.source.title}`);
+    } catch (error) {
+      setConnectorStatus(
+        error instanceof Error ? error.message : "Connector import is unavailable."
+      );
+    }
+  };
+
+  const prepareConnectorAction = async (
+    action: ConnectorActionKind,
+    payload: Record<string, string>
+  ) => {
+    try {
+      const fixtureRequest = prepareFixtureConnectorAction(action, payload);
+      const prepared =
+        (await prepareRuntimeConnectorAction(fixtureRequest)) ?? fixtureRequest;
+      setPreparedConnectorActions((current) => [
+        prepared,
+        ...current.filter((request) => request.id !== prepared.id)
+      ]);
+      setConnectorStatus(
+        `${prepared.approval.service} action prepared. Review it in Memory and approvals.`
+      );
+      setLastAction(`${prepared.approval.service} action needs approval`);
+    } catch (error) {
+      setConnectorStatus(
+        error instanceof Error ? error.message : "Connector action could not be prepared."
+      );
+    }
   };
 
   // Agent-runtime backend connect/disconnect. The secret is handed to the Rust
@@ -1017,6 +1239,16 @@ export function useShellRuntime(): ShellRuntime {
     useDirective,
     useConnector,
     runCommand,
+    connectorManifests,
+    connectorStatus,
+    connectorSearchResult,
+    connectorImportedSources,
+    connectConnector,
+    disconnectConnector,
+    refreshConnector,
+    searchConnector,
+    importConnectorItem,
+    prepareConnectorAction,
     openApprovals,
     approvalAudit,
     sessionApprovalGrants,

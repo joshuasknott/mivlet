@@ -9,6 +9,15 @@ import type {
   BackendConsequentialEvent,
   BackendCredentialRequest,
   BackendProvider,
+  ConnectorActionRequest,
+  ConnectorActionResult,
+  ConnectorAuthRequest,
+  ConnectorAuthResult,
+  ConnectorImportRequest,
+  ConnectorImportResult,
+  ConnectorManifest,
+  ConnectorSearchRequest,
+  ConnectorSearchResult,
   KnowledgeSearchResponse,
   KnowledgeSource,
   LocalFileImport,
@@ -34,6 +43,15 @@ function hasTauriRuntime() {
 function toRuntimeError(error: unknown) {
   if (error instanceof Error) {
     return error;
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return new Error(error.message);
   }
 
   return new Error(typeof error === "string" ? error : "Arden runtime request failed.");
@@ -215,6 +233,116 @@ export async function recordRuntimeApprovalDecision(entry: ApprovalAuditEntry) {
     return response.persisted ? response.entry : null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// First-wave connectors.
+//
+// The runtime owns auth, credentials, provider health, and future network
+// egress. Browser preview returns null so the shell can use explicit fixture
+// adapters without claiming a live connection.
+// ---------------------------------------------------------------------------
+
+export async function listRuntimeConnectorStatuses() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorManifest[]>("list_connector_statuses");
+  } catch {
+    return null;
+  }
+}
+
+export async function startRuntimeConnectorAuth(request: ConnectorAuthRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorAuthResult>("start_connector_auth", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorAuthResult>("complete_connector_auth", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function clearRuntimeConnectorAuth(connectorId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorManifest>("clear_connector_auth", { connectorId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function refreshRuntimeConnectorHealth(connectorId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorManifest>("refresh_connector_health", { connectorId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function searchRuntimeConnector(request: ConnectorSearchRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorSearchResult>("search_connector", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function importRuntimeConnectorItem(request: ConnectorImportRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorImportResult>("import_connector_item", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function prepareRuntimeConnectorAction(request: ConnectorActionRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorActionRequest>("prepare_connector_action", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function executeRuntimeConnectorAction(request: {
+  action: ConnectorActionRequest;
+  approval: ApprovalResolutionRequest;
+}) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorActionResult>("execute_approved_connector_action", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
   }
 }
 

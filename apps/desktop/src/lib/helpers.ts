@@ -28,12 +28,20 @@ export function normalizeActiveItem(activeItem: string) {
     return "arden-memory";
   }
 
+  if (activeItem === "Plugins") {
+    return "Connectors";
+  }
+
+  if (activeItem === "Automations") {
+    return "Schedules";
+  }
+
   return activeItem;
 }
 
 export function mergeKnowledgeSources(
   baseSources: KnowledgeSource[],
-  importedSources: LocalFileImport[]
+  importedSources: KnowledgeSource[]
 ) {
   const seen = new Set<string>();
   return [...importedSources, ...baseSources].filter((source) => {

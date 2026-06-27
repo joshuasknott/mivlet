@@ -25,10 +25,13 @@ const connectedCodex: BackendProvider = {
 };
 
 vi.mock("./runtime", () => ({
+  clearRuntimeConnectorAuth: vi.fn(async () => null),
   clearRuntimeBackend: vi.fn(async () => null),
   connectRuntimeBackend: vi.fn(async () => "codex"),
   exportRuntimeMemoryState: vi.fn(async () => null),
+  importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
+  listRuntimeConnectorStatuses: vi.fn(async () => null),
   listRuntimeBackends: vi.fn(
     () =>
       new Promise<BackendProvider[] | null>((resolve) => {
@@ -45,15 +48,19 @@ vi.mock("./runtime", () => ({
         ? Promise.resolve(runtimeMocks.snapshot)
         : new Promise<RuntimeSnapshot | null>(() => {})
   ),
+  prepareRuntimeConnectorAction: vi.fn(async () => null),
   promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
   recordRuntimeBackendEvent: vi.fn(async () => null),
+  refreshRuntimeConnectorHealth: vi.fn(async () => null),
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
     runtimeMocks.savedSnapshots.push(snapshot);
     return snapshot;
   }),
+  searchRuntimeConnector: vi.fn(async () => null),
   searchRuntimeKnowledgeSources: vi.fn(async () => null),
+  startRuntimeConnectorAuth: vi.fn(async () => null),
   streamRuntimeCompletion: vi.fn(async () => null),
   cancelRuntimeCompletion: vi.fn(async () => null),
   listenRuntimeBackendEvents: vi.fn(async () => null)
@@ -110,6 +117,72 @@ describe("Arden home", () => {
     expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^threads$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /goals/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the seven first-wave connectors with honest fixture setup states", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+
+    for (const name of [
+      "GitHub",
+      "Vercel",
+      "Google Drive",
+      "Notion",
+      "Gmail",
+      "Slack",
+      "Google Calendar"
+    ]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+
+    const gmailCard = screen
+      .getAllByText("Gmail")
+      .map((node) => node.closest("article"))
+      .find(Boolean);
+    expect(gmailCard).not.toBeNull();
+    expect(within(gmailCard as HTMLElement).getByText("fixture")).toBeInTheDocument();
+    expect(within(gmailCard as HTMLElement).getByText("Not connected")).toBeInTheDocument();
+
+    await user.click(
+      within(gmailCard as HTMLElement).getByRole("button", { name: /live setup/i })
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/explicit preview data/i);
+  });
+
+  it("searches and imports fixture connector content as untrusted knowledge", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.selectOptions(screen.getByLabelText(/^search connector$/i), "gmail");
+    await user.type(screen.getByLabelText(/connector search query/i), "release");
+    await user.click(screen.getByRole("button", { name: /search connector content/i }));
+
+    expect(await screen.findByText("Release readiness notes")).toBeInTheDocument();
+    expect(screen.getByText(/Gmail fixture.*untrusted/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^import$/i }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(/untrusted connector knowledge/i);
+    expect(screen.getByText("1 imported")).toBeInTheDocument();
+  });
+
+  it("prepares connector writes as approval requests instead of executing them", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    const gmailCard = screen
+      .getAllByText("Gmail")
+      .map((node) => node.closest("article"))
+      .find(Boolean);
+    expect(gmailCard).not.toBeNull();
+
+    await user.click(
+      within(gmailCard as HTMLElement).getByRole("button", {
+        name: /prepare create draft/i
+      })
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/action prepared/i);
+
+    await user.click(screen.getByRole("button", { name: /memory and approvals/i }));
+    expect(screen.getByText("Create Draft")).toBeInTheDocument();
+    expect(screen.getByText(/does not send the email/i)).toBeInTheDocument();
   });
 
   it("closes the sidebar and keeps mobile separate from the account menu", async () => {

@@ -7,8 +7,19 @@
   position: relative;
   overflow: hidden;
   background:
-    radial-gradient(circle at 82% 6%, rgba(133, 142, 135, 0.08), transparent 26%),
-    linear-gradient(180deg, var(--canvas-warm) 0%, var(--canvas) 100%);
+    radial-gradient(circle at 78% 12%, rgba(255, 255, 255, 0.92), transparent 28%),
+    radial-gradient(circle at 32% 0%, rgba(220, 229, 227, 0.72), transparent 26%),
+    linear-gradient(180deg, #f8f7f2 0%, #eef1f1 100%);
+}
+
+.workspace::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.28), transparent 34%),
+    radial-gradient(circle at 44% 34%, rgba(255, 255, 255, 0.42), transparent 24%);
+  content: "";
 }
 
 .topbar {
@@ -85,18 +96,21 @@ kbd {
 }
 
 .workspace-center {
-  width: min(100% - 80px, 920px);
-  margin: 72px auto 48px;
+  position: relative;
+  z-index: 1;
+  width: min(100% - 80px, 900px);
+  margin: 226px auto 48px;
 }
 
 .hero {
-  margin-bottom: 28px;
+  margin-bottom: 34px;
 }
 
 .greeting {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 14px;
   color: var(--ink-muted);
   font-size: 19px;
   line-height: 1.2;
@@ -108,13 +122,14 @@ kbd {
 
 .hero h1 {
   max-width: 940px;
-  margin: 20px 0 14px;
+  margin: 22px 0 0;
   color: #1c1f20;
-  font-family: "Newsreader", Georgia, serif;
-  font-size: clamp(44px, 4.2vw, 58px);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  line-height: 1.03;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(42px, 3.8vw, 52px);
+  font-weight: 590;
+  letter-spacing: 0;
+  line-height: 1.08;
+  text-align: center;
 }
 
 .hero p {
@@ -122,4 +137,67 @@ kbd {
   color: var(--ink-muted);
   font-size: 21px;
   line-height: 1.4;
+}
+
+.connector-rail {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.connector-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  gap: 8px;
+  padding: 0 13px;
+  color: #2a3032;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(131, 146, 148, 0.22);
+  border-radius: 999px;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.78) inset,
+    0 8px 18px rgba(58, 72, 72, 0.045);
+  font-size: 13px;
+  font-weight: 520;
+  line-height: 1;
+}
+
+.connector-pill:hover {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(109, 128, 121, 0.3);
+}
+
+.connector-pill--docs svg {
+  color: #4285f4;
+}
+
+.connector-pill--sheets svg {
+  color: #0f9d58;
+}
+
+.connector-pill--slides svg {
+  color: #f4b400;
+}
+
+.connector-pill--drive svg {
+  color: #34a853;
+}
+
+.connector-pill--gmail svg {
+  color: #ea4335;
+}
+
+.connector-pill--calendar svg {
+  color: #4285f4;
+}
+
+.connector-pill--chat svg {
+  color: #00a884;
+}
+
+.connector-pill--tasks svg {
+  color: #5f8ded;
 }

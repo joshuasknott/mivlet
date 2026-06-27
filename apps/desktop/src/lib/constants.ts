@@ -1,4 +1,4 @@
-import { PuzzlePiece, Lightning, Stack } from "@phosphor-icons/react";
+import { Lightning, PuzzlePiece, Stack } from "@phosphor-icons/react";
 import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@arden/connectors";
 
 /**
@@ -17,7 +17,7 @@ export const ACCEPTED_LOCAL_KNOWLEDGE_FILES = SUPPORTED_LOCAL_FILE_EXTENSIONS.ma
 ).join(",");
 
 export const utilityItems = [
+  { label: "Connectors", icon: PuzzlePiece },
   { label: "Knowledge", icon: Stack },
-  { label: "Plugins", icon: PuzzlePiece },
-  { label: "Automations", icon: Lightning }
+  { label: "Schedules", icon: Lightning }
 ] as const;

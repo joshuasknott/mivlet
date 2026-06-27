@@ -71,11 +71,217 @@ pub const MAX_BACKEND_SECRET_CHARACTERS: usize = 8_000;
 pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;
 
+// First-wave connector vocabularies.
+pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 7] = [
+    "github",
+    "vercel",
+    "google-drive",
+    "notion",
+    "gmail",
+    "slack",
+    "google-calendar",
+];
+pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
+    "fixture",
+    "needs-auth",
+    "configured",
+    "connected",
+    "expired",
+    "error",
+    "unavailable",
+];
+pub const CONNECTOR_ACTIONS: [&str; 10] = [
+    "github.draft-pull-request",
+    "github.comment",
+    "vercel.promote",
+    "vercel.rollback",
+    "gmail.create-draft",
+    "gmail.send",
+    "slack.create-draft",
+    "slack.post",
+    "google-calendar.create-draft",
+    "google-calendar.update-draft",
+];
+pub const MAX_CONNECTOR_QUERY_CHARACTERS: usize = 500;
+pub const MAX_CONNECTOR_RESULT_LIMIT: usize = 50;
+pub const MAX_CONNECTOR_PAYLOAD_FIELDS: usize = 32;
+
 #[derive(Serialize)]
 pub struct RuntimeStatus {
     pub permission_mode: &'static str,
     pub offline_ready: bool,
     pub connector_boundaries: [&'static str; 7],
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorPermission {
+    pub id: String,
+    pub label: String,
+    pub access: String,
+    pub required: bool,
+    pub granted: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorHealth {
+    pub state: String,
+    pub summary: String,
+    pub checked_at: String,
+    pub retry_after: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorAccountSummary {
+    pub id: String,
+    pub display_name: String,
+    pub handle: Option<String>,
+    pub email: Option<String>,
+    pub workspace: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorManifest {
+    pub id: String,
+    pub name: String,
+    pub status: String,
+    pub permissions: Vec<String>,
+    pub health_summary: String,
+    pub last_checked_at: String,
+    pub auth_mode: String,
+    pub scopes: Vec<ConnectorPermission>,
+    pub health: ConnectorHealth,
+    pub account: Option<ConnectorAccountSummary>,
+    pub setup_message: Option<String>,
+    pub supports_search: bool,
+    pub supports_import: bool,
+    pub supported_actions: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorAuthRequest {
+    pub connector_id: String,
+    pub redirect_uri: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorAuthResult {
+    pub connector_id: String,
+    pub status: String,
+    pub authorization_url: Option<String>,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorCommandError {
+    pub code: String,
+    pub connector_id: String,
+    pub message: String,
+    pub retryable: bool,
+    pub retry_after: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSearchRequest {
+    pub connector_id: String,
+    pub query: String,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSearchItem {
+    pub id: String,
+    pub connector_id: String,
+    pub title: String,
+    pub kind: String,
+    pub summary: String,
+    pub provenance: String,
+    pub freshness: String,
+    pub trust: String,
+    pub url: Option<String>,
+    pub content_preview: Option<String>,
+    pub provider_metadata: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSearchResult {
+    pub connector_id: String,
+    pub query: String,
+    pub items: Vec<ConnectorSearchItem>,
+    pub next_cursor: Option<String>,
+    pub source: String,
+    pub searched_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorImportRequest {
+    pub connector_id: String,
+    pub item: ConnectorSearchItem,
+    pub imported_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorKnowledgeSource {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+    pub connector_id: String,
+    pub provenance: String,
+    pub freshness: String,
+    pub pinned: bool,
+    pub trust: String,
+    pub content_preview: Option<String>,
+    pub imported_at: String,
+    pub origin: String,
+    pub provider_metadata: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorImportResult {
+    pub source: ConnectorKnowledgeSource,
+    pub imported: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorActionRequest {
+    pub id: String,
+    pub connector_id: String,
+    pub action: String,
+    pub payload: BTreeMap<String, String>,
+    pub approval: ApprovalRequest,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorActionResult {
+    pub request_id: String,
+    pub connector_id: String,
+    pub action: String,
+    pub status: String,
+    pub message: String,
+    pub provider_resource_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorActionExecutionRequest {
+    pub action: ConnectorActionRequest,
+    pub approval: ApprovalResolutionRequest,
 }
 
 /// A selectable model exposed by a backend. `available` is resolved from auth

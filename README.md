@@ -39,21 +39,21 @@ The screenshot filenames are historical artifacts from the pre-Arden working nam
 ## Commands
 
 ```bash
-npm install
-npm run dev
-npm run check
+pnpm install
+pnpm dev
+pnpm check
 ```
 
 Tauri checks use:
 
 ```bash
-npm run tauri:check
+pnpm tauri:check
 ```
 
 Windows bundles use:
 
 ```bash
-npm run tauri:build
+pnpm tauri:build
 ```
 
 Expected local build outputs:

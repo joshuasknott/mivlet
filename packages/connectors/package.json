@@ -11,9 +11,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@arden/protocol": "0.1.0"
+    "@arden/protocol": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^24.3.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }

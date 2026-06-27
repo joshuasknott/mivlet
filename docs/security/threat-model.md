@@ -33,3 +33,7 @@
 - Stronger confirmation for destructive, public, or financial actions.
 - Memory provenance, freshness, permissions, and fact/inference separation.
 - Connector health and permission review before execution.
+- Explicit fixture states; missing provider configuration never appears connected.
+- Provider content is normalized as untrusted KnowledgeSource data and cannot enter durable memory without approval.
+- Connector client secrets and signing material stay in an auth broker; access and refresh tokens stay behind an OS secure-storage boundary.
+- Connector logs/errors redact authorization headers, cookies, tokens, raw payloads, email bodies, Slack messages, and imported Drive/Notion content.

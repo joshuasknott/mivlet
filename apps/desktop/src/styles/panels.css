@@ -1,6 +1,6 @@
 /*
  * Context panels: section headings and the approvals, knowledge/memory,
- * plugins, and automations panels. Includes the shared card/row base styles
+ * connectors, and schedules panels. Includes the shared card/row base styles
  * and the status dot tones. Extracted verbatim from styles.css.
  */
 
@@ -469,6 +469,155 @@
   background: rgba(20, 22, 23, 0.045);
   border-radius: 6px;
   font-size: 12px;
+}
+
+.connector-card__meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 12px;
+  margin: 0;
+  padding: 10px 0;
+  border-block: 1px solid rgba(25, 27, 28, 0.08);
+}
+
+.connector-card__meta div {
+  min-width: 0;
+}
+
+.connector-card__meta dt,
+.connector-card__meta dd {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.connector-card__meta dt {
+  color: #7b8185;
+}
+
+.connector-card__meta dd {
+  overflow: hidden;
+  color: #343c3f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connector-card__setup {
+  margin: 0;
+  color: #6c6453;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.connector-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.connector-browser {
+  margin-top: 6px;
+}
+
+.connector-browser__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.connector-browser__heading h2 {
+  margin: 0;
+  color: #1c2022;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 30px;
+  font-weight: 560;
+}
+
+.connector-browser__heading p,
+.connector-result p,
+.connector-browser__status {
+  margin: 4px 0 0;
+  color: #61686c;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.connector-browser__heading > span {
+  flex: 0 0 auto;
+  color: #70767a;
+  font-size: 12px;
+}
+
+.connector-search {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.35fr) minmax(220px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.connector-search label {
+  display: grid;
+  gap: 6px;
+}
+
+.connector-search label > span {
+  color: #70767a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.connector-search select,
+.connector-search input,
+.connector-search button,
+.connector-result button {
+  min-height: 36px;
+  color: #28312c;
+  background: rgba(255, 255, 255, 0.34);
+  border: 1px solid rgba(25, 27, 28, 0.12);
+  border-radius: 7px;
+}
+
+.connector-search select,
+.connector-search input {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.connector-search button,
+.connector-result button {
+  padding: 0 12px;
+  background: rgba(139, 148, 141, 0.14);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.connector-results {
+  display: grid;
+  gap: 8px;
+}
+
+.connector-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 13px 14px;
+  background: rgba(255, 255, 255, 0.24);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.connector-result strong {
+  color: #17202a;
+  font-size: 14px;
+}
+
+.connector-result small {
+  display: block;
+  margin-top: 3px;
+  color: #70767a;
+  font-size: 11px;
 }
 
 .status-dot {

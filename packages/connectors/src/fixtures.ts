@@ -10,6 +10,8 @@
 import type {
   AutomationRule,
   ConnectorManifest,
+  ConnectorSearchItem,
+  FirstWaveConnectorId,
   KnowledgeSource,
   ProjectWorkspace,
   ThreadSummary,
@@ -23,47 +25,172 @@ export const connectorFixtures = [
     status: "connected",
     permissions: ["read files you explicitly select", "index imported source metadata"],
     healthSummary: "Native text-file import ready",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "none",
+    health: {
+      state: "healthy",
+      summary: "Native text-file import ready",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    supportsSearch: false,
+    supportsImport: true,
+    supportedActions: []
   },
   {
     id: "github",
     name: "GitHub",
     status: "fixture",
-    permissions: ["read repositories", "prepare draft pull requests"],
-    healthSummary: "Fixture repo josh-arden is available",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
+    permissions: ["read repositories and selected files", "prepare draft pull requests and comments"],
+    healthSummary: "Preview data loaded; live GitHub App setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "oauth-broker",
+    scopes: [
+      { id: "contents:read", label: "Repository contents", access: "read", required: true, granted: false },
+      { id: "issues:read", label: "Issues", access: "read", required: true, granted: false },
+      { id: "pull_requests:write", label: "Draft pull requests", access: "write", required: false, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Register a GitHub App and configure the Arden auth broker.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: ["github.draft-pull-request", "github.comment"]
   },
   {
     id: "vercel",
     name: "Vercel",
     status: "fixture",
-    permissions: ["read deployments", "prepare preview links"],
-    healthSummary: "Preview deployment fixtures loaded",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
+    permissions: ["read projects and deployments", "prepare promote or rollback requests"],
+    healthSummary: "Preview data loaded; live integration setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "provider-installation",
+    scopes: [
+      { id: "project:read", label: "Projects", access: "read", required: true, granted: false },
+      { id: "deployment:read", label: "Deployments", access: "read", required: true, granted: false },
+      { id: "deployment:write", label: "Promote or rollback", access: "write", required: false, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Create a Vercel integration and configure its External Flow redirect.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: ["vercel.promote", "vercel.rollback"]
   },
   {
     id: "google-drive",
     name: "Google Drive",
-    status: "needs-auth",
-    permissions: ["read selected docs"],
-    healthSummary: "Needs OAuth before live import",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
-  },
-  {
-    id: "slack",
-    name: "Slack",
-    status: "needs-auth",
-    permissions: ["read selected channels"],
-    healthSummary: "Adapter boundary ready",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
+    status: "fixture",
+    permissions: ["read files explicitly selected with Google Picker"],
+    healthSummary: "Preview data loaded; Google OAuth setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "oauth-pkce",
+    scopes: [
+      { id: "drive.file", label: "Selected Drive files", access: "read", required: true, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Enable Drive API and create a desktop OAuth client.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: []
   },
   {
     id: "notion",
     name: "Notion",
-    status: "needs-auth",
-    permissions: ["read selected pages"],
-    healthSummary: "Adapter boundary ready",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
+    status: "fixture",
+    permissions: ["read user-selected pages and databases"],
+    healthSummary: "Preview data loaded; Notion connection setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "oauth-broker",
+    scopes: [
+      { id: "read_content", label: "Read selected content", access: "read", required: true, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Create a Notion public connection and broker callback.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: []
+  },
+  {
+    id: "gmail",
+    name: "Gmail",
+    status: "fixture",
+    permissions: ["read selected search results", "prepare email drafts; never send by default"],
+    healthSummary: "Preview data loaded; Google OAuth setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "oauth-pkce",
+    scopes: [
+      { id: "gmail.readonly", label: "Read mail", access: "read", required: true, granted: false },
+      { id: "gmail.compose", label: "Create drafts", access: "write", required: false, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Enable Gmail API, create a desktop OAuth client, and complete Google verification.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: ["gmail.create-draft", "gmail.send"]
+  },
+  {
+    id: "slack",
+    name: "Slack",
+    status: "fixture",
+    permissions: ["read selected conversations", "prepare messages; never post by default"],
+    healthSummary: "Preview data loaded; Slack app setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "oauth-broker",
+    scopes: [
+      { id: "channels:read", label: "Channel list", access: "read", required: true, granted: false },
+      { id: "channels:history", label: "Selected channel history", access: "read", required: true, granted: false },
+      { id: "chat:write", label: "Post approved messages", access: "write", required: false, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Create a Slack app and configure its HTTPS broker callback.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: ["slack.create-draft", "slack.post"]
+  },
+  {
+    id: "google-calendar",
+    name: "Google Calendar",
+    status: "fixture",
+    permissions: ["read calendars and events", "prepare event create or update requests"],
+    healthSummary: "Preview data loaded; Google OAuth setup required",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    authMode: "oauth-pkce",
+    scopes: [
+      { id: "calendar.calendarlist.readonly", label: "Calendar list", access: "read", required: true, granted: false },
+      { id: "calendar.events.readonly", label: "Calendar events", access: "read", required: true, granted: false },
+      { id: "calendar.events", label: "Create or update events", access: "write", required: false, granted: false }
+    ],
+    health: {
+      state: "unknown",
+      summary: "Fixture adapter only",
+      checkedAt: "2026-06-27T09:00:00.000Z"
+    },
+    setupMessage: "Enable Calendar API and create a desktop OAuth client.",
+    supportsSearch: true,
+    supportsImport: true,
+    supportedActions: ["google-calendar.create-draft", "google-calendar.update-draft"]
   },
   {
     id: "linear",
@@ -71,9 +198,137 @@ export const connectorFixtures = [
     status: "needs-auth",
     permissions: ["read teams and issues"],
     healthSummary: "Adapter boundary ready",
-    lastCheckedAt: "2026-06-25T21:00:00.000Z"
+    lastCheckedAt: "2026-06-25T21:00:00.000Z",
+    authMode: "oauth-broker",
+    setupMessage: "Linear remains a later-wave adapter.",
+    supportsSearch: false,
+    supportsImport: false,
+    supportedActions: []
   }
 ] satisfies ConnectorManifest[];
+
+export const connectorSearchFixtures: Record<FirstWaveConnectorId, ConnectorSearchItem[]> = {
+  github: [
+    {
+      id: "github-repo-arden",
+      connectorId: "github",
+      title: "arden",
+      kind: "repository",
+      summary: "Desktop workspace repository with connector and approval foundations.",
+      provenance: "GitHub fixture · acme/arden",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "README: Arden is a local-first AI workspace for real work.",
+      providerMetadata: { owner: "acme", defaultBranch: "main", visibility: "private" }
+    },
+    {
+      id: "github-pr-42",
+      connectorId: "github",
+      title: "PR #42 · Add connector foundations",
+      kind: "pull-request",
+      summary: "Synthetic draft pull request used to verify read and approval boundaries.",
+      provenance: "GitHub fixture · acme/arden",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      providerMetadata: { repository: "acme/arden", number: "42", state: "draft" }
+    }
+  ],
+  vercel: [
+    {
+      id: "vercel-project-arden",
+      connectorId: "vercel",
+      title: "arden-web",
+      kind: "project",
+      summary: "Synthetic Vercel project with preview and production deployments.",
+      provenance: "Vercel fixture · Acme team",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      providerMetadata: { framework: "vite", team: "Acme", productionBranch: "main" }
+    },
+    {
+      id: "vercel-deployment-preview",
+      connectorId: "vercel",
+      title: "arden-web-preview",
+      kind: "deployment",
+      summary: "Ready preview deployment for connector UI verification.",
+      provenance: "Vercel fixture · arden-web",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      url: "https://example.invalid/arden-preview",
+      providerMetadata: { environment: "preview", state: "READY", commitRef: "connector-wave" }
+    }
+  ],
+  "google-drive": [
+    {
+      id: "drive-launch-brief",
+      connectorId: "google-drive",
+      title: "Connector launch brief",
+      kind: "file",
+      summary: "Synthetic Google Doc selected through the fixture picker.",
+      provenance: "Google Drive fixture · selected file",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "Launch checklist: provider setup, permission review, redaction, and rollback.",
+      providerMetadata: { mimeType: "application/vnd.google-apps.document", selected: "true" }
+    }
+  ],
+  notion: [
+    {
+      id: "notion-connector-plan",
+      connectorId: "notion",
+      title: "Connector rollout plan",
+      kind: "page",
+      summary: "Synthetic page shared with the Arden fixture connection.",
+      provenance: "Notion fixture · selected page",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "Rollout phases cover read-only imports before approval-gated actions.",
+      providerMetadata: { workspace: "Acme", object: "page" }
+    }
+  ],
+  gmail: [
+    {
+      id: "gmail-message-release",
+      connectorId: "gmail",
+      title: "Release readiness notes",
+      kind: "message",
+      summary: "Synthetic message metadata and redacted preview.",
+      provenance: "Gmail fixture · selected search result",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "Synthetic preview: confirm scopes, callbacks, and approval checks before release.",
+      providerMetadata: { threadId: "fixture-thread-1", labels: "INBOX,IMPORTANT", from: "sender@example.invalid" }
+    }
+  ],
+  slack: [
+    {
+      id: "slack-message-connectors",
+      connectorId: "slack",
+      title: "#product · connector rollout",
+      kind: "message",
+      summary: "Synthetic channel snippet for import-flow testing.",
+      provenance: "Slack fixture · selected #product conversation",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "Synthetic snippet: keep live setup states explicit and writes approval-gated.",
+      providerMetadata: { channelId: "C_FIXTURE", channelName: "product", timestamp: "fixture-1" }
+    }
+  ],
+  "google-calendar": [
+    {
+      id: "calendar-event-review",
+      connectorId: "google-calendar",
+      title: "Connector security review",
+      kind: "event",
+      summary: "Synthetic calendar event with no attendee data.",
+      provenance: "Google Calendar fixture · selected calendar",
+      freshness: "Fixture updated 2026-06-27",
+      trust: "untrusted",
+      contentPreview: "Review provider scopes, token storage, and approval boundaries.",
+      providerMetadata: { calendarId: "fixture-primary", status: "confirmed", start: "2026-07-01T10:00:00Z" }
+    }
+  ]
+};
 
 export const directiveFixtures = [
   {

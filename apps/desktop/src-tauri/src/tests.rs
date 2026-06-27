@@ -12,6 +12,10 @@ use crate::approvals::{
     persist_approval_audit_entry, persist_approval_rule, read_approval_audit_entries,
     read_approval_rules, resolve_approval,
 };
+use crate::connectors::{
+    execute_approved_connector_action, list_connector_statuses, redact_connector_text,
+    validate_connector_action,
+};
 use crate::knowledge::{import_local_text_file, search_knowledge_sources};
 use crate::memory::{
     encode_memory_export, promote_knowledge_source, read_memory_state, write_memory_state,
@@ -21,6 +25,144 @@ use crate::snapshot::{
     persist_imported_knowledge_source, read_imported_knowledge_sources, read_runtime_snapshot,
     write_runtime_snapshot,
 };
+
+#[test]
+fn lists_first_wave_connectors_without_faking_live_connections() {
+    let manifests = list_connector_statuses();
+
+    assert_eq!(
+        manifests
+            .iter()
+            .map(|manifest| manifest.id.as_str())
+            .collect::<Vec<_>>(),
+        FIRST_WAVE_CONNECTOR_IDS
+    );
+    assert!(manifests
+        .iter()
+        .all(|manifest| manifest.status == "needs-auth"));
+    assert!(manifests.iter().all(|manifest| manifest.account.is_none()));
+    assert!(manifests
+        .iter()
+        .all(|manifest| manifest.setup_message.is_some()));
+    assert!(manifests
+        .iter()
+        .all(|manifest| manifest.scopes.iter().all(|scope| !scope.granted)));
+}
+
+fn connector_action(action: &str, connector_id: &str, service: &str) -> ConnectorActionRequest {
+    let id = format!("{connector_id}-fixture-action");
+    let (label, mode, risk_level, consequence, confirmation_phrase) = match action {
+        "gmail.create-draft" => (
+            "Create Draft",
+            "trusted-scope",
+            "medium",
+            "Creates an email draft. It does not send the email.",
+            None,
+        ),
+        "gmail.send" => (
+            "Send",
+            "full-access",
+            "high",
+            "Sends the selected email to external recipients.",
+            Some("send email"),
+        ),
+        "slack.post" => (
+            "Post",
+            "full-access",
+            "high",
+            "Posts a message to the selected Slack conversation.",
+            Some("post message"),
+        ),
+        _ => (
+            "Fixture Action",
+            "trusted-scope",
+            "medium",
+            "Writes to the selected provider after approval.",
+            None,
+        ),
+    };
+    ConnectorActionRequest {
+        id: id.clone(),
+        connector_id: connector_id.to_string(),
+        action: action.to_string(),
+        payload: BTreeMap::from([("targetId".to_string(), "fixture-target".to_string())]),
+        approval: ApprovalRequest {
+            id,
+            service: service.to_string(),
+            action: label.to_string(),
+            mode: mode.to_string(),
+            risk_level: risk_level.to_string(),
+            data_used: vec!["targetId".to_string()],
+            consequence: consequence.to_string(),
+            requested_at: "2026-06-27T10:00:00.000Z".to_string(),
+            decisions: APPROVAL_DECISIONS
+                .iter()
+                .map(|decision| decision.to_string())
+                .collect(),
+            confirmation_phrase: confirmation_phrase.map(str::to_string),
+        },
+    }
+}
+
+#[test]
+fn validates_connector_actions_against_provider_and_approval_metadata() {
+    let valid = validate_connector_action(connector_action("gmail.create-draft", "gmail", "Gmail"))
+        .expect("known action should validate");
+    assert_eq!(valid.action, "gmail.create-draft");
+
+    let error = validate_connector_action(connector_action("slack.post", "gmail", "Gmail"))
+        .expect_err("cross-provider action should fail");
+    assert_eq!(error.code, "invalid-request");
+}
+
+#[test]
+fn rejects_connector_actions_with_downgraded_approval_risk() {
+    let mut action = connector_action("gmail.send", "gmail", "Gmail");
+    action.approval.mode = "trusted-scope".to_string();
+    action.approval.risk_level = "medium".to_string();
+    action.approval.confirmation_phrase = None;
+
+    let error =
+        validate_connector_action(action).expect_err("high-risk policy must be runtime-owned");
+    assert_eq!(error.code, "invalid-request");
+}
+
+#[test]
+fn rejects_connector_execution_with_reshaped_approval() {
+    let action = connector_action("gmail.send", "gmail", "Gmail");
+    let mut approval = action.approval.clone();
+    approval.consequence = "Harmless operation.".to_string();
+    let request = ConnectorActionExecutionRequest {
+        action,
+        approval: ApprovalResolutionRequest {
+            request: approval,
+            decision: "once".to_string(),
+            decided_at: "2026-06-27T10:01:00.000Z".to_string(),
+            confirmation_text: Some("send email".to_string()),
+            modification: None,
+        },
+    };
+
+    let error = execute_approved_connector_action(request)
+        .expect_err("execution approval must exactly match the prepared action");
+    assert_eq!(error.code, "approval-required");
+}
+
+#[test]
+fn redacts_connector_secrets_and_private_provider_data() {
+    assert_eq!(
+        redact_connector_text("Authorization: Bearer secret-token"),
+        "[redacted connector data]"
+    );
+    assert_eq!(
+        redact_connector_text("email body: private content"),
+        "[redacted connector data]"
+    );
+    assert_eq!(
+        redact_connector_text("Provider temporarily unavailable"),
+        "Provider temporarily unavailable"
+    );
+}
 
 fn candidate(name: &str, content: &str) -> LocalTextFileCandidate {
     LocalTextFileCandidate {

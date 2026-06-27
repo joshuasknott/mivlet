@@ -27,10 +27,35 @@ export {
   automationFixtures,
   chatThreadFixtures,
   connectorFixtures,
+  connectorSearchFixtures,
   directiveFixtures,
   knowledgeSourceFixtures,
   projectFixtures
 } from "./fixtures";
+
+// first-wave provider adapters (pure: no network and no credential access)
+export {
+  FIRST_WAVE_CONNECTOR_IDS,
+  importFixtureConnectorItem,
+  listFirstWaveConnectors,
+  prepareFixtureConnectorAction,
+  searchFixtureConnector
+} from "./providers/registry";
+export {
+  classifyConnectorError,
+  importConnectorSearchItem,
+  prepareConnectorAction,
+  searchConnectorFixtures,
+  shapeConnectorSearchRequest,
+  type ProviderErrorLike
+} from "./providers/shared";
+export * from "./providers/github";
+export * from "./providers/vercel";
+export * from "./providers/google-drive";
+export * from "./providers/notion";
+export * from "./providers/gmail";
+export * from "./providers/slack";
+export * from "./providers/google-calendar";
 
 // agent-runtime backends (logic + data split, mirroring the connector pattern)
 export {

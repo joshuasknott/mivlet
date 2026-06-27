@@ -3,7 +3,7 @@ import { SectionHeading, StatusDot } from "./primitives";
 import type { AutomationRuleView } from "../lib/types";
 
 /**
- * Automations context panel: scheduled rules with draft/active/paused status
+ * Schedules context panel: scheduled rules with draft/active/paused status
  * and enable/pause toggles. Rules that need approval route to the composer.
  */
 
@@ -15,8 +15,8 @@ export function AutomationPanel({
   onToggle: (rule: AutomationRuleView) => void;
 }) {
   return (
-    <section className="context-panel" aria-label="Automations">
-      <SectionHeading title="Automations" meta="quiet by default" />
+    <section className="context-panel" aria-label="Schedules">
+      <SectionHeading title="Schedules" meta="quiet by default" />
       <div className="automation-list">
         {rules.map((rule) => (
           <article className="automation-row" key={rule.id}>

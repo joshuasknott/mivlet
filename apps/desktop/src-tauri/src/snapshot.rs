@@ -300,6 +300,8 @@ pub(crate) fn normalize_runtime_snapshot(
         imported_knowledge_sources,
         memory_disabled: memory_state.disabled,
         memory_records: memory_state.records,
+        // Provider ids only — secrets are never persisted into the snapshot.
+        connected_backend_ids: normalize_snapshot_id_list(snapshot.connected_backend_ids),
         saved_at,
     })
 }

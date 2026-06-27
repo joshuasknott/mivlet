@@ -1,32 +1,52 @@
-import type { KnowledgeCitation, ThreadSummary, WorkspaceDirective } from "@arden/protocol";
+import type {
+  ConnectorManifest,
+  KnowledgeCitation,
+  ThreadSummary,
+  WorkspaceDirective
+} from "@arden/protocol";
 
 /**
  * Composer-adjacent presentational components: directive prompt starters,
  * citation results, and the active thread context strip.
+ *
+ * Directive cards are Google AI Studio-style curved chips: a short task title
+ * with a trailing connector (plugin) pill so each starter advertises the tool
+ * it will use.
  */
 
 export function DirectiveCards({
   directives,
+  connectors,
   onUseDirective
 }: {
   directives: WorkspaceDirective[];
+  connectors: ConnectorManifest[];
   onUseDirective: (directive: WorkspaceDirective) => void;
 }) {
+  const connectorName = (id: string) =>
+    connectors.find((connector) => connector.id === id)?.name ?? id;
+
   return (
     <section className="directives" aria-label="Workspace directives">
-      {directives.map((directive) => (
-        <button
-          className="directive-card"
-          key={directive.id}
-          type="button"
-          onClick={() => onUseDirective(directive)}
-        >
-          <span className="directive-copy">
-            <strong>{directive.label}</strong>
-            <small>{directive.source}</small>
-          </span>
-        </button>
-      ))}
+      {directives.map((directive) => {
+        const primary = connectorName(directive.connectorIds[0]);
+        return (
+          <button
+            className="directive-card"
+            key={directive.id}
+            type="button"
+            onClick={() => onUseDirective(directive)}
+          >
+            <span className="directive-copy">
+              <strong>{directive.label}</strong>
+              <small>{directive.source}</small>
+            </span>
+            <span className="directive-pill" aria-label={`Uses ${primary}`}>
+              {primary}
+            </span>
+          </button>
+        );
+      })}
     </section>
   );
 }

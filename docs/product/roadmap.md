@@ -21,9 +21,11 @@
 ## Milestone 3: Real Connectors
 
 - Done: Local files connector imports selected text/Markdown/JSON/CSV/YAML through the Rust runtime with browser fallback tests.
-- GitHub connector with repo/PR draft boundaries.
-- Vercel connector with project/deployment status.
-- Add Google Drive, Slack, Notion, and Linear adapter boundaries with auth states.
+- Done: first-wave GitHub, Vercel, Google Drive, Notion, Gmail, Slack, and Google Calendar protocol/catalog and pure fixture adapters.
+- Done: connector status, health, scopes, search/import, and approval-gated action command boundaries fail closed when secure configuration is absent.
+- Next: wire OS secure storage, the Arden auth broker, provider-console apps, and live Rust egress.
+- Next: complete provider verification and validate each live OAuth flow with non-production test accounts.
+- Linear remains a later-wave adapter boundary.
 
 ## Milestone 4: Voice And Automations
 

@@ -2,8 +2,8 @@ import type { Icon } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 /**
- * Shared page chrome for the standalone workspace pages (Knowledge,
- * Automations, Plugins). Gives each page a consistent, minimal header with an
+ * Shared page chrome for the standalone workspace pages (Connectors,
+ * Knowledge, Schedules). Gives each page a consistent, minimal header with an
  * icon, title, supporting copy, and an optional actions slot.
  */
 export function PageHeader({

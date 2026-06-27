@@ -28,6 +28,13 @@ Core domains:
 
 Implemented runtime commands currently cover approval resolution, standing approval rules, approval audit persistence, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
 
+The first-wave connector boundary now also exposes status, auth setup/complete/clear,
+health refresh, search, import, action preparation, and approved-action execution
+commands. The current credential implementation intentionally fails closed with
+`configuration-required`; browser preview uses explicitly labeled synthetic fixtures.
+See [Connectors](connectors.md) for scopes, callbacks, credential ownership, and
+external provider-console work.
+
 ## Offline Behavior
 
 - Composer drafts, selected context, imported knowledge, durable memory, approval audit history, and connector health cache stay local.

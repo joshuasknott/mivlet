@@ -6,6 +6,7 @@
 
 mod approvals;
 mod backends;
+mod connectors;
 mod knowledge;
 mod memory;
 mod models;
@@ -39,6 +40,15 @@ pub fn run() {
             backends::store_backend_credential,
             backends::clear_backend_credential,
             backends::record_backend_event,
+            connectors::list_connector_statuses,
+            connectors::start_connector_auth,
+            connectors::complete_connector_auth,
+            connectors::clear_connector_auth,
+            connectors::refresh_connector_health,
+            connectors::search_connector,
+            connectors::import_connector_item,
+            connectors::prepare_connector_action,
+            connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion
         ])

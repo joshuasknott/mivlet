@@ -14,7 +14,9 @@ import type {
  * shapes without App.tsx owning them.
  */
 
-export type UtilityItem = "Knowledge" | "Plugins" | "Automations";
+export type UtilityItem = "Connectors" | "Knowledge" | "Schedules";
+export type AccountPage = "Profile" | "Settings";
+export type WorkspacePage = UtilityItem | AccountPage;
 
 export type AutomationRuleView = Omit<AutomationRule, "status"> & { status: AutomationStatus };
 
@@ -42,6 +44,8 @@ export interface PersistedShellState {
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;
   memoryRecords: MemoryRecord[];
+  /** Provider ids of connected agent-runtime backends. Secrets never persist here. */
+  connectedBackendIds: string[];
 }
 
 export const EMPTY_APPROVAL_MODIFICATION: ApprovalModificationDraft = {

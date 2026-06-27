@@ -3,22 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "description": "Arden is an open-source AI workspace for real work.",
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
+  "packageManager": "pnpm@10.15.0",
   "scripts": {
-    "dev": "npm run dev --workspace @arden/desktop",
-    "build": "npm run build --workspace @arden/protocol && npm run build --workspace @arden/connectors && npm run build --workspace @arden/desktop",
-    "typecheck": "npm run build --workspace @arden/protocol && npm run typecheck --workspace @arden/connectors && npm run typecheck --workspace @arden/desktop",
-    "test": "npm run test --workspace @arden/connectors && npm run test --workspace @arden/desktop",
-    "lint": "npm run lint --workspaces --if-present",
+    "dev": "pnpm --filter @arden/desktop dev",
+    "build": "pnpm --filter @arden/protocol build && pnpm --filter @arden/connectors build && pnpm --filter @arden/desktop build",
+    "typecheck": "pnpm --filter @arden/protocol build && pnpm --filter @arden/connectors typecheck && pnpm --filter @arden/desktop typecheck",
+    "test": "pnpm --filter @arden/connectors test && pnpm --filter @arden/desktop test",
+    "lint": "pnpm -r --if-present lint",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
-    "tauri:build": "npm run tauri --workspace @arden/desktop -- build",
-    "check": "npm run typecheck && npm run test && npm run build && npm run tauri:check"
+    "tauri:build": "pnpm --filter @arden/desktop tauri -- build",
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm tauri:check"
   },
   "engines": {
     "node": ">=22",
-    "npm": ">=11"
+    "pnpm": ">=10"
   }
 }

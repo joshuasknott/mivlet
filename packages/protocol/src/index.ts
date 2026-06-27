@@ -82,15 +82,76 @@ export interface MemoryPromotionResponse {
   state: MemoryControlState;
 }
 
-export type ConnectorStatus = "connected" | "needs-auth" | "unavailable" | "fixture";
+export type FirstWaveConnectorId =
+  | "github"
+  | "vercel"
+  | "google-drive"
+  | "notion"
+  | "gmail"
+  | "slack"
+  | "google-calendar";
+
+export type ConnectorId = "local-files" | FirstWaveConnectorId | (string & {});
+
+export type ConnectorStatus =
+  | "fixture"
+  | "needs-auth"
+  | "configured"
+  | "connected"
+  | "expired"
+  | "error"
+  | "unavailable";
+
+export type ConnectorAuthMode =
+  | "none"
+  | "fixture"
+  | "oauth-pkce"
+  | "oauth-broker"
+  | "provider-installation";
+
+export type ConnectorPermissionAccess = "read" | "write";
+
+export interface ConnectorPermission {
+  id: string;
+  label: string;
+  access: ConnectorPermissionAccess;
+  required: boolean;
+  granted: boolean;
+}
+
+export type ConnectorHealthState = "healthy" | "degraded" | "error" | "unknown";
+
+export interface ConnectorHealth {
+  state: ConnectorHealthState;
+  summary: string;
+  checkedAt: string;
+  retryAfter?: string;
+}
+
+export interface ConnectorAccountSummary {
+  id: string;
+  displayName: string;
+  handle?: string;
+  email?: string;
+  workspace?: string;
+  avatarUrl?: string;
+}
 
 export interface ConnectorManifest {
-  id: string;
+  id: ConnectorId;
   name: string;
   status: ConnectorStatus;
   permissions: string[];
   healthSummary: string;
   lastCheckedAt: string;
+  authMode?: ConnectorAuthMode;
+  scopes?: ConnectorPermission[];
+  health?: ConnectorHealth;
+  account?: ConnectorAccountSummary;
+  setupMessage?: string;
+  supportsSearch?: boolean;
+  supportsImport?: boolean;
+  supportedActions?: ConnectorActionKind[];
   /**
    * Optional backend facet. When present, this connector entry surfaces an
    * agent-runtime AI backend (Codex, Cursor, Copilot, Grok) whose auth state
@@ -98,6 +159,129 @@ export interface ConnectorManifest {
    * only ever sees `authState` and `capabilities` — never raw tokens.
    */
   backend?: BackendProvider;
+}
+
+export type ConnectorItemKind =
+  | "repository"
+  | "branch"
+  | "issue"
+  | "pull-request"
+  | "file"
+  | "project"
+  | "deployment"
+  | "page"
+  | "database"
+  | "message"
+  | "conversation"
+  | "calendar"
+  | "event";
+
+export interface ConnectorSearchRequest {
+  connectorId: FirstWaveConnectorId;
+  query: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface ConnectorSearchItem {
+  id: string;
+  connectorId: FirstWaveConnectorId;
+  title: string;
+  kind: ConnectorItemKind;
+  summary: string;
+  provenance: string;
+  freshness: string;
+  trust: KnowledgeTrust;
+  url?: string;
+  contentPreview?: string;
+  providerMetadata: Record<string, string>;
+}
+
+export interface ConnectorSearchResult {
+  connectorId: FirstWaveConnectorId;
+  query: string;
+  items: ConnectorSearchItem[];
+  nextCursor?: string;
+  source: "fixture" | "live";
+  searchedAt: string;
+}
+
+export interface ConnectorImportRequest {
+  connectorId: FirstWaveConnectorId;
+  item: ConnectorSearchItem;
+  importedAt: string;
+}
+
+export interface ConnectorImportResult {
+  source: KnowledgeSource;
+  imported: boolean;
+}
+
+export type ConnectorActionKind =
+  | "github.draft-pull-request"
+  | "github.comment"
+  | "vercel.promote"
+  | "vercel.rollback"
+  | "gmail.create-draft"
+  | "gmail.send"
+  | "slack.create-draft"
+  | "slack.post"
+  | "google-calendar.create-draft"
+  | "google-calendar.update-draft";
+
+export interface ConnectorActionRequest {
+  id: string;
+  connectorId: FirstWaveConnectorId;
+  action: ConnectorActionKind;
+  payload: Record<string, string>;
+  approval: ApprovalRequest;
+}
+
+export type ConnectorActionResultStatus =
+  | "awaiting-approval"
+  | "executed"
+  | "denied"
+  | "configuration-required";
+
+export interface ConnectorActionResult {
+  requestId: string;
+  connectorId: FirstWaveConnectorId;
+  action: ConnectorActionKind;
+  status: ConnectorActionResultStatus;
+  message: string;
+  providerResourceId?: string;
+}
+
+export type ConnectorErrorCode =
+  | "configuration-required"
+  | "needs-auth"
+  | "expired-auth"
+  | "permission-denied"
+  | "rate-limited"
+  | "provider-unavailable"
+  | "not-found"
+  | "invalid-request"
+  | "approval-required"
+  | "unknown";
+
+export interface ConnectorError {
+  code: ConnectorErrorCode;
+  connectorId: FirstWaveConnectorId;
+  message: string;
+  retryable: boolean;
+  retryAfter?: string;
+}
+
+export interface ConnectorAuthRequest {
+  connectorId: FirstWaveConnectorId;
+  redirectUri?: string;
+}
+
+export interface ConnectorAuthResult {
+  connectorId: FirstWaveConnectorId;
+  status: ConnectorStatus;
+  authorizationUrl?: string;
+  message: string;
 }
 
 /**
@@ -236,7 +420,8 @@ export interface KnowledgeSource {
   contentFingerprint?: string;
   sizeBytes?: number;
   importedAt?: string;
-  origin?: "fixture" | "local-import";
+  origin?: "fixture" | "local-import" | "connector-import";
+  providerMetadata?: Record<string, string>;
 }
 
 export interface LocalFileImport extends KnowledgeSource {
