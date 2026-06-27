@@ -74,6 +74,32 @@ pub(crate) fn record_pending_connector_action(
     let preview = subject
         .map(|subject| format!("{} — {subject} → {target}", action.action))
         .unwrap_or_else(|| format!("{} → {target}", action.action));
+    let detail_keys = [
+        "workspace",
+        "account",
+        "channelName",
+        "threadTimestamp",
+        "timestamp",
+        "destination",
+        "text",
+        "subject",
+        "title",
+        "changedProperties",
+        "body",
+        "reaction",
+    ];
+    let details = detail_keys
+        .iter()
+        .filter_map(|key| {
+            first_payload_value(action, &[*key]).map(|value| format!("{key}: {value}"))
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let preview = if details.is_empty() {
+        preview
+    } else {
+        format!("{} -> {target} | {details}", action.action)
+    };
     let record = ConnectorApprovalRecord {
         id: format!("connector-approval-{}", action.id),
         connector_id: action.connector_id.clone(),

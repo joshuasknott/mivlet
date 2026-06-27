@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::approvals::resolve_approval;
 use crate::execution_approvals::verify_and_consume_execution_approval;
-use crate::models::{ApprovalResolutionRequest, APPROVAL_DECISIONS};
+use crate::models::{ApprovalResolutionRequest, ConnectorSearchRequest, APPROVAL_DECISIONS};
 use crate::paths::{execution_approvals_path, normalize_spaces, truncate_characters};
 
 /// The workspace root tools operate within. The command layer resolves it from
@@ -64,7 +64,14 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 4] = ["read-file", "write-file", "run-shell", "web-fetch"];
+pub(crate) const SUPPORTED_TOOLS: [&str; 6] = [
+    "read-file",
+    "write-file",
+    "run-shell",
+    "web-fetch",
+    "search-notion",
+    "search-slack",
+];
 
 /// The outcome of re-validating + running a tool against the workspace root.
 ///
@@ -163,6 +170,7 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
+        "search-notion" | "search-slack" => Some(("read-only", "low")),
         _ => None,
     }
 }
@@ -419,6 +427,45 @@ pub async fn execute_tool_call(
         &request.approval.request,
         &request.approval.decided_at,
     )?;
+    if request.tool == "search-notion" || request.tool == "search-slack" {
+        let connector_id = if request.tool == "search-notion" {
+            "notion"
+        } else {
+            "slack"
+        };
+        let query = request
+            .arguments
+            .get("query")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let limit = request
+            .arguments
+            .get("limit")
+            .and_then(serde_json::Value::as_u64)
+            .map(|value| value.min(50) as usize);
+        let cursor = request
+            .arguments
+            .get("cursor")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let result = crate::collaboration_connectors::search(
+            &app,
+            ConnectorSearchRequest {
+                connector_id: connector_id.to_string(),
+                query,
+                limit,
+                cursor,
+            },
+        )
+        .await
+        .map_err(|error| error.message)?;
+        return Ok(ToolResult {
+            ok: true,
+            output: serde_json::to_string(&result)
+                .map_err(|_| "Fable could not encode connector results.".to_string())?,
+        });
+    }
     // The caller may never select its own authority root. Resolve the workspace
     // at the native boundary so a forged request cannot point at an arbitrary
     // directory and then appear "confined" beneath it.

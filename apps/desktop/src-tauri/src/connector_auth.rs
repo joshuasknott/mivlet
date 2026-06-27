@@ -888,6 +888,35 @@ pub(crate) async fn refresh_connection(
     Ok(updated)
 }
 
+/// Resolve a usable access token entirely inside the Rust/keyring boundary.
+/// Callers receive it only in Rust; no Tauri command exposes this function.
+pub(crate) async fn access_token(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+) -> Result<(ConnectorConnection, String), ConnectorCommandError> {
+    let connection = refresh_connection(app, connector_id).await?;
+    let encoded = NativeConnectorSecretStore
+        .get(&connection.credential_ref)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?
+        .ok_or_else(|| {
+            command_error(
+                "needs-auth",
+                connector_id,
+                "Connector credentials are missing.",
+                false,
+            )
+        })?;
+    let tokens: StoredTokenSet = serde_json::from_str(&encoded).map_err(|_| {
+        command_error(
+            "needs-auth",
+            connector_id,
+            "Connector credentials are invalid.",
+            false,
+        )
+    })?;
+    Ok((connection, tokens.access_token))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

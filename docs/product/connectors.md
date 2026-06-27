@@ -88,10 +88,9 @@ must remain in an Fable auth broker or equivalent server-side secret boundary.
 They must not be compiled into React assets, Rust binaries, logs, snapshots,
 or local JSON state.
 
-The Rust `ConnectorCredentialBoundary` is currently a fail-closed interface.
-Until a production keychain implementation is selected for Windows, macOS, and
-Linux, live auth/search/import/action commands return
-`configuration-required`.
+The Rust connector credential boundary uses the platform-native OS keyring.
+Notion and Slack have live API paths; other first-wave providers remain
+fail-closed until their production adapters are implemented.
 
 ## Local cache, logging, and disconnect
 
@@ -109,13 +108,12 @@ expired/unavailable auth state.
 
 ## Known limitations
 
-- No production OS secure-storage backend is wired for connectors.
 - The Fable auth broker and production callback URLs are not deployed.
 - Provider apps, consent screens, distribution review, and Google restricted
   scope verification are external setup tasks.
-- Tauri provider egress is intentionally disabled; desktop commands fail
-  closed.
-- Browser search/import is synthetic fixture behavior only.
+- Tauri provider egress is enabled for authenticated Notion and Slack accounts;
+  unimplemented providers fail closed.
+- Browser preview search/import remains synthetic and is never a production fallback.
 - Imported connector records are session-local until encrypted connector cache
   persistence is added.
 

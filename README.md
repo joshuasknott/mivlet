@@ -15,7 +15,7 @@ Local-first and private by default, Fable is built for people who want powerful 
 - Approval flow with once/session/rule/modify/deny decisions and audit history.
 - Local recovery for composer drafts, pinned sources, automation status, and approval audit.
 - Protocol types for approvals, memory, connector health, directives, and runtime snapshots.
-- Fixture-backed connector adapters for local files, GitHub, Vercel, Slack, Notion, Linear, and Google Drive.
+- Production OAuth/API adapters for Notion and Slack, plus fixture-backed previews and fail-closed foundations for the remaining first-wave connectors.
 
 ## Brand
 

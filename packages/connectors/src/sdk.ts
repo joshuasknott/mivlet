@@ -31,6 +31,7 @@ export interface ConnectorRequest {
   capability: string;
   input: Record<string, unknown>;
   cursor?: string;
+  signal?: AbortSignal;
 }
 
 export interface ConnectorWriteRequest extends ConnectorRequest {

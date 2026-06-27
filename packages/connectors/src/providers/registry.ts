@@ -104,5 +104,7 @@ export function prepareFixtureConnectorAction(
         start: payload.start ?? "2026-07-01T10:00:00Z",
         end: payload.end ?? "2026-07-01T10:30:00Z"
       });
+    default:
+      throw new Error(`Fixture connector action is not supported: ${action}`);
   }
 }
