@@ -78,8 +78,26 @@ const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("deployment:read", "Deployments", "read", true),
     ("deployment:write", "Promote or rollback", "write", false),
 ];
-const DRIVE_SCOPES: &[(&str, &str, &str, bool)] =
-    &[("drive.file", "Selected Drive files", "read", true)];
+const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
+    (
+        "drive.metadata.readonly",
+        "Search Drive metadata",
+        "read",
+        true,
+    ),
+    (
+        "drive.readonly",
+        "Read and export Drive content",
+        "read",
+        false,
+    ),
+    (
+        "drive.file",
+        "Create and update Fable-authorized files",
+        "write",
+        false,
+    ),
+];
 const NOTION_SCOPES: &[(&str, &str, &str, bool)] =
     &[("read_content", "Read selected content", "read", true)];
 const GMAIL_SCOPES: &[(&str, &str, &str, bool)] = &[
@@ -131,10 +149,21 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         id: "google-drive",
         name: "Google Drive",
         auth_mode: "oauth-pkce",
-        permissions: &["read files explicitly selected with Google Picker"],
+        permissions: &[
+            "search accessible file metadata",
+            "read or export content only when the matching scope is granted",
+            "prepare approval-gated file changes",
+        ],
         scopes: DRIVE_SCOPES,
         setup_message: "Enable Drive API and create a desktop OAuth client.",
-        actions: &[],
+        actions: &[
+            "google-drive.create-file",
+            "google-drive.update-file",
+            "google-drive.move-file",
+            "google-drive.rename-file",
+            "google-drive.share-file",
+            "google-drive.delete-file",
+        ],
     },
     ConnectorCatalogEntry {
         id: "notion",
@@ -183,6 +212,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         actions: &[
             "google-calendar.create-draft",
             "google-calendar.update-draft",
+            "google-calendar.delete-event",
         ],
     },
 ];
@@ -227,6 +257,50 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             consequence: "Rolls production back to the selected deployment.",
             confirmation_phrase: Some("rollback deployment"),
         },
+        "google-drive.create-file" => ConnectorActionPolicy {
+            label: "Create File",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence:
+                "Creates a file in the selected Google Drive destination after explicit approval.",
+            confirmation_phrase: None,
+        },
+        "google-drive.update-file" => ConnectorActionPolicy {
+            label: "Update File",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence:
+                "Replaces content in the selected Google Drive file after explicit approval.",
+            confirmation_phrase: None,
+        },
+        "google-drive.move-file" => ConnectorActionPolicy {
+            label: "Move File",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Moves the selected Google Drive item after explicit approval.",
+            confirmation_phrase: None,
+        },
+        "google-drive.rename-file" => ConnectorActionPolicy {
+            label: "Rename File",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Renames the selected Google Drive item after explicit approval.",
+            confirmation_phrase: None,
+        },
+        "google-drive.share-file" => ConnectorActionPolicy {
+            label: "Share File",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Shares the selected Google Drive item with an external recipient.",
+            confirmation_phrase: Some("share drive file"),
+        },
+        "google-drive.delete-file" => ConnectorActionPolicy {
+            label: "Delete File",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Deletes the selected Google Drive item.",
+            confirmation_phrase: Some("delete drive file"),
+        },
         "gmail.create-draft" => ConnectorActionPolicy {
             label: "Create Draft",
             mode: "trusted-scope",
@@ -268,6 +342,13 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             risk_level: "medium",
             consequence: "Updates the selected calendar event after Fable approval.",
             confirmation_phrase: None,
+        },
+        "google-calendar.delete-event" => ConnectorActionPolicy {
+            label: "Delete Event",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Deletes or cancels the selected calendar event after explicit approval.",
+            confirmation_phrase: Some("delete calendar event"),
         },
         _ => return None,
     };
@@ -516,11 +597,45 @@ pub fn start_connector_auth(
     request: ConnectorAuthRequest,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    let scopes = entry
+    let declared = entry
         .scopes
         .iter()
-        .map(|scope| scope.0.to_string())
-        .collect();
+        .map(|scope| scope.0)
+        .collect::<BTreeSet<_>>();
+    let scopes = match request.requested_scopes.as_ref() {
+        Some(scopes) if scopes.is_empty() => {
+            return Err(command_error(
+                "invalid-request",
+                entry.id,
+                "Incremental authorization requires at least one scope.",
+                false,
+            ))
+        }
+        Some(scopes) => {
+            let mut selected = Vec::new();
+            for scope in scopes {
+                let normalized = normalize_spaces(scope);
+                if !declared.contains(normalized.as_str()) {
+                    return Err(command_error(
+                        "invalid-request",
+                        entry.id,
+                        "Requested OAuth scope is not declared by this connector.",
+                        false,
+                    ));
+                }
+                if !selected.contains(&normalized) {
+                    selected.push(normalized);
+                }
+            }
+            selected
+        }
+        None => entry
+            .scopes
+            .iter()
+            .filter(|scope| scope.3)
+            .map(|scope| scope.0.to_string())
+            .collect(),
+    };
     start_auth(entry.id, entry.auth_mode, scopes, request)
 }
 
@@ -559,7 +674,8 @@ pub async fn refresh_connector_health(
 }
 
 #[tauri::command]
-pub fn search_connector(
+pub async fn search_connector(
+    app: tauri::AppHandle,
     request: ConnectorSearchRequest,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
@@ -573,12 +689,15 @@ pub fn search_connector(
             false,
         ));
     }
-    let _cursor = request.cursor.as_deref().map(normalize_spaces);
+    if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
+        return crate::google::search(&app, request).await;
+    }
     Err(configuration_required(entry.id))
 }
 
 #[tauri::command]
-pub fn import_connector_item(
+pub async fn import_connector_item(
+    app: tauri::AppHandle,
     request: ConnectorImportRequest,
 ) -> Result<ConnectorImportResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
@@ -589,6 +708,9 @@ pub fn import_connector_item(
             "Connector import metadata does not match the selected provider.",
             false,
         ));
+    }
+    if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
+        return crate::google::import(&app, request).await;
     }
     Err(configuration_required(entry.id))
 }
@@ -601,21 +723,33 @@ pub fn prepare_connector_action(
     let action = validate_connector_action(request)?;
     let connections_path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
-    let account_id = connection_for(&connections_path, &action.connector_id)
-        .map(|connection| connection.account.id)
+    let connection = connection_for(&connections_path, &action.connector_id);
+    let account_id = connection
+        .as_ref()
+        .map(|connection| connection.account.id.clone())
         .unwrap_or_else(|| "unconnected".to_string());
+    let account_label = connection
+        .as_ref()
+        .and_then(|connection| connection.account.email.clone())
+        .or_else(|| {
+            connection
+                .as_ref()
+                .map(|connection| connection.account.display_name.clone())
+        })
+        .unwrap_or_else(|| "unconnected account".to_string());
     record_pending_connector_action(
         &connector_approval_records_path(&app)
             .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?,
         &action,
         &account_id,
+        &account_label,
     )
     .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
     Ok(action)
 }
 
 #[tauri::command]
-pub fn execute_approved_connector_action(
+pub async fn execute_approved_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionExecutionRequest,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
@@ -644,6 +778,19 @@ pub fn execute_approved_connector_action(
         });
     }
 
+    if matches!(
+        action.connector_id.as_str(),
+        "google-drive" | "gmail" | "google-calendar"
+    ) && !matches!(resolution.audit_entry.decision.as_str(), "once" | "modify")
+    {
+        return Err(command_error(
+            "approval-required",
+            &action.connector_id,
+            "Google mutations require a fresh explicit approval for this exact action.",
+            false,
+        ));
+    }
+
     verify_and_consume_execution_approval(
         &execution_approvals_path(&app).map_err(|message| {
             command_error("approval-required", &action.connector_id, &message, false)
@@ -660,6 +807,37 @@ pub fn execute_approved_connector_action(
         None,
     )
     .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+
+    if matches!(
+        action.connector_id.as_str(),
+        "google-drive" | "gmail" | "google-calendar"
+    ) {
+        match crate::google::execute_action(&app, &action).await {
+            Ok(result) => {
+                update_connector_action_result(
+                    &records_path,
+                    &action.approval.id,
+                    "executed",
+                    &resolution.audit_entry.decided_at,
+                    None,
+                )
+                .map_err(|message| {
+                    command_error("unknown", &action.connector_id, &message, false)
+                })?;
+                return Ok(result);
+            }
+            Err(provider_error) => {
+                let _ = update_connector_action_result(
+                    &records_path,
+                    &action.approval.id,
+                    "failed",
+                    &resolution.audit_entry.decided_at,
+                    Some(&provider_error.code),
+                );
+                return Err(provider_error);
+            }
+        }
+    }
 
     let _ = update_connector_action_result(
         &records_path,

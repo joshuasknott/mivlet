@@ -11,6 +11,7 @@ mod connector_approvals;
 mod connector_auth;
 mod connectors;
 mod execution_approvals;
+mod google;
 mod knowledge;
 mod memory;
 mod models;

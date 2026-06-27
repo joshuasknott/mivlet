@@ -12,6 +12,8 @@ import {
   normalizeNotionItem,
   normalizeSlackItem,
   normalizeVercelItem,
+  prepareGoogleCalendarDelete,
+  prepareGoogleDriveAction,
   prepareFixtureConnectorAction,
   searchFixtureConnector,
   shapeConnectorSearchRequest
@@ -215,5 +217,46 @@ describe("provider error and action boundaries", () => {
 
     const post = prepareFixtureConnectorAction("slack.post", { channelId: "C_FIXTURE" });
     expect(post.approval.confirmationPhrase).toBe("post message");
+  });
+
+  it("prepares Google Drive mutations with native policy metadata", () => {
+    const share = prepareGoogleDriveAction("google-drive.share-file", {
+      fileId: "file-1",
+      recipient: "recipient@example.invalid",
+      role: "reader"
+    });
+    expect(share.approval).toMatchObject({
+      service: "Google Drive",
+      mode: "full-access",
+      riskLevel: "high",
+      consequence: "Shares the selected Google Drive item with an external recipient.",
+      confirmationPhrase: "share drive file"
+    });
+
+    const rename = prepareGoogleDriveAction("google-drive.rename-file", {
+      fileId: "file-1",
+      name: "Updated name"
+    });
+    expect(rename.approval).toMatchObject({
+      mode: "trusted-scope",
+      riskLevel: "medium",
+      consequence: "Renames the selected Google Drive item after explicit approval."
+    });
+    expect(rename.approval.confirmationPhrase).toBeUndefined();
+  });
+
+  it("prepares Google Calendar deletion with per-action confirmation", () => {
+    const action = prepareGoogleCalendarDelete({
+      calendarId: "primary",
+      eventId: "event-1",
+      title: "Review"
+    });
+    expect(action.approval).toMatchObject({
+      service: "Google Calendar",
+      mode: "full-access",
+      riskLevel: "high",
+      consequence: "Deletes or cancels the selected calendar event after explicit approval.",
+      confirmationPhrase: "delete calendar event"
+    });
   });
 });

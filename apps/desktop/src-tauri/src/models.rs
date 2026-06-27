@@ -93,17 +93,24 @@ pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 10] = [
+pub const CONNECTOR_ACTIONS: [&str; 17] = [
     "github.draft-pull-request",
     "github.comment",
     "vercel.promote",
     "vercel.rollback",
+    "google-drive.create-file",
+    "google-drive.update-file",
+    "google-drive.move-file",
+    "google-drive.rename-file",
+    "google-drive.share-file",
+    "google-drive.delete-file",
     "gmail.create-draft",
     "gmail.send",
     "slack.create-draft",
     "slack.post",
     "google-calendar.create-draft",
     "google-calendar.update-draft",
+    "google-calendar.delete-event",
 ];
 pub const MAX_CONNECTOR_QUERY_CHARACTERS: usize = 500;
 pub const MAX_CONNECTOR_RESULT_LIMIT: usize = 50;
@@ -173,6 +180,7 @@ pub struct ConnectorAuthRequest {
     pub connector_id: String,
     pub redirect_uri: Option<String>,
     pub callback_url: Option<String>,
+    pub requested_scopes: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

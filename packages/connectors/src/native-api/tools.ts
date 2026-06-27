@@ -54,6 +54,59 @@ const TOOLS: Record<string, BackendTool> = {
       properties: { url: { type: "string" } },
       required: ["url"]
     })
+  },
+  "google-drive-read": {
+    name: "google-drive-read",
+    description: "Search Google Drive or read file metadata using the connected account and granted scopes.",
+    defaultMode: "read-only",
+    defaultRisk: "low",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["search", "metadata"] },
+        query: { type: "string" },
+        fileId: { type: "string" },
+        cursor: { type: "string" }
+      },
+      required: ["operation"]
+    })
+  },
+  "gmail-read": {
+    name: "gmail-read",
+    description: "Search or read selected Gmail messages and threads using the connected account.",
+    defaultMode: "read-only",
+    defaultRisk: "medium",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["search", "message", "thread"] },
+        query: { type: "string" },
+        messageId: { type: "string" },
+        threadId: { type: "string" },
+        cursor: { type: "string" }
+      },
+      required: ["operation"]
+    })
+  },
+  "google-calendar-read": {
+    name: "google-calendar-read",
+    description: "List calendars, read events, or check free/busy conflicts using the connected account.",
+    defaultMode: "read-only",
+    defaultRisk: "low",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        operation: { type: "string", enum: ["calendars", "events", "event", "freebusy"] },
+        calendarId: { type: "string" },
+        calendarIds: { type: "array", items: { type: "string" } },
+        eventId: { type: "string" },
+        q: { type: "string" },
+        timeMin: { type: "string" },
+        timeMax: { type: "string" },
+        pageToken: { type: "string" }
+      },
+      required: ["operation"]
+    })
   }
 };
 

@@ -64,7 +64,15 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 4] = ["read-file", "write-file", "run-shell", "web-fetch"];
+pub(crate) const SUPPORTED_TOOLS: [&str; 7] = [
+    "read-file",
+    "write-file",
+    "run-shell",
+    "web-fetch",
+    "google-drive-read",
+    "gmail-read",
+    "google-calendar-read",
+];
 
 /// The outcome of re-validating + running a tool against the workspace root.
 ///
@@ -80,6 +88,11 @@ pub(crate) enum ToolOutcome {
     Done(Result<ToolResult, String>),
     /// A granted web-fetch that needs the async command to issue the GET.
     NeedsWebFetch { url: String },
+    /// An authenticated, read-only Google Workspace request owned by Rust.
+    NeedsGoogleRead {
+        tool: String,
+        arguments: serde_json::Value,
+    },
 }
 
 /// Re-validate the approval and run the tool against the workspace root. Pure
@@ -99,6 +112,9 @@ pub(crate) fn execute_tool(
         // clear contract error instead of silently dropping the GET.
         ToolOutcome::NeedsWebFetch { .. } => {
             Err("web-fetch must be executed through the async command boundary.".to_string())
+        }
+        ToolOutcome::NeedsGoogleRead { .. } => {
+            Err("Google reads must be executed through the async command boundary.".to_string())
         }
     }
 }
@@ -144,6 +160,9 @@ pub(crate) fn execute_tool_outcome(
             Ok(url) => ToolOutcome::NeedsWebFetch { url },
             Err(error) => ToolOutcome::Done(Err(error)),
         },
+        "google-drive-read" | "gmail-read" | "google-calendar-read" => {
+            ToolOutcome::NeedsGoogleRead { tool, arguments }
+        }
         other => ToolOutcome::Done(Err(format!("Tool {other} is not supported."))),
     }
 }
@@ -163,6 +182,9 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
+        "google-drive-read" => Some(("read-only", "low")),
+        "gmail-read" => Some(("read-only", "medium")),
+        "google-calendar-read" => Some(("read-only", "low")),
         _ => None,
     }
 }
@@ -426,6 +448,12 @@ pub async fn execute_tool_call(
     match execute_tool_outcome(request, &root) {
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,
+        ToolOutcome::NeedsGoogleRead { tool, arguments } => {
+            crate::google::execute_read_tool(&app, &tool, &arguments)
+                .await
+                .map(|output| ToolResult { ok: true, output })
+                .map_err(|error| error.message)
+        }
     }
 }
 

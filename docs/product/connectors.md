@@ -7,9 +7,12 @@ Notion, Gmail, Slack, and Google Calendar. Local Files remains a native local
 connector.
 
 The browser preview uses synthetic fixture records and labels them `fixture`.
-The desktop runtime reports `needs-auth` until provider configuration and OS
-secure storage are available. Fable must never translate a missing credential
-into a connected state.
+The desktop runtime uses authenticated production paths for Google Drive,
+Gmail, and Google Calendar when a Google OAuth client is configured and the
+user connects an account. Other first-wave provider runtime paths still report
+`needs-auth` or `configuration-required` until their provider configuration is
+implemented. Fable must never translate a missing credential into a connected
+state.
 
 Every connector exposes:
 
@@ -27,7 +30,7 @@ Every connector exposes:
 | --- | --- | --- | --- |
 | GitHub | Register a GitHub App and installation policy | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Metadata, contents, issues, and pull requests read; issue/PR write only when enabled |
 | Vercel | Create a connectable-account integration and select API permissions | External Flow redirect, proposed `https://auth.fable.app/oauth/vercel/callback` | Project and deployment read; deployment write only when enabled |
-| Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `https://www.googleapis.com/auth/drive.file` |
+| Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `drive.metadata.readonly`; incremental `drive.readonly` and `drive.file` |
 | Notion | Create a public connection and select connection capabilities | Broker callback, proposed `https://auth.fable.app/oauth/notion/callback` | Read content on user-selected pages/workspaces |
 | Gmail | Enable Gmail API, create Desktop OAuth client, configure consent and verification | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `gmail.readonly`; optional `gmail.compose` |
 | Slack | Create/distribute a Slack app, configure scopes and token rotation | HTTPS broker callback, proposed `https://auth.fable.app/oauth/slack/callback` | Selected conversation read scopes; optional `chat:write` |
@@ -57,6 +60,45 @@ Google classifies `gmail.readonly` and `gmail.compose` as restricted scopes.
 Production use requires the applicable OAuth verification and, when restricted
 data is transmitted or stored on servers, may require a security assessment.
 
+## Google production connector setup
+
+Google Drive, Gmail, and Google Calendar share the desktop OAuth implementation:
+
+- create a Google Cloud project;
+- enable the Google Drive API, Gmail API, and Google Calendar API as needed;
+- configure the OAuth consent screen and add local developers as test users
+  while the app is in testing mode;
+- create an OAuth client with application type `Desktop app`;
+- provide the client id through the desktop connector configuration;
+- use the loopback redirect URI that Fable opens for the active authorization
+  attempt.
+
+The desktop flow uses Authorization Code with PKCE, validates the returned
+OAuth state and callback values, and stores access/refresh tokens only through
+the native credential boundary. Google refresh tokens are reused across
+incremental scope grants when Google returns only a new access token.
+
+Fable requests only required scopes initially and asks for optional scopes
+when a user invokes capabilities that need them:
+
+| Connector | Initial read scopes | Incremental scopes |
+| --- | --- | --- |
+| Google Drive | `https://www.googleapis.com/auth/drive.metadata.readonly` | `drive.readonly` for downloads/exports; `drive.file` for create/update/move/rename/share/delete |
+| Gmail | `https://www.googleapis.com/auth/gmail.readonly` | `gmail.compose` for drafts and sends |
+| Google Calendar | `calendar.calendarlist.readonly`, `calendar.events.readonly` | `calendar.events` for create/update/delete |
+
+Google Drive supports metadata search/read, supported file downloads,
+Google Docs/Sheets/Slides export, and approved create/update/move/rename/share/
+delete actions. Gmail supports search, message/thread reads, attachment
+metadata, draft creation, and explicit sends. Google Calendar supports calendar
+listing, event reads, event details, free/busy checks, and approved event
+create/update/delete actions.
+
+Google write actions require a fresh explicit approval. Standing session/rule
+grants are intentionally not accepted for Google mutations. Gmail sends also
+require per-message approval and show the sending account, recipients, subject,
+body preview, and attachments before execution.
+
 ## Read and write behavior
 
 Read operations list/search only the resources granted by the provider and
@@ -80,18 +122,18 @@ confirmation. No adapter executes a write directly.
 ## Credential storage and auth broker
 
 Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
-the authorization code; the refresh token is written to OS secure storage.
-The desktop app does not rely on a client secret.
+the authorization code; access and refresh tokens are written through OS secure
+storage/keyring. The desktop app does not rely on a client secret.
 
 GitHub App signing material and the Vercel, Notion, and Slack client secrets
 must remain in an Fable auth broker or equivalent server-side secret boundary.
 They must not be compiled into React assets, Rust binaries, logs, snapshots,
 or local JSON state.
 
-The Rust `ConnectorCredentialBoundary` is currently a fail-closed interface.
-Until a production keychain implementation is selected for Windows, macOS, and
-Linux, live auth/search/import/action commands return
-`configuration-required`.
+The Rust `ConnectorCredentialBoundary` is fail-closed: if a credential or token
+is missing, unavailable, expired without refresh, or lacks the required scope,
+live commands return a normalized connector error instead of using fixtures or
+claiming access.
 
 ## Local cache, logging, and disconnect
 
@@ -109,15 +151,15 @@ expired/unavailable auth state.
 
 ## Known limitations
 
-- No production OS secure-storage backend is wired for connectors.
 - The Fable auth broker and production callback URLs are not deployed.
 - Provider apps, consent screens, distribution review, and Google restricted
   scope verification are external setup tasks.
-- Tauri provider egress is intentionally disabled; desktop commands fail
-  closed.
-- Browser search/import is synthetic fixture behavior only.
+- Browser search/import remains synthetic fixture behavior only.
+- Non-Google provider production egress remains pending.
 - Imported connector records are session-local until encrypted connector cache
   persistence is added.
+- Live Google integration tests are opt-in and require deliberately supplied
+  credentials and test account data.
 
 ## Official provider references
 

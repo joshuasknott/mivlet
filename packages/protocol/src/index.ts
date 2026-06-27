@@ -222,12 +222,19 @@ export type ConnectorActionKind =
   | "github.comment"
   | "vercel.promote"
   | "vercel.rollback"
+  | "google-drive.create-file"
+  | "google-drive.update-file"
+  | "google-drive.move-file"
+  | "google-drive.rename-file"
+  | "google-drive.share-file"
+  | "google-drive.delete-file"
   | "gmail.create-draft"
   | "gmail.send"
   | "slack.create-draft"
   | "slack.post"
   | "google-calendar.create-draft"
-  | "google-calendar.update-draft";
+  | "google-calendar.update-draft"
+  | "google-calendar.delete-event";
 
 export interface ConnectorActionRequest {
   id: string;
@@ -277,6 +284,8 @@ export interface ConnectorAuthRequest {
   redirectUri?: string;
   /** Authorization callback URL, or the provider-returned code when completing OAuth. */
   callbackUrl?: string;
+  /** Optional incremental subset of the connector's declared OAuth scopes. */
+  requestedScopes?: string[];
 }
 
 export interface ConnectorAuthResult {
