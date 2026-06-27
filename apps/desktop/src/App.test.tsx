@@ -61,6 +61,8 @@ vi.mock("./runtime", () => ({
   refreshRuntimeConnectorHealth: vi.fn(async () => null),
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
+  saveRuntimeAgentRun: vi.fn(async (run: unknown) => run),
+  recoverRuntimeAgentRuns: vi.fn(async () => []),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
     runtimeMocks.savedSnapshots.push(snapshot);
     return snapshot;

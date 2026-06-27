@@ -32,6 +32,13 @@ interface OpenAiChunk {
 export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
   const messages = request.messages.map((message) => {
     const base: Record<string, unknown> = { role: message.role, content: message.content };
+    if (message.role === "assistant" && message.toolCalls?.length) {
+      base.tool_calls = message.toolCalls.map((call) => ({
+        id: call.callId,
+        type: "function",
+        function: { name: call.tool, arguments: call.arguments }
+      }));
+    }
     if (message.toolCallId) {
       base.tool_call_id = message.toolCallId;
     }
@@ -41,7 +48,10 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
   return {
     model: request.model,
     messages,
-    max_tokens: request.maxTokens,
+    ...(request.providerId === "openai" &&
+    (request.model.startsWith("gpt-5") || request.model.startsWith("o"))
+      ? { max_completion_tokens: request.maxTokens }
+      : { max_tokens: request.maxTokens }),
     stream: true,
     stream_options: { include_usage: true },
     ...(request.tools.length > 0
@@ -57,6 +67,77 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
         }
       : {})
   };
+}
+
+interface OpenAiStreamState {
+  toolCalls: Map<number, { index: number; id?: string; name: string; arguments: string }>;
+}
+
+function newOpenAiStreamState(): OpenAiStreamState {
+  return { toolCalls: new Map() };
+}
+
+function parseOpenAiStreamLine(
+  providerId: string,
+  line: string,
+  state: OpenAiStreamState
+): BackendAgentEvent[] {
+  const payload = line.startsWith("data:") ? line.slice(5).trim() : line.trim();
+  if (!payload || payload === "[DONE]") return [];
+  let chunk: OpenAiChunk;
+  try {
+    chunk = JSON.parse(payload) as OpenAiChunk;
+  } catch {
+    return [{ type: "error", message: "Unparseable OpenAI chunk." }];
+  }
+  const events: BackendAgentEvent[] = [];
+  const choice = chunk.choices?.[0];
+  if (choice?.delta?.content) events.push({ type: "text-delta", text: choice.delta.content });
+  for (const fragment of choice?.delta?.tool_calls ?? []) {
+    const buffered = state.toolCalls.get(fragment.index) ?? {
+      index: fragment.index,
+      name: "",
+      arguments: ""
+    };
+    if (fragment.id) buffered.id = fragment.id;
+    if (fragment.function?.name) buffered.name += fragment.function.name;
+    if (fragment.function?.arguments) buffered.arguments += fragment.function.arguments;
+    state.toolCalls.set(fragment.index, buffered);
+  }
+  if (chunk.usage) {
+    const input = chunk.usage.prompt_tokens ?? 0;
+    const output = chunk.usage.completion_tokens ?? 0;
+    events.push({
+      type: "usage",
+      inputTokens: input,
+      outputTokens: output,
+      costUsd: priceFor(providerId, input, output)
+    });
+  }
+  if (choice?.finish_reason) {
+    if (choice.finish_reason === "tool_calls") {
+      for (const call of [...state.toolCalls.values()].sort((a, b) => a.index - b.index)) {
+        events.push(
+          toToolCallEvent(providerId, {
+            index: call.index,
+            id: call.id,
+            function: { name: call.name, arguments: call.arguments || "{}" }
+          })
+        );
+      }
+      state.toolCalls.clear();
+    }
+    events.push({
+      type: "done",
+      finishReason:
+        choice.finish_reason === "tool_calls"
+          ? "tool-calls"
+          : choice.finish_reason === "length"
+            ? "length"
+            : "stop"
+    });
+  }
+  return events;
 }
 
 function toToolCallEvent(providerId: string, raw: OpenAiToolCallDelta): BackendAgentEvent {
@@ -125,8 +206,9 @@ export async function* streamOpenAiEvents(
   transport: HttpTransport,
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
+  const state = newOpenAiStreamState();
   for await (const line of transport.stream(request)) {
-    for (const event of parseOpenAiLine(request.providerId, line)) {
+    for (const event of parseOpenAiStreamLine(request.providerId, line, state)) {
       yield event;
     }
   }

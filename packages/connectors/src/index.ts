@@ -56,6 +56,21 @@ export * from "./providers/notion";
 export * from "./providers/gmail";
 export * from "./providers/slack";
 export * from "./providers/google-calendar";
+export {
+  ConnectorRuntime,
+  normalizeConnectorError,
+  tokenExpiresSoon,
+  type ConnectorAccountSession,
+  type ConnectorAdapter,
+  type ConnectorApprovalBoundary,
+  type ConnectorAuthCallback,
+  type ConnectorAuthContext,
+  type ConnectorAuthResult as SdkConnectorAuthResult,
+  type ConnectorAuthStart,
+  type ConnectorRequest,
+  type ConnectorRuntimeOptions,
+  type ConnectorWriteRequest
+} from "./sdk";
 
 // agent-runtime backends (logic + data split, mirroring the connector pattern)
 export {

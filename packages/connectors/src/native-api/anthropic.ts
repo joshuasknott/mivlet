@@ -24,11 +24,12 @@ interface ToolBuffer {
 /** Per-stream state carrying partial tool-input buffers across lines. */
 export interface AnthropicStreamState {
   toolBuffers: Map<number, ToolBuffer>;
+  inputTokens: number;
 }
 
 /** Create fresh per-stream state. */
 export function newAnthropicState(): AnthropicStreamState {
-  return { toolBuffers: new Map() };
+  return { toolBuffers: new Map(), inputTokens: 0 };
 }
 
 /** Shape a normalized request into the Anthropic Messages body. */
@@ -46,6 +47,20 @@ export function shapeAnthropicRequest(request: NativeCompletionRequest): unknown
           role: "user",
           content: [
             { type: "tool_result", tool_use_id: message.toolCallId, content: message.content }
+          ]
+        };
+      }
+      if (message.role === "assistant" && message.toolCalls?.length) {
+        return {
+          role: "assistant",
+          content: [
+            ...(message.content ? [{ type: "text", text: message.content }] : []),
+            ...message.toolCalls.map((call) => ({
+              type: "tool_use",
+              id: call.callId,
+              name: call.tool,
+              input: JSON.parse(call.arguments)
+            }))
           ]
         };
       }
@@ -89,6 +104,12 @@ export function parseAnthropicLine(
 
   const type = chunk.type as string;
   const events: BackendAgentEvent[] = [];
+
+  if (type === "message_start") {
+    const message = chunk.message as Record<string, unknown> | undefined;
+    const usage = message?.usage as Record<string, number> | undefined;
+    state.inputTokens = usage?.input_tokens ?? 0;
+  }
 
   if (type === "content_block_start") {
     const block = chunk.content_block as Record<string, unknown> | undefined;
@@ -137,9 +158,9 @@ export function parseAnthropicLine(
     if (usage) {
       events.push({
         type: "usage",
-        inputTokens: 0,
+        inputTokens: state.inputTokens,
         outputTokens: usage.output_tokens ?? 0,
-        costUsd: priceFor("anthropic", 0, usage.output_tokens ?? 0)
+        costUsd: priceFor("anthropic", state.inputTokens, usage.output_tokens ?? 0)
       });
     }
     if (delta?.stop_reason) {

@@ -24,6 +24,7 @@ import type {
   MemoryControlState,
   MemoryPromotionRequest,
   MemoryPromotionResponse,
+  PersistedAgentRun,
   RuntimeSnapshot
 } from "@fable/protocol";
 
@@ -176,6 +177,33 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
     });
   } catch (error) {
     throw toRuntimeError(error);
+  }
+}
+
+export async function saveRuntimeAgentRun(run: PersistedAgentRun) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<PersistedAgentRun>("save_agent_run", { run });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listRuntimeAgentRuns() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<PersistedAgentRun[]>("list_agent_runs");
+  } catch {
+    return null;
+  }
+}
+
+export async function recoverRuntimeAgentRuns(recoveredAt: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<PersistedAgentRun[]>("recover_interrupted_agent_runs", { recoveredAt });
+  } catch {
+    return null;
   }
 }
 
@@ -494,7 +522,7 @@ export interface RuntimeToolRequest {
   /** The approval resolution request the shell used to grant the call. Rust
    *  re-validates it before running the tool (defense in depth). */
   approval: ApprovalResolutionRequest;
-  /** Optional explicit workspace root; Rust resolves from the app handle when absent. */
+  /** Test-only compatibility field. Production Rust ignores caller-supplied roots. */
   workspaceRoot?: string;
 }
 

@@ -1,14 +1,20 @@
 //! First-wave connector runtime boundary.
 //!
-//! This module deliberately contains no provider HTTP calls and no credential
-//! storage. The `ConnectorCredentialBoundary` trait is the seam for a future OS
-//! keychain implementation. The current implementation fails closed with
-//! `configuration-required`, while still exposing honest status metadata and
-//! validating approval-gated action requests.
+//! Provider adapters plug into this shared command surface. OAuth/token work is
+//! delegated to `connector_auth`; secrets never enter this module or JavaScript.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::approvals::resolve_approval;
+use crate::connector_approvals::{
+    record_pending_connector_action, update_connector_action_result,
+    verify_prepared_connector_action,
+};
+use crate::connector_auth::{
+    complete_auth, connection_for, disconnect, refresh_connection, start_auth, usable_connection,
+    ConnectorConnection,
+};
+use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{
     ConnectorActionExecutionRequest, ConnectorActionRequest, ConnectorActionResult,
     ConnectorAuthRequest, ConnectorAuthResult, ConnectorCommandError, ConnectorHealth,
@@ -17,23 +23,30 @@ use crate::models::{
     CONNECTOR_AUTH_STATES, FIRST_WAVE_CONNECTOR_IDS, MAX_CONNECTOR_PAYLOAD_FIELDS,
     MAX_CONNECTOR_QUERY_CHARACTERS, MAX_CONNECTOR_RESULT_LIMIT,
 };
-use crate::paths::{normalize_spaces, truncate_characters};
+use crate::paths::{
+    connector_approval_records_path, connector_connections_path, execution_approvals_path,
+    normalize_spaces, truncate_characters,
+};
 
 pub(crate) trait ConnectorCredentialBoundary {
-    fn has_credentials(&self, connector_id: &str) -> bool;
-    fn clear(&self, connector_id: &str) -> Result<(), ConnectorCommandError>;
+    fn connection(&self, connector_id: &str) -> Option<ConnectorConnection>;
 }
 
 struct UnavailableCredentialBoundary;
 
 impl ConnectorCredentialBoundary for UnavailableCredentialBoundary {
-    fn has_credentials(&self, _connector_id: &str) -> bool {
-        false
+    fn connection(&self, _connector_id: &str) -> Option<ConnectorConnection> {
+        None
     }
+}
 
-    fn clear(&self, connector_id: &str) -> Result<(), ConnectorCommandError> {
-        require_connector(connector_id)?;
-        Ok(())
+struct NativeCredentialBoundary {
+    connections_path: std::path::PathBuf,
+}
+
+impl ConnectorCredentialBoundary for NativeCredentialBoundary {
+    fn connection(&self, connector_id: &str) -> Option<ConnectorConnection> {
+        usable_connection(&self.connections_path, connector_id)
     }
 }
 
@@ -291,7 +304,8 @@ fn build_manifest(
     entry: &'static ConnectorCatalogEntry,
     boundary: &dyn ConnectorCredentialBoundary,
 ) -> ConnectorManifest {
-    let connected = boundary.has_credentials(entry.id);
+    let connection = boundary.connection(entry.id);
+    let connected = connection.is_some();
     let status = if connected { "connected" } else { "needs-auth" };
     debug_assert!(CONNECTOR_AUTH_STATES.contains(&status));
 
@@ -320,7 +334,12 @@ fn build_manifest(
                 label: (*label).to_string(),
                 access: (*access).to_string(),
                 required: *required,
-                granted: connected,
+                granted: connection.as_ref().is_some_and(|connection| {
+                    connection
+                        .scopes
+                        .iter()
+                        .any(|scope| scope == id || scope.ends_with(&format!("/{id}")))
+                }),
             })
             .collect(),
         health: ConnectorHealth {
@@ -329,7 +348,7 @@ fn build_manifest(
             checked_at: "Not checked".to_string(),
             retry_after: None,
         },
-        account: None,
+        account: connection.map(|connection| connection.account),
         setup_message: (!connected).then(|| entry.setup_message.to_string()),
         supports_search: true,
         supports_import: true,
@@ -352,6 +371,40 @@ pub(crate) fn list_connector_statuses_with(
         .iter()
         .map(|entry| build_manifest(entry, boundary))
         .collect()
+}
+
+#[cfg(test)]
+pub(crate) fn list_unconfigured_connector_statuses() -> Vec<ConnectorManifest> {
+    list_connector_statuses_with(&UnavailableCredentialBoundary)
+}
+
+pub(crate) fn validate_connector_execution_request(
+    request: ConnectorActionExecutionRequest,
+) -> Result<
+    (
+        ConnectorActionRequest,
+        crate::models::ApprovalResolutionResponse,
+    ),
+    ConnectorCommandError,
+> {
+    let action = validate_connector_action(request.action)?;
+    if request.approval.request != action.approval {
+        return Err(command_error(
+            "approval-required",
+            &action.connector_id,
+            "The approval does not match this connector action.",
+            false,
+        ));
+    }
+    let resolution = resolve_approval(request.approval).map_err(|_| {
+        command_error(
+            "approval-required",
+            &action.connector_id,
+            "The connector action approval is invalid or incomplete.",
+            false,
+        )
+    })?;
+    Ok((action, resolution))
 }
 
 pub(crate) fn validate_connector_action(
@@ -449,8 +502,13 @@ pub(crate) fn redact_connector_text(value: &str) -> String {
 }
 
 #[tauri::command]
-pub fn list_connector_statuses() -> Vec<ConnectorManifest> {
-    list_connector_statuses_with(&UnavailableCredentialBoundary)
+pub fn list_connector_statuses(app: tauri::AppHandle) -> Vec<ConnectorManifest> {
+    let boundary = connector_connections_path(&app)
+        .map(|connections_path| NativeCredentialBoundary { connections_path });
+    match boundary {
+        Ok(boundary) => list_connector_statuses_with(&boundary),
+        Err(_) => list_connector_statuses_with(&UnavailableCredentialBoundary),
+    }
 }
 
 #[tauri::command]
@@ -458,47 +516,46 @@ pub fn start_connector_auth(
     request: ConnectorAuthRequest,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    if let Some(redirect_uri) = request.redirect_uri {
-        let normalized = redirect_uri.to_ascii_lowercase();
-        let safe_loopback = normalized.starts_with("http://127.0.0.1:")
-            || normalized.starts_with("http://[::1]:")
-            || normalized.starts_with("https://");
-        if !safe_loopback {
-            return Err(command_error(
-                "invalid-request",
-                entry.id,
-                "OAuth redirect must use HTTPS or a loopback IP address.",
-                false,
-            ));
-        }
-    }
-    Err(configuration_required(entry.id))
+    let scopes = entry
+        .scopes
+        .iter()
+        .map(|scope| scope.0.to_string())
+        .collect();
+    start_auth(entry.id, entry.auth_mode, scopes, request)
 }
 
 #[tauri::command]
-pub fn complete_connector_auth(
+pub async fn complete_connector_auth(
+    app: tauri::AppHandle,
     request: ConnectorAuthRequest,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    Err(configuration_required(entry.id))
+    complete_auth(&app, entry.id, request).await
 }
 
 #[tauri::command]
-pub fn clear_connector_auth(
+pub async fn clear_connector_auth(
+    app: tauri::AppHandle,
     connector_id: String,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
-    let boundary = UnavailableCredentialBoundary;
-    boundary.clear(entry.id)?;
-    Ok(build_manifest(entry, &boundary))
-}
-
-#[tauri::command]
-pub fn refresh_connector_health(
-    connector_id: String,
-) -> Result<ConnectorManifest, ConnectorCommandError> {
-    let entry = require_connector(&connector_id)?;
+    disconnect(&app, entry.id).await?;
     Ok(build_manifest(entry, &UnavailableCredentialBoundary))
+}
+
+#[tauri::command]
+pub async fn refresh_connector_health(
+    app: tauri::AppHandle,
+    connector_id: String,
+) -> Result<ConnectorManifest, ConnectorCommandError> {
+    let entry = require_connector(&connector_id)?;
+    let _ = refresh_connection(&app, entry.id).await?;
+    let connections_path = connector_connections_path(&app)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    Ok(build_manifest(
+        entry,
+        &NativeCredentialBoundary { connections_path },
+    ))
 }
 
 #[tauri::command]
@@ -538,35 +595,45 @@ pub fn import_connector_item(
 
 #[tauri::command]
 pub fn prepare_connector_action(
+    app: tauri::AppHandle,
     request: ConnectorActionRequest,
 ) -> Result<ConnectorActionRequest, ConnectorCommandError> {
-    validate_connector_action(request)
+    let action = validate_connector_action(request)?;
+    let connections_path = connector_connections_path(&app)
+        .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+    let account_id = connection_for(&connections_path, &action.connector_id)
+        .map(|connection| connection.account.id)
+        .unwrap_or_else(|| "unconnected".to_string());
+    record_pending_connector_action(
+        &connector_approval_records_path(&app)
+            .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?,
+        &action,
+        &account_id,
+    )
+    .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+    Ok(action)
 }
 
 #[tauri::command]
 pub fn execute_approved_connector_action(
+    app: tauri::AppHandle,
     request: ConnectorActionExecutionRequest,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
-    let action = validate_connector_action(request.action)?;
-    if request.approval.request != action.approval {
-        return Err(command_error(
-            "approval-required",
-            &action.connector_id,
-            "The approval does not match this connector action.",
-            false,
-        ));
-    }
-
-    let resolution = resolve_approval(request.approval).map_err(|_| {
-        command_error(
-            "approval-required",
-            &action.connector_id,
-            "The connector action approval is invalid or incomplete.",
-            false,
-        )
+    let (action, resolution) = validate_connector_execution_request(request)?;
+    let records_path = connector_approval_records_path(&app)
+        .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+    verify_prepared_connector_action(&records_path, &action).map_err(|message| {
+        command_error("approval-required", &action.connector_id, &message, false)
     })?;
 
     if resolution.audit_entry.decision == "deny" {
+        let _ = update_connector_action_result(
+            &records_path,
+            &action.approval.id,
+            "denied",
+            &resolution.audit_entry.decided_at,
+            None,
+        );
         return Ok(ConnectorActionResult {
             request_id: action.id,
             connector_id: action.connector_id,
@@ -577,6 +644,30 @@ pub fn execute_approved_connector_action(
         });
     }
 
+    verify_and_consume_execution_approval(
+        &execution_approvals_path(&app).map_err(|message| {
+            command_error("approval-required", &action.connector_id, &message, false)
+        })?,
+        &resolution.effective_request,
+        &resolution.audit_entry.decided_at,
+    )
+    .map_err(|message| command_error("approval-required", &action.connector_id, &message, false))?;
+    update_connector_action_result(
+        &records_path,
+        &action.approval.id,
+        "approved",
+        &resolution.audit_entry.decided_at,
+        None,
+    )
+    .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+
+    let _ = update_connector_action_result(
+        &records_path,
+        &action.approval.id,
+        "failed",
+        &resolution.audit_entry.decided_at,
+        Some("configuration-required"),
+    );
     Err(configuration_required(&action.connector_id))
 }
 

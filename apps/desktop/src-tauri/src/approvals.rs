@@ -6,6 +6,7 @@
 
 use std::{collections::HashSet, fs, path::Path};
 
+use crate::execution_approvals::record_execution_decision;
 use crate::models::{
     ApprovalAuditEntry, ApprovalAuditRecordResponse, ApprovalGrant, ApprovalRequest,
     ApprovalResolutionRequest, ApprovalResolutionResponse, APPROVAL_DECISIONS, APPROVAL_MODES,
@@ -14,7 +15,8 @@ use crate::models::{
     MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
 };
 use crate::paths::{
-    approval_audit_path, approval_rules_path, file_slug, normalize_spaces, truncate_characters,
+    approval_audit_path, approval_rules_path, execution_approvals_path, file_slug,
+    normalize_spaces, truncate_characters,
 };
 
 pub(crate) fn normalize_approval_data(values: Vec<String>) -> Vec<String> {
@@ -430,11 +432,13 @@ pub fn resolve_approval_request(
         grant => grant,
     };
 
-    Ok(ApprovalResolutionResponse {
+    let persisted_response = ApprovalResolutionResponse {
         persisted: true,
         audit_entry: audit.entry,
         effective_request: response.effective_request,
         dismissed: response.dismissed,
         grant,
-    })
+    };
+    record_execution_decision(&execution_approvals_path(&app)?, &persisted_response)?;
+    Ok(persisted_response)
 }

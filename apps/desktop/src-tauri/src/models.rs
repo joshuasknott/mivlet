@@ -108,6 +108,8 @@ pub const CONNECTOR_ACTIONS: [&str; 10] = [
 pub const MAX_CONNECTOR_QUERY_CHARACTERS: usize = 500;
 pub const MAX_CONNECTOR_RESULT_LIMIT: usize = 50;
 pub const MAX_CONNECTOR_PAYLOAD_FIELDS: usize = 32;
+pub const MAX_AGENT_RUNS: usize = 100;
+pub const MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS: usize = 200_000;
 
 #[derive(Serialize)]
 pub struct RuntimeStatus {
@@ -170,6 +172,7 @@ pub struct ConnectorManifest {
 pub struct ConnectorAuthRequest {
     pub connector_id: String,
     pub redirect_uri: Option<String>,
+    pub callback_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -178,7 +181,55 @@ pub struct ConnectorAuthResult {
     pub connector_id: String,
     pub status: String,
     pub authorization_url: Option<String>,
+    pub account: Option<ConnectorAccountSummary>,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedAgentRun {
+    pub id: String,
+    pub provider_id: String,
+    pub model: String,
+    pub status: String,
+    pub transcript: String,
+    pub turn: usize,
+    pub usage: Option<AgentRunUsage>,
+    pub pending_approval_ids: Vec<String>,
+    pub recoverable: bool,
+    pub retry_count: usize,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorApprovalRecord {
+    pub id: String,
+    pub connector_id: String,
+    pub account_id: String,
+    pub proposed_action: String,
+    pub target: String,
+    pub preview: String,
+    pub risk_level: String,
+    pub result: String,
+    pub request_id: String,
+    pub requested_at: String,
+    pub decided_at: Option<String>,
+    pub executed_at: Option<String>,
+    pub actor: String,
+    pub run_id: Option<String>,
+    pub error_code: Option<String>,
+    pub action_fingerprint: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -537,5 +588,13 @@ pub struct RuntimeSnapshot {
     /// never live here — only *which* backends were connected, so the Rust
     /// boundary can re-resolve auth state on recovery.
     pub connected_backend_ids: Vec<String>,
+    #[serde(default)]
+    pub selected_model_id: String,
+    #[serde(default = "default_permission_mode")]
+    pub permission_mode: String,
     pub saved_at: String,
+}
+
+fn default_permission_mode() -> String {
+    "read-only".to_string()
 }

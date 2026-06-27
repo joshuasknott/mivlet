@@ -13,11 +13,12 @@
  * stays fixture-testable without a live socket.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BackendAgentEvent,
   BackendProvider,
   NativeCompletionRequest,
+  PersistedAgentRun,
   PermissionMode
 } from "@fable/protocol";
 import {
@@ -32,6 +33,8 @@ import { permissionModeFor } from "../lib/agent-run";
 import {
   cancelRuntimeCompletion,
   listenRuntimeBackendEvents,
+  recoverRuntimeAgentRuns,
+  saveRuntimeAgentRun,
   streamRuntimeCompletion
 } from "../runtime";
 
@@ -54,7 +57,10 @@ function hasDesktopRuntime(): boolean {
 }
 
 /** Build a transport that delegates egress to the Rust boundary. Null outside Tauri. */
-function tauriTransport(): HttpTransport | null {
+function tauriTransport(
+  onRequestStarted: (requestId: string) => void,
+  onRetry: () => void
+): HttpTransport | null {
   if (!hasDesktopRuntime()) {
     return null;
   }
@@ -64,6 +70,7 @@ function tauriTransport(): HttpTransport | null {
       const queue: string[] = [];
       let resolveNext: ((value: string | undefined) => void) | null = null;
       let finished = false;
+      let transportError: Error | null = null;
 
       const unlisten = await listenRuntimeBackendEvents(requestId, (line) => {
         if (line === "[DONE]" || line === "[CANCELLED]") {
@@ -71,16 +78,38 @@ function tauriTransport(): HttpTransport | null {
           resolveNext?.(undefined);
           return;
         }
+        try {
+          const parsed = JSON.parse(line) as {
+            __fableTransport?: { kind: string; message: string };
+          };
+          if (parsed.__fableTransport) {
+            if (parsed.__fableTransport.kind === "error") {
+              transportError = new Error(parsed.__fableTransport.message);
+            } else if (parsed.__fableTransport.kind === "retrying") {
+              onRetry();
+            }
+            return;
+          }
+        } catch {
+          // Provider payloads are parsed by their provider-specific stream parser.
+        }
         queue.push(line);
         resolveNext?.(line);
         resolveNext = null;
       });
 
-      await streamRuntimeCompletion({
+      onRequestStarted(requestId);
+      // Tauri commands resolve when the Rust future finishes. Start the command
+      // without awaiting it so events are yielded to the UI as they arrive.
+      const completion = streamRuntimeCompletion({
         providerId: request.providerId,
         requestId,
         model: request.model,
         body: shapeBodyFor(request)
+      }).catch((error) => {
+        transportError = error instanceof Error ? error : new Error("Provider request failed.");
+        finished = true;
+        resolveNext?.(undefined);
       });
 
       try {
@@ -96,6 +125,8 @@ function tauriTransport(): HttpTransport | null {
             break;
           }
         }
+        await completion;
+        if (transportError) throw transportError;
       } finally {
         void unlisten?.();
       }
@@ -160,13 +191,32 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const onCancelRef = useRef(options.onCancel);
   onCancelRef.current = options.onCancel;
 
+  useEffect(() => {
+    void recoverRuntimeAgentRuns(new Date().toISOString());
+  }, []);
+
   const run = useCallback(
     async (
       request: NativeCompletionRequest,
       contextPrefix?: string,
       permissionLabel?: string
     ) => {
-      const transport = tauriTransport();
+      let persisted: PersistedAgentRun | null = null;
+      const transport = tauriTransport(
+        (requestId) => {
+          cancelRef.current = requestId;
+        },
+        () => {
+          if (!persisted) return;
+          persisted = {
+            ...persisted,
+            status: "retrying",
+            retryCount: persisted.retryCount + 1,
+            updatedAt: new Date().toISOString()
+          };
+          void saveRuntimeAgentRun(persisted);
+        }
+      );
       if (!transport) {
         setState((current) => ({
           ...current,
@@ -176,8 +226,25 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         return;
       }
       setState({ transcript: "", usage: null, running: true, lastError: null, noTransport: false });
-      const requestId = `req-${Date.now()}`;
-      cancelRef.current = requestId;
+      const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const createdAt = new Date().toISOString();
+      persisted = {
+        id: runId,
+        providerId: request.providerId,
+        model: request.model,
+        status: "streaming",
+        transcript: "",
+        turn: 0,
+        pendingApprovalIds: [],
+        recoverable: true,
+        retryCount: 0,
+        createdAt,
+        updatedAt: createdAt
+      };
+      await saveRuntimeAgentRun(persisted);
+      let lastPersistedTranscriptLength = 0;
+      let lastPersistedAt = Date.now();
+      const pendingApprovalByCall = new Map<string, string>();
       // Map the composer's permission-level label to a PermissionMode that gates
       // tool execution in the loop (read-only suppresses write/shell, etc.).
       const permissionMode: PermissionMode = permissionLabel
@@ -201,6 +268,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         })) {
           if (event.type === "text-delta") {
             setState((current) => ({ ...current, transcript: current.transcript + event.text }));
+            persisted = {
+              ...persisted,
+              transcript: persisted.transcript + event.text,
+              updatedAt: new Date().toISOString()
+            };
           } else if (event.type === "usage") {
             setState((current) => ({
               ...current,
@@ -210,20 +282,78 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 costUsd: event.costUsd
               }
             }));
+            persisted = {
+              ...persisted,
+              usage: {
+                inputTokens: event.inputTokens,
+                outputTokens: event.outputTokens,
+                costUsd: event.costUsd
+              },
+              updatedAt: new Date().toISOString()
+            };
           } else if (event.type === "tool-call") {
             onToolCallRef.current?.(event);
+            pendingApprovalByCall.set(event.callId, event.approval.id);
+            persisted = {
+              ...persisted,
+              status: "awaiting-approval",
+              pendingApprovalIds: [...persisted.pendingApprovalIds, event.approval.id],
+              updatedAt: new Date().toISOString()
+            };
+          } else if (event.type === "tool-result") {
+            const completedApprovalId = pendingApprovalByCall.get(event.callId);
+            pendingApprovalByCall.delete(event.callId);
+            persisted = {
+              ...persisted,
+              status: "streaming",
+              turn: persisted.turn + 1,
+              pendingApprovalIds: persisted.pendingApprovalIds.filter(
+                (id) => id !== completedApprovalId
+              ),
+              updatedAt: new Date().toISOString()
+            };
           } else if (event.type === "error") {
             setState((current) => ({ ...current, lastError: event.message }));
+            persisted = {
+              ...persisted,
+              error: event.message,
+              updatedAt: new Date().toISOString()
+            };
           } else if (event.type === "done" || event.type === "cancelled") {
             setState((current) => ({ ...current, running: false }));
+            persisted = {
+              ...persisted,
+              status: event.type === "cancelled" ? "cancelled" : "completed",
+              recoverable: false,
+              pendingApprovalIds: [],
+              updatedAt: new Date().toISOString()
+            };
+          }
+          const terminalOrBoundary =
+            event.type !== "text-delta" ||
+            persisted.transcript.length - lastPersistedTranscriptLength >= 512 ||
+            Date.now() - lastPersistedAt >= 1_000;
+          if (terminalOrBoundary) {
+            await saveRuntimeAgentRun(persisted);
+            lastPersistedTranscriptLength = persisted.transcript.length;
+            lastPersistedAt = Date.now();
           }
         }
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Agent run failed.";
         setState((current) => ({
           ...current,
           running: false,
-          lastError: error instanceof Error ? error.message : "Agent run failed."
+          lastError: message
         }));
+        persisted = {
+          ...persisted,
+          status: shouldCancelRef.current?.() ? "cancelled" : "failed",
+          recoverable: !shouldCancelRef.current?.(),
+          error: message,
+          updatedAt: new Date().toISOString()
+        };
+        await saveRuntimeAgentRun(persisted);
       } finally {
         cancelRef.current = null;
       }

@@ -20,7 +20,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::approvals::resolve_approval;
+use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{ApprovalResolutionRequest, APPROVAL_DECISIONS};
+use crate::paths::{execution_approvals_path, normalize_spaces, truncate_characters};
 
 /// The workspace root tools operate within. The command layer resolves it from
 /// the app handle; the pure helpers below take an explicit root so they are
@@ -46,6 +48,9 @@ pub struct ToolExecutionRequest {
     pub tool: String,
     pub arguments: serde_json::Value,
     pub approval: ApprovalResolutionRequest,
+    /// Retained for wire compatibility and pure helper tests. The Tauri command
+    /// deliberately ignores it and resolves authority from the native app.
+    #[allow(dead_code)]
     pub workspace_root: Option<String>,
 }
 
@@ -150,6 +155,63 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
     } else {
         Err(format!("Tool {tool} is not in Fable's tool registry."))
     }
+}
+
+fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
+    match tool {
+        "read-file" => Some(("read-only", "low")),
+        "write-file" => Some(("full-access", "high")),
+        "run-shell" => Some(("full-access", "critical")),
+        "web-fetch" => Some(("read-only", "medium")),
+        _ => None,
+    }
+}
+
+/// Bind an approval to the exact registered tool policy and argument preview.
+/// This prevents approving one path/command and substituting another at the
+/// final Rust dispatch boundary.
+pub(crate) fn validate_tool_approval_binding(
+    tool: &str,
+    arguments: &serde_json::Value,
+    approval: &crate::models::ApprovalRequest,
+) -> Result<(), String> {
+    let (required_mode, required_risk) =
+        tool_policy(tool).ok_or_else(|| format!("Tool {tool} has no execution policy."))?;
+    if approval.mode != required_mode || approval.risk_level != required_risk {
+        return Err(format!(
+            "Tool {tool} approval does not match its required permission policy."
+        ));
+    }
+    if approval.action.split_whitespace().next() != Some(tool) {
+        return Err(format!(
+            "Tool {tool} approval is bound to a different action."
+        ));
+    }
+    let object = arguments.as_object().ok_or_else(|| {
+        format!("Tool {tool} arguments must be an object at the execution boundary.")
+    })?;
+    let expected = object
+        .iter()
+        .take(4)
+        .map(|(key, value)| {
+            let rendered = value
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| value.to_string());
+            truncate_characters(&normalize_spaces(&format!("{key}: {rendered}")), 240)
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    let approved = approval
+        .data_used
+        .iter()
+        .map(|value| truncate_characters(&normalize_spaces(value), 240))
+        .collect::<std::collections::BTreeSet<_>>();
+    if expected != approved {
+        return Err(format!(
+            "Tool {tool} arguments changed after the approval preview."
+        ));
+    }
+    Ok(())
 }
 
 /// Confine a relative path under the workspace root. Rejects `..` escapes and
@@ -350,10 +412,17 @@ pub async fn execute_tool_call(
     app: tauri::AppHandle,
     request: ToolExecutionRequest,
 ) -> Result<ToolResult, String> {
-    let root = match request.workspace_root.as_deref() {
-        Some(explicit) => PathBuf::from(explicit),
-        None => resolve_workspace_root(&app)?,
-    };
+    validate_tool_name(&request.tool)?;
+    validate_tool_approval_binding(&request.tool, &request.arguments, &request.approval.request)?;
+    verify_and_consume_execution_approval(
+        &execution_approvals_path(&app)?,
+        &request.approval.request,
+        &request.approval.decided_at,
+    )?;
+    // The caller may never select its own authority root. Resolve the workspace
+    // at the native boundary so a forged request cannot point at an arbitrary
+    // directory and then appear "confined" beneath it.
+    let root = resolve_workspace_root(&app)?;
     match execute_tool_outcome(request, &root) {
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,

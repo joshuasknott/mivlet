@@ -150,8 +150,8 @@ const CATALOG: &[BackendCatalogEntry] = &[
         description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[
+            ("gpt-5.2", "GPT-5.2"),
             ("gpt-5", "GPT-5"),
-            ("gpt-5-thinking", "GPT-5 Thinking"),
             ("gpt-4.1", "GPT-4.1"),
         ],
         capabilities: NATIVE_API_CAPS,
@@ -162,7 +162,10 @@ const CATALOG: &[BackendCatalogEntry] = &[
         label: "Anthropic",
         description: "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
         install_hint: "",
-        models: &[("claude-sonnet-4", "Claude Sonnet 4"), ("claude-opus-4", "Claude Opus 4")],
+        models: &[
+            ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
+            ("claude-opus-4-8", "Claude Opus 4.8"),
+        ],
         capabilities: NATIVE_API_CAPS,
     },
     BackendCatalogEntry {
@@ -171,7 +174,10 @@ const CATALOG: &[BackendCatalogEntry] = &[
         label: "Google Gemini",
         description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
         install_hint: "",
-        models: &[("gemini-2-pro", "Gemini 2 Pro"), ("gemini-2-flash", "Gemini 2 Flash")],
+        models: &[
+            ("gemini-3.5-flash", "Gemini 3.5 Flash"),
+            ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+        ],
         capabilities: NATIVE_API_CAPS,
     },
     BackendCatalogEntry {
@@ -305,10 +311,9 @@ pub(crate) fn read_credential(provider_id: &str) -> Result<Option<String>, Strin
     CredentialStores.get(provider_id)
 }
 
-/// The composed production store: keychain-primary, in-memory-fallback. The
-/// Tauri commands pass this to the generic helpers so the same fallback rules
-/// apply to reads (`list_backends`), writes (`store_backend_credential`), and
-/// deletes (`clear_backend_credential`). It is never serialized and never
+/// The composed production store. Reads retain an in-memory test/headless seam;
+/// writes require the OS keyring so a connection is never reported successful
+/// when its credential would disappear at restart. It is never serialized and
 /// exposes a secret — it is only ever asked whether a credential *exists* or
 /// handed one to persist.
 pub(crate) struct CredentialStores;
@@ -328,15 +333,10 @@ impl BackendCredentialStore for CredentialStores {
     }
 
     fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String> {
-        // Primary: keychain. Mirror to the in-memory fallback only on keychain
-        // failure, so the secret survives at least for this session.
-        if KeyringStore.set(provider_id, secret).is_err() {
-            let mut store = credential_store()
-                .lock()
-                .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-            store.set(provider_id, secret)?;
-        }
-        Ok(())
+        // Production writes must be durable and OS-protected. The in-memory
+        // map remains an injectable/headless read seam for tests, but a failed
+        // keyring write is never reported as a successful connection.
+        KeyringStore.set(provider_id, secret)
     }
 
     fn remove(&mut self, provider_id: &str) -> Result<(), String> {

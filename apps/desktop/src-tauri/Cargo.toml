@@ -25,11 +25,16 @@ tauri = { version = "2", features = [] }
 # the existing lockfile (verified during planning). `stream` enables SSE.
 reqwest = { version = "0.13", default-features = false, features = [
     "json",
+    "form",
     "rustls-no-provider",
     "stream",
 ] }
-tokio = { version = "1", features = ["sync", "rt", "macros"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "time"] }
 futures-util = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+url = "2"
 # OS-secure credential storage for agent-runtime API keys. The keyring crate
 # speaks the platform-native store (Windows Credential Manager, macOS
 # Keychain, Linux Secret Service) and ships a `mock` in-process backend used

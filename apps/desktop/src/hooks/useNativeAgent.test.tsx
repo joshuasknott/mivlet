@@ -42,6 +42,7 @@ const mocks = vi.hoisted(() => ({
   // The joined integration test scripts the mocked Rust tool boundary here:
   // every executeRuntimeToolCall records its request and resolves with this result.
   toolRequests: [] as unknown[],
+  savedRuns: [] as unknown[],
   toolResult: { ok: true, output: "Fetched body text from Rust." }
 }));
 
@@ -71,6 +72,11 @@ vi.mock("../runtime", () => ({
     mocks.cancelCalls.push(requestId);
     return null;
   }),
+  saveRuntimeAgentRun: vi.fn(async (run: unknown) => {
+    mocks.savedRuns.push(run);
+    return run;
+  }),
+  recoverRuntimeAgentRuns: vi.fn(async () => []),
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
     return mocks.toolResult;
@@ -120,6 +126,7 @@ function resetLineState() {
   mocks.streamCalls = 0;
   mocks.cancelCalls = [];
   mocks.toolRequests = [];
+  mocks.savedRuns = [];
   mocks.toolResult = { ok: true, output: "Fetched body text from Rust." };
   listenCount = 0;
 }

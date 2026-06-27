@@ -117,8 +117,8 @@ export const nativeFixtures: NativeFixture[] = [
       "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
     authLabel: "OpenAI API key",
     models: [
+      { id: "gpt-5.2", label: "GPT-5.2" },
       { id: "gpt-5", label: "GPT-5" },
-      { id: "gpt-5-thinking", label: "GPT-5 Thinking" },
       { id: "gpt-4.1", label: "GPT-4.1" }
     ]
   },
@@ -129,8 +129,8 @@ export const nativeFixtures: NativeFixture[] = [
       "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
     authLabel: "Anthropic API key / Vertex / Bedrock",
     models: [
-      { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
-      { id: "claude-opus-4", label: "Claude Opus 4" }
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+      { id: "claude-opus-4-8", label: "Claude Opus 4.8" }
     ]
   },
   {
@@ -140,8 +140,8 @@ export const nativeFixtures: NativeFixture[] = [
       "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
     authLabel: "Google AI API key / Vertex AI",
     models: [
-      { id: "gemini-2-pro", label: "Gemini 2 Pro" },
-      { id: "gemini-2-flash", label: "Gemini 2 Flash" }
+      { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+      { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" }
     ]
   },
   {

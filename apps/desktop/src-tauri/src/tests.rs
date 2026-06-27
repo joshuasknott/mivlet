@@ -13,8 +13,8 @@ use crate::approvals::{
     read_approval_rules, resolve_approval,
 };
 use crate::connectors::{
-    execute_approved_connector_action, list_connector_statuses, redact_connector_text,
-    validate_connector_action,
+    list_unconfigured_connector_statuses, redact_connector_text, validate_connector_action,
+    validate_connector_execution_request,
 };
 use crate::knowledge::{import_local_text_file, search_knowledge_sources};
 use crate::memory::{
@@ -28,7 +28,7 @@ use crate::snapshot::{
 
 #[test]
 fn lists_first_wave_connectors_without_faking_live_connections() {
-    let manifests = list_connector_statuses();
+    let manifests = list_unconfigured_connector_statuses();
 
     assert_eq!(
         manifests
@@ -143,7 +143,7 @@ fn rejects_connector_execution_with_reshaped_approval() {
         },
     };
 
-    let error = execute_approved_connector_action(request)
+    let error = validate_connector_execution_request(request)
         .expect_err("execution approval must exactly match the prepared action");
     assert_eq!(error.code, "approval-required");
 }
@@ -705,6 +705,8 @@ fn runtime_snapshot() -> RuntimeSnapshot {
             "Recover the workspace after restart.",
         )],
         connected_backend_ids: vec!["codex".to_string()],
+        selected_model_id: "gpt-5".to_string(),
+        permission_mode: "read-only".to_string(),
         saved_at: "2026-06-26T10:30:00.000Z".to_string(),
     }
 }
@@ -1434,7 +1436,9 @@ fn in_memory_fallback_store_implements_the_trait_contract() {
 // ---------------------------------------------------------------------------
 
 use crate::models::ApprovalModification;
-use crate::tools::{confine_path, execute_tool, ToolExecutionRequest};
+use crate::tools::{
+    confine_path, execute_tool, validate_tool_approval_binding, ToolExecutionRequest,
+};
 
 fn tool_approval(
     tool: &str,
@@ -1510,6 +1514,37 @@ fn confine_path_rejects_parent_dir_and_absolute_escapes() {
     // A simple relative path is confined under the root.
     let confined = confine_path("notes.txt", &root).expect("relative path confined");
     assert_eq!(confined, root.join("notes.txt"));
+}
+
+#[test]
+fn execution_boundary_rejects_argument_substitution_and_permission_downgrade() {
+    let mut approval = tool_approval(
+        "write-file",
+        "full-access",
+        "high",
+        Some("approve write-file"),
+    );
+    approval.data_used = vec!["content: safe".to_string(), "path: safe.txt".to_string()];
+    validate_tool_approval_binding(
+        "write-file",
+        &serde_json::json!({ "path": "safe.txt", "content": "safe" }),
+        &approval,
+    )
+    .expect("exact approval binding");
+
+    assert!(validate_tool_approval_binding(
+        "write-file",
+        &serde_json::json!({ "path": "other.txt", "content": "safe" }),
+        &approval,
+    )
+    .is_err());
+    approval.mode = "read-only".to_string();
+    assert!(validate_tool_approval_binding(
+        "write-file",
+        &serde_json::json!({ "path": "safe.txt", "content": "safe" }),
+        &approval,
+    )
+    .is_err());
 }
 
 #[test]

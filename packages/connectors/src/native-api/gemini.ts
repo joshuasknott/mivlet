@@ -33,7 +33,26 @@ export function shapeGeminiRequest(request: NativeCompletionRequest): unknown {
     .filter((message) => message.role !== "system")
     .map((message) => {
       const role = message.role === "assistant" ? "model" : "user";
-      const parts: GeminiPart[] = [{ text: message.content }];
+      const parts: Array<GeminiPart | Record<string, unknown>> = [];
+      if (message.content) parts.push({ text: message.content });
+      if (message.role === "assistant") {
+        for (const call of message.toolCalls ?? []) {
+          parts.push({
+            functionCall: {
+              name: call.tool,
+              args: JSON.parse(call.arguments)
+            }
+          });
+        }
+      }
+      if (message.role === "tool" && message.toolCallId) {
+        parts.push({
+          functionResponse: {
+            name: message.toolName ?? message.toolCallId,
+            response: { output: message.content }
+          }
+        });
+      }
       return { role, parts };
     });
 
@@ -78,11 +97,13 @@ export function parseGeminiLine(
 
   const events: BackendAgentEvent[] = [];
   const candidate = chunk.candidates?.[0];
+  let hasFunctionCall = false;
   for (const part of candidate?.content?.parts ?? []) {
     if (part.text) {
       events.push({ type: "text-delta", text: part.text });
     }
     if (part.functionCall?.name) {
+      hasFunctionCall = true;
       const args = JSON.stringify(part.functionCall.args ?? {});
       events.push({
         type: "tool-call",
@@ -108,7 +129,9 @@ export function parseGeminiLine(
     events.push({
       type: "done",
       finishReason:
-        reason === "STOP"
+        hasFunctionCall
+          ? "tool-calls"
+          : reason === "STOP"
           ? "stop"
           : reason === "MAX_TOKENS"
             ? "length"

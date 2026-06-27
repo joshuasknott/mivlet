@@ -121,24 +121,34 @@ export async function* runAgentLoop(
     let finishReason: FinishReason = "stop";
     const pendingToolCalls: PendingToolCall[] = [];
 
-    for await (const event of stream) {
-      if (options.shouldCancel?.()) {
-        yield { type: "cancelled" };
-        return;
+    try {
+      for await (const event of stream) {
+        if (options.shouldCancel?.()) {
+          yield { type: "cancelled" };
+          return;
+        }
+        if (event.type === "done") {
+          finishReason = event.finishReason;
+          continue; // hold the done event; decide whether to continue after the turn
+        }
+        if (event.type === "error") {
+          finishReason = "error";
+        }
+        if (event.type === "tool-call") {
+          pendingToolCalls.push({
+            callId: event.callId,
+            tool: event.tool,
+            arguments: event.arguments,
+            approval: event.approval
+          });
+        }
+        yield event;
       }
-      if (event.type === "done") {
-        finishReason = event.finishReason;
-        continue; // hold the done event; decide whether to continue after the turn
-      }
-      if (event.type === "tool-call") {
-        pendingToolCalls.push({
-          callId: event.callId,
-          tool: event.tool,
-          arguments: event.arguments,
-          approval: event.approval
-        });
-      }
-      yield event;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Provider stream failed.";
+      yield { type: "error", message };
+      yield { type: "done", finishReason: "error" };
+      return;
     }
 
     if (finishReason !== "tool-calls" || pendingToolCalls.length === 0) {
@@ -164,11 +174,17 @@ export async function* runAgentLoop(
       try {
         const result = await execute(call.approval, call.arguments);
         yield { type: "tool-result", callId: call.callId, ok: true, output: result };
-        messages = [...messages, { role: "tool", content: result, toolCallId: call.callId }];
+        messages = [
+          ...messages,
+          { role: "tool", content: result, toolCallId: call.callId, toolName: call.tool }
+        ];
       } catch (error) {
         const message = error instanceof Error ? error.message : "Tool execution failed.";
         yield { type: "tool-result", callId: call.callId, ok: false, output: message };
-        messages = [...messages, { role: "tool", content: message, toolCallId: call.callId }];
+        messages = [
+          ...messages,
+          { role: "tool", content: message, toolCallId: call.callId, toolName: call.tool }
+        ];
       }
     }
   }

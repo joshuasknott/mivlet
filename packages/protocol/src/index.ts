@@ -266,7 +266,7 @@ export type ConnectorErrorCode =
 
 export interface ConnectorError {
   code: ConnectorErrorCode;
-  connectorId: FirstWaveConnectorId;
+  connectorId: ConnectorId;
   message: string;
   retryable: boolean;
   retryAfter?: string;
@@ -275,13 +275,88 @@ export interface ConnectorError {
 export interface ConnectorAuthRequest {
   connectorId: FirstWaveConnectorId;
   redirectUri?: string;
+  /** Authorization callback URL, or the provider-returned code when completing OAuth. */
+  callbackUrl?: string;
 }
 
 export interface ConnectorAuthResult {
   connectorId: FirstWaveConnectorId;
   status: ConnectorStatus;
   authorizationUrl?: string;
+  account?: ConnectorAccountSummary;
   message: string;
+}
+
+export interface ConnectorTokenSet {
+  accessToken: string;
+  refreshToken?: string;
+  tokenType: string;
+  expiresAt?: string;
+  scopes: string[];
+}
+
+export type ConnectorCapabilityKind = "read" | "write";
+
+export interface ConnectorCapability {
+  id: string;
+  kind: ConnectorCapabilityKind;
+  consequential: boolean;
+  description: string;
+}
+
+export interface ConnectorPage<T> {
+  items: T[];
+  nextCursor?: string;
+  rateLimit?: {
+    remaining?: number;
+    resetAt?: string;
+    retryAfterMs?: number;
+  };
+}
+
+export interface ConnectorApprovalRecord {
+  id: string;
+  connectorId: ConnectorId;
+  accountId: string;
+  proposedAction: string;
+  target: string;
+  preview: string;
+  riskLevel: ApprovalRiskLevel;
+  result: "pending" | "approved" | "denied" | "executed" | "failed";
+  requestId: string;
+  requestedAt: string;
+  decidedAt?: string;
+  executedAt?: string;
+  actor: "user" | "system";
+  runId?: string;
+  errorCode?: ConnectorErrorCode;
+  actionFingerprint?: string;
+}
+
+export type AgentRunStatus =
+  | "queued"
+  | "streaming"
+  | "awaiting-approval"
+  | "retrying"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "interrupted";
+
+export interface PersistedAgentRun {
+  id: string;
+  providerId: string;
+  model: string;
+  status: AgentRunStatus;
+  transcript: string;
+  turn: number;
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+  pendingApprovalIds: string[];
+  recoverable: boolean;
+  retryCount: number;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -524,6 +599,8 @@ export interface NativeMessage {
   toolCalls?: NativeToolCall[];
   /** Tool-result call id, when role === "tool". */
   toolCallId?: string;
+  /** Tool name for providers (for example Gemini) that require it on results. */
+  toolName?: string;
 }
 
 /** A tool call the model emitted. The arguments are the raw model JSON string. */

@@ -4,9 +4,13 @@
 //! `knowledge`, `memory`, `snapshot`, `backends`). This crate root only
 //! declares those modules and registers the Tauri command handlers on startup.
 
+mod agent_runs;
 mod approvals;
 mod backends;
+mod connector_approvals;
+mod connector_auth;
 mod connectors;
+mod execution_approvals;
 mod knowledge;
 mod memory;
 mod models;
@@ -23,6 +27,9 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             snapshot::runtime_status,
+            agent_runs::save_agent_run,
+            agent_runs::list_agent_runs,
+            agent_runs::recover_interrupted_agent_runs,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,
@@ -42,6 +49,7 @@ pub fn run() {
             backends::clear_backend_credential,
             backends::record_backend_event,
             connectors::list_connector_statuses,
+            connector_approvals::list_connector_approval_records,
             connectors::start_connector_auth,
             connectors::complete_connector_auth,
             connectors::clear_connector_auth,

@@ -70,4 +70,21 @@ describe("openai-compatible shaping", () => {
     expect(types).toContain("usage");
     expect(types.at(-1)).toBe("done");
   });
+
+  it("assembles fragmented streamed tool names and arguments before execution", async () => {
+    const transport = new FixtureTransport([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read-","arguments":"{\\"pa"}}]}}]}',
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"file","arguments":"th\\":\\"README.md\\"}"}}]}}]}',
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}'
+    ]);
+    const events = [];
+    for await (const event of streamOpenAiEvents(transport, request)) events.push(event);
+    expect(events[0]).toMatchObject({
+      type: "tool-call",
+      callId: "call_1",
+      tool: "read-file",
+      arguments: '{"path":"README.md"}'
+    });
+    expect(events[1]).toEqual({ type: "done", finishReason: "tool-calls" });
+  });
 });

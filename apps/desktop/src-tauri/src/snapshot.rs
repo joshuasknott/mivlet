@@ -17,10 +17,11 @@ use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
     ApprovalAuditEntry, ApprovalGrant, LocalFileImport, LocalTextFileCandidate, RuntimeSnapshot,
-    RuntimeStatus, AUTOMATION_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES, MAX_IMPORTED_KNOWLEDGE_SOURCES,
-    MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILE_PREVIEW_CHARACTERS, MAX_MEMORY_TITLE_CHARACTERS,
-    MAX_RUNTIME_SNAPSHOT_AUTOMATIONS, MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS,
-    MAX_RUNTIME_SNAPSHOT_IDS, MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS, RUNTIME_SNAPSHOT_VERSION,
+    RuntimeStatus, APPROVAL_MODES, AUTOMATION_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES,
+    MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILE_PREVIEW_CHARACTERS,
+    MAX_MEMORY_TITLE_CHARACTERS, MAX_RUNTIME_SNAPSHOT_AUTOMATIONS,
+    MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS, MAX_RUNTIME_SNAPSHOT_IDS,
+    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS, RUNTIME_SNAPSHOT_VERSION,
 };
 use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
@@ -302,6 +303,15 @@ pub(crate) fn normalize_runtime_snapshot(
         memory_records: memory_state.records,
         // Provider ids only — secrets are never persisted into the snapshot.
         connected_backend_ids: normalize_snapshot_id_list(snapshot.connected_backend_ids),
+        selected_model_id: truncate_characters(
+            &normalize_spaces(&snapshot.selected_model_id),
+            MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+        ),
+        permission_mode: if APPROVAL_MODES.contains(&snapshot.permission_mode.as_str()) {
+            snapshot.permission_mode
+        } else {
+            "read-only".to_string()
+        },
         saved_at,
     })
 }
