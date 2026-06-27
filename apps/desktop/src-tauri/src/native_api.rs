@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::backends::credential_store;
+use crate::backends::read_credential;
 use tauri::{AppHandle, Emitter};
 
 /// Which wire family a native provider speaks (selects endpoint + auth header).
@@ -114,16 +114,12 @@ fn cancel_map() -> &'static Mutex<CancelMap> {
     CANCEL_MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Look up the key for a provider from the credential store. Returns Err if
-/// there is no stored credential — the command then fails closed (no egress).
+/// Look up the key for a provider, preferring the OS keychain and falling back
+/// to the in-memory store. Returns Err if neither has a credential — the
+/// command then fails closed (no egress). The resolved key never crosses into
+/// JavaScript; it is placed into a header here.
 fn require_key(provider_id: &str) -> Result<String, String> {
-    let store = credential_store()
-        .lock()
-        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-    store
-        .get(provider_id)
-        .cloned()
-        .ok_or_else(|| format!("{provider_id} has no stored credential."))
+    read_credential(provider_id)?.ok_or_else(|| format!("{provider_id} has no stored credential."))
 }
 
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";

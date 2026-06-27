@@ -64,9 +64,12 @@ pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 9] = [
     "xai",
     "openrouter",
 ];
-/// Marker that backend credential storage is pre-release (OS keychain not
-/// wired yet). Logged once on first credential write.
-pub const BACKENDS_PRE_RELEASE: bool = true;
+/// Marker that backend credential storage is pre-release. Now that the OS
+/// keychain is wired (`backends::KeyringStore`, with an in-memory fallback),
+/// this is `false` — secrets persist across restarts in the platform-secure
+/// store rather than living only in process memory. The flag is retained so
+/// any future pre-release window can re-enable the one-time warning.
+pub const BACKENDS_PRE_RELEASE: bool = false;
 pub const MAX_BACKEND_SECRET_CHARACTERS: usize = 8_000;
 pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;

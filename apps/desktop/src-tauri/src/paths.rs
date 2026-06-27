@@ -37,8 +37,9 @@ pub fn runtime_snapshot_path(app: &tauri::AppHandle) -> Result<PathBuf, String> 
 }
 
 /// Path for the connected-backend id manifest. Stores *which* backends are
-/// connected (provider ids only), never secrets. Secrets live in the
-/// process-scoped in-memory credential store.
+/// connected (provider ids only), never secrets. Secrets live in the OS-secure
+/// store (keychain); this manifest lets the Rust boundary re-resolve auth state
+/// against the keychain after a restart.
 pub fn connected_backends_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_data_file_path(app, "connected-backends.json")
 }

@@ -1255,3 +1255,174 @@ fn native_catalog_copy_carries_no_forbidden_subscription_phrases() {
 
     let _ = fs::remove_file(&path);
 }
+
+// ---------------------------------------------------------------------------
+// OS keychain credential store (keyring swap): the secret survives a process
+// restart and never crosses into JS. These tests use a file-backed mock
+// BackendCredentialStore so they never touch the real OS keychain.
+// ---------------------------------------------------------------------------
+
+use crate::backends::BackendCredentialStore;
+
+/// A file-backed mock credential store that emulates the keychain's
+/// persistence: a credential written through one instance is readable from a
+/// *fresh* instance pointed at the same file. This models a full process
+/// restart (the keychain outlives the process) without touching the real OS
+/// store. The on-disk shape is a JSON map of provider id -> secret.
+struct FileKeychain {
+    path: PathBuf,
+}
+
+impl FileKeychain {
+    fn read_all(&self) -> HashMap<String, String> {
+        match fs::read_to_string(&self.path) {
+            Ok(contents) if !contents.trim().is_empty() => {
+                serde_json::from_str(&contents).unwrap_or_default()
+            }
+            _ => HashMap::new(),
+        }
+    }
+
+    fn write_all(&self, map: &HashMap<String, String>) {
+        let encoded = serde_json::to_string(map).expect("mock keychain encodes");
+        fs::write(&self.path, encoded).expect("mock keychain writes");
+    }
+}
+
+impl BackendCredentialStore for FileKeychain {
+    fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
+        Ok(self.read_all().get(provider_id).cloned())
+    }
+
+    fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String> {
+        let mut map = self.read_all();
+        map.insert(provider_id.to_string(), secret.to_string());
+        self.write_all(&map);
+        Ok(())
+    }
+
+    fn remove(&mut self, provider_id: &str) -> Result<(), String> {
+        let mut map = self.read_all();
+        map.remove(provider_id);
+        self.write_all(&map);
+        Ok(())
+    }
+}
+
+#[test]
+fn credential_survives_a_process_restart_and_re_resolves_connected() {
+    // The connected-backends manifest and the (mock) keychain each get their
+    // own temp file so the round-trip models two real files outliving a restart.
+    let manifest_path = temp_backends_path("keychain-restart-manifest");
+    let keychain_path = temp_backends_path("keychain-restart-store");
+    let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_file(&keychain_path);
+
+    // --- "Process A": store the credential. ---
+    {
+        let mut keychain = FileKeychain {
+            path: keychain_path.clone(),
+        };
+        store_credential_into(
+            &mut keychain,
+            &manifest_path,
+            credential_request("anthropic", "sk-ant-survives-restart"),
+        )
+        .expect("credential should store to the keychain");
+    }
+
+    // --- "Process B" (fresh instances == restart): list resolves connected. ---
+    let providers = {
+        let keychain = FileKeychain {
+            path: keychain_path.clone(),
+        };
+        list_providers_from(&keychain, &manifest_path).expect("providers should list after restart")
+    };
+
+    let anthropic = providers
+        .iter()
+        .find(|p| p.id == "anthropic")
+        .expect("anthropic provider exists");
+    assert_eq!(
+        anthropic.auth_state, "connected",
+        "a persisted keychain entry must re-resolve to connected after a restart"
+    );
+    assert!(anthropic.capabilities.contains(&"streaming".to_string()));
+
+    let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_file(&keychain_path);
+}
+
+#[test]
+fn keyring_entry_value_never_appears_in_served_provider_json() {
+    let manifest_path = temp_backends_path("keychain-no-leak-manifest");
+    let keychain_path = temp_backends_path("keychain-no-leak-store");
+    let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_file(&keychain_path);
+
+    let mut keychain = FileKeychain {
+        path: keychain_path.clone(),
+    };
+    store_credential_into(
+        &mut keychain,
+        &manifest_path,
+        credential_request("openai", "sk-openai-never-leak-to-js"),
+    )
+    .expect("store");
+
+    // The served provider list must not carry the raw keyring entry value.
+    let serialized =
+        serde_json::to_string(&list_providers_from(&keychain, &manifest_path).expect("list"))
+            .expect("serialize");
+    assert!(
+        !serialized.contains("sk-openai-never-leak-to-js"),
+        "keyring entry value must not appear in served BackendProvider JSON"
+    );
+
+    // The connected-backends manifest is ids only.
+    let connected = read_connected_backends(&manifest_path).expect("connected read");
+    let manifest = serde_json::to_string(&connected).expect("serialize");
+    assert!(manifest.contains("openai"));
+    assert!(!manifest.contains("sk-openai-never-leak-to-js"));
+
+    let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_file(&keychain_path);
+}
+
+#[test]
+fn keyring_store_trait_miss_is_a_normal_get_not_an_error() {
+    // The trait contract the command path relies on: a missing credential must
+    // be `Ok(None)`, not `Err`, so the path fails closed (needs-auth) without
+    // surfacing a secret or aborting. Verified against the mock keychain so the
+    // real OS keychain is never touched by the test suite.
+    let path = temp_backends_path("keychain-miss-contract");
+    let _ = fs::remove_file(&path);
+    let keychain = FileKeychain { path: path.clone() };
+
+    let missing = keychain
+        .get("openai")
+        .expect("a missing entry is a normal miss, not an error");
+    assert_eq!(missing, None);
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn in_memory_fallback_store_implements_the_trait_contract() {
+    // The HashMap fallback (the original store) still satisfies the trait: a
+    // write is readable back, and a remove makes it absent — the same shape the
+    // keychain impl must honor so the command layer is store-agnostic. The
+    // trait methods are called via fully-qualified syntax because HashMap also
+    // has an inherent `get` that would otherwise shadow the trait method.
+    let mut store: HashMap<String, String> = HashMap::new();
+    store.set("codex", "fallback-token").expect("set");
+    assert_eq!(
+        BackendCredentialStore::get(&store, "codex").expect("get"),
+        Some("fallback-token".to_string())
+    );
+    store.remove("codex").expect("remove");
+    assert_eq!(
+        BackendCredentialStore::get(&store, "codex").expect("get after remove"),
+        None
+    );
+}

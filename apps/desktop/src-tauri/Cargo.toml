@@ -30,3 +30,9 @@ reqwest = { version = "0.13", default-features = false, features = [
 ] }
 tokio = { version = "1", features = ["sync", "rt", "macros"] }
 futures-util = "0.3"
+# OS-secure credential storage for agent-runtime API keys. The keyring crate
+# speaks the platform-native store (Windows Credential Manager, macOS
+# Keychain, Linux Secret Service) and ships a `mock` in-process backend used
+# by tests so they never touch the real OS keychain. v3 is the current
+# stable line with the bring-your-own-store architecture.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

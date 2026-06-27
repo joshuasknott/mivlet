@@ -1,16 +1,20 @@
 //! Agent-runtime backend credential boundary.
 //!
 //! Rust owns credential access for the agent-runtime AI backends (Codex,
-//! Cursor, Copilot, Grok). Secrets live in a process-scoped store — a
-//! `Mutex<HashMap<ProviderId, SecretString>>` now, behind the
-//! `BACKENDS_PRE_RELEASE` flag, with OS keychain as the future swap point.
+//! Cursor, Copilot, Grok, plus the native-API providers). Secrets live in the
+//! OS-secure store (Windows Credential Manager / macOS Keychain / Linux Secret
+//! Service) via the `keyring` crate, with a process-scoped `Mutex<HashMap>`
+//! kept as the test/headless fallback. Both are reached through the
+//! [`BackendCredentialStore`] trait so the storage backend is pluggable and
+//! mockable without touching the Tauri command surface.
 //!
 //! Hard invariants:
 //!   - Secrets never cross the Tauri command boundary into JavaScript.
 //!   - `list_backends` returns auth state + capabilities + models only.
 //!   - Secrets are never logged, serialized into `RuntimeSnapshot`, or written
 //!     to disk in the snapshot path. Only *which* backends are connected is
-//!     persisted (to `connected-backends.json`), as provider ids.
+//!     persisted (to `connected-backends.json`), as provider ids — so auth state
+//!     can be re-resolved against the keychain after a restart.
 //!
 //! Public Tauri commands (names must stay stable): `list_backends`,
 //! `store_backend_credential`, `clear_backend_credential`,
@@ -193,24 +197,164 @@ const CATALOG: &[BackendCatalogEntry] = &[
     },
 ];
 
-/// Process-scoped credential store. The secret string is held here and never
-/// serialized into a Tauri response or the runtime snapshot.
+/// Process-scoped fallback credential store. The OS-secure store
+/// ([`KeyringStore`]) is primary; this in-memory map is the fallback used when
+/// the keychain is unavailable (headless/test builds) and the backing store for
+/// existing unit tests. Secrets held here are never serialized into a Tauri
+/// response or the runtime snapshot.
 static CREDENTIAL_STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 static PRE_RELEASE_WARNING_LOGGED: OnceLock<()> = OnceLock::new();
 
+/// The service name under which every backend key is filed in the OS-secure
+/// store. The entry name (a.k.a. user name) is the provider id, so a stored
+/// connected id from `connected-backends.json` re-resolves to its secret after
+/// a restart.
+const KEYRING_SERVICE: &str = "com.fable.workspace";
+
 /// Exposed crate-wide so the native-API transport (`native_api.rs`) can look up
 /// a stored key to add it as an Authorization header — without duplicating the
-/// store. The store itself (OnceLock + Mutex) is unchanged.
+/// store. The store itself (OnceLock + Mutex) is unchanged; it remains the
+/// process-scoped fallback behind the keychain-backed store.
 pub(crate) fn credential_store() -> &'static Mutex<HashMap<String, String>> {
     CREDENTIAL_STORE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Pluggable, mockable credential storage for agent-runtime backends. The
+/// production path is the OS-secure store; the in-memory map implements this so
+/// it can remain the test/headless fallback. Every method returns owned errors
+/// (never the secret) so a failure cannot leak the value across the boundary.
+///
+/// Contract for callers:
+///   - `get` returns `Ok(None)` when no credential exists (a *normal* miss) and
+///     `Err` only when the store itself is unavailable.
+///   - `set`/`remove` return `Err` only when the store is unavailable.
+pub(crate) trait BackendCredentialStore {
+    fn get(&self, provider_id: &str) -> Result<Option<String>, String>;
+    fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String>;
+    fn remove(&mut self, provider_id: &str) -> Result<(), String>;
+}
+
+/// The keychain is the primary store. `keyring` maps a `(service, user)` pair —
+/// here `("com.fable.workspace", provider_id)` — to a platform credential
+/// (Windows Credential Manager / macOS Keychain / Linux Secret Service). A
+/// missing entry is a normal miss (`Ok(None)`); only platform-unavailable
+/// failures bubble up as `Err` so the command path can fall back to the
+/// in-memory store.
+pub(crate) struct KeyringStore;
+
+impl KeyringStore {
+    fn entry(provider_id: &str) -> Result<keyring::Entry, String> {
+        keyring::Entry::new(KEYRING_SERVICE, provider_id)
+            .map_err(|_| "Fable could not open the OS secure store.".to_string())
+    }
+}
+
+impl BackendCredentialStore for KeyringStore {
+    fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
+        let entry = Self::entry(provider_id)?;
+        match entry.get_password() {
+            Ok(secret) => Ok(Some(secret)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(other) => Err(format!("Fable could not read the OS secure store: {other}")),
+        }
+    }
+
+    fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String> {
+        let entry = Self::entry(provider_id)?;
+        entry
+            .set_password(secret)
+            .map_err(|_| "Fable could not save to the OS secure store.".to_string())
+    }
+
+    fn remove(&mut self, provider_id: &str) -> Result<(), String> {
+        let entry = Self::entry(provider_id)?;
+        match entry.delete_credential() {
+            Ok(()) => Ok(()),
+            // Nothing to remove is a normal miss, not an unavailable store.
+            Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => Err("Fable could not clear the OS secure store.".to_string()),
+        }
+    }
+}
+
+/// The in-memory fallback. `HashMap<String, String>` is the process-scoped
+/// store used when the keychain is unavailable (headless/test) and is also what
+/// the existing unit tests drive directly.
+impl BackendCredentialStore for HashMap<String, String> {
+    fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
+        Ok(self.get(provider_id).cloned())
+    }
+
+    fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String> {
+        self.insert(provider_id.to_string(), secret.to_string());
+        Ok(())
+    }
+
+    fn remove(&mut self, provider_id: &str) -> Result<(), String> {
+        self.remove(provider_id);
+        Ok(())
+    }
+}
+
+/// Read a credential for `provider_id`, preferring the keychain and falling
+/// back to the in-memory store only when the keychain is unavailable or empty.
+/// Returns `Ok(None)` when neither store has a value (a normal miss →
+/// needs-auth). The in-memory fallback exists so headless/test runs without a
+/// keychain still resolve.
+pub(crate) fn read_credential(provider_id: &str) -> Result<Option<String>, String> {
+    CredentialStores.get(provider_id)
+}
+
+/// The composed production store: keychain-primary, in-memory-fallback. The
+/// Tauri commands pass this to the generic helpers so the same fallback rules
+/// apply to reads (`list_backends`), writes (`store_backend_credential`), and
+/// deletes (`clear_backend_credential`). It is never serialized and never
+/// exposes a secret — it is only ever asked whether a credential *exists* or
+/// handed one to persist.
+pub(crate) struct CredentialStores;
+
+impl BackendCredentialStore for CredentialStores {
+    fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
+        // Keychain first. A hit resolves; a miss OR an unavailable keychain
+        // falls through to the in-memory store (so the same miss/miss path is
+        // taken either way, and headless builds still work).
+        if let Ok(Some(secret)) = KeyringStore.get(provider_id) {
+            return Ok(Some(secret));
+        }
+        let store = credential_store()
+            .lock()
+            .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
+        Ok(store.get(provider_id).cloned())
+    }
+
+    fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String> {
+        // Primary: keychain. Mirror to the in-memory fallback only on keychain
+        // failure, so the secret survives at least for this session.
+        if KeyringStore.set(provider_id, secret).is_err() {
+            let mut store = credential_store()
+                .lock()
+                .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
+            store.set(provider_id, secret)?;
+        }
+        Ok(())
+    }
+
+    fn remove(&mut self, provider_id: &str) -> Result<(), String> {
+        // Best-effort clear of both stores; a missing entry is not an error.
+        let _ = KeyringStore.remove(provider_id);
+        if let Ok(mut store) = credential_store().lock() {
+            let _ = store.remove(provider_id);
+        }
+        Ok(())
+    }
 }
 
 fn log_pre_release_warning_once() {
     PRE_RELEASE_WARNING_LOGGED.get_or_init(|| {
         if BACKENDS_PRE_RELEASE {
             eprintln!(
-                "fable: backend credential storage is PRE-RELEASE (local process store). \
-                 OS keychain is not wired yet. Secrets are held in memory only."
+                "fable: backend credential storage is PRE-RELEASE. Secrets are held in the \
+                 OS secure store (with a process-scoped fallback). Do not ship pre-release."
             );
         }
     });
@@ -232,16 +376,16 @@ fn catalog_entry(provider_id: &str) -> Option<&'static BackendCatalogEntry> {
     CATALOG.iter().find(|entry| entry.id == provider_id)
 }
 
-/// Resolve the auth state for a provider from the credential store + the
-/// persisted connected-backends manifest. ACP providers (cursor, grok) are
-/// `install-required` until a credential is present (the CLI is the gating
-/// dependency for this pre-release boundary).
-fn resolve_auth_state(
-    provider_id: &str,
-    has_credential: bool,
-    _connected: &ConnectedBackends,
-) -> String {
-    if has_credential {
+/// Resolve the auth state for a provider from a credential store. A provider
+/// is `connected` when a live credential exists (re-read from the keychain on
+/// restart, so a persisted connected id re-resolves without a re-prompt). ACP
+/// providers (cursor, grok) are `install-required` until a credential is
+/// present (the CLI is the gating dependency). When the manifest said a
+/// provider was connected but no credential survives (e.g. cleared from the
+/// keychain), it falls back to `needs-auth` rather than silently dropping — the
+/// keychain is the source of truth, the manifest is just a recovery hint.
+fn resolve_auth_state<S: BackendCredentialStore>(provider_id: &str, store: &S) -> String {
+    if matches!(store.get(provider_id), Ok(Some(_))) {
         return "connected".to_string();
     }
 
@@ -386,10 +530,11 @@ fn write_connected_backends(path: &Path, connected: &ConnectedBackends) -> Resul
 
 /// Validate the secret length and write it to the given store. The secret is
 /// never returned and never persisted to disk. Pure over the store + path so
-/// tests can pass a fresh store; the Tauri command wrapper passes the global
-/// process store.
-pub(crate) fn store_credential_into(
-    store: &mut HashMap<String, String>,
+/// tests can pass a fresh store; the Tauri command wrapper passes the
+/// keychain-backed [`CredentialStores`], which mirrors to the in-memory
+/// fallback when the keychain is unavailable.
+pub(crate) fn store_credential_into<S: BackendCredentialStore>(
+    store: &mut S,
     connected_path: &Path,
     request: BackendCredentialRequest,
 ) -> Result<String, String> {
@@ -405,7 +550,7 @@ pub(crate) fn store_credential_into(
     }
 
     log_pre_release_warning_once();
-    store.insert(provider_id.clone(), secret);
+    store.set(&provider_id, &secret)?;
 
     let mut connected = read_connected_backends(connected_path)?;
     connected.add(&provider_id);
@@ -415,15 +560,16 @@ pub(crate) fn store_credential_into(
 }
 
 /// Remove a credential from the store and drop the provider from the manifest.
-pub(crate) fn clear_credential_into(
-    store: &mut HashMap<String, String>,
+/// The supplied store is responsible for clearing any fallbacks it owns.
+pub(crate) fn clear_credential_into<S: BackendCredentialStore>(
+    store: &mut S,
     connected_path: &Path,
     provider_id: &str,
 ) -> Result<String, String> {
     require_supported_provider(provider_id)?;
     let provider_id = normalize_spaces(provider_id);
 
-    store.remove(&provider_id);
+    store.remove(&provider_id)?;
 
     let mut connected = read_connected_backends(connected_path)?;
     connected.remove(&provider_id);
@@ -433,17 +579,24 @@ pub(crate) fn clear_credential_into(
 }
 
 /// Serve every catalog provider with its resolved auth state. Never includes
-/// secrets — only auth state, capabilities, and model availability.
-pub(crate) fn list_providers_from(
-    store: &HashMap<String, String>,
+/// secrets — only auth state, capabilities, and model availability. Auth state
+/// is resolved by asking the store whether a live credential exists, so a
+/// persisted connected id re-resolves to "connected" after a restart when the
+/// keychain still holds the entry.
+pub(crate) fn list_providers_from<S: BackendCredentialStore>(
+    store: &S,
     connected_path: &Path,
 ) -> Result<Vec<BackendProvider>, String> {
     validate_catalog_vocabulary();
-    let connected = read_connected_backends(connected_path)?;
+    // The connected manifest is read so store/clear stay consistent with it;
+    // auth state itself is resolved from the credential store (the keychain is
+    // the source of truth), so a persisted connected id re-resolves to
+    // "connected" when its keychain entry survives a restart.
+    let _connected = read_connected_backends(connected_path)?;
     let providers = CATALOG
         .iter()
         .map(|entry| {
-            let auth_state = resolve_auth_state(entry.id, store.contains_key(entry.id), &connected);
+            let auth_state = resolve_auth_state(entry.id, store);
             build_provider(entry, auth_state)
         })
         .collect();
@@ -541,12 +694,10 @@ pub(crate) fn normalize_backend_event(
 #[tauri::command]
 pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, String> {
     let path = connected_backends_path(&app)?;
-    let store = credential_store()
-        .lock()
-        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-    let store_snapshot: HashMap<String, String> = store.clone();
-    drop(store);
-    list_providers_from(&store_snapshot, &path)
+    // Auth state is resolved against the keychain (primary) with the in-memory
+    // store as fallback — never against a raw secret. A persisted connected id
+    // re-resolves to "connected" when the keychain still holds the entry.
+    list_providers_from(&CredentialStores, &path)
 }
 
 #[tauri::command]
@@ -555,10 +706,8 @@ pub fn store_backend_credential(
     request: BackendCredentialRequest,
 ) -> Result<String, String> {
     let path = connected_backends_path(&app)?;
-    let mut store = credential_store()
-        .lock()
-        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-    store_credential_into(&mut store, &path, request)
+    let mut stores = CredentialStores;
+    store_credential_into(&mut stores, &path, request)
 }
 
 #[tauri::command]
@@ -567,10 +716,8 @@ pub fn clear_backend_credential(
     provider_id: String,
 ) -> Result<String, String> {
     let path = connected_backends_path(&app)?;
-    let mut store = credential_store()
-        .lock()
-        .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-    clear_credential_into(&mut store, &path, &provider_id)
+    let mut stores = CredentialStores;
+    clear_credential_into(&mut stores, &path, &provider_id)
 }
 
 #[tauri::command]
