@@ -181,6 +181,9 @@ expired/unavailable auth state.
 - Provider apps, consent screens, distribution review, and Google restricted
   scope verification are external setup tasks.
 - Browser search/import remains synthetic fixture behavior only.
+- Tauri provider egress is enabled for authenticated GitHub, Vercel, Linear,
+  Google Drive, Gmail, Google Calendar, Notion, and Slack accounts; undeclared
+  capabilities still fail closed.
 - Imported connector records are session-local until encrypted connector cache
   persistence is added.
 - GitHub/Vercel/Linear coverage intentionally targets practical high-value
@@ -188,6 +191,8 @@ expired/unavailable auth state.
   undeclared capabilities.
 - Live Google integration tests are opt-in and require deliberately supplied
   credentials and test account data.
+- Live Notion and Slack integration tests are opt-in and require deliberately
+  supplied workspace credentials and test targets.
 
 ## Official provider references
 

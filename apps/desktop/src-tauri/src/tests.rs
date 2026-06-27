@@ -149,6 +149,25 @@ fn rejects_connector_execution_with_reshaped_approval() {
 }
 
 #[test]
+fn rejects_standing_approvals_for_connector_writes() {
+    let action = connector_action("slack.post", "slack", "Slack");
+    let request = ConnectorActionExecutionRequest {
+        action: action.clone(),
+        approval: ApprovalResolutionRequest {
+            request: action.approval,
+            decision: "session".to_string(),
+            decided_at: "2026-06-27T10:01:00.000Z".to_string(),
+            confirmation_text: Some("post message".to_string()),
+            modification: None,
+        },
+    };
+
+    let error = validate_connector_execution_request(request)
+        .expect_err("connector writes require fresh per-action approval");
+    assert_eq!(error.code, "approval-required");
+}
+
+#[test]
 fn redacts_connector_secrets_and_private_provider_data() {
     assert_eq!(
         redact_connector_text("Authorization: Bearer secret-token"),

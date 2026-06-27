@@ -110,6 +110,20 @@ const TOOLS: Record<string, BackendTool> = {
       },
       required: ["operation"]
     })
+  },
+  "search-notion": {
+    name: "search-notion",
+    description: "Search pages and databases explicitly shared with the connected Notion integration.",
+    defaultMode: "read-only",
+    defaultRisk: "low",
+    parameters: JSON.stringify({ type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, cursor: { type: "string" } }, required: ["query"] })
+  },
+  "search-slack": {
+    name: "search-slack",
+    description: "Search supported message data or list accessible channels in the connected Slack workspace.",
+    defaultMode: "read-only",
+    defaultRisk: "low",
+    parameters: JSON.stringify({ type: "object", properties: { query: { type: "string" }, limit: { type: "number" }, cursor: { type: "string" } }, required: ["query"] })
   }
 };
 

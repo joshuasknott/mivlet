@@ -972,6 +972,16 @@ pub(crate) async fn provider_access_token(
     Ok(tokens.access_token)
 }
 
+/// Resolve a usable access token entirely inside the Rust/keyring boundary.
+/// Callers receive it only in Rust; no Tauri command exposes this function.
+pub(crate) async fn access_token(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+) -> Result<(ConnectorConnection, String), ConnectorCommandError> {
+    let (connection, tokens) = authorized_tokens(app, connector_id).await?;
+    Ok((connection, tokens.access_token))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

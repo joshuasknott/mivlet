@@ -7,6 +7,7 @@
 mod agent_runs;
 mod approvals;
 mod backends;
+mod collaboration_connectors;
 mod connector_api;
 mod connector_approvals;
 mod connector_auth;

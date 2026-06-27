@@ -142,6 +142,15 @@ fn connector_target_summary(action: &ConnectorActionRequest, account_id: &str) -
         ],
         "gmail" => &["to", "draftId", "subject", "targetId"],
         "google-calendar" => &["calendarId", "eventId", "title", "start", "end", "targetId"],
+        "slack" => &[
+            "workspace",
+            "channelName",
+            "channelId",
+            "timestamp",
+            "threadTimestamp",
+            "targetId",
+        ],
+        "notion" => &["workspace", "targetId", "destination", "title", "subject", "body"],
         _ => &[
             "target",
             "to",
@@ -230,6 +239,34 @@ pub(crate) fn record_pending_connector_action(
             action.action,
             value(&["name", "content"], "(metadata only)"),
         ),
+        "notion" | "slack" => {
+            let detail_keys = [
+                "workspace",
+                "account",
+                "channelName",
+                "threadTimestamp",
+                "timestamp",
+                "destination",
+                "text",
+                "subject",
+                "title",
+                "changedProperties",
+                "body",
+                "reaction",
+            ];
+            let details = detail_keys
+                .iter()
+                .filter_map(|key| {
+                    first_payload_value(action, &[*key]).map(|value| format!("{key}: {value}"))
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            if details.is_empty() {
+                default_preview
+            } else {
+                format!("{} -> {target} | {details}", action.action)
+            }
+        }
         _ => default_preview,
     };
     let preview = truncate_characters(&preview, 1_000);

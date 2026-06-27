@@ -15,7 +15,8 @@ import {
   prepareGoogleCalendarDelete,
   prepareGoogleCalendarUpdate
 } from "./google-calendar";
-import { prepareSlackDraft, prepareSlackPost } from "./slack";
+import { prepareNotionWrite } from "./notion";
+import { prepareSlackDraft, prepareSlackMutation, prepareSlackPost } from "./slack";
 import {
   importConnectorSearchItem,
   prepareConnectorAction,
@@ -119,6 +120,35 @@ export function prepareFixtureConnectorAction(
         payload.channelId ?? payload.targetId ?? "C_FIXTURE",
         payload.text ?? "Prepared Slack message."
       );
+    case "slack.reply":
+    case "slack.edit":
+    case "slack.delete":
+    case "slack.react-add":
+    case "slack.react-remove":
+      return prepareSlackMutation(action, {
+        account: payload.account ?? "fixture-account",
+        workspace: payload.workspace ?? "fixture-workspace",
+        channelId: payload.channelId ?? payload.targetId ?? "C_FIXTURE",
+        channelName: payload.channelName ?? "general",
+        text: payload.text,
+        timestamp: payload.timestamp ?? payload.targetId,
+        threadTimestamp: payload.threadTimestamp,
+        reaction: payload.reaction
+      });
+    case "notion.create-page":
+    case "notion.update-page":
+    case "notion.append-blocks":
+    case "notion.update-block":
+    case "notion.delete-block":
+    case "notion.create-comment":
+    case "notion.create-entry":
+      return prepareNotionWrite(action, {
+        workspace: payload.workspace ?? "fixture-workspace",
+        targetId: payload.targetId ?? "fixture-target",
+        destination: payload.destination ?? payload.targetId ?? "fixture-target",
+        body: parseNotionBody(payload.body, payload.title),
+        changedProperties: payload.changedProperties?.split(",").map((value) => value.trim()).filter(Boolean)
+      });
     case "google-calendar.create-draft":
       return prepareGoogleCalendarCreate({
         calendarId: payload.calendarId ?? payload.targetId ?? "fixture-primary",
@@ -140,5 +170,16 @@ export function prepareFixtureConnectorAction(
         eventId: payload.eventId ?? payload.targetId ?? "fixture-event",
         title: payload.title
       });
+    default:
+      throw new Error(`Fixture connector action is not supported: ${action}`);
+  }
+}
+
+function parseNotionBody(body: string | undefined, title: string | undefined) {
+  if (!body) return { title: title ?? "Connector review" };
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return { content: body };
   }
 }

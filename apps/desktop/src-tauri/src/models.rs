@@ -94,7 +94,7 @@ pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 32] = [
+pub const CONNECTOR_ACTIONS: [&str; 44] = [
     "github.draft-pull-request",
     "github.comment",
     "vercel.promote",
@@ -124,6 +124,18 @@ pub const CONNECTOR_ACTIONS: [&str; 32] = [
     "gmail.send",
     "slack.create-draft",
     "slack.post",
+    "slack.reply",
+    "slack.edit",
+    "slack.delete",
+    "slack.react-add",
+    "slack.react-remove",
+    "notion.create-page",
+    "notion.update-page",
+    "notion.append-blocks",
+    "notion.update-block",
+    "notion.delete-block",
+    "notion.create-comment",
+    "notion.create-entry",
     "google-calendar.create-draft",
     "google-calendar.update-draft",
     "google-calendar.delete-event",

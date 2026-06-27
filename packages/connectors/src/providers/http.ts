@@ -13,7 +13,8 @@ import type {
 } from "../sdk";
 
 export type JsonObject = Record<string, unknown>;
-export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+export type FetchLike = ProviderFetch;
 
 export interface OAuthClientOptions {
   connectorId: ConnectorId;
@@ -28,7 +29,7 @@ export interface OAuthClientOptions {
 }
 
 export interface ProviderRequest {
-  method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+  method?: string;
   path: string;
   query?: Record<string, string | number | boolean | undefined>;
   body?: unknown;
@@ -36,17 +37,19 @@ export interface ProviderRequest {
   headers?: Record<string, string>;
 }
 
+export type ProviderHttpRequest = ProviderRequest;
+
 export class ProviderHttpClient {
   constructor(
     private readonly connectorId: ConnectorId,
     private readonly baseUrl: string,
-    private readonly fetcher: FetchLike = fetch
+    private readonly fetcher: ProviderFetch = fetch
   ) {}
 
-  async request<T>(request: ProviderRequest, tokens: ConnectorTokenSet): Promise<{
-    data: T;
-    response: Response;
-  }> {
+  async request<T>(
+    request: ProviderRequest,
+    tokens: ConnectorTokenSet
+  ): Promise<{ data: T; response: Response; headers: Headers }> {
     const url = new URL(request.path, this.baseUrl);
     for (const [key, value] of Object.entries(request.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
@@ -66,11 +69,15 @@ export class ProviderHttpClient {
       });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw error;
+      if (request.signal?.aborted) throw error;
       throw providerError(this.connectorId, 0, undefined, undefined);
     }
     if (!response.ok) {
-      const body = await safeJson(response);
-      const code = stringValue(body, "code") ?? nestedString(body, "error", "code");
+      const body = await optionalJson(response);
+      const code = stringValue(body, "code") ??
+        stringValue(body, "error") ??
+        stringValue(body, "error_description") ??
+        nestedString(body, "error", "code");
       throw providerError(
         this.connectorId,
         response.status,
@@ -79,16 +86,28 @@ export class ProviderHttpClient {
       );
     }
     const data = (response.status === 204 ? {} : await safeJson(response)) as T;
-    return { data, response };
+    return { data, response, headers: response.headers };
   }
 }
 
-export function page<T>(items: T[], response: Response, nextCursor?: string): ConnectorPage<T> {
-  const remaining = numberHeader(response, "x-ratelimit-remaining") ??
-    numberHeader(response, "x-ratelimit-requests-remaining");
-  const reset = numberHeader(response, "x-ratelimit-reset") ??
-    numberHeader(response, "x-ratelimit-requests-reset");
-  const retrySeconds = numberHeader(response, "retry-after");
+export function page<T>(
+  items: T[],
+  responseOrNextCursor?: Response | string,
+  nextCursorOrHeaders?: string | Headers
+): ConnectorPage<T> {
+  const response = responseOrNextCursor instanceof Response ? responseOrNextCursor : undefined;
+  const headers = response?.headers ??
+    (nextCursorOrHeaders instanceof Headers ? nextCursorOrHeaders : undefined);
+  const nextCursor = typeof responseOrNextCursor === "string"
+    ? responseOrNextCursor
+    : typeof nextCursorOrHeaders === "string"
+      ? nextCursorOrHeaders
+      : undefined;
+  const remaining = numberHeader(headers, "x-ratelimit-remaining") ??
+    numberHeader(headers, "x-ratelimit-requests-remaining");
+  const reset = numberHeader(headers, "x-ratelimit-reset") ??
+    numberHeader(headers, "x-ratelimit-requests-reset");
+  const retrySeconds = numberHeader(headers, "retry-after");
   return {
     items,
     ...(nextCursor ? { nextCursor } : {}),
@@ -181,25 +200,29 @@ export function providerError(
   providerCode?: string,
   retryAfter?: string
 ): ConnectorError {
+  const lowerCode = providerCode?.toLowerCase() ?? "";
   const code = status === 401
-    ? (providerCode?.includes("expired") || providerCode?.includes("refresh") ? "expired-auth" : "needs-auth")
+    ? (lowerCode.includes("expired") || lowerCode.includes("refresh") ? "expired-auth" : "needs-auth")
     : status === 403 ? "permission-denied"
     : status === 404 ? "not-found"
-    : status === 429 || providerCode?.toLowerCase().includes("ratelimit") ? "rate-limited"
+    : status === 429 || lowerCode.includes("ratelimit") ? "rate-limited"
     : status === 400 || status === 422 ? "invalid-request"
     : status === 0 || status >= 500 ? "provider-unavailable"
     : "unknown";
+  const missingScope = lowerCode.includes("missing_scope")
+    ? " The installed app is missing a required scope."
+    : "";
   return {
     connectorId,
     code,
-    message: code === "permission-denied" ? "The provider denied the required scope or permission."
+    message: (code === "permission-denied" ? "The provider denied the required scope or permission."
       : code === "expired-auth" ? "The provider authorization expired; reconnect the account."
       : code === "needs-auth" ? "Connect the provider account before trying again."
       : code === "rate-limited" ? "The provider rate limit was reached."
       : code === "not-found" ? "The requested provider resource was not found."
       : code === "invalid-request" ? "The provider rejected the request."
       : code === "provider-unavailable" ? "The provider is temporarily unavailable."
-      : "The connector request failed.",
+      : "The connector request failed.") + missingScope,
     retryable: code === "rate-limited" || code === "provider-unavailable",
     ...(retryAfter ? { retryAfter: String(Number(retryAfter) * 1000) } : {})
   };
@@ -219,7 +242,18 @@ export function numberValue(value: unknown, key: string): number | undefined {
 }
 
 async function safeJson(response: Response): Promise<unknown> {
-  try { return await response.json(); } catch { throw providerError("connector", 502, "malformed_response"); }
+  try {
+    return await response.json();
+  } catch {
+    throw providerError("connector", 502, "malformed_response");
+  }
+}
+async function optionalJson(response: Response): Promise<unknown> {
+  try {
+    return await response.clone().json();
+  } catch {
+    return {};
+  }
 }
 function tokenSet(value: unknown): ConnectorTokenSet {
   if (!isObject(value) || typeof value.access_token !== "string") {
@@ -253,9 +287,9 @@ function accountSummary(value: unknown): ConnectorAccountSummary {
 function nestedString(value: unknown, outer: string, inner: string) {
   return isObject(value) ? stringValue(value[outer], inner) : undefined;
 }
-function numberHeader(response: Response, name: string) {
-  const value = response.headers.get(name);
-  if (value === null) return undefined;
+function numberHeader(headers: Headers | undefined, name: string) {
+  const value = headers?.get(name);
+  if (value === undefined || value === null) return undefined;
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
 }

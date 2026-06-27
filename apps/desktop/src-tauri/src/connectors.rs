@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::approvals::resolve_approval;
+use crate::collaboration_connectors;
 use crate::connector_api;
 use crate::connector_approvals::{
     record_pending_connector_action, update_connector_action_result,
@@ -100,8 +101,11 @@ const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
         false,
     ),
 ];
-const NOTION_SCOPES: &[(&str, &str, &str, bool)] =
-    &[("read_content", "Read selected content", "read", true)];
+const NOTION_SCOPES: &[(&str, &str, &str, bool)] = &[
+    ("read_content", "Read selected content", "read", true),
+    ("insert_content", "Create content", "write", false),
+    ("update_content", "Update content", "write", false),
+];
 const GMAIL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("gmail.readonly", "Read mail", "read", true),
     ("gmail.compose", "Create drafts", "write", false),
@@ -109,7 +113,22 @@ const GMAIL_SCOPES: &[(&str, &str, &str, bool)] = &[
 const SLACK_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("channels:read", "Channel list", "read", true),
     ("channels:history", "Selected channel history", "read", true),
+    ("groups:read", "Private channel list", "read", false),
+    (
+        "groups:history",
+        "Selected private channel history",
+        "read",
+        false,
+    ),
+    ("users:read", "Workspace users", "read", true),
+    ("search:read", "Supported message search", "read", false),
     ("chat:write", "Post approved messages", "write", false),
+    (
+        "reactions:write",
+        "Change approved reactions",
+        "write",
+        false,
+    ),
 ];
 const CALENDAR_SCOPES: &[(&str, &str, &str, bool)] = &[
     (
@@ -194,10 +213,21 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         id: "notion",
         name: "Notion",
         auth_mode: "oauth-broker",
-        permissions: &["read user-selected pages and databases"],
+        permissions: &[
+            "read user-selected pages and databases",
+            "prepare approval-gated page, block, comment, and database entry changes",
+        ],
         scopes: NOTION_SCOPES,
         setup_message: "Create a Notion public connection and broker callback.",
-        actions: &[],
+        actions: &[
+            "notion.create-page",
+            "notion.update-page",
+            "notion.append-blocks",
+            "notion.update-block",
+            "notion.delete-block",
+            "notion.create-comment",
+            "notion.create-entry",
+        ],
     },
     ConnectorCatalogEntry {
         id: "gmail",
@@ -222,7 +252,15 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         ],
         scopes: SLACK_SCOPES,
         setup_message: "Create a Slack app and configure its HTTPS broker callback.",
-        actions: &["slack.create-draft", "slack.post"],
+        actions: &[
+            "slack.create-draft",
+            "slack.post",
+            "slack.reply",
+            "slack.edit",
+            "slack.delete",
+            "slack.react-add",
+            "slack.react-remove",
+        ],
     },
     ConnectorCatalogEntry {
         id: "google-calendar",
@@ -421,6 +459,90 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             consequence: "Posts a message to the selected Slack conversation.",
             confirmation_phrase: Some("post message"),
         },
+        "slack.reply" => ConnectorActionPolicy {
+            label: "Reply",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Posts a reply to the selected Slack thread.",
+            confirmation_phrase: Some("post message"),
+        },
+        "slack.edit" => ConnectorActionPolicy {
+            label: "Edit",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Edits the selected Slack message.",
+            confirmation_phrase: Some("change slack content"),
+        },
+        "slack.delete" => ConnectorActionPolicy {
+            label: "Delete",
+            mode: "full-access",
+            risk_level: "critical",
+            consequence: "Deletes the selected Slack message.",
+            confirmation_phrase: Some("delete slack message"),
+        },
+        "slack.react-add" => ConnectorActionPolicy {
+            label: "React Add",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Adds the selected reaction to a Slack message.",
+            confirmation_phrase: Some("change slack content"),
+        },
+        "slack.react-remove" => ConnectorActionPolicy {
+            label: "React Remove",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Removes the selected reaction from a Slack message.",
+            confirmation_phrase: Some("change slack content"),
+        },
+        "notion.create-page" => ConnectorActionPolicy {
+            label: "Create Page",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Creates a page in the selected Notion destination.",
+            confirmation_phrase: None,
+        },
+        "notion.update-page" => ConnectorActionPolicy {
+            label: "Update Page",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Updates the selected Notion page and properties.",
+            confirmation_phrase: None,
+        },
+        "notion.append-blocks" => ConnectorActionPolicy {
+            label: "Append Blocks",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Appends the proposed blocks to the selected Notion page.",
+            confirmation_phrase: None,
+        },
+        "notion.update-block" => ConnectorActionPolicy {
+            label: "Update Block",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Updates the selected Notion block.",
+            confirmation_phrase: None,
+        },
+        "notion.delete-block" => ConnectorActionPolicy {
+            label: "Delete Block",
+            mode: "full-access",
+            risk_level: "critical",
+            consequence: "Archives the selected Notion block.",
+            confirmation_phrase: Some("delete notion block"),
+        },
+        "notion.create-comment" => ConnectorActionPolicy {
+            label: "Create Comment",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Creates the proposed comment on the selected Notion page.",
+            confirmation_phrase: None,
+        },
+        "notion.create-entry" => ConnectorActionPolicy {
+            label: "Create Entry",
+            mode: "trusted-scope",
+            risk_level: "medium",
+            consequence: "Creates an entry in the selected Notion database.",
+            confirmation_phrase: None,
+        },
         "google-calendar.create-draft" => ConnectorActionPolicy {
             label: "Create Draft",
             mode: "trusted-scope",
@@ -581,6 +703,14 @@ pub(crate) fn validate_connector_execution_request(
     ConnectorCommandError,
 > {
     let action = validate_connector_action(request.action)?;
+    if matches!(request.approval.decision.as_str(), "session" | "rule") {
+        return Err(command_error(
+            "approval-required",
+            &action.connector_id,
+            "External connector writes require a fresh per-action approval.",
+            false,
+        ));
+    }
     if request.approval.request != action.approval {
         return Err(command_error(
             "approval-required",
@@ -777,6 +907,9 @@ pub async fn refresh_connector_health(
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
     let _ = refresh_connection(&app, entry.id).await?;
+    if matches!(entry.id, "notion" | "slack") {
+        collaboration_connectors::validate_identity(&app, entry.id).await?;
+    }
     let connections_path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     Ok(build_manifest(
@@ -806,6 +939,9 @@ pub async fn search_connector(
     }
     if matches!(entry.id, "github" | "vercel" | "linear") {
         return connector_api::search(&app, request).await;
+    }
+    if matches!(entry.id, "notion" | "slack") {
+        return collaboration_connectors::search(&app, request).await;
     }
     Err(configuration_required(entry.id))
 }
@@ -839,23 +975,27 @@ pub async fn import_connector_item(
     if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
         return crate::google::import(&app, request).await;
     }
+    if !matches!(entry.id, "github" | "vercel" | "linear" | "notion" | "slack") {
+        return Err(configuration_required(entry.id));
+    }
+    let kind = match request.item.kind.as_str() {
+        "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => {
+            "folder"
+        }
+        "deployment" => "web",
+        _ => "document",
+    };
     Ok(ConnectorImportResult {
         source: ConnectorKnowledgeSource {
             id: format!("connector-{}-{}", entry.id, request.item.id),
             title: request.item.title,
-            kind: match request.item.kind.as_str() {
-                "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => {
-                    "folder".to_string()
-                }
-                "deployment" => "web".to_string(),
-                _ => "document".to_string(),
-            },
+            kind: kind.to_string(),
             connector_id: entry.id.to_string(),
             provenance: request.item.provenance,
             freshness: request.item.freshness,
             pinned: false,
             trust: "untrusted".to_string(),
-            content_preview: request.item.content_preview,
+            content_preview: request.item.content_preview.or(Some(request.item.summary)),
             imported_at: request.imported_at,
             origin: "connector-import".to_string(),
             provider_metadata: request.item.provider_metadata,
@@ -984,6 +1124,34 @@ pub async fn execute_approved_connector_action(
                     Some(&provider_error.code),
                 );
                 return Err(provider_error);
+            }
+        }
+    }
+
+    if matches!(action.connector_id.as_str(), "notion" | "slack") {
+        match collaboration_connectors::execute(&app, &action).await {
+            Ok(result) => {
+                update_connector_action_result(
+                    &records_path,
+                    &action.approval.id,
+                    "executed",
+                    &resolution.audit_entry.decided_at,
+                    None,
+                )
+                .map_err(|message| {
+                    command_error("unknown", &action.connector_id, &message, false)
+                })?;
+                return Ok(result);
+            }
+            Err(error) => {
+                let _ = update_connector_action_result(
+                    &records_path,
+                    &action.approval.id,
+                    "failed",
+                    &resolution.audit_entry.decided_at,
+                    Some(&error.code),
+                );
+                return Err(error);
             }
         }
     }

@@ -262,6 +262,10 @@ function confirmationPhrase(action: ConnectorActionKind) {
   if (action === "slack.post") {
     return "post message";
   }
+  if (action === "slack.reply") return "post message";
+  if (action === "slack.edit" || action === "slack.react-add" || action === "slack.react-remove") return "change slack content";
+  if (action === "slack.delete") return "delete slack message";
+  if (action === "notion.delete-block") return "delete notion block";
   if (action === "vercel.promote") {
     return "promote deployment";
   }
