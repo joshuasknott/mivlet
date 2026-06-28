@@ -33,9 +33,11 @@ import {
   importFixtureConnectorItem,
   importLocalTextFile,
   listBackendProviders,
+  mergeDiscoveredModels,
   prepareFixtureConnectorAction,
   searchFixtureConnector,
   type ToolApprovalGate,
+  type ModelDiscoveryResult,
   type LocalTextFileCandidate
 } from "@fable/connectors";
 import {
@@ -64,6 +66,7 @@ import {
   listRuntimeConnectorStatuses,
   listRuntimeConnectorAccounts,
   listRuntimeBackends,
+  listRuntimeBackendModels,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
@@ -368,6 +371,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(() =>
     listBackendProviders()
   );
+  // Dynamically discovered model ids per native provider id, plus whether
+  // discovery actually ran for that provider (so the catalogue fallback is
+  // truthful: an omitted catalogue id is unavailable once discovery succeeded).
+  const [discoveredModels, setDiscoveredModels] = useState<
+    Record<string, ModelDiscoveryResult>
+  >({});
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   // Composer model + permission picker selections, persisted so the next run
@@ -418,10 +427,23 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ),
     [backendProviders]
   );
-  const selectableModels = useMemo(
-    () => connectedNativeBackend?.models ?? [],
-    [connectedNativeBackend]
-  );
+  const selectableModels = useMemo(() => {
+    const catalogue = connectedNativeBackend?.models ?? [];
+    if (!connectedNativeBackend) return catalogue;
+    // Merge dynamic discovery with the curated catalogue so availability is
+    // truthful: discovered ids are available, catalogue-only ids become
+    // unavailable once discovery ran (and stay available offline). Outside
+    // Tauri, discovery never ran, so the catalogue fallback drives selection.
+    const discovery = discoveredModels[connectedNativeBackend.id];
+    if (!discovery) return catalogue;
+    return mergeDiscoveredModels({
+      providerId: connectedNativeBackend.id,
+      catalogueModels: catalogue,
+      discovered: discovery.models,
+      connected: connectedNativeBackend.authState === "connected",
+      discoveryRan: discovery.outcome === "success" || discovery.outcome === "empty"
+    });
+  }, [connectedNativeBackend, discoveredModels]);
   // The persisted selection is re-validated against the connected backend's
   // available models each render: keep it if still available, else fall back to
   // the first available model (or "" when none is available).
@@ -641,6 +663,35 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
   }, []);
 
+  // Dynamic model discovery: when a native backend connects, ask the Rust
+  // boundary to list that provider's models (fail closed — no key in JS) and
+  // merge the result with the curated catalogue. Outside Tauri this is a no-op,
+  // so the catalogue fallback drives selection and fixture tests stay green.
+  // Re-runs only when the connected native provider id changes.
+  useEffect(() => {
+    if (!connectedNativeBackend || connectedNativeBackend.authState !== "connected") {
+      return;
+    }
+    const providerId = connectedNativeBackend.id;
+    let active = true;
+    void listRuntimeBackendModels(providerId).then((result) => {
+      if (!active) return;
+      // null means preview/no desktop runtime. Every desktop outcome is retained
+      // explicitly so failed/offline/unsupported never masquerades as empty.
+      if (result === null) return;
+      setDiscoveredModels((current) => ({
+        ...current,
+        [providerId]: result
+      }));
+      if (result.outcome === "failed") {
+        setBackendStatus(result.message ?? "Model discovery failed; using the curated catalogue.");
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [connectedNativeBackend?.id, connectedNativeBackend?.authState]);
+
   const focusComposer = (value: string) => {
     window.requestAnimationFrame(() => {
       composerRef.current?.focus();
@@ -800,7 +851,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memory: memoryDisabled ? [] : managedMemoryRecords,
       citations: result.citations,
       authorization: {
-        isSourceAuthorized: (connectorId) =>
+        isSourceAuthorized: (connectorId: string) =>
           connectorId === "local-files" ||
           connectorManifests.some(
             (connector) => connector.id === connectorId && connector.status === "connected"

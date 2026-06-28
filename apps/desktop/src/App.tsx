@@ -5,7 +5,8 @@ import { chatThreads, connectors, profileFixture, projects } from "./data/worksp
 import { utilityItems } from "./lib/constants";
 import {
   buildAgentRequest,
-  PERMISSION_PROFILES
+  PERMISSION_PROFILES,
+  validateModelSelection
 } from "./lib/agent-run";
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
 import { useShellRuntime } from "./hooks/useShellRuntime";
@@ -64,6 +65,8 @@ export function App() {
   const cancelRequestedRef = useRef(false);
   const agent = useNativeAgent({
     providers: runtime.backendProviders,
+    models: runtime.selectableModels,
+    threadId: runtime.activeThread?.id ?? runtime.activeItem,
     execute: executor,
     shouldCancel: () => cancelRequestedRef.current,
     onCancel: () => {
@@ -134,6 +137,10 @@ export function App() {
 
   const renderChatContext = () => {
     const visibleAgentError = agent.state.noTransport ? null : agent.state.lastError;
+    const activeThreadId = runtime.activeThread?.id ?? runtime.activeItem;
+    const visibleRecoverableRuns = agent.state.recoverableRuns.filter(
+      (run) => !run.threadId || run.threadId === activeThreadId
+    );
 
     return (
       <>
@@ -191,8 +198,20 @@ export function App() {
         {agent.state.transcript ||
         agent.state.usage ||
         visibleAgentError ||
-        agent.state.running ? (
+        agent.state.running ||
+        visibleRecoverableRuns.length > 0 ? (
           <section className="agent-panel" aria-label="Agent activity">
+            {visibleRecoverableRuns.map((run) => (
+              <div className="agent-panel__recovery" key={run.id}>
+                <p>
+                  {run.status === "interrupted" ? "Interrupted" : "Failed"} run · {run.model}
+                  {run.transcript ? ` · ${run.transcript.slice(0, 120)}` : ""}
+                </p>
+                <button type="button" onClick={() => void agent.retry(run)}>
+                  Retry from prompt
+                </button>
+              </div>
+            ))}
             {agent.state.transcript ? (
               <p className="agent-panel__transcript">{agent.state.transcript}</p>
             ) : null}
@@ -200,11 +219,16 @@ export function App() {
               <p className="agent-panel__usage">
                 {agent.state.usage.inputTokens} in · {agent.state.usage.outputTokens} out · $
                 {agent.state.usage.costUsd.toFixed(6)}
+                {agent.state.usage.costEstimated ? " estimated" : ""}
               </p>
             ) : null}
             {agent.state.running ? (
               <p className="agent-panel__running">
-                Running…
+                {agent.state.status === "awaiting-approval"
+                  ? "Waiting for approval…"
+                  : agent.state.status === "retrying"
+                    ? "Retrying provider…"
+                    : "Running…"}
                 <button
                   type="button"
                   className="agent-panel__stop"
@@ -405,11 +429,24 @@ export function App() {
                   // Build the pinned-memory/knowledge system prefix (empty when
                   // nothing is pinned or memory is disabled) and the request from
                   // the picker-selected model — both drive the real agent run.
+                  // Validate the model selection before opening a socket: an
+                  // unknown, unavailable, or non-streaming model is caught here
+                  // and surfaced through the same error channel as run failures.
+                  const validation = validateModelSelection(
+                    nativeConnected.id,
+                    runtime.resolvedSelectedModelId,
+                    runtime.selectableModels,
+                    2048
+                  );
+                  if (!validation.ok) {
+                    agent.reportError(validation.error ?? "The selected model cannot run.");
+                    return;
+                  }
                   const request = buildAgentRequest({
                     providerId: nativeConnected.id,
                     model: runtime.resolvedSelectedModelId,
                     prompt,
-                    maxTokens: 2048
+                    maxTokens: validation.maxTokens
                   });
                   // Reset the cooperative-cancel flag so a new run is not born
                   // already cancelled, then drive the Fable-owned agent loop.

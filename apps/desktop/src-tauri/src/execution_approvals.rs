@@ -19,6 +19,69 @@ struct ExecutionApproval {
     consumed_at: Option<String>,
 }
 
+const EXECUTION_APPROVAL_TTL_SECONDS: i64 = 15 * 60;
+
+fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
+    let value = value.strip_suffix('Z')?;
+    let (date, time) = value.split_once('T')?;
+    let mut date_parts = date.split('-').map(|part| part.parse::<i64>().ok());
+    let year = date_parts.next()??;
+    let month = date_parts.next()??;
+    let day = date_parts.next()??;
+    if date_parts.next().is_some() || !(1..=12).contains(&month) {
+        return None;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    if day < 1 || day > month_days[(month - 1) as usize] {
+        return None;
+    }
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next()?.parse::<i64>().ok()?;
+    let minute = time_parts.next()?.parse::<i64>().ok()?;
+    let seconds_part = time_parts.next()?;
+    if time_parts.next().is_some() || hour > 23 || minute > 59 {
+        return None;
+    }
+    let (second_text, fraction) = seconds_part.split_once('.').unwrap_or((seconds_part, ""));
+    if (!fraction.is_empty() && !fraction.chars().all(|character| character.is_ascii_digit()))
+        || second_text.len() != 2
+    {
+        return None;
+    }
+    let second = second_text.parse::<i64>().ok()?;
+    if second > 59 {
+        return None;
+    }
+
+    // Howard Hinnant's civil-date conversion, yielding days since Unix epoch.
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year
+    } else {
+        adjusted_year - 399
+    } / 400;
+    let year_of_era = adjusted_year - era * 400;
+    let shifted_month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
 fn request_fingerprint(request: &ApprovalRequest) -> Result<String, String> {
     let encoded = serde_json::to_vec(request)
         .map_err(|_| "Fable could not fingerprint the approval request.".to_string())?;
@@ -102,6 +165,15 @@ pub(crate) fn verify_and_consume_execution_approval(
     if record.consumed_at.is_some() {
         return Err("Execution blocked: this approval was already consumed.".to_string());
     }
+    let decided_at = parse_rfc3339_utc_seconds(&record.decided_at)
+        .ok_or_else(|| "Execution blocked: approval timestamp is invalid.".to_string())?;
+    let consumed_at_seconds = parse_rfc3339_utc_seconds(consumed_at)
+        .ok_or_else(|| "Execution blocked: execution timestamp is invalid.".to_string())?;
+    if consumed_at_seconds < decided_at
+        || consumed_at_seconds - decided_at > EXECUTION_APPROVAL_TTL_SECONDS
+    {
+        return Err("Execution blocked: this approval is stale.".to_string());
+    }
     record.consumed_at = Some(consumed_at.to_string());
     write_records(path, &records)
 }
@@ -154,8 +226,12 @@ mod tests {
         let mut reshaped = approved.clone();
         reshaped.action = "run-shell destructive-command".to_string();
         assert!(verify_and_consume_execution_approval(&path, &reshaped, "now").is_err());
-        verify_and_consume_execution_approval(&path, &approved, "now").expect("consume");
-        assert!(verify_and_consume_execution_approval(&path, &approved, "later").is_err());
+        verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:02Z")
+            .expect("consume");
+        assert!(
+            verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:03Z")
+                .is_err()
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -163,8 +239,31 @@ mod tests {
     fn unpersisted_model_claim_cannot_authorize_execution() {
         let path = std::env::temp_dir().join("fable-missing-execution-approval.json");
         let _ = fs::remove_file(&path);
-        let error = verify_and_consume_execution_approval(&path, &request(), "now")
-            .expect_err("missing user decision must fail closed");
+        let error =
+            verify_and_consume_execution_approval(&path, &request(), "2026-06-27T12:00:02Z")
+                .expect_err("missing user decision must fail closed");
         assert!(error.contains("no persisted user approval"));
+    }
+
+    #[test]
+    fn stale_or_backdated_execution_is_rejected_without_consuming_the_permit() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-stale-execution-approval-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let approved = request();
+        record_execution_decision(&path, &response(approved.clone())).expect("record");
+        assert!(
+            verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:20:01Z")
+                .is_err()
+        );
+        assert!(
+            verify_and_consume_execution_approval(&path, &approved, "2026-06-27T11:59:59Z")
+                .is_err()
+        );
+        verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:05.123Z")
+            .expect("fresh permit remains usable");
+        let _ = fs::remove_file(path);
     }
 }

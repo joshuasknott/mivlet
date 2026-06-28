@@ -431,14 +431,28 @@ export type AgentRunStatus =
   | "failed"
   | "interrupted";
 
+export interface PersistedAgentExchange {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  toolCallId?: string;
+  toolName?: string;
+  ok?: boolean;
+}
+
 export interface PersistedAgentRun {
   id: string;
   providerId: string;
   model: string;
   status: AgentRunStatus;
   transcript: string;
+  /** Active chat thread this exchange belongs to. */
+  threadId?: string;
+  /** Durable completed/checkpointed user, assistant, and tool exchanges. */
+  exchanges?: PersistedAgentExchange[];
+  /** Prior interrupted/failed run when this run is an explicit retry. */
+  parentRunId?: string;
   turn: number;
-  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean };
   pendingApprovalIds: string[];
   recoverable: boolean;
   retryCount: number;
@@ -482,11 +496,41 @@ export type BackendCapability =
   | "model-availability"
   | "cancellation";
 
+/**
+ * The closed set of per-model capabilities Fable represents. Each field is a
+ * truthful ceiling: it is only present when the adapter (or curated catalogue)
+ * actually knows the model can honor it. An adapter must never populate a field
+ * it cannot back — unknown capabilities stay `undefined` on the model, never
+ * fabricated.
+ */
+export interface ModelCapabilities {
+  /** Total input + output token ceiling for the model's context window. */
+  contextWindow: number;
+  /** Provider-imposed output cap for a single completion (max_tokens ceiling). */
+  maxOutputTokens: number;
+  /** Model supports streamed (SSE) completions. */
+  streaming: boolean;
+  /** Model supports tool / function calling. */
+  tools: boolean;
+  /** Model accepts image / vision inputs. */
+  vision: boolean;
+  /** Model exposes an internal reasoning / thinking mode. */
+  reasoning: boolean;
+  /** Model supports structured / JSON-schema-constrained output. */
+  structuredOutput: boolean;
+}
+
 /** A selectable model exposed by a backend. */
 export interface BackendModel {
   id: string;
   label: string;
   available: boolean;
+  /**
+   * Per-model capabilities. Optional: present only when the adapter or curated
+   * catalogue knows them. Callers must treat `undefined` as "capabilities
+   * unknown" (fail conservatively), never as "all capabilities present".
+   */
+  capabilities?: ModelCapabilities;
 }
 
 /**
@@ -993,7 +1037,7 @@ export type BackendAgentEvent =
       approval: ApprovalRequest;
     }
   | { type: "tool-result"; callId: string; ok: boolean; output: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number }
+  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }
   | { type: "cancelled" };

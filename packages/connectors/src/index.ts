@@ -130,6 +130,19 @@ export {
 export { buildToolApproval } from "./native-api/approvals";
 export { lookupTool, registeredToolSpecs } from "./native-api/tools";
 export { priceFor } from "./native-api/pricing";
+export {
+  catalogueCapabilities,
+  MAX_TOKENS_DEFAULT,
+  resolveModelCapabilities,
+  validateModelForRun,
+  type ModelValidation
+} from "./native-api/model-catalogue";
+export {
+  mergeDiscoveredModels,
+  type DiscoveredModel,
+  type DiscoveryOutcome,
+  type ModelDiscoveryResult
+} from "./native-api/discovery";
 export { runAgentLoop, type ToolExecutor, type RunAgentLoopOptions } from "./native-api/agent-loop";
 export { buildContextPrefix } from "./native-api/memory-context";
 export {

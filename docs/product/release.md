@@ -58,8 +58,9 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
   scheduler/recurring execution engine yet.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
-- Provider model discovery is static; a later adapter should query provider
-  model APIs and account entitlements dynamically.
+- Native API providers use bounded dynamic model discovery. Live availability
+  and entitlements still depend on each provider account and are not proven by
+  fixture tests.
 - Windows preview packaging is unsigned. macOS and Linux packaging are not
   ready.
 

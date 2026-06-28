@@ -90,13 +90,87 @@ describe("runAgentLoop", () => {
   });
 
   it("stops after maxTurns to avoid runaway loops", async () => {
-    // A fixture that always requests a tool call; cap turns at 2.
-    const looping = 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read-file","arguments":"{}"}}]}}]}\ndata: {"choices":[{"finish_reason":"tool_calls"}]}';
-    const transport = new FixtureTransport(looping.split(/\r?\n/));
+    const toolTurn = (id: string) =>
+      `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"${id}","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}\ndata: {"choices":[{"finish_reason":"tool_calls"}]}`;
+    const transport = SequencedFixtureTransport.fromTexts([toolTurn("c1"), toolTurn("c2")]);
     const events = await collect(
       runAgentLoop(transport, baseRequest, { execute: echoExecutor, maxTurns: 2 })
     );
     expect(events.at(-1)).toEqual({ type: "done", finishReason: "length" });
+  });
+
+  it.each([
+    ["unknown", "made-up", "{}", /unknown tool/i],
+    ["malformed arguments", "read-file", "not-json", /malformed tool arguments/i]
+  ])("rejects %s tool calls before execution", async (_name, tool, args, message) => {
+    let executions = 0;
+    const transport = new FixtureTransport([
+      `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", function: { name: tool, arguments: args } }] } }] })}`,
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}'
+    ]);
+    const events = await collect(
+      runAgentLoop(transport, baseRequest, {
+        execute: async () => {
+          executions += 1;
+          return "unexpected";
+        },
+        runId: "run-safe"
+      })
+    );
+    expect(executions).toBe(0);
+    expect(events.find((event) => event.type === "tool-result")?.output).toMatch(message);
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "error" });
+  });
+
+  it("rejects malformed call ids before approval or execution", async () => {
+    let executions = 0;
+    const transport = new FixtureTransport([
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"../cross-run","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}',
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}'
+    ]);
+    const events = await collect(
+      runAgentLoop(transport, baseRequest, {
+        execute: async () => {
+          executions += 1;
+          return "unexpected";
+        },
+        runId: "run-safe"
+      })
+    );
+    expect(executions).toBe(0);
+    expect(events.find((event) => event.type === "tool-result")?.output).toMatch(
+      /malformed tool call id/i
+    );
+  });
+
+  it("rejects replayed call ids and binds approvals to the current run", async () => {
+    const turn = 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"same-call","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}\ndata: {"choices":[{"finish_reason":"tool_calls"}]}';
+    const events = await collect(
+      runAgentLoop(SequencedFixtureTransport.fromTexts([turn, turn]), baseRequest, {
+        execute: echoExecutor,
+        runId: "run-123"
+      })
+    );
+    const approval = events.find((event) => event.type === "tool-call")?.approval;
+    expect(approval?.id).toContain("run-123-same-call");
+    expect(events.some((event) => event.type === "tool-result" && /replayed/i.test(event.output))).toBe(true);
+  });
+
+  it("bounds tool output before reinserting it into model context", async () => {
+    const turn = 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}\ndata: {"choices":[{"finish_reason":"tool_calls"}]}';
+    const events = await collect(
+      runAgentLoop(
+        SequencedFixtureTransport.fromTexts([
+          turn,
+          'data: {"choices":[{"finish_reason":"stop"}]}'
+        ]),
+        baseRequest,
+        { execute: async () => "x".repeat(100), maxToolOutputCharacters: 16 }
+      )
+    );
+    const result = events.find((event) => event.type === "tool-result");
+    expect(result?.output.startsWith("x".repeat(16))).toBe(true);
+    expect(result?.output).toMatch(/truncated/i);
   });
 
   it("prepends a system context prefix when provided", async () => {

@@ -26,6 +26,7 @@ vi.mock("../runtime", () => ({
   importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeBackends: vi.fn(async () => null),
+  listRuntimeBackendModels: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
   loadRuntimeApprovalAudit: vi.fn(async () => null),
   loadRuntimeApprovalRules: vi.fn(async () => null),

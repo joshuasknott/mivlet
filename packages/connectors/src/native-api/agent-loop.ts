@@ -25,6 +25,7 @@ import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
 import { streamOpenAiEvents } from "./openai-compat";
 import { registeredToolSpecs } from "./tools";
+import { lookupTool } from "./tools";
 import type { HttpTransport } from "./transport";
 
 type FinishReason = "stop" | "tool-calls" | "length" | "error";
@@ -52,7 +53,17 @@ export interface RunAgentLoopOptions {
    * by the tool-execution goal; until then the executor refuses (fail-closed).
    */
   permissionMode?: PermissionMode;
+  /** Stable run id used to bind approvals and reject cross-run/replayed calls. */
+  runId?: string;
+  /** Maximum accepted tool calls across the whole run. */
+  maxToolCalls?: number;
+  /** Maximum characters returned to model context by one tool. */
+  maxToolOutputCharacters?: number;
 }
+
+export const MAX_TOOL_ARGUMENT_CHARACTERS = 64_000;
+export const MAX_TOOL_OUTPUT_CHARACTERS = 64_000;
+export const MAX_TOOL_CALLS_PER_RUN = 32;
 
 /** Permission rank so a stricter mode forbids tools requiring a looser one. */
 const PERMISSION_RANK: Record<PermissionMode, number> = {
@@ -113,6 +124,24 @@ export async function* runAgentLoop(
   let messages: NativeMessage[] = options.contextPrefix
     ? [{ role: "system", content: options.contextPrefix }, ...request.messages]
     : [...request.messages];
+  const seenCallIds = new Set<string>();
+  let toolCallCount = 0;
+
+  const bindApproval = (callId: string, approval: ApprovalRequest): ApprovalRequest => ({
+    ...approval,
+    id: `native-${options.runId ?? "run"}-${callId}`
+      .replace(/[^a-zA-Z0-9_-]/g, "-")
+      .slice(0, 160),
+    service: request.providerId,
+    requestedAt: new Date().toISOString()
+  });
+
+  const boundedToolOutput = (output: string): string => {
+    const limit = options.maxToolOutputCharacters ?? MAX_TOOL_OUTPUT_CHARACTERS;
+    return output.length <= limit
+      ? output
+      : `${output.slice(0, limit)}\n[Tool output truncated by Fable at ${limit} characters.]`;
+  };
 
   for (let turn = 0; turn < maxTurns; turn += 1) {
     const turnRequest: NativeCompletionRequest = { ...request, messages, tools };
@@ -120,6 +149,7 @@ export async function* runAgentLoop(
 
     let finishReason: FinishReason = "stop";
     const pendingToolCalls: PendingToolCall[] = [];
+    let rejectedToolCall = false;
 
     try {
       for await (const event of stream) {
@@ -135,18 +165,64 @@ export async function* runAgentLoop(
           finishReason = "error";
         }
         if (event.type === "tool-call") {
+          const invalidReason =
+            !lookupTool(event.tool)
+              ? `Rejected unknown tool "${event.tool}".`
+              : !event.callId ||
+                  event.callId.length > 160 ||
+                  !/^[a-zA-Z0-9_-]+$/.test(event.callId)
+                ? "Rejected malformed tool call id."
+                : seenCallIds.has(event.callId)
+                  ? `Rejected replayed tool call "${event.callId}".`
+                  : event.arguments.length > MAX_TOOL_ARGUMENT_CHARACTERS
+                    ? "Rejected oversized tool arguments."
+                    : (() => {
+                        try {
+                          const parsed = JSON.parse(event.arguments);
+                          return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+                            ? null
+                            : "Rejected malformed tool arguments.";
+                        } catch {
+                          return "Rejected malformed tool arguments.";
+                        }
+                      })();
+          if (invalidReason) {
+            yield { type: "tool-result", callId: event.callId || "invalid", ok: false, output: invalidReason };
+            rejectedToolCall = true;
+            continue;
+          }
+          toolCallCount += 1;
+          if (toolCallCount > (options.maxToolCalls ?? MAX_TOOL_CALLS_PER_RUN)) {
+            yield {
+              type: "tool-result",
+              callId: event.callId,
+              ok: false,
+              output: "Rejected tool call because this run reached its execution limit."
+            };
+            rejectedToolCall = true;
+            continue;
+          }
+          seenCallIds.add(event.callId);
+          const approval = bindApproval(event.callId, event.approval);
           pendingToolCalls.push({
             callId: event.callId,
             tool: event.tool,
             arguments: event.arguments,
-            approval: event.approval
+            approval
           });
+          yield { ...event, approval };
+          continue;
         }
         yield event;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Provider stream failed.";
       yield { type: "error", message };
+      yield { type: "done", finishReason: "error" };
+      return;
+    }
+
+    if (rejectedToolCall) {
       yield { type: "done", finishReason: "error" };
       return;
     }
@@ -172,14 +248,16 @@ export async function* runAgentLoop(
 
     for (const call of pendingToolCalls) {
       try {
-        const result = await execute(call.approval, call.arguments);
+        const result = boundedToolOutput(await execute(call.approval, call.arguments));
         yield { type: "tool-result", callId: call.callId, ok: true, output: result };
         messages = [
           ...messages,
           { role: "tool", content: result, toolCallId: call.callId, toolName: call.tool }
         ];
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Tool execution failed.";
+        const message = boundedToolOutput(
+          error instanceof Error ? error.message : "Tool execution failed."
+        );
         yield { type: "tool-result", callId: call.callId, ok: false, output: message };
         messages = [
           ...messages,

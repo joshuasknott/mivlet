@@ -238,6 +238,18 @@ pub struct AgentRunUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost_usd: f64,
+    #[serde(default)]
+    pub cost_estimated: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedAgentExchange {
+    pub role: String,
+    pub content: String,
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub ok: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -248,6 +260,12 @@ pub struct PersistedAgentRun {
     pub model: String,
     pub status: String,
     pub transcript: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    #[serde(default)]
+    pub exchanges: Vec<PersistedAgentExchange>,
+    #[serde(default)]
+    pub parent_run_id: Option<String>,
     pub turn: usize,
     pub usage: Option<AgentRunUsage>,
     pub pending_approval_ids: Vec<String>,

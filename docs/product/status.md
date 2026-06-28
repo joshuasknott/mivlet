@@ -28,8 +28,19 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage.
 - Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Only native API-key providers can become connected through the current credential command; subscription/CLI entries remain gated until real adapters exist.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
-- Native API agent loop: TypeScript owns provider request shaping and the pure agent loop; Rust owns API key lookup, HTTP/SSE egress, event emission, and cancellation for OpenAI-compatible, Anthropic, and Gemini-style providers.
-- Tool execution: the registered tools are `read-file`, `write-file`, `run-shell`, and `web-fetch`; model tool calls route through approval before Rust re-validates and executes side effects.
+- Native API agent loop: TypeScript owns provider request shaping and a bounded
+  multi-round agent loop; Rust owns API key lookup, bounded HTTP/SSE egress,
+  normalized retry/error events, idle timeout, response-size enforcement, and
+  cancellation for OpenAI-compatible, Anthropic, and Gemini-style providers.
+- Native model discovery: provider lists are paginated and bounded with
+  distinct success/empty/unsupported/offline/failed outcomes. Non-generation
+  and unknown-capability models cannot be selected.
+- Agent recovery: run checkpoints persist active-thread user, assistant, and
+  tool exchanges. Interrupted runs surface in chat and retry as new child runs
+  from the durable user prompt without replaying tool effects.
+- Tool execution: the registered tools are `read-file`, `write-file`,
+  `run-shell`, and `web-fetch`; calls are bounded and route through approval
+  before Rust re-validates an exact, fresh, single-use execution permit.
 - First-wave connector catalog: GitHub, Vercel, Google Drive, Notion, Gmail, Slack, and Google Calendar are modeled with scopes, auth mode, health/status metadata, search/import/action protocol shapes, and fixture adapters.
 - Connector writes: fixture-side connector write preparation creates approval requests for GitHub, Vercel, Gmail, Slack, and Calendar actions instead of directly executing them.
 - Tauri connector runtime: external connector commands expose status/auth/health/search/import/action boundaries. Google public-client connectors use loopback PKCE and OS secure storage; confidential-client connectors (GitHub, Vercel, Notion, Slack, Linear) are broker-gated and fail closed with `configuration-required` until the auth broker and provider configuration exist.

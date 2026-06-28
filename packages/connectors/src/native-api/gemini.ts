@@ -121,7 +121,8 @@ export function parseGeminiLine(
       type: "usage",
       inputTokens: input,
       outputTokens: output,
-      costUsd: priceFor(providerId, input, output)
+      costUsd: priceFor(providerId, input, output),
+      costEstimated: true
     });
   }
   if (candidate?.finishReason) {

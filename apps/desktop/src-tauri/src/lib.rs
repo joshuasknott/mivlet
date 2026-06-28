@@ -85,6 +85,7 @@ pub fn run() {
             connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
+            native_api::list_backend_models,
             google::cancel_google_call,
             tools::execute_tool_call,
             store::encrypted_store_status,
