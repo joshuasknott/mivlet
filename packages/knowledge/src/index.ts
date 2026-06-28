@@ -49,3 +49,17 @@ export {
   type MemorySuggestionContext,
   type PromoteMemoryInput
 } from "./memory";
+
+// --- retrieval pipeline (additive) ----------------------------------------
+export {
+  cosineSimilarity,
+  DEFAULT_RANKING_WEIGHTS,
+  filterRetrievable,
+  NO_EMBEDDING_PROVIDER,
+  retrieve,
+  type EmbeddingProvider,
+  type RetrievalFeedback,
+  type RetrievalRankingWeights,
+  type RetrievalSource,
+  type RetrieveOptions
+} from "./retrieval";
