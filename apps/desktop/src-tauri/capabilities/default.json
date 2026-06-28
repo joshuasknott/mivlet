@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default permissions for the Fable desktop window",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "notification:default"]
 }

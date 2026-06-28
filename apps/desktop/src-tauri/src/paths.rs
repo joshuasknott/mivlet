@@ -65,6 +65,25 @@ pub fn connected_backends_path(app: &tauri::AppHandle) -> Result<PathBuf, String
     app_data_file_path(app, "connected-backends.json")
 }
 
+/// Durable scheduler store (jobs + queue). Non-secret: job definitions, trigger
+/// shapes, lease state, and attempt history only. The in-process tick leases
+/// due entries; because Tauri is a single shared process, the lease map is the
+/// cross-window duplicate-execution guard.
+pub fn scheduler_store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "scheduler-store.json")
+}
+
+/// Durable workflow-run journal. Inputs, outputs, tool calls, approval state,
+/// and failure reason are persisted here (non-secret). Restart recovery marks
+/// in-flight runs as interrupted on the TS side; Rust owns atomic writes.
+pub fn workflow_runs_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "workflow-runs.json")
+}
+
+pub fn workflow_definitions_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "workflow-definitions.json")
+}
+
 /// Collapse runs of whitespace into single spaces.
 pub fn normalize_spaces(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")

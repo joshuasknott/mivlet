@@ -519,6 +519,19 @@
     grid-template-columns: 1fr;
   }
 
+  .schedule-row {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .schedule-row__actions {
+    grid-column: 2;
+    flex-wrap: wrap;
+  }
+
+  .schedule-edit {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
   .thread-context p {
     grid-column: auto;
     white-space: normal;

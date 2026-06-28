@@ -45,6 +45,10 @@ vi.mock("./runtime", () => ({
   importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
+  listRuntimeSchedulerJobs: vi.fn(async () => null),
+  listRuntimeWorkflowDefinitions: vi.fn(async () => null),
+  listRuntimeWorkflowRuns: vi.fn(async () => null),
+  listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
   listRuntimeBackends: vi.fn(
     () =>
       new Promise<BackendProvider[] | null>((resolve) => {
@@ -71,6 +75,14 @@ vi.mock("./runtime", () => ({
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
   saveRuntimeImportedKnowledgeSources: vi.fn(async () => null),
+  saveRuntimeScheduledJob: vi.fn(async () => null),
+  saveRuntimeWorkflowDefinition: vi.fn(async () => null),
+  saveRuntimeWorkflowRun: vi.fn(async () => null),
+  enqueueRuntimeJobRun: vi.fn(async () => null),
+  reportRuntimeJobAttempt: vi.fn(async () => null),
+  setRuntimeJobStatus: vi.fn(async () => null),
+  deleteRuntimeScheduledJob: vi.fn(async () => null),
+  deliverRuntimeNotification: vi.fn(async () => null),
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => run),
   recoverRuntimeAgentRuns: vi.fn(async () => runtimeMocks.agentRuns),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
@@ -360,6 +372,15 @@ describe("Fable home", () => {
     expect(await screen.findByText("Weekly digest")).toBeInTheDocument();
     expect(screen.getByText(/Fridays at 9:00 AM/i)).toBeInTheDocument();
     expect(screen.getByText("Summarize active projects and approvals.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
+    const editName = screen.getByLabelText(/edit schedule task name/i);
+    await user.clear(editName);
+    await user.type(editName, "Friday briefing");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /run now/i }));
+    expect(await screen.findByText(/last result · completed/i)).toBeInTheDocument();
     // No draft/active status labels anywhere on the page.
     expect(screen.queryByText(/^draft$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^active$/i)).not.toBeInTheDocument();

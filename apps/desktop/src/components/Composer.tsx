@@ -247,7 +247,7 @@ export function Composer({
               className={`composer-chip${voiceEnabled ? " composer-chip--active" : ""}`}
               onClick={onToggleVoice}
               aria-pressed={voiceEnabled}
-              aria-label={voiceEnabled ? "Pause voice input" : "Start voice input"}
+              aria-label={voiceEnabled ? "Stop voice recording" : "Start voice recording"}
             >
               <Microphone size={17} weight="fill" />
             </button>

@@ -1,8 +1,9 @@
 //! Fable desktop runtime entrypoint.
 //!
 //! Feature logic lives in focused modules (`models`, `paths`, `approvals`,
-//! `knowledge`, `memory`, `snapshot`, `backends`). This crate root only
-//! declares those modules and registers the Tauri command handlers on startup.
+//! `knowledge`, `memory`, `snapshot`, `backends`, `scheduler`, `workflows`).
+//! This crate root only declares those modules, registers the Tauri command
+//! handlers, and starts the in-process scheduler tick.
 
 mod agent_runs;
 mod approvals;
@@ -18,12 +19,14 @@ mod knowledge;
 mod memory;
 mod models;
 mod native_api;
+mod notifications;
 mod oauth_loopback;
 mod paths;
+mod scheduler;
 mod snapshot;
 mod store;
 mod tools;
-use tauri::Manager as _;
+mod workflows;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install
 /// the audited ring provider before constructing any native HTTP client.
@@ -34,15 +37,41 @@ pub(crate) fn ensure_rustls_provider() {
 #[cfg(test)]
 mod tests;
 
+use std::time::Duration;
+
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let app_data = app
                 .path()
                 .app_data_dir()
                 .map_err(|_| "Fable could not resolve the app data folder.")?;
             store::initialize(&app_data)?;
+            // Load the durable scheduler store once and manage it as process
+            // state. The in-process tick leases due entries; because Tauri is a
+            // single shared process, the lease map is the cross-window duplicate-
+            // execution guard (two windows can never lease the same occurrence).
+            let handle = app.handle().clone();
+            let store = scheduler::read_store(&paths::scheduler_store_path(&handle)?)
+                .unwrap_or_else(|_| scheduler::SchedulerState::empty());
+            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(Some(
+                store,
+            ))));
+
+            // In-process scheduler tick. Stops when the app exits. An
+            // interrupted tick only ever leaves entries leased until their short
+            // deadline; the next tick re-queues expired leases (crash-safe).
+            let tick_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let _ = scheduler::run_tick(&tick_handle);
+                    tokio::time::sleep(Duration::from_secs(models::SCHEDULER_TICK_SECS)).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -91,7 +120,20 @@ pub fn run() {
             store::encrypted_store_status,
             store::export_local_data,
             store::backup_local_data,
-            store::delete_local_data
+            store::delete_local_data,
+            scheduler::list_scheduler_jobs,
+            scheduler::list_scheduler_queue,
+            scheduler::save_scheduled_job,
+            scheduler::delete_scheduled_job,
+            scheduler::set_job_status,
+            scheduler::enqueue_job_run,
+            scheduler::report_job_attempt,
+            workflows::save_workflow_run,
+            workflows::save_workflow_definition,
+            workflows::list_workflow_definitions,
+            workflows::list_workflow_runs,
+            workflows::list_workflow_runs_for_definition,
+            notifications::deliver_notification
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");

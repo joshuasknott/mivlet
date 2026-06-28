@@ -1722,6 +1722,34 @@
   font-size: var(--text-12);
 }
 
+.voice-review {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised, var(--canvas));
+}
+
+.voice-review__status,
+.voice-review small {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
+}
+
+.voice-review textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.voice-review > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* Connected AI backends panel (Connectors page) */
 
 .backends-panel {
@@ -2173,4 +2201,21 @@ button.og-path--primary .og-path__icon {
 @keyframes og-spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+.schedule-edit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+}
+
+.schedule-edit textarea,
+.schedule-edit input:first-child {
+  grid-column: 1 / -1;
+}
+
+.schedule-edit input,
+.schedule-edit textarea,
+.schedule-edit select {
+  min-width: 0;
 }
