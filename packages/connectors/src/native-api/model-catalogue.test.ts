@@ -96,6 +96,16 @@ describe("validateModelForRun", () => {
     expect(result.error).toMatch(/not available/i);
   });
 
+  it("rejects an available model whose execution capabilities are unknown", () => {
+    const result = validateModelForRun(
+      "openai",
+      "future-model",
+      [{ id: "future-model", label: "Future", available: true }]
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/unknown execution capabilities/i);
+  });
+
   it("clamps maxTokens to the model's output ceiling", () => {
     const result = validateModelForRun("openai", "gpt-5", models, 1_000_000);
     const ceiling = catalogueCapabilities("openai", "gpt-5")!.maxOutputTokens;

@@ -136,6 +136,12 @@ export {
   validateModelForRun,
   type ModelValidation
 } from "./native-api/model-catalogue";
+export {
+  mergeDiscoveredModels,
+  type DiscoveredModel,
+  type DiscoveryOutcome,
+  type ModelDiscoveryResult
+} from "./native-api/discovery";
 export { runAgentLoop, type ToolExecutor, type RunAgentLoopOptions } from "./native-api/agent-loop";
 export { buildContextPrefix } from "./native-api/memory-context";
 export {

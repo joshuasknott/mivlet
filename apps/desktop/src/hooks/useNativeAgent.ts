@@ -16,8 +16,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   BackendAgentEvent,
+  BackendModel,
   BackendProvider,
   NativeCompletionRequest,
+  PersistedAgentExchange,
   PersistedAgentRun,
   PermissionMode
 } from "@fable/protocol";
@@ -136,15 +138,26 @@ function tauriTransport(
 
 export interface NativeAgentState {
   transcript: string;
-  usage: { inputTokens: number; outputTokens: number; costUsd: number } | null;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    costEstimated?: boolean;
+  } | null;
   running: boolean;
   lastError: string | null;
+  status: PersistedAgentRun["status"] | "idle";
+  recoverableRuns: PersistedAgentRun[];
   /** True when there is no desktop runtime to carry the request. */
   noTransport: boolean;
 }
 
 export interface UseNativeAgentOptions {
   providers: BackendProvider[];
+  /** Truthfully selectable models after dynamic discovery/catalogue merging. */
+  models?: BackendModel[];
+  /** Active chat/thread identifier used to durably associate completed exchanges. */
+  threadId?: string;
   /** Receives tool-call events so the shell can route them into its approval queue. */
   onToolCall?: (event: Extract<BackendAgentEvent, { type: "tool-call" }>) => void;
   /**
@@ -177,6 +190,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     usage: null,
     running: false,
     lastError: null,
+    status: "idle",
+    recoverableRuns: [],
     noTransport: !hasDesktopRuntime()
   });
   const cancelRef = useRef<string | null>(null);
@@ -190,16 +205,30 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   shouldCancelRef.current = options.shouldCancel;
   const onCancelRef = useRef(options.onCancel);
   onCancelRef.current = options.onCancel;
+  const threadIdRef = useRef(options.threadId);
+  threadIdRef.current = options.threadId;
+  const modelsRef = useRef(options.models ?? []);
+  modelsRef.current = options.models ?? [];
 
   useEffect(() => {
-    void recoverRuntimeAgentRuns(new Date().toISOString());
+    void recoverRuntimeAgentRuns(new Date().toISOString()).then((runs) => {
+      if (!runs) return;
+      setState((current) => ({
+        ...current,
+        recoverableRuns: runs.filter(
+          (run) =>
+            (run.status === "interrupted" || run.status === "failed") && run.recoverable
+        )
+      }));
+    });
   }, []);
 
   const run = useCallback(
     async (
       request: NativeCompletionRequest,
       contextPrefix?: string,
-      permissionLabel?: string
+      permissionLabel?: string,
+      parentRunId?: string
     ) => {
       let persisted: PersistedAgentRun | null = null;
       const transport = tauriTransport(
@@ -221,19 +250,45 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         setState((current) => ({
           ...current,
           noTransport: true,
-          lastError: "Native agent needs the desktop runtime."
+          lastError: "Native agent needs the desktop runtime.",
+          status: "failed"
         }));
         return;
       }
-      setState({ transcript: "", usage: null, running: true, lastError: null, noTransport: false });
+      setState((current) => ({
+        ...current,
+        transcript: "",
+        usage: null,
+        running: true,
+        lastError: null,
+        status: "streaming",
+        recoverableRuns: parentRunId
+          ? current.recoverableRuns.filter((run) => run.id !== parentRunId)
+          : current.recoverableRuns,
+        noTransport: false
+      }));
       const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const createdAt = new Date().toISOString();
+      const initialExchanges: PersistedAgentExchange[] = request.messages
+        .filter(
+          (message): message is typeof message & { role: "user" | "assistant" | "tool" } =>
+            message.role !== "system"
+        )
+        .map((message) => ({
+          role: message.role,
+          content: message.content,
+          toolCallId: message.toolCallId,
+          toolName: message.toolName
+        }));
       persisted = {
         id: runId,
         providerId: request.providerId,
         model: request.model,
         status: "streaming",
         transcript: "",
+        threadId: threadIdRef.current,
+        exchanges: initialExchanges,
+        parentRunId,
         turn: 0,
         pendingApprovalIds: [],
         recoverable: true,
@@ -264,13 +319,25 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             }),
           shouldCancel: shouldCancelRef.current ?? (() => false),
           contextPrefix,
-          permissionMode
+          permissionMode,
+          runId
         })) {
           if (event.type === "text-delta") {
             setState((current) => ({ ...current, transcript: current.transcript + event.text }));
+            const exchanges: PersistedAgentExchange[] = [...(persisted.exchanges ?? [])];
+            const finalExchange = exchanges.at(-1);
+            if (finalExchange?.role === "assistant" && !finalExchange.toolCallId) {
+              exchanges[exchanges.length - 1] = {
+                ...finalExchange,
+                content: finalExchange.content + event.text
+              };
+            } else {
+              exchanges.push({ role: "assistant", content: event.text });
+            }
             persisted = {
               ...persisted,
               transcript: persisted.transcript + event.text,
+              exchanges,
               updatedAt: new Date().toISOString()
             };
           } else if (event.type === "usage") {
@@ -279,7 +346,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               usage: {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
-                costUsd: event.costUsd
+                costUsd: event.costUsd,
+                costEstimated: event.costEstimated
               }
             }));
             persisted = {
@@ -287,7 +355,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               usage: {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
-                costUsd: event.costUsd
+                costUsd: event.costUsd,
+                costEstimated: event.costEstimated
               },
               updatedAt: new Date().toISOString()
             };
@@ -300,6 +369,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               pendingApprovalIds: [...persisted.pendingApprovalIds, event.approval.id],
               updatedAt: new Date().toISOString()
             };
+            setState((current) => ({ ...current, status: "awaiting-approval" }));
           } else if (event.type === "tool-result") {
             const completedApprovalId = pendingApprovalByCall.get(event.callId);
             pendingApprovalByCall.delete(event.callId);
@@ -310,8 +380,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               pendingApprovalIds: persisted.pendingApprovalIds.filter(
                 (id) => id !== completedApprovalId
               ),
+              exchanges: [
+                ...(persisted.exchanges ?? []),
+                {
+                  role: "tool",
+                  content: event.output,
+                  toolCallId: event.callId,
+                  ok: event.ok
+                }
+              ],
               updatedAt: new Date().toISOString()
             };
+            setState((current) => ({ ...current, status: "streaming" }));
           } else if (event.type === "error") {
             setState((current) => ({ ...current, lastError: event.message }));
             persisted = {
@@ -320,14 +400,31 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString()
             };
           } else if (event.type === "done" || event.type === "cancelled") {
-            setState((current) => ({ ...current, running: false }));
-            persisted = {
-              ...persisted,
-              status: event.type === "cancelled" ? "cancelled" : "completed",
-              recoverable: false,
+            const failed: boolean =
+              event.type === "done" &&
+              (event.finishReason === "error" || Boolean(persisted.error));
+            const terminalStatus: PersistedAgentRun["status"] =
+              event.type === "cancelled" ? "cancelled" : failed ? "failed" : "completed";
+            const terminalRun: PersistedAgentRun = {
+              ...persisted!,
+              status: terminalStatus,
+              recoverable: terminalStatus === "failed",
               pendingApprovalIds: [],
               updatedAt: new Date().toISOString()
             };
+            persisted = terminalRun;
+            setState((current) => ({
+              ...current,
+              running: false,
+              status: terminalStatus,
+              recoverableRuns:
+                terminalStatus === "failed"
+                  ? [
+                      terminalRun,
+                      ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)
+                    ]
+                  : current.recoverableRuns
+            }));
           }
           const terminalOrBoundary =
             event.type !== "text-delta" ||
@@ -341,24 +438,70 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Agent run failed.";
-        setState((current) => ({
-          ...current,
-          running: false,
-          lastError: message
-        }));
-        persisted = {
-          ...persisted,
-          status: shouldCancelRef.current?.() ? "cancelled" : "failed",
-          recoverable: !shouldCancelRef.current?.(),
+        const cancelled = Boolean(shouldCancelRef.current?.());
+        const terminalRun: PersistedAgentRun = {
+          ...persisted!,
+          status: cancelled ? "cancelled" : "failed",
+          recoverable: !cancelled,
           error: message,
           updatedAt: new Date().toISOString()
         };
+        persisted = terminalRun;
+        setState((current) => ({
+          ...current,
+          running: false,
+          lastError: message,
+          status: terminalRun.status,
+          recoverableRuns: cancelled
+            ? current.recoverableRuns
+            : [
+                terminalRun,
+                ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)
+              ]
+        }));
         await saveRuntimeAgentRun(persisted);
       } finally {
         cancelRef.current = null;
       }
     },
     []
+  );
+
+  const retry = useCallback(
+    async (runToRetry: PersistedAgentRun) => {
+      const userExchange = runToRetry.exchanges
+        ?.filter((exchange) => exchange.role === "user")
+        .at(-1);
+      if (!runToRetry.recoverable || !userExchange?.content.trim()) {
+        setState((current) => ({
+          ...current,
+          lastError: "This interrupted run does not contain a safe user prompt to retry."
+        }));
+        return;
+      }
+      const model = modelsRef.current.find((candidate) => candidate.id === runToRetry.model);
+      if (!model?.available || model.capabilities?.streaming !== true) {
+        setState((current) => ({
+          ...current,
+          lastError:
+            "This run cannot be retried because its model is unavailable or its capabilities are unknown."
+        }));
+        return;
+      }
+      await run(
+        {
+          providerId: runToRetry.providerId,
+          model: runToRetry.model,
+          messages: [{ role: "user", content: userExchange.content }],
+          tools: [],
+          maxTokens: 2_048
+        },
+        undefined,
+        "Confirm every action",
+        runToRetry.id
+      );
+    },
+    [run]
   );
 
   const cancel = useCallback(async () => {
@@ -369,7 +512,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     // cancelled-but-never-granted call (and its unresolved promise) does not
     // linger for the session. No-op when no onCancel is wired.
     onCancelRef.current?.();
-    setState((current) => ({ ...current, running: false }));
+    setState((current) => ({ ...current, running: false, status: "cancelled" }));
   }, []);
 
   /**
@@ -384,9 +527,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       running: false,
       lastError: message,
       transcript: "",
-      usage: null
+      usage: null,
+      status: "failed"
     }));
   }, []);
 
-  return { state, run, cancel, reportError };
+  return { state, run, retry, cancel, reportError };
 }

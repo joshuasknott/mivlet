@@ -33,6 +33,36 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
     run.model = truncate_characters(&normalize_spaces(&run.model), 160);
     run.status = normalize_spaces(&run.status).to_ascii_lowercase();
     run.transcript = truncate_characters(&run.transcript, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS);
+    run.thread_id = run
+        .thread_id
+        .map(|value| truncate_characters(&normalize_spaces(&value), 160))
+        .filter(|value| !value.is_empty());
+    run.parent_run_id = run
+        .parent_run_id
+        .map(|value| truncate_characters(&normalize_spaces(&value), 160))
+        .filter(|value| !value.is_empty() && value != &run.id);
+    run.exchanges = run
+        .exchanges
+        .into_iter()
+        .filter_map(|mut exchange| {
+            exchange.role = normalize_spaces(&exchange.role).to_ascii_lowercase();
+            if !matches!(exchange.role.as_str(), "user" | "assistant" | "tool") {
+                return None;
+            }
+            exchange.content =
+                truncate_characters(&exchange.content, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS);
+            exchange.tool_call_id = exchange
+                .tool_call_id
+                .map(|value| truncate_characters(&normalize_spaces(&value), 160))
+                .filter(|value| !value.is_empty());
+            exchange.tool_name = exchange
+                .tool_name
+                .map(|value| truncate_characters(&normalize_spaces(&value), 120))
+                .filter(|value| !value.is_empty());
+            Some(exchange)
+        })
+        .take(256)
+        .collect();
     run.pending_approval_ids = run
         .pending_approval_ids
         .into_iter()
@@ -160,7 +190,17 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 4,
                 cost_usd: 0.01,
+                cost_estimated: true,
             }),
+            thread_id: Some("thread-1".to_string()),
+            exchanges: vec![crate::models::PersistedAgentExchange {
+                role: "user".to_string(),
+                content: "Summarize this".to_string(),
+                tool_call_id: None,
+                tool_name: None,
+                ok: None,
+            }],
+            parent_run_id: None,
             pending_approval_ids: vec!["approval-1".to_string()],
             recoverable: true,
             retry_count: 1,
@@ -180,6 +220,8 @@ mod tests {
         assert_eq!(recovered[0].status, "interrupted");
         assert_eq!(recovered[0].transcript, "partial response");
         assert_eq!(recovered[0].pending_approval_ids, vec!["approval-1"]);
+        assert_eq!(recovered[0].thread_id.as_deref(), Some("thread-1"));
+        assert_eq!(recovered[0].exchanges.len(), 1);
         assert!(recovered[0].recoverable);
         let _ = fs::remove_file(path);
     }

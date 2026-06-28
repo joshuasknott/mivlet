@@ -215,7 +215,14 @@ export function validateModelForRun(
     };
   }
   const capabilities = resolveModelCapabilities(providerId, model);
-  if (capabilities && !capabilities.streaming) {
+  if (!capabilities) {
+    return {
+      ok: false,
+      error: `Model "${modelId}" has unknown execution capabilities and cannot run safely.`,
+      maxTokens: requestedMaxTokens
+    };
+  }
+  if (!capabilities.streaming) {
     return {
       ok: false,
       error: `Model "${modelId}" does not support streaming runs.`,
@@ -223,9 +230,9 @@ export function validateModelForRun(
       maxTokens: requestedMaxTokens
     };
   }
-  const maxTokens =
-    capabilities && requestedMaxTokens > capabilities.maxOutputTokens
-      ? capabilities.maxOutputTokens
-      : Math.max(1, requestedMaxTokens);
+  const maxTokens = Math.min(
+    capabilities.maxOutputTokens,
+    Math.max(1, requestedMaxTokens)
+  );
   return { ok: true, capabilities, maxTokens };
 }

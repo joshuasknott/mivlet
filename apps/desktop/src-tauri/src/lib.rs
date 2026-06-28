@@ -66,6 +66,7 @@ pub fn run() {
             connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
+            native_api::list_backend_models,
             tools::execute_tool_call
         ])
         .run(tauri::generate_context!())

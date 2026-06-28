@@ -527,6 +527,39 @@ export async function cancelRuntimeCompletion(requestId: string) {
 }
 
 /**
+ * Discover the available model ids for a connected native provider. Rust looks
+ * up the key (fail closed — no egress without a credential), issues a bounded
+ * GET to the provider's list-models endpoint, and returns the parsed ids. Returns
+ * null outside Tauri so the shell falls back to the curated catalogue and stays
+ * fixture-testable. A null/empty result is treated as "discovery did not run".
+ */
+export interface RuntimeDiscoveredModel {
+  id: string;
+  available: boolean;
+}
+
+export interface RuntimeModelDiscoveryResult {
+  outcome: "success" | "unsupported" | "offline" | "failed" | "empty";
+  models: RuntimeDiscoveredModel[];
+  message?: string;
+}
+
+export async function listRuntimeBackendModels(providerId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<RuntimeModelDiscoveryResult>("list_backend_models", { providerId });
+  } catch (error) {
+    return {
+      outcome: "failed" as const,
+      models: [],
+      message: toRuntimeError(error).message
+    };
+  }
+}
+
+/**
  * Listen for normalized SSE lines for a request. Returns an unlisten function
  * (or null outside Tauri).
  */

@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { BackendProvider, RuntimeSnapshot } from "@fable/protocol";
+import type { BackendProvider, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
@@ -15,7 +15,8 @@ const runtimeMocks = vi.hoisted(() => ({
   emitDone: true,
   onLine: null as ((line: string) => void) | null,
   cancelCalls: [] as string[],
-  connectorOAuthCalls: [] as string[]
+  connectorOAuthCalls: [] as string[],
+  agentRuns: [] as PersistedAgentRun[]
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -50,6 +51,9 @@ vi.mock("./runtime", () => ({
         resolve(runtimeMocks.backends ?? [connectedCodex]);
       })
   ),
+  // null = no desktop runtime in tests, so the curated catalogue fallback
+  // drives model selection (discovery did not run) — matching prior behavior.
+  listRuntimeBackendModels: vi.fn(async () => null),
   loadRuntimeApprovalAudit: vi.fn(async () => null),
   loadRuntimeApprovalRules: vi.fn(async () => null),
   loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
@@ -67,7 +71,7 @@ vi.mock("./runtime", () => ({
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => run),
-  recoverRuntimeAgentRuns: vi.fn(async () => []),
+  recoverRuntimeAgentRuns: vi.fn(async () => runtimeMocks.agentRuns),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
     runtimeMocks.savedSnapshots.push(snapshot);
     return snapshot;
@@ -163,6 +167,7 @@ describe("Fable home", () => {
     runtimeMocks.onLine = null;
     runtimeMocks.cancelCalls = [];
     runtimeMocks.connectorOAuthCalls = [];
+    runtimeMocks.agentRuns = [];
     connectRuntimeBackendSpy.mockClear();
     removeDesktopRuntime();
   });
@@ -771,6 +776,64 @@ describe("Fable home", () => {
       expect(screen.queryByText(/aftercancel/i)).not.toBeInTheDocument();
     });
     expect(screen.getByText(/^partial$/)).toBeInTheDocument();
+  });
+
+  it("shows an interrupted run and retries it from the durable prompt", async () => {
+    installDesktopRuntime();
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming"],
+        models: [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            available: true,
+            capabilities: {
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              streaming: true,
+              tools: true,
+              vision: false,
+              reasoning: true,
+              structuredOutput: true
+            }
+          }
+        ]
+      }
+    ];
+    runtimeMocks.agentRuns = [
+      {
+        id: "run-interrupted",
+        providerId: "openai",
+        model: "gpt-5",
+        status: "interrupted",
+        transcript: "partial answer",
+        exchanges: [{ role: "user", content: "Retry this prompt" }],
+        turn: 0,
+        pendingApprovalIds: [],
+        recoverable: true,
+        retryCount: 0,
+        createdAt: "2026-06-28T10:00:00Z",
+        updatedAt: "2026-06-28T10:01:00Z"
+      }
+    ];
+    runtimeMocks.lines = [
+      'data: {"choices":[{"delta":{"content":"Recovered answer"}}]}',
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ];
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByText(/interrupted run · gpt-5/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /retry from prompt/i }));
+    expect(await screen.findByText("Recovered answer")).toBeInTheDocument();
+    expect(screen.queryByText(/interrupted run · gpt-5/i)).not.toBeInTheDocument();
   });
 
   it("lists the connected backend's models in the composer model picker", async () => {

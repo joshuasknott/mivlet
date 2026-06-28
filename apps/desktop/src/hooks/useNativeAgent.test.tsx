@@ -1,5 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
+import type {
+  BackendAgentEvent,
+  NativeCompletionRequest,
+  PersistedAgentRun
+} from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
@@ -55,6 +59,7 @@ const mocks = vi.hoisted(() => ({
   // every executeRuntimeToolCall records its request and resolves with this result.
   toolRequests: [] as unknown[],
   savedRuns: [] as unknown[],
+  recoveredRuns: [] as PersistedAgentRun[],
   toolResult: { ok: true, output: "Fetched body text from Rust." }
 }));
 
@@ -93,7 +98,7 @@ vi.mock("../runtime", () => ({
     mocks.savedRuns.push(run);
     return run;
   }),
-  recoverRuntimeAgentRuns: vi.fn(async () => []),
+  recoverRuntimeAgentRuns: vi.fn(async () => mocks.recoveredRuns),
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
     return mocks.toolResult;
@@ -145,6 +150,7 @@ function resetLineState() {
   mocks.cancelCalls = [];
   mocks.toolRequests = [];
   mocks.savedRuns = [];
+  mocks.recoveredRuns = [];
   mocks.toolResult = { ok: true, output: "Fetched body text from Rust." };
   listenCount = 0;
 }
@@ -175,6 +181,68 @@ describe("useNativeAgent", () => {
     expect(mocks.streamCalls).toBe(0);
   });
 
+  it("surfaces interrupted runs and retries from the durable user prompt", async () => {
+    installDesktopRuntime();
+    mocks.recoveredRuns = [
+      {
+        id: "run-interrupted",
+        providerId: "openai",
+        model: "gpt-5",
+        status: "interrupted",
+        transcript: "partial",
+        threadId: "thread-1",
+        exchanges: [{ role: "user", content: "Resume this safely" }],
+        turn: 0,
+        pendingApprovalIds: [],
+        recoverable: true,
+        retryCount: 0,
+        createdAt: "2026-06-28T10:00:00Z",
+        updatedAt: "2026-06-28T10:01:00Z"
+      }
+    ];
+    mocks.lines = [openAiChunk("Recovered"), finishStop];
+
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [],
+        threadId: "thread-1",
+        models: [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            available: true,
+            capabilities: {
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              streaming: true,
+              tools: true,
+              vision: false,
+              reasoning: true,
+              structuredOutput: true
+            }
+          }
+        ]
+      })
+    );
+    await waitFor(() => expect(result.current.state.recoverableRuns).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.retry(result.current.state.recoverableRuns[0]);
+    });
+
+    expect(result.current.state.transcript).toBe("Recovered");
+    expect(result.current.state.recoverableRuns).toHaveLength(0);
+    const finalRun = mocks.savedRuns.at(-1) as PersistedAgentRun;
+    expect(finalRun.parentRunId).toBe("run-interrupted");
+    expect(finalRun.threadId).toBe("thread-1");
+    expect(finalRun.exchanges?.[0]).toEqual({
+      role: "user",
+      content: "Resume this safely",
+      toolCallId: undefined,
+      toolName: undefined
+    });
+  });
+
   it("accumulates text-delta events into the transcript", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Hello"), openAiChunk(" world"), finishStop];
@@ -191,6 +259,17 @@ describe("useNativeAgent", () => {
     expect(result.current.state.transcript).toBe("Hello world");
     expect(result.current.state.running).toBe(false);
     expect(result.current.state.lastError).toBeNull();
+    const finalRun = mocks.savedRuns.at(-1) as PersistedAgentRun;
+    expect(finalRun.status).toBe("completed");
+    expect(finalRun.exchanges).toEqual([
+      {
+        role: "user",
+        content: "summarize the project",
+        toolCallId: undefined,
+        toolName: undefined
+      },
+      { role: "assistant", content: "Hello world" }
+    ]);
   });
 
   it("captures usage events into the usage state", async () => {

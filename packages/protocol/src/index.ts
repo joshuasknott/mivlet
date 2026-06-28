@@ -380,14 +380,28 @@ export type AgentRunStatus =
   | "failed"
   | "interrupted";
 
+export interface PersistedAgentExchange {
+  role: "user" | "assistant" | "tool";
+  content: string;
+  toolCallId?: string;
+  toolName?: string;
+  ok?: boolean;
+}
+
 export interface PersistedAgentRun {
   id: string;
   providerId: string;
   model: string;
   status: AgentRunStatus;
   transcript: string;
+  /** Active chat thread this exchange belongs to. */
+  threadId?: string;
+  /** Durable completed/checkpointed user, assistant, and tool exchanges. */
+  exchanges?: PersistedAgentExchange[];
+  /** Prior interrupted/failed run when this run is an explicit retry. */
+  parentRunId?: string;
   turn: number;
-  usage?: { inputTokens: number; outputTokens: number; costUsd: number };
+  usage?: { inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean };
   pendingApprovalIds: string[];
   recoverable: boolean;
   retryCount: number;
@@ -750,7 +764,7 @@ export type BackendAgentEvent =
       approval: ApprovalRequest;
     }
   | { type: "tool-result"; callId: string; ok: boolean; output: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number }
+  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }
   | { type: "cancelled" };

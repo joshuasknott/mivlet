@@ -160,7 +160,8 @@ export function parseAnthropicLine(
         type: "usage",
         inputTokens: state.inputTokens,
         outputTokens: usage.output_tokens ?? 0,
-        costUsd: priceFor("anthropic", state.inputTokens, usage.output_tokens ?? 0)
+        costUsd: priceFor("anthropic", state.inputTokens, usage.output_tokens ?? 0),
+        costEstimated: true
       });
     }
     if (delta?.stop_reason) {

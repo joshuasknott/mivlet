@@ -13,7 +13,7 @@
 //!   - The API key never crosses into JavaScript — it is added to a header here.
 //!   - No socket is opened in tests; only the pure helpers are unit-tested.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -140,6 +140,7 @@ fn require_key(provider_id: &str) -> Result<String, String> {
 
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
+const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "gemini", "xai", "openrouter"];
 
 #[derive(Debug, serde::Serialize)]
@@ -218,6 +219,7 @@ pub async fn stream_backend_completion(
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
+        .read_timeout(Duration::from_secs(90))
         .tcp_keepalive(Duration::from_secs(30))
         .build()
         .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
@@ -349,6 +351,7 @@ pub async fn stream_backend_completion(
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut response_bytes = 0usize;
         loop {
             tokio::select! {
                 changed = rx.changed() => {
@@ -360,6 +363,19 @@ pub async fn stream_backend_completion(
                 chunk = stream.next() => {
                     match chunk {
                         Some(Ok(bytes)) => {
+                            response_bytes = response_bytes.saturating_add(bytes.len());
+                            if response_bytes > MAX_STREAM_RESPONSE_BYTES {
+                                emit_control(&app, &channel, TransportControlEvent {
+                                    kind: "error",
+                                    code: "response-too-large",
+                                    message: "Provider stream exceeded Fable's response-size limit.".to_string(),
+                                    retryable: false,
+                                    attempt: attempt + 1,
+                                    retry_after_ms: None,
+                                });
+                                completed = true;
+                                break;
+                            }
                             buffer.push_str(&String::from_utf8_lossy(&bytes));
                             while let Some(newline_pos) = buffer.find('\n') {
                                 let line: String = buffer.drain(..=newline_pos).collect();
@@ -421,6 +437,284 @@ pub fn cancel_backend_completion(request_id: String) -> Result<bool, String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Dynamic model discovery (list-models endpoints).
+//
+// Mirrors the streaming path's invariants: the API key is looked up here and
+// placed into the auth header (never returned to JS), egress is bounded while
+// bytes arrive, and discovery failures remain distinct from successful empties.
+// ---------------------------------------------------------------------------
+
+/// The maximum number of model ids a discovery response may surface. Caps a
+/// hostile or pathological provider response so the merge step stays bounded.
+const MAX_DISCOVERED_MODELS: usize = 1_000;
+const MAX_DISCOVERY_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+const MAX_DISCOVERY_PAGES: usize = 10;
+
+/// The list-models endpoint for a provider. Pure helper (unit-tested).
+pub fn models_endpoint_for(provider_id: &str) -> Result<String, String> {
+    match provider_kind(provider_id) {
+        ProviderKind::OpenAiCompat if provider_id == "xai" => {
+            Ok("https://api.x.ai/v1/models".to_string())
+        }
+        ProviderKind::OpenAiCompat if provider_id == "openrouter" => {
+            Ok("https://openrouter.ai/api/v1/models".to_string())
+        }
+        ProviderKind::OpenAiCompat => Ok("https://api.openai.com/v1/models".to_string()),
+        ProviderKind::Anthropic => Ok("https://api.anthropic.com/v1/models".to_string()),
+        // Gemini models are enumerated under /v1beta/models; the API key stays
+        // in the x-goog-api-key header owned by this Rust boundary.
+        ProviderKind::Gemini => {
+            Ok("https://generativelanguage.googleapis.com/v1beta/models".to_string())
+        }
+    }
+}
+
+/// A discovered model id surfaced back to JavaScript. No capability data is
+/// invented here — the TS merge step attaches catalogue capabilities where known.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredModel {
+    pub id: String,
+    pub available: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDiscoveryResult {
+    pub outcome: &'static str,
+    pub models: Vec<DiscoveredModel>,
+    pub message: Option<String>,
+}
+
+fn is_generation_model(provider_id: &str, model: &serde_json::Value, id: &str) -> bool {
+    if provider_kind(provider_id) == ProviderKind::Gemini {
+        return model
+            .get("supportedGenerationMethods")
+            .and_then(|value| value.as_array())
+            .is_some_and(|methods| {
+                methods
+                    .iter()
+                    .any(|method| method.as_str() == Some("generateContent"))
+            });
+    }
+    let normalized = id.to_ascii_lowercase();
+    ![
+        "embedding",
+        "embed-",
+        "moderation",
+        "whisper",
+        "transcrib",
+        "tts-",
+        "dall-e",
+        "image",
+        "realtime",
+        "audio",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+}
+
+/// Extract model ids from a list-models JSON body across provider shapes. Pure
+/// helper so the per-provider parsing contract is unit-tested without a socket.
+///
+/// Recognized shapes:
+///   - OpenAI / xAI / OpenRouter: `{ "data": [{ "id": "..." }] }`
+///   - Anthropic: `{ "data": [{ "id": "..." }] }`
+///   - Gemini: `{ "models": [{ "name": "models/gemini-...", "supportedGenerationMethods": [...] }] }`
+pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<DiscoveredModel> {
+    let mut out = Vec::new();
+    if provider_kind(provider_id) == ProviderKind::Gemini {
+        if let Some(models) = body.get("models").and_then(|v| v.as_array()) {
+            for model in models {
+                if out.len() >= MAX_DISCOVERED_MODELS {
+                    break;
+                }
+                // Gemini `name` is "models/<id>"; strip the prefix to the bare id.
+                let raw = model
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim();
+                let id = raw
+                    .strip_prefix("models/")
+                    .unwrap_or(raw)
+                    .trim()
+                    .to_string();
+                if id.is_empty() {
+                    continue;
+                }
+                if is_generation_model(provider_id, model, &id) {
+                    out.push(DiscoveredModel {
+                        id,
+                        available: true,
+                    });
+                }
+            }
+        }
+        return out;
+    }
+
+    if let Some(data) = body.get("data").and_then(|v| v.as_array()) {
+        for model in data {
+            if out.len() >= MAX_DISCOVERED_MODELS {
+                break;
+            }
+            let id = model
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim();
+            if id.is_empty() {
+                continue;
+            }
+            if !is_generation_model(provider_id, model, id) {
+                continue;
+            }
+            out.push(DiscoveredModel {
+                id: id.to_string(),
+                available: true,
+            });
+        }
+    }
+    out
+}
+
+fn discovery_cursor(provider_id: &str, body: &serde_json::Value) -> Option<String> {
+    if provider_kind(provider_id) == ProviderKind::Gemini {
+        return body
+            .get("nextPageToken")
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+            .filter(|value| !value.is_empty());
+    }
+    if body.get("has_more").and_then(|value| value.as_bool()) != Some(true) {
+        return None;
+    }
+    body.get("last_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+}
+
+/// Discover model ids without collapsing unsupported, offline, failed, and
+/// successful-empty outcomes. Pagination and response bytes are bounded.
+#[tauri::command]
+pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryResult, String> {
+    if !NATIVE_PROVIDER_IDS.contains(&provider_id.as_str()) {
+        return Err("Provider is not registered for native API model discovery.".to_string());
+    }
+    let key = match require_key(&provider_id) {
+        Ok(key) => key,
+        Err(message) => {
+            return Ok(ModelDiscoveryResult {
+                outcome: "failed",
+                models: Vec::new(),
+                message: Some(message),
+            })
+        }
+    };
+    let url = models_endpoint_for(&provider_id)?;
+    let (auth_name, auth_value) = auth_header_for(&provider_id, &key);
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
+    let mut cursor: Option<String> = None;
+    let mut total_bytes = 0usize;
+    let mut models = Vec::new();
+    let mut seen = HashSet::new();
+
+    for _page in 0..MAX_DISCOVERY_PAGES {
+        let mut request = client.get(&url).header(&auth_name, &auth_value);
+        if let Some(cursor_value) = cursor.as_deref() {
+            let key = if provider_kind(&provider_id) == ProviderKind::Gemini {
+                "pageToken"
+            } else if provider_kind(&provider_id) == ProviderKind::Anthropic {
+                "after_id"
+            } else {
+                "after"
+            };
+            request = request.query(&[(key, cursor_value)]);
+        }
+        for (name, value) in extra_headers(&provider_id) {
+            request = request.header(name, value);
+        }
+        let mut response = match request.send().await {
+            Ok(response) => response,
+            Err(_) => {
+                return Ok(ModelDiscoveryResult {
+                    outcome: "offline",
+                    models: Vec::new(),
+                    message: Some("Provider model discovery is offline.".to_string()),
+                })
+            }
+        };
+        if !response.status().is_success() {
+            let status = response.status();
+            let unsupported = matches!(status.as_u16(), 404 | 405 | 501);
+            return Ok(ModelDiscoveryResult {
+                outcome: if unsupported { "unsupported" } else { "failed" },
+                models: Vec::new(),
+                message: Some(format!("Provider model discovery returned HTTP {status}.")),
+            });
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "Fable could not read the provider model list.".to_string())?
+        {
+            total_bytes = total_bytes.saturating_add(chunk.len());
+            if total_bytes > MAX_DISCOVERY_RESPONSE_BYTES {
+                return Ok(ModelDiscoveryResult {
+                    outcome: "failed",
+                    models: Vec::new(),
+                    message: Some("Provider model list exceeds the supported size.".to_string()),
+                });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let body: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(body) => body,
+            Err(_) => {
+                return Ok(ModelDiscoveryResult {
+                    outcome: "failed",
+                    models: Vec::new(),
+                    message: Some("Fable could not parse the provider model list.".to_string()),
+                })
+            }
+        };
+        for model in parse_models_body(&provider_id, &body) {
+            if seen.insert(model.id.clone()) {
+                models.push(model);
+                if models.len() >= MAX_DISCOVERED_MODELS {
+                    break;
+                }
+            }
+        }
+        if models.len() >= MAX_DISCOVERED_MODELS {
+            break;
+        }
+        cursor = discovery_cursor(&provider_id, &body);
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    Ok(ModelDiscoveryResult {
+        outcome: if models.is_empty() {
+            "empty"
+        } else {
+            "success"
+        },
+        models,
+        message: None,
+    })
+}
+
 #[cfg(test)]
 mod transport_policy_tests {
     use super::*;
@@ -439,5 +733,78 @@ mod transport_policy_tests {
         assert!(endpoint.contains("/models/gemini-2.5-pro:streamGenerateContent"));
         assert!(endpoint.ends_with("alt=sse"));
         assert!(endpoint_for_model("gemini", "../escape?key=secret").is_err());
+    }
+
+    #[test]
+    fn models_endpoints_point_at_each_provider_list_route() {
+        assert_eq!(
+            models_endpoint_for("openai").unwrap(),
+            "https://api.openai.com/v1/models"
+        );
+        assert_eq!(
+            models_endpoint_for("anthropic").unwrap(),
+            "https://api.anthropic.com/v1/models"
+        );
+        assert!(models_endpoint_for("gemini")
+            .unwrap()
+            .ends_with("/v1beta/models"));
+        assert_eq!(
+            models_endpoint_for("xai").unwrap(),
+            "https://api.x.ai/v1/models"
+        );
+        assert_eq!(
+            models_endpoint_for("openrouter").unwrap(),
+            "https://openrouter.ai/api/v1/models"
+        );
+    }
+
+    #[test]
+    fn parses_openai_style_data_array_into_ids() {
+        let body = serde_json::json!({
+            "data": [
+                { "id": "gpt-5" },
+                { "id": "gpt-4.1" },
+                { "id": "" },
+                { "other": "ignored" }
+            ]
+        });
+        let models = parse_models_body("openai", &body);
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["gpt-5", "gpt-4.1"]);
+        assert!(models.iter().all(|m| m.available));
+    }
+
+    #[test]
+    fn parses_gemini_models_name_prefix_and_generation_filter() {
+        let body = serde_json::json!({
+            "models": [
+                { "name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent", "streamGenerateContent"] },
+                { "name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"] },
+                { "name": "models/gemini-3.5-flash" }
+            ]
+        });
+        let models = parse_models_body("gemini", &body);
+        // Embedding-only models are not surfaced as runnable generation models.
+        let by_id: std::collections::HashMap<&str, bool> = models
+            .iter()
+            .map(|m| (m.id.as_str(), m.available))
+            .collect();
+        assert!(by_id["gemini-2.5-pro"]);
+        // Missing capability metadata is not proof that the model supports
+        // generation. Unknown models fail closed until the provider declares
+        // generateContent support.
+        assert!(!by_id.contains_key("gemini-3.5-flash"));
+        assert!(!by_id.contains_key("text-embedding-004"));
+    }
+
+    #[test]
+    fn discovery_caps_a_pathologically_large_response() {
+        let mut data = Vec::new();
+        for i in 0..(MAX_DISCOVERED_MODELS + 50) {
+            data.push(serde_json::json!({ "id": format!("m-{i}") }));
+        }
+        let body = serde_json::json!({ "data": data });
+        let models = parse_models_body("openai", &body);
+        assert_eq!(models.len(), MAX_DISCOVERED_MODELS);
     }
 }

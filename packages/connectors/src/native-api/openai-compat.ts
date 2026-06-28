@@ -111,7 +111,8 @@ function parseOpenAiStreamLine(
       type: "usage",
       inputTokens: input,
       outputTokens: output,
-      costUsd: priceFor(providerId, input, output)
+      costUsd: priceFor(providerId, input, output),
+      costEstimated: true
     });
   }
   if (choice?.finish_reason) {
@@ -186,7 +187,8 @@ export function parseOpenAiLine(
       type: "usage",
       inputTokens: input,
       outputTokens: output,
-      costUsd: priceFor(providerId, input, output)
+      costUsd: priceFor(providerId, input, output),
+      costEstimated: true
     });
   }
   if (choice?.finish_reason) {
