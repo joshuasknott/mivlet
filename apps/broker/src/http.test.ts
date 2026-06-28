@@ -95,12 +95,11 @@ describe("broker http routing + security", () => {
     expect(result.body).not.toContain("secret");
   });
 
-  it("authorize route returns the authorization url", async () => {
-    const result = await drive(handler(), "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/cb&state=s&code_challenge=ch");
-    expect(result.status).toBe(200);
-    const body = JSON.parse(result.body);
-    expect(body.authorizationUrl).toContain("client_id=gh-id");
-    expect(body.authorizationUrl).toContain("state=s");
+  it("authorize route redirects the browser to the provider", async () => {
+    const result = await drive(handler(), "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch");
+    expect(result.status).toBe(302);
+    expect(result.location).toContain("client_id=gh-id");
+    expect(result.location).toContain("state=s");
   });
 
   it("handoff redeem maps to the broker and returns tokens", async () => {
@@ -108,7 +107,7 @@ describe("broker http routing + security", () => {
     const h = createBrokerHandler({ broker: b, port: 0 });
     b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:1/cb", state: "hs", codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:1/callback", state: "hs", codeChallenge: "ch", codeChallengeMethod: "S256"
     });
     const cb = await b.callback("github", new URLSearchParams({ code: "c", state: "hs" }));
     const handoff = cb.redirect.searchParams.get("handoff")!;
@@ -122,11 +121,11 @@ describe("broker http routing + security", () => {
     const h = createBrokerHandler({ broker: b, port: 0 });
     b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:1/cb", state: "cb1", codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:1/callback", state: "cb1", codeChallenge: "ch", codeChallengeMethod: "S256"
     });
     const result = await drive(h, "GET", "/oauth/github/callback?code=c&state=cb1");
     expect(result.status).toBe(302);
-    expect(result.location).toContain("http://127.0.0.1:1/cb");
+    expect(result.location).toContain("http://127.0.0.1:1/callback");
     expect(result.location).toContain("handoff=");
     expect(result.location).not.toContain("access-token");
   });
@@ -146,18 +145,18 @@ describe("broker http routing + security", () => {
   });
 
   it("unknown provider returns unknown-provider", async () => {
-    const result = await drive(handler(), "GET", "/oauth/google/authorize?redirect_uri=http://127.0.0.1:1/cb&state=s&code_challenge=ch");
+    const result = await drive(handler(), "GET", "/oauth/google/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch");
     expect(result.status).toBe(400);
     expect(JSON.parse(result.body).error).toBe("unknown-provider");
   });
 
   it("rate-limits a route after the per-minute budget is exceeded", async () => {
     const h = handler(2); // budget of 2/min
-    const r1 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/cb&state=s1&code_challenge=ch");
-    const r2 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/cb&state=s2&code_challenge=ch");
-    const r3 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/cb&state=s3&code_challenge=ch");
-    expect(r1.status).toBe(200);
-    expect(r2.status).toBe(200);
+    const r1 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s1&code_challenge=ch");
+    const r2 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s2&code_challenge=ch");
+    const r3 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s3&code_challenge=ch");
+    expect(r1.status).toBe(302);
+    expect(r2.status).toBe(302);
     expect(r3.status).toBe(429);
     expect(JSON.parse(r3.body).error).toBe("rate-limited");
   });

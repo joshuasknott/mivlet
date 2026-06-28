@@ -126,10 +126,10 @@ describe("broker authorize", () => {
     expect(url.origin + url.pathname).toBe("https://github.com/login/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("gh-id");
     expect(url.searchParams.get("state")).toBe("s1");
-    expect(url.searchParams.get("redirect_uri")).toBe(REDIRECT);
+    expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:8788/oauth/github/callback");
     expect(url.searchParams.get("scope")).toBe("read:user read:org repo workflow");
-    // GitHub profile does NOT use broker-pkce; it carries the desktop challenge.
-    expect(url.searchParams.get("code_challenge")).toBe("desktop-challenge");
+    // The broker performs the exchange, so its verifier (not the desktop's) is used.
+    expect(url.searchParams.get("code_challenge")).not.toBe("desktop-challenge");
     expect(response.authorizationUrl).not.toContain("secret");
   });
 
@@ -153,6 +153,14 @@ describe("broker authorize", () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     const unconfigured = new FableBroker({ env: {} });
     expect(() => unconfigured.authorize(authorizeRequest("github"))).toThrow(/GitHub is not configured/);
+  });
+
+  it("rejects desktop redirects outside the narrow callback allowlist", () => {
+    const { broker } = makeBroker("github", providerFetch("github"));
+    expect(() => broker.authorize({ ...authorizeRequest("github"), redirectUri: "https://evil.example/callback" }))
+      .toThrow(/not allowed/);
+    expect(() => broker.authorize({ ...authorizeRequest("github"), redirectUri: "http://127.0.0.1:9/other" }))
+      .toThrow(/not allowed/);
   });
 });
 

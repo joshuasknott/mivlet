@@ -6,7 +6,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Repo Shape
 
-- The repo is a private pnpm monorepo named `fable`, with `@fable/desktop`, `@fable/connectors`, and `@fable/protocol`.
+- The repo is a private pnpm monorepo named `fable`, with `@fable/desktop`, `@fable/broker`, `@fable/connectors`, and `@fable/protocol`.
 - The desktop app is Tauri 2 plus React, TypeScript, and Vite.
 - The Rust runtime is under `apps/desktop/src-tauri`.
 - Product docs already exist for thesis, roadmap, architecture, connectors, release notes, and threat model.
@@ -57,7 +57,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Not Implemented Yet
 
-- No production auth broker for GitHub, Vercel, Notion, Slack, Linear, or other broker-based connector flows.
+- No deployed production auth broker or externally validated confidential OAuth session.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the deferred auth broker.
 - No encrypted SQLite store is wired yet. Current local runtime state is app-data JSON plus browser localStorage fallback; backend secrets are separately handled by the OS keyring boundary.

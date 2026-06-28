@@ -62,6 +62,8 @@ import { createStores, type HandoffStore, type PendingExchangeStore } from "./st
 
 export interface BrokerOptions {
   env: NodeJS.ProcessEnv;
+  /** Public HTTPS (or loopback development) base URL registered with providers. */
+  publicBaseUrl?: string;
   clock?: BrokerClock;
   fetch?: BrokerFetch;
   pending?: PendingExchangeStore;
@@ -83,9 +85,11 @@ export class FableBroker {
   private readonly pending: PendingExchangeStore;
   private readonly handoff: HandoffStore;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly publicBaseUrl: URL;
 
   constructor(options: BrokerOptions) {
     this.env = options.env;
+    this.publicBaseUrl = new URL(options.publicBaseUrl ?? "http://127.0.0.1:8788/");
     this.clock = options.clock ?? { nowMs: () => Date.now() };
     this.fetcher = options.fetch;
     const stores = createStores(this.clock);
@@ -110,10 +114,12 @@ export class FableBroker {
     this.requireConfigured(request.provider);
     const profile = providerProfile(request.provider);
     const credentials = resolveCredentials(request.provider, this.env);
+    validateDesktopRedirect(request.redirectUri, this.env);
+    const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrl).toString();
 
     const url = new URL(profile.authorizationEndpoint);
     url.searchParams.set("client_id", credentials.clientId);
-    url.searchParams.set("redirect_uri", request.redirectUri);
+    url.searchParams.set("redirect_uri", providerRedirectUri);
     url.searchParams.set("response_type", "code");
     if (profile.scopes.length) {
       url.searchParams.set("scope", profile.scopes.join(profile === providerProfile("slack") ? " " : " "));
@@ -136,6 +142,7 @@ export class FableBroker {
     this.pending.create({
       provider: request.provider,
       redirectUri: request.redirectUri,
+      providerRedirectUri,
       state: request.state,
       verifier
     });
@@ -189,7 +196,7 @@ export class FableBroker {
     try {
       exchange = await exchangeCode(
         { provider, credentials, fetch: this.fetcher, clock: this.clock },
-        { code, redirectUri: pending.redirectUri, verifier: pending.verifier }
+        { code, redirectUri: pending.providerRedirectUri, verifier: pending.verifier }
       );
     } catch (error) {
       throw brokerErrorFrom(error);
@@ -239,7 +246,7 @@ export class FableBroker {
     }
     return {
       contractVersion: BROKER_CONTRACT_VERSION,
-      tokens: entry.tokens,
+      tokens: transportTokens(entry.tokens, this.clock.nowMs()),
       account: entry.account
     };
   }
@@ -255,7 +262,7 @@ export class FableBroker {
         { provider: request.provider, credentials, fetch: this.fetcher, clock: this.clock },
         request.refreshToken
       );
-      return { contractVersion: BROKER_CONTRACT_VERSION, tokens };
+      return { contractVersion: BROKER_CONTRACT_VERSION, tokens: transportTokens(tokens, this.clock.nowMs()) };
     } catch (error) {
       throw brokerErrorFrom(error);
     }
@@ -300,6 +307,40 @@ export class FableBroker {
       );
     }
   }
+}
+
+/**
+ * Allow only the desktop loopback callback shape, or an exact HTTPS callback
+ * explicitly listed for managed desktop schemes. Loopback ports are ephemeral,
+ * but host and path are fixed and query/fragment/userinfo are forbidden.
+ */
+function validateDesktopRedirect(value: string, env: NodeJS.ProcessEnv): void {
+  let redirect: URL;
+  try {
+    redirect = new URL(value);
+  } catch {
+    throw new BrokerContractError("invalid-request", "Desktop redirect URI is invalid.", false);
+  }
+  const loopback = redirect.protocol === "http:"
+    && (redirect.hostname === "127.0.0.1" || redirect.hostname === "[::1]")
+    && redirect.pathname === "/callback";
+  const exact = (env.FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS ?? "")
+    .split(",").map((entry) => entry.trim()).filter(Boolean)
+    .some((entry) => entry === redirect.toString());
+  if ((!loopback && !exact) || redirect.username || redirect.password || redirect.search || redirect.hash) {
+    throw new BrokerContractError("invalid-request", "Desktop redirect URI is not allowed.", false);
+  }
+}
+
+/** Add wire-compatible relative expiry/scope fields for the native desktop. */
+function transportTokens(tokens: ConnectorTokenSet, nowMs: number): ConnectorTokenSet {
+  const expiresIn = tokens.expiresAt
+    ? Math.max(0, Math.floor((Date.parse(tokens.expiresAt) - nowMs) / 1000))
+    : undefined;
+  return Object.assign({}, tokens, {
+    ...(expiresIn !== undefined ? { expiresIn } : {}),
+    scope: tokens.scopes.join(" ")
+  });
 }
 
 /** Convert a provider-client error into a structured broker error. */

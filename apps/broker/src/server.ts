@@ -16,6 +16,7 @@ import { createBrokerServer } from "./http.js";
 const port = Number(process.env.FABLE_BROKER_PORT ?? 8788);
 const host = process.env.FABLE_BROKER_HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
 const requestsPerMinute = Number(process.env.FABLE_BROKER_RATE_LIMIT_PER_MINUTE ?? 60);
+const publicBaseUrl = process.env.FABLE_BROKER_PUBLIC_URL ?? `http://127.0.0.1:${port}/`;
 
 if (process.env.NODE_ENV === "production" && host === "127.0.0.1") {
   // Defensive: production should bind an externally reachable host behind HTTPS.
@@ -24,7 +25,7 @@ if (process.env.NODE_ENV === "production" && host === "127.0.0.1") {
   console.warn("[fable-broker] production host defaults to loopback; ensure an HTTPS reverse proxy fronts it.");
 }
 
-const broker = new FableBroker({ env: process.env });
+const broker = new FableBroker({ env: process.env, publicBaseUrl });
 const server = createBrokerServer({ broker, host, port, requestsPerMinute });
 
 server.on("error", (error) => {

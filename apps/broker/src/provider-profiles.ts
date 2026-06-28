@@ -60,7 +60,7 @@ const GITHUB_PROFILE: ProviderProfile = {
   scopes: ["read:user", "read:org", "repo", "workflow"],
   clientIdEnv: "FABLE_BROKER_GITHUB_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_GITHUB_CLIENT_SECRET",
-  pkce: "none",
+  pkce: "broker-pkce",
   normalizeIdentity(payload) {
     const p = asObject(payload);
     const id = pickString(p, "id") ?? pickString(p, "node_id");

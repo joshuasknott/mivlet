@@ -127,6 +127,14 @@ export function page<T>(
 
 export function oauthClient(options: OAuthClientOptions) {
   const fetcher = options.fetch ?? fetch;
+  const brokerEndpoint = (segment: "handoff" | "refresh" | "revoke") => {
+    const url = new URL(options.tokenEndpoint);
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.at(-1) !== "token") throw providerError(options.connectorId, 500, "broker_configuration");
+    parts[parts.length - 1] = segment;
+    url.pathname = `/${parts.join("/")}`;
+    return url.toString();
+  };
   return {
     async startAuth(context: ConnectorAuthContext): Promise<ConnectorAuthStart> {
       const url = new URL(options.authorizationEndpoint);
@@ -144,53 +152,55 @@ export function oauthClient(options: OAuthClientOptions) {
       if (callbackUrl.searchParams.get("state") !== callback.expectedState) {
         throw providerError(options.connectorId, 400, "state_mismatch");
       }
-      const code = callbackUrl.searchParams.get("code");
-      if (!code) throw providerError(options.connectorId, 400, "missing_code");
-      const response = await fetcher(options.tokenEndpoint, {
+      const handoff = callbackUrl.searchParams.get("handoff");
+      if (!handoff) throw providerError(options.connectorId, 400, "missing_handoff");
+      const response = await fetcher(brokerEndpoint("handoff"), {
         method: "POST",
-        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          code,
-          client_id: options.clientId,
-          redirect_uri: options.redirectUri,
-          code_verifier: callback.codeVerifier
-        })
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, handoff, state: callback.expectedState })
       });
       if (!response.ok) throw providerError(options.connectorId, response.status, "token_exchange");
-      const tokens = tokenSet(await safeJson(response));
-      const identity = await fetcher(options.identityEndpoint, {
-        headers: { accept: "application/json", authorization: `${tokens.tokenType} ${tokens.accessToken}` }
-      });
-      if (!identity.ok) throw providerError(options.connectorId, identity.status, "identity");
-      return { tokens, account: accountSummary(await safeJson(identity)) };
+      const body = await safeJson(response);
+      if (!isObject(body) || !isObject(body.tokens) || !isObject(body.account)) {
+        throw providerError(options.connectorId, 502, "malformed_handoff");
+      }
+      return { tokens: connectorTokenSet(body.tokens), account: accountSummary(body.account) };
     },
     async refresh(tokens: ConnectorTokenSet): Promise<ConnectorTokenSet> {
       if (!tokens.refreshToken) throw providerError(options.connectorId, 401, "expired_token");
-      const response = await fetcher(options.tokenEndpoint, {
+      const response = await fetcher(brokerEndpoint("refresh"), {
         method: "POST",
-        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          refresh_token: tokens.refreshToken,
-          client_id: options.clientId
-        })
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, refreshToken: tokens.refreshToken })
       });
       if (!response.ok) throw providerError(options.connectorId, response.status, "refresh_failed");
-      const refreshed = tokenSet(await safeJson(response));
+      const body = await safeJson(response);
+      if (!isObject(body) || !isObject(body.tokens)) throw providerError(options.connectorId, 502, "malformed_refresh");
+      const refreshed = connectorTokenSet(body.tokens);
       return { ...refreshed, refreshToken: refreshed.refreshToken ?? tokens.refreshToken };
     },
     async revoke(tokens: ConnectorTokenSet): Promise<void> {
       if (!options.revocationEndpoint) return;
-      const response = await fetcher(options.revocationEndpoint, {
+      const response = await fetcher(brokerEndpoint("revoke"), {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ token: tokens.refreshToken ?? tokens.accessToken })
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, token: tokens.refreshToken ?? tokens.accessToken, tokenTypeHint: tokens.refreshToken ? "refresh_token" : "access_token" })
       });
       if (!response.ok && response.status !== 404) {
         throw providerError(options.connectorId, response.status, "revocation_failed");
       }
     }
+  };
+}
+
+function connectorTokenSet(value: JsonObject): ConnectorTokenSet {
+  if (typeof value.accessToken !== "string") throw providerError("connector", 502, "malformed_token");
+  return {
+    accessToken: value.accessToken,
+    ...(typeof value.refreshToken === "string" ? { refreshToken: value.refreshToken } : {}),
+    tokenType: typeof value.tokenType === "string" ? value.tokenType : "Bearer",
+    ...(typeof value.expiresAt === "string" ? { expiresAt: value.expiresAt } : {}),
+    scopes: Array.isArray(value.scopes) ? value.scopes.filter((scope): scope is string => typeof scope === "string") : []
   };
 }
 

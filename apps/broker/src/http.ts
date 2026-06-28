@@ -135,7 +135,8 @@ async function route(
       codeChallengeMethod: "S256" as const
     };
     const { response } = broker.authorize(request);
-    writeJson(res, 200, response);
+    res.writeHead(302, { location: response.authorizationUrl, "cache-control": "no-store" });
+    res.end();
     return;
   }
 

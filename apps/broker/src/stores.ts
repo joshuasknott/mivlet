@@ -25,6 +25,8 @@ interface PendingExchange {
   provider: BrokerProviderId;
   /** The desktop's exact redirect URI the provider callback must return to. */
   redirectUri: string;
+  /** Broker callback registered with the provider; reused for token exchange. */
+  providerRedirectUri: string;
   /** Desktop-supplied single-use state. */
   state: string;
   /** Broker-generated PKCE verifier (broker-pkce providers only). */
