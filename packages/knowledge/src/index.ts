@@ -21,3 +21,11 @@ export {
   type KnowledgeStore,
   type KnowledgeStoreState
 } from "./store";
+
+/**
+ * Ingestion pipeline: pure functions for turning connector/local-file
+ * candidates into stable KnowledgeSource + SourceChunk records, with dedup,
+ * incremental reindex, move/rename detection, and folder indexing. See
+ * ./ingestion for the full surface.
+ */
+export * from "./ingestion";
