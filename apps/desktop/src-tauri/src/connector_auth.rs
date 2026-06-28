@@ -1275,7 +1275,12 @@ pub(crate) async fn refresh_connection(
                 )
             })?;
         if !response.status().is_success() {
-            return refresh_rejected(connector_id, &connection.account.id, &path, &mut connections);
+            return refresh_rejected(
+                connector_id,
+                &connection.account.id,
+                &path,
+                &mut connections,
+            );
         }
         let refreshed: HandoffResponse = response.json().await.map_err(|_| {
             command_error(
@@ -1308,7 +1313,12 @@ pub(crate) async fn refresh_connection(
                 )
             })?;
         if !response.status().is_success() {
-            return refresh_rejected(connector_id, &connection.account.id, &path, &mut connections);
+            return refresh_rejected(
+                connector_id,
+                &connection.account.id,
+                &path,
+                &mut connections,
+            );
         }
         response.json().await.map_err(|_| {
             command_error(
