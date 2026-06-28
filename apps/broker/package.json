@@ -1,0 +1,27 @@
+{
+  "name": "@fable/broker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fable confidential-OAuth auth broker. Deployable, not deployed.",
+  "main": "./dist/server.js",
+  "bin": {
+    "fable-broker": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "pnpm build && node ./dist/server.js",
+    "start": "node ./dist/server.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fable/connectors": "workspace:*",
+    "@fable/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
