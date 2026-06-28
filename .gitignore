@@ -13,3 +13,4 @@ output/
 coverage/
 .npm-cache/
 .vite/
+.superpowers/
