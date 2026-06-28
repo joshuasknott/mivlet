@@ -6,9 +6,9 @@
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "pnpm --filter @fable/desktop dev",
-    "build": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors build && pnpm --filter @fable/desktop build",
-    "typecheck": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors typecheck && pnpm --filter @fable/desktop typecheck",
-    "test": "pnpm --filter @fable/connectors test && pnpm --filter @fable/desktop test",
+    "build": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors build && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop build",
+    "typecheck": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors typecheck && pnpm --filter @fable/knowledge typecheck && pnpm --filter @fable/desktop typecheck",
+    "test": "pnpm --filter @fable/connectors test && pnpm --filter @fable/knowledge test && pnpm --filter @fable/desktop test",
     "lint": "pnpm -r --if-present lint",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "pnpm --filter @fable/desktop tauri build",

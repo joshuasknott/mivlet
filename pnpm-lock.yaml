@@ -88,6 +88,19 @@ importers:
         specifier: ^3.2.4
         version: 3.2.6(@types/node@24.13.2)(jsdom@26.1.0)
 
+  packages/knowledge:
+    dependencies:
+      '@fable/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/node@24.13.2)(jsdom@26.1.0)
+
   packages/protocol:
     devDependencies:
       typescript:
