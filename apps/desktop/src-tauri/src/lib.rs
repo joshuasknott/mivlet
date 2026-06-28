@@ -47,6 +47,7 @@ pub fn run() {
             approvals::record_approval_decision,
             approvals::resolve_approval_request,
             snapshot::list_imported_knowledge_sources,
+            snapshot::save_imported_knowledge_sources,
             snapshot::import_local_knowledge_source,
             memory::list_memory_state,
             memory::save_memory_state,

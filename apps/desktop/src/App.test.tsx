@@ -66,6 +66,7 @@ vi.mock("./runtime", () => ({
   refreshRuntimeConnectorHealth: vi.fn(async () => null),
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
+  saveRuntimeImportedKnowledgeSources: vi.fn(async () => null),
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => run),
   recoverRuntimeAgentRuns: vi.fn(async () => []),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
@@ -218,7 +219,7 @@ describe("Fable home", () => {
     expect(within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
 
     await user.click(
-      within(gmailCard as HTMLElement).getByRole("button", { name: /connect/i })
+      within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })
     );
     expect(within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
   });
@@ -312,15 +313,27 @@ describe("Fable home", () => {
     );
   });
 
-  it("opens knowledge as an empty workspace view", async () => {
+  it("opens the interactive knowledge workspace", async () => {
     const user = await renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
     expect(screen.getByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
-    expect(screen.getByLabelText(/knowledge is empty/i)).toHaveTextContent("Nothing here yet");
-    expect(screen.queryByRole("heading", { name: "Sources" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Sources" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: /import file/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /import folder/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
+
+    const file = new File(["Knowledge page import content"], "knowledge-page.md", {
+      type: "text/markdown"
+    });
+    await user.upload(screen.getByLabelText(/import local knowledge file/i), file);
+    expect(await screen.findByRole("heading", { name: "knowledge-page.md" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remember" }));
+
+    await user.click(screen.getByRole("tab", { name: "Memory" }));
+    expect(screen.getByText(/only explicitly approved memory/i)).toBeInTheDocument();
+    expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(0);
   });
 
   it("creates a schedule from name, description, day, and time", async () => {
@@ -567,8 +580,8 @@ describe("Fable home", () => {
 
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
-    expect(screen.getByLabelText(/knowledge is empty/i)).toHaveTextContent("Nothing here yet");
-    expect(screen.queryByText("launch-notes.md")).not.toBeInTheDocument();
+    expect(screen.getAllByText("launch-notes.md").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Launch risks, connector recovery/i)).toBeInTheDocument();
   });
 
   it("recovers composer drafts from local persistence", async () => {

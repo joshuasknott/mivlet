@@ -52,6 +52,26 @@ export interface ApprovalResolutionResponse {
 
 export type MemoryKind = "fact" | "inference" | "preference" | "imported";
 
+/**
+ * Approval lifecycle for a memory. Suggested memories are surfaced for the
+ * user to accept but never enter a run until promoted to `approved`. Only the
+ * user creates durable memory; the system suggests but does not write silently.
+ */
+export type MemoryApprovalState = "approved" | "suggested" | "rejected";
+
+/**
+ * Origin provenance for a memory — where it came from and what produced it.
+ * Carried on every promoted memory so the Knowledge page can show provenance
+ * and so the context assembler can record why each memory entered a run.
+ */
+export interface MemoryProvenance {
+  origin: "chat" | "source" | "artifact" | "run" | "manual";
+  sourceId?: string;
+  runId?: string;
+  artifactId?: string;
+  note: string;
+}
+
 export interface MemoryRecord {
   id: string;
   kind: MemoryKind;
@@ -61,6 +81,31 @@ export interface MemoryRecord {
   freshness: string;
   approved: boolean;
   pinned: boolean;
+  /**
+   * Scope the memory belongs to. Defaults to global when absent. The context
+   * assembler only applies memory whose scope is satisfied by the run.
+   */
+  scope?: KnowledgeScope;
+  /** 0..1 confidence. 1 = user-confirmed; lower for inferred suggestions. */
+  confidence?: number;
+  /** Origin provenance. */
+  provenance?: MemoryProvenance;
+  /** Approval lifecycle. `approved` mirrors the boolean for back-compat. */
+  approvalState?: MemoryApprovalState;
+  /** Originating agent run, when promoted from a completed run. */
+  runId?: string;
+  /** ISO timestamp of creation. */
+  createdAt?: string;
+  /** ISO timestamp of last edit. */
+  updatedAt?: string;
+  /**
+   * Forget tombstone. Present => the memory is excluded from every read path
+   * (retrieval, context assembler, Knowledge page). Preferred over hard delete
+   * so exclusion survives store round-trips and stays auditable.
+   */
+  forgottenAt?: string;
+  /** Soft-disable, mirrors the disabled-source mechanism. */
+  disabled?: boolean;
 }
 
 export interface MemoryControlState {
@@ -525,6 +570,30 @@ export interface ProjectWorkspace {
 export type KnowledgeSourceKind = "document" | "folder" | "web" | "memory";
 export type KnowledgeTrust = "trusted" | "untrusted";
 
+/**
+ * Scope bounds for sources, memory, and pinned context. Retrieval and the
+ * context assembler never leak material from a tighter scope into a looser one
+ * (a thread-scoped memory is not applied to a global run). `global` is the
+ * backward-compatible default for everything that predates scoped knowledge.
+ */
+export type KnowledgeScopeLevel = "global" | "project" | "thread";
+
+export interface KnowledgeScope {
+  level: KnowledgeScopeLevel;
+  projectId?: string;
+  threadId?: string;
+}
+
+export const GLOBAL_SCOPE: KnowledgeScope = { level: "global" };
+
+/**
+ * Lifecycle/health of an indexed source. Used by the ingestion pipeline and
+ * the Knowledge page to surface indexing / failed / stale states without a
+ * separate metrics dashboard. All additive — sources created before this field
+ * default to "ok".
+ */
+export type SourceStatus = "ok" | "indexing" | "stale" | "error";
+
 export interface KnowledgeSource {
   id: string;
   title: string;
@@ -540,6 +609,23 @@ export interface KnowledgeSource {
   importedAt?: string;
   origin?: "fixture" | "local-import" | "connector-import";
   providerMetadata?: Record<string, string>;
+  /**
+   * Scope the source belongs to. Defaults to global when absent (the
+   * pre-scope behavior). Drives retrieval + pinned-context bounding.
+   */
+  scope?: KnowledgeScope;
+  /** Connector account provenance, when the source came from a connected account. */
+  account?: string;
+  /** True once chunks have been produced (and, when configured, embedded). */
+  embeddingReady?: boolean;
+  /** 0..1 connector/local trust weight used in retrieval ranking. */
+  authority?: number;
+  /** Soft-disable / exclusion flag. Disabled sources never enter a run. */
+  disabled?: boolean;
+  /** Lifecycle/health state surfaced in the Knowledge page. */
+  status?: SourceStatus;
+  /** Optional message describing a failed/stale state for the UI. */
+  statusMessage?: string;
 }
 
 export interface LocalFileImport extends KnowledgeSource {
@@ -562,12 +648,193 @@ export interface KnowledgeCitation {
   trust: KnowledgeTrust;
   pinned: boolean;
   score: number;
+  /**
+   * Stable id of the cited chunk, when the citation came from chunked
+   * retrieval. Lets the UI/inspector resolve an excerpt to an exact location.
+   */
+  chunkId?: string;
+  /** Connector account the source came from, when applicable. */
+  account?: string;
+  /** The basis for the citation's score — never hidden from the user. */
+  ranking?: CitationRanking;
+}
+
+/**
+ * The score components behind a citation, surfaced so the user can see *why*
+ * something entered context without exposing internal chain-of-thought.
+ */
+export interface CitationRanking {
+  relevance: number;
+  recency: number;
+  authority: number;
+  pin: number;
+  feedback: number;
 }
 
 export interface KnowledgeSearchResponse {
   query: string;
   mode: "lexical-fallback" | "hybrid";
   citations: KnowledgeCitation[];
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge & memory domain (additive).
+//
+// The chunk/ingestion/memory/context/artifact records below extend the existing
+// source/memory types so the local-first foundations keep working unchanged.
+// Every new field on an existing interface is optional, so a v1 runtime
+// snapshot still loads. See docs/superpowers/specs/2026-06-28-knowledge-memory-design.md.
+// ---------------------------------------------------------------------------
+
+/**
+ * A structure-aware slice of a source. Chunk ids are stable
+ * (`${sourceId}#${ordinal}`) so citations resolve to a durable location, and
+ * each chunk carries its own content hash for dedup across reindex.
+ */
+export interface SourceChunk {
+  id: string;
+  sourceId: string;
+  ordinal: number;
+  text: string;
+  contentHash: string;
+  /** Nearest heading, when the source was chunked by structure (e.g. Markdown). */
+  heading?: string;
+  charStart: number;
+  charEnd: number;
+  /** Present when an embedding provider ran on this chunk. */
+  embedding?: number[];
+  embeddingModel?: string;
+}
+
+export interface SourceRecord {
+  source: KnowledgeSource;
+  chunks: SourceChunk[];
+}
+
+/**
+ * Bounded outcome of ingesting one candidate. The pipeline never throws for
+ * ordinary problems — unsupported, malformed, binary, oversized, or
+ * inaccessible inputs surface as a `skipped` outcome the caller can show.
+ */
+export type IngestionOutcome =
+  | { kind: "created"; source: KnowledgeSource; chunks: SourceChunk[] }
+  | {
+      kind: "updated";
+      source: KnowledgeSource;
+      chunks: SourceChunk[];
+      previousFingerprint: string;
+    }
+  | { kind: "unchanged"; source: KnowledgeSource }
+  | { kind: "skipped"; reason: SkipReason; detail: string };
+
+export type SkipReason =
+  | "unsupported-type"
+  | "oversized"
+  | "empty"
+  | "malformed"
+  | "binary"
+  | "inaccessible"
+  | "too-many-files";
+
+/**
+ * A memory the system thinks is worth keeping, surfaced for explicit approval.
+ * Suggestions NEVER write durable memory on their own — only `approve` does.
+ * Duplicate-of / contradiction-with point at existing memory ids so the UI can
+ * show the relationship without nested dashboards.
+ */
+export interface MemorySuggestion {
+  id: string;
+  title: string;
+  value: string;
+  kind: MemoryKind;
+  provenance: MemoryProvenance;
+  confidence: number;
+  duplicateOfId?: string;
+  contradictsId?: string;
+}
+
+export interface MemoryRetentionResult {
+  prunedIds: string[];
+  reasons: Record<string, "stale" | "superseded" | "low-confidence">;
+}
+
+/**
+ * A user-selected source or memory kept always-available within a scope.
+ * Pinned context is resolved by the context assembler before retrieval, so a
+ * pinned item enters a run deterministically even when it would not rank.
+ */
+export interface PinnedContextEntry {
+  id: string;
+  scope: KnowledgeScope;
+  sourceId?: string;
+  memoryId?: string;
+  pinnedAt: string;
+}
+
+/**
+ * Temporary context associated with a thread, project, or run. Captured during
+ * assembly so the same run can be inspected/cited; it is not durable memory.
+ */
+export interface WorkingContext {
+  runId: string;
+  scope: KnowledgeScope;
+  messageIds: string[];
+  retrievedCitationIds: string[];
+  memoryIds: string[];
+  toolResultIds: string[];
+  createdAt: string;
+}
+
+/**
+ * Useful output produced by completed work, saved with provenance and a link
+ * back to the originating run. Artifacts are first-class knowledge citizens
+ * that can be promoted into memory.
+ */
+export interface Artifact {
+  id: string;
+  title: string;
+  kind: "document" | "code" | "summary" | "other";
+  content: string;
+  provenance: { runId: string; createdAt: string; sourceIds: string[] };
+  scope?: KnowledgeScope;
+  pinned?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Connector-source contract.
+//
+// A provider-agnostic ingestion contract: any connector branch (local-files or
+// a future first-wave connector) implements this interface so the knowledge
+// pipeline can ingest its content uniformly. The knowledge package depends on
+// this interface only — never on a connector implementation.
+// ---------------------------------------------------------------------------
+
+/**
+ * A connector-supplied candidate for ingestion. `externalId` is stable within
+ * the connector; `content` is already-extracted text (empty when extraction
+ * failed or the file is binary, which the pipeline turns into a bounded skip).
+ */
+export interface ConnectorSourceCandidate {
+  externalId: string;
+  title: string;
+  mimeType: string;
+  content: string;
+  sizeBytes: number;
+  fetchedAt: string;
+  account?: string;
+  providerMetadata?: Record<string, string>;
+}
+
+/**
+ * Implemented by a connector (local-files or any first-wave connector branch).
+ * The knowledge ingestion pipeline iterates `listSources()` and turns each
+ * candidate into a `SourceRecord` via the shared ingestion path.
+ */
+export interface ConnectorSourceProvider {
+  readonly connectorId: ConnectorId;
+  listSources():
+    | AsyncIterable<ConnectorSourceCandidate>
+    | ConnectorSourceCandidate[];
 }
 
 export type AutomationStatus = "draft" | "active" | "paused";

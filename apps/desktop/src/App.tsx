@@ -5,7 +5,6 @@ import { chatThreads, connectors, profileFixture, projects } from "./data/worksp
 import { utilityItems } from "./lib/constants";
 import {
   buildAgentRequest,
-  buildContextPrefixForRun,
   PERMISSION_PROFILES
 } from "./lib/agent-run";
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
@@ -121,7 +120,7 @@ export function App() {
       case "Connectors":
         return <ConnectorsPage runtime={runtime} />;
       case "Knowledge":
-        return <KnowledgePage />;
+        return <KnowledgePage runtime={runtime} />;
       case "Schedules":
         return <SchedulesPage runtime={runtime} />;
       case "Profile":
@@ -406,12 +405,6 @@ export function App() {
                   // Build the pinned-memory/knowledge system prefix (empty when
                   // nothing is pinned or memory is disabled) and the request from
                   // the picker-selected model — both drive the real agent run.
-                  const contextPrefix = buildContextPrefixForRun({
-                    memoryRecords: runtime.managedMemoryRecords,
-                    knowledgeSources: runtime.workspaceKnowledgeSources,
-                    pinnedSourceIds: runtime.pinnedSourceIds,
-                    memoryDisabled: runtime.memoryDisabled
-                  });
                   const request = buildAgentRequest({
                     providerId: nativeConnected.id,
                     model: runtime.resolvedSelectedModelId,
@@ -421,10 +414,12 @@ export function App() {
                   // Reset the cooperative-cancel flag so a new run is not born
                   // already cancelled, then drive the Fable-owned agent loop.
                   cancelRequestedRef.current = false;
-                  void agent.run(
-                    request,
-                    contextPrefix || undefined,
-                    runtime.permissionLabel
+                  void runtime.assembleKnowledgeContext(prompt).then((contextPrefix) =>
+                    agent.run(
+                      request,
+                      contextPrefix || undefined,
+                      runtime.permissionLabel
+                    )
                   );
                   return;
                 }

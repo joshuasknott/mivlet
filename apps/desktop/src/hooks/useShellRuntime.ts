@@ -16,6 +16,7 @@ import type {
   ConnectorSearchResult,
   FirstWaveConnectorId,
   KnowledgeCitation,
+  KnowledgeScope,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
@@ -26,6 +27,7 @@ import type {
   ThreadSummary,
   WorkspaceDirective
 } from "@fable/protocol";
+import { assembleContext, chunkSourceText, retrieve } from "@fable/knowledge";
 import {
   FIRST_WAVE_CONNECTOR_IDS,
   importFixtureConnectorItem,
@@ -33,7 +35,6 @@ import {
   listBackendProviders,
   prepareFixtureConnectorAction,
   searchFixtureConnector,
-  searchKnowledgeSources,
   type ToolApprovalGate,
   type LocalTextFileCandidate
 } from "@fable/connectors";
@@ -74,6 +75,7 @@ import {
   refreshRuntimeConnectorHealth,
   resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
+  saveRuntimeImportedKnowledgeSources,
   saveRuntimeSnapshot,
   searchRuntimeConnector,
   searchRuntimeKnowledgeSources,
@@ -166,8 +168,11 @@ export interface ShellRuntime {
   knowledgeSearchMode: string;
   composerRef: React.MutableRefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  folderInputRef: React.MutableRefObject<HTMLInputElement | null>;
   submitComposer: (event: FormEvent) => void;
   handleLocalKnowledgeFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  handleLocalKnowledgeFolderChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  triggerFolderImport: () => void;
   focusComposer: (value: string) => void;
   useDirective: (directive: WorkspaceDirective) => void;
   useConnector: (connector: ConnectorManifest) => void;
@@ -230,6 +235,11 @@ export interface ShellRuntime {
   toggleMemoryDisabled: () => void;
   exportMemory: () => Promise<void>;
   cancelMemoryEdit: () => void;
+  searchKnowledge: (query: string) => Promise<void>;
+  refreshKnowledgeSource: (sourceId: string) => Promise<void>;
+  toggleKnowledgeSourceDisabled: (sourceId: string) => void;
+  deleteKnowledgeSource: (sourceId: string) => void;
+  assembleKnowledgeContext: (query: string) => Promise<string>;
   // schedules
   schedules: Schedule[];
   createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;
@@ -367,6 +377,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(initialState.permissionMode);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const allThreads = useMemo(
     () => [...chatThreads, ...projects.flatMap((project) => project.threads)],
@@ -388,7 +399,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const isChatView = activePage === null;
   const workspaceKnowledgeSources = useMemo(
     () =>
-      mergeKnowledgeSources(knowledgeSources, [
+      mergeKnowledgeSources(hasTauriRuntime() ? [] : knowledgeSources, [
         ...connectorImportedSources,
         ...importedKnowledgeSources
       ]),
@@ -649,6 +660,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     fileInputRef.current?.click();
   };
 
+  const triggerFolderImport = () => {
+    setImportStatus("Choose a folder containing supported knowledge files.");
+    folderInputRef.current?.click();
+  };
+
   const addImportedKnowledgeSource = (source: LocalFileImport) => {
     setImportedKnowledgeSources((current) =>
       [source, ...current.filter((existing) => existing.id !== source.id)].slice(
@@ -659,13 +675,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
   };
 
-  const importLocalKnowledgeFile = async (file: File) => {
-    setImportStatus(`Reading ${file.name}...`);
+  const importLocalKnowledgeFile = async (file: File, sourceName = file.name) => {
+    setImportStatus(`Reading ${sourceName}...`);
 
     try {
       const content = await readFileAsText(file);
       const candidate: LocalTextFileCandidate = {
-        name: file.name,
+        name: sourceName,
         content,
         sizeBytes: file.size,
         importedAt: new Date().toISOString()
@@ -676,10 +692,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       addImportedKnowledgeSource(imported);
       setImportStatus(`Imported ${imported.title}. It is pinned as untrusted knowledge.`);
       setLastAction(`Imported source: ${imported.title}`);
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Fable could not import that file.";
       setImportStatus(message);
       setLastAction(message);
+      return false;
     }
   };
 
@@ -694,9 +712,39 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     void importLocalKnowledgeFile(file);
   };
 
+  const handleLocalKnowledgeFolderChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []).slice(
+      0,
+      MAX_IMPORTED_KNOWLEDGE_SOURCES
+    );
+    event.currentTarget.value = "";
+
+    if (files.length === 0) {
+      return;
+    }
+
+    void (async () => {
+      let importedCount = 0;
+      for (const file of files) {
+        if (await importLocalKnowledgeFile(file, file.webkitRelativePath || file.name)) {
+          importedCount += 1;
+        }
+      }
+      setImportStatus(
+        importedCount === files.length
+          ? `Imported ${importedCount} files from the selected folder.`
+          : `Imported ${importedCount} of ${files.length} files. Unsupported or invalid files were skipped.`
+      );
+    })();
+  };
+
   const runKnowledgeSearch = async (query: string) => {
-    const runtimeResult = await searchRuntimeKnowledgeSources(query, workspaceKnowledgeSources, 3);
-    const result = runtimeResult ?? searchKnowledgeSources(query, workspaceKnowledgeSources, 3);
+    const result = await retrieve(knowledgeRetrievalSources(), {
+      query,
+      scope: currentKnowledgeScope(),
+      limit: 8,
+      budgetChars: 6_000
+    });
 
     setKnowledgeCitations(result.citations);
     setKnowledgeSearchMode(result.mode);
@@ -705,6 +753,111 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         ? `Found ${result.citations.length} cited workspace sources`
         : "No matching workspace sources found"
     );
+  };
+
+  const currentKnowledgeScope = (): KnowledgeScope => {
+    if (!activeThread) return { level: "global" };
+    const project = projects.find((candidate) =>
+      candidate.threads.some((thread) => thread.id === activeThread.id)
+    );
+    return {
+      level: "thread",
+      threadId: activeThread.id,
+      projectId: project?.id ?? "workspace"
+    };
+  };
+
+  const sourceIsAuthorized = (source: KnowledgeSource) =>
+    source.connectorId === "local-files" ||
+    connectorManifests.some(
+      (connector) => connector.id === source.connectorId && connector.status === "connected"
+    );
+
+  const knowledgeRetrievalSources = () =>
+    workspaceKnowledgeSources
+      .filter(sourceIsAuthorized)
+      .map((source) => ({
+        source,
+        chunks: chunkSourceText(source.contentPreview ?? "", {
+          sourceId: source.id,
+          mimeType: source.providerMetadata?.mimeType
+        })
+      }))
+      .filter((record) => record.chunks.length > 0);
+
+  const assembleKnowledgeContext = async (query: string) => {
+    const result = await retrieve(knowledgeRetrievalSources(), {
+      query,
+      scope: currentKnowledgeScope(),
+      limit: 8,
+      budgetChars: 6_000
+    });
+    setKnowledgeCitations(result.citations);
+    setKnowledgeSearchMode(result.mode);
+    return assembleContext({
+      runId: `run-${Date.now()}`,
+      scope: currentKnowledgeScope(),
+      memory: memoryDisabled ? [] : managedMemoryRecords,
+      citations: result.citations,
+      authorization: {
+        isSourceAuthorized: (connectorId) =>
+          connectorId === "local-files" ||
+          connectorManifests.some(
+            (connector) => connector.id === connectorId && connector.status === "connected"
+          )
+      }
+    }).systemPrefix;
+  };
+
+  const persistLocalKnowledgeSources = (sources: LocalFileImport[]) => {
+    setImportedKnowledgeSources(sources);
+    void saveRuntimeImportedKnowledgeSources(sources).catch((error) => {
+      setImportStatus(
+        error instanceof Error ? error.message : "Fable could not save source changes."
+      );
+    });
+  };
+
+  const refreshKnowledgeSource = async (sourceId: string) => {
+    const refreshedAt = new Date().toISOString();
+    const refresh = <T extends KnowledgeSource>(sources: T[]) =>
+      sources.map((source) =>
+        source.id === sourceId
+          ? {
+              ...source,
+              status: "ok" as const,
+              statusMessage: undefined,
+              freshness: "Reindexed just now",
+              importedAt: refreshedAt
+            }
+          : source
+      );
+    const local = refresh(importedKnowledgeSources);
+    persistLocalKnowledgeSources(local);
+    setConnectorImportedSources((current) => refresh(current));
+    setLastAction("Knowledge source reindexed");
+  };
+
+  const toggleKnowledgeSourceDisabled = (sourceId: string) => {
+    const toggle = <T extends KnowledgeSource>(sources: T[]) =>
+      sources.map((source) =>
+        source.id === sourceId ? { ...source, disabled: !source.disabled } : source
+      );
+    persistLocalKnowledgeSources(toggle(importedKnowledgeSources));
+    setConnectorImportedSources((current) => toggle(current));
+    setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
+    setLastAction("Knowledge source visibility updated");
+  };
+
+  const deleteKnowledgeSource = (sourceId: string) => {
+    persistLocalKnowledgeSources(
+      importedKnowledgeSources.filter((source) => source.id !== sourceId)
+    );
+    setConnectorImportedSources((current) =>
+      current.filter((source) => source.id !== sourceId)
+    );
+    setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
+    setLastAction("Knowledge source deleted");
   };
 
   const commitMemoryState = (state: MemoryControlState, status: string) => {
@@ -1409,6 +1562,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     toggleVoice,
     setImportStatus,
     triggerAttach,
+    triggerFolderImport,
     toolPickerOpen,
     commandOpen,
     importStatus,
@@ -1416,8 +1570,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     knowledgeSearchMode,
     composerRef,
     fileInputRef,
+    folderInputRef,
     submitComposer,
     handleLocalKnowledgeFileChange,
+    handleLocalKnowledgeFolderChange,
     focusComposer,
     useDirective,
     useConnector,
@@ -1470,6 +1626,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     toggleMemoryDisabled,
     exportMemory,
     cancelMemoryEdit,
+    searchKnowledge: runKnowledgeSearch,
+    refreshKnowledgeSource,
+    toggleKnowledgeSourceDisabled,
+    deleteKnowledgeSource,
+    assembleKnowledgeContext,
     schedules,
     createSchedule,
     toggleSchedule,

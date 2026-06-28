@@ -38,6 +38,7 @@ vi.mock("../runtime", () => ({
   refreshRuntimeConnectorHealth: vi.fn(async () => null),
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
+  saveRuntimeImportedKnowledgeSources: vi.fn(async () => null),
   saveRuntimeSnapshot: vi.fn(async () => null),
   searchRuntimeConnector: vi.fn(async () => null),
   searchRuntimeKnowledgeSources: vi.fn(async () => null),

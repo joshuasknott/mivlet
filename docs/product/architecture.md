@@ -28,6 +28,34 @@ Core domains:
 
 Implemented runtime commands cover approval resolution, one-time execution permits, standing approval rules, approval audit persistence, native agent-run journaling and restart recovery, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
 
+## Knowledge And Memory
+
+`@fable/knowledge` is the pure domain layer for ingestion, chunking, retrieval,
+memory proposals, context assembly, and store contracts. The desktop shell owns
+the user interaction and delegates retrieval/context construction to that
+package; the Rust snapshot boundary persists imported local sources and durable
+memory until the encrypted store replaces the snapshot adapter.
+
+- Local file and recursive folder imports are bounded, typed, fingerprinted,
+  chunked, and classified as untrusted knowledge. Provider imports retain their
+  connector/account provenance and remain authorized only while that connector
+  is connected.
+- Retrieval is scoped to global, project, or thread context. Deleted, disabled,
+  stale, failed, disconnected, or out-of-scope sources are excluded before
+  context assembly.
+- Citations identify the exact source and excerpt used. Pinned context is
+  deliberate, not a trust upgrade.
+- Imported content never becomes durable memory implicitly. “Remember” uses the
+  existing approval-gated promotion path; memory remains editable, pinnable,
+  exportable, disableable, and forgettable.
+- Agent submissions assemble the same bounded, cited context used by Knowledge
+  search. Durable memory is omitted when memory is disabled or a record has
+  been forgotten.
+
+The `KnowledgeStore` contract is snapshot-shaped and independent of a storage
+engine. Goal 5's encrypted SQLite repository can implement the same boundary;
+this branch does not introduce a competing database or secret store.
+
 ## Native AI Runtime
 
 Fable owns the native API agent loop while preserving provider-specific wire formats:
