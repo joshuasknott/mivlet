@@ -130,13 +130,22 @@ public/destructive action use high-risk full-access confirmation. No adapter
 executes a consequential write directly; the native runtime records a prepared
 approval preview and requires a matching explicit user decision before egress.
 
-The native AI runtime exposes read-only tools for GitHub, Vercel, and Linear
-capabilities. These call the live provider APIs after native credential
-resolution and return structured items with pagination and rate-limit metadata.
-Supported write capabilities are functional provider calls, but only after the
-same explicit approval boundary.
+The native AI runtime exposes read-only tools for authenticated GitHub, Vercel,
+and Linear capabilities. These call the live provider APIs only after native
+credential resolution and return structured items with pagination and rate-limit
+metadata. Supported write capabilities are functional provider calls only after
+the same explicit approval boundary and only when the connector is actually
+connected.
 
 ## Credential storage and auth broker
+
+The auth broker is **deferred**: this repo has no deployable broker app yet.
+The narrow broker contract, its non-proxying boundary, the fail-closed
+configuration checks, and the local-first guarantees are documented in
+[Auth broker contract](../connectors/auth-broker.md). Confidential-client
+connectors (GitHub, Vercel, Notion, Slack, Linear) fail closed until a broker is
+deployed; the core desktop workspace and Google public-client (PKCE) connectors
+do not depend on it.
 
 Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
 the authorization code; access and refresh tokens are written through OS secure

@@ -15,7 +15,8 @@ Local-first and private by default, Fable is built for people who want powerful 
 - Approval flow with once/session/rule/modify/deny decisions and audit history.
 - Local recovery for composer drafts, pinned sources, automation status, and approval audit.
 - Protocol types for approvals, memory, connector health, directives, and runtime snapshots.
-- Production OAuth/API adapters for Notion and Slack, plus fixture-backed previews and fail-closed foundations for the remaining first-wave connectors.
+- Native API-key agent path for OpenAI-compatible, Anthropic, Gemini, xAI, and OpenRouter providers, with keys held by the local credential boundary.
+- First-wave connector boundaries with explicit fixture previews, Google public-client PKCE support, and broker-gated confidential connectors that fail closed until configured.
 
 ## Brand
 

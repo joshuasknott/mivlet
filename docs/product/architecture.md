@@ -5,7 +5,7 @@
 - Tauri 2 for the desktop shell.
 - Rust for runtime commands, permissions, jobs, local context, and connector execution.
 - React, TypeScript, and Vite for the interface.
-- Convex for auth, realtime shared state, and collaboration state when configured.
+- Convex for optional realtime shared state and collaboration state when configured.
 - Encrypted SQLite for offline/private local state.
 - OS secure storage for credentials.
 
@@ -52,7 +52,7 @@ The native connector boundary exposes status, auth start/complete/clear, health 
 - GitHub, Notion, Slack, Vercel, or another provider that requires confidential credentials routes through the configured HTTPS auth broker. The broker is limited to authorization, token exchange/refresh, identity, and revocation; it is not a general connector proxy.
 - Every external write capability must be marked consequential. The shared runtime rejects non-consequential write declarations and requires a fresh matching per-action approval record before calling an adapter.
 
-GitHub, Vercel, and Linear have live provider adapters on the desktop path. Their production reads use native credential resolution and provider API egress; their consequential writes are routed through the connector approval audit and one-time execution permit before the provider call. Google Drive, Notion, Gmail, Slack, and Google Calendar still use deterministic fixtures or fail-closed live boundaries until their provider adapters are implemented. Provider console registrations, broker deployment, and provider verification remain deployment configuration.
+Authenticated provider egress exists on the desktop path for the first-wave external connectors, but availability is gated by each connector's auth boundary. Google Drive, Gmail, and Google Calendar use public-client loopback PKCE and can run without the auth broker once Google desktop OAuth configuration is supplied. GitHub, Vercel, Notion, Slack, and Linear are confidential-client or provider-installation flows; they require the HTTPS auth broker and provider-console callback registration before users can connect them. Browser preview remains explicitly fixture-backed, and missing configuration fails closed instead of claiming a live connection.
 
 Dynamic provider model discovery/routing is also incomplete. The current native catalog uses maintained, provider-valid defaults and revalidates the selected model against that catalog; a later adapter should query provider model APIs and account entitlements instead of treating the catalog as exhaustive.
 
@@ -82,4 +82,4 @@ Fable did not reuse TokenMaxxer’s quota scraping, fixed blended cost estimates
 
 ## Convex Boundary
 
-Convex is optional at local preview time. If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for realtime shared state. Without it, the app uses local fixtures and typed adapter boundaries.
+Convex is optional. If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for realtime shared state. Without it, the core desktop workspace, local files, approvals, runtime snapshots, memory controls, schedules, and API-key providers remain usable.

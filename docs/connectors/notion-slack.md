@@ -4,6 +4,12 @@ Fable's desktop runtime uses the providers' supported OAuth 2 authorization-code
 
 ## Auth broker and callbacks
 
+The auth broker is **deferred**: this repo contains no deployable broker app.
+The full broker contract — including the non-proxying boundary, the fail-closed
+configuration checks, and the local-first guarantees — is documented in
+[Auth broker contract](auth-broker.md). The desktop fails closed for Notion and
+Slack until a broker is deployed.
+
 Notion public integrations and Slack apps are confidential clients. Set `FABLE_AUTH_BROKER_URL` to the HTTPS base URL of a broker that owns the provider client secrets and implements:
 
 - `GET /oauth/{notion|slack}/authorize`
