@@ -20,6 +20,9 @@ fn action_fingerprint(action: &ConnectorActionRequest) -> Result<String, String>
 }
 
 fn read_records(path: &Path) -> Result<Vec<ConnectorApprovalRecord>, String> {
+    if let Some(records) = crate::store::read_document(path)? {
+        return Ok(records);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -33,6 +36,9 @@ fn read_records(path: &Path) -> Result<Vec<ConnectorApprovalRecord>, String> {
 }
 
 fn write_records(path: &Path, records: &[ConnectorApprovalRecord]) -> Result<(), String> {
+    if crate::store::write_document(path, &records)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_vec_pretty(records)
         .map_err(|_| "Fable could not encode connector approval records.".to_string())?;
     let temporary = path.with_extension("json.tmp");

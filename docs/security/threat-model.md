@@ -64,6 +64,7 @@
 
 - Deploy and independently review the auth broker before enabling confidential-client providers.
 - Add provider-specific redirect allowlists, webhook verification, and token audience/issuer validation as each live adapter is implemented.
-- Move non-secret JSON metadata to encrypted SQLite for transactional integrity and migrations.
+- Continue review of the encrypted SQLite schema and recovery UX as new Goal 8
+  domains are integrated; do not create a competing persistence layer.
 - Add platform CI for macOS Keychain and Linux Secret Service; Windows and mock-store coverage alone is insufficient for release confidence.
 - Add outbound network policy controls and SSRF protection before broadening `web-fetch` beyond the current explicit approval and HTTP(S) checks.

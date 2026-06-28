@@ -65,6 +65,9 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
 }
 
 pub(crate) fn read_agent_runs(path: &Path) -> Result<Vec<PersistedAgentRun>, String> {
+    if let Some(runs) = crate::store::read_document(path)? {
+        return Ok(runs);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -78,6 +81,9 @@ pub(crate) fn read_agent_runs(path: &Path) -> Result<Vec<PersistedAgentRun>, Str
 }
 
 fn write_agent_runs(path: &Path, runs: &[PersistedAgentRun]) -> Result<(), String> {
+    if crate::store::write_document(path, &runs)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_vec_pretty(runs)
         .map_err(|_| "Fable could not encode agent run state.".to_string())?;
     let temporary = path.with_extension("json.tmp");

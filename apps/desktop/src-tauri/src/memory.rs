@@ -98,6 +98,9 @@ pub(crate) fn normalize_memory_state(
 }
 
 pub(crate) fn read_memory_state(path: &Path) -> Result<MemoryControlState, String> {
+    if let Some(state) = crate::store::read_document(path)? {
+        return normalize_memory_state(state);
+    }
     if !path.exists() {
         return Ok(default_memory_state());
     }
@@ -120,6 +123,9 @@ pub(crate) fn write_memory_state(
     state: MemoryControlState,
 ) -> Result<MemoryControlState, String> {
     let normalized = normalize_memory_state(state)?;
+    if crate::store::write_document(path, &normalized)? {
+        return Ok(normalized);
+    }
     let encoded = serde_json::to_string_pretty(&normalized)
         .map_err(|_| "Fable could not encode memory state.".to_string())?;
 

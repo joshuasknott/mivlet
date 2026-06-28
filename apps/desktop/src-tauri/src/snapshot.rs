@@ -116,6 +116,9 @@ fn normalize_imported_knowledge_source(source: LocalFileImport) -> Result<LocalF
 }
 
 pub(crate) fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFileImport>, String> {
+    if let Some(sources) = crate::store::read_document(path)? {
+        return Ok(sources);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -145,6 +148,9 @@ fn write_imported_knowledge_sources(
     path: &Path,
     sources: &[LocalFileImport],
 ) -> Result<(), String> {
+    if crate::store::write_document(path, &sources)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_string_pretty(sources)
         .map_err(|_| "Fable could not encode imported knowledge sources.".to_string())?;
 
@@ -415,6 +421,9 @@ pub(crate) fn normalize_runtime_snapshot(
 }
 
 pub(crate) fn read_runtime_snapshot(path: &Path) -> Result<Option<RuntimeSnapshot>, String> {
+    if let Some(snapshot) = crate::store::read_document(path)? {
+        return normalize_runtime_snapshot(snapshot).map(Some);
+    }
     if !path.exists() {
         return Ok(None);
     }
@@ -437,6 +446,9 @@ pub(crate) fn write_runtime_snapshot(
     snapshot: RuntimeSnapshot,
 ) -> Result<RuntimeSnapshot, String> {
     let normalized = normalize_runtime_snapshot(snapshot)?;
+    if crate::store::write_document(path, &normalized)? {
+        return Ok(normalized);
+    }
     let encoded = serde_json::to_string_pretty(&normalized)
         .map_err(|_| "Fable could not encode runtime snapshot.".to_string())?;
 

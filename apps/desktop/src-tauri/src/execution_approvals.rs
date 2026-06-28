@@ -27,6 +27,9 @@ fn request_fingerprint(request: &ApprovalRequest) -> Result<String, String> {
 }
 
 fn read_records(path: &Path) -> Result<Vec<ExecutionApproval>, String> {
+    if let Some(records) = crate::store::read_document(path)? {
+        return Ok(records);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -40,6 +43,9 @@ fn read_records(path: &Path) -> Result<Vec<ExecutionApproval>, String> {
 }
 
 fn write_records(path: &Path, records: &[ExecutionApproval]) -> Result<(), String> {
+    if crate::store::write_document(path, &records)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_vec_pretty(records)
         .map_err(|_| "Fable could not encode execution approvals.".to_string())?;
     let temporary = path.with_extension("json.tmp");
