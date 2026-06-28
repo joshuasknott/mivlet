@@ -18,14 +18,22 @@ import type {
   ConnectorManifest,
   ConnectorSearchRequest,
   ConnectorSearchResult,
+  JobAttempt,
   KnowledgeSearchResponse,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
   MemoryPromotionRequest,
   MemoryPromotionResponse,
+  NotificationRecord,
   PersistedAgentRun,
-  RuntimeSnapshot
+  RuntimeSnapshot,
+  ScheduledJob,
+  ScheduledJobStatus,
+  SchedulerQueueEntry,
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowRunStatus
 } from "@fable/protocol";
 
 interface ApprovalAuditRecordResponse {
@@ -583,5 +591,250 @@ export async function executeRuntimeToolCall(request: RuntimeToolRequest) {
     return await invoke<RuntimeToolResult>("execute_tool_call", { request });
   } catch (error) {
     throw toRuntimeError(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler durable store (jobs + queue). The Rust boundary owns durability +
+// the in-process tick that leases due entries and emits run-request events.
+// Because Tauri is a single shared process, the lease map is the cross-window
+// duplicate-execution guard. Outside Tauri these return null so the shell
+// stays fixture-testable without claiming live scheduling.
+// ---------------------------------------------------------------------------
+
+export async function listRuntimeSchedulerJobs() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<ScheduledJob[]>("list_scheduler_jobs");
+  } catch {
+    return null;
+  }
+}
+
+export async function listRuntimeSchedulerQueue() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<SchedulerQueueEntry[]>("list_scheduler_queue");
+  } catch {
+    return null;
+  }
+}
+
+export async function saveRuntimeScheduledJob(job: ScheduledJob) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<ScheduledJob>("save_scheduled_job", { job });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function deleteRuntimeScheduledJob(jobId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<void>("delete_scheduled_job", { jobId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function setRuntimeJobStatus(jobId: string, status: ScheduledJobStatus) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<void>("set_job_status", { jobId, status });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function enqueueRuntimeJobRun(jobId: string, runId: string, scheduledAt: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<SchedulerQueueEntry>("enqueue_job_run", {
+      jobId,
+      runId,
+      scheduledAt
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function reportRuntimeJobAttempt(runId: string, attempt: JobAttempt) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<void>("report_job_attempt", { runId, attempt });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Listen for the Rust tick's run-request events (a due occurrence was leased).
+ * The TS scheduler driver starts a workflow run in response. Returns an
+ * unlisten function (or null outside Tauri).
+ */
+export async function listenRuntimeSchedulerRunRequest(
+  onRun: (event: { jobId: string; runId: string; scheduledAt: string }) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const unlisten = await listen<{
+      jobId: string;
+      runId: string;
+      scheduledAt: string;
+    }>("fable://scheduler/run-request", (event) => onRun(event.payload));
+    return unlisten;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-run journal. The Rust boundary owns atomic persistence + bounded
+// history. The TS layer owns run execution + restart-recovery marking.
+// ---------------------------------------------------------------------------
+
+/** The wire shape crossing the Rust boundary (camelCase mirrors the Rust struct). */
+export interface WorkflowRunRecordWire {
+  id: string;
+  definitionId: string;
+  definitionVersion: number;
+  status: WorkflowRunStatus;
+  trigger: WorkflowRun["trigger"];
+  scheduledJobId?: string;
+  input: unknown;
+  steps: unknown;
+  failureReason?: string;
+  idempotencyKey?: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt?: string;
+}
+
+function toWorkflowRunWire(run: WorkflowRun): WorkflowRunRecordWire {
+  return {
+    id: run.id,
+    definitionId: run.definitionId,
+    definitionVersion: run.definitionVersion,
+    status: run.status,
+    trigger: run.trigger,
+    scheduledJobId: run.scheduledJobId,
+    input: run.input,
+    steps: run.steps,
+    failureReason: run.failureReason,
+    idempotencyKey: run.idempotencyKey,
+    startedAt: run.startedAt,
+    updatedAt: run.updatedAt,
+    finishedAt: run.finishedAt
+  };
+}
+
+/** Convert a wire record back into the protocol WorkflowRun shape. */
+export function wireToWorkflowRun(record: WorkflowRunRecordWire): WorkflowRun {
+  return {
+    id: record.id,
+    definitionId: record.definitionId,
+    definitionVersion: record.definitionVersion,
+    status: record.status,
+    trigger: record.trigger,
+    scheduledJobId: record.scheduledJobId,
+    input: (record.input as Record<string, unknown>) ?? {},
+    steps: (record.steps as WorkflowRun["steps"]) ?? [],
+    failureReason: record.failureReason,
+    idempotencyKey: record.idempotencyKey,
+    startedAt: record.startedAt,
+    updatedAt: record.updatedAt,
+    finishedAt: record.finishedAt
+  };
+}
+
+export async function saveRuntimeWorkflowRun(run: WorkflowRun) {
+  if (!hasTauriRuntime()) return null;
+  const record = toWorkflowRunWire(run);
+  try {
+    return await invoke<WorkflowRunRecordWire>("save_workflow_run", { run: record });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function saveRuntimeWorkflowDefinition(definition: WorkflowDefinition) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<WorkflowDefinition>("save_workflow_definition", { definition });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listRuntimeWorkflowDefinitions() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<WorkflowDefinition[]>("list_workflow_definitions");
+  } catch {
+    return null;
+  }
+}
+
+export async function listRuntimeWorkflowRuns() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs");
+  } catch {
+    return null;
+  }
+}
+
+export async function listRuntimeWorkflowRunsForDefinition(definitionId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs_for_definition", {
+      definitionId
+    });
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// OS notifications. The TS layer shapes private/public bodies; Rust only
+// delivers them and emits the click deep-link so the shell navigates to the run.
+// ---------------------------------------------------------------------------
+
+export async function deliverRuntimeNotification(record: NotificationRecord) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<void>("deliver_notification", {
+      request: {
+        id: record.id,
+        title: record.title,
+        body: record.body,
+        deepLinkPage: record.deepLink?.page,
+        runId: record.deepLink?.runId
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Listen for notification click deep-links so the shell navigates to the run.
+ * Returns an unlisten function (or null outside Tauri).
+ */
+export async function listenRuntimeNotificationClick(
+  onClick: (event: { page: string; runId: string; notificationId: string }) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const unlisten = await listen<{
+      page: string;
+      runId: string;
+      notificationId: string;
+    }>("fable://notification/click", (event) => onClick(event.payload));
+    return unlisten;
+  } catch {
+    return null;
   }
 }

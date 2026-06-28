@@ -1,7 +1,8 @@
 import { FormEvent, useState } from "react";
-import { Clock, Trash } from "@phosphor-icons/react";
+import { Clock, PencilSimple, Trash } from "@phosphor-icons/react";
 import { WEEKDAYS, type Schedule, type Weekday } from "../lib/types";
 import { formatScheduleWhen } from "../lib/helpers";
+import type { ScheduledJob, WorkflowRun } from "@fable/protocol";
 
 /**
  * Schedules context panel: a create form (name / description / day + time)
@@ -17,18 +18,27 @@ const DEFAULT_TIME = "09:00";
 export function SchedulePanel({
   schedules,
   onCreate,
+  onEdit,
   onToggle,
-  onDelete
+  onDelete,
+  jobs = [],
+  runs = [],
+  onRunNow
 }: {
   schedules: Schedule[];
   onCreate: (input: { name: string; description: string; day: Weekday; time: string }) => void;
+  onEdit: (schedule: Schedule) => void;
   onToggle: (schedule: Schedule) => void;
   onDelete: (schedule: Schedule) => void;
+  jobs?: ScheduledJob[];
+  runs?: WorkflowRun[];
+  onRunNow?: (job: ScheduledJob) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [day, setDay] = useState<Weekday>(DEFAULT_DAY);
   const [time, setTime] = useState(DEFAULT_TIME);
+  const [editing, setEditing] = useState<Schedule | null>(null);
 
   const resetForm = () => {
     setName("");
@@ -117,15 +127,104 @@ export function SchedulePanel({
         <ul className="schedule-list">
           {schedules.map((schedule) => (
             <li key={schedule.id} className="schedule-row">
+              {(() => {
+                const job = jobs.find((candidate) => candidate.id === schedule.id);
+                const lastRun = runs.find((candidate) => candidate.id === job?.lastRunId);
+                return (
+                  <>
               <span className="schedule-row__icon" aria-hidden="true">
                 <Clock size={18} />
               </span>
               <div className="schedule-row__body">
-                <strong>{schedule.name}</strong>
-                <span className="schedule-row__when">{formatScheduleWhen(schedule)}</span>
+                {editing?.id === schedule.id ? (
+                  <form
+                    className="schedule-edit"
+                    aria-label={`Edit schedule ${schedule.name}`}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (!editing.name.trim() || !editing.description.trim()) return;
+                      onEdit({
+                        ...editing,
+                        name: editing.name.trim(),
+                        description: editing.description.trim()
+                      });
+                      setEditing(null);
+                    }}
+                  >
+                    <input
+                      aria-label="Edit schedule task name"
+                      value={editing.name}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current ? { ...current, name: event.target.value } : current
+                        )
+                      }
+                    />
+                    <textarea
+                      aria-label="Edit schedule description"
+                      value={editing.description}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current ? { ...current, description: event.target.value } : current
+                        )
+                      }
+                    />
+                    <select
+                      aria-label="Edit schedule day"
+                      value={editing.day}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current ? { ...current, day: event.target.value as Weekday } : current
+                        )
+                      }
+                    >
+                      {WEEKDAYS.map((weekday) => (
+                        <option key={weekday} value={weekday}>{weekday}</option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label="Edit schedule time"
+                      type="time"
+                      value={editing.time}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current ? { ...current, time: event.target.value } : current
+                        )
+                      }
+                    />
+                    <button type="submit">Save</button>
+                    <button type="button" onClick={() => setEditing(null)}>Cancel</button>
+                  </form>
+                ) : (
+                  <>
+                    <strong>{schedule.name}</strong>
+                    <span className="schedule-row__when">{formatScheduleWhen(schedule)}</span>
+                  </>
+                )}
+                {job?.nextRunAt ? (
+                  <span className="schedule-row__when">
+                    Upcoming {new Date(job.nextRunAt).toLocaleString()}
+                  </span>
+                ) : null}
                 <p className="schedule-row__description">{schedule.description}</p>
+                {lastRun ? (
+                  <details>
+                    <summary>Last result · {lastRun.status}</summary>
+                    <p>{lastRun.failureReason ?? "Workflow completed."}</p>
+                  </details>
+                ) : null}
               </div>
               <div className="schedule-row__actions">
+                <button
+                  type="button"
+                  aria-label={`Edit schedule ${schedule.name}`}
+                  onClick={() => setEditing({ ...schedule })}
+                >
+                  <PencilSimple size={15} />
+                </button>
+                {job && onRunNow ? (
+                  <button type="button" onClick={() => onRunNow(job)}>Run now</button>
+                ) : null}
                 <button
                   type="button"
                   className={schedule.enabled ? "schedule-row__pause" : "schedule-row__resume"}
@@ -142,6 +241,9 @@ export function SchedulePanel({
                   <Trash size={15} />
                 </button>
               </div>
+                  </>
+                );
+              })()}
             </li>
           ))}
         </ul>

@@ -6,8 +6,79 @@
 
 use std::{fs, path::Path};
 
-use crate::models::{WorkflowRunRecord, MAX_WORKFLOW_RUNS, WORKFLOW_RUN_STATUSES};
-use crate::paths::{normalize_spaces, truncate_characters, workflow_runs_path};
+use crate::models::{
+    WorkflowDefinitionRecord, WorkflowRunRecord, MAX_WORKFLOW_RUNS, MAX_WORKFLOW_STEPS,
+    WORKFLOW_RUN_STATUSES, WORKFLOW_RUN_STORE_VERSION,
+};
+use crate::paths::{
+    normalize_spaces, truncate_characters, workflow_definitions_path, workflow_runs_path,
+};
+
+fn normalize_definition(
+    mut definition: WorkflowDefinitionRecord,
+) -> Result<WorkflowDefinitionRecord, String> {
+    definition.id = truncate_characters(&normalize_spaces(&definition.id), 160);
+    definition.name = truncate_characters(&normalize_spaces(&definition.name), 200);
+    definition.description = truncate_characters(&normalize_spaces(&definition.description), 2_000);
+    definition.created_at = normalize_spaces(&definition.created_at);
+    definition.updated_at = normalize_spaces(&definition.updated_at);
+    let step_count = definition.steps.as_array().map(Vec::len).unwrap_or(0);
+    if definition.schema_version != WORKFLOW_RUN_STORE_VERSION
+        || definition.id.is_empty()
+        || definition.name.is_empty()
+        || definition.version == 0
+        || step_count == 0
+        || step_count > MAX_WORKFLOW_STEPS
+    {
+        return Err("Workflow definition is incomplete or exceeds its limits.".to_string());
+    }
+    Ok(definition)
+}
+
+fn read_definitions(path: &Path) -> Result<Vec<WorkflowDefinitionRecord>, String> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let contents = fs::read_to_string(path)
+        .map_err(|_| "Fable could not read workflow definitions.".to_string())?;
+    if contents.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_str(&contents)
+        .map_err(|_| "Fable could not parse workflow definitions.".to_string())
+}
+
+fn write_definitions(path: &Path, definitions: &[WorkflowDefinitionRecord]) -> Result<(), String> {
+    let encoded = serde_json::to_vec_pretty(definitions)
+        .map_err(|_| "Fable could not encode workflow definitions.".to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, encoded)
+        .map_err(|_| "Fable could not save workflow definitions.".to_string())?;
+    fs::rename(&tmp, path).map_err(|_| "Fable could not commit workflow definitions.".to_string())
+}
+
+#[tauri::command]
+pub fn save_workflow_definition(
+    app: tauri::AppHandle,
+    definition: WorkflowDefinitionRecord,
+) -> Result<WorkflowDefinitionRecord, String> {
+    let definition = normalize_definition(definition)?;
+    let path = workflow_definitions_path(&app)?;
+    let mut definitions = read_definitions(&path)?;
+    definitions
+        .retain(|existing| existing.id != definition.id || existing.version != definition.version);
+    definitions.insert(0, definition.clone());
+    definitions.truncate(500);
+    write_definitions(&path, &definitions)?;
+    Ok(definition)
+}
+
+#[tauri::command]
+pub fn list_workflow_definitions(
+    app: tauri::AppHandle,
+) -> Result<Vec<WorkflowDefinitionRecord>, String> {
+    read_definitions(&workflow_definitions_path(&app)?)
+}
 
 fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String> {
     run.id = truncate_characters(&normalize_spaces(&run.id), 160);
@@ -33,8 +104,8 @@ pub fn read_runs(path: &Path) -> Result<Vec<WorkflowRunRecord>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read workflow runs.".to_string())?;
+    let contents =
+        fs::read_to_string(path).map_err(|_| "Fable could not read workflow runs.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -82,7 +153,10 @@ pub fn list_workflow_runs_for_definition(
 ) -> Result<Vec<WorkflowRunRecord>, String> {
     let definition_id = normalize_spaces(&definition_id);
     let runs = read_runs(&workflow_runs_path(&app)?)?;
-    Ok(runs.into_iter().filter(|r| r.definition_id == definition_id).collect())
+    Ok(runs
+        .into_iter()
+        .filter(|r| r.definition_id == definition_id)
+        .collect())
 }
 
 #[cfg(test)]
@@ -124,6 +198,20 @@ mod tests {
         }
     }
 
+    fn sample_definition() -> WorkflowDefinitionRecord {
+        WorkflowDefinitionRecord {
+            schema_version: WORKFLOW_RUN_STORE_VERSION,
+            id: "wf".to_string(),
+            version: 1,
+            name: "Brief".to_string(),
+            description: "A transparent brief.".to_string(),
+            steps: serde_json::json!([{"kind":"prompt","id":"prompt","prompt":"Summarize"}]),
+            notification_prefs: None,
+            created_at: "2026-06-28T10:00:00Z".to_string(),
+            updated_at: "2026-06-28T10:00:00Z".to_string(),
+        }
+    }
+
     #[test]
     fn round_trips_a_run() {
         let path = tmp_path();
@@ -162,5 +250,25 @@ mod tests {
         let mut run = sample_run("r1", "completed");
         run.trigger = "auto".to_string();
         assert!(normalize_run(run).is_err());
+    }
+
+    #[test]
+    fn versioned_definition_round_trips_without_overwriting_history() {
+        let path = tmp_path();
+        let first = normalize_definition(sample_definition()).unwrap();
+        write_definitions(&path, std::slice::from_ref(&first)).unwrap();
+        let mut second = sample_definition();
+        second.version = 2;
+        let mut definitions = read_definitions(&path).unwrap();
+        definitions.insert(0, normalize_definition(second).unwrap());
+        write_definitions(&path, &definitions).unwrap();
+        let read = read_definitions(&path).unwrap();
+        assert_eq!(
+            read.iter()
+                .map(|definition| definition.version)
+                .collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+        let _ = fs::remove_file(path);
     }
 }

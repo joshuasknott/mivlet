@@ -24,11 +24,12 @@ use std::{
 use std::path::PathBuf;
 
 use crate::models::{
-    JobAttempt, SchedulerQueueEntry, SchedulerStore, ScheduledJob, JOB_ATTEMPT_STATUSES,
+    JobAttempt, ScheduledJob, SchedulerQueueEntry, SchedulerStore, JOB_ATTEMPT_STATUSES,
     MAX_JOB_ATTEMPTS, MAX_SCHEDULED_JOBS, MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES,
     SCHEDULED_JOB_STATUSES, SCHEDULER_LEASE_MS, SCHEDULER_STORE_VERSION,
 };
 use crate::paths::{normalize_spaces, scheduler_store_path, truncate_characters};
+use chrono::{DateTime, SecondsFormat, Utc};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// Process-global scheduler state held behind Tauri's managed state.
@@ -55,7 +56,7 @@ fn empty_store(instance_id: &str) -> SchedulerStore {
         jobs: Vec::new(),
         queue: Vec::new(),
         instance_id: instance_id.to_string(),
-        updated_at: now_epoch_ms().to_string(),
+        updated_at: now_iso(),
     }
 }
 
@@ -69,15 +70,29 @@ fn now_epoch_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Parse a stored scheduler timestamp. The canonical form is epoch-ms (the
-/// TS driver writes `Date.getTime()` for `scheduledAt`/lease times); empty or
-/// unparseable values resolve to 0 (treated as immediately due).
+fn now_iso() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// Parse the canonical RFC 3339 wire timestamp. Numeric epoch milliseconds are
+/// accepted only for backward compatibility with the pre-ISO scheduler store.
 fn parse_ms(value: &str) -> i64 {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return 0;
     }
-    trimmed.parse::<i64>().unwrap_or(0)
+    DateTime::parse_from_rfc3339(trimmed)
+        .map(|value| value.timestamp_millis())
+        .or_else(|_| trimmed.parse::<i64>())
+        .unwrap_or(i64::MAX)
+}
+
+fn canonical_timestamp(value: &str) -> Result<String, String> {
+    let parsed = DateTime::parse_from_rfc3339(value.trim())
+        .map_err(|_| "Scheduler timestamps must be RFC 3339 strings.".to_string())?;
+    Ok(parsed
+        .with_timezone(&Utc)
+        .to_rfc3339_opts(SecondsFormat::Millis, true))
 }
 
 fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
@@ -170,7 +185,7 @@ fn persist<F: FnOnce(&mut SchedulerStore)>(app: &AppHandle, mutate: F) -> Result
         }
         let store = guard.as_mut().expect("store loaded");
         mutate(store);
-        store.updated_at = now_epoch_ms().to_string();
+        store.updated_at = now_iso();
         write_store(&path, store)
     })
 }
@@ -251,7 +266,7 @@ pub fn enqueue_job_run(
 ) -> Result<SchedulerQueueEntry, String> {
     let job_id = normalize_spaces(&job_id);
     let run_id = truncate_characters(&normalize_spaces(&run_id), 160);
-    let scheduled_at = normalize_spaces(&scheduled_at);
+    let scheduled_at = canonical_timestamp(&scheduled_at)?;
     let key = format!("{}:{}", job_id, scheduled_at);
     if job_id.is_empty() || run_id.is_empty() || scheduled_at.is_empty() {
         return Err("Enqueue needs jobId, runId, and scheduledAt.".to_string());
@@ -314,6 +329,16 @@ pub fn report_job_attempt(
                 } else {
                     "queued".to_string()
                 };
+            } else if status == "running" {
+                // Acknowledgement: keep the entry leased but extend it so the
+                // five-second tick cannot start a duplicate while the workflow
+                // is active. A crashed process eventually recovers the lease.
+                entry.state = "leased".to_string();
+                entry.lease_expires_at =
+                    DateTime::from_timestamp_millis(now_epoch_ms() + 15 * 60 * 1_000)
+                        .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
+                        .unwrap_or_default();
+                continue;
             }
             entry.lease_holder.clear();
             entry.lease_expires_at.clear();
@@ -328,7 +353,9 @@ pub fn report_job_attempt(
 pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     let now_ms = now_epoch_ms();
     let instance = with_state(app, |mutex| {
-        let guard = mutex.lock().map_err(|_| "Scheduler lock poisoned.".to_string())?;
+        let guard = mutex
+            .lock()
+            .map_err(|_| "Scheduler lock poisoned.".to_string())?;
         Ok::<String, String>(
             guard
                 .as_ref()
@@ -337,6 +364,7 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
         )
     })?;
 
+    let mut newly_leased = Vec::new();
     persist(app, |store| {
         // 1. Expire leases whose deadline has passed.
         for entry in &mut store.queue {
@@ -353,24 +381,21 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
             if entry.state == "queued" && parse_ms(&entry.scheduled_at) <= now_ms {
                 entry.state = "leased".to_string();
                 entry.lease_holder = instance.clone();
-                entry.lease_expires_at = (now_ms + SCHEDULER_LEASE_MS).to_string();
+                entry.lease_expires_at =
+                    DateTime::from_timestamp_millis(now_ms + SCHEDULER_LEASE_MS)
+                        .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
+                        .unwrap_or_default();
+                newly_leased.push(entry.clone());
             }
         }
     })?;
 
-    // 3. After persisting leases, emit run-requests for entries leased by us.
-    let path = scheduler_store_path(app)?;
-    let store = read_store(&path)?;
-    let mut emitted = 0usize;
-    for entry in store
-        .queue
-        .iter()
-        .filter(|e| e.lease_holder == instance && e.state == "leased")
-    {
+    // 3. Emit only entries leased by this tick. Previously every leased entry
+    // was re-emitted every five seconds until acknowledgement.
+    for entry in &newly_leased {
         emit_run_request(app, entry);
-        emitted += 1;
     }
-    Ok(emitted)
+    Ok(newly_leased.len())
 }
 
 #[cfg(test)]
@@ -449,9 +474,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_ms_handles_epoch_ms_and_empty() {
+    fn parse_ms_handles_iso_and_legacy_epoch_ms() {
         assert_eq!(parse_ms("12345"), 12345);
         assert_eq!(parse_ms(""), 0);
-        assert_eq!(parse_ms("not-a-number"), 0);
+        assert_eq!(parse_ms("1970-01-01T00:00:12.345Z"), 12345);
+        assert_eq!(parse_ms("not-a-number"), i64::MAX);
+        assert!(canonical_timestamp("2026-06-28T09:30:00+01:00")
+            .unwrap()
+            .ends_with('Z'));
     }
 }

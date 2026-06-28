@@ -141,3 +141,7 @@ export {
   type ToolApprovalGate,
   type ToolRuntime
 } from "./native-api/tool-executor";
+export * from "./scheduler";
+export * from "./workflows";
+export * from "./notifications";
+export * from "./voice";

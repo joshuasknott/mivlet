@@ -80,6 +80,10 @@ pub fn workflow_runs_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_data_file_path(app, "workflow-runs.json")
 }
 
+pub fn workflow_definitions_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "workflow-definitions.json")
+}
+
 /// Collapse runs of whitespace into single spaces.
 pub fn normalize_spaces(value: &str) -> String {
     value.split_whitespace().collect::<Vec<_>>().join(" ")

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createApprovalGate } from "@fable/connectors";
+import { createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
 import { Moon, Sun } from "@phosphor-icons/react";
 import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
@@ -11,6 +11,7 @@ import {
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
+import { useVoice } from "./hooks/useVoice";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
@@ -23,6 +24,7 @@ import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
 import { ProfilePage } from "./components/pages/ProfilePage";
 import { SettingsPage } from "./components/pages/SettingsPage";
+import { VoiceReview } from "./components/VoiceReview";
 
 /**
  * Root composition for the Fable desktop shell.
@@ -83,6 +85,37 @@ export function App() {
       void runtime.recordBackendToolCall(event);
     }
   });
+  const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
+  const voice = useVoice(voiceProvider, (transcript) => runPrompt(transcript));
+  const activeWorkflowRunRef = useRef<{ runId: string; observedRunning: boolean } | null>(null);
+
+  useEffect(() => {
+    const pending = runtime.pendingWorkflowRuns[0];
+    if (!pending || activeWorkflowRunRef.current) return;
+    if (!runtime.connectedNativeBackend) {
+      runPrompt(pending.prompt);
+      runtime.completeWorkflowRun(pending.runId, true, "Submitted through the workspace prompt path.");
+      return;
+    }
+    activeWorkflowRunRef.current = { runId: pending.runId, observedRunning: false };
+    runPrompt(pending.prompt);
+  }, [runtime.pendingWorkflowRuns, runtime.connectedNativeBackend]);
+
+  useEffect(() => {
+    const active = activeWorkflowRunRef.current;
+    if (!active) return;
+    if (agent.state.running) {
+      active.observedRunning = true;
+      return;
+    }
+    if (!active.observedRunning) return;
+    runtime.completeWorkflowRun(
+      active.runId,
+      !agent.state.lastError,
+      agent.state.lastError ?? agent.state.transcript
+    );
+    activeWorkflowRunRef.current = null;
+  }, [agent.state.running, agent.state.lastError, agent.state.transcript]);
   const [expandedCollections, setExpandedCollections] = useState({
     projects: true,
     chats: true
@@ -209,7 +242,14 @@ export function App() {
                 <button
                   type="button"
                   className="agent-panel__stop"
-                  onClick={() => void agent.cancel()}
+                  onClick={() => {
+                    const active = activeWorkflowRunRef.current;
+                    if (active) {
+                      runtime.completeWorkflowRun(active.runId, false, "Workflow cancelled.");
+                      activeWorkflowRunRef.current = null;
+                    }
+                    void agent.cancel();
+                  }}
                 >
                   Stop
                 </button>
@@ -232,6 +272,30 @@ export function App() {
   const modelChipLabel =
     runtime.selectableModels.find((model) => model.id === runtime.resolvedSelectedModelId)?.label ??
     "Select model";
+
+  function runPrompt(rawPrompt: string) {
+    const prompt = rawPrompt.trim();
+    if (!prompt) return;
+    const nativeConnected = runtime.connectedNativeBackend;
+    if (!nativeConnected) {
+      runtime.submitPrompt(prompt);
+      return;
+    }
+    const contextPrefix = buildContextPrefixForRun({
+      memoryRecords: runtime.managedMemoryRecords,
+      knowledgeSources: runtime.workspaceKnowledgeSources,
+      pinnedSourceIds: runtime.pinnedSourceIds,
+      memoryDisabled: runtime.memoryDisabled
+    });
+    const request = buildAgentRequest({
+      providerId: nativeConnected.id,
+      model: runtime.resolvedSelectedModelId,
+      prompt,
+      maxTokens: 2048
+    });
+    cancelRequestedRef.current = false;
+    void agent.run(request, contextPrefix || undefined, runtime.permissionLabel);
+  }
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -430,8 +494,11 @@ export function App() {
                 }
                 runtime.submitComposer(event);
               }}
-              voiceEnabled={runtime.voiceEnabled}
-              onToggleVoice={runtime.toggleVoice}
+              voiceEnabled={voice.state.status === "recording"}
+              onToggleVoice={() => {
+                if (voice.state.status === "recording") void voice.stop();
+                else if (voice.state.status !== "processing") void voice.start();
+              }}
               onAttach={runtime.triggerAttach}
               addMenuOpen={addMenuOpen}
               permissionsOpen={toolPickerOpen}
@@ -453,9 +520,11 @@ export function App() {
               onRunCommand={runtime.runCommand}
               onFileChange={runtime.handleLocalKnowledgeFileChange}
               voiceState={
-                runtime.voiceEnabled
-                  ? "Push-to-talk ready. Transcript stays local until you send it."
-                  : undefined
+                voice.state.status === "recording"
+                  ? "Recording only after your explicit click."
+                  : voice.state.status === "processing"
+                    ? "Processing speech…"
+                    : undefined
               }
               importStatus={runtime.importStatus}
               models={runtime.selectableModels}
@@ -467,6 +536,7 @@ export function App() {
               onSelectPermissionLabel={runtime.selectPermissionLabel}
               inThread={!!runtime.activeThread}
             />
+            <VoiceReview voice={voice} />
 
             {renderChatContext()}
           </div>

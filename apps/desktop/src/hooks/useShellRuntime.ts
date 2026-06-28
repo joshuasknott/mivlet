@@ -22,7 +22,11 @@ import type {
   MemoryRecord,
   PermissionMode,
   RuntimeSnapshot,
+  ScheduledJob,
   ThreadSummary,
+  WorkflowDefinition,
+  WorkflowRun,
+  NotificationRecord,
   WorkspaceDirective
 } from "@fable/protocol";
 import {
@@ -33,6 +37,9 @@ import {
   prepareFixtureConnectorAction,
   searchFixtureConnector,
   searchKnowledgeSources,
+  missedOccurrences,
+  nextOccurrence,
+  shapeWorkflowNotification,
   type ToolApprovalGate,
   type LocalTextFileCandidate
 } from "@fable/connectors";
@@ -66,6 +73,18 @@ import {
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
+  listRuntimeSchedulerJobs,
+  listRuntimeWorkflowRuns,
+  listRuntimeWorkflowDefinitions,
+  listenRuntimeSchedulerRunRequest,
+  enqueueRuntimeJobRun,
+  reportRuntimeJobAttempt,
+  saveRuntimeScheduledJob,
+  saveRuntimeWorkflowDefinition,
+  saveRuntimeWorkflowRun,
+  setRuntimeJobStatus,
+  deleteRuntimeScheduledJob,
+  deliverRuntimeNotification,
   prepareRuntimeConnectorAction,
   promoteRuntimeKnowledgeSourceToMemory,
   recordRuntimeBackendEvent,
@@ -164,6 +183,7 @@ export interface ShellRuntime {
   composerRef: React.MutableRefObject<HTMLTextAreaElement | null>;
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
   submitComposer: (event: FormEvent) => void;
+  submitPrompt: (prompt: string) => void;
   handleLocalKnowledgeFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   focusComposer: (value: string) => void;
   useDirective: (directive: WorkspaceDirective) => void;
@@ -227,8 +247,15 @@ export interface ShellRuntime {
   // schedules
   schedules: Schedule[];
   createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;
+  editSchedule: (schedule: Schedule) => void;
   toggleSchedule: (schedule: Schedule) => void;
   deleteSchedule: (schedule: Schedule) => void;
+  scheduledJobs: ScheduledJob[];
+  workflowRuns: WorkflowRun[];
+  notificationHistory: NotificationRecord[];
+  pendingWorkflowRuns: Array<{ runId: string; jobId: string; prompt: string }>;
+  runScheduleNow: (job: ScheduledJob) => void;
+  completeWorkflowRun: (runId: string, ok: boolean, result?: string) => void;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -313,6 +340,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     useState<PendingApprovalConfirmation | null>(null);
   const [approvalConfirmationText, setApprovalConfirmationText] = useState("");
   const [schedules, setSchedules] = useState<Schedule[]>(initialState.schedules);
+  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
+  const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([]);
+  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
+  const [pendingWorkflowRuns, setPendingWorkflowRuns] = useState<
+    Array<{ runId: string; jobId: string; prompt: string }>
+  >([]);
+  const [notificationHistory, setNotificationHistory] = useState<NotificationRecord[]>(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("fable.notification-history.v1") ?? "[]");
+    } catch {
+      return [];
+    }
+  });
   const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(initialState.pinnedSourceIds);
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
     initialState.connectedBackendIds
@@ -465,6 +505,89 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   useEffect(() => {
     persistShellState(shellState);
   }, [shellState]);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "fable.notification-history.v1",
+      JSON.stringify(notificationHistory.slice(0, 200))
+    );
+  }, [notificationHistory]);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all([
+      listRuntimeSchedulerJobs(),
+      listRuntimeWorkflowDefinitions(),
+      listRuntimeWorkflowRuns()
+    ]).then(([jobs, definitions, runs]) => {
+      if (!active) return;
+      if (jobs) {
+        const now = new Date();
+        const recoveredJobs = jobs.map((job) => {
+          if (job.status !== "active") return job;
+          const previous = new Date(job.lastRunAt || job.createdAt);
+          const missed = missedOccurrences(job.trigger, previous, now, job.missedRunPolicy);
+          for (const occurrence of missed) {
+            const scheduledAt = occurrence.toISOString();
+            void enqueueRuntimeJobRun(
+              job.id,
+              `workflow-run-${toSlug(job.id)}-${toSlug(scheduledAt)}`,
+              scheduledAt
+            ).catch(() => undefined);
+          }
+          const nextRunAt = nextOccurrence(job.trigger, now)?.toISOString() ?? "";
+          const recovered = { ...job, nextRunAt, updatedAt: now.toISOString() };
+          if (nextRunAt) {
+            void enqueueRuntimeJobRun(
+              job.id,
+              `workflow-run-${toSlug(job.id)}-${toSlug(nextRunAt)}`,
+              nextRunAt
+            ).catch(() => undefined);
+          }
+          void saveRuntimeScheduledJob(recovered);
+          return recovered;
+        });
+        setScheduledJobs(recoveredJobs);
+      }
+      if (definitions) setWorkflowDefinitions(definitions);
+      if (runs) {
+        setWorkflowRuns(
+          runs.map((record) => ({
+            id: record.id,
+            definitionId: record.definitionId,
+            definitionVersion: record.definitionVersion,
+            status: record.status,
+            trigger: record.trigger,
+            scheduledJobId: record.scheduledJobId,
+            input: (record.input as Record<string, unknown>) ?? {},
+            steps: (record.steps as WorkflowRun["steps"]) ?? [],
+            failureReason: record.failureReason,
+            idempotencyKey: record.idempotencyKey,
+            startedAt: record.startedAt,
+            updatedAt: record.updatedAt,
+            finishedAt: record.finishedAt
+          }))
+        );
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void listenRuntimeSchedulerRunRequest((event) => {
+      if (active) queueWorkflowRun(event.jobId, event.runId);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => {
+      active = false;
+      void unlisten?.();
+    };
+  }, [scheduledJobs, workflowDefinitions]);
 
   useEffect(() => {
     if (!runtimeSnapshotReady) {
@@ -840,16 +963,21 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     focusComposer("");
   };
 
-  const submitComposer = (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = composerValue.trim();
+  const submitPrompt = (prompt: string) => {
+    const trimmed = prompt.trim();
     if (!trimmed) {
       setKnowledgeCitations([]);
       setLastAction("Choose a directive or write a prompt.");
       return;
     }
 
+    setComposerValue(trimmed);
     void runKnowledgeSearch(trimmed);
+  };
+
+  const submitComposer = (event: FormEvent) => {
+    event.preventDefault();
+    submitPrompt(composerValue);
   };
 
   const useConnector = (connector: ConnectorManifest) => {
@@ -1333,16 +1461,72 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     day: Weekday;
     time: string;
   }) => {
+    const now = new Date();
+    const id = `schedule-${toSlug(name)}-${toSlug(now.toISOString())}`;
     const schedule: Schedule = {
-      id: `schedule-${toSlug(name)}-${toSlug(new Date().toISOString())}`,
+      id,
       name,
       description,
       day,
       time,
       enabled: true,
-      createdAt: new Date().toISOString()
+      createdAt: now.toISOString()
     };
     setSchedules((current) => [schedule, ...current]);
+    const [hour, minute] = time.split(":").map(Number);
+    const definition: WorkflowDefinition = {
+      schemaVersion: 1,
+      id: `workflow-${id}`,
+      version: 1,
+      name,
+      description,
+      steps: [{ kind: "prompt", id: "prompt", prompt: description }],
+      notificationPrefs: {
+        disableOs: false,
+        enabledKinds: ["run-completed", "run-failed", "approval-needed"]
+      },
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    };
+    const trigger = {
+      kind: "recurring" as const,
+      rule: {
+        frequency: "weekly" as const,
+        interval: 1,
+        byWeekday: [day],
+        hour,
+        minute,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      }
+    };
+    const job: ScheduledJob = {
+      id,
+      schemaVersion: 1,
+      name,
+      description,
+      workflowDefinitionId: definition.id,
+      trigger,
+      missedRunPolicy: "run-once",
+      status: "active",
+      nextRunAt: nextOccurrence(trigger, now)?.toISOString() ?? "",
+      lastRunAt: "",
+      lastRunId: "",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    };
+    setWorkflowDefinitions((current) => [definition, ...current]);
+    setScheduledJobs((current) => [job, ...current]);
+    void saveRuntimeWorkflowDefinition(definition);
+    void saveRuntimeScheduledJob(job);
+    if (job.nextRunAt) {
+      void enqueueRuntimeJobRun(
+        job.id,
+        `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
+        job.nextRunAt
+      ).catch((error) => {
+        setLastAction(error instanceof Error ? error.message : "Fable could not queue the schedule.");
+      });
+    }
     setLastAction(`Schedule created: ${name}`);
   };
 
@@ -1352,12 +1536,231 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         entry.id === schedule.id ? { ...entry, enabled: !entry.enabled } : entry
       )
     );
+    const status: ScheduledJob["status"] = schedule.enabled ? "paused" : "active";
+    const currentJob = scheduledJobs.find((job) => job.id === schedule.id);
+    const updatedJob = currentJob
+      ? {
+          ...currentJob,
+          status,
+          nextRunAt:
+            status === "active"
+              ? nextOccurrence(currentJob.trigger, new Date())?.toISOString() ?? ""
+              : "",
+          updatedAt: new Date().toISOString()
+        }
+      : null;
+    if (updatedJob) {
+      setScheduledJobs((current) =>
+        current.map((job) => (job.id === schedule.id ? updatedJob : job))
+      );
+      void saveRuntimeScheduledJob(updatedJob);
+      if (status === "active" && updatedJob.nextRunAt) {
+        void enqueueRuntimeJobRun(
+          updatedJob.id,
+          `workflow-run-${toSlug(updatedJob.id)}-${toSlug(updatedJob.nextRunAt)}`,
+          updatedJob.nextRunAt
+        ).catch(() => undefined);
+      }
+    }
+    void setRuntimeJobStatus(schedule.id, status);
     setLastAction(`${schedule.name} ${schedule.enabled ? "paused" : "resumed"}`);
+  };
+
+  const editSchedule = (schedule: Schedule) => {
+    const now = new Date();
+    setSchedules((current) =>
+      current.map((entry) => (entry.id === schedule.id ? schedule : entry))
+    );
+    const currentJob = scheduledJobs.find((job) => job.id === schedule.id);
+    const currentDefinition = workflowDefinitions.find(
+      (definition) => definition.id === currentJob?.workflowDefinitionId
+    );
+    if (!currentJob || !currentDefinition) return;
+    const [hour, minute] = schedule.time.split(":").map(Number);
+    const trigger = {
+      kind: "recurring" as const,
+      rule: {
+        frequency: "weekly" as const,
+        interval: 1,
+        byWeekday: [schedule.day],
+        hour,
+        minute,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      }
+    };
+    const definition: WorkflowDefinition = {
+      ...currentDefinition,
+      version: currentDefinition.version + 1,
+      name: schedule.name,
+      description: schedule.description,
+      steps: [{ kind: "prompt", id: "prompt", prompt: schedule.description }],
+      updatedAt: now.toISOString()
+    };
+    const job: ScheduledJob = {
+      ...currentJob,
+      name: schedule.name,
+      description: schedule.description,
+      trigger,
+      nextRunAt:
+        currentJob.status === "active"
+          ? nextOccurrence(trigger, now)?.toISOString() ?? ""
+          : "",
+      updatedAt: now.toISOString()
+    };
+    setWorkflowDefinitions((current) => [
+      definition,
+      ...current.filter((entry) => entry.id !== definition.id)
+    ]);
+    setScheduledJobs((current) =>
+      current.map((entry) => (entry.id === job.id ? job : entry))
+    );
+    void saveRuntimeWorkflowDefinition(definition);
+    void saveRuntimeScheduledJob(job);
+    if (job.nextRunAt) {
+      void enqueueRuntimeJobRun(
+        job.id,
+        `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
+        job.nextRunAt
+      ).catch(() => undefined);
+    }
+    setLastAction(`Schedule updated: ${schedule.name}`);
   };
 
   const deleteSchedule = (schedule: Schedule) => {
     setSchedules((current) => current.filter((entry) => entry.id !== schedule.id));
+    setScheduledJobs((current) => current.filter((entry) => entry.id !== schedule.id));
+    void deleteRuntimeScheduledJob(schedule.id);
     setLastAction(`Schedule deleted: ${schedule.name}`);
+  };
+
+  function queueWorkflowRun(jobId: string, runId: string) {
+    const job = scheduledJobs.find((candidate) => candidate.id === jobId);
+    if (!job || job.status !== "active") return;
+    const definition = workflowDefinitions.find(
+      (candidate) => candidate.id === job.workflowDefinitionId
+    );
+    const prompt =
+      definition?.steps.find(
+        (step): step is Extract<typeof step, { kind: "prompt" | "agent" }> =>
+          step.kind === "prompt" || step.kind === "agent"
+      )?.prompt ?? job.description;
+    const now = new Date().toISOString();
+    const run: WorkflowRun = {
+      id: runId,
+      definitionId: job.workflowDefinitionId,
+      definitionVersion: definition?.version ?? 1,
+      status: "running",
+      trigger: "schedule",
+      scheduledJobId: jobId,
+      input: {},
+      steps: [{ stepId: "prompt", status: "running", input: { prompt }, startedAt: now }],
+      idempotencyKey: `schedule:${jobId}:${runId}`,
+      startedAt: now,
+      updatedAt: now
+    };
+    setWorkflowRuns((current) => [run, ...current.filter((entry) => entry.id !== runId)]);
+    setPendingWorkflowRuns((current) =>
+      current.some((entry) => entry.runId === runId)
+        ? current
+        : [...current, { runId, jobId, prompt }]
+    );
+    void saveRuntimeWorkflowRun(run);
+    void reportRuntimeJobAttempt(runId, {
+      runId,
+      status: "running",
+      attemptNumber: 1,
+      startedAt: now
+    });
+  }
+
+  const runScheduleNow = (job: ScheduledJob) => {
+    const now = new Date().toISOString();
+    const runId = `workflow-run-${toSlug(job.id)}-${Date.now()}`;
+    void enqueueRuntimeJobRun(job.id, runId, now).then((queued) => {
+      if (!queued) queueWorkflowRun(job.id, runId);
+    }).catch((error) => {
+      setLastAction(error instanceof Error ? error.message : "Fable could not queue that run.");
+    });
+    setLastAction(`Queued ${job.name} to run now`);
+  };
+
+  const completeWorkflowRun = (runId: string, ok: boolean, result = "") => {
+    const finishedAt = new Date().toISOString();
+    const existing = workflowRuns.find((run) => run.id === runId);
+    if (!existing) return;
+    const completed: WorkflowRun = {
+      ...existing,
+      status: ok ? "completed" : "failed",
+      steps: existing.steps.map((step) =>
+        step.status === "running"
+          ? {
+              ...step,
+              status: ok ? "succeeded" : "failed",
+              output: ok ? result : undefined,
+              error: ok ? undefined : result || "Agent run failed.",
+              finishedAt
+            }
+          : step
+      ),
+      failureReason: ok ? undefined : result || "Agent run failed.",
+      updatedAt: finishedAt,
+      finishedAt
+    };
+    setWorkflowRuns((current) =>
+      current.map((run) => (run.id === runId ? completed : run))
+    );
+    setPendingWorkflowRuns((current) => current.filter((run) => run.runId !== runId));
+    const scheduledJob = scheduledJobs.find((job) => job.id === completed.scheduledJobId);
+    const nextRunAt =
+      scheduledJob?.status === "active"
+        ? nextOccurrence(scheduledJob.trigger, new Date(finishedAt))?.toISOString() ?? ""
+        : "";
+    const updatedJob = scheduledJob
+      ? {
+          ...scheduledJob,
+          lastRunAt: finishedAt,
+          lastRunId: runId,
+          nextRunAt,
+          updatedAt: finishedAt
+        }
+      : null;
+    if (updatedJob) {
+      setScheduledJobs((current) =>
+        current.map((job) => (job.id === updatedJob.id ? updatedJob : job))
+      );
+      void saveRuntimeScheduledJob(updatedJob);
+      if (nextRunAt) {
+        void enqueueRuntimeJobRun(
+          updatedJob.id,
+          `workflow-run-${toSlug(updatedJob.id)}-${toSlug(nextRunAt)}`,
+          nextRunAt
+        ).catch(() => undefined);
+      }
+    }
+    void saveRuntimeWorkflowRun(completed);
+    void reportRuntimeJobAttempt(runId, {
+      runId,
+      status: ok ? "succeeded" : "failed",
+      attemptNumber: 1,
+      startedAt: existing.startedAt,
+      finishedAt,
+      error: ok ? undefined : completed.failureReason
+    });
+    const definition = workflowDefinitions.find(
+      (candidate) => candidate.id === completed.definitionId
+    );
+    const notification = shapeWorkflowNotification({
+      id: `notification-${runId}`,
+      kind: ok ? "run-completed" : "run-failed",
+      run: completed,
+      prefs: definition?.notificationPrefs,
+      createdAt: finishedAt
+    });
+    setNotificationHistory((current) => [
+      notification,
+      ...current.filter((entry) => entry.id !== notification.id)
+    ].slice(0, 200));
+    if (!notification.suppressed) void deliverRuntimeNotification(notification);
   };
 
   return {
@@ -1382,6 +1785,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     composerRef,
     fileInputRef,
     submitComposer,
+    submitPrompt,
     handleLocalKnowledgeFileChange,
     focusComposer,
     useDirective,
@@ -1434,8 +1838,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     cancelMemoryEdit,
     schedules,
     createSchedule,
+    editSchedule,
     toggleSchedule,
     deleteSchedule,
+    scheduledJobs,
+    workflowRuns,
+    notificationHistory,
+    pendingWorkflowRuns,
+    runScheduleNow,
+    completeWorkflowRun,
     backendProviders,
     connectedBackendIds,
     backendStatus,

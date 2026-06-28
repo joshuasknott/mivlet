@@ -19,6 +19,7 @@ mod knowledge;
 mod memory;
 mod models;
 mod native_api;
+mod notifications;
 mod oauth_loopback;
 mod paths;
 mod scheduler;
@@ -36,6 +37,7 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Load the durable scheduler store once and manage it as process
             // state. The in-process tick leases due entries; because Tauri is a
@@ -44,7 +46,9 @@ pub fn run() {
             let handle = app.handle().clone();
             let store = scheduler::read_store(&paths::scheduler_store_path(&handle)?)
                 .unwrap_or_else(|_| scheduler::SchedulerState::empty());
-            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(Some(store))));
+            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(Some(
+                store,
+            ))));
 
             // In-process scheduler tick. Stops when the app exits. An
             // interrupted tick only ever leaves entries leased until their short
@@ -104,8 +108,11 @@ pub fn run() {
             scheduler::enqueue_job_run,
             scheduler::report_job_attempt,
             workflows::save_workflow_run,
+            workflows::save_workflow_definition,
+            workflows::list_workflow_definitions,
             workflows::list_workflow_runs,
-            workflows::list_workflow_runs_for_definition
+            workflows::list_workflow_runs_for_definition,
+            notifications::deliver_notification
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");

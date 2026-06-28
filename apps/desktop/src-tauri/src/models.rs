@@ -159,7 +159,6 @@ pub const SCHEDULER_LEASE_MS: i64 = 30_000;
 pub const SCHEDULER_MAX_RETRIES: u32 = 2;
 pub const SCHEDULED_JOB_STATUSES: [&str; 3] = ["active", "paused", "deleted"];
 pub const MISSED_RUN_POLICIES: [&str; 3] = ["skip", "run-once", "run-all"];
-pub const SCHEDULER_JOB_STATES: [&str; 4] = ["queued", "leased", "done", "dead"];
 pub const JOB_ATTEMPT_STATUSES: [&str; 4] = ["running", "succeeded", "failed", "cancelled"];
 
 // Workflow-run store constants.
@@ -793,4 +792,18 @@ pub struct WorkflowRunRecord {
     pub started_at: String,
     pub updated_at: String,
     pub finished_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowDefinitionRecord {
+    pub schema_version: u8,
+    pub id: String,
+    pub version: u32,
+    pub name: String,
+    pub description: String,
+    pub steps: serde_json::Value,
+    pub notification_prefs: Option<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
 }
