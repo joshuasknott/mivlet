@@ -190,8 +190,7 @@ export function App() {
         {agent.state.transcript ||
         agent.state.usage ||
         agent.state.lastError ||
-        agent.state.running ||
-        agent.state.noTransport ? (
+        agent.state.running ? (
           <section className="agent-panel" aria-label="Agent activity">
             {agent.state.transcript ? (
               <p className="agent-panel__transcript">{agent.state.transcript}</p>
@@ -216,11 +215,6 @@ export function App() {
             ) : null}
             {agent.state.lastError ? (
               <p className="agent-panel__error">{agent.state.lastError}</p>
-            ) : null}
-            {agent.state.noTransport && !agent.state.transcript ? (
-              <p className="agent-panel__notice">
-                Native agent needs a connected desktop backend to run.
-              </p>
             ) : null}
           </section>
         ) : null}
