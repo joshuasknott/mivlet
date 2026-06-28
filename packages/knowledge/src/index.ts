@@ -29,3 +29,23 @@ export {
  * ./ingestion for the full surface.
  */
 export * from "./ingestion";
+
+// --- memory pipeline (additive) -------------------------------------------
+export {
+  approveSuggestion,
+  applyRetention,
+  DEFAULT_RETENTION_POLICY,
+  detectContradiction,
+  detectDuplicate,
+  disableMemory,
+  editMemory,
+  exportMemories,
+  forgetMemory,
+  pinMemory,
+  promoteToMemory,
+  suggestMemories,
+  unpinMemory,
+  type MemoryRetentionPolicy,
+  type MemorySuggestionContext,
+  type PromoteMemoryInput
+} from "./memory";
