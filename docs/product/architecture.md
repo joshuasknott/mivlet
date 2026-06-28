@@ -66,7 +66,10 @@ See [Connectors](connectors.md) for scopes, callbacks, credential ownership, and
 
 The desktop runtime persists non-secret approval, run, connector-account, and snapshot metadata in the Tauri app data folder. Credentials and OAuth tokens use OS secure storage. Session approval grants remain ephemeral, while high-risk full-access approvals fail closed unless the required confirmation phrase is provided.
 
-Encrypted SQLite remains incomplete: current non-secret metadata uses atomic JSON files. This does not weaken credential storage, but schema migrations, cross-file transactions, and high-volume history should move to encrypted SQLite before broad production rollout.
+The Tauri runtime initializes encrypted SQLite before commands, migrates legacy
+JSON idempotently, and routes production documents through the native store.
+Credentials remain in OS secure storage. See
+[Encrypted local storage](../architecture/encrypted-storage.md).
 
 ## Selective TokenMaxxer Reuse
 

@@ -42,3 +42,15 @@ url = "2"
 # by tests so they never touch the real OS keychain. v3 is the current
 # stable line with the bring-your-own-store architecture.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+# Encrypted local-first store (see docs/superpowers/specs/2026-06-28-encrypted-storage-design.md).
+# `rusqlite` `bundled` compiles the SQLite C amalgamation with the system C
+# compiler (no system SQLite needed). SQLCipher was ruled out: every flavor
+# needs a system OpenSSL (`OPENSSL_DIR`) or a full Perl to build vendored
+# OpenSSL, neither of which is reliably present in this build env or CI.
+# Encryption is therefore application-layer AES-256-GCM (pure Rust, no native
+# crypto) over bundled SQLite. The 32-byte master key lives in OS secure
+# storage under a dedicated keyring service (`com.fable.workspace.vault`).
+rusqlite = { version = "0.31", features = ["bundled"] }
+aes-gcm = "0.10"
+hex = "0.4"
+tempfile = "3"

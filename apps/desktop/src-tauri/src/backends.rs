@@ -501,6 +501,14 @@ impl ConnectedBackends {
 }
 
 pub(crate) fn read_connected_backends(path: &Path) -> Result<ConnectedBackends, String> {
+    if let Some(parsed) = crate::store::read_document::<BTreeSet<String>>(path)? {
+        let ids = parsed
+            .into_iter()
+            .filter(|id| SUPPORTED_BACKEND_PROVIDER_IDS.contains(&id.as_str()))
+            .take(SUPPORTED_BACKEND_PROVIDER_IDS.len())
+            .collect();
+        return Ok(ConnectedBackends(ids));
+    }
     if !path.exists() {
         return Ok(ConnectedBackends::default());
     }
@@ -526,6 +534,9 @@ pub(crate) fn read_connected_backends(path: &Path) -> Result<ConnectedBackends, 
 
 fn write_connected_backends(path: &Path, connected: &ConnectedBackends) -> Result<(), String> {
     let set: BTreeSet<&String> = connected.ids().iter().collect();
+    if crate::store::write_document(path, &set)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_string_pretty(&set)
         .map_err(|_| "Fable could not encode connected backends.".to_string())?;
     fs::write(path, encoded).map_err(|_| "Fable could not save connected backends.".to_string())

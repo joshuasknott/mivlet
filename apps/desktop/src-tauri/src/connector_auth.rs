@@ -670,6 +670,9 @@ async fn fetch_identity(
 }
 
 pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, String> {
+    if let Some(connections) = crate::store::read_document(path)? {
+        return Ok(connections);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -683,6 +686,9 @@ pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, 
 }
 
 fn write_connections(path: &Path, connections: &[ConnectorConnection]) -> Result<(), String> {
+    if crate::store::write_document(path, &connections)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_vec_pretty(connections)
         .map_err(|_| "Fable could not encode connector state.".to_string())?;
     let temporary = path.with_extension("json.tmp");

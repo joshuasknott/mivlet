@@ -75,6 +75,9 @@ pub(crate) fn normalize_approval_audit_entry(
 }
 
 pub(crate) fn read_approval_audit_entries(path: &Path) -> Result<Vec<ApprovalAuditEntry>, String> {
+    if let Some(entries) = crate::store::read_document(path)? {
+        return Ok(entries);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -101,6 +104,9 @@ fn append_approval_audit_entry(
 }
 
 fn write_approval_audit_entries(path: &Path, entries: &[ApprovalAuditEntry]) -> Result<(), String> {
+    if crate::store::write_document(path, &entries)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_string_pretty(entries)
         .map_err(|_| "Fable could not encode the approval audit log.".to_string())?;
 
@@ -239,6 +245,9 @@ pub(crate) fn normalize_approval_grant(grant: ApprovalGrant) -> Result<ApprovalG
 }
 
 pub(crate) fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, String> {
+    if let Some(rules) = crate::store::read_document(path)? {
+        return Ok(rules);
+    }
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -258,6 +267,9 @@ pub(crate) fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, Str
 }
 
 fn write_approval_rules(path: &Path, rules: &[ApprovalGrant]) -> Result<(), String> {
+    if crate::store::write_document(path, &rules)? {
+        return Ok(());
+    }
     let encoded = serde_json::to_string_pretty(rules)
         .map_err(|_| "Fable could not encode approval rules.".to_string())?;
     fs::write(path, encoded).map_err(|_| "Fable could not save approval rules.".to_string())

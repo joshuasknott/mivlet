@@ -21,7 +21,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Knowledge search: lexical fallback search exists over known knowledge sources and returns cited snippets, scores, provenance, freshness, trust, and pin state.
 - Approvals: Rust commands and shell UI support once/session/rule/modify/deny decisions, audit entries, approval rules, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
-- Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted locally through app-data JSON files; browser preview also uses localStorage.
+- Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage.
 - Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Only native API-key providers can become connected through the current credential command; subscription/CLI entries remain gated until real adapters exist.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
 - Native API agent loop: TypeScript owns provider request shaping and the pure agent loop; Rust owns API key lookup, HTTP/SSE egress, event emission, and cancellation for OpenAI-compatible, Anthropic, and Gemini-style providers.
@@ -42,7 +42,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Google Drive, Gmail, Google Calendar | Live provider egress exists, but only after Google desktop OAuth configuration and a connected test account. |
 | GitHub, Vercel, Notion, Slack, Linear | Provider egress code exists behind the credential boundary, but auth is broker-gated and fails closed until the deferred auth broker and provider-console callbacks exist. |
 | Browser preview connectors | Explicit synthetic fixture behavior only; never proof of a live provider connection. |
-| Schedules, voice, Convex collaboration, encrypted SQLite | Incomplete or non-executing as described below. |
+| Encrypted SQLite | Active in the Tauri production path with keyring-backed AES-GCM payloads and legacy migration. |
+| Schedules, voice, Convex collaboration | Incomplete or non-executing as described below. |
 
 ## Partially Implemented Or Preview-Only
 
@@ -60,7 +61,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - No production auth broker for GitHub, Vercel, Notion, Slack, Linear, or other broker-based connector flows.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the deferred auth broker.
-- No encrypted SQLite store is wired yet. Current local runtime state is app-data JSON plus browser localStorage fallback; backend secrets are separately handled by the OS keyring boundary.
+- Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite. Backend and connector credentials remain separately handled by OS secure storage.
 - No local model runtime path. The onboarding UI labels local models as planned and disabled.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
 - No product website, legal pages, downloads page, or public release pipeline in the audited files.
@@ -68,7 +69,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 ## Highest-Risk Gaps
 
 - External connectors look close in the UI but are not live. The repo correctly fails closed, but product messaging must keep this distinction clear.
-- Local state is not encrypted yet, despite architecture docs naming encrypted SQLite as the target.
+- Backup restoration requires the database and matching OS-secure master key; external recovery UI polish remains future work.
 - Schedules can be created and persisted, but they do not execute automatically.
 
 ## Evidence Checked

@@ -21,7 +21,9 @@ mod native_api;
 mod oauth_loopback;
 mod paths;
 mod snapshot;
+mod store;
 mod tools;
+use tauri::Manager as _;
 
 #[cfg(test)]
 mod tests;
@@ -29,6 +31,14 @@ mod tests;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let app_data = app
+                .path()
+                .app_data_dir()
+                .map_err(|_| "Fable could not resolve the app data folder.")?;
+            store::initialize(&app_data)?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             snapshot::runtime_status,
             agent_runs::save_agent_run,
@@ -66,7 +76,11 @@ pub fn run() {
             connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
-            tools::execute_tool_call
+            tools::execute_tool_call,
+            store::encrypted_store_status,
+            store::export_local_data,
+            store::backup_local_data,
+            store::delete_local_data
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");
