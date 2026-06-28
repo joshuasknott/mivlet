@@ -6,7 +6,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Repo Shape
 
-- The repo is a private pnpm monorepo named `fable`, with `@fable/desktop`, `@fable/connectors`, and `@fable/protocol`.
+- The repo is a private pnpm monorepo named `fable`, with `@fable/desktop`, `@fable/connectors`, `@fable/knowledge`, and `@fable/protocol`.
 - The desktop app is Tauri 2 plus React, TypeScript, and Vite.
 - The Rust runtime is under `apps/desktop/src-tauri`.
 - Product docs already exist for thesis, roadmap, architecture, connectors, release notes, and threat model.
@@ -14,11 +14,15 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Implemented
 
-- Desktop shell: local-profile onboarding, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, empty knowledge page, schedules page, profile page, and settings page.
+- Desktop shell: local-profile onboarding, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
 - Composer: supports text entry, slash command insertion, local file import trigger, voice toggle UI, model selection, permission selection, and native-agent submit path when a connected native backend exists.
 - Protocol package: defines approvals, memory, connectors, backend providers, runtime snapshots, native agent events, native tool specs, and tool-call request shapes.
 - Local file import: supports `txt`, `md`, `markdown`, `json`, `csv`, `yaml`, and `yml`; rejects empty files, unsupported extensions, changed file sizes, and files over 2 MB; imported files are untrusted local knowledge with a 6,000-character preview.
-- Knowledge search: lexical fallback search exists over known knowledge sources and returns cited snippets, scores, provenance, freshness, trust, and pin state.
+- Knowledge and retrieval: local files and recursive folders can be imported,
+  chunked, fingerprinted, scoped, searched, inspected, refreshed, disabled, and
+  deleted. Lexical retrieval returns cited snippets, scores, provenance,
+  freshness, trust, and pin state; stale, failed, disabled, disconnected, and
+  out-of-scope sources are excluded.
 - Approvals: Rust commands and shell UI support once/session/rule/modify/deny decisions, audit entries, approval rules, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
 - Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted locally through app-data JSON files; browser preview also uses localStorage.
@@ -50,7 +54,10 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - The API-key path can hand native backend secrets to the Rust credential boundary, but subscription provider paths are represented as backend catalog states and install/setup flows, not proven live provider integrations.
 - Browser preview can mark API-key backends as locally connected for testability. Connector reads remain explicitly fixture-backed and do not become live connections.
 - Connector search/import in browser preview uses explicitly labeled synthetic fixture behavior.
-- Knowledge imported through local files can feed composer directives and search, but the standalone Knowledge page currently renders an empty state.
+- The Knowledge page provides Sources and Memory modes with search, provenance,
+  status, scope, account, freshness, local file/folder import, connector entry,
+  refresh, pin, disable/delete, explicit memory promotion, edit, export,
+  disable, and forget controls.
 - Schedules persist through the runtime snapshot, but no background scheduler or recurring execution engine was found.
 - Voice is a toggle and status affordance; no dictation, audio capture, realtime voice provider, or transcript pipeline was found.
 - Convex is optional via `VITE_CONVEX_URL`, but no Convex schema or collaboration implementation was found in this repo.

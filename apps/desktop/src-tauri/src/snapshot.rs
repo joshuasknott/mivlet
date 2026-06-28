@@ -152,6 +152,25 @@ fn write_imported_knowledge_sources(
         .map_err(|_| "Fable could not save imported knowledge sources.".to_string())
 }
 
+#[tauri::command]
+pub fn save_imported_knowledge_sources(
+    app: tauri::AppHandle,
+    sources: Vec<LocalFileImport>,
+) -> Result<Vec<LocalFileImport>, String> {
+    let mut normalized = Vec::new();
+    for source in sources.into_iter().take(MAX_IMPORTED_KNOWLEDGE_SOURCES) {
+        let source = normalize_imported_knowledge_source(source)?;
+        if !normalized
+            .iter()
+            .any(|existing: &LocalFileImport| existing.id == source.id)
+        {
+            normalized.push(source);
+        }
+    }
+    write_imported_knowledge_sources(&imported_knowledge_path(&app)?, &normalized)?;
+    Ok(normalized)
+}
+
 pub(crate) fn persist_imported_knowledge_source(
     path: &Path,
     source: LocalFileImport,

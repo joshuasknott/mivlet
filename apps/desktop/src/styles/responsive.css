@@ -568,4 +568,43 @@
   .toggle-row {
     grid-template-columns: minmax(0, 1fr) 42px;
   }
+
+  .knowledge-toolbar,
+  .memory-mode-bar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 10px 0;
+  }
+
+  .knowledge-mode {
+    min-height: 40px;
+  }
+
+  .knowledge-search {
+    width: 100%;
+    max-width: none;
+  }
+
+  .knowledge-toolbar__actions,
+  .memory-mode-bar > div {
+    flex-wrap: wrap;
+  }
+
+  .knowledge-browser {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-list {
+    max-height: 220px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .knowledge-inspector {
+    padding: 18px 0;
+  }
+
+  .knowledge-inspector dl {
+    grid-template-columns: 1fr;
+  }
 }

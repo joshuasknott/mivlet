@@ -205,6 +205,19 @@ describe("retrieve — stale / disabled exclusion", () => {
     const result = await retrieve(sources, { query: "connector" });
     expect(result.citations.map((c) => c.sourceId)).toEqual(["live"]);
   });
+
+  it("excludes stale sources until they are refreshed", async () => {
+    const sources = [
+      src(makeSource({ id: "fresh", title: "Fresh connector" }), [
+        makeChunk("fresh", 0, "connector")
+      ]),
+      src(makeSource({ id: "stale", title: "Stale connector", status: "stale" }), [
+        makeChunk("stale", 0, "connector")
+      ])
+    ];
+    const result = await retrieve(sources, { query: "connector" });
+    expect(result.citations.map((citation) => citation.sourceId)).toEqual(["fresh"]);
+  });
 });
 
 describe("retrieve — no-embedding fallback", () => {

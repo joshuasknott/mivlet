@@ -13,6 +13,9 @@ importers:
       '@fable/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors
+      '@fable/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
       '@fable/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

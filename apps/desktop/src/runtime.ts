@@ -108,6 +108,18 @@ export async function loadRuntimeImportedKnowledgeSources() {
   }
 }
 
+export async function saveRuntimeImportedKnowledgeSources(sources: LocalFileImport[]) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<LocalFileImport[]>("save_imported_knowledge_sources", { sources });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export async function importRuntimeLocalKnowledgeSource(candidate: LocalTextFileCandidate) {
   if (!hasTauriRuntime()) {
     return null;

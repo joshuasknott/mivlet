@@ -31,7 +31,7 @@ import { buildLexicalCorpus, scoreChunkLexical, tokenize } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
 
 /** Sources/chunks that must never enter a run, regardless of score. */
-const EXCLUDED_STATUSES: ReadonlySet<SourceStatus> = new Set(["error"]);
+const EXCLUDED_STATUSES: ReadonlySet<SourceStatus> = new Set(["error", "stale"]);
 
 export interface RetrievalSource {
   source: KnowledgeSource;

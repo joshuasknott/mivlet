@@ -41,6 +41,14 @@
 - Connector health and permission review before execution.
 - Explicit fixture states; missing provider configuration never appears connected.
 - Provider content is normalized as untrusted KnowledgeSource data and cannot enter durable memory without approval.
+- Retrieval excludes disabled, deleted, stale, failed, disconnected, and
+  out-of-scope sources before agent context is assembled. A pin changes
+  selection priority, not trust.
+- Local imports retain provenance and bounded previews. Recursive folder import
+  is capped, and unsupported or oversized files fail closed.
+- Durable memory is never inferred directly from imported content. Promotion is
+  explicit and audited; disabled or forgotten memory is excluded from future
+  agent context.
 - Connector client secrets and signing material stay in an auth broker; access and refresh tokens stay behind an OS secure-storage boundary.
 - Connector logs/errors redact authorization headers, cookies, tokens, raw payloads, email bodies, Slack messages, and imported Drive/Notion content.
 - OAuth uses high-entropy state and PKCE S256. Pending verifiers are stored in the OS credential store, callbacks require exact state, and plain HTTP redirects are restricted to literal loopback IP addresses.

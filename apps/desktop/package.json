@@ -16,6 +16,7 @@
     "@fontsource/inter": "^5.2.8",
     "@phosphor-icons/react": "^2.1.10",
     "@fable/connectors": "workspace:*",
+    "@fable/knowledge": "workspace:*",
     "@fable/protocol": "workspace:*",
     "@tauri-apps/api": "^2.9.0",
     "convex": "^1.30.0",
