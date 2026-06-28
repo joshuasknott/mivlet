@@ -28,7 +28,11 @@ export function ConnectorsPage({ runtime }: { runtime: ShellRuntime }) {
         onConnect={(connector) => void runtime.connectConnector(connector)}
         onDisconnect={(connectorId) => void runtime.disconnectConnector(connectorId)}
         onRefresh={(connectorId) => void runtime.refreshConnector(connectorId)}
-        onSelect={() => undefined}
+        accounts={runtime.connectorAccounts}
+        onSwitchAccount={(connectorId, accountId) =>
+          void runtime.switchConnectorAccount(connectorId, accountId)
+        }
+        onSelect={(connector) => void runtime.loadConnectorAccounts(connector.id)}
         onPrepareAction={(action, payload) =>
           void runtime.prepareConnectorAction(action, payload)
         }

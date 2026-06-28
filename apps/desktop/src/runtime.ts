@@ -11,6 +11,7 @@ import type {
   BackendProvider,
   ConnectorActionRequest,
   ConnectorActionResult,
+  ConnectorAccountOption,
   ConnectorAuthRequest,
   ConnectorAuthResult,
   ConnectorImportRequest,
@@ -354,6 +355,31 @@ export async function clearRuntimeConnectorAuth(connectorId: string) {
   }
   try {
     return await invoke<ConnectorManifest>("clear_connector_auth", { connectorId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listRuntimeConnectorAccounts(connectorId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorAccountOption[]>("list_connector_accounts", { connectorId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function switchRuntimeConnectorAccount(connectorId: string, accountId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorManifest>("switch_connector_account", {
+      connectorId,
+      accountId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }

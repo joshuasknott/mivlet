@@ -11,6 +11,7 @@ import { prepareGitHubComment, prepareGitHubDraftPullRequest } from "./github";
 import { prepareGmailDraft, prepareGmailSend } from "./gmail";
 import { prepareGoogleDriveAction } from "./google-drive";
 import {
+  prepareGoogleCalendarCancel,
   prepareGoogleCalendarCreate,
   prepareGoogleCalendarDelete,
   prepareGoogleCalendarUpdate
@@ -166,6 +167,12 @@ export function prepareFixtureConnectorAction(
       });
     case "google-calendar.delete-event":
       return prepareGoogleCalendarDelete({
+        calendarId: payload.calendarId ?? "fixture-primary",
+        eventId: payload.eventId ?? payload.targetId ?? "fixture-event",
+        title: payload.title
+      });
+    case "google-calendar.cancel-event":
+      return prepareGoogleCalendarCancel({
         calendarId: payload.calendarId ?? "fixture-primary",
         eventId: payload.eventId ?? payload.targetId ?? "fixture-event",
         title: payload.title

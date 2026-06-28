@@ -276,6 +276,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         actions: &[
             "google-calendar.create-draft",
             "google-calendar.update-draft",
+            "google-calendar.cancel-event",
             "google-calendar.delete-event",
         ],
     },
@@ -594,8 +595,15 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             label: "Delete Event",
             mode: "full-access",
             risk_level: "high",
-            consequence: "Deletes or cancels the selected calendar event after explicit approval.",
+            consequence: "Permanently deletes the selected calendar event after explicit approval.",
             confirmation_phrase: Some("delete calendar event"),
+        },
+        "google-calendar.cancel-event" => ConnectorActionPolicy {
+            label: "Cancel Event",
+            mode: "full-access",
+            risk_level: "high",
+            consequence: "Cancels the selected calendar event after explicit approval.",
+            confirmation_phrase: Some("cancel calendar event"),
         },
         _ => return None,
     };
@@ -1019,7 +1027,55 @@ pub async fn clear_connector_auth(
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
     disconnect(&app, entry.id).await?;
-    Ok(build_manifest(entry, &UnavailableCredentialBoundary))
+    let path = connector_connections_path(&app)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    Ok(build_manifest(
+        entry,
+        &NativeCredentialBoundary {
+            connections_path: path,
+        },
+    ))
+}
+
+/// List every connected account for a connector (active first), so the UI can
+/// render an account switcher. Token secrets never leave the credential
+/// boundary; only non-secret account summaries are returned. Multi-account
+/// support lets a user keep several Google accounts connected and switch the
+/// one reads/actions resolve against.
+#[tauri::command]
+pub fn list_connector_accounts(
+    app: tauri::AppHandle,
+    connector_id: String,
+) -> Result<Vec<crate::models::ConnectorAccountOption>, ConnectorCommandError> {
+    let entry = require_connector(&connector_id)?;
+    let path = connector_connections_path(&app)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    Ok(crate::connector_auth::accounts_for_connector(
+        &path, entry.id,
+    ))
+}
+
+/// Make `account_id` the active account for a connector. Other accounts for the
+/// same connector are deactivated but their credentials are preserved, so the
+/// user can switch back. Returns the refreshed manifest reflecting the new
+/// active account. Fails closed if the account is not connected.
+#[tauri::command]
+pub fn switch_connector_account(
+    app: tauri::AppHandle,
+    connector_id: String,
+    account_id: String,
+) -> Result<ConnectorManifest, ConnectorCommandError> {
+    let entry = require_connector(&connector_id)?;
+    let path = connector_connections_path(&app)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    crate::connector_auth::switch_active_account(&path, entry.id, &account_id)
+        .map_err(|err| err)?;
+    Ok(build_manifest(
+        entry,
+        &NativeCredentialBoundary {
+            connections_path: path,
+        },
+    ))
 }
 
 #[tauri::command]

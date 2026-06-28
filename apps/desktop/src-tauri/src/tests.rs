@@ -167,6 +167,29 @@ fn rejects_standing_approvals_for_connector_writes() {
     assert_eq!(error.code, "approval-required");
 }
 
+/// Sending email must never execute on a standing (session/rule) approval,
+/// regardless of the global permission level. A `rule` decision for gmail.send
+/// is rejected at the validation boundary, so the provider egress is never
+/// reached. This is the per-message-approval guarantee for Gmail sends.
+#[test]
+fn gmail_send_rejects_standing_rule_approval() {
+    let action = connector_action("gmail.send", "gmail", "Gmail");
+    let request = ConnectorActionExecutionRequest {
+        action: action.clone(),
+        approval: ApprovalResolutionRequest {
+            request: action.approval,
+            decision: "rule".to_string(),
+            decided_at: "2026-06-27T10:01:00.000Z".to_string(),
+            confirmation_text: Some("send email".to_string()),
+            modification: None,
+        },
+    };
+
+    let error = validate_connector_execution_request(request)
+        .expect_err("gmail.send must require a fresh per-message approval");
+    assert_eq!(error.code, "approval-required");
+}
+
 #[test]
 fn redacts_connector_secrets_and_private_provider_data() {
     assert_eq!(

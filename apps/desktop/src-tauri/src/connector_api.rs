@@ -47,6 +47,7 @@ async fn request_json(
     query: &[(String, String)],
     body: Option<Value>,
 ) -> Result<ApiResponse, ConnectorCommandError> {
+    crate::ensure_rustls_provider();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .user_agent("Fable/0.1 connector-runtime")

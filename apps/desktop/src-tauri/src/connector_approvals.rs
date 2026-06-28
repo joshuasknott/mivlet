@@ -413,4 +413,63 @@ mod tests {
         assert!(verify_prepared_connector_action(&path, &action("attacker@example.com")).is_err());
         let _ = fs::remove_file(path);
     }
+
+    /// The Gmail send approval preview must surface every field a user needs to
+    /// make a per-message decision: the sending account, To, CC, BCC, subject,
+    /// a body preview, and attachments. A regression dropping any of these
+    /// would let a send be approved without full visibility.
+    #[test]
+    fn gmail_send_preview_shows_account_recipients_body_and_attachments() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-connector-approval-preview-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let prepared = ConnectorActionRequest {
+            id: "action-preview".to_string(),
+            connector_id: "gmail".to_string(),
+            action: "gmail.send".to_string(),
+            payload: BTreeMap::from([
+                ("to".to_string(), "alice@example.com".to_string()),
+                ("cc".to_string(), "bob@example.com".to_string()),
+                ("bcc".to_string(), "carol@example.com".to_string()),
+                ("subject".to_string(), "Quarterly review".to_string()),
+                (
+                    "body".to_string(),
+                    "Please review the attached.".to_string(),
+                ),
+                ("attachments".to_string(), "report.pdf".to_string()),
+            ]),
+            approval: ApprovalRequest {
+                id: "action-preview".to_string(),
+                service: "Gmail".to_string(),
+                action: "Send".to_string(),
+                mode: "full-access".to_string(),
+                risk_level: "high".to_string(),
+                data_used: vec![
+                    "to".to_string(),
+                    "cc".to_string(),
+                    "bcc".to_string(),
+                    "subject".to_string(),
+                    "body".to_string(),
+                    "attachments".to_string(),
+                ],
+                consequence: "Sends the selected email to external recipients.".to_string(),
+                requested_at: "2026-06-27T12:00:00Z".to_string(),
+                decisions: vec!["once".to_string(), "deny".to_string()],
+                confirmation_phrase: Some("send email".to_string()),
+            },
+        };
+        let record =
+            record_pending_connector_action(&path, &prepared, "account-1", "sender@example.com")
+                .expect("record");
+        assert!(record.preview.contains("Account: sender@example.com"));
+        assert!(record.preview.contains("To: alice@example.com"));
+        assert!(record.preview.contains("CC: bob@example.com"));
+        assert!(record.preview.contains("BCC: carol@example.com"));
+        assert!(record.preview.contains("Subject: Quarterly review"));
+        assert!(record.preview.contains("Body: Please review the attached."));
+        assert!(record.preview.contains("Attachments: report.pdf"));
+        let _ = fs::remove_file(path);
+    }
 }

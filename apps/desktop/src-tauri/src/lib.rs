@@ -23,6 +23,12 @@ mod paths;
 mod snapshot;
 mod tools;
 
+/// reqwest is intentionally built without an implicit rustls provider. Install
+/// the audited ring provider before constructing any native HTTP client.
+pub(crate) fn ensure_rustls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[cfg(test)]
 mod tests;
 
@@ -58,6 +64,8 @@ pub fn run() {
             connectors::complete_connector_auth,
             connectors::begin_connector_oauth,
             connectors::clear_connector_auth,
+            connectors::list_connector_accounts,
+            connectors::switch_connector_account,
             connectors::refresh_connector_health,
             connectors::search_connector,
             connectors::read_connector_capability,
@@ -66,6 +74,7 @@ pub fn run() {
             connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
+            google::cancel_google_call,
             tools::execute_tool_call
         ])
         .run(tauri::generate_context!())

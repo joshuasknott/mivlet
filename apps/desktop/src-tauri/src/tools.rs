@@ -560,6 +560,7 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
     // Defense in depth: re-validate the scheme at the boundary, immediately
     // before egress, so a reshaped request can never reach a non-http(s) URL.
     web_fetch_url_from_args(&serde_json::json!({ "url": url }))?;
+    crate::ensure_rustls_provider();
     let client = reqwest::Client::new();
     let response = match client.get(url).send().await {
         Ok(response) => response,

@@ -11,6 +11,7 @@ export const GOOGLE_CALENDAR_CAPABILITIES = [
   { id: "calendar.read", kind: "read", consequential: false, description: "Read events, attendees, and availability." },
   { id: "google-calendar.create-draft", kind: "write", consequential: true, description: "Create an approved event." },
   { id: "google-calendar.update-draft", kind: "write", consequential: true, description: "Update an approved event." },
+  { id: "google-calendar.cancel-event", kind: "write", consequential: true, description: "Cancel an approved event." },
   { id: "google-calendar.delete-event", kind: "write", consequential: true, description: "Delete an approved event." }
 ] satisfies ConnectorCapability[];
 
@@ -107,6 +108,21 @@ export function prepareGoogleCalendarDelete(payload: {
     { ...payload, targetId: payload.eventId },
     "high",
     "Deletes or cancels the selected calendar event after explicit approval."
+  );
+}
+
+export function prepareGoogleCalendarCancel(payload: {
+  calendarId: string;
+  eventId: string;
+  title?: string;
+}) {
+  return prepareConnectorAction(
+    "google-calendar",
+    "Google Calendar",
+    "google-calendar.cancel-event",
+    { ...payload, targetId: payload.eventId },
+    "high",
+    "Cancels the selected calendar event after explicit approval."
   );
 }
 
