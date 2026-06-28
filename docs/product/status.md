@@ -22,7 +22,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Approvals: Rust commands and shell UI support once/session/rule/modify/deny decisions, audit entries, approval rules, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
 - Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted locally through app-data JSON files; browser preview also uses localStorage.
-- Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends.
+- Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Only native API-key providers can become connected through the current credential command; subscription/CLI entries remain gated until real adapters exist.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
 - Native API agent loop: TypeScript owns provider request shaping and the pure agent loop; Rust owns API key lookup, HTTP/SSE egress, event emission, and cancellation for OpenAI-compatible, Anthropic, and Gemini-style providers.
 - Tool execution: the registered tools are `read-file`, `write-file`, `run-shell`, and `web-fetch`; model tool calls route through approval before Rust re-validates and executes side effects.
@@ -33,11 +33,22 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - CI file: `.github/workflows/ci.yml` exists and uses pnpm for typecheck, tests, build, Tauri check, Rust tests, clippy, and fmt on Windows.
 - Tests exist across desktop, connectors, native API, local files, knowledge search, backend registry, and Rust runtime modules.
 
+## Runtime Availability Matrix
+
+| Area | Current state |
+| --- | --- |
+| Local files, approvals, memory controls, knowledge search, runtime snapshots | Live local runtime paths. |
+| Native API-key backends | Live when the user supplies a provider API key; keys stay in the local credential boundary. |
+| Google Drive, Gmail, Google Calendar | Live provider egress exists, but only after Google desktop OAuth configuration and a connected test account. |
+| GitHub, Vercel, Notion, Slack, Linear | Provider egress code exists behind the credential boundary, but auth is broker-gated and fails closed until the deferred auth broker and provider-console callbacks exist. |
+| Browser preview connectors | Explicit synthetic fixture behavior only; never proof of a live provider connection. |
+| Schedules, voice, Convex collaboration, encrypted SQLite | Incomplete or non-executing as described below. |
+
 ## Partially Implemented Or Preview-Only
 
 - Onboarding collects an optional local display profile only. It does not create or require a hosted Fable account.
 - The API-key path can hand native backend secrets to the Rust credential boundary, but subscription provider paths are represented as backend catalog states and install/setup flows, not proven live provider integrations.
-- Browser preview can mark backends/connectors as connected for testability; that is not a live connection.
+- Browser preview can mark API-key backends as locally connected for testability. Connector reads remain explicitly fixture-backed and do not become live connections.
 - Connector search/import in browser preview uses explicitly labeled synthetic fixture behavior.
 - Knowledge imported through local files can feed composer directives and search, but the standalone Knowledge page currently renders an empty state.
 - Schedules persist through the runtime snapshot, but no background scheduler or recurring execution engine was found.
@@ -81,7 +92,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `apps/desktop/src/components/pages/ProfilePage.tsx`
 - `apps/desktop/src/components/pages/SettingsPage.tsx`
 - `apps/desktop/src/components/pages/KnowledgePage.tsx`
-- `apps/desktop/src/components/pages/AutomationsPage.tsx`
+- `apps/desktop/src/components/pages/SchedulesPage.tsx`
 - `apps/desktop/src/data/workspace.ts`
 - `apps/desktop/src/lib/persistence.ts`
 - `apps/desktop/src-tauri/src/lib.rs`
@@ -90,6 +101,10 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `apps/desktop/src-tauri/src/snapshot.rs`
 - `apps/desktop/src-tauri/src/memory.rs`
 - `apps/desktop/src-tauri/src/connectors.rs`
+- `apps/desktop/src-tauri/src/connector_auth.rs`
+- `apps/desktop/src-tauri/src/connector_api.rs`
+- `apps/desktop/src-tauri/src/collaboration_connectors.rs`
+- `apps/desktop/src-tauri/src/google.rs`
 - `apps/desktop/src-tauri/src/oauth_loopback.rs`
 - `apps/desktop/src-tauri/src/backends.rs`
 - `apps/desktop/src-tauri/src/native_api.rs`
@@ -103,3 +118,4 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `packages/connectors/src/native-api/agent-loop.ts`
 - `packages/connectors/src/native-api/tools.ts`
 - `packages/connectors/src/native-api/tool-executor.ts`
+- `docs/connectors/auth-broker.md`

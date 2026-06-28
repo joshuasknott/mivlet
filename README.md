@@ -6,14 +6,14 @@ Local-first and private by default, Fable is built for people who want powerful 
 
 ## Current Slice
 
-- Tauri 2 desktop shell with Chats, Projects, Knowledge, Plugins, and Automations navigation.
+- Tauri 2 desktop shell with Chats, Projects, Connectors, Knowledge, and Schedules navigation.
 - Universal composer with text, voice, attachments, `@` tools, slash commands, and send affordances.
 - Contextual directive cards that fill the composer instead of behaving like task cards.
 - Knowledge view with sources, memory provenance, and source pinning.
-- Plugin view with connector permissions, health, and composer insertion.
-- Automation view with draft/active status and approval routing for scheduled work.
+- Connectors view with auth state, permissions, health, search/import, and approval-gated actions.
+- Schedules view for locally persisted schedule definitions; automatic execution is not implemented yet.
 - Approval flow with once/session/rule/modify/deny decisions and audit history.
-- Local recovery for composer drafts, pinned sources, automation status, and approval audit.
+- Local recovery for composer drafts, pinned sources, schedule definitions, and approval audit.
 - Protocol types for approvals, memory, connector health, directives, and runtime snapshots.
 - Native API-key agent path for OpenAI-compatible, Anthropic, Gemini, xAI, and OpenRouter providers, with keys held by the local credential boundary.
 - First-wave connector boundaries with explicit fixture previews, Google public-client PKCE support, and broker-gated confidential connectors that fail closed until configured.

@@ -18,9 +18,9 @@ import { FableLogo } from "./components/FableLogo";
 import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
-import { AutomationsPage } from "./components/pages/AutomationsPage";
+import { SchedulesPage } from "./components/pages/SchedulesPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
-import { PluginsPage } from "./components/pages/PluginsPage";
+import { ConnectorsPage } from "./components/pages/ConnectorsPage";
 import { ProfilePage } from "./components/pages/ProfilePage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 
@@ -119,11 +119,11 @@ export function App() {
   const renderPage = () => {
     switch (runtime.activePage) {
       case "Connectors":
-        return <PluginsPage runtime={runtime} />;
+        return <ConnectorsPage runtime={runtime} />;
       case "Knowledge":
         return <KnowledgePage />;
       case "Schedules":
-        return <AutomationsPage runtime={runtime} />;
+        return <SchedulesPage runtime={runtime} />;
       case "Profile":
         return <ProfilePage profile={profile} onProfileChange={setProfile} />;
       case "Settings":

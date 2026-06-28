@@ -7,7 +7,7 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
  * Minimal connector setup surface. The app shell owns navigation; this page
  * only renders the icon-led connector grid and the selected connector details.
  */
-export function PluginsPage({ runtime }: { runtime: ShellRuntime }) {
+export function ConnectorsPage({ runtime }: { runtime: ShellRuntime }) {
   const visibleConnectors = runtime.connectorManifests.filter(
     (connector) => connector.id !== "local-files"
   );

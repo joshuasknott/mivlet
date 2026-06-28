@@ -1,7 +1,8 @@
 //! Agent-runtime backend credential boundary.
 //!
-//! Rust owns credential access for the agent-runtime AI backends (Codex,
-//! Cursor, Copilot, Grok, plus the native-API providers). Secrets live in the
+//! Rust owns credential access for native API-key agent backends. Catalog-only
+//! subscription/CLI providers remain gated until their real runtime adapter is
+//! available. Secrets live in the
 //! OS-secure store (Windows Credential Manager / macOS Keychain / Linux Secret
 //! Service) via the `keyring` crate, with a process-scoped `Mutex<HashMap>`
 //! kept as the test/headless fallback. Both are reached through the
@@ -340,11 +341,14 @@ impl BackendCredentialStore for CredentialStores {
     }
 
     fn remove(&mut self, provider_id: &str) -> Result<(), String> {
-        // Best-effort clear of both stores; a missing entry is not an error.
-        let _ = KeyringStore.remove(provider_id);
-        if let Ok(mut store) = credential_store().lock() {
-            let _ = store.remove(provider_id);
-        }
+        // Do not report a disconnect until durable secure-store deletion
+        // succeeds. Otherwise metadata could say disconnected while the secret
+        // remains in the OS keyring.
+        KeyringStore.remove(provider_id)?;
+        let mut store = credential_store()
+            .lock()
+            .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
+        BackendCredentialStore::remove(&mut *store, provider_id)?;
         Ok(())
     }
 }
@@ -376,20 +380,19 @@ fn catalog_entry(provider_id: &str) -> Option<&'static BackendCatalogEntry> {
     CATALOG.iter().find(|entry| entry.id == provider_id)
 }
 
-/// Resolve the auth state for a provider from a credential store. A provider
-/// is `connected` when a live credential exists (re-read from the keychain on
-/// restart, so a persisted connected id re-resolves without a re-prompt). ACP
-/// providers (cursor, grok) are `install-required` until a credential is
-/// present (the CLI is the gating dependency). When the manifest said a
-/// provider was connected but no credential survives (e.g. cleared from the
-/// keychain), it falls back to `needs-auth` rather than silently dropping — the
-/// keychain is the source of truth, the manifest is just a recovery hint.
+/// Resolve auth state from the credential store. Only native API-key providers
+/// can become connected through this boundary. Catalog-only subscription/CLI
+/// providers stay gated until a real runtime adapter reports capabilities.
 fn resolve_auth_state<S: BackendCredentialStore>(provider_id: &str, store: &S) -> String {
-    if matches!(store.get(provider_id), Ok(Some(_))) {
+    let entry = catalog_entry(provider_id);
+    let is_native = entry
+        .map(|entry| entry.backend_type == "native-api")
+        .unwrap_or(false);
+    if is_native && matches!(store.get(provider_id), Ok(Some(_))) {
         return "connected".to_string();
     }
 
-    let is_acp = catalog_entry(provider_id)
+    let is_acp = entry
         .map(|entry| entry.backend_type == "acp")
         .unwrap_or(false);
 
@@ -540,6 +543,14 @@ pub(crate) fn store_credential_into<S: BackendCredentialStore>(
 ) -> Result<String, String> {
     require_supported_provider(&request.provider_id)?;
     let provider_id = normalize_spaces(&request.provider_id);
+    let entry = catalog_entry(&provider_id)
+        .ok_or_else(|| format!("{} is not a supported agent-runtime backend.", provider_id))?;
+    if entry.backend_type != "native-api" {
+        return Err(format!(
+            "{} requires its real runtime adapter; it cannot connect through the API-key boundary.",
+            entry.label
+        ));
+    }
     let secret = truncate_characters(
         &normalize_spaces(&request.secret),
         MAX_BACKEND_SECRET_CHARACTERS,

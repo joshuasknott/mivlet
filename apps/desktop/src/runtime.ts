@@ -306,12 +306,11 @@ export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest
 }
 
 /**
- * Begin an end-to-end public-client (loopback PKCE) OAuth flow. Rust binds a
- * loopback redirect URI, starts the transaction, opens the browser, accepts one
- * callback, and completes the token exchange inside the credential boundary.
- * Returns null outside Tauri (preview has no real OAuth). Brokered providers
- * fail closed with a configuration-required error so the shell can surface the
- * configured-auth-required state.
+ * Begin an end-to-end loopback OAuth flow. Rust binds a redirect URI, starts
+ * the transaction, opens the browser, accepts one callback, and completes the
+ * token exchange inside the credential boundary. Confidential providers route
+ * exchange through the configured auth broker; public Google clients call
+ * Google directly. Returns null outside Tauri.
  */
 export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) {
   if (!hasTauriRuntime()) {

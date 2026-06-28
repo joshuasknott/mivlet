@@ -109,6 +109,12 @@ A fail-closed result means the confidential connector surfaces a clear
 fixtures, never claims a connected state, and never downgrades to a public
 client.
 
+The desktop uses the same exact loopback receiver for public and confidential
+OAuth. For confidential providers, the authorization URL points at the broker,
+which owns the provider callback and returns the final code/state to the exact
+desktop loopback redirect. The desktop then completes exchange through the
+broker token endpoint without exposing tokens to JavaScript.
+
 ### Why the checks are separated
 
 `resolve_broker_endpoints` takes the URL as an argument rather than reading the

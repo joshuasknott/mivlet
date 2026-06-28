@@ -74,8 +74,7 @@ import {
   saveRuntimeMemoryState,
   saveRuntimeSnapshot,
   searchRuntimeConnector,
-  searchRuntimeKnowledgeSources,
-  startRuntimeConnectorAuth
+  searchRuntimeKnowledgeSources
 } from "../runtime";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
@@ -878,16 +877,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
     setConnectorStatus(`Preparing ${connector.name} authorization...`);
     try {
-      // Public-client (loopback PKCE) connectors run the full flow end-to-end:
-      // Rust binds a real loopback redirect, opens the browser, accepts the
-      // callback, and completes the token exchange inside the credential
-      // boundary. Brokered connectors (GitHub, Vercel, Linear, Notion, Slack)
-      // start the brokered authorization; they fail closed with a clear
-      // configuration-required state when the auth broker is not configured.
-      const result =
-        connector.authMode === "oauth-pkce"
-          ? await beginRuntimeConnectorOAuth({ connectorId: connector.id })
-          : await startRuntimeConnectorAuth({ connectorId: connector.id });
+      // Every OAuth connector runs the full loopback flow end-to-end. Public
+      // Google clients call Google directly; confidential connectors route
+      // exchange through the configured broker and fail closed if it is absent.
+      const result = await beginRuntimeConnectorOAuth({ connectorId: connector.id });
       if (!result) {
         // Preview mode (no Tauri runtime): no live OAuth is available. Surface
         // the configured-auth-required state honestly — never claim a fixture

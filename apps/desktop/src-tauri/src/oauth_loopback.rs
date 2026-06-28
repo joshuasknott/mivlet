@@ -1,7 +1,7 @@
 //! Loopback OAuth callback receiver.
 //!
-//! The Google desktop PKCE flow (and any future public-client OAuth) needs a
-//! real redirect URI the provider can call back. We bind an ephemeral
+//! Desktop OAuth needs a real redirect URI the provider or auth broker can call
+//! back. We bind an ephemeral
 //! `http://127.0.0.1:{port}/callback` listener, hand that exact URI to
 //! `start_auth`, and then accept a single callback. The received callback URL
 //! is forwarded to `complete_auth`, which already validates state, redirect
@@ -133,7 +133,7 @@ fn callback_page(status: &str, message: &str) -> String {
     )
 }
 
-/// Drive the full public-client OAuth flow for a connector:
+/// Drive the full loopback OAuth flow for a connector:
 /// 1. bind a loopback listener and derive its redirect URI,
 /// 2. start the OAuth transaction (writes PKCE verifier to secure storage),
 /// 3. open the browser to the authorization URL,

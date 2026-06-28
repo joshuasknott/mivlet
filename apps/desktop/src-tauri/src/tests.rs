@@ -915,18 +915,22 @@ fn acp_providers_are_install_required_without_a_credential() {
 }
 
 #[test]
-fn storing_a_credential_connects_the_provider_and_serves_capabilities() {
+fn catalog_only_runtime_backends_reject_api_key_storage_and_stay_gated() {
     let path = temp_backends_path("backends-connect");
     let _ = fs::remove_file(&path);
 
     let mut store = HashMap::new();
-    let provider_id = store_credential_into(
+    let error = store_credential_into(
         &mut store,
         &path,
         credential_request("codex", "super-secret-token"),
     )
-    .expect("credential should store");
-    assert_eq!(provider_id, "codex");
+    .expect_err("catalog-only runtime must reject API-key storage");
+    assert!(error.contains("real runtime adapter"));
+
+    // Even a legacy/injected value cannot make a catalog-only provider claim
+    // capabilities without a runnable adapter.
+    store.insert("codex".to_string(), "legacy-token".to_string());
 
     let providers = list_providers_from(&store, &path).expect("providers should list");
     let codex = providers
@@ -934,10 +938,9 @@ fn storing_a_credential_connects_the_provider_and_serves_capabilities() {
         .find(|p| p.id == "codex")
         .expect("codex provider exists");
 
-    assert_eq!(codex.auth_state, "connected");
-    assert!(codex.capabilities.contains(&"streaming".to_string()));
-    assert!(codex.capabilities.contains(&"tool-requests".to_string()));
-    assert!(codex.models.iter().all(|model| model.available));
+    assert_eq!(codex.auth_state, "needs-auth");
+    assert!(codex.capabilities.is_empty());
+    assert!(codex.models.iter().all(|model| !model.available));
 
     let _ = fs::remove_file(&path);
 }
@@ -951,7 +954,7 @@ fn stored_secrets_never_appear_in_list_or_connected_manifest() {
     store_credential_into(
         &mut store,
         &path,
-        credential_request("copilot", "do-not-leak-me-12345"),
+        credential_request("openai", "do-not-leak-me-12345"),
     )
     .expect("credential should store");
 
@@ -967,7 +970,7 @@ fn stored_secrets_never_appear_in_list_or_connected_manifest() {
     // The persisted connected-backends manifest is ids only.
     let connected = read_connected_backends(&path).expect("connected backends read");
     let manifest = serde_json::to_string(&connected).expect("serialize");
-    assert!(manifest.contains("copilot"));
+    assert!(manifest.contains("openai"));
     assert!(!manifest.contains("do-not-leak-me-12345"));
 
     let _ = fs::remove_file(&path);
@@ -979,14 +982,57 @@ fn clearing_a_credential_drops_the_provider_from_the_manifest() {
     let _ = fs::remove_file(&path);
 
     let mut store = HashMap::new();
-    store_credential_into(&mut store, &path, credential_request("grok", "grok-token"))
-        .expect("store grok");
+    store_credential_into(
+        &mut store,
+        &path,
+        credential_request("openai", "openai-token"),
+    )
+    .expect("store openai");
     let connected = read_connected_backends(&path).expect("read");
-    assert!(connected.has("grok"));
+    assert!(connected.has("openai"));
 
-    clear_credential_into(&mut store, &path, "grok").expect("clear grok");
+    clear_credential_into(&mut store, &path, "openai").expect("clear openai");
     let connected = read_connected_backends(&path).expect("read after clear");
-    assert!(!connected.has("grok"));
+    assert!(!connected.has("openai"));
+
+    let _ = fs::remove_file(&path);
+}
+
+struct FailingRemoveStore;
+
+impl BackendCredentialStore for FailingRemoveStore {
+    fn get(&self, _provider_id: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    fn set(&mut self, _provider_id: &str, _secret: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn remove(&mut self, _provider_id: &str) -> Result<(), String> {
+        Err("secure store unavailable".to_string())
+    }
+}
+
+#[test]
+fn secure_store_delete_failure_keeps_connected_manifest_intact() {
+    let path = temp_backends_path("backends-clear-failure");
+    let _ = fs::remove_file(&path);
+
+    let mut seed_store = HashMap::new();
+    store_credential_into(
+        &mut seed_store,
+        &path,
+        credential_request("openai", "openai-token"),
+    )
+    .expect("seed connected metadata");
+
+    let error = clear_credential_into(&mut FailingRemoveStore, &path, "openai")
+        .expect_err("secure-store failure must surface");
+    assert!(error.contains("secure store unavailable"));
+    assert!(read_connected_backends(&path)
+        .expect("manifest remains readable")
+        .has("openai"));
 
     let _ = fs::remove_file(&path);
 }
@@ -1010,7 +1056,7 @@ fn rejects_empty_backend_secrets() {
     let _ = fs::remove_file(&path);
 
     let mut store = HashMap::new();
-    let error = store_credential_into(&mut store, &path, credential_request("codex", "   "))
+    let error = store_credential_into(&mut store, &path, credential_request("openai", "   "))
         .expect_err("empty secret should fail");
     assert!(error.contains("non-empty"));
 

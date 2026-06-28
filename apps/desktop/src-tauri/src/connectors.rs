@@ -959,26 +959,17 @@ pub async fn complete_connector_auth(
     complete_auth(&app, entry.id, request).await
 }
 
-/// Begin a public-client (loopback PKCE) OAuth flow end-to-end: bind a loopback
-/// redirect, start the transaction, open the browser, accept one callback, and
-/// complete the token exchange inside the credential boundary. Brokered
-/// providers (GitHub, Vercel, Linear, Notion, Slack) require the auth broker
-/// and must use `start_connector_auth` instead — this command fails closed for
-/// them so the shell can surface a configured-auth-required state.
+/// Begin a loopback OAuth flow end-to-end: bind an exact desktop redirect,
+/// start the transaction, open the browser, accept one callback, and complete
+/// token exchange inside the credential boundary. Confidential providers route
+/// exchange through the configured auth broker and fail closed when it is
+/// unavailable; public Google clients call Google directly.
 #[tauri::command]
 pub async fn begin_connector_oauth(
     app: tauri::AppHandle,
     request: ConnectorAuthRequest,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    if entry.auth_mode != "oauth-pkce" {
-        return Err(command_error(
-            "configuration-required",
-            entry.id,
-            &redact_connector_text(entry.setup_message),
-            false,
-        ));
-    }
     let declared = entry
         .scopes
         .iter()

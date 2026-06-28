@@ -9,7 +9,7 @@ import {
   Spinner,
   WarningCircle
 } from "@phosphor-icons/react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import { FableLogo } from "../FableLogo";
@@ -30,8 +30,9 @@ import { FableLogo } from "../FableLogo";
  *   - Connector (workspace tools) setup is NOT part of onboarding. It is
  *     optional and lives on the real Connectors page (`onOpenConnectors`).
  *
- * Secrets are never held in React state beyond the connection form: the key is
- * handed to the Rust credential boundary via `onConnect` and never read back.
+ * Secrets are never held in React state: the key is read once from an
+ * uncontrolled input, handed to the Rust credential boundary via `onConnect`,
+ * then cleared from the DOM field.
  */
 export function OnboardingPage({
   providers,
@@ -65,7 +66,8 @@ export function OnboardingPage({
 
   // Track the user-selected provider to connect (native-API only).
   const [selectedProvider, setSelectedProvider] = useState<BackendProvider | null>(null);
-  const [secretKey, setSecretKey] = useState("");
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const [hasSecretKey, setHasSecretKey] = useState(false);
 
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
 
@@ -82,12 +84,19 @@ export function OnboardingPage({
   useEffect(() => {
     if (selectedProvider && connectedBackendIds.includes(selectedProvider.id)) {
       setPendingProviderId(null);
+      if (keyInputRef.current) {
+        keyInputRef.current.value = "";
+      }
+      setHasSecretKey(false);
     }
   }, [connectedBackendIds, selectedProvider]);
 
   const handleSelectProvider = (provider: BackendProvider) => {
     setSelectedProvider(provider);
-    setSecretKey("");
+    if (keyInputRef.current) {
+      keyInputRef.current.value = "";
+    }
+    setHasSecretKey(false);
     setValidationError(null);
     setStep("connection");
   };
@@ -385,18 +394,27 @@ export function OnboardingPage({
                   className="og-form"
                   onSubmit={(e) => {
                     e.preventDefault();
-                    handleConnect(selectedProvider, secretKey);
+                    const secret = keyInputRef.current?.value.trim() ?? "";
+                    if (!secret) {
+                      setValidationError("Enter an API key to connect.");
+                      return;
+                    }
+                    handleConnect(selectedProvider, secret);
+                    if (keyInputRef.current) {
+                      keyInputRef.current.value = "";
+                    }
+                    setHasSecretKey(false);
                   }}
                 >
                   {selectedProvider.backendType === "native-api" ? (
                     <label className="og-field">
                       <span>{selectedProvider.label} API Key</span>
                       <input
+                        ref={keyInputRef}
                         type="password"
                         aria-label={`API key for ${selectedProvider.label.toLowerCase()}`}
                         placeholder={`Enter your ${selectedProvider.label} API key`}
-                        value={secretKey}
-                        onChange={(e) => setSecretKey(e.target.value)}
+                        onInput={(e) => setHasSecretKey(Boolean(e.currentTarget.value.trim()))}
                         disabled={pendingProviderId === selectedProvider.id}
                         autoComplete="off"
                         spellCheck={false}
@@ -418,7 +436,7 @@ export function OnboardingPage({
                     type="submit"
                     className="og-submit button button--primary"
                     disabled={
-                      (selectedProvider.backendType === "native-api" && !secretKey.trim()) ||
+                      (selectedProvider.backendType === "native-api" && !hasSecretKey) ||
                       pendingProviderId === selectedProvider.id
                     }
                   >
@@ -448,7 +466,10 @@ export function OnboardingPage({
                 className="og-back-btn button button--ghost"
                 onClick={() => {
                   setStep(selectedProvider.backendType === "native-api" ? "apikey" : "subscription");
-                  setSecretKey("");
+                  if (keyInputRef.current) {
+                    keyInputRef.current.value = "";
+                  }
+                  setHasSecretKey(false);
                   setValidationError(null);
                 }}
               >

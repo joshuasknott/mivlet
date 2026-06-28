@@ -14,7 +14,8 @@ const runtimeMocks = vi.hoisted(() => ({
   lines: [] as string[],
   emitDone: true,
   onLine: null as ((line: string) => void) | null,
-  cancelCalls: [] as string[]
+  cancelCalls: [] as string[],
+  connectorOAuthCalls: [] as string[]
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -32,6 +33,10 @@ const connectedCodex: BackendProvider = {
 };
 
 vi.mock("./runtime", () => ({
+  beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
+    runtimeMocks.connectorOAuthCalls.push(request.connectorId);
+    return null;
+  }),
   clearRuntimeConnectorAuth: vi.fn(async () => null),
   clearRuntimeBackend: vi.fn(async () => null),
   connectRuntimeBackend: vi.fn(async () => "codex"),
@@ -157,6 +162,7 @@ describe("Fable home", () => {
     runtimeMocks.emitDone = true;
     runtimeMocks.onLine = null;
     runtimeMocks.cancelCalls = [];
+    runtimeMocks.connectorOAuthCalls = [];
     connectRuntimeBackendSpy.mockClear();
     removeDesktopRuntime();
   });
@@ -227,6 +233,23 @@ describe("Fable home", () => {
     expect(screen.getByText(/Enable Gmail API/i)).toBeInTheDocument();
     expect(screen.getByText("Read mail")).toBeInTheDocument();
     expect(screen.getByText("Create drafts")).toBeInTheDocument();
+  });
+
+  it("routes broker-gated connector auth through the loopback OAuth command", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+
+    const githubCard = screen
+      .getAllByText("GitHub")
+      .map((node) => node.closest("article"))
+      .find(Boolean);
+    expect(githubCard).not.toBeNull();
+
+    await user.click(
+      within(githubCard as HTMLElement).getByRole("button", { name: /^connect$/i })
+    );
+
+    expect(runtimeMocks.connectorOAuthCalls).toContain("github");
   });
 
   it("prepares connector writes as approval requests instead of executing them", async () => {
@@ -939,6 +962,7 @@ describe("Fable onboarding", () => {
     window.localStorage.clear();
     runtimeMocks.snapshot = null;
     runtimeMocks.backends = failClosedBackends;
+    connectRuntimeBackendSpy.mockClear();
   });
 
   const completeProfileStep = async (user: any) => {
@@ -1137,6 +1161,15 @@ describe("Fable onboarding", () => {
     const keyInput = await screen.findByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-test-key");
     await user.click(screen.getByRole("button", { name: /add key & connect/i }));
+
+    await waitFor(() => {
+      expect(connectRuntimeBackendSpy).toHaveBeenCalledWith({
+        providerId: "openai",
+        secret: "sk-test-key"
+      });
+    });
+    expect(keyInput).toHaveValue("");
+    expect(window.localStorage.getItem("fable.shell.v1") ?? "").not.toContain("sk-test-key");
 
     // The success screen offers to start using Fable; connector setup stays optional.
     const startBtn = await screen.findByRole("button", { name: /start using fable/i });
