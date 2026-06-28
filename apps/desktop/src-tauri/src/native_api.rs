@@ -216,6 +216,7 @@ pub async fn stream_backend_completion(
     let url = endpoint_for_model(&request.provider_id, &request.model)?;
     let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
 
+    crate::ensure_rustls_provider();
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .tcp_keepalive(Duration::from_secs(30))

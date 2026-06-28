@@ -259,6 +259,9 @@ function confirmationPhrase(action: ConnectorActionKind) {
   if (action === "google-calendar.delete-event") {
     return "delete calendar event";
   }
+  if (action === "google-calendar.cancel-event") {
+    return "cancel calendar event";
+  }
   if (action === "slack.post") {
     return "post message";
   }

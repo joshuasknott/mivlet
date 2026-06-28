@@ -190,7 +190,12 @@ export const connectorFixtures = [
     setupMessage: "Enable Calendar API and create a desktop OAuth client.",
     supportsSearch: true,
     supportsImport: true,
-    supportedActions: ["google-calendar.create-draft", "google-calendar.update-draft"]
+    supportedActions: [
+      "google-calendar.create-draft",
+      "google-calendar.update-draft",
+      "google-calendar.cancel-event",
+      "google-calendar.delete-event"
+    ]
   },
   {
     id: "linear",

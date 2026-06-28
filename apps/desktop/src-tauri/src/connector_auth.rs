@@ -19,11 +19,13 @@ use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::models::{
-    ConnectorAccountSummary, ConnectorAuthRequest, ConnectorAuthResult, ConnectorCommandError,
+    ConnectorAccountOption, ConnectorAccountSummary, ConnectorAuthRequest, ConnectorAuthResult,
+    ConnectorCommandError,
 };
 use crate::paths::connector_connections_path;
 
 const KEYRING_SERVICE: &str = "com.fable.workspace.connectors";
+const OAUTH_PENDING_MAX_AGE_SECONDS: u64 = 5 * 60;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OAuthProviderConfig {
@@ -48,6 +50,7 @@ struct PendingOAuth {
     client_id: String,
     scopes: Vec<String>,
     brokered: bool,
+    created_at: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -75,6 +78,13 @@ pub(crate) struct ConnectorConnection {
     pub credential_ref: String,
     pub connected_at: String,
     pub updated_at: String,
+    /// Whether this account is the one reads/actions resolve by default.
+    /// Exactly one connection per `connector_id` is active; the rest are kept
+    /// so the user can switch between multiple Google accounts. Defaults to
+    /// `false` for legacy entries; `read_connections` repairs the collection so
+    /// exactly one account per connector is active before it is used.
+    #[serde(default)]
+    pub is_active: bool,
 }
 
 pub(crate) trait ConnectorSecretStore: Send + Sync {
@@ -366,6 +376,7 @@ fn start_with_store(
         client_id: config.client_id,
         scopes: config.scopes,
         brokered: config.brokered,
+        created_at: now_epoch(),
     };
     let encoded = serde_json::to_string(&pending).map_err(|_| {
         command_error(
@@ -468,6 +479,17 @@ async fn complete_with_store(
             false,
         ));
     }
+    if now_epoch().saturating_sub(pending.created_at) > OAUTH_PENDING_MAX_AGE_SECONDS {
+        store
+            .remove(&key)
+            .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+        return Err(command_error(
+            "invalid-request",
+            connector_id,
+            "OAuth state expired; start authorization again.",
+            false,
+        ));
+    }
     let expected_redirect = Url::parse(&pending.redirect_uri).map_err(|_| {
         command_error(
             "invalid-request",
@@ -495,6 +517,7 @@ async fn complete_with_store(
         .remove(&key)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
 
+    crate::ensure_rustls_provider();
     let response = reqwest::Client::new()
         .post(&pending.token_endpoint)
         .form(&[
@@ -600,6 +623,7 @@ async fn fetch_identity(
             false,
         )
     })?;
+    crate::ensure_rustls_provider();
     let response = reqwest::Client::new()
         .get(endpoint)
         .bearer_auth(access_token)
@@ -678,8 +702,39 @@ pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse connector state.".to_string())
+    let mut connections: Vec<ConnectorConnection> = serde_json::from_str(&contents)
+        .map_err(|_| "Fable could not parse connector state.".to_string())?;
+    normalize_active_accounts(&mut connections);
+    Ok(connections)
+}
+
+fn normalize_active_accounts(connections: &mut [ConnectorConnection]) {
+    let mut connector_ids = connections
+        .iter()
+        .map(|connection| connection.connector_id.clone())
+        .collect::<Vec<_>>();
+    connector_ids.sort();
+    connector_ids.dedup();
+    for connector_id in connector_ids {
+        let matching = connections
+            .iter()
+            .enumerate()
+            .filter(|(_, connection)| connection.connector_id == connector_id)
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let active = matching
+            .iter()
+            .copied()
+            .filter(|index| connections[*index].is_active)
+            .collect::<Vec<_>>();
+        let selected = active
+            .first()
+            .copied()
+            .or_else(|| matching.first().copied());
+        for index in matching {
+            connections[index].is_active = Some(index) == selected;
+        }
+    }
 }
 
 fn write_connections(path: &Path, connections: &[ConnectorConnection]) -> Result<(), String> {
@@ -691,11 +746,22 @@ fn write_connections(path: &Path, connections: &[ConnectorConnection]) -> Result
     fs::rename(&temporary, path).map_err(|_| "Fable could not commit connector state.".to_string())
 }
 
+/// Resolve the *active* connection for a connector. With multi-account
+/// support several accounts may be connected; reads/actions resolve against the
+/// one flagged active. Falls back to the first connection if none is flagged
+/// (legacy files / invariant drift) so an account never becomes unreachable.
 pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
-    read_connections(path)
-        .ok()?
-        .into_iter()
-        .find(|connection| connection.connector_id == connector_id)
+    let connections = read_connections(path).ok()?;
+    let matching: Vec<&ConnectorConnection> = connections
+        .iter()
+        .filter(|connection| connection.connector_id == connector_id)
+        .collect();
+    matching
+        .iter()
+        .copied()
+        .find(|connection| connection.is_active)
+        .or_else(|| matching.first().copied())
+        .cloned()
 }
 
 pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
@@ -750,13 +816,32 @@ pub(crate) async fn complete_auth(
         credential_ref,
         connected_at: timestamp.clone(),
         updated_at: timestamp,
+        is_active: true,
     };
     let path = connector_connections_path(app)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let mut connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    connections.retain(|existing| existing.connector_id != connector_id);
-    connections.insert(0, connection);
+    // Multi-account: keep every other account for this connector, deactivate
+    // them (the freshly authenticated one becomes active), and replace the
+    // matching account in place if the user re-authenticated it. Connecting a
+    // brand-new account therefore never discards an existing one.
+    let mut replaced = false;
+    for existing in connections.iter_mut() {
+        if existing.connector_id == connector_id {
+            existing.is_active = false;
+            if existing.account.id == account.id {
+                *existing = connection.clone();
+                replaced = true;
+            }
+        }
+    }
+    if !replaced {
+        connections.insert(0, connection);
+    }
+    // Backfill `is_active` for any legacy entry missing the field: the most
+    // recently connected account per connector wins as active.
+    promote_single_active(&mut connections, connector_id);
     write_connections(&path, &connections)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     Ok(ConnectorAuthResult {
@@ -768,6 +853,96 @@ pub(crate) async fn complete_auth(
     })
 }
 
+/// Enforce the "exactly one active account per connector" invariant. If no
+/// account is active (e.g. a legacy file where the field defaulted), promote
+/// the first one for the connector. Other connectors are untouched.
+fn promote_single_active(connections: &mut [ConnectorConnection], connector_id: &str) {
+    let has_active = connections
+        .iter()
+        .any(|connection| connection.connector_id == connector_id && connection.is_active);
+    if has_active {
+        return;
+    }
+    for connection in connections.iter_mut() {
+        if connection.connector_id == connector_id {
+            connection.is_active = true;
+            break;
+        }
+    }
+}
+
+/// All stored accounts for a connector (active first), so the UI can render an
+/// account switcher. Token secrets never leave the credential boundary; only
+/// the non-secret account summaries are returned.
+pub(crate) fn accounts_for_connector(
+    path: &Path,
+    connector_id: &str,
+) -> Vec<ConnectorAccountOption> {
+    let Ok(connections) = read_connections(path) else {
+        return Vec::new();
+    };
+    let mut matching: Vec<&ConnectorConnection> = connections
+        .iter()
+        .filter(|connection| connection.connector_id == connector_id)
+        .collect();
+    // Stable sort so the active account sorts to the front.
+    matching.sort_by_key(|connection| !connection.is_active);
+    matching
+        .into_iter()
+        .map(|connection| ConnectorAccountOption {
+            account: connection.account.clone(),
+            active: connection.is_active,
+        })
+        .collect()
+}
+
+/// Make `account_id` the active account for `connector_id`. Other accounts for
+/// the same connector are deactivated; their credentials are preserved so the
+/// user can switch back. Returns the now-active account, or an error if the
+/// account is unknown. Used by the account-switcher command.
+pub(crate) fn switch_active_account(
+    path: &Path,
+    connector_id: &str,
+    account_id: &str,
+) -> Result<ConnectorAccountSummary, ConnectorCommandError> {
+    let mut connections = read_connections(path)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let mut found: Option<ConnectorAccountSummary> = None;
+    let mut saw_connector = false;
+    for connection in connections.iter_mut() {
+        if connection.connector_id != connector_id {
+            continue;
+        }
+        saw_connector = true;
+        let matches = connection.account.id == account_id;
+        connection.is_active = matches;
+        connection.updated_at = now_epoch().to_string();
+        if matches {
+            found = Some(connection.account.clone());
+        }
+    }
+    if !saw_connector {
+        return Err(command_error(
+            "needs-auth",
+            connector_id,
+            "Connector is not authenticated.",
+            false,
+        ));
+    }
+    let account = found.ok_or_else(|| {
+        command_error(
+            "not-found",
+            connector_id,
+            "The selected account is not connected.",
+            false,
+        )
+    })?;
+    promote_single_active(&mut connections, connector_id);
+    write_connections(path, &connections)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    Ok(account)
+}
+
 pub(crate) async fn disconnect(
     app: &tauri::AppHandle,
     connector_id: &str,
@@ -776,38 +951,52 @@ pub(crate) async fn disconnect(
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let mut connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    if let Some(connection) = connections
+    // Multi-account: disconnect only the active account, preserving any other
+    // connected accounts for this connector. If others remain, promote one to
+    // active so reads/actions still resolve.
+    let active = connections
         .iter()
-        .find(|item| item.connector_id == connector_id)
-        .cloned()
+        .find(|item| item.connector_id == connector_id && item.is_active)
+        .or_else(|| {
+            connections
+                .iter()
+                .find(|item| item.connector_id == connector_id)
+        })
+        .cloned();
+    let Some(connection) = active else {
+        return Ok(());
+    };
+    if let Some(encoded) = NativeConnectorSecretStore
+        .get(&connection.credential_ref)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?
     {
-        if let Some(encoded) = NativeConnectorSecretStore
-            .get(&connection.credential_ref)
-            .map_err(|message| command_error("unknown", connector_id, &message, false))?
-        {
-            if let Ok(tokens) = serde_json::from_str::<StoredTokenSet>(&encoded) {
-                if let Some(endpoint) = tokens.revocation_endpoint {
-                    let _ = reqwest::Client::new()
-                        .post(endpoint)
-                        .form(&[(
-                            "token",
-                            tokens
-                                .refresh_token
-                                .as_deref()
-                                .unwrap_or(&tokens.access_token),
-                        )])
-                        .send()
-                        .await;
-                }
+        if let Ok(tokens) = serde_json::from_str::<StoredTokenSet>(&encoded) {
+            if let Some(endpoint) = tokens.revocation_endpoint {
+                crate::ensure_rustls_provider();
+                let _ = reqwest::Client::new()
+                    .post(endpoint)
+                    .form(&[(
+                        "token",
+                        tokens
+                            .refresh_token
+                            .as_deref()
+                            .unwrap_or(&tokens.access_token),
+                    )])
+                    .send()
+                    .await;
             }
         }
-        NativeConnectorSecretStore
-            .remove(&connection.credential_ref)
-            .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-        connections.retain(|item| item.connector_id != connector_id);
-        write_connections(&path, &connections)
-            .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     }
+    NativeConnectorSecretStore
+        .remove(&connection.credential_ref)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    connections.retain(|item| {
+        !(item.connector_id == connector_id && item.account.id == connection.account.id)
+    });
+    // If any account remains for this connector, make sure exactly one is active.
+    promote_single_active(&mut connections, connector_id);
+    write_connections(&path, &connections)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     Ok(())
 }
 
@@ -819,17 +1008,26 @@ pub(crate) async fn refresh_connection(
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let mut connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    // Multi-account: refresh the active account for this connector, falling
+    // back to the first connected account if none is flagged active.
+    let active_index = connections
+        .iter()
+        .position(|connection| connection.connector_id == connector_id && connection.is_active)
+        .or_else(|| {
+            connections
+                .iter()
+                .position(|connection| connection.connector_id == connector_id)
+        });
     let connection = connections
-        .iter_mut()
-        .find(|connection| connection.connector_id == connector_id)
-        .ok_or_else(|| {
+        .get_mut(active_index.ok_or_else(|| {
             command_error(
                 "needs-auth",
                 connector_id,
                 "Connector is not authenticated.",
                 false,
             )
-        })?;
+        })?)
+        .expect("active_index was just validated");
     let encoded = NativeConnectorSecretStore
         .get(&connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?
@@ -864,6 +1062,7 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
+    crate::ensure_rustls_provider();
     let response = reqwest::Client::new()
         .post(&tokens.token_endpoint)
         .form(&[
@@ -996,6 +1195,8 @@ pub(crate) async fn access_token(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     #[derive(Default)]
     struct MemoryStore(Mutex<BTreeMap<String, String>>);
@@ -1026,6 +1227,23 @@ mod tests {
             scopes: vec!["items.read".to_string()],
             brokered: false,
         }
+    }
+
+    async fn mock_json_server(body: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).await;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+        format!("http://{address}/token")
     }
 
     #[test]
@@ -1095,6 +1313,7 @@ mod tests {
             credential_ref: "oauth-token:fixture:account-1".to_string(),
             connected_at: "1".to_string(),
             updated_at: "1".to_string(),
+            is_active: true,
         };
         write_connections(&path, &[connection]).expect("write");
         let disk = fs::read_to_string(&path).expect("read");
@@ -1134,6 +1353,136 @@ mod tests {
         .await
         .expect_err("redirect mismatch");
         assert_eq!(wrong_redirect.code, "invalid-request");
+    }
+
+    #[tokio::test]
+    async fn incremental_oauth_preserves_refresh_token_and_consumes_state() {
+        let store = MemoryStore::default();
+        let token_endpoint = mock_json_server(
+            r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"scope":"items.write","account":{"id":"account-1","displayName":"Test account","email":"test@example.com"}}"#,
+        )
+        .await;
+        let mut config = fixture_config();
+        config.token_endpoint = token_endpoint;
+        config.scopes = vec!["items.write".to_string()];
+        let started =
+            start_with_store("fixture", "http://127.0.0.1:43123/callback", config, &store).unwrap();
+        let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
+        let state = authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let existing = StoredTokenSet {
+            access_token: "old-access".to_string(),
+            refresh_token: Some("keep-refresh".to_string()),
+            token_type: "Bearer".to_string(),
+            expires_at: None,
+            scopes: vec!["items.read".to_string()],
+            revocation_endpoint: None,
+            token_endpoint: "https://example.invalid/token".to_string(),
+            client_id: "desktop-client".to_string(),
+            brokered: false,
+        };
+        store
+            .set(
+                &token_key("fixture", "account-1"),
+                &serde_json::to_string(&existing).unwrap(),
+            )
+            .unwrap();
+        let callback = format!("http://127.0.0.1:43123/callback?code=code&state={state}");
+        let (tokens, account, _) = complete_with_store("fixture", &callback, &store)
+            .await
+            .unwrap();
+        assert_eq!(account.id, "account-1");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("keep-refresh"));
+        assert_eq!(tokens.scopes, vec!["items.read", "items.write"]);
+        assert!(store
+            .get(&pending_key("fixture", &state))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            complete_with_store("fixture", &callback, &store)
+                .await
+                .unwrap_err()
+                .code,
+            "invalid-request"
+        );
+    }
+
+    #[tokio::test]
+    async fn oauth_pending_state_expires_before_token_egress() {
+        let store = MemoryStore::default();
+        let started = start_with_store(
+            "fixture",
+            "http://127.0.0.1:43123/callback",
+            fixture_config(),
+            &store,
+        )
+        .unwrap();
+        let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
+        let state = authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let key = pending_key("fixture", &state);
+        let mut pending: PendingOAuth =
+            serde_json::from_str(&store.get(&key).unwrap().unwrap()).unwrap();
+        pending.created_at = 0;
+        store
+            .set(&key, &serde_json::to_string(&pending).unwrap())
+            .unwrap();
+        let error = complete_with_store(
+            "fixture",
+            &format!("http://127.0.0.1:43123/callback?code=code&state={state}"),
+            &store,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.code, "invalid-request");
+        assert!(error.message.contains("expired"));
+        assert!(store.get(&key).unwrap().is_none());
+    }
+
+    #[test]
+    fn multiple_accounts_have_one_explicit_active_selection() {
+        let path =
+            std::env::temp_dir().join(format!("fable-google-accounts-{}.json", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let connection = |id: &str, active: bool| ConnectorConnection {
+            connector_id: "gmail".to_string(),
+            account: ConnectorAccountSummary {
+                id: id.to_string(),
+                display_name: id.to_string(),
+                handle: None,
+                email: Some(format!("{id}@example.com")),
+                workspace: None,
+                avatar_url: None,
+            },
+            status: "connected".to_string(),
+            scopes: vec!["gmail.readonly".to_string()],
+            expires_at: None,
+            credential_ref: format!("oauth-token:gmail:{id}"),
+            connected_at: "1".to_string(),
+            updated_at: "1".to_string(),
+            is_active: active,
+        };
+        write_connections(
+            &path,
+            &[connection("first", true), connection("second", true)],
+        )
+        .unwrap();
+        let accounts = accounts_for_connector(&path, "gmail");
+        assert_eq!(accounts.iter().filter(|option| option.active).count(), 1);
+        assert_eq!(accounts[0].account.id, "first");
+        switch_active_account(&path, "gmail", "second").unwrap();
+        let accounts = accounts_for_connector(&path, "gmail");
+        assert_eq!(accounts.iter().filter(|option| option.active).count(), 1);
+        assert_eq!(accounts[0].account.id, "second");
+        let _ = fs::remove_file(path);
     }
 
     // -------------------------------------------------------------------------

@@ -97,7 +97,7 @@ pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 44] = [
+pub const CONNECTOR_ACTIONS: [&str; 45] = [
     "github.draft-pull-request",
     "github.comment",
     "vercel.promote",
@@ -141,6 +141,7 @@ pub const CONNECTOR_ACTIONS: [&str; 44] = [
     "notion.create-entry",
     "google-calendar.create-draft",
     "google-calendar.update-draft",
+    "google-calendar.cancel-event",
     "google-calendar.delete-event",
 ];
 pub const MAX_CONNECTOR_QUERY_CHARACTERS: usize = 500;
@@ -184,6 +185,13 @@ pub struct ConnectorAccountSummary {
     pub email: Option<String>,
     pub workspace: Option<String>,
     pub avatar_url: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorAccountOption {
+    pub account: ConnectorAccountSummary,
+    pub active: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

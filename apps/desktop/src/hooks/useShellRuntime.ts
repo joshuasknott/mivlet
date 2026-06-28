@@ -9,6 +9,7 @@ import type {
   BackendProvider,
   ConnectorActionKind,
   ConnectorActionRequest,
+  ConnectorAccountOption,
   ConnectorManifest,
   ConnectorSearchItem,
   ConnectorSearchRequest,
@@ -60,6 +61,7 @@ import {
   importRuntimeConnectorItem,
   importRuntimeLocalKnowledgeSource,
   listRuntimeConnectorStatuses,
+  listRuntimeConnectorAccounts,
   listRuntimeBackends,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
@@ -74,7 +76,8 @@ import {
   saveRuntimeMemoryState,
   saveRuntimeSnapshot,
   searchRuntimeConnector,
-  searchRuntimeKnowledgeSources
+  searchRuntimeKnowledgeSources,
+  switchRuntimeConnectorAccount
 } from "../runtime";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
@@ -171,12 +174,15 @@ export interface ShellRuntime {
   runCommand: (command: string) => void;
   // first-wave connectors
   connectorManifests: ConnectorManifest[];
+  connectorAccounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
   connectorSearchResult: ConnectorSearchResult | null;
   connectorImportedSources: KnowledgeSource[];
   connectConnector: (connector: ConnectorManifest) => Promise<void>;
   disconnectConnector: (connectorId: string) => Promise<void>;
   refreshConnector: (connectorId: string) => Promise<void>;
+  loadConnectorAccounts: (connectorId: string) => Promise<void>;
+  switchConnectorAccount: (connectorId: string, accountId: string) => Promise<void>;
   searchConnector: (request: ConnectorSearchRequest) => Promise<void>;
   importConnectorItem: (item: ConnectorSearchItem) => Promise<void>;
   prepareConnectorAction: (
@@ -325,6 +331,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [connectorManifests, setConnectorManifests] =
     useState<ConnectorManifest[]>(connectors);
+  const [connectorAccounts, setConnectorAccounts] = useState<Record<string, ConnectorAccountOption[]>>({});
   const [connectorStatus, setConnectorStatus] = useState<string | null>(null);
   const [connectorSearchResult, setConnectorSearchResult] =
     useState<ConnectorSearchResult | null>(null);
@@ -900,6 +907,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         if (refreshed) {
           replaceConnectorManifest(refreshed);
         }
+        await loadConnectorAccounts(connector.id);
       }
       setConnectorStatus(result.message);
       setLastAction(result.message);
@@ -929,6 +937,33 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setConnectorStatus(
         error instanceof Error ? error.message : `${connector.name} could not be disconnected.`
       );
+    }
+  };
+
+  const loadConnectorAccounts = async (connectorId: string) => {
+    if (!isFirstWaveConnectorId(connectorId)) return;
+    try {
+      const accounts = await listRuntimeConnectorAccounts(connectorId);
+      if (accounts) {
+        setConnectorAccounts((current) => ({ ...current, [connectorId]: accounts }));
+      }
+    } catch (error) {
+      setConnectorStatus(error instanceof Error ? error.message : "Connected accounts are unavailable.");
+    }
+  };
+
+  const switchConnectorAccount = async (connectorId: string, accountId: string) => {
+    if (!isFirstWaveConnectorId(connectorId)) return;
+    try {
+      const manifest = await switchRuntimeConnectorAccount(connectorId, accountId);
+      if (manifest) {
+        replaceConnectorManifest(manifest);
+        await loadConnectorAccounts(connectorId);
+        await loadConnectorAccounts(connectorId);
+        setConnectorStatus(`Using ${manifest.account?.email ?? manifest.account?.displayName ?? "selected account"}.`);
+      }
+    } catch (error) {
+      setConnectorStatus(error instanceof Error ? error.message : "The account could not be selected.");
     }
   };
 
@@ -1388,12 +1423,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     useConnector,
     runCommand,
     connectorManifests,
+    connectorAccounts,
     connectorStatus,
     connectorSearchResult,
     connectorImportedSources,
     connectConnector,
     disconnectConnector,
     refreshConnector,
+    loadConnectorAccounts,
+    switchConnectorAccount,
     searchConnector,
     importConnectorItem,
     prepareConnectorAction,

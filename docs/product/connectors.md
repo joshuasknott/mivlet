@@ -71,6 +71,9 @@ data is transmitted or stored on servers, may require a security assessment.
 
 ## Google production connector setup
 
+The implementation and operational setup are detailed in
+[Google Drive, Gmail, and Calendar](../connectors/google.md).
+
 Google Drive, Gmail, and Google Calendar share the desktop OAuth implementation:
 
 - create a Google Cloud project;

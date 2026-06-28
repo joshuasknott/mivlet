@@ -138,6 +138,11 @@ export interface ConnectorAccountSummary {
   avatarUrl?: string;
 }
 
+export interface ConnectorAccountOption {
+  account: ConnectorAccountSummary;
+  active: boolean;
+}
+
 export interface ConnectorManifest {
   id: ConnectorId;
   name: string;
@@ -262,6 +267,7 @@ export type ConnectorActionKind =
   | "notion.create-entry"
   | "google-calendar.create-draft"
   | "google-calendar.update-draft"
+  | "google-calendar.cancel-event"
   | "google-calendar.delete-event";
 
 export interface ConnectorActionRequest {

@@ -1,5 +1,9 @@
 import { useMemo, useState } from "react";
-import type { ConnectorActionKind, ConnectorManifest } from "@fable/protocol";
+import type {
+  ConnectorAccountOption,
+  ConnectorActionKind,
+  ConnectorManifest
+} from "@fable/protocol";
 import { ConnectorIcon } from "./ConnectorIcon";
 
 /**
@@ -13,6 +17,8 @@ export function PluginPanel({
   onDisconnect,
   onRefresh,
   onSelect,
+  accounts,
+  onSwitchAccount,
   onPrepareAction
 }: {
   manifests: ConnectorManifest[];
@@ -21,6 +27,8 @@ export function PluginPanel({
   onDisconnect: (connectorId: string) => void;
   onRefresh: (connectorId: string) => void;
   onSelect: (connector: ConnectorManifest) => void;
+  accounts: Record<string, ConnectorAccountOption[]>;
+  onSwitchAccount: (connectorId: string, accountId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
@@ -93,6 +101,8 @@ export function PluginPanel({
           onUseConnector={onUseConnector}
           onDisconnect={onDisconnect}
           onRefresh={onRefresh}
+          accounts={accounts[selectedConnector.id] ?? []}
+          onSwitchAccount={onSwitchAccount}
           onPrepareAction={onPrepareAction}
         />
       ) : null}
@@ -105,12 +115,16 @@ function ConnectorDetails({
   onUseConnector,
   onDisconnect,
   onRefresh,
+  accounts,
+  onSwitchAccount,
   onPrepareAction
 }: {
   connector: ConnectorManifest;
   onUseConnector: (connector: ConnectorManifest) => void;
   onDisconnect: (connectorId: string) => void;
   onRefresh: (connectorId: string) => void;
+  accounts: ConnectorAccountOption[];
+  onSwitchAccount: (connectorId: string, accountId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
   const firstAction = connector.supportedActions?.[0];
@@ -145,6 +159,26 @@ function ConnectorDetails({
           <p>{connector.health?.summary ?? connector.healthSummary}</p>
         </div>
       </div>
+
+      {connector.status === "connected" && accounts.length > 1 ? (
+        <label className="connector-detail__account">
+          <span>Active account</span>
+          <select
+            value={accounts.find((option) => option.active)?.account.id ?? connector.account?.id}
+            onChange={(event) => onSwitchAccount(connector.id, event.target.value)}
+          >
+            {accounts.map(({ account }) => (
+              <option key={account.id} value={account.id}>
+                {account.email ?? account.displayName}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : connector.status === "connected" && connector.account ? (
+        <p className="connector-detail__account">
+          Active account: {connector.account.email ?? connector.account.displayName}
+        </p>
+      ) : null}
 
       <div className="connector-detail__actions">
         {connector.status === "connected" || connector.status === "fixture" ? (
