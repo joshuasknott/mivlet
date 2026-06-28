@@ -431,11 +431,41 @@ export type BackendCapability =
   | "model-availability"
   | "cancellation";
 
+/**
+ * The closed set of per-model capabilities Fable represents. Each field is a
+ * truthful ceiling: it is only present when the adapter (or curated catalogue)
+ * actually knows the model can honor it. An adapter must never populate a field
+ * it cannot back — unknown capabilities stay `undefined` on the model, never
+ * fabricated.
+ */
+export interface ModelCapabilities {
+  /** Total input + output token ceiling for the model's context window. */
+  contextWindow: number;
+  /** Provider-imposed output cap for a single completion (max_tokens ceiling). */
+  maxOutputTokens: number;
+  /** Model supports streamed (SSE) completions. */
+  streaming: boolean;
+  /** Model supports tool / function calling. */
+  tools: boolean;
+  /** Model accepts image / vision inputs. */
+  vision: boolean;
+  /** Model exposes an internal reasoning / thinking mode. */
+  reasoning: boolean;
+  /** Model supports structured / JSON-schema-constrained output. */
+  structuredOutput: boolean;
+}
+
 /** A selectable model exposed by a backend. */
 export interface BackendModel {
   id: string;
   label: string;
   available: boolean;
+  /**
+   * Per-model capabilities. Optional: present only when the adapter or curated
+   * catalogue knows them. Callers must treat `undefined` as "capabilities
+   * unknown" (fail conservatively), never as "all capabilities present".
+   */
+  capabilities?: ModelCapabilities;
 }
 
 /**

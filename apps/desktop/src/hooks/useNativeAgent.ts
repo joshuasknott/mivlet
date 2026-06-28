@@ -372,5 +372,21 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     setState((current) => ({ ...current, running: false }));
   }, []);
 
-  return { state, run, cancel };
+  /**
+   * Surface a pre-run validation error (e.g. an invalid model selection) through
+   * the same `lastError` channel the UI renders for run failures, without
+   * starting a run. Used so {@link validateModelSelection} can fail fast before
+   * the loop opens a socket.
+   */
+  const reportError = useCallback((message: string) => {
+    setState((current) => ({
+      ...current,
+      running: false,
+      lastError: message,
+      transcript: "",
+      usage: null
+    }));
+  }, []);
+
+  return { state, run, cancel, reportError };
 }

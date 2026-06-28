@@ -6,7 +6,8 @@ import { utilityItems } from "./lib/constants";
 import {
   buildAgentRequest,
   buildContextPrefixForRun,
-  PERMISSION_PROFILES
+  PERMISSION_PROFILES,
+  validateModelSelection
 } from "./lib/agent-run";
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
 import { useShellRuntime } from "./hooks/useShellRuntime";
@@ -412,11 +413,24 @@ export function App() {
                     pinnedSourceIds: runtime.pinnedSourceIds,
                     memoryDisabled: runtime.memoryDisabled
                   });
+                  // Validate the model selection before opening a socket: an
+                  // unknown, unavailable, or non-streaming model is caught here
+                  // and surfaced through the same error channel as run failures.
+                  const validation = validateModelSelection(
+                    nativeConnected.id,
+                    runtime.resolvedSelectedModelId,
+                    runtime.selectableModels,
+                    2048
+                  );
+                  if (!validation.ok) {
+                    agent.reportError(validation.error ?? "The selected model cannot run.");
+                    return;
+                  }
                   const request = buildAgentRequest({
                     providerId: nativeConnected.id,
                     model: runtime.resolvedSelectedModelId,
                     prompt,
-                    maxTokens: 2048
+                    maxTokens: validation.maxTokens
                   });
                   // Reset the cooperative-cancel flag so a new run is not born
                   // already cancelled, then drive the Fable-owned agent loop.

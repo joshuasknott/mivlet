@@ -14,7 +14,7 @@ import type {
   NativeCompletionRequest,
   PermissionMode
 } from "@fable/protocol";
-import { buildContextPrefix } from "@fable/connectors";
+import { buildContextPrefix, MAX_TOKENS_DEFAULT, validateModelForRun } from "@fable/connectors";
 
 /**
  * The composer's permission-level picker uses user-facing labels; this maps each
@@ -96,8 +96,27 @@ export function buildAgentRequest(input: BuildAgentRequestInput): NativeCompleti
     model: input.model,
     messages: [{ role: "user", content: input.prompt }],
     tools: [],
-    maxTokens: input.maxTokens ?? 2048
+    maxTokens: input.maxTokens ?? MAX_TOKENS_DEFAULT
   };
+}
+
+/**
+ * Validate the model selection before a run starts. The shell calls this with
+ * the connected provider's selectable models so an unknown/unavailable model —
+ * or one whose known capabilities exclude streaming — is caught *before* the
+ * run, surfacing a normalized error to the user instead of a provider rejection.
+ *
+ * Returns the resolved (catalogue/discovery) capabilities and the maxTokens
+ * clamped to the model's output ceiling, so the caller can shape the request
+ * with truthful limits.
+ */
+export function validateModelSelection(
+  providerId: string,
+  modelId: string,
+  models: BackendModel[],
+  maxTokens?: number
+) {
+  return validateModelForRun(providerId, modelId, models, maxTokens ?? MAX_TOKENS_DEFAULT);
 }
 
 /**
