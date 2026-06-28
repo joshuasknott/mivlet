@@ -149,6 +149,32 @@ pub const MAX_CONNECTOR_PAYLOAD_FIELDS: usize = 32;
 pub const MAX_AGENT_RUNS: usize = 100;
 pub const MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS: usize = 200_000;
 
+// Scheduler constants (durable local automation engine).
+pub const SCHEDULER_STORE_VERSION: u8 = 1;
+pub const MAX_SCHEDULED_JOBS: usize = 100;
+pub const MAX_SCHEDULER_QUEUE_ENTRIES: usize = 500;
+pub const MAX_JOB_ATTEMPTS: usize = 20;
+pub const SCHEDULER_TICK_SECS: u64 = 5;
+pub const SCHEDULER_LEASE_MS: i64 = 30_000;
+pub const SCHEDULER_MAX_RETRIES: u32 = 2;
+pub const SCHEDULED_JOB_STATUSES: [&str; 3] = ["active", "paused", "deleted"];
+pub const MISSED_RUN_POLICIES: [&str; 3] = ["skip", "run-once", "run-all"];
+pub const SCHEDULER_JOB_STATES: [&str; 4] = ["queued", "leased", "done", "dead"];
+pub const JOB_ATTEMPT_STATUSES: [&str; 4] = ["running", "succeeded", "failed", "cancelled"];
+
+// Workflow-run store constants.
+pub const WORKFLOW_RUN_STORE_VERSION: u8 = 1;
+pub const MAX_WORKFLOW_RUNS: usize = 200;
+pub const MAX_WORKFLOW_STEPS: usize = 24;
+pub const WORKFLOW_RUN_STATUSES: [&str; 6] = [
+    "queued",
+    "running",
+    "awaiting-approval",
+    "completed",
+    "failed",
+    "cancelled",
+];
+
 #[derive(Serialize)]
 pub struct RuntimeStatus {
     pub permission_mode: &'static str,
@@ -677,4 +703,94 @@ pub struct RuntimeSnapshot {
 
 fn default_permission_mode() -> String {
     "read-only".to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Scheduler wire models (durable local automation engine).
+//
+// The trigger is stored as a serde_json::Value (validated shallowly) because
+// the recurrence math lives in the TypeScript layer; Rust only owns durable
+// storage, the lease lock, and the in-process tick that prevents duplicate
+// execution across multiple Fable windows.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledJob {
+    pub id: String,
+    pub schema_version: u8,
+    pub name: String,
+    pub description: String,
+    pub workflow_definition_id: String,
+    /// ScheduleTrigger serialized as JSON (validated shallowly in Rust; the TS
+    /// layer owns the recurrence/next-run math).
+    pub trigger: serde_json::Value,
+    pub missed_run_policy: String,
+    pub status: String,
+    pub next_run_at: String,
+    pub last_run_at: String,
+    pub last_run_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobAttempt {
+    pub run_id: String,
+    pub status: String,
+    pub attempt_number: u32,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerQueueEntry {
+    pub job_id: String,
+    pub run_id: String,
+    pub scheduled_at: String,
+    pub state: String,
+    pub lease_holder: String,
+    pub lease_expires_at: String,
+    pub attempts: Vec<JobAttempt>,
+    pub deduplication_key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchedulerStore {
+    pub schema_version: u8,
+    pub jobs: Vec<ScheduledJob>,
+    pub queue: Vec<SchedulerQueueEntry>,
+    pub instance_id: String,
+    pub updated_at: String,
+}
+
+// ---------------------------------------------------------------------------
+// Workflow-run wire models (durable workflow journal).
+//
+// The per-step records are stored as a serde_json::Value (the rich step record
+// shape is owned by the TS protocol); Rust owns atomic persistence + restart
+// recovery only.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRunRecord {
+    pub id: String,
+    pub definition_id: String,
+    pub definition_version: u32,
+    pub status: String,
+    pub trigger: String,
+    pub scheduled_job_id: Option<String>,
+    pub input: serde_json::Value,
+    /// Vec<WorkflowStepRecord> stored as JSON (the step shape is the TS layer's).
+    pub steps: serde_json::Value,
+    pub failure_reason: Option<String>,
+    pub idempotency_key: Option<String>,
+    pub started_at: String,
+    pub updated_at: String,
+    pub finished_at: Option<String>,
 }

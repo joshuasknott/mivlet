@@ -1,8 +1,9 @@
 //! Fable desktop runtime entrypoint.
 //!
 //! Feature logic lives in focused modules (`models`, `paths`, `approvals`,
-//! `knowledge`, `memory`, `snapshot`, `backends`). This crate root only
-//! declares those modules and registers the Tauri command handlers on startup.
+//! `knowledge`, `memory`, `snapshot`, `backends`, `scheduler`, `workflows`).
+//! This crate root only declares those modules, registers the Tauri command
+//! handlers, and starts the in-process scheduler tick.
 
 mod agent_runs;
 mod approvals;
@@ -20,15 +21,43 @@ mod models;
 mod native_api;
 mod oauth_loopback;
 mod paths;
+mod scheduler;
 mod snapshot;
 mod tools;
+mod workflows;
 
 #[cfg(test)]
 mod tests;
 
+use std::time::Duration;
+
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            // Load the durable scheduler store once and manage it as process
+            // state. The in-process tick leases due entries; because Tauri is a
+            // single shared process, the lease map is the cross-window duplicate-
+            // execution guard (two windows can never lease the same occurrence).
+            let handle = app.handle().clone();
+            let store = scheduler::read_store(&paths::scheduler_store_path(&handle)?)
+                .unwrap_or_else(|_| scheduler::SchedulerState::empty());
+            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(Some(store))));
+
+            // In-process scheduler tick. Stops when the app exits. An
+            // interrupted tick only ever leaves entries leased until their short
+            // deadline; the next tick re-queues expired leases (crash-safe).
+            let tick_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let _ = scheduler::run_tick(&tick_handle);
+                    tokio::time::sleep(Duration::from_secs(models::SCHEDULER_TICK_SECS)).await;
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             snapshot::runtime_status,
             agent_runs::save_agent_run,
@@ -66,7 +95,17 @@ pub fn run() {
             connectors::execute_approved_connector_action,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
-            tools::execute_tool_call
+            tools::execute_tool_call,
+            scheduler::list_scheduler_jobs,
+            scheduler::list_scheduler_queue,
+            scheduler::save_scheduled_job,
+            scheduler::delete_scheduled_job,
+            scheduler::set_job_status,
+            scheduler::enqueue_job_run,
+            scheduler::report_job_attempt,
+            workflows::save_workflow_run,
+            workflows::list_workflow_runs,
+            workflows::list_workflow_runs_for_definition
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");
