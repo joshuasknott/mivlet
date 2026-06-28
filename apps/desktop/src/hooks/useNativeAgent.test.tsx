@@ -101,8 +101,8 @@ function removeDesktopRuntime() {
   try {
     delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   } catch {
-    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
   }
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
 }
 
 const baseRequest: NativeCompletionRequest = {

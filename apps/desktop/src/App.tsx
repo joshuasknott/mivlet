@@ -134,6 +134,8 @@ export function App() {
   };
 
   const renderChatContext = () => {
+    const visibleAgentError = agent.state.noTransport ? null : agent.state.lastError;
+
     return (
       <>
         {connectedConnectorCards.length > 0 ? (
@@ -189,7 +191,7 @@ export function App() {
         ) : null}
         {agent.state.transcript ||
         agent.state.usage ||
-        agent.state.lastError ||
+        visibleAgentError ||
         agent.state.running ? (
           <section className="agent-panel" aria-label="Agent activity">
             {agent.state.transcript ? (
@@ -213,8 +215,8 @@ export function App() {
                 </button>
               </p>
             ) : null}
-            {agent.state.lastError ? (
-              <p className="agent-panel__error">{agent.state.lastError}</p>
+            {visibleAgentError ? (
+              <p className="agent-panel__error">{visibleAgentError}</p>
             ) : null}
           </section>
         ) : null}

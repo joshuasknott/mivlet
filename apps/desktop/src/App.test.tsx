@@ -86,7 +86,7 @@ vi.mock("./runtime", () => ({
       // faked desktop runtime it feeds the scripted SSE lines.
       const hasRuntime =
         typeof window !== "undefined" &&
-        "__TAURI_INTERNALS__" in (window as Window & { __TAURI_INTERNALS__?: unknown });
+        Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
       if (!hasRuntime || !onLine) {
         return null;
       }
@@ -123,8 +123,8 @@ function removeDesktopRuntime() {
   try {
     delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   } catch {
-    (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
   }
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
 }
 
 /**
@@ -440,13 +440,11 @@ describe("Fable home", () => {
     await user.type(composer, "summarize the project");
     await user.keyboard("{Enter}");
 
-    // Enter sends; outside Tauri, the native-agent path fails closed with a
-    // visible desktop-runtime requirement instead of silently pretending to run.
+    // Enter sends; outside Tauri, the missing transport stays visually silent.
     await waitFor(() => {
-      expect(screen.getByLabelText(/agent activity/i)).toHaveTextContent(
-        "Native agent needs the desktop runtime."
-      );
+      expect(composer).toHaveValue("summarize the project");
     });
+    expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     // The newline was not inserted into the composer.
     expect(composer).toHaveValue("summarize the project");
   });
@@ -536,14 +534,11 @@ describe("Fable home", () => {
     await user.type(composer, "summarize the project");
     await user.click(screen.getByRole("button", { name: /send prompt/i }));
 
-    // Outside Tauri there is no transport, so the native-agent panel surfaces a
-    // fail-closed runtime requirement rather than starting a fake run.
+    // Outside Tauri there is no transport, and the placeholder surface stays hidden.
     await waitFor(() => {
-      expect(screen.getByLabelText(/agent activity/i)).toHaveTextContent(
-        "Native agent needs the desktop runtime."
-      );
+      expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
   });
 
   it("drives a cooperative cancel from the agent panel Stop button", async () => {

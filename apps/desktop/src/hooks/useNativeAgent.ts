@@ -52,7 +52,7 @@ function shapeBodyFor(request: NativeCompletionRequest): unknown {
 function hasDesktopRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
-    "__TAURI_INTERNALS__" in (window as Window & { __TAURI_INTERNALS__?: unknown })
+    Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
   );
 }
 

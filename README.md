@@ -30,13 +30,6 @@ Brand assets live in `apps/desktop/public/brand`:
 
 The product position and usage notes are documented in `docs/brand.md`.
 
-## QA Evidence
-
-- Desktop screenshot: `docs/design/qa/fable-after-1440x1024.png`
-- Mobile screenshot: `docs/design/qa/fable-after-390x844.png`
-- Connectors screenshot: `docs/design/qa/fable-after-connectors-1440x1024.png`
-- Visual QA report: `design-qa.md`
-
 ## Commands
 
 ```bash
