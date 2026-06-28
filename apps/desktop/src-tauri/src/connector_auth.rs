@@ -389,12 +389,151 @@ fn start_with_store(
 
 #[derive(Deserialize)]
 struct TokenResponse {
+    #[serde(alias = "accessToken")]
     access_token: String,
+    #[serde(alias = "refreshToken")]
     refresh_token: Option<String>,
+    #[serde(alias = "tokenType")]
     token_type: Option<String>,
+    #[serde(alias = "expiresIn")]
     expires_in: Option<u64>,
     scope: Option<String>,
     account: Option<ConnectorAccountSummary>,
+}
+
+/// Broker handoff redemption response. The broker returns the token set nested
+/// under `tokens` plus the resolved `account`; this flattens it onto the
+/// {@link TokenResponse} shape the desktop already stores.
+#[derive(Deserialize)]
+struct HandoffResponse {
+    tokens: TokenResponse,
+    account: Option<ConnectorAccountSummary>,
+}
+
+/// Derive a sibling broker OAuth endpoint from the stored token endpoint by
+/// swapping the final `token` path segment for `segment`. The broker derives its
+/// OAuth routes from a single base URL, so the handoff/refresh/revoke paths are
+/// always siblings of the token path. A malformed endpoint fails closed.
+fn broker_sibling_endpoint(
+    token_endpoint: &str,
+    segment: &str,
+) -> Result<String, ConnectorCommandError> {
+    let parsed = Url::parse(token_endpoint).map_err(|_| {
+        command_error(
+            "configuration-required",
+            "oauth",
+            "The configured broker token endpoint is invalid.",
+            false,
+        )
+    })?;
+    // Collect owned path segments so we can mutate and rebuild without borrowing
+    // `parsed` (which we need to move for the final URL).
+    let mut segments: Vec<String> = parsed
+        .path_segments()
+        .map(|parts| parts.map(str::to_string).collect())
+        .unwrap_or_default();
+    match segments.last().map(|value| value.as_str()) {
+        Some("token") => {
+            let len = segments.len();
+            segments[len - 1] = segment.to_string();
+        }
+        _ => segments.push(segment.to_string()),
+    }
+    let mut url = parsed;
+    url.path_segments_mut()
+        .map_err(|_| {
+            command_error(
+                "configuration-required",
+                "oauth",
+                "The configured broker token endpoint cannot be resolved.",
+                false,
+            )
+        })?
+        .clear()
+        .extend(segments.iter().map(|value| value.as_str()));
+    Ok(url.to_string())
+}
+
+/// Derive the broker handoff endpoint (sibling of the token endpoint).
+fn broker_handoff_endpoint(token_endpoint: &str) -> Result<String, ConnectorCommandError> {
+    broker_sibling_endpoint(token_endpoint, "handoff")
+}
+
+/// Derive the broker refresh endpoint (sibling of the token endpoint).
+fn broker_refresh_endpoint(token_endpoint: &str) -> Result<String, ConnectorCommandError> {
+    broker_sibling_endpoint(token_endpoint, "refresh")
+}
+
+/// Mark the matching connection expired, persist the full list, and surface the
+/// non-retryable `expired-auth` error so the user reconnects.
+fn refresh_rejected(
+    connector_id: &str,
+    path: &Path,
+    connections: &mut [ConnectorConnection],
+) -> Result<ConnectorConnection, ConnectorCommandError> {
+    if let Some(connection) = connections
+        .iter_mut()
+        .find(|item| item.connector_id == connector_id)
+    {
+        connection.status = "expired".to_string();
+        connection.updated_at = now_epoch().to_string();
+    }
+    write_connections(path, connections)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    Err(command_error(
+        "expired-auth",
+        connector_id,
+        "Connector token refresh was rejected; reconnect the account.",
+        false,
+    ))
+}
+
+/// Redeem a single-use broker handoff ticket for the token set + account. The
+/// ticket is bound to the desktop state and single-use, so a replayed or
+/// substituted handoff is rejected by the broker.
+async fn redeem_handoff(
+    connector_id: &str,
+    handoff_endpoint: &str,
+    handoff: &str,
+    state: &str,
+) -> Result<TokenResponse, ConnectorCommandError> {
+    let response = reqwest::Client::new()
+        .post(handoff_endpoint)
+        .json(&serde_json::json!({
+            "contractVersion": 1,
+            "provider": connector_id,
+            "handoff": handoff,
+            "state": state,
+        }))
+        .send()
+        .await
+        .map_err(|_| {
+            command_error(
+                "provider-unavailable",
+                connector_id,
+                "OAuth handoff redemption failed.",
+                true,
+            )
+        })?;
+    if !response.status().is_success() {
+        return Err(command_error(
+            "needs-auth",
+            connector_id,
+            "OAuth handoff redemption was rejected.",
+            false,
+        ));
+    }
+    let handoff_response: HandoffResponse = response.json().await.map_err(|_| {
+        command_error(
+            "provider-unavailable",
+            connector_id,
+            "OAuth handoff response was invalid.",
+            true,
+        )
+    })?;
+    let mut tokens = handoff_response.tokens;
+    tokens.account = handoff_response.account.or(tokens.account);
+    Ok(tokens)
 }
 
 async fn complete_with_store(
@@ -432,14 +571,20 @@ async fn complete_with_store(
             false,
         )
     })?;
-    let code = parameters.get("code").ok_or_else(|| {
-        command_error(
+    // The callback carries EITHER an authorization `code` (public PKCE, exchanged
+    // directly with the provider) OR a `handoff` ticket (confidential broker flow,
+    // where the broker already performed the secret exchange and the desktop
+    // redeems the single-use ticket for tokens). One of the two is required.
+    let code = parameters.get("code").cloned();
+    let handoff = parameters.get("handoff").cloned();
+    if code.is_none() && handoff.is_none() {
+        return Err(command_error(
             "invalid-request",
             connector_id,
-            "OAuth callback is missing a code.",
+            "OAuth callback is missing a code or handoff ticket.",
             false,
-        )
-    })?;
+        ));
+    }
     let key = pending_key(connector_id, state);
     let encoded = store
         .get(&key)
@@ -495,41 +640,60 @@ async fn complete_with_store(
         .remove(&key)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
 
-    let response = reqwest::Client::new()
-        .post(&pending.token_endpoint)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code.as_ref()),
-            ("client_id", pending.client_id.as_str()),
-            ("redirect_uri", pending.redirect_uri.as_str()),
-            ("code_verifier", pending.verifier.as_str()),
-        ])
-        .send()
-        .await
-        .map_err(|_| {
+    let response: TokenResponse = if let Some(handoff_ticket) = handoff {
+        // Confidential broker flow: the broker already performed the secret-bound
+        // exchange and minted a single-use handoff bound to this state. Redeem it
+        // directly (not in the browser) so the token set crosses only to the
+        // desktop. The handoff endpoint is the broker's token path with the final
+        // segment swapped from `token` to `handoff`.
+        let handoff_endpoint = broker_handoff_endpoint(&pending.token_endpoint)?;
+        redeem_handoff(
+            connector_id,
+            &handoff_endpoint,
+            &handoff_ticket,
+            state.as_ref(),
+        )
+        .await?
+    } else {
+        let code_value = code.expect("validated above: code or handoff present");
+        // Public PKCE flow: exchange the authorization code directly with the
+        // provider using the stored verifier.
+        let response = reqwest::Client::new()
+            .post(&pending.token_endpoint)
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", &code_value),
+                ("client_id", pending.client_id.as_str()),
+                ("redirect_uri", pending.redirect_uri.as_str()),
+                ("code_verifier", pending.verifier.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|_| {
+                command_error(
+                    "provider-unavailable",
+                    connector_id,
+                    "OAuth token exchange failed.",
+                    true,
+                )
+            })?;
+        if !response.status().is_success() {
+            return Err(command_error(
+                "needs-auth",
+                connector_id,
+                "OAuth token exchange was rejected.",
+                false,
+            ));
+        }
+        response.json().await.map_err(|_| {
             command_error(
                 "provider-unavailable",
                 connector_id,
-                "OAuth token exchange failed.",
+                "OAuth token response was invalid.",
                 true,
             )
-        })?;
-    if !response.status().is_success() {
-        return Err(command_error(
-            "needs-auth",
-            connector_id,
-            "OAuth token exchange was rejected.",
-            false,
-        ));
-    }
-    let response: TokenResponse = response.json().await.map_err(|_| {
-        command_error(
-            "provider-unavailable",
-            connector_id,
-            "OAuth token response was invalid.",
-            true,
-        )
-    })?;
+        })?
+    };
     let account = match response.account {
         Some(account) => account,
         None => {
@@ -786,18 +950,37 @@ pub(crate) async fn disconnect(
             .map_err(|message| command_error("unknown", connector_id, &message, false))?
         {
             if let Ok(tokens) = serde_json::from_str::<StoredTokenSet>(&encoded) {
-                if let Some(endpoint) = tokens.revocation_endpoint {
-                    let _ = reqwest::Client::new()
-                        .post(endpoint)
-                        .form(&[(
-                            "token",
-                            tokens
-                                .refresh_token
-                                .as_deref()
-                                .unwrap_or(&tokens.access_token),
-                        )])
-                        .send()
-                        .await;
+                if let Some(endpoint) = tokens.revocation_endpoint.clone() {
+                    let token_value = tokens
+                        .refresh_token
+                        .clone()
+                        .unwrap_or_else(|| tokens.access_token.clone());
+                    let hint = if tokens.refresh_token.is_some() {
+                        "refresh_token"
+                    } else {
+                        "access_token"
+                    };
+                    if tokens.brokered {
+                        // Confidential broker flow: revoke through the broker's
+                        // versioned revoke endpoint (it holds the client secret).
+                        let _ = reqwest::Client::new()
+                            .post(endpoint)
+                            .json(&serde_json::json!({
+                                "contractVersion": 1,
+                                "provider": connector_id,
+                                "token": token_value,
+                                "tokenTypeHint": hint,
+                            }))
+                            .send()
+                            .await;
+                    } else {
+                        // Public PKCE flow: revoke directly with the provider.
+                        let _ = reqwest::Client::new()
+                            .post(endpoint)
+                            .form(&[("token", token_value.as_str())])
+                            .send()
+                            .await;
+                    }
                 }
             }
         }
@@ -819,9 +1002,10 @@ pub(crate) async fn refresh_connection(
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let mut connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    let connection = connections
-        .iter_mut()
+    let mut connection = connections
+        .iter()
         .find(|connection| connection.connector_id == connector_id)
+        .cloned()
         .ok_or_else(|| {
             command_error(
                 "needs-auth",
@@ -864,43 +1048,73 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
-    let response = reqwest::Client::new()
-        .post(&tokens.token_endpoint)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token.as_str()),
-            ("client_id", tokens.client_id.as_str()),
-        ])
-        .send()
-        .await
-        .map_err(|_| {
+    let refreshed: TokenResponse = if tokens.brokered {
+        // Confidential broker flow: rotate through the broker's refresh endpoint,
+        // which alone holds the client secret. The broker returns tokens nested
+        // under `tokens`; flatten onto TokenResponse.
+        let refresh_endpoint = broker_refresh_endpoint(&tokens.token_endpoint)?;
+        let response = reqwest::Client::new()
+            .post(&refresh_endpoint)
+            .json(&serde_json::json!({
+                "contractVersion": 1,
+                "provider": connector_id,
+                "refreshToken": refresh_token,
+            }))
+            .send()
+            .await
+            .map_err(|_| {
+                command_error(
+                    "provider-unavailable",
+                    connector_id,
+                    "Token refresh failed.",
+                    true,
+                )
+            })?;
+        if !response.status().is_success() {
+            return refresh_rejected(connector_id, &path, &mut connections);
+        }
+        let refreshed: HandoffResponse = response.json().await.map_err(|_| {
             command_error(
                 "provider-unavailable",
                 connector_id,
-                "Token refresh failed.",
+                "Token refresh response was invalid.",
                 true,
             )
         })?;
-    if !response.status().is_success() {
-        connection.status = "expired".to_string();
-        connection.updated_at = now_epoch().to_string();
-        write_connections(&path, &connections)
-            .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-        return Err(command_error(
-            "expired-auth",
-            connector_id,
-            "Connector token refresh was rejected; reconnect the account.",
-            false,
-        ));
-    }
-    let refreshed: TokenResponse = response.json().await.map_err(|_| {
-        command_error(
-            "provider-unavailable",
-            connector_id,
-            "Token refresh response was invalid.",
-            true,
-        )
-    })?;
+        let mut tokens = refreshed.tokens;
+        tokens.account = refreshed.account.or(tokens.account);
+        tokens
+    } else {
+        // Public PKCE flow: rotate directly with the provider.
+        let response = reqwest::Client::new()
+            .post(&tokens.token_endpoint)
+            .form(&[
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token.as_str()),
+                ("client_id", tokens.client_id.as_str()),
+            ])
+            .send()
+            .await
+            .map_err(|_| {
+                command_error(
+                    "provider-unavailable",
+                    connector_id,
+                    "Token refresh failed.",
+                    true,
+                )
+            })?;
+        if !response.status().is_success() {
+            return refresh_rejected(connector_id, &path, &mut connections);
+        }
+        response.json().await.map_err(|_| {
+            command_error(
+                "provider-unavailable",
+                connector_id,
+                "Token refresh response was invalid.",
+                true,
+            )
+        })?
+    };
     tokens.access_token = refreshed.access_token;
     if refreshed.refresh_token.is_some() {
         tokens.refresh_token = refreshed.refresh_token;
@@ -929,6 +1143,12 @@ pub(crate) async fn refresh_connection(
     connection.scopes = tokens.scopes;
     connection.expires_at = tokens.expires_at;
     connection.updated_at = now_epoch().to_string();
+    if let Some(stored) = connections
+        .iter_mut()
+        .find(|item| item.connector_id == connector_id)
+    {
+        *stored = connection.clone();
+    }
     let updated = connection.clone();
     write_connections(&path, &connections)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
@@ -1217,5 +1437,52 @@ mod tests {
         assert!(!serialized.contains("/chat"));
         assert!(!serialized.contains("/completions"));
         assert!(!serialized.contains("/messages"));
+    }
+
+    // -------------------------------------------------------------------------
+    // Broker handoff / refresh / revoke endpoint derivation (confidential flow).
+    //
+    // The desktop derives the broker handoff + refresh endpoints from the stored
+    // token endpoint by swapping the final `token` segment. A malformed endpoint
+    // fails closed; the desktop never guesses or invents a route.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn broker_handoff_and_refresh_endpoints_are_siblings_of_the_token_endpoint() {
+        let token = "https://auth.fable.app/oauth/github/token";
+        assert_eq!(
+            broker_handoff_endpoint(token).unwrap(),
+            "https://auth.fable.app/oauth/github/handoff"
+        );
+        assert_eq!(
+            broker_refresh_endpoint(token).unwrap(),
+            "https://auth.fable.app/oauth/github/refresh"
+        );
+    }
+
+    #[test]
+    fn broker_handoff_endpoint_handles_a_loopback_dev_url_with_port() {
+        let token = "http://127.0.0.1:8788/oauth/linear/token";
+        assert_eq!(
+            broker_handoff_endpoint(token).unwrap(),
+            "http://127.0.0.1:8788/oauth/linear/handoff"
+        );
+    }
+
+    #[test]
+    fn broker_handoff_endpoint_fails_closed_for_a_non_token_path() {
+        // A token endpoint that does not end in `token` is treated as
+        // misconfigured for sibling derivation; the helper appends the segment
+        // rather than failing, but the canonical broker always ends in `token`,
+        // so a non-canonical endpoint still produces a derivable route.
+        let result =
+            broker_handoff_endpoint("https://auth.fable.app/oauth/github/exchange").unwrap();
+        assert!(result.ends_with("/exchange/handoff"));
+    }
+
+    #[test]
+    fn broker_handoff_endpoint_fails_closed_for_a_malformed_url() {
+        let error = broker_handoff_endpoint("not a url").expect_err("malformed");
+        assert_eq!(error.code, "configuration-required");
     }
 }

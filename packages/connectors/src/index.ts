@@ -60,6 +60,7 @@ export * from "./providers/slack";
 export * from "./providers/notion-api";
 export * from "./providers/slack-api";
 export * from "./providers/http";
+export * from "./providers/broker-contract";
 export * from "./providers/google-calendar";
 export {
   ConnectorRuntime,

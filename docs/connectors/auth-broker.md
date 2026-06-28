@@ -1,13 +1,18 @@
 # Auth broker contract
 
-## Status: deferred
+## Status: implemented, not deployed
 
-This repository does **not** contain a deployable auth broker app. The desktop
-runtime is the only app in the repo (`apps/desktop`), plus the `@fable/connectors`
-and `@fable/protocol` packages. There is no Cloudflare Worker, edge function, or
-server project that implements the broker surface defined below.
+This repository contains the portable Node/TypeScript auth broker in
+`apps/broker`. It is buildable and tested, but it has not been deployed or
+independently reviewed for external use.
 
-Building, deploying, and independently reviewing the broker is explicitly a
+The implemented version-1 browser protocol is authoritative: `authorize`
+redirects to the provider, the provider returns to the broker `callback`, and
+the broker redirects an opaque ticket to the desktop for one-time `handoff`
+redemption. Direct desktop operations use `refresh` and `revoke`. The earlier
+`token` and `identity` route sketch is superseded by this handoff protocol.
+
+Deploying, configuring, and independently reviewing the broker is explicitly a
 separate release task (see [Roadmap](../product/roadmap.md) Milestone 3 and
 [Threat model](../security/threat-model.md) "Remaining security work"). Until a
 broker is deployed and its callback URLs are registered in each provider
