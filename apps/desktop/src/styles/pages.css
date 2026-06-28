@@ -621,10 +621,10 @@
 
 .provider-access-row {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto 98px;
+  grid-template-columns: 36px minmax(0, 1fr) auto minmax(96px, auto);
   align-items: center;
   gap: 16px;
-  min-height: 78px;
+  padding: 14px 0;
   border-top: 1px solid var(--line-strong);
 }
 
@@ -640,10 +640,16 @@
   color: var(--ink-muted);
 }
 
+.provider-access-row__body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .provider-access-row__name {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -657,7 +663,128 @@
 .provider-access-row__name span {
   color: var(--ink-muted);
   font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.provider-access-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.provider-access-caps {
+  color: var(--ink-soft);
+  font-size: var(--text-12);
   line-height: 1.35;
+}
+
+.provider-access-caps--muted {
+  color: var(--ink-muted);
+}
+
+.provider-access-models {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  line-height: 1.35;
+}
+
+.provider-access-models--muted {
+  color: var(--ink-muted);
+}
+
+.provider-access-empty {
+  margin: 0;
+  padding: 24px 4px;
+  color: var(--ink-muted);
+  font-size: var(--text-13);
+}
+
+.provider-access-row__action {
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+/* Inline API-key form revealed by the native provider "Connect" action. The key
+   input is uncontrolled: the secret is read once at submit and passed straight
+   to the credential boundary, then cleared — it never enters React state. */
+.provider-access-key-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding-top: 6px;
+}
+
+.provider-access-key-form__field {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 4px;
+}
+
+.provider-access-key-form__field span {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  font-weight: 600;
+}
+
+.provider-access-key-form__field input {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-1);
+  outline: 0;
+}
+
+.provider-access-key-form__field input:focus {
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
+}
+
+.provider-access-key-form__submit,
+.provider-access-key-form__cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.provider-access-key-form__submit {
+  color: var(--surface);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.provider-access-key-form__submit:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+
+.provider-access-key-form__submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.provider-access-key-form__cancel {
+  color: var(--ink-muted);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+}
+
+.provider-access-key-form__pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.provider-access-key-form__pending svg {
+  animation: og-spin 1s linear infinite;
 }
 
 .provider-access-state {
@@ -678,9 +805,21 @@
   background: var(--accent-subtle);
 }
 
+.provider-access-state--needs-auth,
 .provider-access-state--not-connected {
   color: var(--ink-muted);
   background: var(--line);
+}
+
+.provider-access-state--install-required,
+.provider-access-state--entitlement-pending {
+  color: var(--caution);
+  background: var(--caution-subtle);
+}
+
+.provider-access-state--unavailable {
+  color: var(--destructive);
+  background: var(--destructive-subtle);
 }
 
 .provider-access-row button,
@@ -698,11 +837,20 @@
   font-weight: 600;
 }
 
-.provider-access-row button:hover,
+.provider-access-row button:hover:not(:disabled),
 .settings-local-storage button:hover {
   color: var(--ink);
   background: var(--surface-raised);
   border-color: var(--line-strong);
+}
+
+.provider-access-row button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.provider-access-row--connected {
+  background: var(--positive-subtle);
 }
 
 .settings-local-storage {
@@ -1156,6 +1304,18 @@
   border-color: var(--positive-subtle);
 }
 
+/* Gated provider "connected" badge — shown only when a real capability-bearing
+   runtime is connected (not a preview/auth-pending state). */
+.og-provider__connected-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--positive);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 /* Trust note — quiet centered frosted pill. */
 .og-trust {
   display: inline-flex;
@@ -1484,6 +1644,17 @@ button.og-path:hover:not(:disabled) {
 
 button.og-path:active:not(:disabled) {
   transform: translateY(0);
+}
+
+/* The primary, recommended path (Bring an API key). Subtle accent emphasis. */
+button.og-path--primary {
+  border-color: var(--accent-line) !important;
+  box-shadow: var(--shadow-2), 0 0 0 1px var(--accent-line);
+}
+
+button.og-path--primary .og-path__icon {
+  background: var(--accent-line);
+  color: var(--surface-raised);
 }
 
 .og-paths--3cols {

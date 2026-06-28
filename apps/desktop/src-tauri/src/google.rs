@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use crate::{
     connector_auth::{authorized_tokens, StoredTokenSet},
     models::{
-        ConnectorActionRequest, ConnectorActionResult, ConnectorCommandError,
+        ConnectorActionRequest, ConnectorActionResult, ConnectorCommandError, ConnectorHealth,
         ConnectorImportRequest, ConnectorImportResult, ConnectorKnowledgeSource,
         ConnectorSearchItem, ConnectorSearchRequest, ConnectorSearchResult,
     },
@@ -1173,6 +1173,63 @@ async fn execute_calendar_action(
     }
     let value = send_json("google-calendar", tokens, method, url, body).await?;
     Ok(string(&value, "id").or_else(|| payload.get("eventId").cloned()))
+}
+
+/// Live health probe for Google connectors. A successful userinfo read is a
+/// healthy connection; a normalized provider error maps to degraded/error.
+pub(crate) async fn probe_health(app: &tauri::AppHandle, connector_id: &str) -> ConnectorHealth {
+    let checked_at = epoch_string();
+    let tokens = match authorized_tokens(app, connector_id).await {
+        Ok(pair) => pair.1,
+        Err(failure) => {
+            return ConnectorHealth {
+                state: if failure.retryable {
+                    "degraded".to_string()
+                } else {
+                    "error".to_string()
+                },
+                summary: failure.message,
+                checked_at,
+                retry_after: failure.retry_after,
+            }
+        }
+    };
+    let url = match api_url("https://openidconnect.googleapis.com/v1/", "userinfo") {
+        Ok(url) => url,
+        Err(failure) => {
+            return ConnectorHealth {
+                state: "error".to_string(),
+                summary: failure.message,
+                checked_at,
+                retry_after: None,
+            }
+        }
+    };
+    match send_json(connector_id, &tokens, Method::GET, url, None).await {
+        Ok(value) => {
+            let email = string(&value, "email");
+            let name = string(&value, "name").or_else(|| email.clone());
+            ConnectorHealth {
+                state: "healthy".to_string(),
+                summary: match name.as_deref() {
+                    Some(label) => format!("Connected as {label}."),
+                    None => "Connected; Google identity verified.".to_string(),
+                },
+                checked_at,
+                retry_after: None,
+            }
+        }
+        Err(failure) => ConnectorHealth {
+            state: if failure.retryable {
+                "degraded".to_string()
+            } else {
+                "error".to_string()
+            },
+            summary: failure.message,
+            checked_at,
+            retry_after: failure.retry_after,
+        },
+    }
 }
 
 /// Read-only Google capabilities exposed to the native model tool runtime.

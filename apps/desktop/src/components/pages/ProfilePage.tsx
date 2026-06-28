@@ -1,4 +1,4 @@
-import { Eye, EyeSlash, LockKey, Trash, UploadSimple, UserCircle } from "@phosphor-icons/react";
+import { LockKey, Trash, UploadSimple, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { profileFixture } from "../../data/workspace";
@@ -13,11 +13,8 @@ export function ProfilePage({
   onProfileChange?: (profile: ProfileFixture) => void;
 }) {
   const [profile, setProfile] = useState(externalProfile || profileFixture);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [passwordVisible, setPasswordVisible] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | undefined>(profile.photoUrl);
-  const [status, setStatus] = useState("Profile changes are saved locally in this mock session.");
+  const [status, setStatus] = useState("Profile changes are local to this desktop workspace.");
   const photoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -55,7 +52,7 @@ export function ProfilePage({
       const result = typeof reader.result === "string" ? reader.result : undefined;
       setPhotoPreview(result);
       setProfile((current) => ({ ...current, photoUrl: result }));
-      setStatus(`${file.name} selected for this mock profile.`);
+      setStatus(`${file.name} selected for this local profile.`);
     });
     reader.readAsDataURL(file);
   };
@@ -66,7 +63,7 @@ export function ProfilePage({
     if (photoInputRef.current) {
       photoInputRef.current.value = "";
     }
-    setStatus("Profile photo removed for this mock session.");
+    setStatus("Profile photo removed locally.");
   };
 
   const saveProfile = () => {
@@ -75,18 +72,7 @@ export function ProfilePage({
     if (onProfileChange) {
       onProfileChange(updated);
     }
-    setStatus("Profile saved locally for this mock session.");
-  };
-
-  const updatePassword = () => {
-    if (!currentPassword || !newPassword) {
-      setStatus("Current and new password are required.");
-      return;
-    }
-
-    setCurrentPassword("");
-    setNewPassword("");
-    setStatus("Password change mocked. No credentials were sent or stored.");
+    setStatus("Profile saved locally on this device.");
   };
 
   return (
@@ -94,7 +80,7 @@ export function ProfilePage({
       <PageHeader
         icon={UserCircle}
         title="Profile"
-        description="Manage your personal details and sign-in security."
+        description="Manage local display details for this workspace."
       />
 
       <section
@@ -147,7 +133,7 @@ export function ProfilePage({
                 </span>
                 <span>
                   <strong id="profile-details-title">Profile details</strong>
-                  <small>Name and email used across Fable.</small>
+                  <small>Name and email used for local display.</small>
                 </span>
               </div>
               <div className="settings-form-grid">
@@ -179,56 +165,13 @@ export function ProfilePage({
                   <LockKey size={19} />
                 </span>
                 <span>
-                  <strong id="profile-security-title">Security</strong>
-                  <small>Password controls for this account.</small>
+                  <strong id="profile-security-title">Provider credentials</strong>
+                  <small>API keys are managed in Settings and stored by the local credential boundary.</small>
                 </span>
               </div>
               <p className="profile-security-note">
-                Password {profile.passwordUpdatedAt.toLowerCase()}
+                This local profile is not a hosted Fable account.
               </p>
-              <div className="settings-form-grid">
-                <label className="settings-field settings-field--secret">
-                  <span>Current password</span>
-                  <span className="profile-secret-input">
-                    <input
-                      type={passwordVisible ? "text" : "password"}
-                      value={currentPassword}
-                      placeholder="Enter current password"
-                      onChange={(event) => setCurrentPassword(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      aria-label={passwordVisible ? "Hide passwords" : "Show passwords"}
-                      onClick={() => setPasswordVisible((visible) => !visible)}
-                    >
-                      {passwordVisible ? <EyeSlash size={16} /> : <Eye size={16} />}
-                    </button>
-                  </span>
-                </label>
-                <label className="settings-field settings-field--secret">
-                  <span>New password</span>
-                  <span className="profile-secret-input">
-                    <input
-                      type={passwordVisible ? "text" : "password"}
-                      value={newPassword}
-                      placeholder="Enter new password"
-                      onChange={(event) => setNewPassword(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      aria-label={passwordVisible ? "Hide passwords" : "Show passwords"}
-                      onClick={() => setPasswordVisible((visible) => !visible)}
-                    >
-                      {passwordVisible ? <EyeSlash size={16} /> : <Eye size={16} />}
-                    </button>
-                  </span>
-                </label>
-              </div>
-              <div className="profile-action-row profile-action-row--end">
-                <button type="button" className="profile-button button button--secondary" onClick={updatePassword}>
-                  Update password
-                </button>
-              </div>
             </section>
           </div>
 
@@ -243,9 +186,7 @@ export function ProfilePage({
                 onClick={() => {
                   setProfile(externalProfile || profileFixture);
                   setPhotoPreview((externalProfile || profileFixture).photoUrl);
-                  setCurrentPassword("");
-                  setNewPassword("");
-                  setStatus("Profile changes reset for this mock session.");
+                  setStatus("Profile changes reset locally.");
                 }}
               >
                 Cancel

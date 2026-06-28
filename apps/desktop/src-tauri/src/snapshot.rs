@@ -17,11 +17,12 @@ use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
     ApprovalAuditEntry, ApprovalGrant, LocalFileImport, LocalTextFileCandidate, RuntimeSnapshot,
-    RuntimeStatus, APPROVAL_MODES, AUTOMATION_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES,
+    RuntimeStatus, Schedule, APPROVAL_MODES, AUTOMATION_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES,
     MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILE_PREVIEW_CHARACTERS,
     MAX_MEMORY_TITLE_CHARACTERS, MAX_RUNTIME_SNAPSHOT_AUTOMATIONS,
     MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS, MAX_RUNTIME_SNAPSHOT_IDS,
-    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS, RUNTIME_SNAPSHOT_VERSION,
+    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS, MAX_RUNTIME_SNAPSHOT_SCHEDULES,
+    MAX_SCHEDULE_FIELD_CHARACTERS, RUNTIME_SNAPSHOT_VERSION, SCHEDULE_WEEKDAYS,
 };
 use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
@@ -212,6 +213,79 @@ fn normalize_runtime_automation_statuses(
     Ok(normalized_statuses)
 }
 
+/// Validate and cap the user-created schedules carried by a runtime snapshot.
+/// Schedules are non-secret (name/description/when only); this keeps the field
+/// lengths, weekday vocabulary, and `HH:MM` time shape bounded so a malformed
+/// or hostile snapshot never echoes unvalidated data back into the shell.
+fn normalize_runtime_schedules(schedules: Vec<Schedule>) -> Result<Vec<Schedule>, String> {
+    let mut normalized_schedules = Vec::new();
+
+    for schedule in schedules {
+        let id = truncate_characters(
+            &normalize_spaces(&schedule.id),
+            MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+        );
+        let name = truncate_characters(
+            &normalize_spaces(&schedule.name),
+            MAX_SCHEDULE_FIELD_CHARACTERS,
+        );
+        let description = truncate_characters(
+            &normalize_spaces(&schedule.description),
+            MAX_SCHEDULE_FIELD_CHARACTERS,
+        );
+        let day = normalize_spaces(&schedule.day);
+        let time = normalize_spaces(&schedule.time);
+        let created_at = normalize_spaces(&schedule.created_at);
+
+        if id.is_empty() || name.is_empty() || created_at.is_empty() {
+            return Err("Schedules need stable identifiers, names, and timestamps.".to_string());
+        }
+
+        if !SCHEDULE_WEEKDAYS.contains(&day.as_str()) {
+            return Err("Schedule day is not recognized.".to_string());
+        }
+
+        if !is_valid_schedule_time(&time) {
+            return Err("Schedule time must be 24-hour HH:MM.".to_string());
+        }
+
+        if normalized_schedules
+            .iter()
+            .any(|existing: &Schedule| existing.id == id)
+        {
+            continue;
+        }
+
+        normalized_schedules.push(Schedule {
+            id,
+            name,
+            description,
+            day,
+            time,
+            enabled: schedule.enabled,
+            created_at,
+        });
+
+        if normalized_schedules.len() >= MAX_RUNTIME_SNAPSHOT_SCHEDULES {
+            break;
+        }
+    }
+
+    Ok(normalized_schedules)
+}
+
+/// A valid schedule time is exactly `HH:MM` in 24-hour form (00:00–23:59).
+fn is_valid_schedule_time(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 5 || bytes[2] != b':' {
+        return false;
+    }
+
+    let hour = value[0..2].parse::<u32>().ok();
+    let minute = value[3..5].parse::<u32>().ok();
+    matches!((hour, minute), (Some(h), Some(m)) if h <= 23 && m <= 59)
+}
+
 pub(crate) fn normalize_runtime_snapshot(
     snapshot: RuntimeSnapshot,
 ) -> Result<RuntimeSnapshot, String> {
@@ -290,6 +364,8 @@ pub(crate) fn normalize_runtime_snapshot(
         records: snapshot.memory_records,
     })?;
 
+    let schedules = normalize_runtime_schedules(snapshot.schedules)?;
+
     Ok(RuntimeSnapshot {
         version: RUNTIME_SNAPSHOT_VERSION,
         active_item,
@@ -299,6 +375,7 @@ pub(crate) fn normalize_runtime_snapshot(
         dismissed_approval_ids: normalize_snapshot_id_list(snapshot.dismissed_approval_ids),
         approval_rules,
         automation_statuses: normalize_runtime_automation_statuses(snapshot.automation_statuses)?,
+        schedules,
         pinned_source_ids: normalize_snapshot_id_list(snapshot.pinned_source_ids),
         imported_knowledge_sources,
         memory_disabled: memory_state.disabled,

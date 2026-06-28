@@ -22,6 +22,8 @@ pub const MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS: usize = 20_000;
 pub const MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS: usize = 160;
 pub const MAX_RUNTIME_SNAPSHOT_IDS: usize = 200;
 pub const MAX_RUNTIME_SNAPSHOT_AUTOMATIONS: usize = 100;
+pub const MAX_RUNTIME_SNAPSHOT_SCHEDULES: usize = 100;
+pub const MAX_SCHEDULE_FIELD_CHARACTERS: usize = 200;
 pub const RUNTIME_SNAPSHOT_VERSION: u8 = 1;
 
 // Controlled vocabularies used for validation.
@@ -32,6 +34,7 @@ pub const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", 
 pub const APPROVAL_MODES: [&str; 3] = ["read-only", "trusted-scope", "full-access"];
 pub const APPROVAL_RISK_LEVELS: [&str; 4] = ["low", "medium", "high", "critical"];
 pub const AUTOMATION_STATUSES: [&str; 3] = ["draft", "active", "paused"];
+pub const SCHEDULE_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
 pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", "native-api"];
@@ -626,6 +629,21 @@ pub struct MemoryPromotionResponse {
     pub state: MemoryControlState,
 }
 
+/// A user-created schedule carried in the runtime snapshot. Non-secret: only
+/// the task name/description, when it fires, and bookkeeping. Normalization
+/// (weekday/time validation, field caps) lives in `snapshot.rs`.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Schedule {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub day: String,
+    pub time: String,
+    pub enabled: bool,
+    pub created_at: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
@@ -637,6 +655,11 @@ pub struct RuntimeSnapshot {
     pub dismissed_approval_ids: Vec<String>,
     pub approval_rules: Vec<ApprovalGrant>,
     pub automation_statuses: BTreeMap<String, String>,
+    /// User-created schedules. Non-secret state persisted through the snapshot
+    /// so it survives a desktop restart. Defaulted so existing v1 snapshot
+    /// files written before this field existed still parse cleanly.
+    #[serde(default)]
+    pub schedules: Vec<Schedule>,
     pub pinned_source_ids: Vec<String>,
     pub imported_knowledge_sources: Vec<LocalFileImport>,
     pub memory_disabled: bool,

@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::connector_auth::access_token;
 use crate::models::{
-    ConnectorActionRequest, ConnectorActionResult, ConnectorCommandError, ConnectorSearchItem,
-    ConnectorSearchRequest, ConnectorSearchResult,
+    ConnectorActionRequest, ConnectorActionResult, ConnectorCommandError, ConnectorHealth,
+    ConnectorSearchItem, ConnectorSearchRequest, ConnectorSearchResult,
 };
 
 fn error(
@@ -137,6 +137,30 @@ pub(crate) async fn validate_identity(
         }
     }
     Ok(())
+}
+
+/// Live health probe for Notion and Slack. A successful identity read is a
+/// healthy connection; a normalized provider error maps to degraded/error.
+pub(crate) async fn probe_health(app: &tauri::AppHandle, connector_id: &str) -> ConnectorHealth {
+    let checked_at = now();
+    match validate_identity(app, connector_id).await {
+        Ok(()) => ConnectorHealth {
+            state: "healthy".into(),
+            summary: "Connected; provider identity verified.".into(),
+            checked_at,
+            retry_after: None,
+        },
+        Err(failure) => ConnectorHealth {
+            state: if failure.retryable {
+                "degraded".into()
+            } else {
+                "error".into()
+            },
+            summary: failure.message,
+            checked_at,
+            retry_after: failure.retry_after,
+        },
+    }
 }
 
 async fn search_notion(

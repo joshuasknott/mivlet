@@ -200,18 +200,13 @@ kbd {
 }
 
 .desktop-frame[data-theme="dark"] .workspace {
-  background:
-    radial-gradient(circle at 58% 21%, rgba(255, 106, 0, 0.13), transparent 26%),
-    radial-gradient(circle at 78% 0%, rgba(255, 174, 94, 0.06), transparent 34%),
-    radial-gradient(circle at 35% 80%, rgba(255, 106, 0, 0.045), transparent 32%),
-    var(--surface);
+  background: var(--surface);
 }
 
 .desktop-frame[data-theme="dark"] .hero .brand-mark--hero {
   filter:
     drop-shadow(0 1px 0 rgba(255, 244, 230, 0.18))
-    drop-shadow(0 28px 46px rgba(0, 0, 0, 0.42))
-    drop-shadow(0 0 34px rgba(255, 106, 0, 0.12));
+    drop-shadow(0 28px 46px rgba(0, 0, 0, 0.42));
 }
 
 .hero p {

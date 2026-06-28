@@ -162,6 +162,86 @@ fn now_epoch() -> u64 {
         .as_secs()
 }
 
+/// Resolve and validate the configured auth broker for a confidential-client
+/// provider. The broker exists ONLY for confidential-client OAuth: it owns the
+/// provider client secret and performs authorization, token exchange/refresh,
+/// identity, and revocation. It never proxies model calls, connector searches,
+/// connector imports, or connector actions — those go directly from the desktop
+/// to the provider API after native token resolution.
+///
+/// Fail-closed: a missing, malformed, or non-secure broker URL is a
+/// `configuration-required` error, never a silent fallback. Local development
+/// may use `http://127.0.0.1` or `http://[::1]`; production must use HTTPS.
+///
+/// `broker_url` is passed in (rather than read from the environment inline) so
+/// the fail-closed checks are unit-testable without env-var races across the
+/// parallel test process. Only the four OAuth paths are derived from the base
+/// URL, so this module can never surface a model/search/import/action endpoint.
+pub(crate) fn resolve_broker_endpoints(
+    connector_id: &str,
+    broker_url: Option<&str>,
+) -> Result<BrokerEndpoints, ConnectorCommandError> {
+    let raw = broker_url.ok_or_else(|| {
+        command_error(
+            "configuration-required",
+            connector_id,
+            "This provider requires the configured Fable auth broker.",
+            false,
+        )
+    })?;
+    let broker = Url::parse(raw).map_err(|_| {
+        command_error(
+            "configuration-required",
+            connector_id,
+            "The Fable auth broker URL is invalid.",
+            false,
+        )
+    })?;
+    let loopback = broker.scheme() == "http"
+        && broker
+            .host_str()
+            .is_some_and(|host| host == "127.0.0.1" || host == "::1");
+    if broker.scheme() != "https" && !loopback {
+        return Err(command_error(
+            "configuration-required",
+            connector_id,
+            "The Fable auth broker must use HTTPS.",
+            false,
+        ));
+    }
+    let route = |suffix: &str| -> Result<String, ConnectorCommandError> {
+        broker
+            .join(suffix)
+            .map_err(|_| {
+                command_error(
+                    "configuration-required",
+                    connector_id,
+                    "Auth broker route is invalid.",
+                    false,
+                )
+            })
+            .map(|url| url.to_string())
+    };
+    Ok(BrokerEndpoints {
+        authorization_endpoint: route(&format!("oauth/{connector_id}/authorize"))?,
+        token_endpoint: route(&format!("oauth/{connector_id}/token"))?,
+        identity_endpoint: route(&format!("oauth/{connector_id}/identity"))?,
+        revocation_endpoint: route(&format!("oauth/{connector_id}/revoke"))?,
+    })
+}
+
+/// The narrow, exhaustive OAuth surface the auth broker implements. The broker
+/// has no model, search, import, or action endpoint; those never derive from the
+/// broker base URL. Keeping this as a dedicated, closed type makes the
+/// non-proxying boundary explicit and testable.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct BrokerEndpoints {
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub identity_endpoint: String,
+    pub revocation_endpoint: String,
+}
+
 fn provider_config(
     connector_id: &str,
     auth_mode: &str,
@@ -209,83 +289,13 @@ fn provider_config(
         });
     }
 
-    let broker = std::env::var("FABLE_AUTH_BROKER_URL").map_err(|_| {
-        command_error(
-            "configuration-required",
-            connector_id,
-            "This provider requires the configured Fable auth broker.",
-            false,
-        )
-    })?;
-    let broker = Url::parse(&broker).map_err(|_| {
-        command_error(
-            "configuration-required",
-            connector_id,
-            "The Fable auth broker URL is invalid.",
-            false,
-        )
-    })?;
-    if broker.scheme() != "https"
-        && !broker
-            .host_str()
-            .is_some_and(|host| host == "127.0.0.1" || host == "::1")
-    {
-        return Err(command_error(
-            "configuration-required",
-            connector_id,
-            "The Fable auth broker must use HTTPS.",
-            false,
-        ));
-    }
+    let broker_url = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+    let endpoints = resolve_broker_endpoints(connector_id, broker_url.as_deref())?;
     Ok(OAuthProviderConfig {
-        authorization_endpoint: broker
-            .join(&format!("oauth/{connector_id}/authorize"))
-            .map_err(|_| {
-                command_error(
-                    "configuration-required",
-                    connector_id,
-                    "Auth broker route is invalid.",
-                    false,
-                )
-            })?
-            .to_string(),
-        token_endpoint: broker
-            .join(&format!("oauth/{connector_id}/token"))
-            .map_err(|_| {
-                command_error(
-                    "configuration-required",
-                    connector_id,
-                    "Auth broker route is invalid.",
-                    false,
-                )
-            })?
-            .to_string(),
-        revocation_endpoint: Some(
-            broker
-                .join(&format!("oauth/{connector_id}/revoke"))
-                .map_err(|_| {
-                    command_error(
-                        "configuration-required",
-                        connector_id,
-                        "Auth broker route is invalid.",
-                        false,
-                    )
-                })?
-                .to_string(),
-        ),
-        userinfo_endpoint: Some(
-            broker
-                .join(&format!("oauth/{connector_id}/identity"))
-                .map_err(|_| {
-                    command_error(
-                        "configuration-required",
-                        connector_id,
-                        "Auth broker route is invalid.",
-                        false,
-                    )
-                })?
-                .to_string(),
-        ),
+        authorization_endpoint: endpoints.authorization_endpoint,
+        token_endpoint: endpoints.token_endpoint,
+        revocation_endpoint: Some(endpoints.revocation_endpoint),
+        userinfo_endpoint: Some(endpoints.identity_endpoint),
         client_id: "fable-desktop".to_string(),
         scopes,
         brokered: true,
@@ -1124,5 +1134,88 @@ mod tests {
         .await
         .expect_err("redirect mismatch");
         assert_eq!(wrong_redirect.code, "invalid-request");
+    }
+
+    // -------------------------------------------------------------------------
+    // Auth broker fail-closed contract (confidential OAuth only).
+    //
+    // The broker is deferred: it must be deployed before any confidential-client
+    // connector (GitHub, Vercel, Linear, Notion, Slack) can connect. Until then,
+    // `resolve_broker_endpoints` fails closed with `configuration-required`. It
+    // never silently falls back, and it never derives a model/search/import/
+    // action endpoint from the broker base URL — only the four OAuth paths.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn broker_resolver_fails_closed_when_no_url_is_configured() {
+        let error = resolve_broker_endpoints("github", None).expect_err("missing broker");
+        assert_eq!(error.code, "configuration-required");
+        assert_eq!(error.connector_id, "github");
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn broker_resolver_fails_closed_for_non_loopback_plain_http() {
+        let error =
+            resolve_broker_endpoints("slack", Some("http://broker.example/oauth/slack/authorize"))
+                .expect_err("plain http must fail");
+        assert_eq!(error.code, "configuration-required");
+    }
+
+    #[test]
+    fn broker_resolver_fails_closed_for_a_malformed_url() {
+        let error =
+            resolve_broker_endpoints("notion", Some("not a url at all")).expect_err("malformed");
+        assert_eq!(error.code, "configuration-required");
+    }
+
+    #[test]
+    fn broker_resolver_accepts_https_and_derives_only_oauth_paths() {
+        let endpoints =
+            resolve_broker_endpoints("github", Some("https://auth.fable.app/")).expect("https ok");
+        assert_eq!(
+            endpoints.authorization_endpoint,
+            "https://auth.fable.app/oauth/github/authorize"
+        );
+        assert_eq!(
+            endpoints.token_endpoint,
+            "https://auth.fable.app/oauth/github/token"
+        );
+        assert_eq!(
+            endpoints.identity_endpoint,
+            "https://auth.fable.app/oauth/github/identity"
+        );
+        assert_eq!(
+            endpoints.revocation_endpoint,
+            "https://auth.fable.app/oauth/github/revoke"
+        );
+    }
+
+    #[test]
+    fn broker_resolver_accepts_a_loopback_url_for_local_development() {
+        let endpoints = resolve_broker_endpoints("linear", Some("http://127.0.0.1:8788/"))
+            .expect("loopback ok");
+        assert_eq!(
+            endpoints.token_endpoint,
+            "http://127.0.0.1:8788/oauth/linear/token"
+        );
+    }
+
+    #[test]
+    fn broker_resolver_derives_no_model_search_import_or_action_endpoint() {
+        // The non-proxying boundary is structural: only four OAuth paths are
+        // derivable. Anything else would let the broker become a connector or
+        // model proxy, which the contract forbids.
+        let endpoints =
+            resolve_broker_endpoints("notion", Some("https://auth.fable.app/")).expect("ok");
+        let serialized = serde_json::to_string(&endpoints).expect("serialize");
+        assert!(!serialized.contains("/search"));
+        assert!(!serialized.contains("/import"));
+        assert!(!serialized.contains("/action"));
+        assert!(!serialized.contains("/execute"));
+        assert!(!serialized.contains("/model"));
+        assert!(!serialized.contains("/chat"));
+        assert!(!serialized.contains("/completions"));
+        assert!(!serialized.contains("/messages"));
     }
 }

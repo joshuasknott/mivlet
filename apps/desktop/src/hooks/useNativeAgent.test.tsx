@@ -38,6 +38,18 @@ const mocks = vi.hoisted(() => ({
   // manually after assertions.
   onLine: null as ((line: string) => void) | null,
   streamCalls: 0,
+  // Every RuntimeStreamRequest the mocked streamRuntimeCompletion received. The
+  // desktop transport calls it once per turn with `{ providerId, requestId,
+  // model, body }` where `body` is the output of shapeBodyFor(request). Capturing
+  // it lets the per-provider routing tests assert that each provider's body was
+  // shaped by the right shaper (anthropic/gemini/openai-compat) before egress —
+  // proving the shapeBodyFor routing works end-to-end through the desktop hook.
+  streamRequests: [] as Array<{
+    providerId: string;
+    requestId: string;
+    model: string;
+    body: unknown;
+  }>,
   cancelCalls: [] as string[],
   // The joined integration test scripts the mocked Rust tool boundary here:
   // every executeRuntimeToolCall records its request and resolves with this result.
@@ -64,10 +76,15 @@ vi.mock("../runtime", () => ({
     }
     return () => {};
   }),
-  streamRuntimeCompletion: vi.fn(async () => {
-    mocks.streamCalls += 1;
-    return null;
-  }),
+  streamRuntimeCompletion: vi.fn(
+    async (request: { providerId: string; requestId: string; model: string; body: unknown }) => {
+      mocks.streamCalls += 1;
+      // Record the egress request so the per-provider routing tests can assert
+      // the body was shaped by the correct shaper before crossing to Rust.
+      mocks.streamRequests.push(request);
+      return null;
+    }
+  ),
   cancelRuntimeCompletion: vi.fn(async (requestId: string) => {
     mocks.cancelCalls.push(requestId);
     return null;
@@ -124,6 +141,7 @@ function resetLineState() {
   mocks.emitDone = true;
   mocks.onLine = null;
   mocks.streamCalls = 0;
+  mocks.streamRequests = [];
   mocks.cancelCalls = [];
   mocks.toolRequests = [];
   mocks.savedRuns = [];
@@ -504,5 +522,159 @@ describe("useNativeAgent", () => {
     expect(result.current.state.running).toBe(false);
     expect(result.current.state.lastError).toBeNull();
     expect(gate.pendingCount()).toBe(0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-provider transport routing: prove each of the five native-API providers
+  // (OpenAI, Anthropic, Gemini, xAI, OpenRouter) flows through the desktop
+  // tauriTransport and that the body handed to the Rust boundary was shaped by
+  // the correct shaper for that provider's wire family. This closes the gap
+  // where the transport bridge + shapeBodyFor routing was only exercised for
+  // openai. Each case replays that provider's own recorded fixture shape so the
+  // run completes, then asserts the captured egress body's signature.
+  // ---------------------------------------------------------------------------
+  it.each([
+    {
+      name: "openai (openai-compat shaper)",
+      providerId: "openai",
+      model: "gpt-5",
+      // OpenAI chat-completions: choices/delta content + a top-level "messages".
+      lines: [
+        'data: {"choices":[{"delta":{"content":"hi"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}]}'
+      ],
+      expectBody: (body: Record<string, unknown>) => {
+        expect(body.model).toBe("gpt-5");
+        expect(body.stream).toBe(true);
+        // Chat-completions uses "messages"; Anthropic also does but without the
+        // "system" sibling and with max_tokens (asserted per-provider below).
+        expect(Array.isArray(body.messages)).toBe(true);
+      }
+    },
+    {
+      name: "anthropic (messages shaper)",
+      providerId: "anthropic",
+      model: "claude-sonnet-4-6",
+      // Anthropic streams event/data pairs; a content_block_delta text + a
+      // message_delta stop closes the turn.
+      lines: [
+        'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}',
+        'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
+        'data: {"type":"message_stop"}'
+      ],
+      expectBody: (body: Record<string, unknown>) => {
+        expect(body.model).toBe("claude-sonnet-4-6");
+        expect(body.max_tokens).toBeDefined();
+        // Anthropic's signature: stream + messages, NO stream_options/choices.
+        expect(body.stream).toBe(true);
+        expect(body.stream_options).toBeUndefined();
+      }
+    },
+    {
+      name: "gemini (generateContent shaper)",
+      providerId: "gemini",
+      model: "gemini-2.5-pro",
+      // Gemini streams JSON-per-line with candidates/parts.
+      lines: [
+        '{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]}}]}',
+        '{"candidates":[{"finishReason":"STOP"}]}'
+      ],
+      expectBody: (body: Record<string, unknown>) => {
+        expect(Array.isArray(body.contents)).toBe(true);
+        // Gemini's signature: generationConfig + contents, NO model/messages.
+        expect(body.generationConfig).toBeDefined();
+        expect(body.model).toBeUndefined();
+        expect(body.messages).toBeUndefined();
+      }
+    },
+    {
+      name: "xai (openai-compat shaper)",
+      providerId: "xai",
+      model: "grok-4",
+      lines: [
+        'data: {"choices":[{"delta":{"content":"hi"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}]}'
+      ],
+      expectBody: (body: Record<string, unknown>) => {
+        expect(body.model).toBe("grok-4");
+        expect(body.stream).toBe(true);
+        expect(Array.isArray(body.messages)).toBe(true);
+      }
+    },
+    {
+      name: "openrouter (openai-compat shaper)",
+      providerId: "openrouter",
+      model: "openrouter:auto",
+      lines: [
+        'data: {"choices":[{"delta":{"content":"hi"}}]}',
+        'data: {"choices":[{"finish_reason":"stop"}]}'
+      ],
+      expectBody: (body: Record<string, unknown>) => {
+        expect(body.model).toBe("openrouter:auto");
+        expect(body.stream).toBe(true);
+        expect(Array.isArray(body.messages)).toBe(true);
+      }
+    }
+  ])(
+    "routes $name through the desktop transport with the provider-shaped body",
+    async ({ providerId, model, lines, expectBody }) => {
+      installDesktopRuntime();
+      mocks.lines = lines;
+
+      const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+
+      await act(async () => {
+        await result.current.run({
+          providerId,
+          model,
+          messages: [{ role: "user", content: "hello" }],
+          tools: [],
+          maxTokens: 512
+        });
+      });
+
+      // The desktop transport made exactly one egress call for the run.
+      expect(mocks.streamRequests).toHaveLength(1);
+      const egress = mocks.streamRequests[0];
+      // The providerId + selected model thread through to the Rust boundary
+      // (the key + endpoint are resolved from providerId inside Rust).
+      expect(egress.providerId).toBe(providerId);
+      expect(egress.model).toBe(model);
+      // The body was shaped by this provider's shaper (the assertion above).
+      expectBody(egress.body as Record<string, unknown>);
+      // The run completed without surfacing an error.
+      expect(result.current.state.running).toBe(false);
+      expect(result.current.state.lastError).toBeNull();
+    }
+  );
+
+  it("provider errors surface into lastError through the transport control channel", async () => {
+    installDesktopRuntime();
+    // The desktop transport parses `__fableTransport` control lines: a `{ kind:
+    // "error" }` from Rust sets transportError, which the transport re-throws so
+    // the loop surfaces it as a lastError. Here the listener feeds that control
+    // line (no provider payload, no [DONE]) to prove the error path.
+    mocks.lines = [
+      JSON.stringify({
+        __fableTransport: {
+          kind: "error",
+          code: "authentication",
+          message: "Provider rejected the API key.",
+          retryable: false,
+          attempt: 1,
+          retryAfterMs: null
+        }
+      })
+    ];
+    // emitDone stays true, but the transport error short-circuits the run.
+
+    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
+
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.lastError).toBe("Provider rejected the API key.");
   });
 });

@@ -102,6 +102,12 @@ vi.mock("./runtime", () => ({
   )
 }));
 
+// Typed handle to the mocked credential-boundary connect wrapper so Settings
+// tests can assert the secret was handed to the boundary (and never leaked into
+// React state, logs, or snapshots).
+import * as runtimeModule from "./runtime";
+const connectRuntimeBackendSpy = vi.mocked(runtimeModule.connectRuntimeBackend);
+
 /** Render App and clear the onboarding gate by skipping in preview mode. */
 async function skipOnboarding() {
   const user = userEvent.setup();
@@ -151,6 +157,7 @@ describe("Fable home", () => {
     runtimeMocks.emitDone = true;
     runtimeMocks.onLine = null;
     runtimeMocks.cancelCalls = [];
+    connectRuntimeBackendSpy.mockClear();
     removeDesktopRuntime();
   });
 
@@ -347,7 +354,7 @@ describe("Fable home", () => {
     expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
   });
 
-  it("opens profile from the account menu and edits mock account details", async () => {
+  it("opens profile from the account menu and edits local profile details", async () => {
     const user = await renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /josh josh@example.com/i }));
@@ -363,8 +370,45 @@ describe("Fable home", () => {
     expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
   });
 
-  it("opens settings from the account menu and connects a mock provider", async () => {
-    const user = await renderWorkspace();
+  it("opens settings from the account menu and lists real runtime provider state", async () => {
+    // Serve the real preview backend registry (all needs-auth / install-required)
+    // so Settings reflects the boundary's actual default auth state — not fake
+    // connected defaults like "Fable Pro" or a pre-connected OpenAI. Skip the
+    // onboarding gate so the workspace (and Settings) is reachable with fail-
+    // closed backends.
+    runtimeMocks.backends = [
+      {
+        id: "codex",
+        backendType: "codex-app-server",
+        label: "Codex",
+        description: "Codex app-server",
+        authState: "needs-auth",
+        capabilities: [],
+        models: [{ id: "gpt-5", label: "GPT-5", available: false }],
+        installHint: "Requires the Codex CLI."
+      },
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop.",
+        authState: "needs-auth",
+        capabilities: [],
+        models: [{ id: "gpt-5", label: "GPT-5", available: false }]
+      },
+      {
+        id: "anthropic",
+        backendType: "native-api",
+        label: "Anthropic",
+        description: "Reach Claude via an Anthropic API key.",
+        authState: "needs-auth",
+        capabilities: [],
+        models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: false }]
+      }
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+    await skipOnboarding();
 
     await user.click(screen.getByRole("button", { name: /josh josh@example.com/i }));
     await user.click(screen.getByRole("menuitem", { name: /^settings$/i }));
@@ -372,13 +416,110 @@ describe("Fable home", () => {
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Provider access" })).toBeInTheDocument();
 
+    // The native API-key providers render from the real registry, each in the
+    // boundary-resolved needs-auth state (no fake "Connected" defaults).
+    const openaiCard = screen.getByText("OpenAI").closest("article");
+    expect(openaiCard).not.toBeNull();
+    expect(
+      within(openaiCard as HTMLElement).getByLabelText(/openai is needs api key/i)
+    ).toBeInTheDocument();
+    // No pre-existing fake connection: the "Connect" affordance is present.
+    expect(
+      within(openaiCard as HTMLElement).getByRole("button", { name: /^connect$/i })
+    ).toBeInTheDocument();
+    // No "mock session" copy anywhere on the page.
+    expect(screen.queryByText(/mock session/i)).not.toBeInTheDocument();
+
+    // The subscription/CLI provider (Codex) is gated: no fake one-click connect.
+    const codexCard = screen.getByText("Codex").closest("article");
+    expect(codexCard).not.toBeNull();
+    expect(
+      within(codexCard as HTMLElement).getByRole("button", { name: /gated/i })
+    ).toBeDisabled();
+    expect(
+      within(codexCard as HTMLElement).queryByRole("button", { name: /^connect$/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it("connects a native API-key provider through the credential boundary in Settings", async () => {
+    // Serve a fail-closed Anthropic so Settings shows it as needs-auth; the test
+    // then connects it through the boundary and asserts the boundary recorded
+    // the secret and the state re-resolved to connected.
+    runtimeMocks.backends = [
+      {
+        id: "codex",
+        backendType: "codex-app-server",
+        label: "Codex",
+        description: "Codex app-server",
+        authState: "needs-auth",
+        capabilities: [],
+        models: [{ id: "gpt-5", label: "GPT-5", available: false }],
+        installHint: "Requires the Codex CLI."
+      },
+      {
+        id: "anthropic",
+        backendType: "native-api",
+        label: "Anthropic",
+        description: "Reach Claude via an Anthropic API key.",
+        authState: "needs-auth",
+        capabilities: [],
+        models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: false }]
+      }
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+    await skipOnboarding();
+
+    await user.click(screen.getByRole("button", { name: /josh josh@example.com/i }));
+    await user.click(screen.getByRole("menuitem", { name: /^settings$/i }));
+
     const anthropicCard = screen.getByText("Anthropic").closest("article");
-
     expect(anthropicCard).not.toBeNull();
-    await user.click(within(anthropicCard as HTMLElement).getByRole("button", { name: /connect/i }));
 
-    expect(screen.getByText(/anthropic connected for this mock session/i)).toBeInTheDocument();
-    expect(within(anthropicCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    // Open the inline key form and submit the key through the boundary.
+    await user.click(
+      within(anthropicCard as HTMLElement).getByRole("button", { name: /^connect$/i })
+    );
+    const keyInput = within(anthropicCard as HTMLElement).getByLabelText(/api key for anthropic/i);
+    await user.type(keyInput, "sk-ant-test-key");
+
+    // Simulate the boundary resolving Anthropic to connected + capability-bearing
+    // after the store call records the key.
+    runtimeMocks.backends = [
+      runtimeMocks.backends[0],
+      {
+        id: "anthropic",
+        backendType: "native-api",
+        label: "Anthropic",
+        description: "Reach Claude via an Anthropic API key.",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming"],
+        models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: true }]
+      }
+    ];
+
+    await user.click(
+      within(anthropicCard as HTMLElement).getByRole("button", { name: /add key & connect/i })
+    );
+
+    // The boundary recorded the secret (connectRuntimeBackend was called) and
+    // the state re-resolved to connected with its real capabilities surfaced.
+    await waitFor(() => {
+      expect(connectRuntimeBackendSpy).toHaveBeenCalledWith({
+        providerId: "anthropic",
+        secret: "sk-ant-test-key"
+      });
+    });
+    expect(
+      await within(anthropicCard as HTMLElement).findByLabelText(/anthropic is connected/i)
+    ).toBeInTheDocument();
+    expect(
+      within(anthropicCard as HTMLElement).getByText(/streaming/i)
+    ).toBeInTheDocument();
+    // After connecting, the affordance switches to Disconnect.
+    expect(
+      within(anthropicCard as HTMLElement).getByRole("button", { name: /disconnect/i })
+    ).toBeInTheDocument();
   });
 
   it("turns slash commands into composer text", async () => {
@@ -493,6 +634,7 @@ describe("Fable home", () => {
       dismissedApprovalIds: [],
       approvalRules: [],
       automationStatuses: {},
+      schedules: [],
       pinnedSourceIds: [],
       importedKnowledgeSources: [],
       memoryDisabled: false,
@@ -668,6 +810,7 @@ describe("Fable home", () => {
       dismissedApprovalIds: [],
       approvalRules: [],
       automationStatuses: {},
+      schedules: [],
       pinnedSourceIds: [],
       importedKnowledgeSources: [],
       memoryDisabled: false,
@@ -798,82 +941,91 @@ describe("Fable onboarding", () => {
     runtimeMocks.backends = failClosedBackends;
   });
 
-  const completeCredentialsStep = async (user: any) => {
-    expect(await screen.findByRole("heading", { name: /create your fable account/i })).toBeInTheDocument();
-    await user.type(screen.getByLabelText(/^name$/i), "Josh");
-    await user.type(screen.getByLabelText(/^email$/i), "josh@example.com");
-    await user.type(screen.getByLabelText(/^password$/i), "password123");
+  const completeProfileStep = async (user: any) => {
+    expect(
+      await screen.findByRole("heading", { name: /set up your local fable workspace/i })
+    ).toBeInTheDocument();
+    // The local profile step must NOT collect a password or claim account creation.
+    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^name \(optional\)$/i), "Josh");
+    await user.type(screen.getByLabelText(/^email \(optional\)$/i), "josh@example.com");
     await user.click(screen.getByRole("button", { name: /continue/i }));
   };
 
-  it("gates the workspace behind the three-path onboarding shell", async () => {
+  it("gates the workspace behind the local-first onboarding shell", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /create your fable account/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /set up your local fable workspace/i })
+    ).toBeInTheDocument();
     // The composer must NOT render until a backend is connected.
     expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
+    // The local profile step must not claim account creation or require a password.
+    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/create your fable account/i)).not.toBeInTheDocument();
 
-    // Fill in credentials to proceed to the three paths choice page
-    await completeCredentialsStep(user);
+    // Proceed through the optional local profile to the backend choice page.
+    await completeProfileStep(user);
 
     expect(await screen.findByRole("heading", { name: /connect one ai backend to continue/i }))
       .toBeInTheDocument();
 
     // All three paths are present.
-    expect(screen.getByText(/use a subscription/i)).toBeInTheDocument();
-    expect(screen.getByText(/bring an api key/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /bring an api key/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /use a subscription or cli/i })).toBeInTheDocument();
     expect(screen.getByText(/run a local model/i)).toBeInTheDocument();
   });
 
-  it("offers the four subscription providers in the functional path", async () => {
+  it("lists the subscription/CLI providers as gated setup (not one-click connect)", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeCredentialsStep(user);
+    await completeProfileStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
-    // Navigate to subscription path
-    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+    // Navigate to the subscription/CLI path.
+    await user.click(screen.getByRole("button", { name: /use a subscription or cli/i }));
 
-    expect(await screen.findByRole("heading", { name: /use a subscription/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /use a subscription or cli/i })).toBeInTheDocument();
     expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Cursor")).toBeInTheDocument();
     expect(screen.getByText("GitHub Copilot")).toBeInTheDocument();
     expect(screen.getByText("Grok")).toBeInTheDocument();
+
+    // None of the gated providers exposes a fake "Set up" that connects from this
+    // screen. The available action routes to real setup, and an install hint is
+    // shown where a CLI is required.
+    const cursorCard = screen.getByText("Cursor").closest("article");
+    expect(cursorCard).not.toBeNull();
+    expect(
+      within(cursorCard as HTMLElement).getByLabelText(/cursor install required/i)
+    ).toHaveTextContent(/cursor cli/i);
+    // No fake "Connect" button: the gated action points at real setup.
+    expect(
+      within(cursorCard as HTMLElement).queryByRole("button", { name: /^connect$/i })
+    ).not.toBeInTheDocument();
   });
 
   it("fails closed with an install hint for ACP providers lacking a CLI", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeCredentialsStep(user);
+    await completeProfileStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
-    // Navigate to subscription path
-    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+    // Navigate to subscription/CLI path.
+    await user.click(screen.getByRole("button", { name: /use a subscription or cli/i }));
 
-    expect(await screen.findByRole("heading", { name: /use a subscription/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /use a subscription or cli/i })).toBeInTheDocument();
     expect(screen.getByLabelText(/cursor install required/i)).toHaveTextContent(/cursor cli/i);
     expect(screen.getByLabelText(/grok install required/i)).toHaveTextContent(/grok cli/i);
   });
 
-  it("connects a subscription backend and clears the gate", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-
-    await completeCredentialsStep(user);
-    await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
-
-    // Navigate to subscription path
-    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
-
-    expect(await screen.findByRole("heading", { name: /use a subscription/i })).toBeInTheDocument();
-    const codexCard = screen.getByText("Codex").closest("article");
-    expect(codexCard).not.toBeNull();
-
-    // Simulate the credential boundary resolving codex to connected after the
-    // store call, so the re-read reflects the new auth state.
+  it("clears the gate when a real capability-bearing subscription runtime is connected", async () => {
+    // The real runtime (not an onboarding click) resolves Codex to genuinely
+    // connected + capability-bearing. Nothing on the onboarding screen fakes
+    // this; the boundary is what flips the gate.
     runtimeMocks.backends = [
       {
         id: "codex",
@@ -887,26 +1039,18 @@ describe("Fable onboarding", () => {
       },
       ...failClosedBackends.filter((provider) => provider.id !== "codex")
     ];
+    render(<App />);
 
-    // Open the connection step, connect, then finish the multi-step shell.
-    await user.click(within(codexCard as HTMLElement).getByRole("button", { name: /set up/i }));
-    await user.click(await screen.findByRole("button", { name: /^connect$/i }));
-    const continueBtn = await screen.findByRole("button", {
-      name: /continue to connectors|finish setup/i
-    });
-    await user.click(continueBtn);
-    const finishBtn = await screen.findByRole("button", { name: /finish setup/i });
-    await user.click(finishBtn);
-
-    // Once a backend connects, the workspace (composer) becomes available.
+    // Once the real runtime is capability-bearing, the workspace becomes available
+    // without any one-click connect from onboarding.
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
-  it("makes the api-key path functional while keeping local-model disabled", async () => {
+  it("makes the api-key path the primary path while keeping local-model disabled", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeCredentialsStep(user);
+    await completeProfileStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
     // The local-model path stays disabled.
@@ -914,7 +1058,11 @@ describe("Fable onboarding", () => {
     expect(localPath?.parentElement).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByText(/local models are on the roadmap/i)).toBeInTheDocument();
 
-    // Navigate to api key path
+    // The api-key path is the primary (recommended) path.
+    const apiKeyPath = screen.getByRole("button", { name: /bring an api key/i });
+    expect(apiKeyPath).toHaveClass("og-path--primary");
+
+    // Navigate to the api-key path.
     await user.click(screen.getByRole("button", { name: /bring an api key/i }));
 
     expect(await screen.findByRole("heading", { name: /bring an api key/i })).toBeInTheDocument();
@@ -936,10 +1084,10 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeCredentialsStep(user);
+    await completeProfileStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
-    // Navigate to api key path
+    // Navigate to api key path.
     await user.click(screen.getByRole("button", { name: /bring an api key/i }));
 
     const shell = await screen.findByRole("heading", {
@@ -958,10 +1106,10 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeCredentialsStep(user);
+    await completeProfileStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
-    // Navigate to api key path
+    // Navigate to api key path.
     await user.click(screen.getByRole("button", { name: /bring an api key/i }));
 
     expect(await screen.findByRole("heading", { name: /bring an api key/i })).toBeInTheDocument();
@@ -984,17 +1132,15 @@ describe("Fable onboarding", () => {
     const openaiCard = screen.getByText("OpenAI").closest("article");
     expect(openaiCard).not.toBeNull();
 
-    // Open the connection step, submit the key, then finish the multi-step shell.
+    // Open the connection step and submit the key.
     await user.click(within(openaiCard as HTMLElement).getByRole("button", { name: /set up/i }));
     const keyInput = await screen.findByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-test-key");
     await user.click(screen.getByRole("button", { name: /add key & connect/i }));
-    const continueBtn = await screen.findByRole("button", {
-      name: /continue to connectors|finish setup/i
-    });
-    await user.click(continueBtn);
-    const finishBtn = await screen.findByRole("button", { name: /finish setup/i });
-    await user.click(finishBtn);
+
+    // The success screen offers to start using Fable; connector setup stays optional.
+    const startBtn = await screen.findByRole("button", { name: /start using fable/i });
+    await user.click(startBtn);
 
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
@@ -1003,14 +1149,14 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeCredentialsStep(user);
+    await completeProfileStep(user);
     await screen.findByRole("heading", { name: /connect one ai backend to continue/i });
 
-    // Navigate to subscription path
-    await user.click(screen.getByRole("button", { name: /use a subscription/i }));
+    // Navigate to subscription/CLI path.
+    await user.click(screen.getByRole("button", { name: /use a subscription or cli/i }));
 
     const shell = await screen.findByRole("heading", {
-      name: /use a subscription/i
+      name: /use a subscription or cli/i
     });
     const frame = shell.closest("main");
     expect(frame?.textContent?.toLowerCase()).not.toMatch(/grok build.*included|premium.*grok/i);
@@ -1020,7 +1166,9 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: /create your fable account/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: /set up your local fable workspace/i })
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /skip onboarding/i }));
 
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();

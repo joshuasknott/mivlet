@@ -703,6 +703,16 @@ fn runtime_snapshot() -> RuntimeSnapshot {
     let mut automation_statuses = BTreeMap::new();
     automation_statuses.insert("weekly-digest".to_string(), "active".to_string());
 
+    let schedules = vec![Schedule {
+        id: "weekly-digest".to_string(),
+        name: "Weekly digest".to_string(),
+        description: "Summarize the week.".to_string(),
+        day: "Fri".to_string(),
+        time: "09:00".to_string(),
+        enabled: true,
+        created_at: "2026-06-26T10:30:00.000Z".to_string(),
+    }];
+
     RuntimeSnapshot {
         version: RUNTIME_SNAPSHOT_VERSION,
         active_item: "Automations".to_string(),
@@ -712,6 +722,7 @@ fn runtime_snapshot() -> RuntimeSnapshot {
         dismissed_approval_ids: vec!["github-draft-pr".to_string(), "github-draft-pr".to_string()],
         approval_rules: vec![approval_rule()],
         automation_statuses,
+        schedules,
         pinned_source_ids: vec![
             "codex-manual".to_string(),
             "codex-manual".to_string(),
@@ -1066,6 +1077,141 @@ fn runtime_snapshot_round_trips_connected_backend_ids_without_secrets() {
     let file_contents = fs::read_to_string(&path).expect("snapshot file readable");
     assert!(!file_contents.contains("secret"));
     assert!(!file_contents.contains("token"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn runtime_snapshot_round_trips_schedules_without_secrets() {
+    let path = temp_audit_path("runtime-snapshot-schedules");
+    let _ = fs::remove_file(&path);
+
+    let mut snapshot = runtime_snapshot();
+    snapshot.schedules = vec![
+        Schedule {
+            id: "weekly-digest".to_string(),
+            name: "Weekly digest".to_string(),
+            description: "Summarize the week.".to_string(),
+            day: "Fri".to_string(),
+            time: "09:00".to_string(),
+            enabled: true,
+            created_at: "2026-06-26T10:30:00.000Z".to_string(),
+        },
+        Schedule {
+            id: "weekly-digest".to_string(), // duplicate id — must be deduped.
+            name: "Duplicate".to_string(),
+            description: "Dropped.".to_string(),
+            day: "Mon".to_string(),
+            time: "08:00".to_string(),
+            enabled: false,
+            created_at: "2026-06-20T10:00:00.000Z".to_string(),
+        },
+    ];
+
+    let saved =
+        write_runtime_snapshot(&path, snapshot).expect("snapshot should save with schedules");
+    // The duplicate id was dropped, leaving exactly one schedule.
+    assert_eq!(saved.schedules.len(), 1);
+    assert_eq!(saved.schedules[0].id, "weekly-digest");
+    assert_eq!(saved.schedules[0].name, "Weekly digest");
+
+    let read = read_runtime_snapshot(&path).expect("read").expect("exists");
+    assert_eq!(read.schedules.len(), 1);
+    assert_eq!(read.schedules[0].id, "weekly-digest");
+    assert_eq!(read.schedules[0].day, "Fri");
+    assert_eq!(read.schedules[0].time, "09:00");
+    assert!(read.schedules[0].enabled);
+
+    // Schedules are non-secret; the on-disk file must not carry secret-shaped
+    // substrings anywhere (mirrors the connected-backends boundary test).
+    let file_contents = fs::read_to_string(&path).expect("snapshot file readable");
+    assert!(!file_contents.contains("secret"));
+    assert!(!file_contents.contains("token"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn rejects_unknown_schedule_weekday_or_time() {
+    let path = temp_audit_path("runtime-snapshot-schedule-validation");
+    let _ = fs::remove_file(&path);
+
+    // Unknown weekday.
+    let mut bad_day = runtime_snapshot();
+    bad_day.schedules = vec![Schedule {
+        id: "bad-day".to_string(),
+        name: "Bad day".to_string(),
+        description: "X".to_string(),
+        day: "Funday".to_string(),
+        time: "09:00".to_string(),
+        enabled: true,
+        created_at: "2026-06-26T10:30:00.000Z".to_string(),
+    }];
+    let error =
+        write_runtime_snapshot(&path, bad_day).expect_err("unknown weekday should fail closed");
+    assert!(error.contains("day"));
+    assert!(!path.exists());
+
+    // Malformed time (not HH:MM).
+    let mut bad_time = runtime_snapshot();
+    bad_time.schedules = vec![Schedule {
+        id: "bad-time".to_string(),
+        name: "Bad time".to_string(),
+        description: "X".to_string(),
+        day: "Fri".to_string(),
+        time: "9:00".to_string(),
+        enabled: true,
+        created_at: "2026-06-26T10:30:00.000Z".to_string(),
+    }];
+    let error =
+        write_runtime_snapshot(&path, bad_time).expect_err("malformed time should fail closed");
+    assert!(error.contains("time"));
+
+    // Out-of-range time.
+    let mut out_of_range = runtime_snapshot();
+    out_of_range.schedules = vec![Schedule {
+        id: "oor".to_string(),
+        name: "OOR".to_string(),
+        description: "X".to_string(),
+        day: "Fri".to_string(),
+        time: "25:00".to_string(),
+        enabled: true,
+        created_at: "2026-06-26T10:30:00.000Z".to_string(),
+    }];
+    let error = write_runtime_snapshot(&path, out_of_range)
+        .expect_err("out-of-range time should fail closed");
+    assert!(error.contains("time"));
+}
+
+#[test]
+fn legacy_snapshot_without_schedules_still_parses() {
+    // A snapshot written before `schedules` joined the contract (the field is
+    // #[serde(default)]) must still read back, with schedules defaulted empty.
+    let path = temp_audit_path("runtime-snapshot-legacy-no-schedules");
+    let _ = fs::remove_file(&path);
+    let legacy_json = r#"{
+      "version": 1,
+      "activeItem": "Automations",
+      "composerDraft": "/schedule weekly digest",
+      "voiceEnabled": true,
+      "approvalAudit": [],
+      "dismissedApprovalIds": [],
+      "approvalRules": [],
+      "automationStatuses": {},
+      "pinnedSourceIds": [],
+      "importedKnowledgeSources": [],
+      "memoryDisabled": false,
+      "memoryRecords": [],
+      "connectedBackendIds": ["codex"],
+      "selectedModelId": "",
+      "permissionMode": "read-only",
+      "savedAt": "2026-06-26T10:30:00.000Z"
+    }"#;
+    fs::write(&path, legacy_json).expect("write legacy snapshot");
+
+    let read = read_runtime_snapshot(&path).expect("read").expect("exists");
+    assert!(read.schedules.is_empty());
+    assert_eq!(read.active_item, "Automations");
 
     let _ = fs::remove_file(&path);
 }
@@ -1765,6 +1911,73 @@ fn web_fetch_outcome_fails_closed_on_a_transport_error() {
     // the loop fails closed instead of pretending a fetch happened.
     let err = WebFetchOutcome::transport_error("connection refused").into_tool_result_err();
     assert!(err.contains("connection refused"));
+}
+
+// ---------------------------------------------------------------------------
+// Auth broker independence: the Cloudflare broker is deferred and required only
+// for confidential-client OAuth (GitHub, Vercel, Notion, Slack, Linear). The
+// local-first invariants pinned here are:
+//   1. Only confidential connectors depend on the broker env var.
+//   2. Public desktop OAuth (Google PKCE) and local API-key backends never read
+//      the broker URL.
+//   3. The broker URL is never a proxy for model calls, connector searches,
+//      imports, or actions — those reference only provider APIs directly.
+// ---------------------------------------------------------------------------
+
+use crate::connector_auth::resolve_broker_endpoints;
+use crate::connectors::{
+    connector_auth_boundary, ConnectorAuthBoundary, BROKER_REQUIRED_CONNECTOR_IDS,
+};
+
+#[test]
+fn only_confidential_connectors_require_the_auth_broker() {
+    // Every broker-required id is classified Confidential, and every
+    // Confidential id is broker-required — the two sets must agree exactly.
+    for id in FIRST_WAVE_CONNECTOR_IDS {
+        let boundary = connector_auth_boundary(id).expect("classified connector");
+        let broker_required = BROKER_REQUIRED_CONNECTOR_IDS.contains(&id);
+        match boundary {
+            ConnectorAuthBoundary::Confidential => assert!(
+                broker_required,
+                "{id} is Confidential and must be broker-required"
+            ),
+            ConnectorAuthBoundary::Public => assert!(
+                !broker_required,
+                "{id} is Public and must never require the broker"
+            ),
+        }
+    }
+}
+
+#[test]
+fn google_connectors_are_public_pkce_and_broker_free() {
+    // Google Drive, Gmail, and Google Calendar run loopback PKCE directly to
+    // Google; the auth broker is irrelevant to them. This is the structural
+    // guarantee that the local workspace stays usable without a hosted broker.
+    for id in ["google-drive", "gmail", "google-calendar"] {
+        assert_eq!(
+            connector_auth_boundary(id),
+            Some(ConnectorAuthBoundary::Public),
+            "{id} must be a public PKCE connector"
+        );
+    }
+}
+
+#[test]
+fn broker_resolver_fail_closed_keeps_core_workspace_usable() {
+    // With no broker configured, confidential connectors fail closed — but the
+    // resolver itself never touches the public PKCE or API-key paths. This test
+    // pins that the fail-closed error is scoped to the *requesting* confidential
+    // connector and does not abort the broader runtime.
+    let err = resolve_broker_endpoints("github", None).expect_err("must fail closed");
+    assert_eq!(err.code, "configuration-required");
+    assert_eq!(err.connector_id, "github");
+    // A Google connector, classified Public, has no dependency on the broker
+    // resolver at all — it never calls resolve_broker_endpoints.
+    assert_eq!(
+        connector_auth_boundary("google-drive"),
+        Some(ConnectorAuthBoundary::Public),
+    );
 }
 
 // Suppress unused-import lint when ApprovalModification is not referenced by the

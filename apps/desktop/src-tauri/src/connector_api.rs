@@ -10,7 +10,8 @@ use crate::{
     connector_auth::provider_access_token,
     models::{
         ConnectorActionRequest, ConnectorCapabilityRequest, ConnectorCapabilityResult,
-        ConnectorCommandError, ConnectorSearchItem, ConnectorSearchRequest, ConnectorSearchResult,
+        ConnectorCommandError, ConnectorHealth, ConnectorSearchItem, ConnectorSearchRequest,
+        ConnectorSearchResult,
     },
     paths::{normalize_spaces, truncate_characters},
 };
@@ -826,4 +827,49 @@ fn unix_timestamp() -> String {
         .unwrap_or_default()
         .as_secs()
         .to_string()
+}
+
+/// Live health probe for the developer connectors (GitHub, Vercel, Linear).
+/// Reuses the authenticated token path: a successful identity read is a healthy
+/// connection; a normalized provider error maps to a degraded/error health
+/// state. Tokens never leave the Rust boundary.
+pub(crate) async fn probe_health(app: &tauri::AppHandle, connector_id: &str) -> ConnectorHealth {
+    let checked_at = unix_timestamp();
+    let capability = ConnectorCapabilityRequest {
+        connector_id: connector_id.to_string(),
+        capability: "identity.read".to_string(),
+        input: BTreeMap::new(),
+        cursor: None,
+    };
+    match read_capability(app, capability).await {
+        Ok(result) => {
+            let label = result
+                .items
+                .first()
+                .and_then(|item| item.get("name").or_else(|| item.get("login")))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            ConnectorHealth {
+                state: "healthy".to_string(),
+                summary: match label.as_deref() {
+                    Some(name) => format!("Connected as {name}."),
+                    None => "Connected; provider identity verified.".to_string(),
+                },
+                checked_at,
+                retry_after: result
+                    .rate_limit_remaining
+                    .map(|remaining| format!("{remaining} provider requests remaining")),
+            }
+        }
+        Err(failure) => ConnectorHealth {
+            state: if failure.retryable {
+                "degraded".to_string()
+            } else {
+                "error".to_string()
+            },
+            summary: failure.message,
+            checked_at,
+            retry_after: failure.retry_after,
+        },
+    }
 }

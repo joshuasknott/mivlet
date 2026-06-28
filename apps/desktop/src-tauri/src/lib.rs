@@ -18,6 +18,7 @@ mod knowledge;
 mod memory;
 mod models;
 mod native_api;
+mod oauth_loopback;
 mod paths;
 mod snapshot;
 mod tools;
@@ -55,6 +56,7 @@ pub fn run() {
             connector_approvals::list_connector_approval_records,
             connectors::start_connector_auth,
             connectors::complete_connector_auth,
+            connectors::begin_connector_oauth,
             connectors::clear_connector_auth,
             connectors::refresh_connector_health,
             connectors::search_connector,

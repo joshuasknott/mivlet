@@ -52,6 +52,7 @@ import {
   workspaceDirectives
 } from "../data/workspace";
 import {
+  beginRuntimeConnectorOAuth,
   clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
@@ -102,6 +103,8 @@ import {
   resolveApprovalFallback
 } from "../lib/approval-fallbacks";
 import {
+  hasTauriRuntime,
+  importLegacyShellStateOnce,
   persistShellState,
   readPersistedShellState,
   shellStateFromRuntimeSnapshot,
@@ -284,7 +287,16 @@ export interface UseShellRuntimeOptions {
 export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRuntime {
   const approvalGateRef = useRef<ToolApprovalGate | null>(options.approvalGate ?? null);
   approvalGateRef.current = options.approvalGate ?? null;
-  const initialState = useMemo(() => readPersistedShellState(defaultShellState), []);
+  const initialState = useMemo(
+    () =>
+      // Desktop: the runtime snapshot is the source of truth; localStorage is
+      // read once for a legacy import then never again. Preview: localStorage
+      // remains the sole store.
+      hasTauriRuntime()
+        ? importLegacyShellStateOnce(defaultShellState)
+        : readPersistedShellState(defaultShellState),
+    []
+  );
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
   const [composerValue, setComposerValue] = useState(initialState.composerValue);
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
@@ -866,8 +878,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
     setConnectorStatus(`Preparing ${connector.name} authorization...`);
     try {
-      const result = await startRuntimeConnectorAuth({ connectorId: connector.id });
+      // Public-client (loopback PKCE) connectors run the full flow end-to-end:
+      // Rust binds a real loopback redirect, opens the browser, accepts the
+      // callback, and completes the token exchange inside the credential
+      // boundary. Brokered connectors (GitHub, Vercel, Linear, Notion, Slack)
+      // start the brokered authorization; they fail closed with a clear
+      // configuration-required state when the auth broker is not configured.
+      const result =
+        connector.authMode === "oauth-pkce"
+          ? await beginRuntimeConnectorOAuth({ connectorId: connector.id })
+          : await startRuntimeConnectorAuth({ connectorId: connector.id });
       if (!result) {
+        // Preview mode (no Tauri runtime): no live OAuth is available. Surface
+        // the configured-auth-required state honestly — never claim a fixture
+        // connection as live.
         const message =
           connector.status === "fixture"
             ? `${connector.name} is using explicit preview data. ${connector.setupMessage ?? "Live provider setup is required."}`
@@ -875,6 +899,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setConnectorStatus(message);
         setLastAction(message);
         return;
+      }
+      // On a real connection, re-read the boundary so the manifest reflects the
+      // live account, granted scopes, and (after refresh) provider health.
+      if (result.status === "connected") {
+        const refreshed = await refreshRuntimeConnectorHealth(connector.id);
+        if (refreshed) {
+          replaceConnectorManifest(refreshed);
+        }
       }
       setConnectorStatus(result.message);
       setLastAction(result.message);

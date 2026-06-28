@@ -127,7 +127,7 @@ export function App() {
       case "Profile":
         return <ProfilePage profile={profile} onProfileChange={setProfile} />;
       case "Settings":
-        return <SettingsPage />;
+        return <SettingsPage runtime={runtime} />;
       default:
         return null;
     }
@@ -266,12 +266,14 @@ export function App() {
         status={runtime.backendStatus}
         onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
         onSkip={runtime.dismissOnboarding}
-        onSubmitCredentials={(name, email) => {
+        onSubmitProfile={(name, email) => {
           setProfile((current) => ({
             ...current,
-            name,
-            email,
-            photoInitials: name
+            // Local profile only: apply name/email when provided. No auth and no
+            // account is created — these are local display fields.
+            ...(name ? { name } : {}),
+            ...(email ? { email } : {}),
+            photoInitials: (name || current.name)
               .split(" ")
               .map((n) => n[0])
               .join("")
@@ -279,6 +281,7 @@ export function App() {
               .slice(0, 2)
           }));
         }}
+        onOpenConnectors={() => runtime.setActiveItem("Connectors")}
       />
     );
   }

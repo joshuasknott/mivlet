@@ -4,7 +4,9 @@ import type {
   ApprovalDecision,
   LocalFileImport,
   MemoryRecord,
-  PermissionMode
+  PermissionMode,
+  ScheduleEntry,
+  ScheduleWeekday
 } from "@fable/protocol";
 
 /**
@@ -18,22 +20,15 @@ export type AccountPage = "Profile" | "Settings";
 export type WorkspacePage = UtilityItem | AccountPage;
 
 /**
- * A user-created schedule. Shell-local (not in the shared protocol): the
- * `name` is the queryable task name, the `description` tells the agent what
- * to do when it fires, and `day`/`time` define when it runs. Execution is
- * linked up so a connected model can pick it up; nothing auto-runs.
+ * A user-created schedule. Shell-local alias for the shared `ScheduleEntry`
+ * contract: the `name` is the queryable task name, the `description` tells the
+ * agent what to do when it fires, and `day`/`time` define when it runs.
+ * Execution is linked up so a connected model can pick it up; nothing
+ * auto-runs. Now persisted through the runtime snapshot so it survives a
+ * desktop restart (localStorage carries it in preview only).
  */
-export type Weekday = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
-
-export interface Schedule {
-  id: string;
-  name: string;
-  description: string;
-  day: Weekday;
-  time: string; // "HH:MM", 24-hour
-  enabled: boolean;
-  createdAt: string;
-}
+export type Weekday = ScheduleWeekday;
+export type Schedule = ScheduleEntry;
 
 export const WEEKDAYS: Weekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 

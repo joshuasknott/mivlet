@@ -305,6 +305,50 @@ export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest
   }
 }
 
+/**
+ * Begin an end-to-end public-client (loopback PKCE) OAuth flow. Rust binds a
+ * loopback redirect URI, starts the transaction, opens the browser, accepts one
+ * callback, and completes the token exchange inside the credential boundary.
+ * Returns null outside Tauri (preview has no real OAuth). Brokered providers
+ * fail closed with a configuration-required error so the shell can surface the
+ * configured-auth-required state.
+ */
+export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorAuthResult>("begin_connector_oauth", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Listen for connector auth completion events emitted by the loopback OAuth
+ * receiver. The shell re-reads connector statuses on a connected result. Returns
+ * an unlisten function (or null outside Tauri).
+ */
+export async function listenRuntimeConnectorAuth(
+  onComplete: (event: { connectorId: string; status: string; message: string }) => void
+) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    const unlisten = await listen<{
+      connectorId: string;
+      status: string;
+      message: string;
+    }>("fable://connector/auth", (event) => {
+      onComplete(event.payload);
+    });
+    return unlisten;
+  } catch {
+    return null;
+  }
+}
+
 export async function clearRuntimeConnectorAuth(connectorId: string) {
   if (!hasTauriRuntime()) {
     return null;

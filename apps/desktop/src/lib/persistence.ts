@@ -4,9 +4,15 @@ import type {
   LocalFileImport,
   MemoryRecord,
   PermissionMode,
-  RuntimeSnapshot
+  RuntimeSnapshot,
+  ScheduleEntry
 } from "@fable/protocol";
-import { LEGACY_STORAGE_KEYS, STORAGE_KEY, RUNTIME_SNAPSHOT_VERSION } from "./constants";
+import {
+  LEGACY_STORAGE_KEYS,
+  LEGACY_IMPORT_SENTINEL,
+  STORAGE_KEY,
+  RUNTIME_SNAPSHOT_VERSION
+} from "./constants";
 import { normalizeActiveItem } from "./helpers";
 import type { PersistedShellState } from "./types";
 
@@ -15,11 +21,28 @@ import type { PersistedShellState } from "./types";
  * pure functions over shell state so they can be tested and reused without
  * React.
  *
- * Schedules are shell-local and persist only via localStorage (they are not
- * part of the shared RuntimeSnapshot contract). The snapshot still carries
- * the legacy `automationStatuses` field for protocol compatibility, defaulted
- * to an empty record on round-trip.
+ * Source-of-truth rules (the safe interim migration toward encrypted SQLite):
+ *
+ * - **Desktop (Tauri runtime):** the runtime snapshot is the source of truth
+ *   for non-secret state. `localStorage` is a write-only best-effort mirror —
+ *   it is read exactly once, on first launch, to import legacy values via
+ *   `importLegacyShellStateOnce`, and never read again.
+ * - **Preview (no Tauri runtime):** `localStorage` remains the sole store.
+ *
+ * Schedules persist through the runtime snapshot so they survive a desktop
+ * restart (the snapshot is the source of truth for non-secret state in Tauri);
+ * localStorage carries them in preview only. The snapshot still carries the
+ * legacy `automationStatuses` field for protocol compatibility, defaulted to
+ * an empty record on round-trip.
  */
+
+/** True inside the Tauri desktop runtime (mirrors `runtime.ts`). */
+export function hasTauriRuntime(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+  );
+}
 
 export function readPersistedShellState(defaultShellState: PersistedShellState): PersistedShellState {
   if (typeof window === "undefined") {
@@ -50,7 +73,60 @@ export function readPersistedShellState(defaultShellState: PersistedShellState):
   }
 }
 
+/**
+ * Desktop one-time legacy import. Reads the legacy `localStorage` keys a single
+ * time (guarded by the `LEGACY_IMPORT_SENTINEL` flag), copies the recovered
+ * non-secret state forward, marks the import done, and returns the merged
+ * state. Every subsequent call returns the defaults — the snapshot is the
+ * source of truth from then on.
+ *
+ * Safe by construction: it only ever copies the documented `PersistedShellState`
+ * fields forward; it never introduces secret-named keys, and the sentinel it
+ * writes is a plain `"1"` marker with no payload.
+ */
+export function importLegacyShellStateOnce(
+  defaultShellState: PersistedShellState
+): PersistedShellState {
+  if (typeof window === "undefined") {
+    return defaultShellState;
+  }
+
+  try {
+    if (window.localStorage.getItem(LEGACY_IMPORT_SENTINEL)) {
+      return defaultShellState;
+    }
+
+    const legacyStored =
+      LEGACY_STORAGE_KEYS.map((key) => window.localStorage.getItem(key)).find(Boolean) ?? null;
+    if (!legacyStored) {
+      // Nothing to import; still mark the migration done so we never scan again.
+      window.localStorage.setItem(LEGACY_IMPORT_SENTINEL, "1");
+      return defaultShellState;
+    }
+
+    const normalized = normalizePersistedShellState({
+      ...defaultShellState,
+      ...JSON.parse(legacyStored)
+    } as PersistedShellState);
+    // Copy forward to the canonical key (downgrade-safe: the legacy key stays).
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    window.localStorage.setItem(LEGACY_IMPORT_SENTINEL, "1");
+    return normalized;
+  } catch {
+    return defaultShellState;
+  }
+}
+
+/**
+ * Write-only best-effort mirror of shell state into `localStorage`. This never
+ * reads — preview relies on it as its sole store, while desktop treats the
+ * snapshot as the source of truth and uses this only as a harmless mirror.
+ */
 export function persistShellState(state: PersistedShellState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
@@ -67,9 +143,10 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     approvalAudit: state.approvalAudit,
     dismissedApprovalIds: state.dismissedApprovalIds,
     approvalRules: state.approvalRules,
-    // Schedules are shell-local; the shared snapshot keeps the legacy field
-    // defaulted empty for protocol compatibility.
+    // The legacy automation field is kept defaulted empty for protocol
+    // compatibility; live schedules live in `schedules` below.
     automationStatuses: {},
+    schedules: state.schedules,
     pinnedSourceIds: state.pinnedSourceIds,
     importedKnowledgeSources: state.importedKnowledgeSources,
     memoryDisabled: state.memoryDisabled,
@@ -93,6 +170,9 @@ export function shellStateFromRuntimeSnapshot(
     approvalAudit: snapshot.approvalAudit,
     dismissedApprovalIds: snapshot.dismissedApprovalIds,
     approvalRules: snapshot.approvalRules,
+    // Schedules are the source of truth in the snapshot; fall back to the
+    // default shell state's schedules when a snapshot omits them.
+    schedules: snapshot.schedules ?? defaultShellState.schedules,
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
@@ -115,5 +195,6 @@ export type {
   ApprovalAuditEntry,
   ApprovalGrant,
   LocalFileImport,
-  MemoryRecord
+  MemoryRecord,
+  ScheduleEntry
 };

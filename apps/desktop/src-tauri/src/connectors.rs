@@ -26,6 +26,7 @@ use crate::models::{
     CONNECTOR_AUTH_STATES, FIRST_WAVE_CONNECTOR_IDS, MAX_CONNECTOR_PAYLOAD_FIELDS,
     MAX_CONNECTOR_QUERY_CHARACTERS, MAX_CONNECTOR_RESULT_LIMIT,
 };
+use crate::oauth_loopback;
 use crate::paths::{
     connector_approval_records_path, connector_connections_path, execution_approvals_path,
     normalize_spaces, truncate_characters,
@@ -305,6 +306,38 @@ fn require_connector(
         .find(|entry| entry.id == normalized)
         .ok_or_else(|| command_error("invalid-request", &normalized, "Unknown connector.", false))
 }
+
+/// The auth boundary a connector sits behind. `Public` connectors (Google
+/// desktop OAuth) use loopback PKCE and never need the auth broker.
+/// `Confidential` connectors (GitHub, Notion, Slack, Linear, Vercel) require
+/// server-side secrets and therefore route through the configured HTTPS auth
+/// broker; they fail closed until it is deployed. The local workspace itself is
+/// `LocalOnly` and has no external auth at all. This classification codifies the
+/// local-first boundary: the broker is only ever required by `Confidential`.
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ConnectorAuthBoundary {
+    Public,
+    Confidential,
+}
+
+#[cfg(test)]
+pub(crate) fn connector_auth_boundary(connector_id: &str) -> Option<ConnectorAuthBoundary> {
+    match CATALOG.iter().find(|entry| entry.id == connector_id)? {
+        entry if entry.auth_mode == "oauth-pkce" => Some(ConnectorAuthBoundary::Public),
+        entry if matches!(entry.auth_mode, "oauth-broker" | "provider-installation") => {
+            Some(ConnectorAuthBoundary::Confidential)
+        }
+        _ => None,
+    }
+}
+
+/// Connector ids that require the deployed auth broker (confidential clients).
+/// Exposed for tests so the broker-independence boundary is pinned: only these
+/// ids ever depend on `FABLE_AUTH_BROKER_URL`.
+#[cfg(test)]
+pub(crate) const BROKER_REQUIRED_CONNECTOR_IDS: &[&str] =
+    &["github", "vercel", "notion", "slack", "linear"];
 
 fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
     let policy = match action {
@@ -619,10 +652,37 @@ fn build_manifest(
     entry: &'static ConnectorCatalogEntry,
     boundary: &dyn ConnectorCredentialBoundary,
 ) -> ConnectorManifest {
+    build_manifest_with_health(entry, boundary, None)
+}
+
+fn build_manifest_with_health(
+    entry: &'static ConnectorCatalogEntry,
+    boundary: &dyn ConnectorCredentialBoundary,
+    health: Option<ConnectorHealth>,
+) -> ConnectorManifest {
     let connection = boundary.connection(entry.id);
     let connected = connection.is_some();
     let status = if connected { "connected" } else { "needs-auth" };
     debug_assert!(CONNECTOR_AUTH_STATES.contains(&status));
+
+    let health = health.unwrap_or(ConnectorHealth {
+        state: "unknown".to_string(),
+        summary: if connected {
+            "Credentials available; live provider health has not been checked.".to_string()
+        } else {
+            "Provider configuration required".to_string()
+        },
+        checked_at: "Not checked".to_string(),
+        retry_after: None,
+    });
+    let health_summary = match health.state.as_str() {
+        "healthy" => health.summary.clone(),
+        "degraded" | "error" => health.summary.clone(),
+        _ if connected => {
+            "Credentials available; live provider health has not been checked.".to_string()
+        }
+        _ => "Provider configuration required".to_string(),
+    };
 
     ConnectorManifest {
         id: entry.id.to_string(),
@@ -633,13 +693,8 @@ fn build_manifest(
             .iter()
             .map(|permission| (*permission).to_string())
             .collect(),
-        health_summary: if connected {
-            "Credentials available; live provider health has not been checked."
-        } else {
-            "Provider configuration required"
-        }
-        .to_string(),
-        last_checked_at: "Not checked".to_string(),
+        health_summary,
+        last_checked_at: health.checked_at.clone(),
         auth_mode: entry.auth_mode.to_string(),
         scopes: entry
             .scopes
@@ -657,12 +712,7 @@ fn build_manifest(
                 }),
             })
             .collect(),
-        health: ConnectorHealth {
-            state: "unknown".to_string(),
-            summary: "Live provider health has not been checked.".to_string(),
-            checked_at: "Not checked".to_string(),
-            retry_after: None,
-        },
+        health,
         account: connection.map(|connection| connection.account),
         setup_message: (!connected).then(|| entry.setup_message.to_string()),
         supports_search: true,
@@ -672,6 +722,25 @@ fn build_manifest(
             .iter()
             .map(|action| (*action).to_string())
             .collect(),
+    }
+}
+
+/// Resolve live provider health for a connected connector by probing the
+/// provider identity endpoint through the authenticated token boundary. Returns
+/// `None` when the connector has no probe path; callers keep the prior health.
+async fn probe_connector_health(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+) -> Option<ConnectorHealth> {
+    match connector_id {
+        "google-drive" | "gmail" | "google-calendar" => {
+            Some(crate::google::probe_health(app, connector_id).await)
+        }
+        "github" | "vercel" | "linear" => {
+            Some(connector_api::probe_health(app, connector_id).await)
+        }
+        "notion" | "slack" => Some(collaboration_connectors::probe_health(app, connector_id).await),
+        _ => None,
     }
 }
 
@@ -890,6 +959,68 @@ pub async fn complete_connector_auth(
     complete_auth(&app, entry.id, request).await
 }
 
+/// Begin a public-client (loopback PKCE) OAuth flow end-to-end: bind a loopback
+/// redirect, start the transaction, open the browser, accept one callback, and
+/// complete the token exchange inside the credential boundary. Brokered
+/// providers (GitHub, Vercel, Linear, Notion, Slack) require the auth broker
+/// and must use `start_connector_auth` instead — this command fails closed for
+/// them so the shell can surface a configured-auth-required state.
+#[tauri::command]
+pub async fn begin_connector_oauth(
+    app: tauri::AppHandle,
+    request: ConnectorAuthRequest,
+) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    let entry = require_connector(&request.connector_id)?;
+    if entry.auth_mode != "oauth-pkce" {
+        return Err(command_error(
+            "configuration-required",
+            entry.id,
+            &redact_connector_text(entry.setup_message),
+            false,
+        ));
+    }
+    let declared = entry
+        .scopes
+        .iter()
+        .map(|scope| scope.0)
+        .collect::<BTreeSet<_>>();
+    let scopes = match request.requested_scopes.as_ref() {
+        Some(scopes) if scopes.is_empty() => {
+            return Err(command_error(
+                "invalid-request",
+                entry.id,
+                "Incremental authorization requires at least one scope.",
+                false,
+            ))
+        }
+        Some(scopes) => {
+            let mut selected = Vec::new();
+            for scope in scopes {
+                let normalized = normalize_spaces(scope);
+                if !declared.contains(normalized.as_str()) {
+                    return Err(command_error(
+                        "invalid-request",
+                        entry.id,
+                        "Requested OAuth scope is not declared by this connector.",
+                        false,
+                    ));
+                }
+                if !selected.contains(&normalized) {
+                    selected.push(normalized);
+                }
+            }
+            selected
+        }
+        None => entry
+            .scopes
+            .iter()
+            .filter(|scope| scope.3)
+            .map(|scope| scope.0.to_string())
+            .collect(),
+    };
+    oauth_loopback::run_loopback_oauth(&app, entry.id, entry.auth_mode, scopes, request).await
+}
+
 #[tauri::command]
 pub async fn clear_connector_auth(
     app: tauri::AppHandle,
@@ -906,15 +1037,20 @@ pub async fn refresh_connector_health(
     connector_id: String,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
+    // Refresh first: this rotates expiring tokens and fails closed when the
+    // connection is missing or the refresh is rejected. A failed refresh is a
+    // real provider error, not a fixture fallback.
     let _ = refresh_connection(&app, entry.id).await?;
-    if matches!(entry.id, "notion" | "slack") {
-        collaboration_connectors::validate_identity(&app, entry.id).await?;
-    }
     let connections_path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
-    Ok(build_manifest(
+    // Probe live provider health through the authenticated token boundary. A
+    // probe failure is surfaced as a degraded/error health state, never as a
+    // fixture or a fake "connected" claim.
+    let health = probe_connector_health(&app, entry.id).await;
+    Ok(build_manifest_with_health(
         entry,
         &NativeCredentialBoundary { connections_path },
+        health,
     ))
 }
 

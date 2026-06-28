@@ -575,6 +575,30 @@ export interface AutomationRule {
   requiresApproval: boolean;
 }
 
+/**
+ * A weekday a user-created schedule may fire on. Kept in the shared protocol so
+ * the shell, the runtime snapshot contract, and the Rust normalization layer
+ * all reference one closed vocabulary.
+ */
+export type ScheduleWeekday = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
+
+/**
+ * A user-created schedule carried in the runtime snapshot. Non-secret: only the
+ * task name/description, when it fires, and bookkeeping. Execution is still
+ * linked up at runtime so a connected model can pick it up; nothing auto-runs.
+ */
+export interface ScheduleEntry {
+  id: string;
+  name: string;
+  description: string;
+  day: ScheduleWeekday;
+  /** "HH:MM", 24-hour. */
+  time: string;
+  enabled: boolean;
+  /** ISO timestamp. */
+  createdAt: string;
+}
+
 export interface ApprovalAuditEntry {
   id: string;
   requestId: string;
@@ -592,6 +616,12 @@ export interface RuntimeSnapshot {
   dismissedApprovalIds: string[];
   approvalRules: ApprovalGrant[];
   automationStatuses: Record<string, AutomationStatus>;
+  /**
+   * User-created schedules. Non-secret state persisted through the snapshot so
+   * it survives a desktop restart (the snapshot is the source of truth for
+   * non-secret state in Tauri). LocalStorage carries them in preview only.
+   */
+  schedules: ScheduleEntry[];
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;

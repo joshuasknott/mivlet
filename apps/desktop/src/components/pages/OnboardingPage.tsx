@@ -12,11 +12,26 @@ import {
 import { useState, useEffect } from "react";
 import type { BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
-import { ConnectorIcon } from "../ConnectorIcon";
 import { FableLogo } from "../FableLogo";
 
 /**
- * Three-path AI-backend onboarding shell with Connectors setup.
+ * Local-first AI-backend onboarding shell.
+ *
+ * Honesty rules this component:
+ *   - No fake account creation or password. The only step before choosing a
+ *     backend is an OPTIONAL local profile (name/email), stored as shell state.
+ *     Nothing leaves the device; no hosted account is created.
+ *   - The API-key path (OpenAI, Anthropic, Gemini, xAI, OpenRouter) is the
+ *     primary, runnable path — Fable owns that agent loop once a key is stored.
+ *   - Subscription/CLI providers (Codex, Cursor, Copilot, Grok) are listed but
+ *     gated as unavailable/setup-required until a real, capability-bearing
+ *     runtime is connected. There is no fake "Connect" button that pretends to
+ *     link a subscription here; setup routes to the real Connectors/Settings.
+ *   - Connector (workspace tools) setup is NOT part of onboarding. It is
+ *     optional and lives on the real Connectors page (`onOpenConnectors`).
+ *
+ * Secrets are never held in React state beyond the connection form: the key is
+ * handed to the Rust credential boundary via `onConnect` and never read back.
  */
 export function OnboardingPage({
   providers,
@@ -24,7 +39,8 @@ export function OnboardingPage({
   status,
   onConnect,
   onSkip,
-  onSubmitCredentials
+  onSubmitProfile,
+  onOpenConnectors
 }: {
   providers: BackendProvider[];
   connectedBackendIds: string[];
@@ -33,28 +49,36 @@ export function OnboardingPage({
    *  The secret is handed to the Rust credential boundary and never read back. */
   onConnect: (providerId: string, secret?: string) => void;
   onSkip: () => void;
-  onSubmitCredentials?: (name: string, email: string) => void;
+  /** Apply the optional local profile (name/email) to shell state. No auth. */
+  onSubmitProfile?: (name: string, email: string) => void;
+  /** Route to the real Connectors page for optional workspace-tool setup. */
+  onOpenConnectors?: () => void;
 }) {
-  const [step, setStep] = useState<"credentials" | "choice" | "subscription" | "apikey" | "connection" | "connectors">("credentials");
+  // Steps: an optional local profile, then the backend choice. The connection
+  // step is only reachable for the runnable native-API key path.
+  const [step, setStep] = useState<"profile" | "choice" | "subscription" | "apikey" | "connection">(
+    "profile"
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Track the user-selected provider to connect
+  // Track the user-selected provider to connect (native-API only).
   const [selectedProvider, setSelectedProvider] = useState<BackendProvider | null>(null);
   const [secretKey, setSecretKey] = useState("");
 
-  // Track mock connector toggles
-  const [connectedConnectors, setConnectedConnectors] = useState<string[]>([]);
-
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
+
+  // Subscription/CLI providers: gated (no real runtime connected unless the
+  // boundary already reports it as capability-bearing). These are shown for
+  // awareness, not as a runnable onboarding path.
   const subscriptionProviders = providers.filter(
     (provider) => provider.id === "codex" || provider.id === "cursor" || provider.id === "copilot" || provider.id === "grok"
   );
+  // Native API-key providers: the primary, runnable path. Fable owns the loop.
   const nativeProviders = providers.filter((provider) => provider.backendType === "native-api");
 
-  // Reset loading status when connection completes
+  // Reset loading status when a connection completes.
   useEffect(() => {
     if (selectedProvider && connectedBackendIds.includes(selectedProvider.id)) {
       setPendingProviderId(null);
@@ -73,49 +97,20 @@ export function OnboardingPage({
     onConnect(provider.id, secret);
   };
 
-  const handleCredentialsSubmit = (e: React.FormEvent) => {
+  const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      setValidationError("Name is required");
-      return;
-    }
-    if (!email.trim()) {
-      setValidationError("Email is required");
-      return;
-    }
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      setValidationError("Invalid email address");
-      return;
-    }
-    if (!password || password.length < 6) {
-      setValidationError("Password must be at least 6 characters");
+    // Local profile only: name is optional, email is validated only if entered.
+    // There is no password and no account is created.
+    if (email.trim() && !/^\S+@\S+\.\S+$/.test(email)) {
+      setValidationError("Enter a valid email, or leave it blank.");
       return;
     }
     setValidationError(null);
-    if (onSubmitCredentials) {
-      onSubmitCredentials(name, email);
+    if (onSubmitProfile) {
+      onSubmitProfile(name.trim(), email.trim());
     }
     setStep("choice");
   };
-
-  const toggleConnector = (connectorId: string) => {
-    setConnectedConnectors((current) =>
-      current.includes(connectorId)
-        ? current.filter((id) => id !== connectorId)
-        : [...current, connectorId]
-    );
-  };
-
-  const connectorsList = [
-    { id: "github", label: "GitHub" },
-    { id: "vercel", label: "Vercel" },
-    { id: "google-drive", label: "Google Drive" },
-    { id: "notion", label: "Notion" },
-    { id: "gmail", label: "Gmail" },
-    { id: "slack", label: "Slack" },
-    { id: "google-calendar", label: "Google Calendar" },
-    { id: "linear", label: "Linear" }
-  ];
 
   return (
     <main className="og-frame" aria-label="Fable onboarding">
@@ -127,13 +122,11 @@ export function OnboardingPage({
               className="og-progress-fill"
               style={{
                 width:
-                  step === "credentials"
-                    ? "20%"
+                  step === "profile"
+                    ? "33%"
                     : step === "choice"
-                    ? "40%"
-                    : step === "subscription" || step === "apikey"
-                    ? "60%"
-                    : step === "connection"
+                    ? "66%"
+                    : step === "apikey" || step === "subscription"
                     ? "80%"
                     : "100%"
               }}
@@ -141,43 +134,34 @@ export function OnboardingPage({
           </div>
           <div className="og-progress-text">
             <span>
-              {step === "credentials"
-                ? "Step 1: Account setup"
+              {step === "profile"
+                ? "Step 1: Local profile"
                 : step === "choice"
-                ? "Step 2: Choose Backend"
-                : step === "subscription" || step === "apikey"
-                ? "Step 3: Choose Provider"
-                : step === "connection"
-                ? "Step 4: Connection"
-                : "Step 5: Connectors"}
+                ? "Step 2: Choose backend"
+                : step === "apikey" || step === "subscription"
+                ? "Step 3: Choose provider"
+                : "Step 4: Connection"}
             </span>
             <span>
-              {step === "credentials"
-                ? "20%"
-                : step === "choice"
-                ? "40%"
-                : step === "subscription" || step === "apikey"
-                ? "60%"
-                : step === "connection"
-                ? "80%"
-                : "100%"}
+              {step === "profile" ? "33%" : step === "choice" ? "66%" : step === "connection" ? "100%" : "80%"}
             </span>
           </div>
         </div>
 
-        {step === "credentials" && (
+        {step === "profile" && (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <span className="og-greeting" aria-hidden="true">
               <FableLogo className="brand-lockup--onboarding" />
             </span>
-            <h1 id="onboarding-title">Create your Fable account</h1>
+            <h1 id="onboarding-title">Set up your local Fable workspace</h1>
             <p className="og-lede">
-              Fable runs agent loops locally and routes consequential actions through approvals. Let's create your account.
+              Fable runs on this device. No account is created and nothing is sent to a hosted
+              service to begin. Add an optional name and email for local display, or skip ahead.
             </p>
 
-            <form className="og-form" onSubmit={handleCredentialsSubmit}>
+            <form className="og-form" onSubmit={handleProfileSubmit}>
               <label className="og-field">
-                <span>Name</span>
+                <span>Name (optional)</span>
                 <input
                   type="text"
                   aria-label="Name"
@@ -189,7 +173,7 @@ export function OnboardingPage({
                 />
               </label>
               <label className="og-field">
-                <span>Email</span>
+                <span>Email (optional)</span>
                 <input
                   type="email"
                   aria-label="Email"
@@ -198,18 +182,6 @@ export function OnboardingPage({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="email"
-                />
-              </label>
-              <label className="og-field">
-                <span>Password</span>
-                <input
-                  type="password"
-                  aria-label="Password"
-                  id="og-password"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="new-password"
                 />
               </label>
 
@@ -241,32 +213,14 @@ export function OnboardingPage({
             </span>
             <h1 id="onboarding-title">Connect one AI backend to continue</h1>
             <p className="og-lede">
-              Fable reaches your existing subscriptions through their official runtimes. Choose how you would like to connect.
+              Bring an API key to run Fable's agent loop directly. Subscription and CLI-backed
+              providers are listed but require their real runtime to be set up first.
             </p>
 
             <div className="og-paths og-paths--3cols">
               <button
                 type="button"
-                className="og-path"
-                onClick={() => setStep("subscription")}
-              >
-                <div className="og-path__heading">
-                  <span className="og-path__icon" aria-hidden="true">
-                    <Plugs size={18} />
-                  </span>
-                  <span>
-                    <strong>Use a subscription</strong>
-                    <small>Codex, Cursor, GitHub Copilot, or Grok</small>
-                  </span>
-                </div>
-                <p className="og-path__note">
-                  Use your existing service plans. Connecting any one clears the gate.
-                </p>
-              </button>
-
-              <button
-                type="button"
-                className="og-path"
+                className="og-path og-path--primary"
                 onClick={() => setStep("apikey")}
               >
                 <div className="og-path__heading">
@@ -279,7 +233,28 @@ export function OnboardingPage({
                   </span>
                 </div>
                 <p className="og-path__note">
-                  Direct API integrations. Keys are held by your local credential boundary.
+                  Direct API integrations. Fable owns the agent loop. Keys are held by your local
+                  credential boundary.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                className="og-path"
+                onClick={() => setStep("subscription")}
+              >
+                <div className="og-path__heading">
+                  <span className="og-path__icon" aria-hidden="true">
+                    <Plugs size={18} />
+                  </span>
+                  <span>
+                    <strong>Use a subscription or CLI</strong>
+                    <small>Codex, Cursor, GitHub Copilot, or Grok</small>
+                  </span>
+                </div>
+                <p className="og-path__note">
+                  Requires the provider's real runtime to be installed and connected. Setup is
+                  available, but these are not one-click here.
                 </p>
               </button>
 
@@ -293,13 +268,11 @@ export function OnboardingPage({
                     <small>Planned — not available yet.</small>
                   </span>
                 </div>
-                <p className="og-path__note">
-                  Local models are on the roadmap but disabled for now.
-                </p>
+                <p className="og-path__note">Local models are on the roadmap but disabled for now.</p>
               </div>
             </div>
 
-            <button type="button" className="og-back-btn button button--ghost" onClick={() => setStep("credentials")}>
+            <button type="button" className="og-back-btn button button--ghost" onClick={() => setStep("profile")}>
               <ArrowLeft size={14} /> Back
             </button>
           </section>
@@ -310,9 +283,11 @@ export function OnboardingPage({
             <span className="og-greeting" aria-hidden="true">
               <FableLogo className="brand-lockup--onboarding" />
             </span>
-            <h1 id="onboarding-title">Use a subscription</h1>
+            <h1 id="onboarding-title">Use a subscription or CLI</h1>
             <p className="og-lede">
-              Select a subscription provider to connect. Codex, Cursor, GitHub Copilot, or Grok are supported.
+              These providers require their real runtime to be installed and connected before Fable
+              can route through them. None can be "connected" from this screen until that runtime is
+              present and capability-bearing.
             </p>
 
             <div style={{ width: "100%", maxWidth: "600px", marginTop: "24px" }}>
@@ -322,7 +297,7 @@ export function OnboardingPage({
                     <SubscriptionProviderRow
                       provider={provider}
                       connected={connectedBackendIds.includes(provider.id)}
-                      onSetUp={() => handleSelectProvider(provider)}
+                      onOpenConnectors={onOpenConnectors}
                     />
                   </li>
                 ))}
@@ -342,7 +317,8 @@ export function OnboardingPage({
             </span>
             <h1 id="onboarding-title">Bring an API key</h1>
             <p className="og-lede">
-              Select an API key provider to connect. Credentials never leave this device.
+              Select a provider and add its API key. Credentials are held by Fable's local credential
+              boundary and never leave this device.
             </p>
 
             <div style={{ width: "100%", maxWidth: "600px", marginTop: "24px" }}>
@@ -371,16 +347,14 @@ export function OnboardingPage({
               <FableLogo className="brand-lockup--onboarding" />
             </span>
             <h1 id="onboarding-title">Connect {selectedProvider.label}</h1>
-            <p className="og-lede">
-              {selectedProvider.description}
-            </p>
+            <p className="og-lede">{selectedProvider.description}</p>
 
-            {selectedProvider.installHint && (
+            {selectedProvider.installHint ? (
               <div className="og-provider__install-banner">
                 <WarningCircle size={14} />
                 <span>{selectedProvider.installHint}</span>
               </div>
-            )}
+            ) : null}
 
             <div className="og-connection-box">
               {connectedBackendIds.includes(selectedProvider.id) ? (
@@ -389,14 +363,22 @@ export function OnboardingPage({
                   <h2>Connected successfully!</h2>
                   <p>Fable is now paired with {selectedProvider.label}.</p>
 
-                  <button
-                    type="button"
-                    className="og-submit button button--primary"
-                    style={{ marginTop: "24px" }}
-                    onClick={() => setStep("connectors")}
-                  >
-                    Continue to connectors
-                  </button>
+                  <div className="og-actions-row" style={{ marginTop: "24px" }}>
+                    <button
+                      type="button"
+                      className="og-btn-primary button button--primary"
+                      onClick={onSkip}
+                    >
+                      Start using Fable
+                    </button>
+                    <button
+                      type="button"
+                      className="og-btn-secondary button button--secondary"
+                      onClick={() => (onOpenConnectors ? onOpenConnectors() : onSkip())}
+                    >
+                      Set up workspace connectors (optional)
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <form
@@ -476,50 +458,6 @@ export function OnboardingPage({
           </section>
         )}
 
-        {step === "connectors" && (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <span className="og-greeting" aria-hidden="true">
-              <FableLogo className="brand-lockup--onboarding" />
-            </span>
-            <h1 id="onboarding-title">Connect your workspace tools</h1>
-            <p className="og-lede">
-              Grant Fable permission to query your documents, code, and calendar contextually.
-            </p>
-
-            <div className="og-connectors-grid">
-              {connectorsList.map((connector) => {
-                const isConnected = connectedConnectors.includes(connector.id);
-                return (
-                  <button
-                    key={connector.id}
-                    type="button"
-                    className={`og-connector-card${isConnected ? " og-connector-card--connected" : ""}`}
-                    onClick={() => toggleConnector(connector.id)}
-                    aria-label={`Connect ${connector.label}`}
-                  >
-                    <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
-                      <ConnectorIcon id={connector.id} />
-                    </span>
-                    <span className="og-connector-name">{connector.label}</span>
-                    <span className="og-connector-status">
-                      {isConnected ? "Connected" : "Disconnected"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="og-actions-row">
-              <button type="button" className="og-btn-primary button button--primary" onClick={onSkip}>
-                Finish setup
-              </button>
-              <button type="button" className="og-btn-secondary button button--secondary" onClick={onSkip}>
-                Skip for now
-              </button>
-            </div>
-          </section>
-        )}
-
         <p className="og-trust" aria-label="Onboarding trust note">
           <LockSimple size={14} />
           Credentials are held by Fable's local credential boundary and never leave this device.
@@ -529,17 +467,26 @@ export function OnboardingPage({
   );
 }
 
+/**
+ * A subscription/CLI provider row. It is never "one-click connectable" from
+ * onboarding: unless the credential boundary already reports it connected and
+ * capability-bearing, the action routes the user to real setup (the Connectors
+ * page) rather than faking a connection.
+ */
 function SubscriptionProviderRow({
   provider,
   connected,
-  onSetUp
+  onOpenConnectors
 }: {
   provider: BackendProvider;
   connected: boolean;
-  onSetUp: () => void;
+  onOpenConnectors?: () => void;
 }) {
-  const installRequired = provider.authState === "install-required";
   const capabilityLabels = providerCapabilityLabels(provider);
+  // Capability-bearing means the real runtime resolved real capabilities — i.e.
+  // it is genuinely connected, not just needs-auth/install-required preview state.
+  const capabilityBearing = capabilityLabels.length > 0;
+  const installRequired = provider.authState === "install-required";
 
   return (
     <article
@@ -555,14 +502,23 @@ function SubscriptionProviderRow({
           </span>
         ) : null}
         {capabilityLabels.length > 0 ? (
-          <span className="og-provider__caps">
-            {capabilityLabels.slice(0, 4).join(" · ")}
-          </span>
+          <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
         ) : null}
       </div>
-      <button type="button" onClick={onSetUp} disabled={connected}>
-        {connected ? "Connected" : "Set up"}
-      </button>
+      {connected && capabilityBearing ? (
+        <span className="og-provider__connected-badge">
+          <CheckCircle size={14} weight="fill" color="var(--positive)" /> Connected
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onOpenConnectors?.()}
+          disabled={!onOpenConnectors}
+          title="Set up requires the provider's real runtime."
+        >
+          Set up in Connectors
+        </button>
+      )}
     </article>
   );
 }
@@ -587,9 +543,7 @@ function NativeApiKeyRow({
         <strong>{provider.label}</strong>
         <small>{provider.description}</small>
         {capabilityLabels.length > 0 ? (
-          <span className="og-provider__caps">
-            {capabilityLabels.slice(0, 4).join(" · ")}
-          </span>
+          <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
         ) : null}
       </div>
       <button type="button" onClick={onSetUp} disabled={connected}>
