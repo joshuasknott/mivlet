@@ -63,3 +63,15 @@ export {
   type RetrievalSource,
   type RetrieveOptions
 } from "./retrieval";
+
+// --- context assembler (additive) -----------------------------------------
+export {
+  artifactFromRun,
+  assembleContext,
+  type AssembleContextInput,
+  type AssembledContext,
+  type AssembledCitation,
+  type ContextAuthorizationRules,
+  type ContextContribution,
+  type ContextContributionReason
+} from "./context";
