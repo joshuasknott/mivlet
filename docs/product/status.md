@@ -25,7 +25,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   out-of-scope sources are excluded.
 - Approvals: Rust commands and shell UI support once/session/rule/modify/deny decisions, audit entries, approval rules, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
-- Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage.
+- Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage. Schedules and workflows still use raw JSON files (`scheduler-store.json` and `workflow-runs.json`/`workflow-definitions.json`).
 - Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Native API-key providers connect through the Rust credential boundary. Codex can run through `codex app-server`; Cursor and Grok can run through ACP CLI processes when the corresponding CLI is installed and signed in. GitHub Copilot remains cataloged but not runnable until its SDK adapter lands.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
 - Native API agent loop: TypeScript owns provider request shaping and a bounded
@@ -45,22 +45,29 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Connector writes: fixture-side connector write preparation creates approval requests for GitHub, Vercel, Gmail, Slack, and Calendar actions instead of directly executing them.
 - Tauri connector runtime: external connector commands expose status/auth/health/search/import/action boundaries. Google public-client connectors use loopback PKCE and OS secure storage; confidential-client connectors (GitHub, Vercel, Notion, Slack, Linear) are broker-gated and fail closed with `configuration-required` until the auth broker and provider configuration exist.
 - Google connectors: Drive, Gmail, and Calendar expose authenticated reads and approval-gated writes, incremental scopes, refresh-token preservation, explicit active-account selection, bounded responses, cancellation, and normalized provider errors. External use still requires Google Cloud configuration and applicable verification.
-- Schedules page: users can create, pause/resume, and delete local schedule records. Records persist locally; the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the provider-neutral `AgentBackend` path when a runnable backend is connected.
+- Schedules page: users can create, pause/resume, and delete local schedule records. Records persist locally in raw JSON; the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the provider-neutral `AgentBackend` path when a runnable backend is connected.
 - CI file: `.github/workflows/ci.yml` exists and uses pnpm for typecheck, tests, build, Tauri check, Rust tests, clippy, and fmt on Windows.
 - Tests exist across desktop, connectors, native API, local files, knowledge search, backend registry, and Rust runtime modules.
 
 ## Runtime Availability Matrix
 
-| Area | Current state |
-| --- | --- |
-| Local files, approvals, memory controls, knowledge search, runtime snapshots | Live local runtime paths. |
-| Native API-key backends | Live when the user supplies a provider API key; keys stay in the local credential boundary. |
-| Google Drive, Gmail, Google Calendar | Live provider egress exists, but only after Google desktop OAuth configuration and a connected test account. |
-| GitHub, Vercel, Notion, Slack, Linear | Provider egress code exists behind the credential boundary, but auth is broker-gated and fails closed until the deferred auth broker and provider-console callbacks exist. |
-| Browser preview connectors | Explicit synthetic fixture behavior only; never proof of a live provider connection. |
-| Encrypted SQLite | Active in the Tauri production path with keyring-backed AES-GCM payloads and legacy migration. |
-| Schedules | Local scheduler, queue, and headless prompt execution are implemented; execution depends on a connected runnable backend. |
-| Voice, Convex collaboration | Incomplete or preview-only as described below. |
+| Area | Category | Details / Location |
+| --- | --- | --- |
+| Local files, approvals, memory controls, knowledge search, runtime snapshots | **Finished** | Live local runtime paths in Tauri. Monolithic JSON documents intercept-routed to SQLite `preferences` table. |
+| Encrypted SQLite Core | **Finished** | Active in production Tauri path (keyring-backed AES-256-GCM vault). |
+| Native API-key Backends (BYOK) | **Finished** | Live OpenAI, Anthropic, Gemini, xAI, OpenRouter model execution when keys are supplied to local keyring. |
+| Schedules Core | **Finished** | Local scheduler tick, leasing, queueing, and headless prompt execution are fully functional (depends on connected runnable backend). |
+| Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
+| ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
+| Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
+| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS code exists, but fails closed as the auth broker and callback URLs are deferred (Missing configuration). |
+| Browser Preview Mode | **Preview/fixture-only** | Purely synthetic fixture responses. Persists via `localStorage` instead of SQLite. |
+| Mobile Remote Control | **Preview/fixture-only** | Sidebar UI button triggers state/accessibility announcement change only; no socket, protocol, or mobile backend. |
+| Schedules & Workflows SQLite migration | **Missing** | Structured database tables defined in schema, but runtime execution still falls back to raw JSON files (`scheduler-store.json`, `workflow-runs.json`). |
+| GitHub Copilot Execution | **Missing** | Cataloged in provider list, but execution adapter/runner is not implemented. |
+| Local Model Execution | **Missing** | Onboarding UI labels local models as planned and disabled. |
+| Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
+| Voice, Convex collaboration | **Missing** | Voice is UI toggle only (no capture/pipeline). Convex is optional and lacks schema/collab code. |
 
 ## Partially Implemented Or Preview-Only
 
@@ -72,7 +79,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   status, scope, account, freshness, local file/folder import, connector entry,
   refresh, pin, disable/delete, explicit memory promotion, edit, export,
   disable, and forget controls.
-- Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back.
+- Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back. The schedules are backed by raw JSON file storage.
 - Voice is a toggle and status affordance; no dictation, audio capture, realtime voice provider, or transcript pipeline was found.
 - Convex is optional via `VITE_CONVEX_URL`, but no Convex schema or collaboration implementation was found in this repo.
 
@@ -81,7 +88,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - No deployed production auth broker or externally validated confidential OAuth session.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the deferred auth broker.
-- Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite. Backend and connector credentials remain separately handled by OS secure storage.
+- Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, and raw JSON files for schedules/workflows. Backend and connector credentials remain separately handled by OS secure storage.
 - No local model runtime path. The onboarding UI labels local models as planned and disabled.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
 - No product website, legal pages, downloads page, or public release pipeline in the audited files.

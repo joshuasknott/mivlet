@@ -6,8 +6,7 @@ Fable's first-wave external connectors are GitHub, Vercel, Google Drive,
 Notion, Gmail, Slack, Google Calendar, and Linear. Local Files remains a native
 local connector.
 
-The browser preview uses synthetic fixture records and labels them `fixture`.
-The desktop runtime uses authenticated production paths when provider
+The browser preview uses synthetic fixture records (labeled `fixture`) and persists state in `localStorage` instead of the encrypted SQLite store. The desktop runtime uses authenticated production paths when provider
 configuration is available and the user connects an account. Fable must never
 translate a missing credential into a connected state, and production desktop
 search/read/write paths do not silently fall back to fixture data.
