@@ -17,7 +17,7 @@ import type {
  * shapes without App.tsx owning them.
  */
 
-export type UtilityItem = "Connectors" | "Knowledge" | "Schedules";
+export type UtilityItem = "Departments" | "Connectors" | "Knowledge" | "Schedules";
 export type AccountPage = "Profile" | "Settings";
 export type WorkspacePage = UtilityItem | AccountPage;
 

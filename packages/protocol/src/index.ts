@@ -1363,6 +1363,65 @@ export interface WorkflowDefinition {
   updatedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Departments: narrow user-facing workflow lanes.
+// ---------------------------------------------------------------------------
+
+export type DepartmentId = "research" | "ship" | (string & {});
+export type PipelineId = string & {};
+export type ConnectorNeedAccess = "read" | "write";
+export type ApprovalRequirementKind = "none" | "fresh-explicit" | "high-risk";
+
+export interface ConnectorNeed {
+  connectorId: ConnectorId;
+  access: ConnectorNeedAccess;
+  reason: string;
+  optional?: boolean;
+}
+
+export interface ScheduleTriggerNeed {
+  kind: "manual" | "scheduled";
+  description: string;
+}
+
+export interface ApprovalRequirement {
+  kind: ApprovalRequirementKind;
+  reason: string;
+}
+
+export interface RuntimeRoute {
+  kind: "agent-backend";
+  policy: ScheduledExecutionRoute["policy"];
+  permissionMode: PermissionMode;
+}
+
+export interface PipelineStep {
+  id: string;
+  title: string;
+  description: string;
+  workflowStepId: string;
+}
+
+export interface Pipeline {
+  id: PipelineId;
+  departmentId: DepartmentId;
+  name: string;
+  description: string;
+  steps: PipelineStep[];
+  connectorNeeds: ConnectorNeed[];
+  scheduleTrigger: ScheduleTriggerNeed;
+  approvalRequirement: ApprovalRequirement;
+  runtimeRoute: RuntimeRoute;
+  workflow: WorkflowDefinition;
+}
+
+export interface Department {
+  id: DepartmentId;
+  name: string;
+  summary: string;
+  pipelines: Pipeline[];
+}
+
 export type WorkflowRunStatus =
   | "queued"
   | "running"

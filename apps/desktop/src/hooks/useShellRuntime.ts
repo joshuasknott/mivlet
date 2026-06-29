@@ -595,6 +595,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // A page view is any first-class utility page or account page. When a page
   // is active the composer is hidden and the dedicated page renders instead.
   const activePage: WorkspacePage | null =
+    activeUtility === "Departments" ||
     activeUtility === "Knowledge" ||
     activeUtility === "Schedules" ||
     activeUtility === "Connectors"

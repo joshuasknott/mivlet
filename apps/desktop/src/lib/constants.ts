@@ -1,4 +1,4 @@
-import { Lightning, PuzzlePiece, Stack } from "@phosphor-icons/react";
+import { GitBranch, Lightning, PuzzlePiece, Stack } from "@phosphor-icons/react";
 import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors";
 
 /**
@@ -28,6 +28,7 @@ export const ACCEPTED_LOCAL_KNOWLEDGE_FILES = SUPPORTED_LOCAL_FILE_EXTENSIONS.ma
 ).join(",");
 
 export const utilityItems = [
+  { label: "Departments", icon: GitBranch },
   { label: "Connectors", icon: PuzzlePiece },
   { label: "Knowledge", icon: Stack },
   { label: "Schedules", icon: Lightning }

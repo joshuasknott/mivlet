@@ -23,6 +23,7 @@ import { KnowledgePage } from "./components/pages/KnowledgePage";
 import { SchedulesPage } from "./components/pages/SchedulesPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
+import { DepartmentsPage } from "./components/pages/DepartmentsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import type { SettingsTab } from "./components/pages/SettingsPage";
 import { VoiceReview } from "./components/VoiceReview";
@@ -162,6 +163,8 @@ export function App() {
 
   const renderPage = () => {
     switch (runtime.activePage) {
+      case "Departments":
+        return <DepartmentsPage runtime={runtime} />;
       case "Connectors":
         return <ConnectorsPage runtime={runtime} />;
       case "Knowledge":
