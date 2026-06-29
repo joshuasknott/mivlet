@@ -186,21 +186,53 @@ pub const MAX_SCHEDULER_QUEUE_ENTRIES: usize = 500;
 pub const MAX_JOB_ATTEMPTS: usize = 20;
 pub const SCHEDULER_TICK_SECS: u64 = 5;
 pub const SCHEDULER_LEASE_MS: i64 = 30_000;
+/// Lease extension granted when a run acknowledges `running`. Long enough that a
+/// healthy long run is not re-queued by the five-second tick, short enough that a
+/// crashed process recovers the entry within minutes.
+pub const RUNNING_LEASE_MS: i64 = 15 * 60 * 1_000;
 pub const SCHEDULER_MAX_RETRIES: u32 = 2;
+/// Base backoff for transient retry. Each retry waits RETRY_BASE_MS * 2^(n-1).
+pub const RETRY_BASE_MS: i64 = 30_000;
+/// Bounded ledger of seen occurrence dedup keys, supplementing the in-queue
+/// check so a completed-then-removed occurrence can never be re-queued.
+pub const MAX_OCCURRENCE_LEDGER: usize = 200;
 pub const SCHEDULED_JOB_STATUSES: [&str; 3] = ["active", "paused", "deleted"];
 pub const MISSED_RUN_POLICIES: [&str; 3] = ["skip", "run-once", "run-all"];
-pub const JOB_ATTEMPT_STATUSES: [&str; 4] = ["running", "succeeded", "failed", "cancelled"];
+pub const JOB_ATTEMPT_STATUSES: [&str; 5] = [
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "blocked-auth",
+];
+/// Full queue-entry state vocabulary. The Rust store is the authority (entry
+/// states are never accepted from the wire — they are advanced by `run_tick`
+/// and `report_job_attempt`). Kept as a named constant so the vocabulary is
+/// discoverable and stays in lock-step with the TS `SchedulerJobState` mirror.
+#[allow(dead_code)]
+pub const SCHEDULER_QUEUE_STATES: [&str; 9] = [
+    "queued",
+    "leased",
+    "running",
+    "completed",
+    "failed",
+    "blocked-auth",
+    "cancelled",
+    "done",
+    "dead",
+];
 
 // Workflow-run store constants.
 pub const WORKFLOW_RUN_STORE_VERSION: u8 = 1;
 pub const MAX_WORKFLOW_RUNS: usize = 200;
 pub const MAX_WORKFLOW_STEPS: usize = 24;
-pub const WORKFLOW_RUN_STATUSES: [&str; 6] = [
+pub const WORKFLOW_RUN_STATUSES: [&str; 7] = [
     "queued",
     "running",
     "awaiting-approval",
     "completed",
     "failed",
+    "blocked-auth",
     "cancelled",
 ];
 
@@ -780,6 +812,17 @@ fn default_permission_mode() -> String {
 // execution across multiple Fable windows.
 // ---------------------------------------------------------------------------
 
+/// The frozen, non-secret execution route captured when a schedule is created.
+/// Carries only provider/model ids + permission mode — never keys or tokens.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduledExecutionRoute {
+    pub policy: String,
+    pub backend_id: String,
+    pub model_id: String,
+    pub permission_mode: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledJob {
@@ -798,6 +841,10 @@ pub struct ScheduledJob {
     pub last_run_id: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Frozen execution route (backend/model/permission). Optional for backward
+    /// compatibility with jobs created before this field existed.
+    #[serde(default)]
+    pub execution: Option<ScheduledExecutionRoute>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -809,6 +856,12 @@ pub struct JobAttempt {
     pub started_at: String,
     pub finished_at: Option<String>,
     pub error: Option<String>,
+    /// Whether a failed attempt is transient (retry) or permanent (dead).
+    #[serde(default)]
+    pub retryable: Option<bool>,
+    /// Fencing token proving this attempt corresponds to the current lease.
+    #[serde(default)]
+    pub lease_token: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -822,6 +875,21 @@ pub struct SchedulerQueueEntry {
     pub lease_expires_at: String,
     pub attempts: Vec<JobAttempt>,
     pub deduplication_key: String,
+    /// Fencing token proving a report/renew call corresponds to the current
+    /// lease. Empty on pre-token entries; set whenever a lease is taken.
+    #[serde(default)]
+    pub lease_token: String,
+    /// Earliest retry time (epoch ms ISO) after a transient failure; honored by
+    /// the tick so retries respect exponential backoff.
+    #[serde(default)]
+    pub available_at: String,
+    /// Last error message (truncated, no secrets) for failed/blocked entries.
+    #[serde(default)]
+    pub last_error: String,
+    /// Snapshot of the job's execution route at enqueue time, so the entry is
+    /// self-describing for the run-request event without a job lookup.
+    #[serde(default)]
+    pub execution: Option<ScheduledExecutionRoute>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -832,6 +900,10 @@ pub struct SchedulerStore {
     pub queue: Vec<SchedulerQueueEntry>,
     pub instance_id: String,
     pub updated_at: String,
+    /// Bounded ledger of seen occurrence dedup keys. Supplements the in-queue
+    /// check so a completed-then-removed occurrence can never be re-queued.
+    #[serde(default)]
+    pub occurrence_ledger: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

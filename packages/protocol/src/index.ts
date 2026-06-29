@@ -1070,6 +1070,25 @@ export type ScheduleTrigger =
 export type ScheduledJobStatus = "active" | "paused" | "deleted";
 
 /**
+ * The frozen, non-secret execution route captured when a schedule is created.
+ *
+ * A schedule pins which backend/model/permission runs it so scheduled work
+ * never silently switches provider, model, or permission mode. At create time,
+ * if a backend is connected the route is `pinned` to the current backend/model;
+ * otherwise it is `current-default` and resolved against whatever is connected
+ * at execution time.
+ *
+ * SECRET INVARIANT: this carries only provider/model ids + permission mode —
+ * never keys, tokens, or credentials.
+ */
+export interface ScheduledExecutionRoute {
+  policy: "pinned" | "current-default";
+  backendId: string;
+  modelId: string;
+  permissionMode: PermissionMode;
+}
+
+/**
  * A durable scheduled job. Supersedes the bare ScheduleEntry for execution.
  * ScheduleEntry remains for the legacy snapshot; this is the engine's record.
  */
@@ -1085,6 +1104,8 @@ export interface ScheduledJob {
   trigger: ScheduleTrigger;
   missedRunPolicy: MissedRunPolicy;
   status: ScheduledJobStatus;
+  /** Frozen execution route (backend/model/permission). Resolved at run time. */
+  execution?: ScheduledExecutionRoute;
   /** ISO timestamp of the next calculated occurrence (empty when paused/none). */
   nextRunAt: string;
   /** ISO timestamp of the last completed run (empty when never run). */
@@ -1096,7 +1117,12 @@ export interface ScheduledJob {
 }
 
 /** Attempt outcome for a single job execution attempt. */
-export type JobAttemptStatus = "running" | "succeeded" | "failed" | "cancelled";
+export type JobAttemptStatus =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "blocked-auth";
 
 export interface JobAttempt {
   /** Id of the workflow run this attempt produced. */
@@ -1106,9 +1132,28 @@ export interface JobAttempt {
   startedAt: string;
   finishedAt?: string;
   error?: string;
+  /** Whether a failed attempt should be retried (transient) or not (permanent). */
+  retryable?: boolean;
+  /** Fencing token proving this attempt corresponds to the current lease. */
+  leaseToken?: string;
 }
 
-export type SchedulerJobState = "queued" | "leased" | "done" | "dead";
+/**
+ * The full lifecycle vocabulary of a scheduler queue entry. The Rust store is
+ * the authority; this mirrors its states so the shell can render them truthfully.
+ */
+export type SchedulerJobState =
+  | "queued"
+  | "leased"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked-auth"
+  | "cancelled"
+  | "done"
+  | "dead";
+
+export type SchedulerJobStateLegacy = "queued" | "leased" | "done" | "dead";
 
 /** A queued execution entry in the durable scheduler queue. */
 export interface SchedulerQueueEntry {
@@ -1128,6 +1173,12 @@ export interface SchedulerQueueEntry {
   attempts: JobAttempt[];
   /** Idempotency key deduplicating this scheduled occurrence. */
   deduplicationKey: string;
+  /** Fencing token proving a report/renew call corresponds to the current lease. */
+  leaseToken?: string;
+  /** Earliest retry time (ISO) after a transient failure; honored by the tick. */
+  availableAt?: string;
+  /** Last error message (truncated, no secrets) for failed/blocked entries. */
+  lastError?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,6 +1267,7 @@ export type WorkflowRunStatus =
   | "awaiting-approval"
   | "completed"
   | "failed"
+  | "blocked-auth"
   | "cancelled";
 
 export type WorkflowStepRecordStatus =
@@ -1398,7 +1450,18 @@ export type BackendAgentEvent =
   | { type: "tool-result"; callId: string; ok: boolean; output: string }
   | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
-  | { type: "error"; message: string }
+  | {
+      type: "error";
+      message: string;
+      /**
+       * Machine-readable error code for routing (e.g. "authentication" routes a
+       * scheduled run to blocked-auth). Optional: backends that can't classify
+       * leave it undefined and callers treat it as a generic failure.
+       */
+      code?: string;
+      /** True when the failure is transient and a retry may succeed. */
+      retryable?: boolean;
+    }
   | { type: "cancelled" };
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@ import {
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
+import { useScheduledAgent } from "./hooks/useScheduledAgent";
 import { useVoice } from "./hooks/useVoice";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
@@ -89,35 +90,25 @@ export function App() {
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
   const voice = useVoice(voiceProvider, (transcript) => runPrompt(transcript));
-  const activeWorkflowRunRef = useRef<{ runId: string; observedRunning: boolean } | null>(null);
 
-  useEffect(() => {
-    const pending = runtime.pendingWorkflowRuns[0];
-    if (!pending || activeWorkflowRunRef.current) return;
-    if (!runtime.connectedAgentBackend) {
-      runPrompt(pending.prompt);
-      runtime.completeWorkflowRun(pending.runId, true, "Submitted through the workspace prompt path.");
-      return;
+  // Scheduled prompts run through a dedicated headless runner that drives the
+  // same AgentBackend contract as the composer — but in complete isolation: it
+  // owns its own backend resolution, cancellation, and lease renewal, and never
+  // touches the active thread or interactive agent state.
+  const scheduledAgent = useScheduledAgent(runtime.pendingWorkflowRuns, {
+    providers: runtime.backendProviders,
+    execute: executor,
+    onComplete: (runId, result) => {
+      runtime.completeWorkflowRun(
+        runId,
+        result.ok,
+        result.ok ? result.transcript : result.error
+      );
     }
-    activeWorkflowRunRef.current = { runId: pending.runId, observedRunning: false };
-    runPrompt(pending.prompt);
-  }, [runtime.pendingWorkflowRuns, runtime.connectedAgentBackend]);
-
-  useEffect(() => {
-    const active = activeWorkflowRunRef.current;
-    if (!active) return;
-    if (agent.state.running) {
-      active.observedRunning = true;
-      return;
-    }
-    if (!active.observedRunning) return;
-    runtime.completeWorkflowRun(
-      active.runId,
-      !agent.state.lastError,
-      agent.state.lastError ?? agent.state.transcript
-    );
-    activeWorkflowRunRef.current = null;
-  }, [agent.state.running, agent.state.lastError, agent.state.transcript]);
+  });
+  // Reference the active run so React keeps the hook's effect wired and the
+  // shell can surface "running" state without redesigning the schedules UI.
+  const scheduledActive = scheduledAgent.active;
   const [expandedCollections, setExpandedCollections] = useState({
     projects: true,
     chats: true
@@ -293,11 +284,6 @@ export function App() {
                   type="button"
                   className="agent-panel__stop"
                   onClick={() => {
-                    const active = activeWorkflowRunRef.current;
-                    if (active) {
-                      runtime.completeWorkflowRun(active.runId, false, "Workflow cancelled.");
-                      activeWorkflowRunRef.current = null;
-                    }
                     void agent.cancel();
                   }}
                 >
@@ -600,7 +586,7 @@ export function App() {
         <p className="sr-only" aria-live="polite">
           {liveStatusLead} {runtime.managedMemoryRecords.length} memory items.{" "}
           {runtime.workspaceKnowledgeSources.length} sources. {runtime.openApprovals.length} approvals
-          pending.
+          pending. {scheduledActive ? `Running scheduled prompt ${scheduledActive.jobId}.` : ""}
         </p>
       </section>
     </main>
