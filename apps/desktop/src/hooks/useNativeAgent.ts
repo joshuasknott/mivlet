@@ -2,9 +2,9 @@
  * Runs a provider-neutral `AgentBackend` and routes its events into the shell.
  *
  * The hook resolves the connected backend to an `AgentBackend` via
- * `resolveAgentBackend` (today only native-API returns a live adapter; Codex,
- * ACP, and Copilot are metadata-only until their adapters land). It then runs
- * the backend, consuming the universal `BackendAgentEvent` stream, and:
+ * `resolveAgentBackend` (native API, Codex app-server, and ACP have live
+ * adapters; Copilot remains metadata-only). It then runs the backend, consuming
+ * the universal `BackendAgentEvent` stream, and:
  *   - accumulates text deltas into the agent transcript
  *   - pushes tool-call approvals into the shell's approval queue (via onToolCall)
  *   - records usage for display

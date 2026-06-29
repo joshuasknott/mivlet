@@ -69,7 +69,27 @@ Fable owns the native API agent loop while preserving provider-specific wire for
 - Model tool calls are untrusted proposals. The shell obtains a user decision; Rust issues a request-fingerprinted, one-time execution permit and rechecks the tool policy, exact argument preview, workspace path confinement, and permit immediately before dispatch.
 - Token usage comes from provider responses. Displayed cost is explicitly an estimate from Fable's maintained rate table when the provider does not return cost; Fable does not invent subscription quota or balance data.
 
-Native API credentials are BYOK. Subscription backends remain separate adapters with dynamically reported capabilities and entitlements; the native API path does not reinterpret consumer subscriptions as API access.
+Native API credentials are BYOK. Codex app-server and ACP providers are
+separate adapters, not the foundation: Codex owns its app-server auth/process
+protocol, and Cursor/Grok own auth in their ACP CLIs. Fable maps those streams
+into the provider-neutral `AgentBackend` contract without reading subscription
+tokens. GitHub Copilot remains cataloged until its SDK execution adapter lands.
+The native API path does not reinterpret consumer subscriptions as API access.
+
+## Schedules And Commands
+
+The composer parses `/remember`, `/goal`, `/plan`, and `/schedule` through the
+provider-neutral command layer in `@fable/connectors`. `/goal` and `/plan`
+create local structured state and, when a backend is connected, submit a
+follow-up prompt through the same `AgentBackend` run path as normal composer
+messages. `/schedule` creates a validated one-time or recurring schedule; the
+runtime pins the selected backend/model/permission route at creation time.
+
+The Tauri scheduler leases due occurrences, writes queue records, and exposes
+pending workflow runs to a headless scheduled-agent hook. Scheduled prompts use
+the same adapter contract as interactive prompts, so native API, Codex
+app-server, and ACP runs share cancellation, blocked-auth handling, and approval
+boundaries. Schedules do not require Convex or a hosted Fable account.
 
 ## Connector Runtime
 

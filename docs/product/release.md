@@ -1,6 +1,6 @@
 # Release Readiness
 
-Last updated: 2026-06-28.
+Last updated: 2026-06-29.
 
 ## Runnable paths
 
@@ -43,9 +43,11 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
   do not require the broker, but they still require Google Cloud OAuth client
   setup, consent configuration, and any provider verification required by
   Google.
-- Subscription/CLI-backed agent providers (Codex, Cursor, GitHub Copilot,
-  Grok) remain gated until a real capability-bearing runtime adapter is
-  connected. The UI no longer treats them as one-click mock connections.
+- Codex runs through the local `codex app-server` process when the Codex CLI is
+  installed and authenticated. Cursor and Grok run through their ACP CLI
+  processes when installed and signed in. GitHub Copilot remains cataloged but
+  not runnable until its SDK adapter lands. None of these paths require a Fable
+  cloud account or expose provider-owned subscription tokens to React state.
 - Convex is optional. `VITE_CONVEX_URL` can enable hosted/realtime features, but
   it is not required for the local desktop workspace.
 - Local model execution is still planned and disabled in onboarding.
@@ -54,8 +56,10 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 - Non-secret runtime metadata still uses app-data JSON plus a runtime snapshot
   contract; encrypted SQLite is not wired yet.
-- Schedules persist and can be managed locally, but there is no background
-  scheduler/recurring execution engine yet.
+- Schedules persist locally and the Tauri runtime leases due occurrences,
+  queues workflow runs, and executes scheduled prompts through the same
+  provider-neutral `AgentBackend` path as the composer. Execution still depends
+  on a connected runnable backend and does not bypass approval boundaries.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
 - Native API providers use bounded dynamic model discovery. Live availability

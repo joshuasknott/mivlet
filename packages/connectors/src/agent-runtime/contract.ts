@@ -3,9 +3,9 @@
  *
  * One interface, every backend family. The shell resolves one AgentBackend per
  * run and consumes its `BackendAgentEvent` stream uniformly — it never branches
- * on provider ids or `BackendType`. Native-API is the first concrete adapter;
- * Codex app-server, ACP (Cursor/Grok), and Copilot SDK each get a future
- * adapter that implements this same contract.
+ * on provider ids or `BackendType`. Native API, Codex app-server, and ACP
+ * (Cursor/Grok) have concrete adapters; Copilot SDK remains modeled until its
+ * execution adapter lands.
  *
  * The contract is deliberately minimal and shaped to match the seams the
  * native-API loop already proved out:
@@ -193,7 +193,7 @@ export interface CodexAppServerHandle {
 /**
  * Resolve a `BackendProvider` to a live `AgentBackend`, or null when the backend
  * family has no execution path yet (not connected, no streaming capability, or a
- * metadata-only backend like Codex/ACP/Copilot before their adapter lands).
+ * metadata-only backend such as Copilot before its adapter lands).
  *
  * Provided here as a type for the factory return; the concrete dispatch lives in
  * `factory.ts`.

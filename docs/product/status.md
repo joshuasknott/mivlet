@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-06-28.
+Last audited: 2026-06-29.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
@@ -26,7 +26,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Approvals: Rust commands and shell UI support once/session/rule/modify/deny decisions, audit entries, approval rules, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
 - Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, schedules, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage.
-- Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Only native API-key providers can become connected through the current credential command; subscription/CLI entries remain gated until real adapters exist.
+- Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Native API-key providers connect through the Rust credential boundary. Codex can run through `codex app-server`; Cursor and Grok can run through ACP CLI processes when the corresponding CLI is installed and signed in. GitHub Copilot remains cataloged but not runnable until its SDK adapter lands.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
 - Native API agent loop: TypeScript owns provider request shaping and a bounded
   multi-round agent loop; Rust owns API key lookup, bounded HTTP/SSE egress,
@@ -45,7 +45,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Connector writes: fixture-side connector write preparation creates approval requests for GitHub, Vercel, Gmail, Slack, and Calendar actions instead of directly executing them.
 - Tauri connector runtime: external connector commands expose status/auth/health/search/import/action boundaries. Google public-client connectors use loopback PKCE and OS secure storage; confidential-client connectors (GitHub, Vercel, Notion, Slack, Linear) are broker-gated and fail closed with `configuration-required` until the auth broker and provider configuration exist.
 - Google connectors: Drive, Gmail, and Calendar expose authenticated reads and approval-gated writes, incremental scopes, refresh-token preservation, explicit active-account selection, bounded responses, cancellation, and normalized provider errors. External use still requires Google Cloud configuration and applicable verification.
-- Schedules page: users can create, pause/resume, and delete local schedule records. Records persist through the runtime snapshot; no background scheduler executes them yet.
+- Schedules page: users can create, pause/resume, and delete local schedule records. Records persist locally; the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the provider-neutral `AgentBackend` path when a runnable backend is connected.
 - CI file: `.github/workflows/ci.yml` exists and uses pnpm for typecheck, tests, build, Tauri check, Rust tests, clippy, and fmt on Windows.
 - Tests exist across desktop, connectors, native API, local files, knowledge search, backend registry, and Rust runtime modules.
 
@@ -59,7 +59,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | GitHub, Vercel, Notion, Slack, Linear | Provider egress code exists behind the credential boundary, but auth is broker-gated and fails closed until the deferred auth broker and provider-console callbacks exist. |
 | Browser preview connectors | Explicit synthetic fixture behavior only; never proof of a live provider connection. |
 | Encrypted SQLite | Active in the Tauri production path with keyring-backed AES-GCM payloads and legacy migration. |
-| Schedules, voice, Convex collaboration | Incomplete or non-executing as described below. |
+| Schedules | Local scheduler, queue, and headless prompt execution are implemented; execution depends on a connected runnable backend. |
+| Voice, Convex collaboration | Incomplete or preview-only as described below. |
 
 ## Partially Implemented Or Preview-Only
 
@@ -71,7 +72,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   status, scope, account, freshness, local file/folder import, connector entry,
   refresh, pin, disable/delete, explicit memory promotion, edit, export,
   disable, and forget controls.
-- Schedules persist through the runtime snapshot, but no background scheduler or recurring execution engine was found.
+- Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back.
 - Voice is a toggle and status affordance; no dictation, audio capture, realtime voice provider, or transcript pipeline was found.
 - Convex is optional via `VITE_CONVEX_URL`, but no Convex schema or collaboration implementation was found in this repo.
 
@@ -89,7 +90,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 - External connectors look close in the UI but are not live. The repo correctly fails closed, but product messaging must keep this distinction clear.
 - Backup restoration requires the database and matching OS-secure master key; external recovery UI polish remains future work.
-- Schedules can be created and persisted, but they do not execute automatically.
+- Scheduled work still depends on a connected runnable backend and user approval gates for consequential actions; live account coverage was not externally validated in this checkout.
 
 ## Evidence Checked
 

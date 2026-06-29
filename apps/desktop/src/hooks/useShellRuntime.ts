@@ -613,11 +613,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     [connectorImportedSources, importedKnowledgeSources]
   );
   // The connected agent backend that drives the run: connected + streaming AND
-  // a backend family Fable can actually drive today (hasRunnableAdapter). Today
-  // only native-api has a live adapter, so this is identical to the legacy
-  // `connectedNativeBackend`; when Codex/ACP/Copilot adapters ship, flip them on
-  // in hasRunnableAdapter and they take over here automatically. The composer's
-  // model picker lists this backend's models.
+  // a backend family Fable can actually drive today (hasRunnableAdapter). Native
+  // API, Codex app-server, and ACP are live adapter families; Copilot remains
+  // modeled but not runnable. The composer's model picker lists this backend's
+  // models.
   const connectedAgentBackend = useMemo(
     () =>
       backendProviders.find(
