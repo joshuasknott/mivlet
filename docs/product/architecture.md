@@ -132,6 +132,12 @@ JSON idempotently, and routes production documents through the native store.
 Credentials remain in OS secure storage. See
 [Encrypted local storage](../architecture/encrypted-storage.md).
 
+A paired mobile device is a second approval, observation, and schedule-control
+surface — never an authority and never a cloud backend. Pairing is pairwise and
+LAN-local (no hosted account), mobile decisions are inputs to the existing
+approval queue rather than execution authority, and no secret crosses the remote
+channel. See [Mobile remote control](../architecture/mobile-remote.md).
+
 ## Selective TokenMaxxer Reuse
 
 Fable inspected [joshuasknott/tokenmaxxer](https://github.com/joshuasknott/tokenmaxxer) and reused the compatible architectural ideas rather than its provider-specific usage endpoints:
