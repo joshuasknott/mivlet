@@ -94,14 +94,14 @@ export function App() {
   useEffect(() => {
     const pending = runtime.pendingWorkflowRuns[0];
     if (!pending || activeWorkflowRunRef.current) return;
-    if (!runtime.connectedNativeBackend) {
+    if (!runtime.connectedAgentBackend) {
       runPrompt(pending.prompt);
       runtime.completeWorkflowRun(pending.runId, true, "Submitted through the workspace prompt path.");
       return;
     }
     activeWorkflowRunRef.current = { runId: pending.runId, observedRunning: false };
     runPrompt(pending.prompt);
-  }, [runtime.pendingWorkflowRuns, runtime.connectedNativeBackend]);
+  }, [runtime.pendingWorkflowRuns, runtime.connectedAgentBackend]);
 
   useEffect(() => {
     const active = activeWorkflowRunRef.current;
@@ -326,7 +326,7 @@ export function App() {
   function runPrompt(rawPrompt: string) {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
-    const nativeConnected = runtime.connectedNativeBackend;
+    const nativeConnected = runtime.connectedAgentBackend;
     if (!nativeConnected) {
       runtime.submitPrompt(prompt);
       return;
@@ -342,7 +342,6 @@ export function App() {
       return;
     }
     const request = buildAgentRequest({
-      providerId: nativeConnected.id,
       model: runtime.resolvedSelectedModelId,
       prompt,
       maxTokens: validation.maxTokens
@@ -505,7 +504,7 @@ export function App() {
                 // When a native-API backend is connected, the composer drives the
                 // Fable-owned agent loop; otherwise fall back to the workspace
                 // knowledge-search submit.
-                const nativeConnected = runtime.connectedNativeBackend;
+                const nativeConnected = runtime.connectedAgentBackend;
                 if (nativeConnected) {
                   event.preventDefault();
                   const prompt = runtime.composerValue.trim();
@@ -527,7 +526,6 @@ export function App() {
                     return;
                   }
                   const request = buildAgentRequest({
-                    providerId: nativeConnected.id,
                     model: runtime.resolvedSelectedModelId,
                     prompt,
                     maxTokens: validation.maxTokens

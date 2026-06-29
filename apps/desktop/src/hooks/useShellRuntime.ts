@@ -34,6 +34,7 @@ import type {
 import { assembleContext, chunkSourceText, retrieve } from "@fable/knowledge";
 import {
   FIRST_WAVE_CONNECTOR_IDS,
+  hasRunnableAdapter,
   importFixtureConnectorItem,
   importLocalTextFile,
   listBackendProviders,
@@ -284,11 +285,15 @@ export interface ShellRuntime {
   connectBackend: (providerId: string, secret?: string) => Promise<void>;
   disconnectBackend: (providerId: string) => Promise<void>;
   /**
-   * The connected native-API backend that owns the agent loop, if any. Drives
-   * the composer's model picker and the native run path. Null when no native
-   * backend is connected (the composer falls back to knowledge search).
+   * The connected agent backend that drives the agent run, if any. Today only a
+   * native-API backend can be connected + streaming, so this is equivalent to
+   * the legacy `connectedNativeBackend`; it is named for the provider-neutral
+   * `AgentBackend` contract so future adapters (Codex/ACP/Copilot) naturally
+   * take over when they connect. Drives the composer's model picker and the run
+   * path. Undefined when no backend is connected (the composer falls back to
+   * knowledge search).
    */
-  connectedNativeBackend: BackendProvider | undefined;
+  connectedAgentBackend: BackendProvider | undefined;
   /** Models the composer's model picker may offer (from the connected backend). */
   selectableModels: BackendProvider["models"];
   /** The model id that should drive the next agent run (re-validated). */
@@ -455,36 +460,39 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ]),
     [connectorImportedSources, importedKnowledgeSources]
   );
-  // The native-API backend that owns the agent loop when one is connected. The
-  // composer's model picker lists this backend's models; selecting one drives
-  // request.model on the next agent run.
-  const connectedNativeBackend = useMemo(
+  // The connected agent backend that drives the run: connected + streaming AND
+  // a backend family Fable can actually drive today (hasRunnableAdapter). Today
+  // only native-api has a live adapter, so this is identical to the legacy
+  // `connectedNativeBackend`; when Codex/ACP/Copilot adapters ship, flip them on
+  // in hasRunnableAdapter and they take over here automatically. The composer's
+  // model picker lists this backend's models.
+  const connectedAgentBackend = useMemo(
     () =>
       backendProviders.find(
         (provider) =>
-          provider.backendType === "native-api" &&
           provider.authState === "connected" &&
-          provider.capabilities.includes("streaming")
+          provider.capabilities.includes("streaming") &&
+          hasRunnableAdapter(provider.backendType)
       ),
     [backendProviders]
   );
   const selectableModels = useMemo(() => {
-    const catalogue = connectedNativeBackend?.models ?? [];
-    if (!connectedNativeBackend) return catalogue;
+    const catalogue = connectedAgentBackend?.models ?? [];
+    if (!connectedAgentBackend) return catalogue;
     // Merge dynamic discovery with the curated catalogue so availability is
     // truthful: discovered ids are available, catalogue-only ids become
     // unavailable once discovery ran (and stay available offline). Outside
     // Tauri, discovery never ran, so the catalogue fallback drives selection.
-    const discovery = discoveredModels[connectedNativeBackend.id];
+    const discovery = discoveredModels[connectedAgentBackend.id];
     if (!discovery) return catalogue;
     return mergeDiscoveredModels({
-      providerId: connectedNativeBackend.id,
+      providerId: connectedAgentBackend.id,
       catalogueModels: catalogue,
       discovered: discovery.models,
-      connected: connectedNativeBackend.authState === "connected",
+      connected: connectedAgentBackend.authState === "connected",
       discoveryRan: discovery.outcome === "success" || discovery.outcome === "empty"
     });
-  }, [connectedNativeBackend, discoveredModels]);
+  }, [connectedAgentBackend, discoveredModels]);
   // The persisted selection is re-validated against the connected backend's
   // available models each render: keep it if still available, else fall back to
   // the first available model (or "" when none is available).
@@ -787,16 +795,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
   }, []);
 
-  // Dynamic model discovery: when a native backend connects, ask the Rust
+  // Dynamic model discovery: when an agent backend connects, ask the Rust
   // boundary to list that provider's models (fail closed — no key in JS) and
   // merge the result with the curated catalogue. Outside Tauri this is a no-op,
   // so the catalogue fallback drives selection and fixture tests stay green.
-  // Re-runs only when the connected native provider id changes.
+  // Re-runs only when the connected provider id changes.
   useEffect(() => {
-    if (!connectedNativeBackend || connectedNativeBackend.authState !== "connected") {
+    if (!connectedAgentBackend || connectedAgentBackend.authState !== "connected") {
       return;
     }
-    const providerId = connectedNativeBackend.id;
+    const providerId = connectedAgentBackend.id;
     let active = true;
     void listRuntimeBackendModels(providerId).then((result) => {
       if (!active) return;
@@ -814,7 +822,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, [connectedNativeBackend?.id, connectedNativeBackend?.authState]);
+  }, [connectedAgentBackend?.id, connectedAgentBackend?.authState]);
 
   const focusComposer = (value: string) => {
     window.requestAnimationFrame(() => {
@@ -2104,7 +2112,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     onboardingRequired,
     connectBackend,
     disconnectBackend,
-    connectedNativeBackend,
+    connectedAgentBackend,
     selectableModels,
     resolvedSelectedModelId,
     selectedModelId,

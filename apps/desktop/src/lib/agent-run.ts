@@ -8,10 +8,10 @@
  */
 
 import type {
+  AgentRunRequest,
   BackendModel,
   KnowledgeSource,
   MemoryRecord,
-  NativeCompletionRequest,
   PermissionMode
 } from "@fable/protocol";
 import { buildContextPrefix, MAX_TOKENS_DEFAULT, validateModelForRun } from "@fable/connectors";
@@ -83,16 +83,19 @@ export function buildContextPrefixForRun(input: BuildContextPrefixForRunInput): 
 }
 
 export interface BuildAgentRequestInput {
-  providerId: string;
   model: string;
   prompt: string;
   maxTokens?: number;
 }
 
-/** Shape the composer submission into a NativeCompletionRequest. */
-export function buildAgentRequest(input: BuildAgentRequestInput): NativeCompletionRequest {
+/**
+ * Shape the composer submission into a provider-neutral {@link AgentRunRequest}.
+ * The providerId is NOT part of the request: the connected backend owns it (it
+ * knows which provider it runs for), so the request carries only the model,
+ * messages, tools, and token ceiling.
+ */
+export function buildAgentRequest(input: BuildAgentRequestInput): AgentRunRequest {
   return {
-    providerId: input.providerId,
     model: input.model,
     messages: [{ role: "user", content: input.prompt }],
     tools: [],

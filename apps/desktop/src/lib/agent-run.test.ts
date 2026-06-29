@@ -98,15 +98,13 @@ describe("buildContextPrefixForRun", () => {
 });
 
 describe("buildAgentRequest", () => {
-  it("shapes the provider/model/messages into a NativeCompletionRequest", () => {
+  it("shapes the model/messages into a provider-neutral AgentRunRequest", () => {
     const request = buildAgentRequest({
-      providerId: "openai",
       model: "gpt-5",
       prompt: "Summarize the project",
       maxTokens: 2048
     });
     expect(request).toEqual({
-      providerId: "openai",
       model: "gpt-5",
       messages: [{ role: "user", content: "Summarize the project" }],
       tools: [],
@@ -116,7 +114,6 @@ describe("buildAgentRequest", () => {
 
   it("uses the selected model id rather than a hardcoded label", () => {
     const request = buildAgentRequest({
-      providerId: "anthropic",
       model: "claude-sonnet-4",
       prompt: "hello",
       maxTokens: 1024

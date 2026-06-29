@@ -1343,3 +1343,63 @@ export type BackendAgentEvent =
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }
   | { type: "cancelled" };
+
+// ---------------------------------------------------------------------------
+// Provider-neutral AgentBackend runtime contract.
+//
+// BackendAgentEvent (above) is the universal streaming surface every backend
+// family speaks. The AgentBackend abstraction lets native-API, Codex app-server,
+// ACP, Copilot SDK, and future local/subscription runtimes each implement one
+// contract: run a prompt turn (streaming events), request tools/approvals,
+// cancel, and expose models/capabilities. Native-API is the first concrete
+// adapter — not the foundation. The other backends remain metadata-only until
+// their adapter lands; the factory returns null for them.
+//
+// HARD SECRET INVARIANT: none of these types carry a key, token, or credential.
+// Auth lives behind the Rust boundary or a provider-owned auth cache. An
+// AgentBackend instance must never hold a secret in its fields.
+// ---------------------------------------------------------------------------
+
+/**
+ * A normalized prompt turn for any agent backend. Shaped like the existing
+ * key-free {@link NativeCompletionRequest}; carries NO key, NO token, NO URL.
+ * Backend-specific shaping happens inside the adapter, never in this type.
+ */
+export interface AgentRunRequest {
+  model: string;
+  messages: NativeMessage[];
+  tools: NativeToolSpec[];
+  /** Max output tokens; adapters clamp to the model's known ceiling. */
+  maxTokens: number;
+}
+
+/**
+ * Options for an agent run. Provider-neutral: the execute/shouldCancel/approval
+ * seams are the same ones the native-API loop uses, so any backend that issues
+ * tool calls routes through Fable's shared approval queue.
+ */
+export interface AgentRunOptions {
+  /** Executes an approved tool. Backends call this for each tool-call event. */
+  execute: (approval: ApprovalRequest, args: string) => Promise<string>;
+  /** Cooperative cancellation hook, checked between events. */
+  shouldCancel?: () => boolean;
+  /** Optional system-context prefix (pinned memory/knowledge by trust level). */
+  contextPrefix?: string;
+  /** The composer's permission level, gating which tools may execute. */
+  permissionMode?: PermissionMode;
+  /** Stable run id used to bind approvals and reject cross-run/replayed calls. */
+  runId?: string;
+  /** Max turns before the backend stops (safety). */
+  maxTurns?: number;
+  /** Maximum accepted tool calls across the whole run. */
+  maxToolCalls?: number;
+  /** Maximum characters returned to model context by one tool. */
+  maxToolOutputCharacters?: number;
+  /**
+   * Notifies the shell that the backend's transport is retrying after a
+   * transient failure (e.g. HTTP 429/5xx backoff). Provider-neutral: any
+   * egress-bound backend may retry. The shell uses this to mark the persisted
+   * run as "retrying" and bump its retry count.
+   */
+  onRetry?: () => void;
+}

@@ -1,139 +1,51 @@
 /**
- * Runs the Fable-owned native-API agent loop and routes its events into the shell.
+ * Runs a provider-neutral `AgentBackend` and routes its events into the shell.
  *
- * The TypeScript layer owns orchestration; Rust owns the key + HTTP/SSE egress.
- * This hook builds a TauriTransport (HttpTransport over the Rust boundary) when
- * the desktop runtime is present, runs runAgentLoop, and:
+ * The hook resolves the connected backend to an `AgentBackend` via
+ * `resolveAgentBackend` (today only native-API returns a live adapter; Codex,
+ * ACP, and Copilot are metadata-only until their adapters land). It then runs
+ * the backend, consuming the universal `BackendAgentEvent` stream, and:
  *   - accumulates text deltas into the agent transcript
  *   - pushes tool-call approvals into the shell's approval queue (via onToolCall)
  *   - records usage for display
- *   - signals real cancellation to Rust on cancel
+ *   - signals real cancellation to the backend (which drops it at egress)
  *
- * Outside Tauri (no transport) the hook surfaces a no-transport notice so the UI
- * stays fixture-testable without a live socket.
+ * The provider-id wire-family details (request shaping, SSE parsing, the Tauri
+ * transport) live inside the native-API adapter + `createDesktopTransport`, not
+ * here — so this hook is provider-neutral. Outside the desktop runtime the hook
+ * surfaces a no-transport notice so the UI stays fixture-testable.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AgentRunRequest,
   BackendAgentEvent,
   BackendModel,
   BackendProvider,
-  NativeCompletionRequest,
   PersistedAgentExchange,
   PersistedAgentRun,
   PermissionMode
 } from "@fable/protocol";
 import {
-  runAgentLoop,
-  shapeAnthropicRequest,
-  shapeGeminiRequest,
-  shapeOpenAiRequest,
-  type HttpTransport,
+  resolveAgentBackend,
+  type AgentBackend,
+  type BackendDeps,
   type ToolExecutor
 } from "@fable/connectors";
 import { permissionModeFor } from "../lib/agent-run";
+import { createDesktopTransport } from "../lib/native-transport";
 import {
-  cancelRuntimeCompletion,
-  listenRuntimeBackendEvents,
+  listRuntimeBackendModels,
   recoverRuntimeAgentRuns,
-  saveRuntimeAgentRun,
-  streamRuntimeCompletion
+  saveRuntimeAgentRun
 } from "../runtime";
 
-/** Shape the request body for the provider; the loop sends a NativeCompletionRequest. */
-function shapeBodyFor(request: NativeCompletionRequest): unknown {
-  if (request.providerId === "anthropic") {
-    return shapeAnthropicRequest(request);
-  }
-  if (request.providerId === "gemini") {
-    return shapeGeminiRequest(request);
-  }
-  return shapeOpenAiRequest(request);
-}
-
+/** True when the desktop (Tauri) runtime is present (drives the noTransport state). */
 function hasDesktopRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
     Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
   );
-}
-
-/** Build a transport that delegates egress to the Rust boundary. Null outside Tauri. */
-function tauriTransport(
-  onRequestStarted: (requestId: string) => void,
-  onRetry: () => void
-): HttpTransport | null {
-  if (!hasDesktopRuntime()) {
-    return null;
-  }
-  return {
-    async *stream(request: NativeCompletionRequest): AsyncIterable<string> {
-      const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      const queue: string[] = [];
-      let resolveNext: ((value: string | undefined) => void) | null = null;
-      let finished = false;
-      let transportError: Error | null = null;
-
-      const unlisten = await listenRuntimeBackendEvents(requestId, (line) => {
-        if (line === "[DONE]" || line === "[CANCELLED]") {
-          finished = true;
-          resolveNext?.(undefined);
-          return;
-        }
-        try {
-          const parsed = JSON.parse(line) as {
-            __fableTransport?: { kind: string; message: string };
-          };
-          if (parsed.__fableTransport) {
-            if (parsed.__fableTransport.kind === "error") {
-              transportError = new Error(parsed.__fableTransport.message);
-            } else if (parsed.__fableTransport.kind === "retrying") {
-              onRetry();
-            }
-            return;
-          }
-        } catch {
-          // Provider payloads are parsed by their provider-specific stream parser.
-        }
-        queue.push(line);
-        resolveNext?.(line);
-        resolveNext = null;
-      });
-
-      onRequestStarted(requestId);
-      // Tauri commands resolve when the Rust future finishes. Start the command
-      // without awaiting it so events are yielded to the UI as they arrive.
-      const completion = streamRuntimeCompletion({
-        providerId: request.providerId,
-        requestId,
-        model: request.model,
-        body: shapeBodyFor(request)
-      }).catch((error) => {
-        transportError = error instanceof Error ? error : new Error("Provider request failed.");
-        finished = true;
-        resolveNext?.(undefined);
-      });
-
-      try {
-        while (!finished || queue.length > 0) {
-          if (queue.length > 0) {
-            yield queue.shift() as string;
-          } else if (!finished) {
-            const next = await new Promise<string | undefined>((resolve) => {
-              resolveNext = resolve;
-            });
-            if (!next && finished) break;
-          } else {
-            break;
-          }
-        }
-        await completion;
-        if (transportError) throw transportError;
-      } finally {
-        void unlisten?.();
-      }
-    }
-  };
 }
 
 export interface NativeAgentState {
@@ -194,7 +106,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     recoverableRuns: [],
     noTransport: !hasDesktopRuntime()
   });
-  const cancelRef = useRef<string | null>(null);
+  // The active backend + run id for the current run. cancel() delegates to the
+  // backend; the adapter routes the cancel to the egress boundary (the Rust
+  // cancel map for native-API) using the requestId it captured from the transport.
+  const activeBackendRef = useRef<AgentBackend | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const onToolCallRef = useRef(options.onToolCall);
   onToolCallRef.current = options.onToolCall;
   // The executor + cancellation hook are read live each run so App.tsx can wire
@@ -223,38 +139,52 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     });
   }, []);
 
+  // Resolve the connected backend to a provider-neutral AgentBackend. The deps
+  // bag injects the desktop transport + model discovery so the contract stays
+  // pure; the native-API adapter consumes them. Returns null when no backend is
+  // connected/runnable, or in browser preview (no transport) — mirroring the
+  // legacy `connectedNativeBackend` predicate.
+  const deps: BackendDeps = useMemo(
+    () => ({
+      createTransport: createDesktopTransport,
+      discoverModels: async (providerId) => {
+        const result = await listRuntimeBackendModels(providerId);
+        return result;
+      }
+    }),
+    []
+  );
+  const backend: AgentBackend | null = useMemo(
+    () =>
+      resolveAgentBackend(
+        options.providers.find(
+          (provider) =>
+            provider.authState === "connected" &&
+            provider.capabilities.includes("streaming")
+        ),
+        deps
+      ),
+    [options.providers, deps]
+  );
+
   const run = useCallback(
     async (
-      request: NativeCompletionRequest,
+      request: AgentRunRequest,
       contextPrefix?: string,
       permissionLabel?: string,
       parentRunId?: string
     ) => {
       let persisted: PersistedAgentRun | null = null;
-      const transport = tauriTransport(
-        (requestId) => {
-          cancelRef.current = requestId;
-        },
-        () => {
-          if (!persisted) return;
-          persisted = {
-            ...persisted,
-            status: "retrying",
-            retryCount: persisted.retryCount + 1,
-            updatedAt: new Date().toISOString()
-          };
-          void saveRuntimeAgentRun(persisted);
-        }
-      );
-      if (!transport) {
+      if (!backend) {
         setState((current) => ({
           ...current,
-          noTransport: true,
+          noTransport: !hasDesktopRuntime(),
           lastError: "Native agent needs the desktop runtime.",
           status: "failed"
         }));
         return;
       }
+      const providerId = backend.providerId;
       setState((current) => ({
         ...current,
         transcript: "",
@@ -282,7 +212,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
       persisted = {
         id: runId,
-        providerId: request.providerId,
+        providerId,
         model: request.model,
         status: "streaming",
         transcript: "",
@@ -305,23 +235,53 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const permissionMode: PermissionMode = permissionLabel
         ? permissionModeFor(permissionLabel)
         : "full-access";
+      // Resolve the run through the provider-neutral backend. The adapter
+      // (native-API today) builds its egress transport from deps and returns null
+      // when no transport is available (browser preview). The event handling below
+      // is provider-neutral — it consumes the universal BackendAgentEvent stream.
+      const eventStream = backend.run(request, {
+        // The real executor is wired by App.tsx from the shell's shared
+        // approval gate + the Rust tool boundary; until then (or in tests)
+        // the fail-closed stub keeps tool calls surfacing as approvals that
+        // refuse to execute. The permission mode still gates which tool calls
+        // may reach the executor.
+        execute:
+          executeRef.current ??
+          (async () => {
+            throw new Error("Tool execution pending approval in the shell.");
+          }),
+        shouldCancel: shouldCancelRef.current ?? (() => false),
+        contextPrefix,
+        permissionMode,
+        runId,
+        onRetry: () => {
+          if (!persisted) return;
+          persisted = {
+            ...persisted,
+            status: "retrying",
+            retryCount: persisted.retryCount + 1,
+            updatedAt: new Date().toISOString()
+          };
+          void saveRuntimeAgentRun(persisted);
+        }
+      });
+      if (!eventStream) {
+        setState((current) => ({
+          ...current,
+          noTransport: true,
+          lastError: "Native agent needs the desktop runtime.",
+          running: false,
+          status: "failed"
+        }));
+        return;
+      }
+      // Capture the active run's backend + id so cancel() reaches the egress
+      // boundary (the Rust cancel map for native-API). The adapter also records
+      // the requestId internally from the transport's onRequestStarted callback.
+      activeBackendRef.current = backend;
+      activeRunIdRef.current = runId;
       try {
-        for await (const event of runAgentLoop(transport, request, {
-          // The real executor is wired by App.tsx from the shell's shared
-          // approval gate + the Rust tool boundary; until then (or in tests)
-          // the fail-closed stub keeps tool calls surfacing as approvals that
-          // refuse to execute. The permission mode still gates which tool calls
-          // may reach the executor.
-          execute:
-            executeRef.current ??
-            (async () => {
-              throw new Error("Tool execution pending approval in the shell.");
-            }),
-          shouldCancel: shouldCancelRef.current ?? (() => false),
-          contextPrefix,
-          permissionMode,
-          runId
-        })) {
+        for await (const event of eventStream) {
           if (event.type === "text-delta") {
             setState((current) => ({ ...current, transcript: current.transcript + event.text }));
             const exchanges: PersistedAgentExchange[] = [...(persisted.exchanges ?? [])];
@@ -461,10 +421,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         await saveRuntimeAgentRun(persisted);
       } finally {
-        cancelRef.current = null;
+        activeBackendRef.current = null;
+        activeRunIdRef.current = null;
       }
     },
-    []
+    [backend]
   );
 
   const retry = useCallback(
@@ -490,7 +451,6 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       }
       await run(
         {
-          providerId: runToRetry.providerId,
           model: runToRetry.model,
           messages: [{ role: "user", content: userExchange.content }],
           tools: [],
@@ -505,8 +465,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   );
 
   const cancel = useCallback(async () => {
-    if (cancelRef.current) {
-      await cancelRuntimeCompletion(cancelRef.current);
+    // Delegate real in-flight cancellation to the active backend. The native-API
+    // adapter routes it to the Rust cancel map via the requestId it captured from
+    // the transport. No-op when no run is active.
+    if (activeBackendRef.current) {
+      await activeBackendRef.current.cancel(activeRunIdRef.current ?? "");
     }
     // Tear down any tool-call still awaiting approval on the shared gate so a
     // cancelled-but-never-granted call (and its unresolved promise) does not

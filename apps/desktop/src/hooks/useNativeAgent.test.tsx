@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type {
+  AgentRunRequest,
   BackendAgentEvent,
-  NativeCompletionRequest,
+  BackendProvider,
   PersistedAgentRun
 } from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors";
@@ -99,6 +100,7 @@ vi.mock("../runtime", () => ({
     return run;
   }),
   recoverRuntimeAgentRuns: vi.fn(async () => mocks.recoveredRuns),
+  listRuntimeBackendModels: vi.fn(async () => null),
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
     return mocks.toolResult;
@@ -127,13 +129,25 @@ function removeDesktopRuntime() {
   (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
 }
 
-const baseRequest: NativeCompletionRequest = {
-  providerId: "openai",
+const baseRequest: AgentRunRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "summarize the project" }],
   tools: [],
   maxTokens: 1024
 };
+
+/** A connected, streaming native-API provider the hook can resolve to a backend. */
+function connectedOpenAiProvider(): BackendProvider {
+  return {
+    id: "openai",
+    backendType: "native-api",
+    label: "OpenAI",
+    description: "OpenAI API",
+    authState: "connected",
+    capabilities: ["authentication", "streaming", "tool-requests", "approvals", "cancellation"],
+    models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+  };
+}
 
 function openAiChunk(delta: string): string {
   return `data: ${JSON.stringify({ choices: [{ delta: { content: delta } }] })}`;
@@ -204,7 +218,7 @@ describe("useNativeAgent", () => {
 
     const { result } = renderHook(() =>
       useNativeAgent({
-        providers: [],
+        providers: [connectedOpenAiProvider()],
         threadId: "thread-1",
         models: [
           {
@@ -247,7 +261,9 @@ describe("useNativeAgent", () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Hello"), openAiChunk(" world"), finishStop];
 
-    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
 
     expect(result.current.state.noTransport).toBe(false);
     expect(result.current.state.running).toBe(false);
@@ -280,7 +296,9 @@ describe("useNativeAgent", () => {
       finishStop
     ];
 
-    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
 
     await act(async () => {
       await result.current.run(baseRequest);
@@ -302,7 +320,9 @@ describe("useNativeAgent", () => {
     ];
 
     const onToolCall = vi.fn();
-    const { result } = renderHook(() => useNativeAgent({ providers: [], onToolCall }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()], onToolCall })
+    );
 
     await act(async () => {
       await result.current.run(baseRequest);
@@ -331,7 +351,9 @@ describe("useNativeAgent", () => {
     // stop keeps the loop finishing normally.
     mocks.lines = ["data: not-valid-json", finishStop];
 
-    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
 
     await act(async () => {
       await result.current.run(baseRequest);
@@ -345,7 +367,9 @@ describe("useNativeAgent", () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("first"), finishStop];
 
-    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
 
     await act(async () => {
       await result.current.run(baseRequest);
@@ -371,7 +395,9 @@ describe("useNativeAgent", () => {
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
 
-    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
 
     let runPromise!: Promise<void>;
     act(() => {
@@ -412,7 +438,7 @@ describe("useNativeAgent", () => {
     let cancelRequested = false;
     const { result } = renderHook(() =>
       useNativeAgent({
-        providers: [],
+        providers: [connectedOpenAiProvider()],
         shouldCancel: () => cancelRequested,
         onCancel: () => {
           cancelRequested = true;
@@ -462,7 +488,9 @@ describe("useNativeAgent", () => {
     mocks.emitDone = false;
 
     const onCancel = vi.fn();
-    const { result } = renderHook(() => useNativeAgent({ providers: [], onCancel }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()], onCancel })
+    );
 
     let runPromise!: Promise<void>;
     act(() => {
@@ -502,7 +530,9 @@ describe("useNativeAgent", () => {
     ];
 
     const onToolCall = vi.fn();
-    const { result } = renderHook(() => useNativeAgent({ providers: [], onToolCall }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()], onToolCall })
+    );
 
     await act(async () => {
       // "Confirm every action" maps to read-only — accepted + threaded into the run.
@@ -552,7 +582,7 @@ describe("useNativeAgent", () => {
       null;
     const { result } = renderHook(() =>
       useNativeAgent({
-        providers: [],
+        providers: [connectedOpenAiProvider()],
         execute: executor,
         onToolCall: (event) => {
           // Mirror App.tsx: register the pending call on the shared gate so a
@@ -700,11 +730,22 @@ describe("useNativeAgent", () => {
       installDesktopRuntime();
       mocks.lines = lines;
 
-      const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+      // Resolve a connected native-API provider matching this case so the hook
+      // builds the right backend; the providerId threads through to the Rust
+      // boundary (the key + endpoint are resolved from it inside Rust).
+      const provider: BackendProvider = {
+        id: providerId,
+        backendType: "native-api",
+        label: providerId,
+        description: `${providerId} API`,
+        authState: "connected",
+        capabilities: ["authentication", "streaming", "tool-requests", "approvals", "cancellation"],
+        models: [{ id: model, label: model, available: true }]
+      };
+      const { result } = renderHook(() => useNativeAgent({ providers: [provider] }));
 
       await act(async () => {
         await result.current.run({
-          providerId,
           model,
           messages: [{ role: "user", content: "hello" }],
           tools: [],
@@ -747,7 +788,9 @@ describe("useNativeAgent", () => {
     ];
     // emitDone stays true, but the transport error short-circuits the run.
 
-    const { result } = renderHook(() => useNativeAgent({ providers: [] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
 
     await act(async () => {
       await result.current.run(baseRequest);
