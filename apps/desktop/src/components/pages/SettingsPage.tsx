@@ -126,8 +126,29 @@ function ProviderAccessView({
 
   // Native-API (key) providers are connectable here. Subscription/CLI providers
   // (codex/cursor/copilot/grok) report provider-owned runtime state.
-  const nativeProviders = providers.filter((provider) => provider.backendType === "native-api");
-  const subscriptionProviders = providers.filter((provider) => provider.backendType !== "native-api");
+  const providerPriority = [
+    "codex",
+    "cursor",
+    "copilot",
+    "grok",
+    "openai",
+    "anthropic",
+    "gemini",
+    "xai",
+    "openrouter"
+  ];
+  const byPriority = (a: BackendProvider, b: BackendProvider) => {
+    const aPriority = providerPriority.indexOf(a.id);
+    const bPriority = providerPriority.indexOf(b.id);
+    return (aPriority === -1 ? Number.MAX_SAFE_INTEGER : aPriority) -
+      (bPriority === -1 ? Number.MAX_SAFE_INTEGER : bPriority);
+  };
+  const nativeProviders = providers
+    .filter((provider) => provider.backendType === "native-api")
+    .sort(byPriority);
+  const subscriptionProviders = providers
+    .filter((provider) => provider.backendType !== "native-api")
+    .sort(byPriority);
 
   return (
     <div className="settings-page__body">
@@ -138,34 +159,54 @@ function ProviderAccessView({
         </p>
       </div>
 
-      <div className="provider-access-list" aria-label="Provider access">
-        {nativeProviders.length > 0 ? (
-          nativeProviders.map((provider) => (
-            <NativeProviderRow
-              key={provider.id}
-              provider={provider}
-              connected={runtime.connectedBackendIds.includes(provider.id)}
-              pending={pendingProviderId === provider.id}
-              onStatus={onStatus}
-              onConnect={(providerId, secret) =>
-                void runtime.connectBackend(providerId, secret).then(() => {
-                  onStatus(`${providerId} connected.`);
-                })
-              }
-              onDisconnect={(providerId) =>
-                void runtime.disconnectBackend(providerId).then(() => {
-                  onStatus(`${providerId} disconnected.`);
-                })
-              }
-            />
-          ))
-        ) : (
-          <p className="provider-access-empty">No API-key providers are registered.</p>
-        )}
+      <div className="provider-access-groups" aria-label="Provider access">
+        <section className="provider-access-group" aria-labelledby="subscription-providers-title">
+          <div className="provider-access-group__heading">
+            <strong id="subscription-providers-title">Subscriptions</strong>
+            <span>Use an existing provider subscription or installed CLI.</span>
+          </div>
+          <div className="provider-access-list">
+            {subscriptionProviders.length > 0 ? (
+              subscriptionProviders.map((provider) => (
+                <SubscriptionProviderRow key={provider.id} provider={provider} />
+              ))
+            ) : (
+              <p className="provider-access-empty">No subscription providers are registered.</p>
+            )}
+          </div>
+        </section>
 
-        {subscriptionProviders.map((provider) => (
-          <SubscriptionProviderRow key={provider.id} provider={provider} />
-        ))}
+        <section className="provider-access-group" aria-labelledby="api-key-providers-title">
+          <div className="provider-access-group__heading">
+            <strong id="api-key-providers-title">API keys</strong>
+            <span>Connect directly with a key stored on this device.</span>
+          </div>
+          <div className="provider-access-list">
+            {nativeProviders.length > 0 ? (
+              nativeProviders.map((provider) => (
+                <NativeProviderRow
+                  key={provider.id}
+                  provider={provider}
+                  connected={runtime.connectedBackendIds.includes(provider.id)}
+                  pending={pendingProviderId === provider.id}
+                  onStatus={onStatus}
+                  onConnect={(providerId, secret) =>
+                    void runtime.connectBackend(providerId, secret).then(() => {
+                      onStatus(`${providerId} connected.`);
+                    })
+                  }
+                  onDisconnect={(providerId) =>
+                    void runtime.disconnectBackend(providerId).then(() => {
+                      onStatus(`${providerId} disconnected.`);
+                    })
+                  }
+                />
+              ))
+            ) : (
+              <p className="provider-access-empty">No API-key providers are registered.</p>
+            )}
+          </div>
+        </section>
       </div>
 
       <div className="settings-local-storage">
@@ -517,7 +558,7 @@ function ProfileSettingsView({
         <p>Manage local display details for this workspace.</p>
       </div>
 
-      <article className="profile-clean-card">
+      <article className="profile-clean-card settings-open-section">
         <div className="profile-clean-card__identity">
           <div className="profile-photo" aria-hidden="true">
             {photoPreview ? (
@@ -566,7 +607,7 @@ function ProfileSettingsView({
                 <small>Name and email used for local display.</small>
               </span>
             </div>
-            <div className="settings-form-grid">
+            <div className="settings-form-grid settings-form-grid--single">
               <label className="settings-field">
                 <span>Name</span>
                 <input
@@ -589,20 +630,6 @@ function ProfileSettingsView({
             </div>
           </section>
 
-          <section className="profile-section" aria-labelledby="profile-security-title">
-            <div className="profile-section__heading">
-              <span className="settings-panel__icon" aria-hidden="true">
-                <LockKey size={19} />
-              </span>
-              <span>
-                <strong id="profile-security-title">Provider credentials</strong>
-                <small>API keys are managed in Settings and stored by the local credential boundary.</small>
-              </span>
-            </div>
-            <p className="profile-security-note">
-              This local profile is not a hosted Fable account.
-            </p>
-          </section>
         </div>
 
         <footer className="profile-clean-card__footer">
@@ -702,11 +729,10 @@ function WorkspaceSettingsView({
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
-        <h2 id="workspace-heading">Workspace Settings</h2>
         <p>Manage workspace details and collaborative access.</p>
       </div>
 
-      <article className="profile-clean-card">
+      <article className="profile-clean-card settings-open-section">
         <div className="profile-clean-card__content">
           <section className="profile-section" aria-labelledby="workspace-details-title">
             <div className="profile-section__heading">
@@ -718,7 +744,7 @@ function WorkspaceSettingsView({
                 <small>Workspace name and display settings.</small>
               </span>
             </div>
-            <div className="settings-form-grid">
+            <div className="settings-form-grid settings-form-grid--single">
               <label className="settings-field">
                 <span>Workspace Name</span>
                 <input

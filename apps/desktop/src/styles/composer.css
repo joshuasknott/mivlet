@@ -24,6 +24,10 @@
     background 200ms ease;
 }
 
+.composer-glow--new-thread {
+  margin-top: 0;
+}
+
 .composer-glow:hover {
   border-color: var(--line-strong);
   background: var(--surface-hover);

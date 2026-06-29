@@ -135,7 +135,7 @@ export const nativeFixtures: NativeFixture[] = [
   },
   {
     providerId: "gemini",
-    label: "Google Gemini",
+    label: "Gemini",
     description:
       "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
     authLabel: "Google AI API key / Vertex AI",

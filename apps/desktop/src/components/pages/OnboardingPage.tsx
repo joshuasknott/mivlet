@@ -277,7 +277,7 @@ export function OnboardingPage({
             </span>
             <h1 id="onboarding-title">Add a model provider</h1>
             <p className="og-lede">
-              Add one provider to start. Bring an API key for OpenAI, Anthropic, Google, xAI, or
+              Add one provider to start. Bring an API key for OpenAI, Anthropic, Gemini, xAI, or
               OpenRouter — or use Codex, Cursor, Copilot, or Grok through their own sign-in.
             </p>
 

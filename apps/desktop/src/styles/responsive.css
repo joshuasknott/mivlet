@@ -558,6 +558,52 @@
     grid-template-columns: 1fr;
   }
 
+  .settings-page__content {
+    width: 100%;
+    padding: 24px 20px 40px;
+  }
+
+  .settings-open-section .profile-clean-card__identity {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 14px;
+    padding-top: 16px;
+  }
+
+  .settings-open-section .profile-photo-buttons {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+  }
+
+  .settings-open-section .profile-photo-buttons button {
+    flex: 1 1 150px;
+  }
+
+  .settings-open-section .profile-security-note {
+    margin-left: 0 !important;
+  }
+
+  .provider-access-list {
+    padding: 0 14px;
+  }
+
+  .provider-access-row {
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 10px 12px;
+  }
+
+  .provider-access-state {
+    grid-column: 2;
+  }
+
+  .provider-access-row__action {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .settings-local-storage {
+    padding-top: 28px;
+  }
+
   .profile-photo {
     width: 64px;
     height: 64px;

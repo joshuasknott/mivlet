@@ -1,4 +1,3 @@
-import { Lightning } from "@phosphor-icons/react";
 import { PageHeader } from "../PageHeader";
 import { SchedulePanel } from "../SchedulePanel";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
@@ -14,7 +13,6 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
   return (
     <>
       <PageHeader
-        icon={Lightning}
         title="Schedules"
         description="Run local workflows while the Fable desktop runtime is open."
       />

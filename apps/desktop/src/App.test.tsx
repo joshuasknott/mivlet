@@ -350,10 +350,10 @@ describe("Fable home", () => {
 
     expect(screen.getByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Sources" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Memory" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Memories" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /import file/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /import folder/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^connect a service$/i })).toBeInTheDocument();
 
     const file = new File(["Knowledge page import content"], "knowledge-page.md", {
       type: "text/markdown"
@@ -362,12 +362,12 @@ describe("Fable home", () => {
     await user.click(
       await screen.findByRole("button", { name: /^knowledge-page\.md local file/i })
     );
-    await user.click(screen.getByRole("button", { name: /^remember$/i }));
+    await user.click(screen.getByRole("button", { name: /^save to memories$/i }));
 
-    await user.click(screen.getByRole("tab", { name: "Memory" }));
+    await user.click(screen.getByRole("tab", { name: "Memories" }));
     expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(0);
-    expect(screen.getByRole("textbox", { name: /search memory/i })).toBeInTheDocument();
-    await user.type(screen.getByRole("textbox", { name: /search memory/i }), "knowledge-page");
+    expect(screen.getByRole("textbox", { name: /search memories/i })).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: /search memories/i }), "knowledge-page");
     expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(0);
   });
 
@@ -628,7 +628,7 @@ describe("Fable home", () => {
     );
     // The command created an approved memory, visible on the Knowledge page.
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
-    await user.click(screen.getByRole("tab", { name: /^memory$/i }));
+    await user.click(screen.getByRole("tab", { name: /^memories$/i }));
     // The memory is created and rendered (title appears in list + detail).
     expect((await screen.findAllByText(/Prefers dark mode/i)).length).toBeGreaterThan(0);
   });
@@ -645,7 +645,7 @@ describe("Fable home", () => {
     // Rejected through the last-action channel; the secret never lands in memory.
     expect(await screen.findByText(/looks like a secret/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
-    await user.click(screen.getByRole("tab", { name: /^memory$/i }));
+    await user.click(screen.getByRole("tab", { name: /^memories$/i }));
     expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
   });
 

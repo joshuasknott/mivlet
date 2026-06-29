@@ -8,7 +8,6 @@ import {
   MagnifyingGlass,
   Plus,
   SidebarSimple,
-  SquaresFour,
   CaretLeft,
   UserCircle,
   Plugs,
@@ -141,10 +140,10 @@ export function WorkspaceSidebar({
               aria-label="Settings"
               onClick={onCloseSettings}
             >
-              <CaretLeft size={14} aria-hidden="true" />
               <span className="workspace-switcher__name">
                 Settings
               </span>
+              <CaretLeft size={14} aria-hidden="true" />
             </button>
           ) : (
             <div className="workspace-switcher-container" ref={dropdownRef}>
@@ -237,13 +236,12 @@ export function WorkspaceSidebar({
             <div className="settings-sidebar-list" style={{ display: "grid", gap: "2px", marginTop: "8px" }}>
               <button
                 type="button"
-                className={`sidebar-action-card utility-row${
+                className={`sidebar-action-card utility-row settings-workspace-row${
                   activeSettingsTab === "workspace" ? " utility-row--active" : ""
                 }`}
                 onClick={() => onSelectSettingsTab?.("workspace")}
                 aria-current={activeSettingsTab === "workspace" ? "page" : undefined}
               >
-                <SquaresFour size={17} />
                 <span>{workspaceName}</span>
               </button>
             </div>

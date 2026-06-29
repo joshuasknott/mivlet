@@ -1,4 +1,3 @@
-import { PuzzlePiece } from "@phosphor-icons/react";
 import { PageHeader } from "../PageHeader";
 import { PluginPanel } from "../PluginPanel";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
@@ -16,7 +15,6 @@ export function ConnectorsPage({ runtime }: { runtime: ShellRuntime }) {
   return (
     <>
       <PageHeader
-        icon={PuzzlePiece}
         title="Connectors"
         description="Connect Fable to the tools you explicitly choose."
         meta={`${connected} of ${visibleConnectors.length} connected`}

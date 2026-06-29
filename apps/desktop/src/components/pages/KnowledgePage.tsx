@@ -1,359 +1,602 @@
 import { FormEvent, useMemo, useState } from "react";
 import {
   ArrowClockwise,
+  CaretDown,
+  CaretRight,
   Database,
   DownloadSimple,
+  File,
   FilePlus,
+  FolderOpen,
+  Lightbulb,
   MagnifyingGlass,
   PlugsConnected,
+  Plus,
   PushPin,
-  Stack,
+  Sparkle,
   Trash
 } from "@phosphor-icons/react";
 import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
-import { PageHeader } from "../PageHeader";
 
-type KnowledgeMode = "sources" | "memory";
+type KnowledgeSection = "sources" | "memories" | "artifacts";
+type SearchScope = "everything" | KnowledgeSection;
+type SortOrder = "newest" | "oldest";
+
+const sectionDetails: Array<{
+  id: KnowledgeSection;
+  label: string;
+  description: string;
+}> = [
+  { id: "sources", label: "Sources", description: "Files, links and notes" },
+  { id: "memories", label: "Memories", description: "Things Fable remembers" },
+  { id: "artifacts", label: "Artifacts", description: "Work Fable has made" }
+];
 
 export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
-  const [mode, setMode] = useState<KnowledgeMode>("sources");
+  const [section, setSection] = useState<KnowledgeSection>("sources");
+  const [scope, setScope] = useState<SearchScope>("everything");
   const [query, setQuery] = useState("");
-  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
-  const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
+  const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
+  const [expandedMemoryId, setExpandedMemoryId] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
-  const sources = useMemo(
-    () =>
-      runtime.workspaceKnowledgeSources.filter((source) =>
-        normalizedQuery
-          ? `${source.title} ${source.provenance} ${source.contentPreview ?? ""}`
-              .toLowerCase()
-              .includes(normalizedQuery)
-          : true
-      ),
-    [normalizedQuery, runtime.workspaceKnowledgeSources]
-  );
-  const memories = useMemo(
-    () =>
-      runtime.managedMemoryRecords.filter((memory) =>
-        normalizedQuery
-          ? `${memory.title} ${memory.value} ${memory.source}`
-              .toLowerCase()
-              .includes(normalizedQuery)
-          : true
-      ),
-    [normalizedQuery, runtime.managedMemoryRecords]
-  );
-  const selectedSource =
-    sources.find((source) => source.id === selectedSourceId) ?? sources[0];
-  const selectedMemory =
-    memories.find((memory) => memory.id === selectedMemoryId) ?? memories[0];
+  const filteredSources = useMemo(() => {
+    const matches = runtime.workspaceKnowledgeSources.filter((source) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        `${source.title} ${source.provenance} ${source.contentPreview ?? ""}`
+          .toLowerCase()
+          .includes(normalizedQuery);
+      const matchesPin = !pinnedOnly || runtime.pinnedSourceIds.includes(source.id);
+      return matchesQuery && matchesPin;
+    });
+    return sortSources(matches, sortOrder);
+  }, [
+    normalizedQuery,
+    pinnedOnly,
+    runtime.pinnedSourceIds,
+    runtime.workspaceKnowledgeSources,
+    sortOrder
+  ]);
+
+  const filteredMemories = useMemo(() => {
+    const matches = runtime.managedMemoryRecords.filter((memory) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        `${memory.title} ${memory.value} ${memory.source}`
+          .toLowerCase()
+          .includes(normalizedQuery);
+      return matchesQuery && (!pinnedOnly || memory.pinned);
+    });
+    return sortMemories(matches, sortOrder);
+  }, [normalizedQuery, pinnedOnly, runtime.managedMemoryRecords, sortOrder]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (query.trim()) void runtime.searchKnowledge(query);
+    if (query.trim() && (scope === "everything" || scope === "sources")) {
+      void runtime.searchKnowledge(query);
+    }
   };
 
+  const selectSection = (nextSection: KnowledgeSection) => {
+    setSection(nextSection);
+    setScope(nextSection);
+  };
+
+  const selectScope = (nextScope: SearchScope) => {
+    setScope(nextScope);
+    if (nextScope !== "everything") setSection(nextScope);
+  };
+
+  const showingGlobalResults = scope === "everything" && normalizedQuery.length > 0;
+
   return (
-    <>
-      <PageHeader
-        icon={Stack}
-        title="Knowledge"
-        description="Inspect what Fable can use, and keep durable memory deliberate."
-      />
-      <section className="knowledge-page" aria-label="Knowledge workspace">
-        <div className="knowledge-toolbar">
-          <div className="knowledge-mode" role="tablist" aria-label="Knowledge mode">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "sources"}
-              className={mode === "sources" ? "is-active" : ""}
-              onClick={() => setMode("sources")}
-            >
-              Sources
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "memory"}
-              className={mode === "memory" ? "is-active" : ""}
-              onClick={() => setMode("memory")}
-            >
-              Memory
-            </button>
-          </div>
-          <form className="knowledge-search" onSubmit={submitSearch}>
-            <MagnifyingGlass size={16} aria-hidden="true" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={`Search ${mode}`}
-              aria-label={`Search ${mode}`}
-            />
-          </form>
-          <div className="knowledge-toolbar__actions">
-            <input
-              ref={runtime.fileInputRef}
-              type="file"
-              hidden
-              aria-label="Import local knowledge file"
-              accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml"
-              onChange={runtime.handleLocalKnowledgeFileChange}
-            />
-            <input
-              ref={(node) => {
-                runtime.folderInputRef.current = node;
-                node?.setAttribute("webkitdirectory", "");
-                node?.setAttribute("directory", "");
-              }}
-              type="file"
-              hidden
-              multiple
-              aria-label="Import local knowledge folder"
-              accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml"
-              onChange={runtime.handleLocalKnowledgeFolderChange}
-            />
-            <button type="button" onClick={runtime.triggerAttach}>
-              <FilePlus size={16} />
-              Import file
-            </button>
-            <button type="button" onClick={runtime.triggerFolderImport}>
-              <FilePlus size={16} />
-              Import folder
-            </button>
-            <button type="button" onClick={() => runtime.setActiveItem("Connectors")}>
-              <PlugsConnected size={16} />
-              Connect
-            </button>
-          </div>
-        </div>
+    <section className="knowledge-page" aria-label="Knowledge workspace">
+      <header className="knowledge-page__header">
+        <h1>Knowledge</h1>
+        <p>Find and manage what Fable knows about your work.</p>
+      </header>
 
-        {runtime.importStatus ? (
-          <p className="knowledge-notice" role="status">{runtime.importStatus}</p>
+      <form className="knowledge-search" onSubmit={submitSearch}>
+        <MagnifyingGlass size={23} aria-hidden="true" />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={scope === "everything" ? "Search everything" : `Search ${scope}`}
+          aria-label={scope === "everything" ? "Search everything" : `Search ${scope}`}
+        />
+        <label className="knowledge-search__scope">
+          <span className="sr-only">Search in</span>
+          <select
+            value={scope}
+            onChange={(event) => selectScope(event.target.value as SearchScope)}
+            aria-label="Search in"
+          >
+            <option value="everything">Everything</option>
+            <option value="sources">Sources</option>
+            <option value="memories">Memories</option>
+            <option value="artifacts">Artifacts</option>
+          </select>
+          <CaretDown size={16} aria-hidden="true" />
+        </label>
+      </form>
+
+      <nav className="knowledge-sections" role="tablist" aria-label="Knowledge sections">
+        {sectionDetails.map((item) => {
+          const count =
+            item.id === "sources"
+              ? runtime.workspaceKnowledgeSources.length
+              : item.id === "memories"
+                ? runtime.managedMemoryRecords.length
+                : 0;
+          return (
+            <button
+              type="button"
+              role="tab"
+              key={item.id}
+              aria-label={item.label}
+              aria-selected={section === item.id && !showingGlobalResults}
+              className={section === item.id && !showingGlobalResults ? "is-active" : ""}
+              onClick={() => selectSection(item.id)}
+            >
+              <span className="knowledge-sections__label">
+                {item.label}
+                <small>{count}</small>
+              </span>
+              <span className="knowledge-sections__description">{item.description}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="knowledge-list-toolbar">
+        <label className="knowledge-pin-filter">
+          <PushPin size={18} aria-hidden="true" />
+          <span>Pinned only</span>
+          <input
+            type="checkbox"
+            checked={pinnedOnly}
+            onChange={(event) => setPinnedOnly(event.target.checked)}
+          />
+        </label>
+        <label className="knowledge-sort">
+          <span className="sr-only">Sort items</span>
+          <select
+            value={sortOrder}
+            onChange={(event) => setSortOrder(event.target.value as SortOrder)}
+            aria-label="Sort items"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+          <CaretDown size={15} aria-hidden="true" />
+        </label>
+        {section === "sources" && !showingGlobalResults ? (
+          <SourceAddMenu runtime={runtime} />
         ) : null}
+        {section === "memories" && !showingGlobalResults ? (
+          <div className="knowledge-memory-actions">
+            <button type="button" onClick={() => void runtime.exportMemory()}>
+              <DownloadSimple size={17} />
+              Export
+            </button>
+            <button type="button" onClick={runtime.toggleMemoryDisabled}>
+              {runtime.memoryDisabled ? "Turn on" : "Turn off"}
+            </button>
+          </div>
+        ) : null}
+      </div>
 
-        {mode === "sources" ? (
-          <SourceWorkspace
-            sources={sources}
-            selected={selectedSource}
-            pinnedIds={runtime.pinnedSourceIds}
-            onSelect={setSelectedSourceId}
-            onPin={runtime.toggleSourcePin}
-            onRefresh={runtime.refreshKnowledgeSource}
-            onToggleDisabled={runtime.toggleKnowledgeSourceDisabled}
-            onDelete={runtime.deleteKnowledgeSource}
-            onRemember={runtime.promoteSourceToMemory}
-            memoryDisabled={runtime.memoryDisabled}
-          />
-        ) : (
-          <MemoryWorkspace
-            memories={memories}
-            selected={selectedMemory}
-            disabled={runtime.memoryDisabled}
-            runtime={runtime}
-            onSelect={setSelectedMemoryId}
-          />
-        )}
-      </section>
-    </>
+      {runtime.importStatus ? (
+        <p className="knowledge-notice" role="status">
+          {runtime.importStatus}
+        </p>
+      ) : null}
+
+      {showingGlobalResults ? (
+        <GlobalResults
+          sources={filteredSources}
+          memories={filteredMemories}
+          runtime={runtime}
+          expandedSourceId={expandedSourceId}
+          expandedMemoryId={expandedMemoryId}
+          onExpandSource={setExpandedSourceId}
+          onExpandMemory={setExpandedMemoryId}
+        />
+      ) : section === "sources" ? (
+        <SourceList
+          sources={filteredSources}
+          runtime={runtime}
+          expandedId={expandedSourceId}
+          onExpand={setExpandedSourceId}
+        />
+      ) : section === "memories" ? (
+        <MemoryList
+          memories={filteredMemories}
+          runtime={runtime}
+          expandedId={expandedMemoryId}
+          onExpand={setExpandedMemoryId}
+        />
+      ) : (
+        <EmptyState
+          icon={Sparkle}
+          title={pinnedOnly ? "No pinned artifacts" : "No artifacts yet"}
+          description="Useful work made by Fable can be saved here."
+        />
+      )}
+
+      {section === "memories" && !showingGlobalResults && runtime.memoryStatus ? (
+        <p className="memory-status" aria-live="polite">
+          {runtime.memoryStatus}
+        </p>
+      ) : null}
+      {section === "memories" && !showingGlobalResults && runtime.memoryExportText ? (
+        <textarea
+          className="memory-export"
+          readOnly
+          aria-label="Memory export"
+          value={runtime.memoryExportText}
+        />
+      ) : null}
+    </section>
   );
 }
 
-function SourceWorkspace({
+function SourceAddMenu({ runtime }: { runtime: ShellRuntime }) {
+  return (
+    <div className="knowledge-add">
+      <input
+        ref={runtime.fileInputRef}
+        type="file"
+        hidden
+        aria-label="Import local knowledge file"
+        accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml"
+        onChange={runtime.handleLocalKnowledgeFileChange}
+      />
+      <input
+        ref={(node) => {
+          runtime.folderInputRef.current = node;
+          node?.setAttribute("webkitdirectory", "");
+          node?.setAttribute("directory", "");
+        }}
+        type="file"
+        hidden
+        multiple
+        aria-label="Import local knowledge folder"
+        accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml"
+        onChange={runtime.handleLocalKnowledgeFolderChange}
+      />
+      <details>
+        <summary>
+          <Plus size={17} />
+          Add
+          <CaretDown size={14} />
+        </summary>
+        <div className="knowledge-add__menu">
+          <button type="button" onClick={runtime.triggerAttach}>
+            <FilePlus size={17} />
+            Import file
+          </button>
+          <button type="button" onClick={runtime.triggerFolderImport}>
+            <FolderOpen size={17} />
+            Import folder
+          </button>
+          <button type="button" onClick={() => runtime.setActiveItem("Connectors")}>
+            <PlugsConnected size={17} />
+            Connect a service
+          </button>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function GlobalResults({
   sources,
-  selected,
-  pinnedIds,
-  onSelect,
-  onPin,
-  onRefresh,
-  onToggleDisabled,
-  onDelete,
-  onRemember,
-  memoryDisabled
+  memories,
+  runtime,
+  expandedSourceId,
+  expandedMemoryId,
+  onExpandSource,
+  onExpandMemory
 }: {
   sources: KnowledgeSource[];
-  selected?: KnowledgeSource;
-  pinnedIds: string[];
-  onSelect: (id: string) => void;
-  onPin: (id: string) => void;
-  onRefresh: (id: string) => Promise<void>;
-  onToggleDisabled: (id: string) => void;
-  onDelete: (id: string) => void;
-  onRemember: (source: KnowledgeSource) => void;
-  memoryDisabled: boolean;
+  memories: MemoryRecord[];
+  runtime: ShellRuntime;
+  expandedSourceId: string | null;
+  expandedMemoryId: string | null;
+  onExpandSource: (id: string | null) => void;
+  onExpandMemory: (id: string | null) => void;
 }) {
-  if (sources.length === 0) {
+  if (sources.length === 0 && memories.length === 0) {
     return (
-      <div className="knowledge-empty">
-        <FilePlus size={22} />
-        <strong>No sources yet</strong>
-        <span>Import a local file or connect a provider to begin.</span>
-      </div>
+      <EmptyState
+        icon={MagnifyingGlass}
+        title="Nothing found"
+        description="Try a different word or search another section."
+      />
     );
   }
+
   return (
-    <div className="knowledge-browser">
-      <div className="knowledge-list" role="list">
-        {sources.map((source) => (
-          <button
-            type="button"
-            key={source.id}
-            className={`knowledge-row${selected?.id === source.id ? " is-selected" : ""}`}
-            onClick={() => onSelect(source.id)}
-          >
-            <span className={`source-state source-state--${source.status ?? "ok"}`} />
-            <span>
-              <strong>{source.title}</strong>
-              <small>{source.provenance} · {source.freshness}</small>
-            </span>
-            {pinnedIds.includes(source.id) ? <PushPin size={14} weight="fill" /> : null}
-          </button>
-        ))}
-      </div>
-      {selected ? (
-        <article className="knowledge-inspector">
-          <div className="knowledge-inspector__heading">
-            <div>
-              <span>{selected.kind}</span>
-              <h2>{selected.title}</h2>
-            </div>
-            <span className={`knowledge-status knowledge-status--${selected.status ?? "ok"}`}>
-              {selected.disabled ? "Disabled" : selected.status ?? "Ready"}
-            </span>
-          </div>
-          <dl>
-            <div><dt>Provenance</dt><dd>{selected.provenance}</dd></div>
-            <div><dt>Scope</dt><dd>{selected.scope?.level ?? "global"}</dd></div>
-            <div><dt>Account</dt><dd>{selected.account ?? "Local workspace"}</dd></div>
-            <div><dt>Freshness</dt><dd>{selected.freshness}</dd></div>
-          </dl>
-          {selected.statusMessage ? <p className="knowledge-warning">{selected.statusMessage}</p> : null}
-          <p className="knowledge-preview">
-            {selected.contentPreview || "No content preview is retained for this source."}
-          </p>
-          <div className="knowledge-inspector__actions">
-            <button type="button" onClick={() => onPin(selected.id)}>
-              <PushPin size={15} />
-              {pinnedIds.includes(selected.id) ? "Unpin" : "Pin"}
-            </button>
-            <button type="button" onClick={() => void onRefresh(selected.id)}>
-              <ArrowClockwise size={15} />
-              Refresh
-            </button>
-            <button type="button" onClick={() => onToggleDisabled(selected.id)}>
-              {selected.disabled ? "Enable" : "Disable"}
-            </button>
-            <button
-              type="button"
-              disabled={memoryDisabled || selected.disabled}
-              onClick={() => onRemember(selected)}
-            >
-              <Database size={15} />
-              Remember
-            </button>
-            <button type="button" className="is-danger" onClick={() => onDelete(selected.id)}>
-              <Trash size={15} />
-              Delete
-            </button>
-          </div>
-        </article>
+    <div className="knowledge-global-results">
+      {sources.length > 0 ? (
+        <section>
+          <h2>Sources <span>{sources.length}</span></h2>
+          <SourceList
+            sources={sources}
+            runtime={runtime}
+            expandedId={expandedSourceId}
+            onExpand={onExpandSource}
+          />
+        </section>
+      ) : null}
+      {memories.length > 0 ? (
+        <section>
+          <h2>Memories <span>{memories.length}</span></h2>
+          <MemoryList
+            memories={memories}
+            runtime={runtime}
+            expandedId={expandedMemoryId}
+            onExpand={onExpandMemory}
+          />
+        </section>
       ) : null}
     </div>
   );
 }
 
-function MemoryWorkspace({
-  memories,
-  selected,
-  disabled,
+function SourceList({
+  sources,
   runtime,
-  onSelect
+  expandedId,
+  onExpand
 }: {
-  memories: MemoryRecord[];
-  selected?: MemoryRecord;
-  disabled: boolean;
+  sources: KnowledgeSource[];
   runtime: ShellRuntime;
-  onSelect: (id: string) => void;
+  expandedId: string | null;
+  onExpand: (id: string | null) => void;
 }) {
+  if (sources.length === 0) {
+    return (
+      <EmptyState
+        icon={File}
+        title="No sources here"
+        description="Add a file, folder or connected service to begin."
+      />
+    );
+  }
+
   return (
-    <>
-      <div className="memory-mode-bar">
-        <span>{disabled ? "Memory is disabled; saved records remain inspectable." : "Only explicitly approved memory is used."}</span>
-        <div>
-          <button type="button" onClick={() => void runtime.exportMemory()}>
-            <DownloadSimple size={15} /> Export
-          </button>
-          <button type="button" onClick={runtime.toggleMemoryDisabled}>
-            {disabled ? "Enable memory" : "Disable memory"}
-          </button>
-        </div>
-      </div>
-      {memories.length === 0 ? (
-        <div className="knowledge-empty">
-          <Database size={22} />
-          <strong>No durable memory</strong>
-          <span>Promote a source or completed result when it is worth keeping.</span>
-        </div>
-      ) : (
-        <div className="knowledge-browser">
-          <div className="knowledge-list" role="list">
-            {memories.map((memory) => (
+    <div className="knowledge-list" role="list">
+      {sources.map((source) => {
+        const expanded = expandedId === source.id;
+        const pinned = runtime.pinnedSourceIds.includes(source.id);
+        return (
+          <article className={`knowledge-item${expanded ? " is-expanded" : ""}`} key={source.id}>
+            <div className="knowledge-item__row">
               <button
                 type="button"
-                key={memory.id}
-                className={`knowledge-row${selected?.id === memory.id ? " is-selected" : ""}`}
-                onClick={() => onSelect(memory.id)}
+                className="knowledge-item__main"
+                aria-expanded={expanded}
+                onClick={() => onExpand(expanded ? null : source.id)}
               >
-                <Database size={15} />
+                <File size={22} aria-hidden="true" />
+                <span>
+                  <strong>{source.title}</strong>
+                  <small>{source.provenance}</small>
+                </span>
+              </button>
+              <span className="knowledge-item__date">{source.freshness}</span>
+              <button
+                type="button"
+                className={`knowledge-item__pin${pinned ? " is-pinned" : ""}`}
+                aria-label={`${pinned ? "Unpin" : "Pin"} ${source.title}`}
+                onClick={() => runtime.toggleSourcePin(source.id)}
+              >
+                <PushPin size={18} weight={pinned ? "fill" : "regular"} />
+              </button>
+              <button
+                type="button"
+                className="knowledge-item__expand"
+                aria-label={`${expanded ? "Close" : "Open"} ${source.title}`}
+                onClick={() => onExpand(expanded ? null : source.id)}
+              >
+                {expanded ? <CaretDown size={18} /> : <CaretRight size={18} />}
+              </button>
+            </div>
+            {expanded ? (
+              <div className="knowledge-item__details">
+                <p>{source.contentPreview || "No preview is available for this source."}</p>
+                <div className="knowledge-item__actions">
+                  <button
+                    type="button"
+                    disabled={runtime.memoryDisabled || source.disabled}
+                    onClick={() => runtime.promoteSourceToMemory(source)}
+                  >
+                    <Database size={16} />
+                    Save to memories
+                  </button>
+                  <button type="button" onClick={() => void runtime.refreshKnowledgeSource(source.id)}>
+                    <ArrowClockwise size={16} />
+                    Refresh
+                  </button>
+                  <button type="button" onClick={() => runtime.toggleKnowledgeSourceDisabled(source.id)}>
+                    {source.disabled ? "Use source" : "Stop using"}
+                  </button>
+                  <button
+                    type="button"
+                    className="is-danger"
+                    onClick={() => runtime.deleteKnowledgeSource(source.id)}
+                  >
+                    <Trash size={16} />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function MemoryList({
+  memories,
+  runtime,
+  expandedId,
+  onExpand
+}: {
+  memories: MemoryRecord[];
+  runtime: ShellRuntime;
+  expandedId: string | null;
+  onExpand: (id: string | null) => void;
+}) {
+  if (memories.length === 0) {
+    return (
+      <EmptyState
+        icon={Lightbulb}
+        title="No memories here"
+        description="Save something Fable should remember for future work."
+      />
+    );
+  }
+
+  return (
+    <div className="knowledge-list" role="list">
+      {memories.map((memory) => {
+        const expanded = expandedId === memory.id;
+        return (
+          <article className={`knowledge-item${expanded ? " is-expanded" : ""}`} key={memory.id}>
+            <div className="knowledge-item__row">
+              <button
+                type="button"
+                className="knowledge-item__main"
+                aria-expanded={expanded}
+                onClick={() => onExpand(expanded ? null : memory.id)}
+              >
+                <Lightbulb size={22} aria-hidden="true" />
                 <span>
                   <strong>{memory.title}</strong>
-                  <small>{memory.source} · {memory.freshness}</small>
+                  <small>{memory.source}</small>
                 </span>
-                {memory.pinned ? <PushPin size={14} weight="fill" /> : null}
               </button>
-            ))}
-          </div>
-          {selected ? (
-            <article className="knowledge-inspector">
-              <div className="knowledge-inspector__heading">
-                <div><span>{selected.kind}</span><h2>{selected.title}</h2></div>
-                <span className="knowledge-status">{selected.approvalState ?? (selected.approved ? "Approved" : "Suggested")}</span>
-              </div>
-              {runtime.editingMemoryId === selected.id ? (
-                <div className="knowledge-memory-edit">
-                  <label>Title<input value={runtime.editingMemoryDraft.title} onChange={(event) => runtime.setEditingMemoryDraft({ ...runtime.editingMemoryDraft, title: event.target.value })} /></label>
-                  <label>Memory<textarea value={runtime.editingMemoryDraft.value} onChange={(event) => runtime.setEditingMemoryDraft({ ...runtime.editingMemoryDraft, value: event.target.value })} /></label>
-                  <div><button type="button" onClick={() => runtime.saveMemoryEdit(selected.id)}>Save</button><button type="button" onClick={runtime.cancelMemoryEdit}>Cancel</button></div>
-                </div>
-              ) : (
-                <>
-                  <p className="knowledge-preview">{selected.value}</p>
-                  <dl>
-                    <div><dt>Origin</dt><dd>{selected.provenance?.origin ?? selected.source}</dd></div>
-                    <div><dt>Scope</dt><dd>{selected.scope?.level ?? "global"}</dd></div>
-                    <div><dt>Freshness</dt><dd>{selected.freshness}</dd></div>
-                  </dl>
-                  <div className="knowledge-inspector__actions">
-                    <button type="button" onClick={() => runtime.startMemoryEdit(selected)}>Edit</button>
-                    <button type="button" onClick={() => runtime.toggleMemoryPin(selected.id)}>
-                      <PushPin size={15} /> {selected.pinned ? "Unpin" : "Pin"}
-                    </button>
-                    <button type="button" className="is-danger" onClick={() => runtime.forgetMemory(selected.id)}>
-                      <Trash size={15} /> Forget
-                    </button>
+              <span className="knowledge-item__date">{memory.freshness}</span>
+              <button
+                type="button"
+                className={`knowledge-item__pin${memory.pinned ? " is-pinned" : ""}`}
+                aria-label={`${memory.pinned ? "Unpin" : "Pin"} ${memory.title}`}
+                onClick={() => runtime.toggleMemoryPin(memory.id)}
+              >
+                <PushPin size={18} weight={memory.pinned ? "fill" : "regular"} />
+              </button>
+              <button
+                type="button"
+                className="knowledge-item__expand"
+                aria-label={`${expanded ? "Close" : "Open"} ${memory.title}`}
+                onClick={() => onExpand(expanded ? null : memory.id)}
+              >
+                {expanded ? <CaretDown size={18} /> : <CaretRight size={18} />}
+              </button>
+            </div>
+            {expanded ? (
+              <div className="knowledge-item__details">
+                {runtime.editingMemoryId === memory.id ? (
+                  <div className="knowledge-memory-edit">
+                    <label>
+                      Name
+                      <input
+                        value={runtime.editingMemoryDraft.title}
+                        onChange={(event) =>
+                          runtime.setEditingMemoryDraft({
+                            ...runtime.editingMemoryDraft,
+                            title: event.target.value
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Memory
+                      <textarea
+                        value={runtime.editingMemoryDraft.value}
+                        onChange={(event) =>
+                          runtime.setEditingMemoryDraft({
+                            ...runtime.editingMemoryDraft,
+                            value: event.target.value
+                          })
+                        }
+                      />
+                    </label>
+                    <div className="knowledge-item__actions">
+                      <button type="button" onClick={() => runtime.saveMemoryEdit(memory.id)}>
+                        Save
+                      </button>
+                      <button type="button" onClick={runtime.cancelMemoryEdit}>
+                        Cancel
+                      </button>
+                    </div>
                   </div>
-                </>
-              )}
-            </article>
-          ) : null}
-        </div>
-      )}
-      <p className="memory-status" aria-live="polite">{runtime.memoryStatus}</p>
-      {runtime.memoryExportText ? (
-        <textarea className="memory-export" readOnly aria-label="Memory export" value={runtime.memoryExportText} />
-      ) : null}
-    </>
+                ) : (
+                  <>
+                    <p>{memory.value}</p>
+                    <div className="knowledge-item__actions">
+                      <button type="button" onClick={() => runtime.startMemoryEdit(memory)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="is-danger"
+                        onClick={() => runtime.forgetMemory(memory.id)}
+                      >
+                        <Trash size={16} />
+                        Forget
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </article>
+        );
+      })}
+    </div>
   );
+}
+
+function EmptyState({
+  icon: Icon,
+  title,
+  description
+}: {
+  icon: typeof File;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="knowledge-empty">
+      <Icon size={26} aria-hidden="true" />
+      <strong>{title}</strong>
+      <span>{description}</span>
+    </div>
+  );
+}
+
+function sortSources(items: KnowledgeSource[], order: SortOrder) {
+  return [...items].sort((a, b) => compareDates(a.importedAt, b.importedAt, order));
+}
+
+function sortMemories(items: MemoryRecord[], order: SortOrder) {
+  return [...items].sort((a, b) =>
+    compareDates(a.updatedAt ?? a.createdAt, b.updatedAt ?? b.createdAt, order)
+  );
+}
+
+function compareDates(a: string | undefined, b: string | undefined, order: SortOrder) {
+  const left = a ? Date.parse(a) || 0 : 0;
+  const right = b ? Date.parse(b) || 0 : 0;
+  return order === "newest" ? right - left : left - right;
 }

@@ -172,7 +172,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
     BackendCatalogEntry {
         id: "gemini",
         backend_type: "native-api",
-        label: "Google Gemini",
+        label: "Gemini",
         description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
         install_hint: "",
         models: &[
