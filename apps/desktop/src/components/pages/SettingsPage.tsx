@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { BackendAuthState, BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
+import { stateViewFor } from "../../lib/backend-state";
 import { ProviderIcon } from "../ProviderIcon";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
@@ -147,8 +148,20 @@ function ProviderAccessView({
               pending={pendingProviderId === provider.id}
               onStatus={onStatus}
               onConnect={(providerId, secret) =>
-                void runtime.connectBackend(providerId, secret).then(() => {
-                  onStatus(`${providerId} connected.`);
+                void runtime.connectBackendWithVerify(providerId, secret).then((result) => {
+                  // Surface useful errors from the verified connect path.
+                  if (result.outcome === "ready") {
+                    onStatus(`${providerId} connected.`);
+                  } else if (result.outcome === "auth-failed") {
+                    onStatus(
+                      result.message ?? `${providerId} rejected this key. Check the key and try again.`
+                    );
+                  } else {
+                    onStatus(
+                      result.message ??
+                        `${providerId} could not be verified right now. Your key is saved.`
+                    );
+                  }
                 })
               }
               onDisconnect={(providerId) =>
@@ -405,25 +418,17 @@ function SubscriptionProviderRow({ provider }: { provider: BackendProvider }) {
   );
 }
 
-/** Human label for a backend's resolved auth state. */
+/** Human label for a backend's resolved auth state. Mirrors the onboarding
+ *  surface so the two never drift — delegates to the shared state view. */
 function authStateLabel(
   authState: BackendAuthState,
   _backendType: BackendProvider["backendType"]
 ): string {
-  switch (authState) {
-    case "connected":
-      return "Connected";
-    case "needs-auth":
-      return "Needs API key";
-    case "install-required":
-      return "Install required";
-    case "entitlement-pending":
-      return "Entitlement pending";
-    case "unavailable":
-      return "Unavailable";
-    default:
-      return authState;
+  // needs-auth carries provider-specific copy in the management view.
+  if (authState === "needs-auth") {
+    return "Needs API key";
   }
+  return stateViewFor(authState).label;
 }
 
 function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace"> }) {

@@ -470,16 +470,52 @@ export interface PersistedAgentRun {
 export type BackendType = "codex-app-server" | "acp" | "copilot-sdk" | "native-api";
 
 /**
- * Resolved auth state for a backend instance. `install-required` and
- * `entitlement-pending` are fail-closed states: the adapter declares no
- * capabilities it cannot honor.
+ * Resolved auth state for a backend instance. Fail-closed states declare no
+ * capabilities the adapter cannot honor.
+ *
+ *   - `connected` — credential/runtime present and last-known good.
+ *   - `needs-auth` — an API-key provider awaiting a key.
+ *   - `sign-in-required` — a provider-owned login (Codex CLI, ACP, Copilot)
+ *     is installed but not signed in; Fable never shows a token field here.
+ *   - `install-required` — the provider's real runtime (CLI/SDK) is missing.
+ *   - `connecting` — a verification round-trip is in flight (UI-only; never
+ *     persisted by the boundary).
+ *   - `expired` — a credential/login was valid before but is no longer.
+ *   - `unsupported` — the provider cannot be driven from this build (e.g. an
+ *     adapter family with no runnable implementation here).
+ *   - `failed` — the last verification round-trip failed (transient/offline);
+ *     the credential may still be stored, so the user can retry.
+ *   - `ready` — terminal success alias surfaced by onboarding before the
+ *     boundary re-resolves to `connected`.
+ *   - `entitlement-pending` — authenticated, awaiting an entitlement check
+ *     (Grok). Declares only the `authentication` capability.
+ *   - `unavailable` — unknown/initialization failure; fails closed.
  */
 export type BackendAuthState =
   | "connected"
   | "needs-auth"
+  | "sign-in-required"
   | "install-required"
+  | "connecting"
+  | "expired"
+  | "unsupported"
+  | "failed"
+  | "ready"
   | "entitlement-pending"
   | "unavailable";
+
+/** States where the backend cannot serve any request (declares no caps). */
+export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
+  "needs-auth",
+  "sign-in-required",
+  "install-required",
+  "connecting",
+  "expired",
+  "unsupported",
+  "failed",
+  "entitlement-pending",
+  "unavailable",
+] as const;
 
 /**
  * The closed capability set an adapter may declare dynamically. The UI may
@@ -562,6 +598,26 @@ export interface BackendProvider {
 export interface BackendCredentialRequest {
   providerId: string;
   secret: string;
+}
+
+/**
+ * Outcome of verifying a stored backend credential against the provider. Rust
+ * hit-tests the stored key inside the credential boundary (no key crosses to
+ * JS) and returns one of these outcomes. `auth-failed` clears the bad key;
+ * the transient outcomes keep the stored key so the user can retry.
+ */
+export type BackendVerifyOutcome =
+  | "ready"
+  | "auth-failed"
+  | "offline"
+  | "unsupported"
+  | "failed";
+
+export interface BackendVerifyResult {
+  providerId: string;
+  outcome: BackendVerifyOutcome;
+  /** Optional human-readable detail for surfacing useful errors. */
+  message?: string;
 }
 
 /**

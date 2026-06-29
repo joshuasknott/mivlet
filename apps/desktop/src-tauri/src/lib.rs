@@ -121,6 +121,7 @@ pub fn run() {
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
             native_api::list_backend_models,
+            native_api::verify_backend_credential,
             google::cancel_google_call,
             tools::execute_tool_call,
             store::encrypted_store_status,

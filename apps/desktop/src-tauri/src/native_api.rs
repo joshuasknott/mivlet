@@ -18,6 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use crate::backends::read_credential;
+use crate::models::BackendVerifyResult;
 use tauri::{AppHandle, Emitter};
 
 /// Which wire family a native provider speaks (selects endpoint + auth header).
@@ -716,6 +717,105 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     })
 }
 
+/// Verify a stored native-API credential by hit-testing it against the
+/// provider's list-models endpoint. The key never crosses into JavaScript —
+/// Rust looks it up via the credential boundary, adds the auth header, and
+/// issues a single bounded GET. The HTTP result maps to a
+/// [`BackendVerifyResult`]:
+///   - 2xx → `ready`
+///   - 401/403 → `auth-failed` (the key is bad/expired)
+///   - network error → `offline`
+///   - 404/405/501 → `unsupported`
+///   - anything else → `failed`
+///
+/// Non-native providers (Codex/ACP/Copilot) own their own auth and never pass
+/// through this boundary, so they fail closed with `unsupported`.
+#[tauri::command]
+pub async fn verify_backend_credential(
+    provider_id: String,
+) -> Result<BackendVerifyResult, String> {
+    if !NATIVE_PROVIDER_IDS.contains(&provider_id.as_str()) {
+        // Provider-owned runtimes (Codex CLI, ACP, Copilot SDK) carry their own
+        // auth that Fable must not touch. They cannot be verified here.
+        return Ok(BackendVerifyResult {
+            provider_id: provider_id.clone(),
+            outcome: "unsupported".to_string(),
+            message: Some(
+                "This provider manages its own sign-in and cannot be verified here.".to_string(),
+            ),
+        });
+    }
+
+    let key = match require_key(&provider_id) {
+        Ok(key) => key,
+        Err(message) => {
+            return Ok(BackendVerifyResult {
+                provider_id: provider_id.clone(),
+                outcome: "auth-failed".to_string(),
+                message: Some(message),
+            })
+        }
+    };
+
+    let url = models_endpoint_for(&provider_id)?;
+    let (auth_name, auth_value) = auth_header_for(&provider_id, &key);
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
+
+    let mut request = client.get(&url).header(&auth_name, &auth_value);
+    for (name, value) in extra_headers(&provider_id) {
+        request = request.header(name, value);
+    }
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(_) => {
+            return Ok(BackendVerifyResult {
+                provider_id: provider_id.clone(),
+                outcome: "offline".to_string(),
+                message: Some(format!("Could not reach {provider_id}. Check your connection.")),
+            })
+        }
+    };
+
+    let status = response.status();
+    let outcome = verify_outcome_for_status(status);
+    let message = if outcome == "auth-failed" {
+        Some(format!(
+            "{provider_id} rejected this key. Check the key and try again."
+        ))
+    } else if outcome == "unsupported" {
+        Some(format!("{provider_id} does not expose a verifiable endpoint."))
+    } else if outcome == "failed" {
+        Some(format!("{provider_id} returned HTTP {status}. Try again."))
+    } else {
+        None
+    };
+
+    Ok(BackendVerifyResult {
+        provider_id,
+        outcome: outcome.to_string(),
+        message,
+    })
+}
+
+/// Map a provider HTTP status to a credential-verify outcome. Pure so the
+/// boundary mapping is unit-testable without a socket. Mirrors the discovery
+/// path's notion of "unsupported" (404/405/501) and treats 401/403 as a bad
+/// or expired key.
+pub fn verify_outcome_for_status(status: reqwest::StatusCode) -> &'static str {
+    match status.as_u16() {
+        401 | 403 => "auth-failed",
+        404 | 405 | 501 => "unsupported",
+        code if (200..300).contains(&code) => "ready",
+        _ => "failed",
+    }
+}
+
 #[cfg(test)]
 mod transport_policy_tests {
     use super::*;
@@ -807,5 +907,37 @@ mod transport_policy_tests {
         let body = serde_json::json!({ "data": data });
         let models = parse_models_body("openai", &body);
         assert_eq!(models.len(), MAX_DISCOVERED_MODELS);
+    }
+
+    #[test]
+    fn verify_maps_http_status_to_outcome_vocabulary() {
+        use crate::models::BACKEND_VERIFY_OUTCOMES;
+        use reqwest::StatusCode;
+
+        let cases = [
+            (StatusCode::OK, "ready"),
+            (StatusCode::CREATED, "ready"),
+            (StatusCode::NO_CONTENT, "ready"),
+            (StatusCode::UNAUTHORIZED, "auth-failed"),
+            (StatusCode::FORBIDDEN, "auth-failed"),
+            (StatusCode::NOT_FOUND, "unsupported"),
+            (StatusCode::METHOD_NOT_ALLOWED, "unsupported"),
+            (StatusCode::NOT_IMPLEMENTED, "unsupported"),
+            (StatusCode::TOO_MANY_REQUESTS, "failed"),
+            (StatusCode::BAD_GATEWAY, "failed"),
+            (StatusCode::INTERNAL_SERVER_ERROR, "failed"),
+        ];
+        for (status, expected) in cases {
+            let outcome = verify_outcome_for_status(status);
+            assert_eq!(
+                outcome, expected,
+                "status {status} should map to {expected}"
+            );
+            // Every emitted outcome must be in the controlled vocabulary.
+            assert!(
+                BACKEND_VERIFY_OUTCOMES.contains(&outcome),
+                "outcome {outcome} is not in BACKEND_VERIFY_OUTCOMES"
+            );
+        }
     }
 }

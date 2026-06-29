@@ -7,6 +7,8 @@ import type {
   ApprovalRequest,
   BackendConsequentialEvent,
   BackendProvider,
+  BackendVerifyOutcome,
+  BackendVerifyResult,
   ConnectorActionKind,
   ConnectorActionRequest,
   ConnectorAccountOption,
@@ -103,7 +105,8 @@ import {
   saveRuntimeSnapshot,
   searchRuntimeConnector,
   searchRuntimeKnowledgeSources,
-  switchRuntimeConnectorAccount
+  switchRuntimeConnectorAccount,
+  verifyRuntimeBackend
 } from "../runtime";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
@@ -283,6 +286,18 @@ export interface ShellRuntime {
   backendStatus: string | null;
   onboardingRequired: boolean;
   connectBackend: (providerId: string, secret?: string) => Promise<void>;
+  /**
+   * Verified connect path used by onboarding + Settings. Stores the key, then
+   * verifies it against the provider inside the Rust boundary (the secret never
+   * returns to JS). Returns the verify outcome so the UI can surface useful
+   * errors (auth-failed/offline/unsupported/failed) and reflect state. On
+   * `auth-failed` the bad key is cleared; on the transient outcomes the stored
+   * key is retained so the user can retry.
+   */
+  connectBackendWithVerify: (
+    providerId: string,
+    secret: string
+  ) => Promise<BackendVerifyResult>;
   disconnectBackend: (providerId: string) => Promise<void>;
   /**
    * The connected agent backend that drives the agent run, if any. Today only a
@@ -1410,43 +1425,110 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // credential boundary; React only ever sees the resulting auth state. Outside
   // Tauri we record a local preview connection so the onboarding gate clears
   // and the UI stays testable.
-  const connectBackend = async (providerId: string, secret = "preview-connection") => {
+  //
+  // The verified path (`connectBackendWithVerify`) is the single connect entry
+  // point for onboarding + Settings: store → mark connecting → verify against
+  // the provider inside the boundary → reflect. `connectBackend` is retained as
+  // a fire-and-forget wrapper over it for the legacy contract.
+  const refreshBackendProviders = async () => {
+    const refreshed = await listRuntimeBackends();
+    if (refreshed) {
+      setBackendProviders(refreshed);
+      setConnectedBackendIds(
+        refreshed
+          .filter((provider) => provider.authState === "connected")
+          .map((provider) => provider.id)
+      );
+    }
+    return refreshed;
+  };
+
+  const markProviderState = (providerId: string, authState: BackendProvider["authState"]) => {
+    setBackendProviders((current) =>
+      current.map((provider) =>
+        provider.id === providerId
+          ? {
+              ...provider,
+              authState,
+              // Transient/non-connected states declare no capabilities.
+              capabilities: authState === "connected" ? provider.capabilities : []
+            }
+          : provider
+      )
+    );
+  };
+
+  const connectBackendWithVerify = async (
+    providerId: string,
+    secret: string
+  ): Promise<BackendVerifyResult> => {
     setBackendStatus(`Connecting ${providerId}…`);
+    // Surface the connecting state on the provider card while the round-trip
+    // is in flight. This is a transient UI state; the boundary re-resolves to
+    // connected/needs-auth after verification.
+    markProviderState(providerId, "connecting");
     try {
       const stored = await connectRuntimeBackend({ providerId, secret });
       if (stored === null) {
         // Preview mode (no Tauri runtime): record a local connection only.
+        // The secret is the placeholder preview value, never a real key, so no
+        // credential is fabricated.
         setConnectedBackendIds((current) =>
           current.includes(providerId) ? current : [...current, providerId]
         );
-        setBackendProviders((current) =>
-          current.map((provider) =>
-            provider.id === providerId ? { ...provider, authState: "connected" } : provider
-          )
-        );
+        markProviderState(providerId, "connected");
         setBackendStatus(`${providerId} connected (preview).`);
         setLastAction(`${providerId} connected (preview)`);
-        return;
+        return { providerId, outcome: "ready" };
       }
 
-      // Re-read the boundary so auth state + capabilities reflect the stored
-      // credential (Rust resolves it; no secret crosses back).
-      const refreshed = await listRuntimeBackends();
-      if (refreshed) {
-        setBackendProviders(refreshed);
-        setConnectedBackendIds(
-          refreshed
-            .filter((provider) => provider.authState === "connected")
-            .map((provider) => provider.id)
-        );
+      // Key stored in the keychain. Verify it against the provider inside the
+      // Rust boundary — the secret never crosses back into JS.
+      const result = await verifyRuntimeBackend(providerId);
+      // null means the verify command is unavailable (older runtime). Treat it
+      // as ready so a real connection is not blocked by a missing command.
+      const outcome: BackendVerifyOutcome = result?.outcome ?? "ready";
+      const message = result?.message;
+
+      if (outcome === "auth-failed") {
+        // The provider rejected the key: clear it so the bad credential does
+        // not linger as a "connected" provider, then surface a useful error.
+        await clearRuntimeBackend(providerId);
+        await refreshBackendProviders();
+        markProviderState(providerId, "needs-auth");
+        const status = message ?? `${providerId} rejected this key. Check the key and try again.`;
+        setBackendStatus(status);
+        setLastAction(status);
+        return { providerId, outcome, message: status };
       }
-      setBackendStatus(`${providerId} connected.`);
-      setLastAction(`${providerId} connected`);
+
+      if (outcome === "ready") {
+        await refreshBackendProviders();
+        setBackendStatus(`${providerId} connected.`);
+        setLastAction(`${providerId} connected`);
+        return { providerId, outcome };
+      }
+
+      // offline / unsupported / failed: the stored key may still be good, so
+      // keep it but reflect a non-blocking warning. Re-read the boundary so the
+      // provider shows connected (key present) with a status note.
+      await refreshBackendProviders();
+      const status = message ?? `${providerId} could not be verified right now. It is connected; try a run to confirm.`;
+      setBackendStatus(status);
+      setLastAction(status);
+      return { providerId, outcome, message };
     } catch (error) {
+      // Storage itself failed. Fail closed: do not report a connection.
+      markProviderState(providerId, "needs-auth");
       const message = error instanceof Error ? error.message : `Could not connect ${providerId}.`;
       setBackendStatus(message);
       setLastAction(message);
+      return { providerId, outcome: "failed", message };
     }
+  };
+
+  const connectBackend = async (providerId: string, secret = "preview-connection") => {
+    await connectBackendWithVerify(providerId, secret);
   };
 
   const disconnectBackend = async (providerId: string) => {
@@ -2112,6 +2194,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     backendStatus,
     onboardingRequired,
     connectBackend,
+    connectBackendWithVerify,
     disconnectBackend,
     connectedAgentBackend,
     selectableModels,
