@@ -1,3 +1,4 @@
+import { useState, useEffect, useRef } from "react";
 import {
   CaretDown,
   CaretRight,
@@ -7,12 +8,18 @@ import {
   MagnifyingGlass,
   Plus,
   SidebarSimple,
-  Stack,
-  SignOut,
-  User
+  SquaresFour,
+  CaretLeft,
+  UserCircle,
+  Plugs,
+  Moon,
+  LockKey,
+  WarningCircle,
+  SignOut
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
+import type { SettingsTab } from "./pages/SettingsPage";
 
 /**
  * Workspace sidebar / shell navigation.
@@ -23,6 +30,14 @@ export interface UtilityNavItem {
   icon: Icon;
 }
 
+const userSettingsTabs = [
+  { id: "profile" as const, label: "Profile", icon: UserCircle },
+  { id: "providers" as const, label: "Providers", icon: Plugs },
+  { id: "appearance" as const, label: "Appearance", icon: Moon },
+  { id: "privacy" as const, label: "Privacy", icon: LockKey },
+  { id: "notifications" as const, label: "Notifications", icon: WarningCircle }
+];
+
 export function WorkspaceSidebar({
   workspaceName,
   utilityItems,
@@ -32,7 +47,6 @@ export function WorkspaceSidebar({
   projects,
   chatThreads,
   mobileNavOpen,
-  accountOpen,
   collapsed,
   onNewChat,
   onAddProject,
@@ -47,10 +61,13 @@ export function WorkspaceSidebar({
   onToggleCollapsed,
   onOpenMobileConnection,
   onSelectThread,
-  onToggleAccount,
   onAccountMenu,
   loadingItemIds = [],
-  profile
+  profile,
+  isSettingsActive = false,
+  activeSettingsTab,
+  onSelectSettingsTab,
+  onCloseSettings
 }: {
   workspaceName: string;
   utilityItems: readonly UtilityNavItem[];
@@ -60,7 +77,6 @@ export function WorkspaceSidebar({
   projects: ProjectWorkspace[];
   chatThreads: ThreadSummary[];
   mobileNavOpen: boolean;
-  accountOpen: boolean;
   collapsed: boolean;
   onNewChat: () => void;
   onAddProject: () => void;
@@ -75,11 +91,31 @@ export function WorkspaceSidebar({
   onToggleCollapsed: () => void;
   onOpenMobileConnection: () => void;
   onSelectThread: (thread: ThreadSummary) => void;
-  onToggleAccount: () => void;
   onAccountMenu: (item: "profile" | "settings" | "logout") => void;
   loadingItemIds?: string[];
   profile?: { name: string; email: string; photoInitials?: string; photoUrl?: string };
+  isSettingsActive?: boolean;
+  activeSettingsTab?: SettingsTab;
+  onSelectSettingsTab?: (tab: SettingsTab) => void;
+  onCloseSettings?: () => void;
 }) {
+  const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setWorkspaceDropdownOpen(false);
+      }
+    }
+    if (workspaceDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [workspaceDropdownOpen]);
+
   if (collapsed) {
     return (
       <button
@@ -98,20 +134,58 @@ export function WorkspaceSidebar({
     <aside className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-header">
         <div className="sidebar-top-row">
-          <button
-            type="button"
-            className="workspace-switcher"
-            aria-label="Select workspace"
-            onClick={onSelectWorkspace}
-          >
-            <span className="workspace-switcher__icon" aria-hidden="true">
-              <Stack size={15} />
-            </span>
-            <span className="workspace-switcher__name">
-              {workspaceName}
-            </span>
-            <CaretDown size={12} className="workspace-switcher__caret" />
-          </button>
+          {isSettingsActive ? (
+            <button
+              type="button"
+              className="workspace-switcher"
+              aria-label="Settings"
+              onClick={onCloseSettings}
+            >
+              <CaretLeft size={14} aria-hidden="true" />
+              <span className="workspace-switcher__name">
+                Settings
+              </span>
+            </button>
+          ) : (
+            <div className="workspace-switcher-container" ref={dropdownRef}>
+              <button
+                type="button"
+                className="workspace-switcher"
+                aria-label="Select workspace"
+                onClick={() => {
+                  setWorkspaceDropdownOpen(!workspaceDropdownOpen);
+                  onSelectWorkspace();
+                }}
+              >
+                <span className="workspace-switcher__name">
+                  {workspaceName}
+                </span>
+                <CaretDown size={12} className="workspace-switcher__caret" />
+              </button>
+
+              {workspaceDropdownOpen && (
+                <div className="workspace-dropdown" role="menu">
+                  <div className="workspace-dropdown__item workspace-dropdown__item--active">
+                    <span className="workspace-dropdown__name">{workspaceName}</span>
+                    <button
+                      type="button"
+                      className="workspace-dropdown__settings-btn"
+                      aria-label="Workspace Settings"
+                      title="Workspace Settings"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWorkspaceDropdownOpen(false);
+                        onAccountMenu("settings");
+                        onSelectSettingsTab?.("workspace");
+                      }}
+                    >
+                      <Gear size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             className="sidebar-minimize"
@@ -124,6 +198,73 @@ export function WorkspaceSidebar({
         </div>
       </div>
 
+      {isSettingsActive ? (
+        <div className="sidebar-body">
+          <section className="nav-group" aria-labelledby="personal-settings-nav-heading">
+            <div className="nav-group-heading-row">
+              <span className="nav-group-title nav-group-title--plain" id="personal-settings-nav-heading">
+                <span>Personal</span>
+              </span>
+            </div>
+            <div className="settings-sidebar-list" style={{ display: "grid", gap: "2px", marginTop: "8px" }}>
+              {userSettingsTabs.map((tab) => {
+                const active = activeSettingsTab === tab.id;
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`sidebar-action-card utility-row${
+                      active ? " utility-row--active" : ""
+                    }`}
+                    onClick={() => onSelectSettingsTab?.(tab.id)}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <Icon size={17} />
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="nav-group" aria-labelledby="workspace-settings-nav-heading" style={{ marginTop: "16px" }}>
+            <div className="nav-group-heading-row">
+              <span className="nav-group-title nav-group-title--plain" id="workspace-settings-nav-heading">
+                <span>Workspaces</span>
+              </span>
+            </div>
+            <div className="settings-sidebar-list" style={{ display: "grid", gap: "2px", marginTop: "8px" }}>
+              <button
+                type="button"
+                className={`sidebar-action-card utility-row${
+                  activeSettingsTab === "workspace" ? " utility-row--active" : ""
+                }`}
+                onClick={() => onSelectSettingsTab?.("workspace")}
+                aria-current={activeSettingsTab === "workspace" ? "page" : undefined}
+              >
+                <SquaresFour size={17} />
+                <span>{workspaceName}</span>
+              </button>
+            </div>
+          </section>
+
+          <div className="settings-logout-wrapper" style={{ marginTop: "auto", display: "grid", gap: "8px" }}>
+            <div className="sidebar-action-divider" aria-hidden="true" style={{ margin: "0 4px" }} />
+            <div className="settings-sidebar-list" style={{ display: "grid", gap: "2px" }}>
+              <button
+                type="button"
+                className="sidebar-action-card utility-row logout-button"
+                onClick={() => onAccountMenu("logout")}
+              >
+                <SignOut size={17} />
+                <span>Log Out</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
           <button
             className="mobile-nav-toggle"
             type="button"
@@ -289,78 +430,71 @@ export function WorkspaceSidebar({
               ) : null}
             </section>
           </div>
+        </>
+      )}
 
-          <div className="sidebar-footer">
-            <div className="account-menu-anchor">
-              <button
-                type="button"
-                className={`account-row${accountOpen ? " account-row--open" : ""}`}
-                onClick={onToggleAccount}
-                aria-expanded={accountOpen}
-                aria-haspopup="menu"
-                aria-label={`${profile?.name || "Josh"} ${profile?.email || "josh@example.com"}`}
-              >
-                <span className="avatar">
-                  {profile?.photoUrl ? (
-                    <img src={profile.photoUrl} alt="" />
-                  ) : (
-                    profile?.photoInitials ||
-                    (profile?.name
-                      ? profile.name
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")
-                          .toUpperCase()
-                          .slice(0, 2)
-                      : "J")
-                  )}
-                </span>
-                <span className="account-row__text">
-                  <strong>{profile?.name || "Josh"}</strong>
-                  <span className="account-row__email">{profile?.email || "josh@example.com"}</span>
-                </span>
-              </button>
-              {accountOpen ? (
-                <div className="account-popover" role="menu" aria-label={`${profile?.name || "Josh"} account menu`}>
-                  <button type="button" role="menuitem" onClick={() => onAccountMenu("profile")}>
-                    <span className="account-popover__icon" aria-hidden="true">
-                      <User size={16} />
-                    </span>
-                    <span>Profile</span>
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => onAccountMenu("settings")}>
-                    <span className="account-popover__icon" aria-hidden="true">
-                      <Gear size={16} />
-                    </span>
-                    <span>Settings</span>
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className="account-popover__logout"
-                    onClick={() => onAccountMenu("logout")}
-                  >
-                    <span className="account-popover__icon" aria-hidden="true">
-                      <SignOut size={16} />
-                    </span>
-                    <span>Log out</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-            <button
-              type="button"
-              className="mobile-connection-card"
-              onClick={onOpenMobileConnection}
-              aria-label="Mobile connection"
-              title="Mobile connection"
-            >
-              <DeviceMobile size={18} />
-            </button>
-          </div>
+      <div className="sidebar-footer">
+        <div className="sidebar-footer__identity">
+          <span className="avatar" aria-hidden="true">
+            {profile?.photoUrl ? (
+              <img src={profile.photoUrl} alt="" />
+            ) : (
+              profile?.photoInitials ||
+              (profile?.name
+                ? profile.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+                : "J")
+            )}
+          </span>
+          <strong className="sidebar-footer__name">{profile?.name || "Josh"}</strong>
+        </div>
+        <div className="sidebar-footer__actions">
+          <button
+            type="button"
+            className="sidebar-footer__action"
+            onClick={() => onAccountMenu("settings")}
+            aria-label="Settings"
+            title="Settings"
+          >
+            <Gear size={18} />
+          </button>
+          <button
+            type="button"
+            className="sidebar-footer__action"
+            onClick={onOpenMobileConnection}
+            aria-label="Mobile connection"
+            title="Mobile connection"
+          >
+            <DeviceMobile size={18} />
+          </button>
+        </div>
+      </div>
 
-          {mobileNavOpen ? (
-            <div className="mobile-drawer" aria-label="Mobile navigation">
+      {mobileNavOpen ? (
+        <div className="mobile-drawer" aria-label="Mobile navigation">
+          {isSettingsActive ? (
+            <section className="mobile-drawer-section" aria-label="Settings">
+              <strong>Settings</strong>
+              <nav className="mobile-utilities" aria-label="Mobile settings">
+                {userSettingsTabs.map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectSettingsTab?.(tab.id);
+                        onToggleMobileNav();
+                      }}
+                    >
+                      <Icon size={15} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </nav>
+            </section>
+          ) : (
+            <>
               <button className="mobile-new-chat" type="button" onClick={onNewChat}>
                 <Plus size={16} weight="bold" />
                 <span>New chat</span>
@@ -432,8 +566,10 @@ export function WorkspaceSidebar({
                   );
                 })}
               </section>
-            </div>
-          ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
     </aside>
   );
 }

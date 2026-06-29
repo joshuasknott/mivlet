@@ -37,7 +37,7 @@ The identity uses warm graphite, warm off-white, and burnt copper:
 - Copper: `#A16B3F`
 - Strong copper: `#8A5832`
 
-Copper is the only interactive accent. Green, yellow, and red are reserved for positive, caution, and destructive status. Avoid gradients, saturated interaction colors, neon effects, and decorative glow.
+Fable is monochromatic. Interactive elements are distinguished through contrast, weight, and borders — not color. The palette is ink on paper with warm neutral tones. Green, yellow, and red are reserved for positive, caution, and destructive status. Avoid gradients, saturated interaction colors, neon effects, and decorative glow.
 
 ## Compatibility
 

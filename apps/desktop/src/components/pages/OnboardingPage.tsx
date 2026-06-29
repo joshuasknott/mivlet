@@ -13,6 +13,7 @@ import { useState, useEffect, useRef } from "react";
 import type { BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import { FableLogo } from "../FableLogo";
+import { ProviderIcon } from "../ProviderIcon";
 
 /**
  * Local-first AI-backend onboarding shell.
@@ -514,17 +515,22 @@ function SubscriptionProviderRow({
       className={`og-provider${connected ? " og-provider--connected" : ""}`}
       data-provider-id={provider.id}
     >
-      <div className="og-provider__lead">
-        <strong>{provider.label}</strong>
-        <small>{provider.description}</small>
-        {installRequired && provider.installHint ? (
-          <span className="og-provider__install" aria-label={`${provider.label} install required`}>
-            <WarningCircle size={13} /> {provider.installHint}
-          </span>
-        ) : null}
-        {capabilityLabels.length > 0 ? (
-          <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
-        ) : null}
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+        <span style={{ display: "grid", placeItems: "center", color: "var(--ink-muted)", flexShrink: 0 }}>
+          <ProviderIcon provider={provider.id} size={18} />
+        </span>
+        <div className="og-provider__lead">
+          <strong>{provider.label}</strong>
+          <small>{provider.description}</small>
+          {installRequired && provider.installHint ? (
+            <span className="og-provider__install" aria-label={`${provider.label} install required`}>
+              <WarningCircle size={13} /> {provider.installHint}
+            </span>
+          ) : null}
+          {capabilityLabels.length > 0 ? (
+            <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
+          ) : null}
+        </div>
       </div>
       {connected && capabilityBearing ? (
         <span className="og-provider__connected-badge">
@@ -560,12 +566,17 @@ function NativeApiKeyRow({
       className={`og-provider${connected ? " og-provider--connected" : ""}`}
       data-provider-id={provider.id}
     >
-      <div className="og-provider__lead">
-        <strong>{provider.label}</strong>
-        <small>{provider.description}</small>
-        {capabilityLabels.length > 0 ? (
-          <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
-        ) : null}
+      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+        <span style={{ display: "grid", placeItems: "center", color: "var(--ink-muted)", flexShrink: 0 }}>
+          <ProviderIcon provider={provider.id} size={18} />
+        </span>
+        <div className="og-provider__lead">
+          <strong>{provider.label}</strong>
+          <small>{provider.description}</small>
+          {capabilityLabels.length > 0 ? (
+            <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
+          ) : null}
+        </div>
       </div>
       <button type="button" onClick={onSetUp} disabled={connected}>
         {connected ? "Connected" : "Set up"}

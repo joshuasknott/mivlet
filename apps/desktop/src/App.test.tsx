@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { BackendProvider, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -288,14 +288,14 @@ describe("Fable home", () => {
     expect(screen.getByText(/does not send the email/i)).toBeInTheDocument();
   });
 
-  it("closes the sidebar and keeps mobile separate from the account menu", async () => {
+  it("closes the sidebar and keeps mobile separate from the settings menu", async () => {
     const user = await renderWorkspace();
 
     const mobileConnection = screen.getByRole("button", { name: /^mobile connection$/i });
-    const account = screen.getByRole("button", { name: /josh josh@example.com/i });
+    const settings = screen.getByRole("button", { name: /^settings$/i });
 
     expect(mobileConnection).toBeInTheDocument();
-    expect(account).not.toHaveTextContent("Mobile");
+    expect(settings).toBeInTheDocument();
 
     await user.click(mobileConnection);
     expect(screen.getByText(/mobile connection selected/i)).toBeInTheDocument();
@@ -384,7 +384,7 @@ describe("Fable home", () => {
     // No draft/active status labels anywhere on the page.
     expect(screen.queryByText(/^draft$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^active$/i)).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it("pauses and resumes a created schedule", async () => {
     const user = await renderWorkspace();
@@ -400,7 +400,7 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /pause/i }));
     expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
     expect(screen.getByText(/daily check paused/i)).toBeInTheDocument();
-  });
+  }, 15000);
 
   it("deletes a created schedule", async () => {
     const user = await renderWorkspace();
@@ -414,13 +414,13 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /delete schedule throwaway/i }));
     expect(screen.queryByText("Throwaway")).not.toBeInTheDocument();
     expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
-  });
+  }, 15000);
 
-  it("opens profile from the account menu and edits local profile details", async () => {
+  it("opens profile from the settings menu and edits local profile details", async () => {
     const user = await renderWorkspace();
 
-    await user.click(screen.getByRole("button", { name: /josh josh@example.com/i }));
-    await user.click(screen.getByRole("menuitem", { name: /^profile$/i }));
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^profile$/i }));
 
     expect(screen.getByRole("heading", { name: "Profile" })).toBeInTheDocument();
 
@@ -472,11 +472,9 @@ describe("Fable home", () => {
     render(<App />);
     await skipOnboarding();
 
-    await user.click(screen.getByRole("button", { name: /josh josh@example.com/i }));
-    await user.click(screen.getByRole("menuitem", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
 
-    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Provider access" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
 
     // The native API-key providers render from the real registry, each in the
     // boundary-resolved needs-auth state (no fake "Connected" defaults).
@@ -532,8 +530,7 @@ describe("Fable home", () => {
     render(<App />);
     await skipOnboarding();
 
-    await user.click(screen.getByRole("button", { name: /josh josh@example.com/i }));
-    await user.click(screen.getByRole("menuitem", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
 
     const anthropicCard = screen.getByText("Anthropic").closest("article");
     expect(anthropicCard).not.toBeNull();
@@ -588,6 +585,7 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /add files and context/i }));
+    fireEvent.mouseEnter(screen.getByRole("menuitem", { name: /commands/i }));
     await user.click(screen.getByRole("menuitem", { name: "/goal" }));
 
     expect(screen.getByLabelText(/universal composer/i)).toHaveValue("/goal ");

@@ -22,8 +22,8 @@ import { KnowledgePage } from "./components/pages/KnowledgePage";
 import { SchedulesPage } from "./components/pages/SchedulesPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
-import { ProfilePage } from "./components/pages/ProfilePage";
 import { SettingsPage } from "./components/pages/SettingsPage";
+import type { SettingsTab } from "./components/pages/SettingsPage";
 import { VoiceReview } from "./components/VoiceReview";
 
 /**
@@ -126,7 +126,6 @@ export function App() {
     fable: true,
     site: false
   });
-  const [accountOpen, setAccountOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -144,6 +143,25 @@ export function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  const [previousActiveItem, setPreviousActiveItem] = useState("new-chat");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("providers");
+
+  useEffect(() => {
+    if (runtime.activeItem !== "Settings" && runtime.activeItem !== "Profile") {
+      setPreviousActiveItem(runtime.activeItem);
+    }
+  }, [runtime.activeItem]);
+
+  useEffect(() => {
+    if (runtime.activeItem === "Profile") {
+      setActiveSettingsTab("profile");
+    } else if (runtime.activeItem === "Settings") {
+      if (activeSettingsTab === "profile") {
+        setActiveSettingsTab("providers");
+      }
+    }
+  }, [runtime.activeItem]);
+
   // Connected connectors shown on the home rail. Real provider marks only;
   // local-files is always available so it is not surfaced as a connector. If
   // nothing is connected, the rail renders nothing.
@@ -160,9 +178,18 @@ export function App() {
       case "Schedules":
         return <SchedulesPage runtime={runtime} />;
       case "Profile":
-        return <ProfilePage profile={profile} onProfileChange={setProfile} />;
       case "Settings":
-        return <SettingsPage runtime={runtime} />;
+        return (
+          <SettingsPage
+            runtime={runtime}
+            profile={profile}
+            onProfileChange={setProfile}
+            theme={theme}
+            onThemeChange={setTheme}
+            activeTab={activeSettingsTab}
+            workspaceName={workspaceName}
+          />
+        );
       default:
         return null;
     }
@@ -379,6 +406,17 @@ export function App() {
     );
   }
 
+  const isSettingsActive = runtime.activePage === "Settings" || runtime.activePage === "Profile";
+
+  const handleSelectSettingsTab = (tab: SettingsTab) => {
+    setActiveSettingsTab(tab);
+    if (tab === "profile") {
+      runtime.setActiveItem("Profile");
+    } else {
+      runtime.setActiveItem("Settings");
+    }
+  };
+
   return (
     <main
       className={`desktop-frame${sidebarCollapsed ? " desktop-frame--sidebar-collapsed" : ""}`}
@@ -394,9 +432,12 @@ export function App() {
         projects={projects}
         chatThreads={chatThreads}
         mobileNavOpen={runtime.mobileNavOpen}
-        accountOpen={accountOpen}
         collapsed={sidebarCollapsed}
         loadingItemIds={agent.state.running && runtime.activeItem ? [runtime.activeItem] : []}
+        isSettingsActive={isSettingsActive}
+        activeSettingsTab={activeSettingsTab}
+        onSelectSettingsTab={handleSelectSettingsTab}
+        onCloseSettings={() => runtime.setActiveItem(previousActiveItem)}
         onNewChat={runtime.startNewChat}
         onAddProject={() => {
           runtime.setActiveItem("new-project");
@@ -426,20 +467,13 @@ export function App() {
         onToggleMobileNav={() => runtime.setMobileNavOpen((open) => !open)}
         onToggleCollapsed={() => {
           setSidebarCollapsed((collapsed) => !collapsed);
-          setAccountOpen(false);
           runtime.setLastAction(sidebarCollapsed ? "Navigation opened" : "Navigation closed");
         }}
         onOpenMobileConnection={() => {
-          setAccountOpen(false);
           runtime.setLastAction("Mobile connection selected");
         }}
         onSelectThread={(thread) => runtime.openThread(thread, "chat")}
-        onToggleAccount={() => {
-          setAccountOpen((open) => !open);
-          runtime.setLastAction("Profile and settings opened");
-        }}
         onAccountMenu={(item) => {
-          setAccountOpen(false);
           if (item === "logout") {
             runtime.setLastAction("Log out selected");
             return;
@@ -453,26 +487,6 @@ export function App() {
       />
 
       <section className="workspace" aria-label="Fable workspace">
-        <div className="theme-toggle" role="group" aria-label="Theme">
-          <button
-            type="button"
-            className={`theme-toggle__button${theme === "light" ? " theme-toggle__button--active" : ""}`}
-            aria-pressed={theme === "light"}
-            onClick={() => setTheme("light")}
-          >
-            <Sun size={17} />
-            <span>Light</span>
-          </button>
-          <button
-            type="button"
-            className={`theme-toggle__button${theme === "dark" ? " theme-toggle__button--active" : ""}`}
-            aria-pressed={theme === "dark"}
-            onClick={() => setTheme("dark")}
-          >
-            <Moon size={17} />
-            <span>Dark</span>
-          </button>
-        </div>
         {runtime.activePage ? (
           <div className="workspace-center workspace-center--page">{renderPage()}</div>
         ) : (
@@ -573,6 +587,9 @@ export function App() {
               permissionProfiles={PERMISSION_PROFILES}
               onSelectPermissionLabel={runtime.selectPermissionLabel}
               inThread={!!runtime.activeThread}
+              connectedConnectors={connectedConnectorCards}
+              knowledgeSources={runtime.workspaceKnowledgeSources}
+              schedules={runtime.schedules}
             />
             <VoiceReview voice={voice} />
 

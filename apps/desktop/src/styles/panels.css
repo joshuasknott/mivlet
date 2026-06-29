@@ -28,7 +28,7 @@
   margin: 0;
   color: var(--ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 30px;
+  font-size: var(--text-30);
   font-weight: 600;
   line-height: 1.05;
 }
@@ -77,7 +77,7 @@
 .memory-row p {
   margin: 6px 0 0;
   color: var(--ink-muted);
-  font-size: 14px;
+  font-size: var(--text-14);
   line-height: 1.45;
 }
 
@@ -103,7 +103,7 @@
 .approval-details dt,
 .approval-details dd {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 
 .approval-details dt {
@@ -130,7 +130,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-1);
-  font-size: 13px;
+  font-size: var(--text-13);
   font-weight: 600;
 }
 
@@ -153,7 +153,7 @@
 .approval-edit > span,
 .approval-edit label > span {
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
 }
 
@@ -175,7 +175,7 @@
   background: transparent;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-1);
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 
 .permission-segments button[aria-pressed="true"] {
@@ -209,18 +209,18 @@
 
 .approval-confirmation strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 
 .approval-confirmation p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 
 .approval-confirmation code {
   color: var(--ink);
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
 }
 
@@ -248,7 +248,7 @@
   background: var(--accent-subtle);
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-1);
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 
 .empty-state {
@@ -272,7 +272,7 @@
   color: var(--ink-muted);
   background: var(--line);
   border-radius: var(--radius-1);
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 
 .source-row {
@@ -310,7 +310,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
 }
 
@@ -331,7 +331,7 @@
   display: block;
   margin-top: 4px;
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
   line-height: 1.35;
 }
 
@@ -372,7 +372,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
 }
 
@@ -386,7 +386,7 @@
 .memory-status {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: var(--text-13);
   line-height: 1.45;
 }
 
@@ -409,7 +409,7 @@
 
 .memory-edit label span {
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
 }
 
@@ -442,7 +442,7 @@
   padding: 10px;
   color: var(--ink-muted);
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--text-12);
   line-height: 1.5;
 }
 
@@ -557,7 +557,7 @@
   background: var(--line);
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
-  font-size: 11px;
+  font-size: var(--text-11);
   font-weight: 500;
   line-height: 1.2;
 }
@@ -589,7 +589,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-1);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 500;
   box-shadow: var(--shadow-1);
   cursor: pointer;
@@ -617,7 +617,7 @@
   margin: 0;
   color: var(--ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 30px;
+  font-size: var(--text-30);
   font-weight: 600;
 }
 
@@ -626,14 +626,14 @@
 .connector-browser__status {
   margin: 4px 0 0;
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: var(--text-13);
   line-height: 1.45;
 }
 
 .connector-browser__heading > span {
   flex: 0 0 auto;
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
 }
 
 .connector-search-bar {
@@ -661,7 +661,7 @@
   border: none;
   padding: 0 20px 0 6px;
   height: 36px;
-  font-size: 13px;
+  font-size: var(--text-13);
   font-weight: 500;
   color: var(--ink);
   cursor: pointer;
@@ -720,7 +720,7 @@
   background: var(--accent);
   border: none;
   border-radius: var(--radius-2);
-  font-size: 13px;
+  font-size: var(--text-13);
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.2s;
@@ -748,14 +748,14 @@
 
 .connector-result strong {
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-14);
 }
 
 .connector-result small {
   display: block;
   margin-top: 3px;
   color: var(--ink-muted);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 
 .status-dot {
@@ -837,7 +837,7 @@
   background: var(--surface-hover);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
-  font-size: 14px;
+  font-size: var(--text-14);
   font-family: inherit;
   line-height: 1.4;
 }
@@ -881,7 +881,7 @@
   padding: 28px 16px;
   color: var(--ink-soft);
   text-align: center;
-  font-size: 14px;
+  font-size: var(--text-14);
 }
 
 .schedule-row {
@@ -999,7 +999,7 @@
 
 .connectors-panel .connector-card strong {
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-14);
   font-weight: 600;
   line-height: 1.2;
 }
@@ -1013,7 +1013,7 @@
   gap: 6px;
   padding: 0 10px;
   border-radius: var(--radius-pill);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
   line-height: 1;
 }
@@ -1060,7 +1060,7 @@
 .connector-detail__header h2 {
   margin: 1px 0 4px;
   color: var(--ink);
-  font-size: 16px;
+  font-size: var(--text-16);
   font-weight: 600;
   line-height: 1.25;
 }
@@ -1069,7 +1069,7 @@
 .connector-detail__body p {
   margin: 0;
   color: var(--ink-muted);
-  font-size: 13px;
+  font-size: var(--text-13);
   line-height: 1.45;
 }
 
@@ -1101,7 +1101,7 @@
   display: block;
   margin-bottom: 7px;
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
   font-weight: 600;
 }
 
@@ -1115,7 +1115,7 @@
 
 .connector-detail__body li {
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-13);
   line-height: 1.35;
 }
 

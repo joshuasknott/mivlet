@@ -14,7 +14,7 @@
   margin: 30px auto 0;
   padding: 0;
   border: 1px solid var(--line-strong);
-  border-radius: var(--radius-3);
+  border-radius: 28px;
   background: var(--surface-raised);
   box-shadow: var(--shadow-2);
   backdrop-filter: var(--glass-filter);
@@ -25,15 +25,15 @@
 }
 
 .composer-glow:hover {
-  border-color: var(--accent-line);
+  border-color: var(--line-strong);
   background: var(--surface-hover);
   box-shadow: var(--shadow-2);
 }
 
 .composer-glow:focus-within {
-  border-color: var(--accent);
+  border-color: var(--line-strong);
   background: var(--surface-overlay);
-  box-shadow: var(--focus-ring), var(--shadow-3);
+  box-shadow: var(--shadow-2);
 }
 
 /* The card itself — solid off-white surface that masks everything but the
@@ -45,7 +45,7 @@
   min-height: 214px;
   padding: 28px 28px 22px;
   background: transparent;
-  border-radius: var(--radius-3);
+  border-radius: 28px;
 }
 
 .composer-field {
@@ -64,7 +64,7 @@
   background: transparent;
   border: 0;
   outline: 0;
-  font-size: 16px;
+  font-size: var(--text-16);
   line-height: 1.6;
   transition: color 150ms ease;
 }
@@ -112,7 +112,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 34px;
+  height: 36px;
   padding: 0;
   color: var(--ink);
   background: var(--surface-raised);
@@ -127,7 +127,7 @@
 .composer-model {
   gap: 8px;
   padding: 0 14px 0 16px;
-  font-size: 13px;
+  font-size: var(--text-13);
   font-weight: 500;
 }
 
@@ -139,7 +139,8 @@
 }
 
 .composer-chip {
-  width: 42px;
+  width: 36px;
+  border-radius: 50% !important;
 }
 
 .composer-model:hover,
@@ -185,7 +186,7 @@
   color: #ffffff;
   background: var(--accent);
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: 50%;
   box-shadow: var(--shadow-1);
   transition: background 140ms ease;
 }
@@ -206,7 +207,7 @@
   gap: 6px;
   min-width: 248px;
   max-height: 60vh;
-  overflow-y: auto;
+  overflow: visible;
   padding: 8px;
   background: var(--surface-overlay);
   border: 1px solid var(--line);
@@ -223,10 +224,9 @@
 .composer-menu__heading {
   padding: 4px 8px 2px;
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: var(--text-11);
   font-weight: 600;
   letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .composer-menu button {
@@ -246,12 +246,14 @@
   background: var(--line);
 }
 
-.composer-add-menu button {
+.composer-add-menu button,
+.composer-menu-item {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-width: 286px;
+  width: 100%;
 }
 
 .composer-add-menu button > span {
@@ -342,7 +344,7 @@
 .composer-permissions__row small {
   grid-column: 1 / 2;
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
   line-height: 1.35;
 }
 
@@ -353,7 +355,7 @@
   color: var(--ink-muted);
   background: var(--accent-subtle);
   border-radius: var(--radius-pill);
-  font-size: 11px;
+  font-size: var(--text-11);
   font-weight: 600;
   text-transform: capitalize;
 }
@@ -398,7 +400,7 @@
   padding-top: 11px;
   color: var(--ink-muted);
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 
 .composer-status {
@@ -415,4 +417,123 @@
 
 .composer-glow--new-thread .composer-trigger--open {
   border-radius: var(--radius-2) var(--radius-2) var(--radius-1) var(--radius-1);
+}
+
+/* Submenu Wrapper & Sidebars */
+.composer-menu-item-wrapper {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.composer-menu-item {
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  color: var(--ink);
+  border-radius: var(--radius-2);
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.composer-menu-item:hover:not(:disabled) {
+  background: var(--line);
+}
+
+.composer-menu-item__arrow {
+  color: var(--ink-soft);
+  opacity: 0.7;
+  transition: transform 150ms ease, color 150ms ease;
+  margin-right: 4px;
+}
+
+.composer-menu-item-wrapper:hover .composer-menu-item__arrow {
+  color: var(--accent);
+  transform: translateX(2px);
+}
+
+/* Sidebar styling: flies out to the right of the dropdown menu */
+.composer-submenu-sidebar {
+  position: absolute;
+  left: calc(100% + 6px);
+  top: -8px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 240px;
+  max-width: 320px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-3);
+  backdrop-filter: var(--glass-filter);
+  animation: composerSubmenuFadeIn 120ms ease-out;
+}
+
+.composer-submenu-sidebar--align-bottom {
+  top: auto;
+  bottom: -8px;
+}
+
+@keyframes composerSubmenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.composer-submenu-sidebar button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-2);
+  text-align: left;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.composer-submenu-sidebar button:hover {
+  background: var(--line);
+  color: var(--accent-strong);
+}
+
+.composer-submenu-item-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.composer-submenu-item-title {
+  font-size: var(--text-13);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.composer-submenu-sidebar--commands button {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+/* Disabled styling for empty dropdown options */
+.composer-menu button:disabled,
+.composer-menu button:disabled:hover,
+.composer-menu-item:disabled,
+.composer-menu-item:disabled:hover {
+  opacity: 0.5;
+  background: transparent !important;
+  cursor: not-allowed;
 }

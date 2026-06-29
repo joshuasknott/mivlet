@@ -223,8 +223,8 @@
 
   .mobile-nav-toggle:hover,
   .mobile-nav-toggle[aria-expanded="true"] {
-    color: #4549ad;
-    background: rgba(91, 95, 199, 0.08);
+    color: var(--ink);
+    background: var(--surface-hover);
   }
 
   .sidebar-footer {
@@ -330,7 +330,7 @@
     min-height: 29px;
     padding: 5px 8px;
     color: #536078;
-    font-size: 12.5px;
+    font-size: var(--text-13);
   }
 
   .mobile-drawer .thread-row {
@@ -412,16 +412,6 @@
     right: 14px;
   }
 
-  .theme-toggle__button {
-    min-width: auto;
-    width: 40px;
-    padding: 0;
-  }
-
-  .theme-toggle__button span {
-    display: none;
-  }
-
   .composer {
     min-height: 202px;
     padding: 16px 12px 12px;
@@ -433,11 +423,11 @@
   }
 
   .composer-glow {
-    border-radius: 22px;
+    border-radius: 28px;
   }
 
   .composer-input {
-    font-size: 16px;
+    font-size: var(--text-16);
   }
 
   .composer-controls {
@@ -461,12 +451,12 @@
 
   .composer-model {
     padding-inline: 13px;
-    font-size: 14px;
+    font-size: var(--text-14);
   }
 
   .composer-permissions-card {
     padding-inline: 11px;
-    font-size: 13px;
+    font-size: var(--text-13);
   }
 
   .composer-control-anchor--permissions .composer-menu {
@@ -619,5 +609,28 @@
 
   .knowledge-inspector dl {
     grid-template-columns: 1fr;
+  }
+
+  /* Dark theme overrides for mobile drawer and elements */
+  .desktop-frame[data-theme="dark"] .mobile-new-chat {
+    color: var(--ink);
+    background: var(--surface-raised);
+    border-color: var(--line);
+  }
+  .desktop-frame[data-theme="dark"] .mobile-new-chat:hover {
+    background: var(--surface-hover);
+  }
+  .desktop-frame[data-theme="dark"] .mobile-utilities button {
+    color: var(--ink);
+  }
+  .desktop-frame[data-theme="dark"] .mobile-utilities button:hover {
+    color: var(--ink);
+    background: var(--surface-hover);
+  }
+  .desktop-frame[data-theme="dark"] .mobile-project > span {
+    color: var(--ink-muted);
+  }
+  .desktop-frame[data-theme="dark"] .mobile-drawer-section > strong {
+    color: var(--ink-muted);
   }
 }

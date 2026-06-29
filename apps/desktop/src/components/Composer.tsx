@@ -4,14 +4,17 @@ import {
   Books,
   CalendarBlank,
   CaretDown,
+  CaretRight,
   FileArrowUp,
   Microphone,
   PlugsConnected,
   Plus,
-  ShieldCheck
+  ShieldCheck,
+  Terminal
 } from "@phosphor-icons/react";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
 import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
+import { ConnectorIcon } from "./ConnectorIcon";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
 
@@ -40,7 +43,10 @@ export function Composer({
   permissionLabel,
   permissionProfiles,
   onSelectPermissionLabel,
-  inThread = false
+  inThread = false,
+  connectedConnectors = [],
+  knowledgeSources = [],
+  schedules = []
 }: {
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -72,12 +78,17 @@ export function Composer({
   permissionProfiles: readonly PermissionProfile[];
   onSelectPermissionLabel: (label: string) => void;
   inThread?: boolean;
+  connectedConnectors?: { id: string; name: string; status: string }[];
+  knowledgeSources?: { id: string; title: string; provenance: string; connectorId?: string }[];
+  schedules?: { id: string; name: string; description: string }[];
 }) {
   const [modelOpen, setModelOpen] = useState(false);
+  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | "schedules" | "commands" | null>(null);
 
   const closeExternalMenus = () => {
     if (addMenuOpen) onToggleAddMenu();
     if (permissionsOpen) onTogglePermissions();
+    setActiveSubmenu(null);
   };
 
   const isNewThread = !inThread;
@@ -122,6 +133,7 @@ export function Composer({
                 onClick={() => {
                   setModelOpen(false);
                   onToggleAddMenu();
+                  setActiveSubmenu(null);
                 }}
                 aria-expanded={addMenuOpen}
                 aria-label="Add files and context"
@@ -131,31 +143,231 @@ export function Composer({
               {addMenuOpen ? (
                 <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt">
                   <span className="composer-menu__heading">Add to prompt</span>
+
                   <button type="button" role="menuitem" onClick={onAttach}>
                     <FileArrowUp size={18} />
                     <span><strong>Files</strong><small>Upload documents or attachments</small></span>
                   </button>
-                  <button type="button" role="menuitem" onClick={() => onOpenTool("Connectors")}>
-                    <PlugsConnected size={18} />
-                    <span><strong>Connectors</strong><small>Bring in context from your tools</small></span>
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => onOpenTool("Knowledge")}>
-                    <Books size={18} />
-                    <span><strong>Knowledge</strong><small>Use saved workspace sources</small></span>
-                  </button>
-                  <button type="button" role="menuitem" onClick={() => onOpenTool("Schedules")}>
-                    <CalendarBlank size={18} />
-                    <span><strong>Schedules</strong><small>Choose or create an automation</small></span>
-                  </button>
-                  <div className="composer-add-menu__divider" aria-hidden="true" />
-                  <span className="composer-menu__heading">Commands</span>
-                  <div className="composer-add-menu__commands">
-                    {COMMANDS.map((command) => (
-                      <button key={command} type="button" role="menuitem" onClick={() => onRunCommand(command)}>
-                        <span className="composer-menu__command">{command}</span>
-                      </button>
-                    ))}
+
+                  <div
+                    className={`composer-menu-item-wrapper${activeSubmenu === "connectors" ? " is-active" : ""}`}
+                    onMouseEnter={() => {
+                      if (connectedConnectors.length > 0) {
+                        setActiveSubmenu("connectors");
+                      }
+                    }}
+                    onMouseLeave={() => setActiveSubmenu(null)}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={connectedConnectors.length === 0}
+                      onClick={() => onOpenTool("Connectors")}
+                      className="composer-menu-item"
+                      onMouseEnter={() => {
+                        if (connectedConnectors.length > 0) {
+                          setActiveSubmenu("connectors");
+                        }
+                      }}
+                    >
+                      <PlugsConnected size={18} />
+                      <span>
+                        <strong>Connectors</strong>
+                        <small>
+                          {connectedConnectors.length > 0
+                            ? "Bring in context from your tools"
+                            : "No connectors added. Add a connector"}
+                        </small>
+                      </span>
+                      {connectedConnectors.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
+                    </button>
+                    {activeSubmenu === "connectors" && connectedConnectors.length > 0 && (
+                      <div className="composer-submenu-sidebar" role="menu" aria-label="Connectors list">
+                        <span className="composer-menu__heading">Your Connectors</span>
+                        {connectedConnectors.map((connector) => (
+                          <button
+                            key={connector.id}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              const prompt = `Use ${connector.name} to `;
+                              onComposerChange(prompt);
+                              composerRef.current?.focus();
+                              onToggleAddMenu();
+                              setActiveSubmenu(null);
+                            }}
+                          >
+                            <div className="composer-submenu-item-content">
+                              <ConnectorIcon id={connector.id} />
+                              <span>{connector.name}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+
+                  <div
+                    className={`composer-menu-item-wrapper${activeSubmenu === "knowledge" ? " is-active" : ""}`}
+                    onMouseEnter={() => {
+                      if (knowledgeSources.length > 0) {
+                        setActiveSubmenu("knowledge");
+                      }
+                    }}
+                    onMouseLeave={() => setActiveSubmenu(null)}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={knowledgeSources.length === 0}
+                      onClick={() => onOpenTool("Knowledge")}
+                      className="composer-menu-item"
+                      onMouseEnter={() => {
+                        if (knowledgeSources.length > 0) {
+                          setActiveSubmenu("knowledge");
+                        }
+                      }}
+                    >
+                      <Books size={18} />
+                      <span>
+                        <strong>Knowledge</strong>
+                        <small>
+                          {knowledgeSources.length > 0
+                            ? "Use saved workspace sources"
+                            : "No knowledge sources. Add one"}
+                        </small>
+                      </span>
+                      {knowledgeSources.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
+                    </button>
+                    {activeSubmenu === "knowledge" && knowledgeSources.length > 0 && (
+                      <div className="composer-submenu-sidebar" role="menu" aria-label="Knowledge sources list">
+                        <span className="composer-menu__heading">Workspace Knowledge</span>
+                        {knowledgeSources.map((source) => (
+                          <button
+                            key={source.id}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              const prompt = `Use source "${source.title}" to `;
+                              onComposerChange(prompt);
+                              composerRef.current?.focus();
+                              onToggleAddMenu();
+                              setActiveSubmenu(null);
+                            }}
+                          >
+                            <div className="composer-submenu-item-content">
+                              <Books size={16} />
+                              <span className="composer-submenu-item-title" title={source.title}>{source.title}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div
+                    className={`composer-menu-item-wrapper${activeSubmenu === "schedules" ? " is-active" : ""}`}
+                    onMouseEnter={() => {
+                      if (schedules.length > 0) {
+                        setActiveSubmenu("schedules");
+                      }
+                    }}
+                    onMouseLeave={() => setActiveSubmenu(null)}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={schedules.length === 0}
+                      onClick={() => onOpenTool("Schedules")}
+                      className="composer-menu-item"
+                      onMouseEnter={() => {
+                        if (schedules.length > 0) {
+                          setActiveSubmenu("schedules");
+                        }
+                      }}
+                    >
+                      <CalendarBlank size={18} />
+                      <span>
+                        <strong>Schedules</strong>
+                        <small>
+                          {schedules.length > 0
+                            ? "Choose or create an automation"
+                            : "No schedules. Create one"}
+                        </small>
+                      </span>
+                      {schedules.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
+                    </button>
+                    {activeSubmenu === "schedules" && schedules.length > 0 && (
+                      <div className="composer-submenu-sidebar composer-submenu-sidebar--align-bottom" role="menu" aria-label="Schedules list">
+                        <span className="composer-menu__heading">Active Schedules</span>
+                        {schedules.map((schedule) => (
+                          <button
+                            key={schedule.id}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              const prompt = `Run schedule "${schedule.name}" `;
+                              onComposerChange(prompt);
+                              composerRef.current?.focus();
+                              onToggleAddMenu();
+                              setActiveSubmenu(null);
+                            }}
+                          >
+                            <div className="composer-submenu-item-content">
+                              <CalendarBlank size={16} />
+                              <span className="composer-submenu-item-title" title={schedule.name}>{schedule.name}</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="composer-add-menu__divider" aria-hidden="true" />
+
+                  <div
+                    className={`composer-menu-item-wrapper${activeSubmenu === "commands" ? " is-active" : ""}`}
+                    onMouseEnter={() => {
+                      setActiveSubmenu("commands");
+                    }}
+                    onMouseLeave={() => setActiveSubmenu(null)}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="composer-menu-item"
+                      onMouseEnter={() => {
+                        setActiveSubmenu("commands");
+                      }}
+                    >
+                      <Terminal size={18} />
+                      <span>
+                        <strong>Commands</strong>
+                        <small>Run prompt-level automations</small>
+                      </span>
+                      <CaretRight size={14} className="composer-menu-item__arrow" />
+                    </button>
+                    {activeSubmenu === "commands" && (
+                      <div className="composer-submenu-sidebar composer-submenu-sidebar--commands composer-submenu-sidebar--align-bottom" role="menu" aria-label="Commands list">
+                        <span className="composer-menu__heading">Available Commands</span>
+                        {COMMANDS.map((command) => (
+                          <button
+                            key={command}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              onRunCommand(command);
+                              onToggleAddMenu();
+                              setActiveSubmenu(null);
+                            }}
+                          >
+                            <span className="composer-menu__command">{command}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                 </div>
               ) : null}
             </div>
