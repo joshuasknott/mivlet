@@ -1,6 +1,11 @@
 # Mobile remote control
 
-The mobile device is a **second approval, observation, and control surface** for
+> [!WARNING]
+> **Status: Planned Design / UI Stub Only**
+> This document describes the planned architecture and specification for mobile remote control.
+> In the current codebase, this feature is not implemented. There is no active socket, mDNS advertising, or remote protocol. The remote control is represented solely as a UI preview/stub on the desktop shell.
+
+The mobile device is designed to be a **second approval, observation, and control surface** for
 the desktop. It does not become a cloud backend, a hosted account, or an
 execution authority. The desktop remains the only execution authority: every
 mobile-originated action funnels through the existing approval and scheduler
