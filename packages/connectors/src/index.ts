@@ -155,12 +155,18 @@ export { buildContextPrefix } from "./native-api/memory-context";
 export {
   resolveAgentBackend,
   hasRunnableAdapter,
+  createCodexBackend,
   createNativeApiBackend,
   type AgentBackend,
   type AgentBackendFactory,
   type AgentRunRequest,
   type AgentRunOptions,
   type BackendDeps,
+  type CodexAppServerEvent,
+  type CodexAppServerHandle,
+  type CodexAppServerHandlers,
+  type CodexThreadRef,
+  type CodexTurnRequest,
   type TransportHandle,
   type TransportHandlers
 } from "./agent-runtime";

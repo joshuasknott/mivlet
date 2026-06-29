@@ -8,6 +8,7 @@
 mod agent_runs;
 mod approvals;
 mod backends;
+mod codex_app_server;
 mod collaboration_connectors;
 mod connector_api;
 mod connector_approvals;
@@ -98,6 +99,11 @@ pub fn run() {
             backends::store_backend_credential,
             backends::clear_backend_credential,
             backends::record_backend_event,
+            codex_app_server::codex_cli_status,
+            codex_app_server::start_codex_app_server_turn,
+            codex_app_server::respond_codex_app_server_approval,
+            codex_app_server::interrupt_codex_app_server_turn,
+            codex_app_server::shutdown_codex_app_server_turn,
             connectors::list_connector_statuses,
             connector_approvals::list_connector_approval_records,
             connectors::start_connector_auth,

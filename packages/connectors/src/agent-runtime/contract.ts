@@ -29,6 +29,7 @@
 import type {
   AgentRunOptions,
   AgentRunRequest,
+  ApprovalRequest,
   BackendAgentEvent,
   BackendCapability,
   BackendProvider
@@ -96,6 +97,15 @@ export interface BackendDeps {
     provider: BackendProvider,
     handlers: TransportHandlers
   ) => TransportHandle | null;
+  /**
+   * Build the Codex app-server process client. This is Codex-specific by
+   * design: it supervises `codex app-server` and reuses Codex-owned auth only.
+   * It must never expose ChatGPT subscription tokens to JavaScript.
+   */
+  createCodexAppServer?: (
+    provider: BackendProvider,
+    handlers: CodexAppServerHandlers
+  ) => CodexAppServerHandle | null;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }
@@ -126,6 +136,51 @@ export interface TransportHandle {
   readonly transport: HttpTransport;
   /** Drop the in-flight request for the given requestId at the egress boundary. */
   cancel: (requestId: string) => Promise<void>;
+}
+
+export interface CodexAppServerHandlers {
+  onRequestStarted: (requestId: string) => void;
+  onRetry: () => void;
+}
+
+export interface CodexThreadRef {
+  threadId: string;
+}
+
+export type CodexAppServerEvent =
+  | { type: "text-delta"; text: string }
+  | {
+      type: "approval-request";
+      requestId: string;
+      callId: string;
+      tool: string;
+      arguments: string;
+      approval: ApprovalRequest;
+    }
+  | { type: "approval-result"; callId: string; ok: boolean; output: string }
+  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd?: number }
+  | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
+  | { type: "error"; message: string }
+  | { type: "cancelled" };
+
+export interface CodexTurnRequest {
+  threadId: string;
+  request: AgentRunRequest;
+  options: Pick<AgentRunOptions, "contextPrefix" | "permissionMode" | "runId">;
+}
+
+export interface CodexAppServerHandle {
+  initialize(): Promise<void>;
+  startThread(request: AgentRunRequest): Promise<CodexThreadRef>;
+  resumeThread(threadId: string, request: AgentRunRequest): Promise<CodexThreadRef>;
+  submitTurn(request: CodexTurnRequest): AsyncIterable<CodexAppServerEvent>;
+  respondApproval(
+    requestId: string,
+    result: { callId: string; ok: boolean; output: string }
+  ): Promise<void>;
+  cancel(threadId: string, turnId?: string): Promise<void>;
+  shutdown(): Promise<void>;
+  listModels?(): Promise<ModelDiscoveryResult>;
 }
 
 /**

@@ -33,6 +33,7 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import { permissionModeFor } from "../lib/agent-run";
+import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
   listRuntimeBackendModels,
@@ -147,6 +148,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const deps: BackendDeps = useMemo(
     () => ({
       createTransport: createDesktopTransport,
+      createCodexAppServer: createDesktopCodexAppServer,
       discoverModels: async (providerId) => {
         const result = await listRuntimeBackendModels(providerId);
         return result;

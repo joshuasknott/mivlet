@@ -337,14 +337,10 @@ describe("Fable home", () => {
 
     expect(screen.getByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Sources" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Memories" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Artifacts" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /search in/i })).toHaveValue("everything");
-    expect(screen.getByRole("combobox", { name: /sort items/i })).toHaveValue("newest");
-    expect(screen.getByRole("checkbox", { name: /pinned only/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Memory" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /import file/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /import folder/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /connect a service/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
 
     const file = new File(["Knowledge page import content"], "knowledge-page.md", {
       type: "text/markdown"
@@ -353,19 +349,13 @@ describe("Fable home", () => {
     await user.click(
       await screen.findByRole("button", { name: /^knowledge-page\.md local file/i })
     );
-    await user.click(screen.getByRole("button", { name: /save to memories/i }));
+    await user.click(screen.getByRole("button", { name: /^remember$/i }));
 
-    await user.click(screen.getByRole("tab", { name: "Memories" }));
+    await user.click(screen.getByRole("tab", { name: "Memory" }));
     expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(0);
-    expect(screen.getByRole("textbox", { name: /search memories/i })).toBeInTheDocument();
-
-    await user.selectOptions(screen.getByRole("combobox", { name: /search in/i }), "everything");
-    expect(screen.getByRole("textbox", { name: /search everything/i })).toBeInTheDocument();
-    await user.type(screen.getByRole("textbox", { name: /search everything/i }), "knowledge-page");
-    expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(1);
-
-    await user.selectOptions(screen.getByRole("combobox", { name: /sort items/i }), "oldest");
-    expect(screen.getByRole("combobox", { name: /sort items/i })).toHaveValue("oldest");
+    expect(screen.getByRole("textbox", { name: /search memory/i })).toBeInTheDocument();
+    await user.type(screen.getByRole("textbox", { name: /search memory/i }), "knowledge-page");
+    expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(0);
   });
 
   it("creates a schedule from name, description, day, and time", async () => {
@@ -1196,7 +1186,7 @@ describe("Fable onboarding", () => {
     // The api-key path is the primary (recommended) path.
     const apiKeyPath = screen.getByRole("button", { name: /bring an api key/i });
     expect(apiKeyPath).toHaveClass("og-path--primary");
-    expect(within(apiKeyPath).getByText("OpenAI, Anthropic, Gemini, xAI, or OpenRouter")).toBeInTheDocument();
+    expect(within(apiKeyPath).getByText("OpenAI, Anthropic, Google, xAI, or OpenRouter")).toBeInTheDocument();
 
     // Navigate to the api-key path.
     await user.click(screen.getByRole("button", { name: /bring an api key/i }));

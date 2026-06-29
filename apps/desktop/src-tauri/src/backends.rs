@@ -719,7 +719,30 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
     // Auth state is resolved against the keychain (primary) with the in-memory
     // store as fallback — never against a raw secret. A persisted connected id
     // re-resolves to "connected" when the keychain still holds the entry.
-    list_providers_from(&CredentialStores, &path)
+    let mut providers = list_providers_from(&CredentialStores, &path)?;
+    if let Some(codex) = providers.iter_mut().find(|provider| provider.id == "codex") {
+        let status = crate::codex_app_server::codex_cli_status();
+        if status.installed {
+            codex.auth_state = "connected".to_string();
+            codex.capabilities = CODEX_CAPS
+                .iter()
+                .filter(|cap| BACKEND_CAPABILITIES.contains(cap))
+                .take(MAX_BACKEND_CAPABILITIES)
+                .map(|cap| (*cap).to_string())
+                .collect();
+            for model in &mut codex.models {
+                model.available = true;
+            }
+            codex.install_hint = status.version.map(|version| format!("Codex CLI {version}"));
+        } else {
+            codex.auth_state = "install-required".to_string();
+            codex.capabilities.clear();
+            for model in &mut codex.models {
+                model.available = false;
+            }
+        }
+    }
+    Ok(providers)
 }
 
 #[tauri::command]

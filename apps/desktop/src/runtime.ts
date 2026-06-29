@@ -8,6 +8,7 @@ import type {
   ApprovalResolutionResponse,
   BackendConsequentialEvent,
   BackendCredentialRequest,
+  AgentRunRequest,
   BackendProvider,
   ConnectorActionRequest,
   ConnectorActionResult,
@@ -619,6 +620,120 @@ export async function listenRuntimeBackendEvents(
   try {
     const unlisten = await listen<string>(`arden://backend/${requestId}`, (event) => {
       onLine(event.payload as string);
+    });
+    return unlisten;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Codex app-server bridge.
+//
+// Fable never handles ChatGPT subscription tokens. Rust starts/supervises the
+// Codex-owned app-server process; JavaScript only receives normalized runtime
+// events and sends approval decisions back by opaque request id.
+// ---------------------------------------------------------------------------
+
+export interface RuntimeCodexStatus {
+  installed: boolean;
+  executablePath?: string;
+  version?: string;
+  message?: string;
+}
+
+export interface RuntimeCodexTurnStartRequest {
+  requestId: string;
+  providerId: string;
+  threadId: string | null;
+  request: AgentRunRequest;
+  options: {
+    contextPrefix?: string;
+    permissionMode?: string;
+    runId?: string;
+  };
+}
+
+export type RuntimeCodexEvent =
+  | { type: "thread"; threadId: string }
+  | { type: "turn"; turnId: string }
+  | { type: "retrying" }
+  | { type: "process-exited" }
+  | {
+      type: "approval-request";
+      requestId: string;
+      callId: string;
+      tool: string;
+      arguments: string;
+      approval: import("@fable/protocol").ApprovalRequest;
+    }
+  | { type: "text-delta"; text: string }
+  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd?: number }
+  | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
+  | { type: "error"; message: string }
+  | { type: "cancelled" };
+
+export async function getRuntimeCodexStatus() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeCodexStatus>("codex_cli_status");
+  } catch {
+    return { installed: false, message: "Fable could not inspect the Codex CLI." };
+  }
+}
+
+export async function startRuntimeCodexTurn(request: RuntimeCodexTurnStartRequest) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("start_codex_app_server_turn", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function respondRuntimeCodexApproval(request: {
+  requestId: string;
+  approvalRequestId: string;
+  result: { callId: string; ok: boolean; output: string };
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("respond_codex_app_server_approval", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function interruptRuntimeCodexTurn(request: {
+  requestId: string;
+  threadId: string;
+  turnId?: string;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("interrupt_codex_app_server_turn", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function shutdownRuntimeCodexTurn(requestId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("shutdown_codex_app_server_turn", { requestId });
+  } catch {
+    return null;
+  }
+}
+
+export async function listenRuntimeCodexEvents(
+  requestId: string,
+  onEvent: (event: RuntimeCodexEvent) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const unlisten = await listen<RuntimeCodexEvent>(`fable://codex/${requestId}`, (event) => {
+      onEvent(event.payload);
     });
     return unlisten;
   } catch {

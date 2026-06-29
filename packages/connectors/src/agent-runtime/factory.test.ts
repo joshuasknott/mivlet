@@ -5,8 +5,11 @@ import { readFixture } from "../native-api/fixtures-loader";
 import {
   resolveAgentBackend,
   hasRunnableAdapter,
+  createCodexBackend,
   createNativeApiBackend,
   type BackendDeps,
+  type CodexAppServerEvent,
+  type CodexAppServerHandle,
   type AgentRunRequest
 } from "./index";
 
@@ -25,16 +28,17 @@ function nativeProvider(overrides: Partial<BackendProvider> = {}): BackendProvid
 }
 
 /** A metadata-only Codex provider (subscription). */
-function codexProvider(): BackendProvider {
+function codexProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
   return {
     id: "codex",
     backendType: "codex-app-server",
     label: "Codex",
     description: "Codex app-server",
-    authState: "entitlement-pending",
-    capabilities: [],
+    authState: "connected",
+    capabilities: ["authentication", "threads", "streaming", "tool-requests", "approvals", "cancellation"],
     models: [],
-    installHint: "ChatGPT subscription or OpenAI API key"
+    installHint: "ChatGPT subscription or OpenAI API key",
+    ...overrides
   };
 }
 
@@ -84,6 +88,66 @@ function nullTransportDeps(): BackendDeps {
   };
 }
 
+class FakeCodexAppServer implements CodexAppServerHandle {
+  initialized = false;
+  started = false;
+  resumedThreadId: string | null = null;
+  submitted = false;
+  shutdownCalled = false;
+  cancelledThreadId: string | null = null;
+  approvalResponses: Array<{ requestId: string; ok: boolean; output: string }> = [];
+
+  constructor(private readonly events: readonly CodexAppServerEvent[]) {}
+
+  async initialize(): Promise<void> {
+    this.initialized = true;
+  }
+
+  async startThread(): Promise<{ threadId: string }> {
+    this.started = true;
+    return { threadId: "codex-thread-1" };
+  }
+
+  async resumeThread(threadId: string): Promise<{ threadId: string }> {
+    this.resumedThreadId = threadId;
+    return { threadId };
+  }
+
+  async *submitTurn(): AsyncIterable<CodexAppServerEvent> {
+    this.submitted = true;
+    for (const event of this.events) yield event;
+  }
+
+  async respondApproval(
+    requestId: string,
+    result: { callId: string; ok: boolean; output: string }
+  ): Promise<void> {
+    this.approvalResponses.push({ requestId, ok: result.ok, output: result.output });
+  }
+
+  async cancel(threadId: string): Promise<void> {
+    this.cancelledThreadId = threadId;
+  }
+
+  async shutdown(): Promise<void> {
+    this.shutdownCalled = true;
+  }
+
+  async listModels() {
+    return {
+      outcome: "success" as const,
+      models: [{ id: "gpt-5", available: true }]
+    };
+  }
+}
+
+function codexDeps(handle: CodexAppServerHandle | null): BackendDeps {
+  return {
+    createTransport: () => null,
+    createCodexAppServer: () => handle
+  };
+}
+
 const baseRunRequest: AgentRunRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "say hi" }],
@@ -98,12 +162,12 @@ async function collect(iter: AsyncIterable<BackendAgentEvent>): Promise<BackendA
 }
 
 describe("hasRunnableAdapter", () => {
-  it("returns true for native-api (the only live adapter today)", () => {
+  it("returns true for native-api and Codex app-server", () => {
     expect(hasRunnableAdapter("native-api")).toBe(true);
+    expect(hasRunnableAdapter("codex-app-server")).toBe(true);
   });
 
   it("returns false for metadata-only backend families until their adapter lands", () => {
-    expect(hasRunnableAdapter("codex-app-server")).toBe(false);
     expect(hasRunnableAdapter("acp")).toBe(false);
     expect(hasRunnableAdapter("copilot-sdk")).toBe(false);
   });
@@ -137,9 +201,10 @@ describe("resolveAgentBackend dispatch", () => {
     expect(backend).toBeNull();
   });
 
-  it("returns null for Codex (metadata-only until its adapter lands)", () => {
-    const backend = resolveAgentBackend(codexProvider(), fixtureDeps([]));
-    expect(backend).toBeNull();
+  it("returns a Codex backend for a connected streaming Codex provider", () => {
+    const backend = resolveAgentBackend(codexProvider(), codexDeps(new FakeCodexAppServer([])));
+    expect(backend).not.toBeNull();
+    expect(backend?.providerId).toBe("codex");
   });
 
   it("returns null for ACP/Cursor (metadata-only until its adapter lands)", () => {
@@ -155,6 +220,108 @@ describe("resolveAgentBackend dispatch", () => {
   it("returns null for undefined provider", () => {
     const backend = resolveAgentBackend(undefined, fixtureDeps([]));
     expect(backend).toBeNull();
+  });
+});
+
+describe("createCodexBackend", () => {
+  it("returns null at run time when no app-server process seam is wired", () => {
+    const backend = createCodexBackend(codexProvider(), codexDeps(null));
+    expect(backend).not.toBeNull();
+    const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
+    expect(iter).toBeNull();
+  });
+
+  it("initializes Codex, starts a thread, streams text, and shuts down", async () => {
+    const handle = new FakeCodexAppServer([
+      { type: "text-delta", text: "Hello" },
+      { type: "text-delta", text: " from Codex" },
+      { type: "done", finishReason: "stop" }
+    ]);
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
+    expect(iter).not.toBeNull();
+    const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
+    expect(handle.initialized).toBe(true);
+    expect(handle.started).toBe(true);
+    expect(handle.submitted).toBe(true);
+    expect(handle.shutdownCalled).toBe(true);
+    expect(
+      events
+        .filter((event): event is Extract<BackendAgentEvent, { type: "text-delta" }> => event.type === "text-delta")
+        .map((event) => event.text)
+        .join("")
+    ).toBe("Hello from Codex");
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "stop" });
+  });
+
+  it("resumes an existing Codex thread when the run request carries a thread id", async () => {
+    const handle = new FakeCodexAppServer([{ type: "done", finishReason: "stop" }]);
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    const iter = backend?.run(
+      { ...baseRunRequest, threadId: "codex-thread-existing" } as AgentRunRequest & {
+        threadId: string;
+      },
+      { execute: async () => "ok" }
+    );
+    await collect(iter as AsyncIterable<BackendAgentEvent>);
+    expect(handle.started).toBe(false);
+    expect(handle.resumedThreadId).toBe("codex-thread-existing");
+  });
+
+  it("routes Codex approval requests through the provider-neutral execute seam", async () => {
+    const handle = new FakeCodexAppServer([
+      {
+        type: "approval-request",
+        requestId: "codex-request-1",
+        callId: "call-1",
+        tool: "run-shell",
+        arguments: "{\"command\":\"pwd\"}",
+        approval: {
+          id: "approval-1",
+          service: "Codex",
+          action: "Run shell command",
+          mode: "full-access",
+          riskLevel: "medium",
+          dataUsed: ["workspace"],
+          consequence: "Runs a shell command.",
+          requestedAt: "2026-06-29T12:00:00.000Z",
+          decisions: []
+        }
+      },
+      { type: "done", finishReason: "stop" }
+    ]);
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    const iter = backend?.run(baseRunRequest, { execute: async () => "approved output" });
+    const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
+    expect(events.some((event) => event.type === "tool-call")).toBe(true);
+    expect(events).toContainEqual({
+      type: "tool-result",
+      callId: "call-1",
+      ok: true,
+      output: "approved output"
+    });
+    expect(handle.approvalResponses).toEqual([
+      { requestId: "codex-request-1", ok: true, output: "approved output" }
+    ]);
+  });
+
+  it("surfaces errors without requiring live Codex credentials", async () => {
+    const handle = new FakeCodexAppServer([{ type: "error", message: "Codex auth required." }]);
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
+    const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
+    expect(events).toContainEqual({ type: "error", message: "Codex auth required." });
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "error" });
+  });
+
+  it("delegates model discovery to the app-server handle", async () => {
+    const backend = createCodexBackend(
+      codexProvider(),
+      codexDeps(new FakeCodexAppServer([]))
+    );
+    const result = await backend?.listModels?.();
+    expect(result?.outcome).toBe("success");
+    expect(result?.models).toContainEqual({ id: "gpt-5", available: true });
   });
 });
 
