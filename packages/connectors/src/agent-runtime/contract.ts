@@ -106,6 +106,13 @@ export interface BackendDeps {
     provider: BackendProvider,
     handlers: CodexAppServerHandlers
   ) => CodexAppServerHandle | null;
+  /**
+   * Build the stdio/JSON-RPC transport for a connected ACP (Cursor/Grok)
+   * backend, or null when there is no egress path. The desktop supplies a
+   * Tauri-bound factory that owns the CLI child process on the Rust side; tests
+   * inject a scripted fake. Holds no secret because auth is CLI-owned.
+   */
+  createAcpTransport?: AcpTransportFactory;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }

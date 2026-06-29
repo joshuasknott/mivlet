@@ -421,6 +421,8 @@ function authStateLabel(
       return "Entitlement pending";
     case "unavailable":
       return "Unavailable";
+    case "failed":
+      return "Failed";
     default:
       return authState;
   }

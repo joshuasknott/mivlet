@@ -26,5 +26,14 @@ export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 // reaches them only through resolveAgentBackend.
 export { createNativeApiBackend } from "./adapters/native-api";
 export { createCodexBackend } from "./adapters/codex";
+export { resolveAcpBackend } from "./adapters/acp";
+export {
+  ACP_PROVIDERS,
+  detectAcpRuntime,
+  type AcpProviderDefinition,
+  type AcpCliProbe,
+  type AcpCliProbeOutcome,
+  type AcpRuntimeDetection
+} from "./adapters/acp-providers";
 export { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 export { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";

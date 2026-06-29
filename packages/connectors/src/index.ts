@@ -148,15 +148,18 @@ export { buildContextPrefix } from "./native-api/memory-context";
 
 // provider-neutral agent-runtime contract. One interface every backend family
 // (native-API, Codex, ACP, Copilot) implements; the shell resolves one
-// AgentBackend per run via resolveAgentBackend. Native-API is the first concrete
-// adapter; the others are metadata-only until their adapter lands. No secret
-// crosses this boundary — auth lives behind the Rust boundary / provider-owned
-// auth caches.
+// AgentBackend per run via resolveAgentBackend. Native-API and ACP (Cursor/Grok)
+// have live adapters; Codex and Copilot remain metadata-only until their
+// adapters land. No secret crosses this boundary — auth lives behind the Rust
+// boundary / provider-owned auth caches (CLI-owned for ACP).
 export {
   resolveAgentBackend,
   hasRunnableAdapter,
   createCodexBackend,
   createNativeApiBackend,
+  resolveAcpBackend,
+  ACP_PROVIDERS,
+  detectAcpRuntime,
   type AgentBackend,
   type AgentBackendFactory,
   type AgentRunRequest,
@@ -168,8 +171,32 @@ export {
   type CodexThreadRef,
   type CodexTurnRequest,
   type TransportHandle,
-  type TransportHandlers
+  type TransportHandlers,
+  type AcpProviderDefinition,
+  type AcpCliProbe,
+  type AcpCliProbeOutcome,
+  type AcpRuntimeDetection
 } from "./agent-runtime";
+// Generic ACP protocol surface (provider-neutral JSON-RPC over stdio). Exposed so
+// the desktop transport factory can frame/correlate frames; tests drive it via
+// the FakeAcpTransport. No provider-specific executable logic lives here.
+export {
+  parseAcpLine,
+  encodeAcpFrame,
+  isAcpRequest,
+  isAcpResponse,
+  isAcpNotification,
+  MAX_ACP_FRAME_CHARACTERS,
+  type AcpFrame,
+  type AcpRequest,
+  type AcpResponse,
+  type AcpNotification,
+  type AcpError,
+  type AcpTransport,
+  type AcpTransportFactory,
+  type AcpTransportProvider,
+  type AcpReply
+} from "./agent-runtime/adapters/acp/index";
 export {
   createApprovalGate,
   createToolExecutor,

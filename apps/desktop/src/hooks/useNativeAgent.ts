@@ -33,6 +33,7 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import { permissionModeFor } from "../lib/agent-run";
+import { createDesktopAcpTransport } from "../lib/acp-transport";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
@@ -149,6 +150,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     () => ({
       createTransport: createDesktopTransport,
       createCodexAppServer: createDesktopCodexAppServer,
+      createAcpTransport: createDesktopAcpTransport,
       discoverModels: async (providerId) => {
         const result = await listRuntimeBackendModels(providerId);
         return result;

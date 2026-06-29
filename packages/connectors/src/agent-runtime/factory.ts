@@ -2,8 +2,8 @@
  * The `AgentBackend` factory: resolves a `BackendProvider` to a live agent
  * backend (or null) by dispatching on `backendType`.
  *
- * Today `native-api` and Codex app-server return live backends. ACP and Copilot
- * are metadata-only (their adapters return null until landed). The factory also
+ * Today `native-api`, Codex app-server, and ACP return live backends. Copilot
+ * is metadata-only (its adapter returns null until landed). The factory also
  * returns null for any backend that is not connected or lacks the `streaming`
  * capability — so the shell's "is there a backend to drive a run?" predicate is
  * preserved by construction.
@@ -30,8 +30,8 @@ function isRunnable(provider: BackendProvider): boolean {
  * True when a backend family has a *live* adapter the factory can resolve today.
  *
  * This is the provider-neutral "can Fable actually drive a run on this backend
- * right now?" predicate. Native API and Codex return true; ACP and Copilot are
- * metadata-only until their adapters land. The shell uses this to
+ * right now?" predicate. Native API, Codex, and ACP return true; Copilot is
+ * metadata-only until its adapter lands. The shell uses this to
  * decide whether the composer drives the agent loop vs. the knowledge-search
  * fallback — preserving the legacy native-API-only behavior while keeping the
  * contract ready for future adapters (flip a backend type here once it ships).
@@ -41,7 +41,11 @@ function isRunnable(provider: BackendProvider): boolean {
  * resolveAgentBackend} does) for the full "runnable now" answer.
  */
 export function hasRunnableAdapter(backendType: string): boolean {
-  return backendType === "native-api" || backendType === "codex-app-server";
+  return (
+    backendType === "native-api" ||
+    backendType === "codex-app-server" ||
+    backendType === "acp"
+  );
 }
 
 /**
@@ -63,7 +67,7 @@ export function resolveAgentBackend(
       // Codex owns auth + process protocol; Fable maps it into AgentBackend.
       return resolveCodexBackend(provider, deps);
     case "acp":
-      // Metadata-only until the ACP (Cursor/Grok) JSON-RPC adapter lands.
+      // ACP providers own auth in their CLIs; Fable maps the JSON-RPC stream.
       return resolveAcpBackend(provider, deps);
     case "copilot-sdk":
       // Metadata-only until the Copilot SDK adapter lands.
