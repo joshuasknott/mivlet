@@ -209,6 +209,7 @@ export {
 } from "./native-api/tool-executor";
 export * from "./scheduler";
 export * from "./workflows";
+export * from "./departments";
 export * from "./notifications";
 export * from "./voice";
 
