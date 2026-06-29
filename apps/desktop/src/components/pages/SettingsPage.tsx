@@ -47,9 +47,8 @@ export const tabs: { id: SettingsTab; label: string }[] = [
  *     and disconnect through the Rust credential boundary. The API key is read
  *     from an uncontrolled input and handed straight to
  *     runtime.connectBackend — it never enters React state, snapshots, or logs.
- *   - Subscription/CLI providers (Codex, Cursor, Copilot, Grok) are gated until
- *     a real capability-bearing runtime adapter exists; there is no fake one-
- *     click "Connect" here.
+ *   - Subscription/CLI providers use their provider-owned runtime/auth. Fable
+ *     does not collect subscription tokens or fake one-click setup here.
  */
 export function SettingsPage({
   runtime,
@@ -125,7 +124,7 @@ function ProviderAccessView({
   const pendingProviderId = runtime.backendStatus?.match(/Connecting (\S+?)[\u2026.]?/)?.[1];
 
   // Native-API (key) providers are connectable here. Subscription/CLI providers
-  // (codex/cursor/copilot/grok) are gated until a real runtime adapter exists.
+  // (codex/cursor/copilot/grok) report provider-owned runtime state.
   const nativeProviders = providers.filter((provider) => provider.backendType === "native-api");
   const subscriptionProviders = providers.filter((provider) => provider.backendType !== "native-api");
 
@@ -134,7 +133,7 @@ function ProviderAccessView({
       <div className="settings-section-heading">
         <p>
           Connect API-key providers to run Fable&rsquo;s agent loop directly. Subscription and
-          CLI-backed providers require their real runtime before they can be used.
+          CLI-backed providers use their installed provider runtime.
         </p>
       </div>
 
@@ -349,9 +348,9 @@ function NativeProviderRow({
 
 /**
  * A subscription/CLI provider row. It is never one-click connectable from
- * Settings: unless the credential boundary already reports it connected and
- * capability-bearing, the row states what is required (CLI install, sign-in)
- * and exposes no fake "Connect" button.
+ * Settings: unless the runtime reports it connected and capability-bearing, the
+ * row states what is required (CLI install, sign-in) and exposes no fake token
+ * entry field.
  */
 function SubscriptionProviderRow({ provider }: { provider: BackendProvider }) {
   const capabilities = providerCapabilityLabels(provider);
@@ -397,7 +396,7 @@ function SubscriptionProviderRow({ provider }: { provider: BackendProvider }) {
         {authLabel}
       </span>
 
-      <span className="provider-access-row__action" title="Subscription providers are gated until a real runtime adapter exists.">
+      <span className="provider-access-row__action" title="Subscription providers use their provider-owned runtime and auth.">
         <button type="button" disabled aria-disabled="true">
           {capabilityBearing ? "Connected" : "Gated"}
         </button>

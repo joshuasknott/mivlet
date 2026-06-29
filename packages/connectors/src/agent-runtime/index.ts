@@ -11,6 +11,11 @@
 export type {
   AgentBackend,
   BackendDeps,
+  CodexAppServerEvent,
+  CodexAppServerHandle,
+  CodexAppServerHandlers,
+  CodexThreadRef,
+  CodexTurnRequest,
   TransportHandlers,
   TransportHandle,
   AgentBackendFactory
@@ -20,3 +25,4 @@ export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 // Adapter constructors are exported for direct unit testing; production code
 // reaches them only through resolveAgentBackend.
 export { createNativeApiBackend } from "./adapters/native-api";
+export { createCodexBackend } from "./adapters/codex";

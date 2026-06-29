@@ -472,7 +472,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         (provider) =>
           provider.authState === "connected" &&
           provider.capabilities.includes("streaming") &&
-          hasRunnableAdapter(provider.backendType)
+          hasRunnableAdapter(provider.backendType) &&
+          (provider.backendType !== "codex-app-server" || hasTauriRuntime())
       ),
     [backendProviders]
   );
