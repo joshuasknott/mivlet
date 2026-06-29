@@ -1068,8 +1068,7 @@ pub fn switch_connector_account(
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
-    crate::connector_auth::switch_active_account(&path, entry.id, &account_id)
-        .map_err(|err| err)?;
+    crate::connector_auth::switch_active_account(&path, entry.id, &account_id)?;
     Ok(build_manifest(
         entry,
         &NativeCredentialBoundary {

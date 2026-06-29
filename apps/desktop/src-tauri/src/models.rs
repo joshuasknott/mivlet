@@ -24,6 +24,14 @@ pub const MAX_RUNTIME_SNAPSHOT_IDS: usize = 200;
 pub const MAX_RUNTIME_SNAPSHOT_AUTOMATIONS: usize = 100;
 pub const MAX_RUNTIME_SNAPSHOT_SCHEDULES: usize = 100;
 pub const MAX_SCHEDULE_FIELD_CHARACTERS: usize = 200;
+pub const MAX_RUNTIME_SNAPSHOT_GOALS: usize = 100;
+pub const MAX_RUNTIME_SNAPSHOT_PLANS: usize = 100;
+pub const MAX_GOAL_FIELD_CHARACTERS: usize = 1_000;
+pub const MAX_PLAN_TITLE_CHARACTERS: usize = 200;
+pub const MAX_PLAN_STEP_DESCRIPTION_CHARACTERS: usize = 500;
+pub const MAX_PLAN_STEPS: usize = 50;
+pub const GOAL_STATUSES: [&str; 3] = ["active", "achieved", "archived"];
+pub const PLAN_STATUSES: [&str; 3] = ["draft", "in-progress", "complete"];
 pub const RUNTIME_SNAPSHOT_VERSION: u8 = 1;
 
 // Controlled vocabularies used for validation.
@@ -695,6 +703,43 @@ pub struct Schedule {
     pub created_at: String,
 }
 
+/// A structured workspace goal created by the /goal command. Non-secret by
+/// construction: only a title, the user's statement, and lifecycle bookkeeping.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceGoal {
+    pub id: String,
+    pub title: String,
+    pub statement: String,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A single step in a structured plan.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanStep {
+    pub id: String,
+    pub order: u32,
+    pub description: String,
+    pub done: bool,
+}
+
+/// A structured plan created by the /plan command. Non-secret by construction.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspacePlan {
+    pub id: String,
+    #[serde(default)]
+    pub goal_id: Option<String>,
+    pub title: String,
+    pub steps: Vec<PlanStep>,
+    pub status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
@@ -711,6 +756,14 @@ pub struct RuntimeSnapshot {
     /// files written before this field existed still parse cleanly.
     #[serde(default)]
     pub schedules: Vec<Schedule>,
+    /// Structured workspace goals created by /goal. Non-secret state persisted
+    /// through the snapshot. Defaulted for back-compat with pre-existing files.
+    #[serde(default)]
+    pub goals: Vec<WorkspaceGoal>,
+    /// Structured plans created by /plan. Non-secret state persisted through
+    /// the snapshot. Defaulted for back-compat with pre-existing files.
+    #[serde(default)]
+    pub plans: Vec<WorkspacePlan>,
     pub pinned_source_ids: Vec<String>,
     pub imported_knowledge_sources: Vec<LocalFileImport>,
     pub memory_disabled: bool,

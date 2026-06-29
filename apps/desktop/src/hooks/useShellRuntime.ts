@@ -15,11 +15,14 @@ import type {
   ConnectorSearchRequest,
   ConnectorSearchResult,
   FirstWaveConnectorId,
+  FableCommandRequest,
+  FableCommandResult,
   KnowledgeCitation,
   KnowledgeScope,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
+  MemoryKind,
   MemoryPromotionRequest,
   MemoryRecord,
   PermissionMode,
@@ -29,9 +32,11 @@ import type {
   WorkflowDefinition,
   WorkflowRun,
   NotificationRecord,
-  WorkspaceDirective
+  WorkspaceDirective,
+  WorkspaceGoal,
+  WorkspacePlan
 } from "@fable/protocol";
-import { assembleContext, chunkSourceText, retrieve } from "@fable/knowledge";
+import { assembleContext, chunkSourceText, promoteToMemory, retrieve } from "@fable/knowledge";
 import {
   FIRST_WAVE_CONNECTOR_IDS,
   hasRunnableAdapter,
@@ -45,6 +50,8 @@ import {
   missedOccurrences,
   nextOccurrence,
   shapeWorkflowNotification,
+  executeCommand,
+  type CommandRuntime,
   type ToolApprovalGate,
   type ModelDiscoveryResult,
   type LocalTextFileCandidate
@@ -154,6 +161,8 @@ const defaultShellState: PersistedShellState = {
   dismissedApprovalIds: [],
   approvalRules: [],
   schedules: [],
+  goals: [],
+  plans: [],
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id),
   importedKnowledgeSources: [],
   memoryDisabled: false,
@@ -271,6 +280,16 @@ export interface ShellRuntime {
   editSchedule: (schedule: Schedule) => void;
   toggleSchedule: (schedule: Schedule) => void;
   deleteSchedule: (schedule: Schedule) => void;
+  // goals + plans (structured Fable state created by /goal and /plan)
+  goals: WorkspaceGoal[];
+  plans: WorkspacePlan[];
+  createGoal: (input: { title: string; statement: string }) => WorkspaceGoal;
+  createPlan: (input: { title: string; steps: string[]; goalId?: string }) => WorkspacePlan;
+  /** Execute a parsed Fable command; returns the result + any follow-up prompt. */
+  runFableCommand: (
+    request: FableCommandRequest,
+    options?: { backendConnected?: boolean; activeGoalId?: string }
+  ) => Promise<FableCommandResult>;
   scheduledJobs: ScheduledJob[];
   workflowRuns: WorkflowRun[];
   notificationHistory: NotificationRecord[];
@@ -365,6 +384,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     useState<PendingApprovalConfirmation | null>(null);
   const [approvalConfirmationText, setApprovalConfirmationText] = useState("");
   const [schedules, setSchedules] = useState<Schedule[]>(initialState.schedules);
+  const [goals, setGoals] = useState<WorkspaceGoal[]>(initialState.goals);
+  const [plans, setPlans] = useState<WorkspacePlan[]>(initialState.plans);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
   const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([]);
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
@@ -525,6 +546,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       dismissedApprovalIds,
       approvalRules,
       schedules,
+      goals,
+      plans,
       pinnedSourceIds,
       importedKnowledgeSources,
       memoryDisabled,
@@ -538,6 +561,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       approvalAudit,
       approvalRules,
       schedules,
+      goals,
+      plans,
       composerValue,
       connectedBackendIds,
       dismissedApprovalIds,
@@ -665,6 +690,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setDismissedApprovalIds(recovered.dismissedApprovalIds);
         setApprovalRules(recovered.approvalRules);
         setSchedules(recovered.schedules);
+        setGoals(recovered.goals);
+        setPlans(recovered.plans);
         setPinnedSourceIds(recovered.pinnedSourceIds);
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
@@ -1711,17 +1738,76 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }) => {
     const now = new Date();
     const id = `schedule-${toSlug(name)}-${toSlug(now.toISOString())}`;
-    const schedule: Schedule = {
-      id,
-      name,
-      description,
-      day,
-      time,
-      enabled: true,
-      createdAt: now.toISOString()
-    };
-    setSchedules((current) => [schedule, ...current]);
     const [hour, minute] = time.split(":").map(Number);
+    const trigger: import("@fable/protocol").ScheduleTrigger = {
+      kind: "recurring",
+      rule: {
+        frequency: "weekly",
+        interval: 1,
+        byWeekday: [day],
+        hour,
+        minute,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      }
+    };
+    createScheduleFromTrigger({ name, description, trigger, id });
+    // Mirror the legacy ScheduleEntry (weekday + time) so the Schedules page,
+    // which still renders that shape, stays paired with the durable job by id.
+    setSchedules((current) => {
+      const schedule: Schedule = {
+        id,
+        name,
+        description,
+        day,
+        time,
+        enabled: true,
+        createdAt: now.toISOString()
+      };
+      if (current.some((entry) => entry.id === id)) return current;
+      return [schedule, ...current];
+    });
+  };
+
+  /**
+   * Derive the legacy {day, time} pair a `ScheduleEntry` needs from a trigger.
+   * Used so command-created schedules appear on the Schedules page alongside
+   * form-created ones. Weekly triggers carry their weekday; other frequencies
+   * fall back to Mon. Time comes from the rule's hour/minute, or the one-time
+   * occurrence's local time.
+   */
+  function deriveLegacyScheduleEntry(job: ScheduledJob): { day: Weekday; time: string } {
+    const pad = (value: number) => value.toString().padStart(2, "0");
+    if (job.trigger.kind === "recurring") {
+      const { rule } = job.trigger;
+      const day = (rule.byWeekday?.[0] ?? "Mon") as Weekday;
+      return { day, time: `${pad(rule.hour)}:${pad(rule.minute)}` };
+    }
+    const occurrence = new Date(job.trigger.at);
+    return {
+      day: (["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][occurrence.getDay()] ?? "Mon") as Weekday,
+      time: `${pad(occurrence.getHours())}:${pad(occurrence.getMinutes())}`
+    };
+  }
+
+  /**
+   * Create a durable scheduled job from a fully-formed, validated trigger.
+   * Shared by the form-bound `createSchedule` (weekly trigger) and the
+   * `/schedule` command (daily/weekly/monthly/once triggers). Routes through
+   * the same durable scheduler-store path the form uses.
+   */
+  const createScheduleFromTrigger = ({
+    name,
+    description,
+    trigger,
+    id: providedId
+  }: {
+    name: string;
+    description: string;
+    trigger: import("@fable/protocol").ScheduleTrigger;
+    id?: string;
+  }): ScheduledJob => {
+    const now = new Date();
+    const id = providedId ?? `schedule-${toSlug(name)}-${toSlug(now.toISOString())}`;
     const definition: WorkflowDefinition = {
       schemaVersion: 1,
       id: `workflow-${id}`,
@@ -1735,17 +1821,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       },
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
-    };
-    const trigger = {
-      kind: "recurring" as const,
-      rule: {
-        frequency: "weekly" as const,
-        interval: 1,
-        byWeekday: [day],
-        hour,
-        minute,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-      }
     };
     const job: ScheduledJob = {
       id,
@@ -1762,8 +1837,21 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     };
-    setWorkflowDefinitions((current) => [definition, ...current]);
-    setScheduledJobs((current) => [job, ...current]);
+    setWorkflowDefinitions((current) =>
+      current.some((entry) => entry.id === definition.id) ? current : [definition, ...current]
+    );
+    setScheduledJobs((current) =>
+      current.some((entry) => entry.id === job.id) ? current : [job, ...current]
+    );
+    // Derive a best-effort legacy ScheduleEntry so the Schedules page (which
+    // renders that shape, pairing it with the job by id) shows command-created
+    // schedules too. Recurring triggers contribute weekday/time; one-time
+    // triggers fall back to the first weekday at their occurrence time.
+    setSchedules((current) => {
+      if (current.some((entry) => entry.id === id)) return current;
+      const derived = deriveLegacyScheduleEntry(job);
+      return [{ ...derived, id, name, description, enabled: true, createdAt: now.toISOString() }, ...current];
+    });
     void saveRuntimeWorkflowDefinition(definition);
     void saveRuntimeScheduledJob(job);
     if (job.nextRunAt) {
@@ -1776,6 +1864,127 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       });
     }
     setLastAction(`Schedule created: ${name}`);
+    return job;
+  };
+
+  /**
+   * Create a structured workspace goal (/goal). Non-secret by construction —
+   * only a title, the user's statement, and lifecycle bookkeeping. Surfaced
+   * in shell state and persisted through the runtime snapshot.
+   */
+  const createGoal = ({
+    title,
+    statement
+  }: {
+    title: string;
+    statement: string;
+  }): WorkspaceGoal => {
+    const now = new Date().toISOString();
+    const goal: WorkspaceGoal = {
+      id: `goal-${toSlug(title)}-${toSlug(now)}`,
+      title,
+      statement,
+      status: "active",
+      createdAt: now,
+      updatedAt: now
+    };
+    setGoals((current) => (current.some((entry) => entry.id === goal.id) ? current : [goal, ...current]));
+    return goal;
+  };
+
+  /**
+   * Create a structured plan (/plan). Optionally linked to the active goal.
+   * Non-secret by construction; persisted through the runtime snapshot.
+   */
+  const createPlan = ({
+    title,
+    steps,
+    goalId
+  }: {
+    title: string;
+    steps: string[];
+    goalId?: string;
+  }): WorkspacePlan => {
+    const now = new Date().toISOString();
+    const planSteps = steps
+      .map((description, index) => description.trim())
+      .filter(Boolean)
+      .map((description, index) => ({
+        id: `step-${toSlug(title)}-${index + 1}`,
+        order: index + 1,
+        description,
+        done: false
+      }));
+    const plan: WorkspacePlan = {
+      id: `plan-${toSlug(title)}-${toSlug(now)}`,
+      goalId,
+      title,
+      steps: planSteps,
+      status: "draft",
+      createdAt: now,
+      updatedAt: now
+    };
+    setPlans((current) => (current.some((entry) => entry.id === plan.id) ? current : [plan, ...current]));
+    return plan;
+  };
+
+  /**
+   * Create a memory from a free-text command value (/remember). Routes through
+   * the same knowledge/memory boundary as source promotion: `promoteToMemory`
+   * builds the approved record (provenance origin "manual"), then
+   * `commitMemoryState` persists it. Secret-shaped input must be redacted by
+   * the command layer BEFORE this is called.
+   */
+  const createMemoryFromCommand = ({
+    title,
+    value,
+    kind
+  }: {
+    title: string;
+    value: string;
+    kind: MemoryKind;
+  }): MemoryRecord => {
+    const record = promoteToMemory({
+      title,
+      value,
+      kind,
+      provenance: { origin: "manual", note: "Created with the /remember command." }
+    });
+    const nextRecords = [record, ...managedMemoryRecords.filter((existing) => existing.id !== record.id)];
+    commitMemoryState({ disabled: memoryDisabled, records: nextRecords }, `Remembered: ${title}`);
+    return record;
+  };
+
+  /**
+   * The provider-neutral CommandRuntime seam. Every backend family honors the
+   * same surface; the shell implements it by routing to the existing memory,
+   * schedule, goal, and plan boundaries. No provider id is branched on here.
+   */
+  const commandRuntime: CommandRuntime = {
+    createMemory: (input) => Promise.resolve(createMemoryFromCommand(input)),
+    createSchedule: (input) => Promise.resolve(createScheduleFromTrigger(input)),
+    createGoal: (input) => Promise.resolve(createGoal(input)),
+    createPlan: (input) => Promise.resolve(createPlan(input)),
+    now: () => new Date().toISOString()
+  };
+
+  /**
+   * Execute a parsed Fable command against the shell's runtime. Surfaces the
+   * result message through `lastAction` and returns the result so the caller
+   * (App.tsx submit) can submit any follow-up prompt to the model through the
+   * resolved agent backend. Never throws — failures are returned as results.
+   */
+  const runFableCommand = async (
+    request: FableCommandRequest,
+    options: { backendConnected?: boolean; activeGoalId?: string } = {}
+  ): Promise<FableCommandResult> => {
+    const result = await executeCommand(request, commandRuntime, {
+      backendConnected: options.backendConnected ?? Boolean(connectedAgentBackend),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      activeGoalId: options.activeGoalId ?? goals[0]?.id
+    });
+    setLastAction(result.message);
+    return result;
   };
 
   const toggleSchedule = (schedule: Schedule) => {
@@ -2100,6 +2309,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     editSchedule,
     toggleSchedule,
     deleteSchedule,
+    goals,
+    plans,
+    createGoal,
+    createPlan,
+    runFableCommand,
     scheduledJobs,
     workflowRuns,
     notificationHistory,

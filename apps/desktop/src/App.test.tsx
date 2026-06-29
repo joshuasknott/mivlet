@@ -606,6 +606,108 @@ describe("Fable home", () => {
     expect(screen.getByLabelText(/universal composer/i)).toHaveValue("/goal ");
   });
 
+  it("/remember creates durable memory instead of just inserting text", async () => {
+    const user = await renderWorkspace();
+
+    await user.type(
+      screen.getByLabelText(/universal composer/i),
+      "/remember Prefers dark mode for long sessions"
+    );
+    await user.keyboard("{Enter}");
+
+    // The composer is cleared so the command token never reached the model.
+    await waitFor(() =>
+      expect(screen.getByLabelText(/universal composer/i)).toHaveValue("")
+    );
+    // The command created an approved memory, visible on the Knowledge page.
+    await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
+    await user.click(screen.getByRole("tab", { name: /^memory$/i }));
+    // The memory is created and rendered (title appears in list + detail).
+    expect((await screen.findAllByText(/Prefers dark mode/i)).length).toBeGreaterThan(0);
+  });
+
+  it("/remember refuses a secret-shaped value without saving it", async () => {
+    const user = await renderWorkspace();
+
+    await user.type(
+      screen.getByLabelText(/universal composer/i),
+      "/remember Bearer super-secret-token-1234567890"
+    );
+    await user.keyboard("{Enter}");
+
+    // Rejected through the last-action channel; the secret never lands in memory.
+    expect(await screen.findByText(/looks like a secret/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
+    await user.click(screen.getByRole("tab", { name: /^memory$/i }));
+    expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
+  });
+
+  it("/goal creates structured Fable state persisted in the snapshot", async () => {
+    // Seed a snapshot so the runtime-save path is active for this session.
+    runtimeMocks.snapshot = {
+      version: 1,
+      activeItem: "new-chat",
+      composerDraft: "",
+      voiceEnabled: false,
+      approvalAudit: [],
+      dismissedApprovalIds: [],
+      approvalRules: [],
+      automationStatuses: {},
+      schedules: [],
+      goals: [],
+      plans: [],
+      pinnedSourceIds: [],
+      importedKnowledgeSources: [],
+      memoryDisabled: false,
+      memoryRecords: [],
+      connectedBackendIds: [],
+      selectedModelId: "",
+      permissionMode: "full-access",
+      savedAt: "2026-06-26T10:30:00.000Z"
+    };
+    const user = await renderWorkspace();
+
+    await user.type(
+      screen.getByLabelText(/universal composer/i),
+      "/goal Ship the v2 onboarding flow"
+    );
+    await user.keyboard("{Enter}");
+
+    // The goal is created and surfaced; no model is connected in this harness so
+    // the result tells the user to connect one.
+    expect(await screen.findByText(/goal saved/i)).toBeInTheDocument();
+
+    // The goal is persisted through the runtime snapshot (durable, non-secret).
+    await waitFor(() => {
+      const snapshot = runtimeMocks.savedSnapshots.at(-1);
+      expect(snapshot?.goals.some((goal) => goal.statement.includes("v2 onboarding flow"))).toBe(true);
+    });
+  });
+
+  it("/schedule creates a durable schedule from natural language", async () => {
+    const user = await renderWorkspace();
+
+    await user.type(screen.getByLabelText(/universal composer/i), "/schedule daily at 09:00");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText(/schedule created/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    // The command-created schedule appears on the Schedules page (the command
+    // derives a legacy entry paired with the durable job by id) and can run now.
+    expect(await screen.findByRole("button", { name: /run now/i })).toBeInTheDocument();
+  });
+
+  it("treats an unknown slash command as an ordinary prompt (passthrough reservation)", async () => {
+    const user = await renderWorkspace();
+
+    await user.type(screen.getByLabelText(/universal composer/i), "/summarize the open PRs");
+    await user.keyboard("{Enter}");
+
+    // Unknown slashes fall through to the normal knowledge-search submit path;
+    // they are not swallowed as an unknown Fable command.
+    expect(await screen.findByText(/summarize the open PRs/i)).toBeInTheDocument();
+  });
+
   it("imports local text files as pinned knowledge and contextual directives", async () => {
     const user = await renderWorkspace();
     const file = new File(["Launch risks, connector recovery, and approval notes"], "launch-notes.md", {
@@ -711,6 +813,8 @@ describe("Fable home", () => {
       approvalRules: [],
       automationStatuses: {},
       schedules: [],
+      goals: [],
+      plans: [],
       pinnedSourceIds: [],
       importedKnowledgeSources: [],
       memoryDisabled: false,
@@ -945,6 +1049,8 @@ describe("Fable home", () => {
       approvalRules: [],
       automationStatuses: {},
       schedules: [],
+      goals: [],
+      plans: [],
       pinnedSourceIds: [],
       importedKnowledgeSources: [],
       memoryDisabled: false,

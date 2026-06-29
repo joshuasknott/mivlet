@@ -113,6 +113,98 @@ export interface MemoryControlState {
   records: MemoryRecord[];
 }
 
+// ---------------------------------------------------------------------------
+// Fable-owned slash commands.
+//
+// The composer recognizes a small set of Fable-owned commands (/goal, /plan,
+// /remember, /schedule). These are provider-neutral product features, not
+// composer-text inserts: they create structured Fable state and submit model
+// work through the resolved agent backend when required. Provider-specific
+// slash commands never replace these; unknown slashes fall through to ordinary
+// prompt submission unless a backend explicitly opts into passthrough.
+//
+// These types are wire only. Parsing, validation, redaction, and dispatch live
+// in @fable/connectors; persistence + the shell live in the desktop boundary.
+// ---------------------------------------------------------------------------
+
+/** The Fable-owned commands. Provider-specific slashes never appear here. */
+export type FableCommandName = "goal" | "plan" | "remember" | "schedule";
+
+/** The canonical, slash-prefixed command tokens Fable owns. */
+export const FABLE_COMMAND_TOKENS: readonly string[] = ["/goal", "/plan", "/remember", "/schedule"];
+
+/** A parsed, validated command ready for execution. */
+export interface FableCommandRequest {
+  /** The canonical name without the leading slash, e.g. "remember". */
+  name: FableCommandName;
+  /** The raw argument text after the command token, trimmed. */
+  args: string;
+}
+
+/** Outcome of parsing raw composer text into a command or a prompt. */
+export type ParseCommandOutcome =
+  | { status: "command"; request: FableCommandRequest }
+  /** Ordinary prompt text — not a command. Submit unchanged. */
+  | { status: "prompt"; text: string }
+  /** A `/foo` token Fable does not own. Reserved as a seam for backend
+   *  passthrough; treated as ordinary prompt text by default. */
+  | { status: "unknown-command"; token: string; text: string };
+
+/** The lifecycle status of a command execution result. */
+export type FableCommandStatus = "ok" | "validation" | "rejected";
+
+/**
+ * The structured result of executing a Fable command. Carries NO secret — the
+ * message is safe to surface to the UI and persist in logs/state.
+ */
+export interface FableCommandResult {
+  name: FableCommandName;
+  status: FableCommandStatus;
+  /** Human-readable confirmation or error, surfaced through the shell. */
+  message: string;
+  /** Id of the created artifact (memory, schedule, goal, plan), when any. */
+  artifactId?: string;
+  /**
+   * When status is "ok", an optional prompt to additionally submit to the
+   * model through the resolved agent backend. Empty for pure-persistence
+   * commands (e.g. /remember). Fable submits it only when a streaming backend
+   * is connected.
+   */
+  followUpPrompt?: string;
+}
+
+/** A structured workspace goal created by /goal. Non-secret by construction. */
+export interface WorkspaceGoal {
+  id: string;
+  title: string;
+  /** The user's verbatim goal statement. */
+  statement: string;
+  status: "active" | "achieved" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A single step in a structured plan. */
+export interface PlanStep {
+  id: string;
+  /** 1-based ordering. */
+  order: number;
+  description: string;
+  done: boolean;
+}
+
+/** A structured plan created by /plan. Non-secret by construction. */
+export interface WorkspacePlan {
+  id: string;
+  /** Optional link to the goal this plan decomposes. */
+  goalId?: string;
+  title: string;
+  steps: PlanStep[];
+  status: "draft" | "in-progress" | "complete";
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface MemoryPromotionRequest {
   source: KnowledgeSource;
   decision: ApprovalDecision;
@@ -939,6 +1031,16 @@ export interface RuntimeSnapshot {
    * non-secret state in Tauri). LocalStorage carries them in preview only.
    */
   schedules: ScheduleEntry[];
+  /**
+   * Structured workspace goals created by /goal. Non-secret state persisted
+   * through the snapshot so it survives a desktop restart.
+   */
+  goals: WorkspaceGoal[];
+  /**
+   * Structured workspace plans created by /plan. Non-secret state persisted
+   * through the snapshot so it survives a desktop restart.
+   */
+  plans: WorkspacePlan[];
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;
