@@ -150,7 +150,7 @@ export function WorkspaceSidebar({
             <div className="workspace-switcher-container" ref={dropdownRef}>
               <button
                 type="button"
-                className="workspace-switcher"
+                className="workspace-switcher workspace-switcher--workspace"
                 aria-label="Select workspace"
                 onClick={() => {
                   setWorkspaceDropdownOpen(!workspaceDropdownOpen);

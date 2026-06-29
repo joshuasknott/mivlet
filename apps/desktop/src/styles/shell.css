@@ -102,6 +102,10 @@
   background: var(--surface-raised);
 }
 
+.workspace-switcher--workspace {
+  padding-left: 0;
+}
+
 .workspace-switcher__name {
   flex: 1;
   font-size: var(--text-13);
