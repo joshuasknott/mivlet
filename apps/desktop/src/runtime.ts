@@ -627,6 +627,108 @@ export async function listenRuntimeBackendEvents(
 }
 
 // ---------------------------------------------------------------------------
+// ACP (Agent Client Protocol) CLI process bridge.
+//
+// Rust owns the CLI child process for ACP providers (Cursor, Grok): it spawns
+// the provider's CLI with piped stdio, emits each stdout line on
+// `arden://acp/<sessionId>`, writes stdin frames on command, and kills the
+// child on close. Auth is provider-owned — Fable never collects a subscription
+// token. These wrappers are thin invoke/listen seams over those Rust commands;
+// outside Tauri they return null so the transport stays fixture-testable.
+// ---------------------------------------------------------------------------
+
+export interface RuntimeSpawnAcpProcessRequest {
+  providerId: string;
+  extraArgs?: string[];
+}
+
+export interface RuntimeSpawnedAcpProcess {
+  sessionId: string;
+}
+
+/** Spawn an ACP CLI child process for a provider. Returns the session id. */
+export async function spawnRuntimeAcpProcess(request: RuntimeSpawnAcpProcessRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<RuntimeSpawnedAcpProcess>("spawn_acp_process", {
+      request: { providerId: request.providerId, extraArgs: request.extraArgs ?? [] }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/** Write a single JSON-RPC frame to the CLI's stdin. */
+export async function writeRuntimeAcpFrame(sessionId: string, frame: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<null>("write_acp_frame", { request: { sessionId, frame } });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/** Kill the CLI child process and drop the session. */
+export async function closeRuntimeAcpProcess(sessionId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<boolean>("close_acp_process", { sessionId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export type RuntimeAcpCliProbeResult =
+  | "not-installed"
+  | "signed-out"
+  | "connected"
+  | "auth-failed"
+  | "unavailable";
+
+/** Probe a provider's CLI to detect its install/auth state (no secret read). */
+export async function detectRuntimeAcpCli(
+  providerId: string
+): Promise<RuntimeAcpCliProbeResult | null> {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<RuntimeAcpCliProbeResult>("detect_acp_cli", { providerId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Listen for ACP frames for a session. Each emitted payload is one JSON-RPC
+ * line the CLI wrote to stdout, plus the control markers `[ACP-CLOSED]` (stdout
+ * ended) and `{ "__fableAcpStderr": "<line>" }` (a stderr line). Returns an
+ * unlisten function (or null outside Tauri).
+ */
+export async function listenRuntimeAcpFrames(
+  sessionId: string,
+  onFrame: (line: string) => void
+) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    const unlisten = await listen<string>(`arden://acp/${sessionId}`, (event) => {
+      onFrame(event.payload as string);
+    });
+    return unlisten;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fable-owned tool execution boundary.
 //
 // Each approved tool call crosses back into Rust, which re-validates the

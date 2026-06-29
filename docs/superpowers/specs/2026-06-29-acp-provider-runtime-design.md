@@ -145,17 +145,18 @@ probe result        → authState          → capabilities
 ─────────────────────────────────────────────────────────
 not-installed       → install-required   → []
 installed/signed-out→ needs-auth         → []
-auth-failed         → unavailable        → []  (fail-closed)
+auth-failed         → failed             → []  (fail-closed, distinct state)
 probe-unavailable   → unavailable        → []
 connected+ready     → connected          → ACP_CAPS (streaming, tools, …)
 ```
 
 `BackendAuthState`'s closed vocabulary is `connected | needs-auth |
-install-required | entitlement-pending | unavailable` — there is no standalone
-"failed" auth state, so an `auth-failed` probe maps to `unavailable` (fail-closed:
-no capabilities). Run-level failures (a model/protocol error during a turn)
-surface separately as `BackendAgentEvent` `error` events, which the shell
-already handles.
+install-required | entitlement-pending | unavailable | failed`. An `auth-failed`
+probe (the CLI reached its endpoint but was denied — 401/forbidden) maps to the
+distinct `failed` state so the shell surfaces it accurately; both `failed` and
+`unavailable` are fail-closed (no capabilities). Run-level failures (a
+model/protocol error during a turn) surface separately as `BackendAgentEvent`
+`error` events, which the shell already handles.
 
 `acp-providers.ts` declares each provider's executable spec (command name, args
 to probe auth, e.g. `cursor agent status` / `grok status`) without bundling it.

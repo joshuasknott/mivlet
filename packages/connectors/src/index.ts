@@ -171,6 +171,26 @@ export {
   type AcpCliProbeOutcome,
   type AcpRuntimeDetection
 } from "./agent-runtime";
+// Generic ACP protocol surface (provider-neutral JSON-RPC over stdio). Exposed so
+// the desktop transport factory can frame/correlate frames; tests drive it via
+// the FakeAcpTransport. No provider-specific executable logic lives here.
+export {
+  parseAcpLine,
+  encodeAcpFrame,
+  isAcpRequest,
+  isAcpResponse,
+  isAcpNotification,
+  MAX_ACP_FRAME_CHARACTERS,
+  type AcpFrame,
+  type AcpRequest,
+  type AcpResponse,
+  type AcpNotification,
+  type AcpError,
+  type AcpTransport,
+  type AcpTransportFactory,
+  type AcpTransportProvider,
+  type AcpReply
+} from "./agent-runtime/adapters/acp/index";
 export {
   createApprovalGate,
   createToolExecutor,

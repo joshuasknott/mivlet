@@ -68,7 +68,8 @@ describe("fail-closed capability resolution", () => {
   const closedStates = [
     "needs-auth",
     "install-required",
-    "unavailable"
+    "unavailable",
+    "failed"
   ] as const;
 
   it.each(closedStates)("declares no capabilities when authState=%s", (authState) => {

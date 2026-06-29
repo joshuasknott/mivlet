@@ -5,6 +5,7 @@
 //! This crate root only declares those modules, registers the Tauri command
 //! handlers, and starts the in-process scheduler tick.
 
+mod acp_process;
 mod agent_runs;
 mod approvals;
 mod backends;
@@ -115,6 +116,10 @@ pub fn run() {
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
             native_api::list_backend_models,
+            acp_process::spawn_acp_process,
+            acp_process::write_acp_frame,
+            acp_process::close_acp_process,
+            acp_process::detect_acp_cli,
             google::cancel_google_call,
             tools::execute_tool_call,
             store::encrypted_store_status,

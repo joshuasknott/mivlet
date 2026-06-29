@@ -5,6 +5,8 @@ import type {
   ApprovalGrant,
   ApprovalModification,
   ApprovalRequest,
+  BackendAuthState,
+  BackendCapability,
   BackendConsequentialEvent,
   BackendProvider,
   ConnectorActionKind,
@@ -40,6 +42,7 @@ import {
   listBackendProviders,
   mergeDiscoveredModels,
   prepareFixtureConnectorAction,
+  resolveCapabilities,
   searchFixtureConnector,
   searchKnowledgeSources,
   missedOccurrences,
@@ -69,6 +72,7 @@ import {
   clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
+  detectRuntimeAcpCli,
   exportRuntimeMemoryState,
   importRuntimeConnectorItem,
   importRuntimeLocalKnowledgeSource,
@@ -164,6 +168,90 @@ const defaultShellState: PersistedShellState = {
   selectedModelId: "",
   permissionMode: "full-access"
 };
+
+/**
+ * Map a Rust ACP CLI probe outcome to a truthful {@link BackendAuthState} +
+ * capability set. Mirrors the pure `detectAcpRuntime` resolver but is kept
+ * inline here so the shell does not import the contract's probe type directly.
+ * No secret is read — the probe reports only install/auth availability.
+ */
+function acpAuthStateFor(
+  outcome: "not-installed" | "signed-out" | "connected" | "auth-failed" | "unavailable"
+): { authState: BackendAuthState; capabilities: BackendCapability[] } {
+  switch (outcome) {
+    case "connected":
+      return {
+        authState: "connected",
+        capabilities: resolveCapabilities("acp", "connected")
+      };
+    case "signed-out":
+      return { authState: "needs-auth", capabilities: [] };
+    case "not-installed":
+      return { authState: "install-required", capabilities: [] };
+    case "auth-failed":
+      // CLI reached its endpoint but was denied (401/forbidden): distinct from
+      // a generic probe failure so the shell surfaces it accurately.
+      return { authState: "failed", capabilities: [] };
+    case "unavailable":
+    default:
+      return { authState: "unavailable", capabilities: [] };
+  }
+}
+
+/**
+ * Safely probe a provider's ACP CLI auth state. Guards against a missing or
+ * non-function runtime export (browser preview, partial mocks) so a probe
+ * failure never breaks backend resolution — the provider keeps its catalog
+ * state instead. Never reads a secret.
+ */
+async function safeDetectAcpCli(
+  providerId: string
+): Promise<"not-installed" | "signed-out" | "connected" | "auth-failed" | "unavailable" | null> {
+  if (typeof detectRuntimeAcpCli !== "function") {
+    return null;
+  }
+  try {
+    return await detectRuntimeAcpCli(providerId);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Probe each ACP provider's CLI auth state and merge the truthful result into
+ * the provider list. Non-ACP providers are returned unchanged. Outside Tauri
+ * (no probe) the providers are returned as-is so preview/fixture state holds.
+ * Never reads a secret — the CLI owns its auth.
+ */
+async function mergeAcpProbeResults(
+  providers: BackendProvider[]
+): Promise<BackendProvider[]> {
+  if (providers.every((provider) => provider.backendType !== "acp")) {
+    return providers;
+  }
+  return Promise.all(
+    providers.map(async (provider) => {
+      if (provider.backendType !== "acp") {
+        return provider;
+      }
+      const probe = await safeDetectAcpCli(provider.id);
+      if (!probe) {
+        return provider;
+      }
+      const { authState, capabilities } = acpAuthStateFor(probe);
+      return {
+        ...provider,
+        authState,
+        capabilities,
+        // Models are selectable only once the CLI reports connected.
+        models: provider.models.map((model) => ({
+          ...model,
+          available: authState === "connected"
+        }))
+      };
+    })
+  );
+}
 
 function isFirstWaveConnectorId(value: string): value is FirstWaveConnectorId {
   return (FIRST_WAVE_CONNECTOR_IDS as readonly string[]).includes(value);
@@ -775,13 +863,23 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   useEffect(() => {
     let active = true;
 
-    void listRuntimeBackends().then((providers) => {
+    void listRuntimeBackends().then(async (providers) => {
       if (!active || !providers) {
         return;
       }
 
-      setBackendProviders(providers);
-      const connectedIds = providers
+      // ACP providers (Cursor/Grok): the Rust list_backends path reports them
+      // install-required by default. Probe each installed CLI's auth state
+      // through the Rust boundary (detect_acp_cli — never reads a secret) and
+      // merge the truthful auth state + capabilities so a signed-in CLI reaches
+      // connected. Native + other backends keep their resolved state as-is.
+      const resolved = await mergeAcpProbeResults(providers);
+
+      if (!active) {
+        return;
+      }
+      setBackendProviders(resolved);
+      const connectedIds = resolved
         .filter((provider) => provider.authState === "connected")
         .map((provider) => provider.id);
       setConnectedBackendIds(connectedIds);

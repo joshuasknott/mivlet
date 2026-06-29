@@ -35,7 +35,7 @@ reqwest = { version = "0.13", default-features = false, features = [
     "stream",
 ] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-tokio = { version = "1", features = ["sync", "rt", "macros", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["sync", "rt", "macros", "time", "net", "io-util", "process"] }
 futures-util = "0.3"
 sha2 = "0.10"
 base64 = "0.22"

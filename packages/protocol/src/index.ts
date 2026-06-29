@@ -479,7 +479,8 @@ export type BackendAuthState =
   | "needs-auth"
   | "install-required"
   | "entitlement-pending"
-  | "unavailable";
+  | "unavailable"
+  | "failed";
 
 /**
  * The closed capability set an adapter may declare dynamically. The UI may

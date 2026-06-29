@@ -41,7 +41,7 @@ describe("detectAcpRuntime", () => {
     { name: "not-installed", outcome: "not-installed", expectedAuth: "install-required", expectStreaming: false },
     { name: "signed-out", outcome: "signed-out", expectedAuth: "needs-auth", expectStreaming: false },
     { name: "connected", outcome: "connected", expectedAuth: "connected", expectStreaming: true },
-    { name: "auth-failed", outcome: "auth-failed", expectedAuth: "unavailable", expectStreaming: false },
+    { name: "auth-failed", outcome: "auth-failed", expectedAuth: "failed", expectStreaming: false },
     { name: "probe-unavailable", outcome: "unavailable", expectedAuth: "unavailable", expectStreaming: false }
   ];
 

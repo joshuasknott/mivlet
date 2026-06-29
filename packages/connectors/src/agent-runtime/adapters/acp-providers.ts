@@ -75,7 +75,8 @@ export interface AcpRuntimeDetection {
     | "needs-auth"
     | "install-required"
     | "entitlement-pending"
-    | "unavailable";
+    | "unavailable"
+    | "failed";
   capabilities: readonly import("@fable/protocol").BackendCapability[];
   entitlementsPending: boolean;
 }
@@ -120,6 +121,16 @@ export async function detectAcpRuntime(
         entitlementsPending: definition.entitlementsPending
       };
     case "auth-failed":
+      // A real auth failure (401/forbidden) is a distinct state from a generic
+      // probe failure: the CLI is installed and reached its endpoint but was
+      // denied. Reported as "failed" (fail-closed: no capabilities) so the shell
+      // can surface it accurately.
+      return {
+        providerId,
+        authState: "failed",
+        capabilities: [],
+        entitlementsPending: definition.entitlementsPending
+      };
     case "unavailable":
       return {
         providerId,

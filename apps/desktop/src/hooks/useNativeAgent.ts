@@ -33,6 +33,7 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import { permissionModeFor } from "../lib/agent-run";
+import { createDesktopAcpTransport } from "../lib/acp-transport";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
   listRuntimeBackendModels,
@@ -140,13 +141,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   }, []);
 
   // Resolve the connected backend to a provider-neutral AgentBackend. The deps
-  // bag injects the desktop transport + model discovery so the contract stays
-  // pure; the native-API adapter consumes them. Returns null when no backend is
-  // connected/runnable, or in browser preview (no transport) — mirroring the
-  // legacy `connectedNativeBackend` predicate.
+  // bag injects the desktop transports + model discovery so the contract stays
+  // pure; the native-API and ACP adapters consume them. Returns null when no
+  // backend is connected/runnable, or in browser preview (no transport) —
+  // mirroring the legacy `connectedNativeBackend` predicate.
   const deps: BackendDeps = useMemo(
     () => ({
       createTransport: createDesktopTransport,
+      // ACP (Cursor/Grok): spawn the provider's CLI through the Rust boundary.
+      // Null outside the desktop runtime so the adapter reports no-transport.
+      createAcpTransport: createDesktopAcpTransport,
       discoverModels: async (providerId) => {
         const result = await listRuntimeBackendModels(providerId);
         return result;

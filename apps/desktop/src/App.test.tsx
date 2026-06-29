@@ -41,6 +41,7 @@ vi.mock("./runtime", () => ({
   clearRuntimeConnectorAuth: vi.fn(async () => null),
   clearRuntimeBackend: vi.fn(async () => null),
   connectRuntimeBackend: vi.fn(async () => "codex"),
+  detectRuntimeAcpCli: vi.fn(async () => null),
   exportRuntimeMemoryState: vi.fn(async () => null),
   importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
