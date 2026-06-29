@@ -31,7 +31,8 @@
 - Dictation and push-to-talk.
 - Realtime conversation provider boundary.
 - Captions, transcripts, interruption, retention controls, and fallback.
-- Schedules, recurring automations, notifications, and audit trails.
+- Done: Schedules, recurring automations, notifications, and audit trails (persistence uses raw JSON files).
+- Next: Migrate schedules and workflows from raw JSON to structured encrypted SQLite tables.
 
 ## Milestone 5: Site, Release, And CI
 

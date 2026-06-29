@@ -25,8 +25,10 @@ migration, so rollback remains possible until the user explicitly deletes local
 data.
 
 Production persistence calls route runtime snapshots, drafts, runs, approvals,
-connector account metadata, backend selections, memory, knowledge sources, and
-schedules through encrypted SQLite. Path-based JSON fallbacks exist only for
+connector account metadata, backend selections, memory, and knowledge sources
+through encrypted SQLite (via preferences document interception in the production path).
+Schedules and workflows are temporarily excluded and persist as direct JSON files
+(`scheduler-store.json` and `workflow-runs.json`). Path-based JSON fallbacks exist for
 isolated unit tests that do not initialize Tauri. Credentials are excluded.
 
 ## Recovery, backup, export, and deletion

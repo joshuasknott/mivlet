@@ -6,7 +6,7 @@
 - Rust for runtime commands, permissions, jobs, local context, and connector execution.
 - React, TypeScript, and Vite for the interface.
 - Convex for optional realtime shared state and collaboration state when configured.
-- Encrypted SQLite for offline/private local state.
+- Encrypted SQLite for offline/private local state (schedules and workflows are temporarily excluded and use raw JSON file persistence).
 - OS secure storage for credentials.
 
 ## Runtime Boundaries
@@ -33,8 +33,10 @@ Implemented runtime commands cover approval resolution, one-time execution permi
 `@fable/knowledge` is the pure domain layer for ingestion, chunking, retrieval,
 memory proposals, context assembly, and store contracts. The desktop shell owns
 the user interaction and delegates retrieval/context construction to that
-package; the Rust snapshot boundary persists imported local sources and durable
-memory until the encrypted store replaces the snapshot adapter.
+  package; the Rust snapshot boundary persists imported local sources and durable
+  memory through the encrypted SQLite store (via preferences document interception
+  in the production path), while browser fallback uses localStorage. Workflows
+  and schedules continue to use direct JSON files.
 
 - Local file and recursive folder imports are bounded, typed, fingerprinted,
   chunked, and classified as untrusted knowledge. Provider imports retain their
@@ -86,7 +88,9 @@ messages. `/schedule` creates a validated one-time or recurring schedule; the
 runtime pins the selected backend/model/permission route at creation time.
 
 The Tauri scheduler leases due occurrences, writes queue records, and exposes
-pending workflow runs to a headless scheduled-agent hook. Scheduled prompts use
+pending workflow runs to a headless scheduled-agent hook. Jobs and queue records
+persist in the raw JSON file `scheduler-store.json` (migration to SQLite is a
+release blocker). Scheduled prompts use
 the same adapter contract as interactive prompts, so native API, Codex
 app-server, and ACP runs share cancellation, blocked-auth handling, and approval
 boundaries. Schedules do not require Convex or a hosted Fable account.
@@ -128,8 +132,9 @@ See [Connectors](connectors.md) for scopes, callbacks, credential ownership, and
 The desktop runtime persists non-secret approval, run, connector-account, and snapshot metadata in the Tauri app data folder. Credentials and OAuth tokens use OS secure storage. Session approval grants remain ephemeral, while high-risk full-access approvals fail closed unless the required confirmation phrase is provided.
 
 The Tauri runtime initializes encrypted SQLite before commands, migrates legacy
-JSON idempotently, and routes production documents through the native store.
-Credentials remain in OS secure storage. See
+JSON idempotently, and routes production documents (except schedules and
+workflows) through the native store. Schedules and workflows still use raw
+JSON files. Credentials remain in OS secure storage. See
 [Encrypted local storage](../architecture/encrypted-storage.md).
 
 A paired mobile device is a second approval, observation, and schedule-control

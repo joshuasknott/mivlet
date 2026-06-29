@@ -54,12 +54,8 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 ## Known limits
 
-- Non-secret runtime metadata still uses app-data JSON plus a runtime snapshot
-  contract; encrypted SQLite is not wired yet.
-- Schedules persist locally and the Tauri runtime leases due occurrences,
-  queues workflow runs, and executes scheduled prompts through the same
-  provider-neutral `AgentBackend` path as the composer. Execution still depends
-  on a connected runnable backend and does not bypass approval boundaries.
+- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Schedules and workflows are temporarily excluded and persist as direct JSON files (`scheduler-store.json` and `workflow-runs.json`).
+- Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by raw JSON file storage.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
 - Native API providers use bounded dynamic model discovery. Live availability
@@ -74,7 +70,7 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
   connectors for external users.
 - Complete provider-console setup, callback registration, OAuth consent review,
   and live non-production validation for each external connector.
-- Move non-secret metadata from JSON files to encrypted SQLite with migrations.
+- Migrate schedules and workflows from raw JSON files to structured encrypted SQLite tables with migrations (Goal 8).
 - Add release signing, updater channels, download/legal pages, and platform
   packaging beyond Windows.
 - Add platform CI coverage for macOS Keychain and Linux Secret Service.
