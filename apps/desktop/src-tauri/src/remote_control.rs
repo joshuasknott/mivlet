@@ -130,7 +130,9 @@ pub fn initialize_state() -> RemoteTrustState {
 
 /// List paired devices in the trust list. Non-secret metadata only.
 #[tauri::command]
-pub fn remote_list_devices(state: State<'_, RemoteTrustState>) -> Result<Vec<RemoteDevice>, String> {
+pub fn remote_list_devices(
+    state: State<'_, RemoteTrustState>,
+) -> Result<Vec<RemoteDevice>, String> {
     let guard = state
         .0
         .lock()
@@ -150,9 +152,7 @@ pub fn remote_pairing_start() -> Result<RemotePairingResult, String> {
         ok: false,
         device: None,
         code: Some("unauthorized".to_string()),
-        message: Some(
-            "Remote pairing transport is not yet available on this build.".to_string(),
-        ),
+        message: Some("Remote pairing transport is not yet available on this build.".to_string()),
     })
 }
 
@@ -164,9 +164,7 @@ pub fn remote_pairing_complete(_proof: RemotePairingProof) -> Result<RemotePairi
         ok: false,
         device: None,
         code: Some("unauthorized".to_string()),
-        message: Some(
-            "Remote pairing transport is not yet available on this build.".to_string(),
-        ),
+        message: Some("Remote pairing transport is not yet available on this build.".to_string()),
     })
 }
 
@@ -197,7 +195,10 @@ pub fn remote_revoke_device(
 /// binds sessions to devices, this fails closed for every envelope — a session
 /// must exist and be live, which only the (deferred) transport can establish.
 #[tauri::command]
-pub fn remote_handle_command(_app: AppHandle, _envelope: serde_json::Value) -> Result<RemoteCommandResult, String> {
+pub fn remote_handle_command(
+    _app: AppHandle,
+    _envelope: serde_json::Value,
+) -> Result<RemoteCommandResult, String> {
     // The pure session/authorization logic lives in @fable/connectors
     // (mobile-remote). The transport layer will deserialize the envelope,
     // resolve the bound session, run `authorizeCommand`, and — only on ok —
