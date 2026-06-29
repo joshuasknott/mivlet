@@ -21,6 +21,7 @@ import type {
   CodexAppServerHandle
 } from "../contract";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
+import { redactSecretsFromString } from "../utils/redact";
 
 function requestedThreadId(request: AgentRunRequest): string | null {
   const candidate = (request as AgentRunRequest & { threadId?: unknown; codexThreadId?: unknown })
@@ -38,7 +39,8 @@ async function* mapCodexEvents(
   handle: CodexAppServerHandle,
   threadId: string,
   events: AsyncIterable<CodexAppServerEvent>,
-  options: AgentRunOptions
+  options: AgentRunOptions,
+  capabilities: readonly BackendCapability[]
 ): AsyncIterable<BackendAgentEvent> {
   for await (const event of events) {
     if (options.shouldCancel?.()) {
@@ -58,6 +60,11 @@ async function* mapCodexEvents(
         costEstimated: event.costUsd === undefined
       };
     } else if (event.type === "approval-request") {
+      if (!capabilities.includes("tool-requests") || !capabilities.includes("approvals")) {
+        yield { type: "error", message: "Tool calls/approvals are not supported by this backend's capabilities." };
+        yield { type: "done", finishReason: "error" };
+        return;
+      }
       yield {
         type: "tool-call",
         callId: event.callId,
@@ -74,7 +81,7 @@ async function* mapCodexEvents(
         });
         yield { type: "tool-result", callId: event.callId, ok: true, output };
       } catch (error) {
-        const output = error instanceof Error ? error.message : "Codex approval was not granted.";
+        const output = error instanceof Error ? redactSecretsFromString(error.message) : "Codex approval was not granted.";
         await handle.respondApproval(event.requestId, {
           callId: event.callId,
           ok: false,
@@ -93,7 +100,7 @@ async function* mapCodexEvents(
       yield { type: "done", finishReason: event.finishReason };
       return;
     } else if (event.type === "error") {
-      yield { type: "error", message: event.message };
+      yield { type: "error", message: redactSecretsFromString(event.message) };
       yield { type: "done", finishReason: "error" };
       return;
     } else if (event.type === "cancelled") {
@@ -114,6 +121,9 @@ export function createCodexBackend(
     request: AgentRunRequest,
     options: AgentRunOptions
   ): AsyncIterable<BackendAgentEvent> | null {
+    if (!capabilities.includes("streaming")) {
+      return null;
+    }
     const handle = deps.createCodexAppServer?.(provider, {
       onRequestStarted: () => {},
       onRetry: () => options.onRetry?.()
@@ -138,11 +148,12 @@ export function createCodexBackend(
             runId: options.runId
           }
         });
-        yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options);
+        yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities);
       } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : "Codex app-server run failed.";
         yield {
           type: "error",
-          message: error instanceof Error ? error.message : "Codex app-server run failed."
+          message: redactSecretsFromString(rawMessage)
         };
         yield { type: "done", finishReason: "error" };
       } finally {
@@ -155,6 +166,9 @@ export function createCodexBackend(
   }
 
   async function cancel(_runId: string): Promise<void> {
+    if (!capabilities.includes("cancellation")) {
+      return;
+    }
     if (active?.threadId) {
       await active.handle.cancel(active.threadId);
     }
