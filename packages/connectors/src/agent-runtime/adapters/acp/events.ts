@@ -15,6 +15,7 @@
 
 import type { BackendAgentEvent } from "@fable/protocol";
 import { buildToolApproval } from "../../../native-api/approvals";
+import { normalizeBackendErrorEvent } from "../../utils/errors";
 import type { AcpNotification } from "./protocol";
 
 /** A best-effort extraction of assistant text from a message's params. */
@@ -123,10 +124,10 @@ export function normalizeAcpNotification(
         params && typeof params === "object"
           ? (params as Record<string, unknown>).message
           : undefined;
-      return {
+      return normalizeBackendErrorEvent({
         type: "error",
         message: typeof message === "string" && message.length > 0 ? message : "ACP session error."
-      };
+      });
     }
 
     default:

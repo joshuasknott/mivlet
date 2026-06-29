@@ -300,7 +300,12 @@ describe("createCodexBackend", () => {
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
     const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
-    expect(events).toContainEqual({ type: "error", message: "Codex auth required." });
+    expect(events).toContainEqual({
+      type: "error",
+      message: "Codex auth required.",
+      code: "authentication",
+      retryable: false
+    });
     expect(events.at(-1)).toEqual({ type: "done", finishReason: "error" });
   });
 

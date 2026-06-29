@@ -6,6 +6,8 @@ import { createNativeApiBackend } from "./adapters/native-api";
 import { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 import { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
 import type { AgentRunRequest, AgentRunOptions } from "@fable/protocol";
+import { resolveAcpBackend } from "./adapters/acp";
+import { FakeAcpTransport, type ScriptedResponder } from "./adapters/acp/transport-fakes";
 
 /** Connected, streaming native-API provider. */
 function mockNativeProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
@@ -36,6 +38,20 @@ function mockCodexProvider(overrides: Partial<BackendProvider> = {}): BackendPro
   };
 }
 
+/** Connected, streaming ACP provider. */
+function mockAcpProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
+  return {
+    id: "cursor",
+    backendType: "acp",
+    label: "Cursor",
+    description: "Cursor ACP CLI",
+    authState: "connected",
+    capabilities: ["authentication", "threads", "streaming", "tool-requests", "approvals", "file-changes", "cancellation"],
+    models: [{ id: "cursor-default", label: "Cursor default", available: true }],
+    ...overrides
+  };
+}
+
 const baseRequest: AgentRunRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "say hi" }],
@@ -60,6 +76,11 @@ function mockCodexDeps(handle: MockCodexAppServer | null): BackendDeps {
     createCodexAppServer: () => handle
   };
 }
+
+const okAcpResponder: ScriptedResponder = (req) =>
+  ["initialize", "session/new", "session/prompt", "session/close"].includes(req.method)
+    ? { result: {} }
+    : { error: { code: -32601, message: "not found" } };
 
 describe("AgentBackend Conformance Tests", () => {
   // ==========================================
@@ -101,7 +122,12 @@ describe("AgentBackend Conformance Tests", () => {
       const backend = createCodexBackend(mockCodexProvider(), mockCodexDeps(handle));
       const stream = backend?.run(baseRequest, { execute: async () => "" });
       const events = await collectEvents(stream);
-      expect(events).toContainEqual({ type: "error", message: "Failed: token=[REDACTED]" });
+      expect(events).toContainEqual({
+        type: "error",
+        message: "Failed: token=[REDACTED]",
+        code: "authentication",
+        retryable: false
+      });
     });
 
     it("ensures Native-API errors containing keys are redacted", async () => {
@@ -115,7 +141,30 @@ describe("AgentBackend Conformance Tests", () => {
       });
       const stream = backend?.run(baseRequest, { execute: async () => "" });
       const events = await collectEvents(stream);
-      expect(events).toContainEqual({ type: "error", message: "Invalid key: [REDACTED]" });
+      expect(events).toContainEqual({
+        type: "error",
+        message: "Invalid key: [REDACTED]",
+        code: "authentication",
+        retryable: false
+      });
+    });
+
+    it("ensures ACP errors containing keys are redacted", async () => {
+      const transport = new FakeAcpTransport(okAcpResponder);
+      transport.queueError("CLI token=sk-12345678901234567890abc123 expired");
+      transport.queueClose();
+      const backend = resolveAcpBackend(mockAcpProvider(), {
+        createTransport: () => null,
+        createAcpTransport: () => transport
+      });
+      const stream = backend?.run(baseRequest, { execute: async () => "" });
+      const events = await collectEvents(stream);
+      expect(events).toContainEqual({
+        type: "error",
+        message: "CLI token=[REDACTED] expired",
+        code: "authentication",
+        retryable: false
+      });
     });
   });
 
@@ -138,6 +187,97 @@ describe("AgentBackend Conformance Tests", () => {
       });
       expect(backend).not.toBeNull();
       expect(backend?.providerId).toBe("openai");
+    });
+  });
+
+  // ==========================================
+  // Area 2b: Error Normalization
+  // ==========================================
+  describe("Error Normalization", () => {
+    it("normalizes blocked-auth errors across Native-API, Codex, and ACP", async () => {
+      const nativeTransport = {
+        async *stream(): AsyncIterable<string> {
+          const error = new Error("Provider returned HTTP 401.");
+          (error as Error & { code: string; retryable: boolean }).code = "authentication";
+          (error as Error & { code: string; retryable: boolean }).retryable = false;
+          throw error;
+        }
+      };
+      const native = createNativeApiBackend(mockNativeProvider(), {
+        createTransport: () => ({ transport: nativeTransport, cancel: async () => {} })
+      });
+      const codex = createCodexBackend(
+        mockCodexProvider(),
+        mockCodexDeps(new MockCodexAppServer({
+          events: [{ type: "error", message: "Codex sign-in required." }]
+        }))
+      );
+      const acpTransport = new FakeAcpTransport((req) =>
+        req.method === "initialize"
+          ? { error: { code: -32001, message: "Cursor login required." } }
+          : { result: {} }
+      );
+      const acp = resolveAcpBackend(mockAcpProvider(), {
+        createTransport: () => null,
+        createAcpTransport: () => acpTransport
+      });
+
+      const eventSets = await Promise.all([
+        collectEvents(native?.run(baseRequest, { execute: async () => "" })),
+        collectEvents(codex?.run(baseRequest, { execute: async () => "" })),
+        collectEvents(acp?.run(baseRequest, { execute: async () => "" }))
+      ]);
+
+      for (const events of eventSets) {
+        const error = events.find((event) => event.type === "error");
+        expect(error).toMatchObject({
+          type: "error",
+          code: "authentication",
+          retryable: false
+        });
+      }
+    });
+
+    it("normalizes retryable runtime errors across Native-API, Codex, and ACP", async () => {
+      const nativeTransport = {
+        async *stream(): AsyncIterable<string> {
+          const error = new Error("Provider stream ended unexpectedly.");
+          (error as Error & { code: string; retryable: boolean }).code = "transport";
+          (error as Error & { code: string; retryable: boolean }).retryable = true;
+          throw error;
+        }
+      };
+      const native = createNativeApiBackend(mockNativeProvider(), {
+        createTransport: () => ({ transport: nativeTransport, cancel: async () => {} })
+      });
+      const codex = createCodexBackend(
+        mockCodexProvider(),
+        mockCodexDeps(new MockCodexAppServer({
+          events: [{ type: "error", message: "Codex connection unavailable." }]
+        }))
+      );
+      const acpTransport = new FakeAcpTransport(okAcpResponder);
+      acpTransport.queueError("ACP provider overloaded.");
+      acpTransport.queueClose();
+      const acp = resolveAcpBackend(mockAcpProvider(), {
+        createTransport: () => null,
+        createAcpTransport: () => acpTransport
+      });
+
+      const eventSets = await Promise.all([
+        collectEvents(native?.run(baseRequest, { execute: async () => "" })),
+        collectEvents(codex?.run(baseRequest, { execute: async () => "" })),
+        collectEvents(acp?.run(baseRequest, { execute: async () => "" }))
+      ]);
+
+      for (const events of eventSets) {
+        const error = events.find((event) => event.type === "error");
+        expect(error).toMatchObject({
+          type: "error",
+          retryable: true
+        });
+        expect(error).not.toMatchObject({ code: "authentication" });
+      }
     });
   });
 

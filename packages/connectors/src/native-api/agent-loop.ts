@@ -27,6 +27,7 @@ import { streamOpenAiEvents } from "./openai-compat";
 import { registeredToolSpecs } from "./tools";
 import { lookupTool } from "./tools";
 import type { HttpTransport } from "./transport";
+import { classifyBackendError } from "../agent-runtime/utils/errors";
 
 type FinishReason = "stop" | "tool-calls" | "length" | "error";
 
@@ -102,6 +103,18 @@ function streamFor(
   if (providerId === "anthropic") return streamAnthropicEvents;
   if (providerId === "gemini") return streamGeminiEvents;
   return streamOpenAiEvents; // openai, xai, openrouter share this path
+}
+
+function transportErrorEvent(error: unknown): Extract<BackendAgentEvent, { type: "error" }> {
+  const candidate = error as { message?: unknown; code?: unknown; retryable?: unknown };
+  const message = typeof candidate?.message === "string" ? candidate.message : "Provider stream failed.";
+  const classified = classifyBackendError(message);
+  return {
+    type: "error",
+    message,
+    code: typeof candidate?.code === "string" ? candidate.code : classified.code,
+    retryable: typeof candidate?.retryable === "boolean" ? candidate.retryable : classified.retryable
+  };
 }
 
 interface PendingToolCall {
@@ -216,8 +229,7 @@ export async function* runAgentLoop(
         yield event;
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Provider stream failed.";
-      yield { type: "error", message };
+      yield transportErrorEvent(error);
       yield { type: "done", finishReason: "error" };
       return;
     }
