@@ -215,3 +215,8 @@ export * from "./voice";
 // Fable-owned slash commands (provider-neutral parsing, redaction, dispatch).
 // Pure logic; the shell implements the CommandRuntime seam.
 export * from "./commands";
+
+// Mobile remote-control foundation: pure session/pairing/authorization/dispatch
+// logic for the desktop-side remote-control surface. Secrets (PSK, device keys)
+// live behind the Rust boundary. See docs/architecture/mobile-remote.md.
+export * from "./mobile-remote";

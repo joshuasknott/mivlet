@@ -24,6 +24,7 @@ mod native_api;
 mod notifications;
 mod oauth_loopback;
 mod paths;
+mod remote_control;
 mod scheduler;
 mod snapshot;
 mod store;
@@ -60,6 +61,10 @@ pub fn run() {
             // Any entry left leased/running by a prior crash is recovered here.
             let handle = app.handle().clone();
             app.manage(scheduler::SchedulerState(std::sync::Mutex::new(None)));
+            // Mobile remote-control trust list. In-memory in this foundation
+            // pass; the durable store lands with the transport layer. The
+            // command surface is registered below and fails closed until then.
+            app.manage(remote_control::initialize_state());
             if let Err(error) = scheduler::initialize_store(&handle) {
                 // Fall back to an empty store so the app still starts; the error
                 // is surfaced via the read commands' own error paths.
@@ -157,7 +162,12 @@ pub fn run() {
             workflows::list_workflow_definitions,
             workflows::list_workflow_runs,
             workflows::list_workflow_runs_for_definition,
-            notifications::deliver_notification
+            notifications::deliver_notification,
+            remote_control::remote_list_devices,
+            remote_control::remote_pairing_start,
+            remote_control::remote_pairing_complete,
+            remote_control::remote_revoke_device,
+            remote_control::remote_handle_command
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");
