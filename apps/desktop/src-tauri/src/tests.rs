@@ -746,6 +746,8 @@ fn runtime_snapshot() -> RuntimeSnapshot {
         approval_rules: vec![approval_rule()],
         automation_statuses,
         schedules,
+        goals: Vec::new(),
+        plans: Vec::new(),
         pinned_source_ids: vec![
             "codex-manual".to_string(),
             "codex-manual".to_string(),

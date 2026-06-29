@@ -6,7 +6,9 @@ import type {
   MemoryRecord,
   PermissionMode,
   ScheduleEntry,
-  ScheduleWeekday
+  ScheduleWeekday,
+  WorkspaceGoal,
+  WorkspacePlan
 } from "@fable/protocol";
 
 /**
@@ -52,6 +54,10 @@ export interface PersistedShellState {
   dismissedApprovalIds: string[];
   approvalRules: import("@fable/protocol").ApprovalGrant[];
   schedules: Schedule[];
+  /** Structured workspace goals created by /goal. */
+  goals: WorkspaceGoal[];
+  /** Structured plans created by /plan. */
+  plans: WorkspacePlan[];
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;

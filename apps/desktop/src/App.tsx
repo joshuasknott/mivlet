@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
+import { createApprovalGate, createBrowserSpeechProvider, parseComposerText } from "@fable/connectors";
 import { Moon, Sun } from "@phosphor-icons/react";
 import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
@@ -89,7 +89,7 @@ export function App() {
     }
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
-  const voice = useVoice(voiceProvider, (transcript) => runPrompt(transcript));
+  const voice = useVoice(voiceProvider, (transcript) => void submitComposerText(transcript));
 
   // Scheduled prompts run through a dedicated headless runner that drives the
   // same AgentBackend contract as the composer — but in complete isolation: it
@@ -309,6 +309,29 @@ export function App() {
     runtime.selectableModels.find((model) => model.id === runtime.resolvedSelectedModelId)?.label ??
     "Select model";
 
+  /**
+   * Submit raw composer text. Fable-owned slash commands (/goal, /plan,
+   * /remember, /schedule) are parsed and executed first — they create
+   * structured Fable state and, when a backend is connected, submit follow-up
+   * model work through the agent run. Unknown slashes and ordinary text fall
+   * through to the normal prompt path unchanged.
+   */
+  async function submitComposerText(rawText: string) {
+    const outcome = parseComposerText(rawText);
+    if (outcome.status === "command") {
+      const result = await runtime.runFableCommand(outcome.request);
+      // Clear the composer so the command token doesn't also reach the model
+      // as ordinary prompt text. A follow-up prompt (if any) is submitted
+      // through the same agent path as a normal prompt.
+      runtime.setComposerValue("");
+      if (result.status === "ok" && result.followUpPrompt) {
+        runPrompt(result.followUpPrompt);
+      }
+      return;
+    }
+    runPrompt(rawText);
+  }
+
   function runPrompt(rawPrompt: string) {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
@@ -490,48 +513,10 @@ export function App() {
               composerValue={runtime.composerValue}
               onComposerChange={runtime.setComposerValue}
               onSubmit={(event) => {
-                // When a native-API backend is connected, the composer drives the
-                // Fable-owned agent loop; otherwise fall back to the workspace
-                // knowledge-search submit.
-                const nativeConnected = runtime.connectedAgentBackend;
-                if (nativeConnected) {
-                  event.preventDefault();
-                  const prompt = runtime.composerValue.trim();
-                  if (!prompt) return;
-                  // Build the pinned-memory/knowledge system prefix (empty when
-                  // nothing is pinned or memory is disabled) and the request from
-                  // the picker-selected model — both drive the real agent run.
-                  // Validate the model selection before opening a socket: an
-                  // unknown, unavailable, or non-streaming model is caught here
-                  // and surfaced through the same error channel as run failures.
-                  const validation = validateModelSelection(
-                    nativeConnected.id,
-                    runtime.resolvedSelectedModelId,
-                    runtime.selectableModels,
-                    2048
-                  );
-                  if (!validation.ok) {
-                    agent.reportError(validation.error ?? "The selected model cannot run.");
-                    return;
-                  }
-                  const request = buildAgentRequest({
-                    model: runtime.resolvedSelectedModelId,
-                    prompt,
-                    maxTokens: validation.maxTokens
-                  });
-                  // Reset the cooperative-cancel flag so a new run is not born
-                  // already cancelled, then drive the Fable-owned agent loop.
-                  cancelRequestedRef.current = false;
-                  void runtime.assembleKnowledgeContext(prompt).then((contextPrefix) =>
-                    agent.run(
-                      request,
-                      contextPrefix || undefined,
-                      runtime.permissionLabel
-                    )
-                  );
-                  return;
-                }
-                runtime.submitComposer(event);
+                event.preventDefault();
+                const text = runtime.composerValue;
+                if (!text.trim()) return;
+                void submitComposerText(text);
               }}
               voiceEnabled={voice.state.status === "recording"}
               onToggleVoice={() => {

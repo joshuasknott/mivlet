@@ -147,6 +147,8 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     // compatibility; live schedules live in `schedules` below.
     automationStatuses: {},
     schedules: state.schedules,
+    goals: state.goals,
+    plans: state.plans,
     pinnedSourceIds: state.pinnedSourceIds,
     importedKnowledgeSources: state.importedKnowledgeSources,
     memoryDisabled: state.memoryDisabled,
@@ -173,6 +175,10 @@ export function shellStateFromRuntimeSnapshot(
     // Schedules are the source of truth in the snapshot; fall back to the
     // default shell state's schedules when a snapshot omits them.
     schedules: snapshot.schedules ?? defaultShellState.schedules,
+    // Goals/plans are non-secret structured state persisted through the
+    // snapshot; fall back to defaults when a snapshot omits them.
+    goals: snapshot.goals ?? defaultShellState.goals,
+    plans: snapshot.plans ?? defaultShellState.plans,
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
