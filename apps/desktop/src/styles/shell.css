@@ -103,7 +103,10 @@
 }
 
 .workspace-switcher--workspace {
-  padding-left: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 34px;
+  padding: 0 9px;
 }
 
 .workspace-switcher__name {
