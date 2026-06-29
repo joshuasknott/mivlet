@@ -26,6 +26,7 @@ import type {
 import { runAgentLoop, type ToolExecutor } from "../../native-api/agent-loop";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
+import { redactSecretsFromString } from "../utils/redact";
 
 /** The bound cancel handle for the most recent run (one live run per backend). */
 interface ActiveRun {
@@ -53,6 +54,9 @@ export function createNativeApiBackend(
     request: AgentRunRequest,
     options: AgentRunOptions
   ): AsyncIterable<BackendAgentEvent> | null {
+    if (!capabilities.includes("streaming")) {
+      return null;
+    }
     const handlers: TransportHandlers = {
       onRequestStarted: (requestId) => {
         if (active) active.requestId = requestId;
@@ -73,7 +77,7 @@ export function createNativeApiBackend(
       tools: request.tools,
       maxTokens: request.maxTokens
     };
-    return runAgentLoop(handle.transport, nativeRequest, {
+    const eventStream = runAgentLoop(handle.transport, nativeRequest, {
       execute,
       shouldCancel: options.shouldCancel,
       contextPrefix: options.contextPrefix,
@@ -83,9 +87,37 @@ export function createNativeApiBackend(
       maxToolCalls: options.maxToolCalls,
       maxToolOutputCharacters: options.maxToolOutputCharacters
     });
+
+    if (!eventStream) return null;
+
+    async function* wrappedStream(): AsyncIterable<BackendAgentEvent> {
+      try {
+        for await (const event of eventStream) {
+          if (event.type === "error") {
+            yield { ...event, message: redactSecretsFromString(event.message) };
+          } else {
+            yield event;
+          }
+        }
+      } catch (error) {
+        const rawMessage = error instanceof Error ? error.message : "Native-API run failed.";
+        yield {
+          type: "error",
+          message: redactSecretsFromString(rawMessage)
+        };
+        yield { type: "done", finishReason: "error" };
+      } finally {
+        active = null;
+      }
+    }
+
+    return wrappedStream();
   }
 
   async function cancel(_runId: string): Promise<void> {
+    if (!capabilities.includes("cancellation")) {
+      return;
+    }
     // The adapter tracks its own active requestId internally (captured from the
     // transport's onRequestStarted callback). The runId argument is accepted for
     // contract conformance but the requestId is what the egress boundary keyed on.

@@ -7,6 +7,7 @@ import {
   hasRunnableAdapter,
   createCodexBackend,
   createNativeApiBackend,
+  MockCodexAppServer,
   type BackendDeps,
   type CodexAppServerEvent,
   type CodexAppServerHandle,
@@ -88,58 +89,7 @@ function nullTransportDeps(): BackendDeps {
   };
 }
 
-class FakeCodexAppServer implements CodexAppServerHandle {
-  initialized = false;
-  started = false;
-  resumedThreadId: string | null = null;
-  submitted = false;
-  shutdownCalled = false;
-  cancelledThreadId: string | null = null;
-  approvalResponses: Array<{ requestId: string; ok: boolean; output: string }> = [];
-
-  constructor(private readonly events: readonly CodexAppServerEvent[]) {}
-
-  async initialize(): Promise<void> {
-    this.initialized = true;
-  }
-
-  async startThread(): Promise<{ threadId: string }> {
-    this.started = true;
-    return { threadId: "codex-thread-1" };
-  }
-
-  async resumeThread(threadId: string): Promise<{ threadId: string }> {
-    this.resumedThreadId = threadId;
-    return { threadId };
-  }
-
-  async *submitTurn(): AsyncIterable<CodexAppServerEvent> {
-    this.submitted = true;
-    for (const event of this.events) yield event;
-  }
-
-  async respondApproval(
-    requestId: string,
-    result: { callId: string; ok: boolean; output: string }
-  ): Promise<void> {
-    this.approvalResponses.push({ requestId, ok: result.ok, output: result.output });
-  }
-
-  async cancel(threadId: string): Promise<void> {
-    this.cancelledThreadId = threadId;
-  }
-
-  async shutdown(): Promise<void> {
-    this.shutdownCalled = true;
-  }
-
-  async listModels() {
-    return {
-      outcome: "success" as const,
-      models: [{ id: "gpt-5", available: true }]
-    };
-  }
-}
+// FakeCodexAppServer removed in favor of MockCodexAppServer
 
 function codexDeps(handle: CodexAppServerHandle | null): BackendDeps {
   return {
@@ -202,7 +152,7 @@ describe("resolveAgentBackend dispatch", () => {
   });
 
   it("returns a Codex backend for a connected streaming Codex provider", () => {
-    const backend = resolveAgentBackend(codexProvider(), codexDeps(new FakeCodexAppServer([])));
+    const backend = resolveAgentBackend(codexProvider(), codexDeps(new MockCodexAppServer({ events: [] })));
     expect(backend).not.toBeNull();
     expect(backend?.providerId).toBe("codex");
   });
@@ -232,11 +182,13 @@ describe("createCodexBackend", () => {
   });
 
   it("initializes Codex, starts a thread, streams text, and shuts down", async () => {
-    const handle = new FakeCodexAppServer([
-      { type: "text-delta", text: "Hello" },
-      { type: "text-delta", text: " from Codex" },
-      { type: "done", finishReason: "stop" }
-    ]);
+    const handle = new MockCodexAppServer({
+      events: [
+        { type: "text-delta", text: "Hello" },
+        { type: "text-delta", text: " from Codex" },
+        { type: "done", finishReason: "stop" }
+      ]
+    });
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
     expect(iter).not.toBeNull();
@@ -255,7 +207,7 @@ describe("createCodexBackend", () => {
   });
 
   it("resumes an existing Codex thread when the run request carries a thread id", async () => {
-    const handle = new FakeCodexAppServer([{ type: "done", finishReason: "stop" }]);
+    const handle = new MockCodexAppServer({ events: [{ type: "done", finishReason: "stop" }] });
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(
       { ...baseRunRequest, threadId: "codex-thread-existing" } as AgentRunRequest & {
@@ -269,27 +221,29 @@ describe("createCodexBackend", () => {
   });
 
   it("routes Codex approval requests through the provider-neutral execute seam", async () => {
-    const handle = new FakeCodexAppServer([
-      {
-        type: "approval-request",
-        requestId: "codex-request-1",
-        callId: "call-1",
-        tool: "run-shell",
-        arguments: "{\"command\":\"pwd\"}",
-        approval: {
-          id: "approval-1",
-          service: "Codex",
-          action: "Run shell command",
-          mode: "full-access",
-          riskLevel: "medium",
-          dataUsed: ["workspace"],
-          consequence: "Runs a shell command.",
-          requestedAt: "2026-06-29T12:00:00.000Z",
-          decisions: []
-        }
-      },
-      { type: "done", finishReason: "stop" }
-    ]);
+    const handle = new MockCodexAppServer({
+      events: [
+        {
+          type: "approval-request",
+          requestId: "codex-request-1",
+          callId: "call-1",
+          tool: "run-shell",
+          arguments: "{\"command\":\"pwd\"}",
+          approval: {
+            id: "approval-1",
+            service: "Codex",
+            action: "Run shell command",
+            mode: "full-access",
+            riskLevel: "medium",
+            dataUsed: ["workspace"],
+            consequence: "Runs a shell command.",
+            requestedAt: "2026-06-29T12:00:00.000Z",
+            decisions: []
+          }
+        },
+        { type: "done", finishReason: "stop" }
+      ]
+    });
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(baseRunRequest, { execute: async () => "approved output" });
     const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
@@ -306,7 +260,7 @@ describe("createCodexBackend", () => {
   });
 
   it("surfaces errors without requiring live Codex credentials", async () => {
-    const handle = new FakeCodexAppServer([{ type: "error", message: "Codex auth required." }]);
+    const handle = new MockCodexAppServer({ events: [{ type: "error", message: "Codex auth required." }] });
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
     const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
@@ -317,7 +271,7 @@ describe("createCodexBackend", () => {
   it("delegates model discovery to the app-server handle", async () => {
     const backend = createCodexBackend(
       codexProvider(),
-      codexDeps(new FakeCodexAppServer([]))
+      codexDeps(new MockCodexAppServer({ events: [] }))
     );
     const result = await backend?.listModels?.();
     expect(result?.outcome).toBe("success");

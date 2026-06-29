@@ -764,7 +764,7 @@ describe("Fable home", () => {
         label: "OpenAI",
         description: "OpenAI native",
         authState: "connected",
-        capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+        capabilities: ["authentication", "threads", "streaming", "tool-requests", "cancellation"],
         models: [{ id: "gpt-5", label: "GPT-5", available: true }]
       }
     ];
