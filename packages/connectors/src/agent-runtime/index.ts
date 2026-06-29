@@ -20,3 +20,15 @@ export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 // Adapter constructors are exported for direct unit testing; production code
 // reaches them only through resolveAgentBackend.
 export { createNativeApiBackend } from "./adapters/native-api";
+export { resolveAcpBackend } from "./adapters/acp";
+// ACP provider definitions (Cursor/Grok executable discovery + auth-state
+// detection). Provider-specific; the generic protocol handling in
+// ./adapters/acp/* is provider-neutral.
+export {
+  ACP_PROVIDERS,
+  detectAcpRuntime,
+  type AcpProviderDefinition,
+  type AcpCliProbe,
+  type AcpCliProbeOutcome,
+  type AcpRuntimeDetection
+} from "./adapters/acp-providers";

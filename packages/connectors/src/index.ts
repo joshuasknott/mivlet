@@ -148,21 +148,28 @@ export { buildContextPrefix } from "./native-api/memory-context";
 
 // provider-neutral agent-runtime contract. One interface every backend family
 // (native-API, Codex, ACP, Copilot) implements; the shell resolves one
-// AgentBackend per run via resolveAgentBackend. Native-API is the first concrete
-// adapter; the others are metadata-only until their adapter lands. No secret
-// crosses this boundary — auth lives behind the Rust boundary / provider-owned
-// auth caches.
+// AgentBackend per run via resolveAgentBackend. Native-API and ACP (Cursor/Grok)
+// have live adapters; Codex and Copilot remain metadata-only until their
+// adapters land. No secret crosses this boundary — auth lives behind the Rust
+// boundary / provider-owned auth caches (CLI-owned for ACP).
 export {
   resolveAgentBackend,
   hasRunnableAdapter,
   createNativeApiBackend,
+  resolveAcpBackend,
+  ACP_PROVIDERS,
+  detectAcpRuntime,
   type AgentBackend,
   type AgentBackendFactory,
   type AgentRunRequest,
   type AgentRunOptions,
   type BackendDeps,
   type TransportHandle,
-  type TransportHandlers
+  type TransportHandlers,
+  type AcpProviderDefinition,
+  type AcpCliProbe,
+  type AcpCliProbeOutcome,
+  type AcpRuntimeDetection
 } from "./agent-runtime";
 export {
   createApprovalGate,

@@ -41,7 +41,11 @@ function isRunnable(provider: BackendProvider): boolean {
  * resolveAgentBackend} does) for the full "runnable now" answer.
  */
 export function hasRunnableAdapter(backendType: string): boolean {
-  return backendType === "native-api";
+  // native-api and acp (Cursor/Grok) have live adapters. The ACP adapter is
+  // inert until a CLI connects (no ACP provider can reach `connected` without
+  // the CLI probe + egress wiring), so this flip preserves current shell
+  // behavior while keeping the contract ready for a connected ACP provider.
+  return backendType === "native-api" || backendType === "acp";
 }
 
 /**

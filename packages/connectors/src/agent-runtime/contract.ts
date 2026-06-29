@@ -35,6 +35,7 @@ import type {
 } from "@fable/protocol";
 import type { HttpTransport } from "../native-api/transport";
 import type { ModelDiscoveryResult } from "../native-api/discovery";
+import type { AcpTransportFactory } from "./adapters/acp/transport";
 
 /**
  * A provider-neutral agent runtime. Native-API, Codex, ACP, and Copilot each
@@ -96,6 +97,15 @@ export interface BackendDeps {
     provider: BackendProvider,
     handlers: TransportHandlers
   ) => TransportHandle | null;
+  /**
+   * Build the stdio/JSON-RPC transport for a connected ACP (Cursor/Grok)
+   * backend, or null when there is no egress path (no desktop runtime, or the
+   * CLI is not spawned). The desktop supplies a Tauri-bound factory that owns
+   * the CLI child process on the Rust side; tests inject a scripted fake. Holds
+   * NO secret — auth is CLI-owned. Optional: absent until the ACP egress wiring
+   * lands, so the adapter reports no-transport (null) in its absence.
+   */
+  createAcpTransport?: AcpTransportFactory;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }

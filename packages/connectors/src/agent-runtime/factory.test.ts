@@ -52,6 +52,19 @@ function acpProvider(): BackendProvider {
   };
 }
 
+/** A connected, streaming ACP (Cursor) provider — what the adapter runs for. */
+function connectedAcpProvider(): BackendProvider {
+  return {
+    id: "cursor",
+    backendType: "acp",
+    label: "Cursor",
+    description: "ACP CLI",
+    authState: "connected",
+    capabilities: ["authentication", "threads", "streaming", "tool-requests", "approvals", "file-changes", "cancellation"],
+    models: [{ id: "cursor-default", label: "Cursor default", available: true }]
+  };
+}
+
 /** Copilot provider — metadata-only. */
 function copilotProvider(): BackendProvider {
   return {
@@ -98,13 +111,13 @@ async function collect(iter: AsyncIterable<BackendAgentEvent>): Promise<BackendA
 }
 
 describe("hasRunnableAdapter", () => {
-  it("returns true for native-api (the only live adapter today)", () => {
+  it("returns true for native-api and acp (the live adapters)", () => {
     expect(hasRunnableAdapter("native-api")).toBe(true);
+    expect(hasRunnableAdapter("acp")).toBe(true);
   });
 
   it("returns false for metadata-only backend families until their adapter lands", () => {
     expect(hasRunnableAdapter("codex-app-server")).toBe(false);
-    expect(hasRunnableAdapter("acp")).toBe(false);
     expect(hasRunnableAdapter("copilot-sdk")).toBe(false);
   });
 
@@ -142,9 +155,28 @@ describe("resolveAgentBackend dispatch", () => {
     expect(backend).toBeNull();
   });
 
-  it("returns null for ACP/Cursor (metadata-only until its adapter lands)", () => {
+  it("returns null for an install-required ACP/Cursor provider (no execution path)", () => {
     const backend = resolveAgentBackend(acpProvider(), fixtureDeps([]));
     expect(backend).toBeNull();
+  });
+
+  it("returns null for a connected ACP provider when no ACP transport is wired", () => {
+    const backend = resolveAgentBackend(
+      connectedAcpProvider(),
+      fixtureDeps([])
+    );
+    expect(backend).toBeNull();
+  });
+
+  it("returns a live ACP backend for a connected provider when the ACP transport is wired", () => {
+    const deps: BackendDeps = {
+      ...fixtureDeps([]),
+      createAcpTransport: () => null
+    };
+    const backend = resolveAgentBackend(connectedAcpProvider(), deps);
+    expect(backend).not.toBeNull();
+    expect(backend?.providerId).toBe("cursor");
+    expect(backend?.capabilities).toContain("streaming");
   });
 
   it("returns null for Copilot (metadata-only until its adapter lands)", () => {
