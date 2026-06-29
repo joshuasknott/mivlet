@@ -37,3 +37,10 @@ export {
 } from "./adapters/acp-providers";
 export { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 export { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
+export {
+  BackendRuntimeError,
+  backendErrorEvent,
+  classifyBackendError,
+  normalizeBackendErrorEvent,
+  type BackendErrorMetadata
+} from "./utils/errors";

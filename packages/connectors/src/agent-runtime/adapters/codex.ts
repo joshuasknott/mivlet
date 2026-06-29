@@ -21,6 +21,7 @@ import type {
   CodexAppServerHandle
 } from "../contract";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
+import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 import { redactSecretsFromString } from "../utils/redact";
 
 function requestedThreadId(request: AgentRunRequest): string | null {
@@ -100,7 +101,7 @@ async function* mapCodexEvents(
       yield { type: "done", finishReason: event.finishReason };
       return;
     } else if (event.type === "error") {
-      yield { type: "error", message: redactSecretsFromString(event.message) };
+      yield normalizeBackendErrorEvent({ type: "error", message: event.message });
       yield { type: "done", finishReason: "error" };
       return;
     } else if (event.type === "cancelled") {
@@ -150,11 +151,7 @@ export function createCodexBackend(
         });
         yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities);
       } catch (error) {
-        const rawMessage = error instanceof Error ? error.message : "Codex app-server run failed.";
-        yield {
-          type: "error",
-          message: redactSecretsFromString(rawMessage)
-        };
+        yield backendErrorEvent(error, "Codex app-server run failed.");
         yield { type: "done", finishReason: "error" };
       } finally {
         await liveHandle.shutdown();

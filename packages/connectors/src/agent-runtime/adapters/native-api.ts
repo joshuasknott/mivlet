@@ -26,7 +26,7 @@ import type {
 import { runAgentLoop, type ToolExecutor } from "../../native-api/agent-loop";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
-import { redactSecretsFromString } from "../utils/redact";
+import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 
 /** The bound cancel handle for the most recent run (one live run per backend). */
 interface ActiveRun {
@@ -94,17 +94,13 @@ export function createNativeApiBackend(
       try {
         for await (const event of eventStream) {
           if (event.type === "error") {
-            yield { ...event, message: redactSecretsFromString(event.message) };
+            yield normalizeBackendErrorEvent(event);
           } else {
             yield event;
           }
         }
       } catch (error) {
-        const rawMessage = error instanceof Error ? error.message : "Native-API run failed.";
-        yield {
-          type: "error",
-          message: redactSecretsFromString(rawMessage)
-        };
+        yield backendErrorEvent(error, "Native-API run failed.");
         yield { type: "done", finishReason: "error" };
       } finally {
         active = null;

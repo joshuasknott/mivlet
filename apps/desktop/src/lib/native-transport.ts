@@ -18,6 +18,7 @@ import type {
   NativeCompletionRequest
 } from "@fable/protocol";
 import {
+  BackendRuntimeError,
   shapeAnthropicRequest,
   shapeGeminiRequest,
   shapeOpenAiRequest,
@@ -40,6 +41,13 @@ function shapeBodyFor(request: NativeCompletionRequest): unknown {
     return shapeGeminiRequest(request);
   }
   return shapeOpenAiRequest(request);
+}
+
+interface NativeTransportControlPayload {
+  kind: string;
+  code?: string;
+  message?: string;
+  retryable?: boolean;
 }
 
 /** True when the desktop (Tauri) runtime is present. */
@@ -78,11 +86,15 @@ function tauriTransport(
         }
         try {
           const parsed = JSON.parse(line) as {
-            __fableTransport?: { kind: string; message: string };
+            __fableTransport?: NativeTransportControlPayload;
           };
           if (parsed.__fableTransport) {
             if (parsed.__fableTransport.kind === "error") {
-              transportError = new Error(parsed.__fableTransport.message);
+              transportError = new BackendRuntimeError(
+                parsed.__fableTransport.message ?? "Provider request failed.",
+                parsed.__fableTransport.code ?? "transport",
+                parsed.__fableTransport.retryable ?? false
+              );
             } else if (parsed.__fableTransport.kind === "retrying") {
               handlers.onRetry();
             }

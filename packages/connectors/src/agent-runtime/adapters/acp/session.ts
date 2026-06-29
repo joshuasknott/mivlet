@@ -33,6 +33,8 @@ import {
 import type { AcpRequest } from "./protocol";
 import type { AcpTransport } from "./transport";
 import { normalizeAcpNotification } from "./events";
+import { normalizeBackendErrorEvent } from "../../utils/errors";
+import { redactSecretsFromString } from "../../utils/redact";
 
 /** The ACP protocol version Fable advertises during initialize. */
 const ACP_PROTOCOL_VERSION = "2025-06-01";
@@ -91,7 +93,7 @@ export async function* runAcpSession(
       acpRequest("initialize", { protocolVersion: ACP_PROTOCOL_VERSION, client: "fable" })
     );
     if (!initReply.ok) {
-      yield { type: "error", message: initReply.error.message };
+      yield normalizeBackendErrorEvent({ type: "error", message: initReply.error.message });
       return;
     }
 
@@ -100,7 +102,7 @@ export async function* runAcpSession(
       acpRequest("session/new", { model: request.model })
     );
     if (!newReply.ok) {
-      yield { type: "error", message: newReply.error.message };
+      yield normalizeBackendErrorEvent({ type: "error", message: newReply.error.message });
       return;
     }
 
@@ -116,7 +118,7 @@ export async function* runAcpSession(
       })
     );
     if (!promptReply.ok) {
-      yield { type: "error", message: promptReply.error.message };
+      yield normalizeBackendErrorEvent({ type: "error", message: promptReply.error.message });
       return;
     }
 
@@ -139,27 +141,27 @@ export async function* runAcpSession(
           !CALL_ID_PATTERN.test(callId)
         ) {
           errored = `ACP tool call has a malformed call id.`;
-          yield { type: "error", message: errored };
+          yield normalizeBackendErrorEvent({ type: "error", message: errored });
           break;
         }
         if (seenCallIds.has(callId)) {
           errored = `ACP tool call id ${callId} was replayed; refusing.`;
-          yield { type: "error", message: errored };
+          yield normalizeBackendErrorEvent({ type: "error", message: errored });
           break;
         }
         if (event.arguments.length > MAX_TOOL_ARGUMENT_CHARACTERS) {
           errored = `ACP tool call ${callId} arguments exceed the supported size.`;
-          yield { type: "error", message: errored };
+          yield normalizeBackendErrorEvent({ type: "error", message: errored });
           break;
         }
         if (toolCallCount >= maxToolCalls) {
           errored = `ACP run exceeded its tool-call cap (${maxToolCalls}).`;
-          yield { type: "error", message: errored };
+          yield normalizeBackendErrorEvent({ type: "error", message: errored });
           break;
         }
         if (turn >= maxTurns) {
           errored = `ACP run exceeded its turn cap (${maxTurns}).`;
-          yield { type: "error", message: errored };
+          yield normalizeBackendErrorEvent({ type: "error", message: errored });
           break;
         }
         seenCallIds.add(callId);
@@ -179,7 +181,9 @@ export async function* runAcpSession(
           );
         } catch (error) {
           ok = false;
-          output = error instanceof Error ? error.message : "Tool execution failed.";
+          output = redactSecretsFromString(
+            error instanceof Error ? error.message : "Tool execution failed."
+          );
         }
         const toolResultEvent: BackendAgentEvent = {
           type: "tool-result",

@@ -105,7 +105,12 @@ describe("normalizeAcpNotification → BackendAgentEvent", () => {
       providerId,
       notification("session/error", { message: "model overloaded" })
     );
-    expect(event).toEqual({ type: "error", message: "model overloaded" });
+    expect(event).toEqual({
+      type: "error",
+      message: "model overloaded",
+      code: "provider-unavailable",
+      retryable: true
+    });
   });
 
   it("returns null for an unknown notification method (forward-compatible)", () => {
