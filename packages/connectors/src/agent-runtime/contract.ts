@@ -36,6 +36,7 @@ import type {
 } from "@fable/protocol";
 import type { HttpTransport } from "../native-api/transport";
 import type { ModelDiscoveryResult } from "../native-api/discovery";
+import type { AcpTransportFactory } from "./adapters/acp/transport";
 
 /**
  * A provider-neutral agent runtime. Native-API, Codex, ACP, and Copilot each

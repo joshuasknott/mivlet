@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use crate::models::{
     JobAttempt, ScheduledExecutionRoute, ScheduledJob, SchedulerQueueEntry, SchedulerStore,
     JOB_ATTEMPT_STATUSES, MAX_JOB_ATTEMPTS, MAX_OCCURRENCE_LEDGER, MAX_SCHEDULED_JOBS,
-    MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES, RUNNING_LEASE_MS, RETRY_BASE_MS,
+    MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES, RETRY_BASE_MS, RUNNING_LEASE_MS,
     SCHEDULED_JOB_STATUSES, SCHEDULER_LEASE_MS, SCHEDULER_STORE_VERSION,
 };
 use crate::paths::{normalize_spaces, scheduler_store_path, truncate_characters};
@@ -130,7 +130,9 @@ fn fresh_lease_token() -> String {
 fn normalize_route(route: ScheduledExecutionRoute) -> Result<ScheduledExecutionRoute, String> {
     let policy = normalize_spaces(&route.policy);
     if !matches!(policy.as_str(), "pinned" | "current-default") {
-        return Err("Execution route policy must be \"pinned\" or \"current-default\".".to_string());
+        return Err(
+            "Execution route policy must be \"pinned\" or \"current-default\".".to_string(),
+        );
     }
     Ok(ScheduledExecutionRoute {
         policy,
@@ -461,7 +463,9 @@ fn remember_occurrence(store: &mut SchedulerStore, key: &str) {
     store.occurrence_ledger.insert(0, key.to_string());
     if store.occurrence_ledger.len() > MAX_OCCURRENCE_LEDGER {
         let drop = store.occurrence_ledger.len() - MAX_OCCURRENCE_LEDGER;
-        store.occurrence_ledger.truncate(store.occurrence_ledger.len() - drop);
+        store
+            .occurrence_ledger
+            .truncate(store.occurrence_ledger.len() - drop);
     }
 }
 
@@ -483,7 +487,9 @@ pub fn renew_job_lease(
                 continue;
             }
             // Fencing: the caller's token must match the entry's current lease.
-            if !entry.lease_token.is_empty() && !lease_token.is_empty() && entry.lease_token != lease_token
+            if !entry.lease_token.is_empty()
+                && !lease_token.is_empty()
+                && entry.lease_token != lease_token
             {
                 continue;
             }
@@ -736,7 +742,9 @@ mod tests {
             permission_mode: "read-only".to_string(),
         });
         store.jobs.push(job);
-        store.occurrence_ledger.push("j:1970-01-01T00:00:00.000Z".to_string());
+        store
+            .occurrence_ledger
+            .push("j:1970-01-01T00:00:00.000Z".to_string());
         write_store(&p, &store).unwrap();
         let read = read_store(&p).unwrap();
         assert_eq!(read.occurrence_ledger.len(), 1);
@@ -849,7 +857,11 @@ mod tests {
             "cancelled" => entry.state = "cancelled".to_string(),
             "blocked-auth" => entry.state = "blocked-auth".to_string(),
             "failed" => {
-                let fails = entry.attempts.iter().filter(|a| a.status == "failed").count() as u32;
+                let fails = entry
+                    .attempts
+                    .iter()
+                    .filter(|a| a.status == "failed")
+                    .count() as u32;
                 if fails > max_retries {
                     entry.state = "dead".to_string();
                 } else {

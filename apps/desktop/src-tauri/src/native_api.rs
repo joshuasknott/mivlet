@@ -731,9 +731,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
 /// Non-native providers (Codex/ACP/Copilot) own their own auth and never pass
 /// through this boundary, so they fail closed with `unsupported`.
 #[tauri::command]
-pub async fn verify_backend_credential(
-    provider_id: String,
-) -> Result<BackendVerifyResult, String> {
+pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVerifyResult, String> {
     if !NATIVE_PROVIDER_IDS.contains(&provider_id.as_str()) {
         // Provider-owned runtimes (Codex CLI, ACP, Copilot SDK) carry their own
         // auth that Fable must not touch. They cannot be verified here.
@@ -777,7 +775,9 @@ pub async fn verify_backend_credential(
             return Ok(BackendVerifyResult {
                 provider_id: provider_id.clone(),
                 outcome: "offline".to_string(),
-                message: Some(format!("Could not reach {provider_id}. Check your connection.")),
+                message: Some(format!(
+                    "Could not reach {provider_id}. Check your connection."
+                )),
             })
         }
     };
@@ -789,7 +789,9 @@ pub async fn verify_backend_credential(
             "{provider_id} rejected this key. Check the key and try again."
         ))
     } else if outcome == "unsupported" {
-        Some(format!("{provider_id} does not expose a verifiable endpoint."))
+        Some(format!(
+            "{provider_id} does not expose a verifiable endpoint."
+        ))
     } else if outcome == "failed" {
         Some(format!("{provider_id} returned HTTP {status}. Try again."))
     } else {
