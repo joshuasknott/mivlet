@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { BackendAuthState, BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
+import { stateViewFor } from "../../lib/backend-state";
 import { ProviderIcon } from "../ProviderIcon";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
@@ -410,22 +411,10 @@ function authStateLabel(
   authState: BackendAuthState,
   _backendType: BackendProvider["backendType"]
 ): string {
-  switch (authState) {
-    case "connected":
-      return "Connected";
-    case "needs-auth":
-      return "Needs API key";
-    case "install-required":
-      return "Install required";
-    case "entitlement-pending":
-      return "Entitlement pending";
-    case "unavailable":
-      return "Unavailable";
-    case "failed":
-      return "Failed";
-    default:
-      return authState;
+  if (authState === "needs-auth") {
+    return "Needs API key";
   }
+  return stateViewFor(authState).label;
 }
 
 function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace"> }) {

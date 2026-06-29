@@ -67,9 +67,14 @@ describe("backend registry", () => {
 describe("fail-closed capability resolution", () => {
   const closedStates = [
     "needs-auth",
+    "sign-in-required",
     "install-required",
-    "unavailable",
-    "failed"
+    "connecting",
+    "expired",
+    "unsupported",
+    "failed",
+    "ready",
+    "unavailable"
   ] as const;
 
   it.each(closedStates)("declares no capabilities when authState=%s", (authState) => {
@@ -77,6 +82,17 @@ describe("fail-closed capability resolution", () => {
     expect(resolveAcpProvider("cursor", authState).capabilities).toEqual([]);
     expect(resolveAcpProvider("grok", authState).capabilities).toEqual([]);
     expect(resolveCopilotProvider(authState).capabilities).toEqual([]);
+  });
+
+  it("only the connected state advertises capabilities (ready is a UI alias, not capability-bearing)", () => {
+    // The new "ready" state is the onboarding's terminal-success alias; the
+    // boundary re-resolves it to "connected" before a run. It must never itself
+    // advertise capabilities, so a transient ready-but-not-connected provider
+    // cannot drive a run.
+    const readyNative = resolveCodexProvider("ready");
+    expect(readyNative.capabilities).toEqual([]);
+    const connectedNative = resolveCodexProvider("connected");
+    expect(connectedNative.capabilities.length).toBeGreaterThan(0);
   });
 
   it("resolves the full capability set for a connected codex subscription", () => {

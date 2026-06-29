@@ -1151,6 +1151,37 @@ fn runtime_snapshot_round_trips_connected_backend_ids_without_secrets() {
 }
 
 #[test]
+fn backend_auth_state_vocabulary_is_closed_and_fail_closed_set_excludes_connected() {
+    use crate::models::{BACKEND_AUTH_FAIL_CLOSED_STATES, BACKEND_AUTH_STATES};
+
+    // Every served auth state must be in the controlled vocabulary — the
+    // boundary's fail-closed guard relies on this.
+    assert!(BACKEND_AUTH_STATES.contains(&"connected"));
+    assert!(BACKEND_AUTH_STATES.contains(&"sign-in-required"));
+    assert!(BACKEND_AUTH_STATES.contains(&"connecting"));
+    assert!(BACKEND_AUTH_STATES.contains(&"failed"));
+    assert!(BACKEND_AUTH_STATES.contains(&"ready"));
+
+    // "connected" is the only capability-bearing state, so it must never appear
+    // in the fail-closed set. The UI leans on this split to decide whether to
+    // offer actions.
+    assert!(!BACKEND_AUTH_FAIL_CLOSED_STATES.contains(&"connected"));
+    // Every fail-closed entry must itself be a recognized auth state.
+    for state in BACKEND_AUTH_FAIL_CLOSED_STATES.iter() {
+        assert!(
+            BACKEND_AUTH_STATES.contains(state),
+            "fail-closed state {state} is not in BACKEND_AUTH_STATES"
+        );
+    }
+
+    // Verify outcomes are a closed set too.
+    use crate::models::BACKEND_VERIFY_OUTCOMES;
+    assert_eq!(BACKEND_VERIFY_OUTCOMES.len(), 5);
+    assert!(BACKEND_VERIFY_OUTCOMES.contains(&"ready"));
+    assert!(BACKEND_VERIFY_OUTCOMES.contains(&"auth-failed"));
+}
+
+#[test]
 fn runtime_snapshot_round_trips_schedules_without_secrets() {
     let path = temp_audit_path("runtime-snapshot-schedules");
     let _ = fs::remove_file(&path);

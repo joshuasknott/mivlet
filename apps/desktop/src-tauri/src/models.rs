@@ -38,13 +38,42 @@ pub const SCHEDULE_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sa
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
 pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", "native-api"];
-pub const BACKEND_AUTH_STATES: [&str; 5] = [
+pub const BACKEND_AUTH_STATES: [&str; 11] = [
     "connected",
     "needs-auth",
+    "sign-in-required",
     "install-required",
+    "connecting",
+    "expired",
+    "unsupported",
+    "failed",
+    "ready",
     "entitlement-pending",
     "unavailable",
 ];
+/// Backend auth states that fail closed: the adapter declares no capabilities
+/// it cannot honor. Mirrors `BACKEND_AUTH_FAIL_CLOSED_STATES` in protocol. Kept
+/// as a contract constant — asserted by the vocabulary test in `tests.rs` (which
+/// is the only non-test reference), so it is allowed as dead code in the lib.
+#[allow(dead_code)]
+pub const BACKEND_AUTH_FAIL_CLOSED_STATES: [&str; 10] = [
+    "needs-auth",
+    "sign-in-required",
+    "install-required",
+    "connecting",
+    "expired",
+    "unsupported",
+    "failed",
+    "entitlement-pending",
+    "ready",
+    "unavailable",
+];
+/// Outcome vocabulary for backend credential verification (Rust round-trips the
+/// stored key against the provider and returns exactly one of these). Asserted
+/// by the vocabulary test in `tests.rs`; allowed as dead code in the lib.
+#[allow(dead_code)]
+pub const BACKEND_VERIFY_OUTCOMES: [&str; 5] =
+    ["ready", "auth-failed", "offline", "unsupported", "failed"];
 pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "authentication",
     "threads",
@@ -483,6 +512,18 @@ pub struct BackendProvider {
 pub struct BackendCredentialRequest {
     pub provider_id: String,
     pub secret: String,
+}
+
+/// Outcome of verifying a stored backend credential. Rust looks the key up
+/// inside the credential boundary and round-trips it against the provider; the
+/// secret never crosses to JavaScript. The outcome vocabulary is
+/// `BACKEND_VERIFY_OUTCOMES`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendVerifyResult {
+    pub provider_id: String,
+    pub outcome: String,
+    pub message: Option<String>,
 }
 
 /// A consequential action a backend wants to perform. Fable records it as an

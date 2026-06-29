@@ -10,6 +10,7 @@ import type {
   BackendCredentialRequest,
   AgentRunRequest,
   BackendProvider,
+  BackendVerifyResult,
   ConnectorActionRequest,
   ConnectorActionResult,
   ConnectorAccountOption,
@@ -493,6 +494,37 @@ export async function connectRuntimeBackend(request: BackendCredentialRequest) {
     return await invoke<string>("store_backend_credential", { request });
   } catch (error) {
     throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Verify a stored native-API credential. Rust looks the key up inside the
+ * credential boundary and hit-tests it against the provider; the secret never
+ * crosses into JavaScript. Returns null outside Tauri so the onboarding shell
+ * falls back to a local preview connection and stays fixture-testable.
+ *
+ * Outcomes map to the onboarding flow:
+ *   - `ready` → the provider is connected; reflect it as connected.
+ *   - `auth-failed` → the key was rejected; clear it and surface a useful error.
+ *   - `offline` / `unsupported` / `failed` → keep the stored key, show a warning.
+ */
+export async function verifyRuntimeBackend(
+  providerId: string
+): Promise<BackendVerifyResult | null> {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<BackendVerifyResult>("verify_backend_credential", { providerId });
+  } catch (error) {
+    // A command failure is treated as a transient failure, not auth failure:
+    // the stored key may still be good.
+    return {
+      providerId,
+      outcome: "failed",
+      message: toRuntimeError(error).message
+    };
   }
 }
 

@@ -384,6 +384,9 @@ export function App() {
         connectedBackendIds={runtime.connectedBackendIds}
         status={runtime.backendStatus}
         onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
+        onConnectWithVerify={(providerId, secret) =>
+          runtime.connectBackendWithVerify(providerId, secret)
+        }
         onSkip={runtime.dismissOnboarding}
         onSubmitProfile={(name, email) => {
           setProfile((current) => ({

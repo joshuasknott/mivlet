@@ -122,6 +122,7 @@ pub fn run() {
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
             native_api::list_backend_models,
+            native_api::verify_backend_credential,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,

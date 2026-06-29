@@ -1,45 +1,52 @@
 import {
-  ArrowLeft,
   ArrowRight,
   CheckCircle,
-  Cpu,
   Key,
   LockSimple,
   Plugs,
   Spinner,
   WarningCircle
 } from "@phosphor-icons/react";
-import { useState, useEffect, useRef } from "react";
-import type { BackendProvider } from "@fable/protocol";
+import { useEffect, useRef, useState } from "react";
+import type { BackendProvider, BackendVerifyResult } from "@fable/protocol";
+import {
+  authKindForProvider,
+  stateClassFor,
+  stateViewFor
+} from "../../lib/backend-state";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import { FableLogo } from "../FableLogo";
 import { ProviderIcon } from "../ProviderIcon";
 
 /**
- * Local-first AI-backend onboarding shell.
+ * Local-first AI-backend onboarding — rebuilt as ONE unified provider list.
  *
  * Honesty rules this component:
  *   - No fake account creation or password. The only step before choosing a
  *     backend is an OPTIONAL local profile (name/email), stored as shell state.
  *     Nothing leaves the device; no hosted account is created.
- *   - The API-key path (OpenAI, Anthropic, Gemini, xAI, OpenRouter) is the
- *     primary, runnable path — Fable owns that agent loop once a key is stored.
- *   - Subscription/CLI providers (Codex, Cursor, Copilot, Grok) are listed but
- *     gated as unavailable/setup-required until a real, capability-bearing
- *     runtime is connected. There is no fake "Connect" button that pretends to
- *     link a subscription here; setup routes to the real Connectors/Settings.
+ *   - Every provider appears in a single list with its real auth-state badge
+ *     and exactly one context-correct action. There is no fake "Connect".
+ *   - API-key providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) expand an
+ *     inline secure key field. The key is read once from an uncontrolled
+ *     input, handed to the verified connect path, then cleared from the DOM.
+ *   - Provider-owned runtimes (Codex CLI, Cursor/Grok ACP, Copilot SDK) manage
+ *     their OWN sign-in. They NEVER show a token field here. Their cards
+ *     reflect the runtime state the boundary resolved and route to real setup.
  *   - Connector (workspace tools) setup is NOT part of onboarding. It is
  *     optional and lives on the real Connectors page (`onOpenConnectors`).
  *
  * Secrets are never held in React state: the key is read once from an
- * uncontrolled input, handed to the Rust credential boundary via `onConnect`,
- * then cleared from the DOM field.
+ * uncontrolled input, handed to the Rust credential boundary via
+ * `onConnectWithVerify`, then cleared from the DOM field. Only the verify
+ * OUTCOME (ready / auth-failed / offline / unsupported / failed) returns.
  */
 export function OnboardingPage({
   providers,
   connectedBackendIds,
   status,
   onConnect,
+  onConnectWithVerify,
   onSkip,
   onSubmitProfile,
   onOpenConnectors
@@ -47,65 +54,37 @@ export function OnboardingPage({
   providers: BackendProvider[];
   connectedBackendIds: string[];
   status: string | null;
-  /** Connect handler; carries the optional API-key secret for native providers.
-   *  The secret is handed to the Rust credential boundary and never read back. */
-  onConnect: (providerId: string, secret?: string) => void;
+  /** Legacy fire-and-forget connect. Kept for back-compat; the verified path
+   *  is preferred and used when `onConnectWithVerify` is supplied. */
+  onConnect?: (providerId: string, secret?: string) => void;
+  /** Verified connect path: stores the key, verifies it inside the Rust
+   *  boundary, and returns the outcome so useful errors can be shown. The
+   *  secret is handed to the boundary and never read back. */
+  onConnectWithVerify?: (
+    providerId: string,
+    secret: string
+  ) => Promise<BackendVerifyResult>;
   onSkip: () => void;
   /** Apply the optional local profile (name/email) to shell state. No auth. */
   onSubmitProfile?: (name: string, email: string) => void;
   /** Route to the real Connectors page for optional workspace-tool setup. */
   onOpenConnectors?: () => void;
 }) {
-  // Steps: an optional local profile, then the backend choice. The connection
-  // step is only reachable for the runnable native-API key path.
-  const [step, setStep] = useState<"profile" | "choice" | "subscription" | "apikey" | "connection">(
-    "profile"
-  );
+  // Steps: an optional local profile, then the unified provider list.
+  const [step, setStep] = useState<"profile" | "providers">(providers.length === 0 ? "providers" : "profile");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Track the user-selected provider to connect (native-API only).
-  const [selectedProvider, setSelectedProvider] = useState<BackendProvider | null>(null);
-  const keyInputRef = useRef<HTMLInputElement>(null);
-  const [hasSecretKey, setHasSecretKey] = useState(false);
-
+  // Track the provider whose inline key panel is expanded (API-key only).
+  const [expandedProviderId, setExpandedProviderId] = useState<string | null>(null);
+  // The provider currently being verified, and the per-provider error message.
   const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
+  const [providerError, setProviderError] = useState<Record<string, string>>({});
 
-  // Subscription/CLI providers: gated (no real runtime connected unless the
-  // boundary already reports it as capability-bearing). These are shown for
-  // awareness, not as a runnable onboarding path.
-  const subscriptionProviders = providers.filter(
-    (provider) => provider.id === "codex" || provider.id === "cursor" || provider.id === "copilot" || provider.id === "grok"
-  );
-  // Native API-key providers: the primary, runnable path. Fable owns the loop.
-  const nativeProviders = providers.filter((provider) => provider.backendType === "native-api");
+  const keyInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset loading status when a connection completes.
-  useEffect(() => {
-    if (selectedProvider && connectedBackendIds.includes(selectedProvider.id)) {
-      setPendingProviderId(null);
-      if (keyInputRef.current) {
-        keyInputRef.current.value = "";
-      }
-      setHasSecretKey(false);
-    }
-  }, [connectedBackendIds, selectedProvider]);
-
-  const handleSelectProvider = (provider: BackendProvider) => {
-    setSelectedProvider(provider);
-    if (keyInputRef.current) {
-      keyInputRef.current.value = "";
-    }
-    setHasSecretKey(false);
-    setValidationError(null);
-    setStep("connection");
-  };
-
-  const handleConnect = (provider: BackendProvider, secret?: string) => {
-    setPendingProviderId(provider.id);
-    onConnect(provider.id, secret);
-  };
+  const hasAnyConnected = connectedBackendIds.length > 0;
 
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,7 +98,98 @@ export function OnboardingPage({
     if (onSubmitProfile) {
       onSubmitProfile(name.trim(), email.trim());
     }
-    setStep("choice");
+    setStep("providers");
+  };
+
+  // Clear any stale key/error when a provider finishes connecting.
+  useEffect(() => {
+    for (const id of connectedBackendIds) {
+      if (providerError[id]) {
+        setProviderError((current) => {
+          const next = { ...current };
+          delete next[id];
+          return next;
+        });
+      }
+    }
+    if (pendingProviderId && connectedBackendIds.includes(pendingProviderId)) {
+      setPendingProviderId(null);
+      setExpandedProviderId(null);
+      if (keyInputRef.current) {
+        keyInputRef.current.value = "";
+      }
+    }
+  }, [connectedBackendIds, pendingProviderId, providerError]);
+
+  const handleToggleProvider = (provider: BackendProvider) => {
+    if (pendingProviderId) return;
+    if (expandedProviderId === provider.id) {
+      setExpandedProviderId(null);
+      return;
+    }
+    setExpandedProviderId(provider.id);
+    setProviderError((current) => {
+      const next = { ...current };
+      delete next[provider.id];
+      return next;
+    });
+    // Clear any value left in the shared uncontrolled input.
+    if (keyInputRef.current) {
+      keyInputRef.current.value = "";
+    }
+  };
+
+  const handleConnect = async (provider: BackendProvider) => {
+    const secret = keyInputRef.current?.value.trim() ?? "";
+    if (!secret) {
+      setProviderError((current) => ({
+        ...current,
+        [provider.id]: "Enter an API key to connect."
+      }));
+      return;
+    }
+    setPendingProviderId(provider.id);
+    setProviderError((current) => {
+      const next = { ...current };
+      delete next[provider.id];
+      return next;
+    });
+    try {
+      const result = onConnectWithVerify
+        ? await onConnectWithVerify(provider.id, secret)
+        : (onConnect?.(provider.id, secret),
+          ({ providerId: provider.id, outcome: "ready" } as BackendVerifyResult));
+      // Clear the uncontrolled input immediately — the secret is now in the
+      // boundary and must not linger in the DOM.
+      if (keyInputRef.current) {
+        keyInputRef.current.value = "";
+      }
+      if (result.outcome === "auth-failed") {
+        setProviderError((current) => ({
+          ...current,
+          [provider.id]:
+            result.message ?? `${provider.label} rejected this key. Check the key and try again.`
+        }));
+      } else if (result.outcome !== "ready") {
+        // offline / unsupported / failed: keep the key stored, show a warning.
+        setProviderError((current) => ({
+          ...current,
+          [provider.id]:
+            result.message ??
+            `${provider.label} could not be verified right now. Your key is saved — try again in a moment.`
+        }));
+      }
+    } catch (error) {
+      if (keyInputRef.current) {
+        keyInputRef.current.value = "";
+      }
+      setProviderError((current) => ({
+        ...current,
+        [provider.id]: error instanceof Error ? error.message : `Could not connect ${provider.label}.`
+      }));
+    } finally {
+      setPendingProviderId(null);
+    }
   };
 
   return (
@@ -130,31 +200,12 @@ export function OnboardingPage({
           <div className="og-progress-bar">
             <div
               className="og-progress-fill"
-              style={{
-                width:
-                  step === "profile"
-                    ? "33%"
-                    : step === "choice"
-                    ? "66%"
-                    : step === "apikey" || step === "subscription"
-                    ? "80%"
-                    : "100%"
-              }}
+              style={{ width: step === "profile" ? "40%" : "100%" }}
             />
           </div>
           <div className="og-progress-text">
-            <span>
-              {step === "profile"
-                ? "Step 1: Local profile"
-                : step === "choice"
-                ? "Step 2: Choose backend"
-                : step === "apikey" || step === "subscription"
-                ? "Step 3: Choose provider"
-                : "Step 4: Connection"}
-            </span>
-            <span>
-              {step === "profile" ? "33%" : step === "choice" ? "66%" : step === "connection" ? "100%" : "80%"}
-            </span>
+            <span>{step === "profile" ? "Step 1: Local profile" : "Step 2: Add a provider"}</span>
+            <span>{step === "profile" ? "40%" : "100%"}</span>
           </div>
         </div>
 
@@ -174,7 +225,7 @@ export function OnboardingPage({
                 <span>Name (optional)</span>
                 <input
                   type="text"
-                  aria-label="Name"
+                  aria-label="Name (optional)"
                   id="og-name"
                   placeholder="Josh Knott"
                   value={name}
@@ -186,7 +237,7 @@ export function OnboardingPage({
                 <span>Email (optional)</span>
                 <input
                   type="email"
-                  aria-label="Email"
+                  aria-label="Email (optional)"
                   id="og-email"
                   placeholder="josh@example.com"
                   value={email}
@@ -210,103 +261,44 @@ export function OnboardingPage({
               </button>
             </form>
 
-            <button type="button" className="og-skip button button--ghost" onClick={onSkip}>
+            <button type="button" className="og-skip button button--ghost" onClick={() => setStep("providers")}>
+              Continue without profile <ArrowRight size={14} />
+            </button>
+            <button type="button" className="og-skip button button--ghost" onClick={onSkip} style={{ marginTop: 6 }}>
               Skip onboarding (preview) <ArrowRight size={14} />
             </button>
           </section>
         )}
 
-        {step === "choice" && (
+        {step === "providers" && (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <span className="og-greeting" aria-hidden="true">
               <FableLogo className="brand-lockup--onboarding" />
             </span>
-            <h1 id="onboarding-title">Connect one AI backend to continue</h1>
+            <h1 id="onboarding-title">Add a model provider</h1>
             <p className="og-lede">
-              Bring an API key to run Fable's agent loop directly. Subscription and CLI-backed
-              providers are listed but require their real runtime to be set up first.
+              Add one provider to start. Bring an API key for OpenAI, Anthropic, Google, xAI, or
+              OpenRouter — or use Codex, Cursor, Copilot, or Grok through their own sign-in.
             </p>
 
-            <div className="og-paths og-paths--3cols">
-              <button
-                type="button"
-                className="og-path og-path--primary"
-                onClick={() => setStep("apikey")}
-              >
-                <div className="og-path__heading">
-                  <span className="og-path__icon" aria-hidden="true">
-                    <Key size={18} />
-                  </span>
-                  <span>
-                    <strong>Bring an API key</strong>
-                    <small>OpenAI, Anthropic, Google, xAI, or OpenRouter</small>
-                  </span>
-                </div>
-                <p className="og-path__note">
-                  Direct API integrations. Fable owns the agent loop. Keys are held by your local
-                  credential boundary.
-                </p>
-              </button>
+            <div className="og-unified">
+              <p className="og-unified__hint">
+                Keys live in your device's secure storage and never leave it. Provider-owned
+                runtimes (Codex, Cursor, Copilot, Grok) manage their own sign-in.
+              </p>
 
-              <button
-                type="button"
-                className="og-path"
-                onClick={() => setStep("subscription")}
-              >
-                <div className="og-path__heading">
-                  <span className="og-path__icon" aria-hidden="true">
-                    <Plugs size={18} />
-                  </span>
-                  <span>
-                    <strong>Use a subscription or CLI</strong>
-                    <small>Codex, Cursor, GitHub Copilot, or Grok</small>
-                  </span>
-                </div>
-                <p className="og-path__note">
-                  Requires the provider's real runtime to be installed and connected. Setup is
-                  available, but these are not one-click here.
-                </p>
-              </button>
-
-              <div className="og-path og-path--disabled" aria-disabled="true">
-                <div className="og-path__heading">
-                  <span className="og-path__icon" aria-hidden="true">
-                    <Cpu size={18} />
-                  </span>
-                  <span>
-                    <strong>Run a local model</strong>
-                    <small>Planned — not available yet.</small>
-                  </span>
-                </div>
-                <p className="og-path__note">Local models are on the roadmap but disabled for now.</p>
-              </div>
-            </div>
-
-            <button type="button" className="og-back-btn button button--ghost" onClick={() => setStep("profile")}>
-              <ArrowLeft size={14} /> Back
-            </button>
-          </section>
-        )}
-
-        {step === "subscription" && (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <span className="og-greeting" aria-hidden="true">
-              <FableLogo className="brand-lockup--onboarding" />
-            </span>
-            <h1 id="onboarding-title">Use a subscription or CLI</h1>
-            <p className="og-lede">
-              These providers require their real runtime to be installed and connected before Fable
-              can route through them. None can be "connected" from this screen until that runtime is
-              present and capability-bearing.
-            </p>
-
-            <div style={{ width: "100%", maxWidth: "600px", marginTop: "24px" }}>
               <ul className="og-provider-list">
-                {subscriptionProviders.map((provider) => (
+                {providers.map((provider) => (
                   <li key={provider.id}>
-                    <SubscriptionProviderRow
+                    <ProviderRow
                       provider={provider}
                       connected={connectedBackendIds.includes(provider.id)}
+                      expanded={expandedProviderId === provider.id}
+                      pending={pendingProviderId === provider.id}
+                      error={providerError[provider.id]}
+                      keyInputRef={keyInputRef}
+                      onToggle={() => handleToggleProvider(provider)}
+                      onConnect={() => void handleConnect(provider)}
                       onOpenConnectors={onOpenConnectors}
                     />
                   </li>
@@ -314,167 +306,34 @@ export function OnboardingPage({
               </ul>
             </div>
 
-            <button type="button" className="og-back-btn button button--ghost" onClick={() => setStep("choice")}>
-              <ArrowLeft size={14} /> Back to options
-            </button>
-          </section>
-        )}
-
-        {step === "apikey" && (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <span className="og-greeting" aria-hidden="true">
-              <FableLogo className="brand-lockup--onboarding" />
-            </span>
-            <h1 id="onboarding-title">Bring an API key</h1>
-            <p className="og-lede">
-              Select a provider and add its API key. Credentials are held by Fable's local credential
-              boundary and never leave this device.
-            </p>
-
-            <div style={{ width: "100%", maxWidth: "600px", marginTop: "24px" }}>
-              <ul className="og-provider-list">
-                {nativeProviders.map((provider) => (
-                  <li key={provider.id}>
-                    <NativeApiKeyRow
-                      provider={provider}
-                      connected={connectedBackendIds.includes(provider.id)}
-                      onSetUp={() => handleSelectProvider(provider)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <button type="button" className="og-back-btn button button--ghost" onClick={() => setStep("choice")}>
-              <ArrowLeft size={14} /> Back to options
-            </button>
-          </section>
-        )}
-
-        {step === "connection" && selectedProvider && (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <span className="og-greeting" aria-hidden="true">
-              <FableLogo className="brand-lockup--onboarding" />
-            </span>
-            <h1 id="onboarding-title">Connect {selectedProvider.label}</h1>
-            <p className="og-lede">{selectedProvider.description}</p>
-
-            {selectedProvider.installHint ? (
-              <div className="og-provider__install-banner">
-                <WarningCircle size={14} />
-                <span>{selectedProvider.installHint}</span>
-              </div>
-            ) : null}
-
-            <div className="og-connection-box">
-              {connectedBackendIds.includes(selectedProvider.id) ? (
-                <div className="og-connection-success">
-                  <CheckCircle size={48} weight="fill" color="var(--positive)" />
-                  <h2>Connected successfully!</h2>
-                  <p>Fable is now paired with {selectedProvider.label}.</p>
-
-                  <div className="og-actions-row" style={{ marginTop: "24px" }}>
-                    <button
-                      type="button"
-                      className="og-btn-primary button button--primary"
-                      onClick={onSkip}
-                    >
-                      Start using Fable
-                    </button>
-                    <button
-                      type="button"
-                      className="og-btn-secondary button button--secondary"
-                      onClick={() => (onOpenConnectors ? onOpenConnectors() : onSkip())}
-                    >
-                      Set up workspace connectors (optional)
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <form
-                  className="og-form"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const secret = keyInputRef.current?.value.trim() ?? "";
-                    if (!secret) {
-                      setValidationError("Enter an API key to connect.");
-                      return;
-                    }
-                    handleConnect(selectedProvider, secret);
-                    if (keyInputRef.current) {
-                      keyInputRef.current.value = "";
-                    }
-                    setHasSecretKey(false);
-                  }}
-                >
-                  {selectedProvider.backendType === "native-api" ? (
-                    <label className="og-field">
-                      <span>{selectedProvider.label} API Key</span>
-                      <input
-                        ref={keyInputRef}
-                        type="password"
-                        aria-label={`API key for ${selectedProvider.label.toLowerCase()}`}
-                        placeholder={`Enter your ${selectedProvider.label} API key`}
-                        onInput={(e) => setHasSecretKey(Boolean(e.currentTarget.value.trim()))}
-                        disabled={pendingProviderId === selectedProvider.id}
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </label>
-                  ) : null}
-
-                  {validationError && (
-                    <p
-                      className="og-status"
-                      role="alert"
-                      style={{ color: "var(--destructive)", margin: "4px 0" }}
-                    >
-                      {validationError}
-                    </p>
-                  )}
-
-                  <button
-                    type="submit"
-                    className="og-submit button button--primary"
-                    disabled={
-                      (selectedProvider.backendType === "native-api" && !hasSecretKey) ||
-                      pendingProviderId === selectedProvider.id
-                    }
-                  >
-                    {pendingProviderId === selectedProvider.id ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
-                        <Spinner className="og-spinner" size={16} /> Connecting…
-                      </span>
-                    ) : selectedProvider.backendType === "native-api" ? (
-                      "Add key & connect"
-                    ) : (
-                      "Connect"
-                    )}
-                  </button>
-                </form>
-              )}
-            </div>
-
-            {status && (
+            {status ? (
               <p className="og-connection-status-msg" role="status">
                 {status}
               </p>
-            )}
+            ) : null}
 
-            {!connectedBackendIds.includes(selectedProvider.id) && (
-              <button
-                type="button"
-                className="og-back-btn button button--ghost"
-                onClick={() => {
-                  setStep(selectedProvider.backendType === "native-api" ? "apikey" : "subscription");
-                  if (keyInputRef.current) {
-                    keyInputRef.current.value = "";
-                  }
-                  setHasSecretKey(false);
-                  setValidationError(null);
-                }}
-              >
-                <ArrowLeft size={14} /> Back
+            {hasAnyConnected ? (
+              <div className="og-primary-cta">
+                <button
+                  type="button"
+                  className="og-primary-cta__start"
+                  onClick={onSkip}
+                >
+                  Start using Fable
+                </button>
+                {onOpenConnectors ? (
+                  <button
+                    type="button"
+                    className="og-primary-cta__secondary"
+                    onClick={onOpenConnectors}
+                  >
+                    Set up workspace connectors (optional)
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <button type="button" className="og-skip button button--ghost" onClick={onSkip}>
+                Skip onboarding (preview) <ArrowRight size={14} />
               </button>
             )}
           </section>
@@ -490,97 +349,205 @@ export function OnboardingPage({
 }
 
 /**
- * A subscription/CLI provider row. It is never "one-click connectable" from
- * onboarding: unless the credential boundary already reports it connected and
- * capability-bearing, the action routes the user to real setup (the Connectors
- * page) rather than faking a connection.
+ * One provider row in the unified list. Renders the real auth-state badge and
+ * exactly one context-correct action. API-key providers expand an inline secure
+ * key field; provider-owned runtimes never show a key field.
  */
-function SubscriptionProviderRow({
+function ProviderRow({
   provider,
   connected,
+  expanded,
+  pending,
+  error,
+  keyInputRef,
+  onToggle,
+  onConnect,
   onOpenConnectors
 }: {
   provider: BackendProvider;
   connected: boolean;
+  expanded: boolean;
+  pending: boolean;
+  error?: string;
+  keyInputRef: React.RefObject<HTMLInputElement | null>;
+  onToggle: () => void;
+  onConnect: () => void;
   onOpenConnectors?: () => void;
 }) {
+  const kind = authKindForProvider(provider);
+  const view = stateViewFor(provider.authState);
   const capabilityLabels = providerCapabilityLabels(provider);
-  // Capability-bearing means the real runtime resolved real capabilities — i.e.
-  // it is genuinely connected, not just needs-auth/install-required preview state.
-  const capabilityBearing = capabilityLabels.length > 0;
-  const installRequired = provider.authState === "install-required";
+  const isApiKey = kind === "api-key";
+  // The key panel is only for API-key providers, and only meaningful when the
+  // provider is not already connected.
+  const canExpandKey = isApiKey && !connected;
 
-  return (
-    <article
-      className={`og-provider${connected ? " og-provider--connected" : ""}`}
-      data-provider-id={provider.id}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-        <span style={{ display: "grid", placeItems: "center", color: "var(--ink-muted)", flexShrink: 0 }}>
-          <ProviderIcon provider={provider.id} size={18} />
+  const kindLabel = isApiKey ? "API key" : "Provider sign-in";
+
+  const renderAction = () => {
+    if (connected) {
+      return (
+        <span className="og-provider__badge og-provider__badge--ready">
+          <CheckCircle size={13} weight="fill" /> Connected
         </span>
-        <div className="og-provider__lead">
-          <strong>{provider.label}</strong>
-          <small>{provider.description}</small>
-          {installRequired && provider.installHint ? (
-            <span className="og-provider__install" aria-label={`${provider.label} install required`}>
-              <WarningCircle size={13} /> {provider.installHint}
-            </span>
-          ) : null}
-          {capabilityLabels.length > 0 ? (
-            <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
-          ) : null}
-        </div>
-      </div>
-      {connected && capabilityBearing ? (
-        <span className="og-provider__connected-badge">
-          <CheckCircle size={14} weight="fill" color="var(--positive)" /> Connected
+      );
+    }
+    if (provider.authState === "connecting" || pending) {
+      return (
+        <span className="og-provider__badge og-provider__badge--info">
+          <Spinner className="og-spinner" size={13} /> Connecting
         </span>
-      ) : (
+      );
+    }
+    if (isApiKey) {
+      return (
         <button
           type="button"
-          onClick={() => onOpenConnectors?.()}
-          disabled={!onOpenConnectors}
-          title="Set up requires the provider's real runtime."
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={`og-key-panel-${provider.id}`}
         >
-          Set up in Connectors
+          {expanded ? "Cancel" : "Add API key"}
         </button>
-      )}
-    </article>
-  );
-}
-
-function NativeApiKeyRow({
-  provider,
-  connected,
-  onSetUp
-}: {
-  provider: BackendProvider;
-  connected: boolean;
-  onSetUp: () => void;
-}) {
-  const capabilityLabels = providerCapabilityLabels(provider);
+      );
+    }
+    // Provider-owned runtime: route to real setup, never a fake connect.
+    return (
+      <button
+        type="button"
+        onClick={() => onOpenConnectors?.()}
+        disabled={!onOpenConnectors}
+        title="Set up requires the provider's real runtime."
+      >
+        Set up
+      </button>
+    );
+  };
 
   return (
     <article
-      className={`og-provider${connected ? " og-provider--connected" : ""}`}
+      className={`og-provider${canExpandKey ? " og-provider--expandable" : ""} ${stateClassFor(provider.authState)}`}
       data-provider-id={provider.id}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-        <span style={{ display: "grid", placeItems: "center", color: "var(--ink-muted)", flexShrink: 0 }}>
-          <ProviderIcon provider={provider.id} size={18} />
-        </span>
-        <div className="og-provider__lead">
-          <strong>{provider.label}</strong>
-          <small>{provider.description}</small>
-          {capabilityLabels.length > 0 ? (
-            <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
+      <div className="og-provider__row">
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
+          <span
+            style={{
+              display: "grid",
+              placeItems: "center",
+              color: "var(--ink-muted)",
+              flexShrink: 0
+            }}
+          >
+            <ProviderIcon provider={provider.id} size={18} />
+          </span>
+          <div className="og-provider__lead">
+            <strong>{provider.label}</strong>
+            <small>{provider.description}</small>
+            <span className="og-provider__kind" aria-label={`${provider.label} ${kindLabel}`}>
+              {kindLabel}
+            </span>
+            {capabilityLabels.length > 0 ? (
+              <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
+            ) : null}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+          {/* Show the state badge only for non-default states, to keep the UI
+              plain. needs-auth is the default for unconnected API-key rows. The
+              accessible state label lives on the state-hint below (which carries
+              the provider-specific copy), so the badge stays decorative. */}
+          {provider.authState !== "needs-auth" && !connected ? (
+            <span
+              className={`og-provider__badge og-provider__badge--${view.tone}`}
+              aria-hidden="true"
+            >
+              {view.tone === "danger" || view.tone === "caution" ? (
+                <WarningCircle size={13} />
+              ) : null}
+              {view.label}
+            </span>
           ) : null}
+          {renderAction()}
         </div>
       </div>
-      <button type="button" onClick={onSetUp} disabled={connected}>
-        {connected ? "Connected" : "Set up"}
-      </button>
+
+      {/* State hint for non-ready states (plain explanation). For install-
+          required providers, the specific install hint (e.g. "Requires the
+          Cursor CLI") is more useful than the generic copy. */}
+      {!connected && provider.authState !== "needs-auth" ? (
+        <p
+          className={`og-provider__state-hint${
+            view.tone === "danger" ? " og-provider__state-hint--danger" : ""
+          }${view.tone === "caution" ? " og-provider__state-hint--caution" : ""}`}
+          aria-label={
+            provider.authState === "install-required"
+              ? `${provider.label} install required`
+              : undefined
+          }
+        >
+          {provider.authState === "install-required" && provider.installHint
+            ? provider.installHint
+            : view.hint}
+        </p>
+      ) : null}
+
+      {/* Inline error from a failed verification (kept visible until retry). */}
+      {error ? (
+        <p className="og-provider__state-hint og-provider__state-hint--danger" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {/* Expandable secure key panel — API-key providers only. */}
+      {canExpandKey && expanded ? (
+        <div className="og-provider__key-panel" id={`og-key-panel-${provider.id}`}>
+          <label>
+            <span>{provider.label} API key</span>
+            <input
+              ref={keyInputRef}
+              type="password"
+              aria-label={`API key for ${provider.label.toLowerCase()}`}
+              placeholder={`Enter your ${provider.label} API key`}
+              disabled={pending}
+              autoComplete="off"
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void onConnect();
+                }
+              }}
+            />
+          </label>
+          <div className="og-provider__key-actions">
+            <button
+              type="button"
+              onClick={onConnect}
+              disabled={pending}
+            >
+              {pending ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                  <Spinner className="og-spinner" size={14} /> Verifying…
+                </span>
+              ) : (
+                "Add key & connect"
+              )}
+            </button>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                color: "var(--ink-soft)",
+                fontSize: "var(--text-11)"
+              }}
+            >
+              <Key size={12} /> Stored in your device's secure storage
+            </span>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
