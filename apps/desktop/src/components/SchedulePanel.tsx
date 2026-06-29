@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 import { Clock, PencilSimple, Trash } from "@phosphor-icons/react";
 import { WEEKDAYS, type Schedule, type Weekday } from "../lib/types";
 import { formatScheduleWhen } from "../lib/helpers";
-import type { ScheduledJob, WorkflowRun } from "@fable/protocol";
+import type { ScheduledJob, SchedulerQueueEntry, WorkflowRun } from "@fable/protocol";
 
 /**
  * Schedules context panel: a create form (name / description / day + time)
@@ -23,7 +23,9 @@ export function SchedulePanel({
   onDelete,
   jobs = [],
   runs = [],
-  onRunNow
+  queue = [],
+  onRunNow,
+  onCancelRun
 }: {
   schedules: Schedule[];
   onCreate: (input: { name: string; description: string; day: Weekday; time: string }) => void;
@@ -32,7 +34,9 @@ export function SchedulePanel({
   onDelete: (schedule: Schedule) => void;
   jobs?: ScheduledJob[];
   runs?: WorkflowRun[];
+  queue?: SchedulerQueueEntry[];
   onRunNow?: (job: ScheduledJob) => void;
+  onCancelRun?: (runId: string) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -130,6 +134,14 @@ export function SchedulePanel({
               {(() => {
                 const job = jobs.find((candidate) => candidate.id === schedule.id);
                 const lastRun = runs.find((candidate) => candidate.id === job?.lastRunId);
+                // The most recent queue entry for this schedule (by scheduledAt
+                // descending) so the UI surfaces the live run state.
+                const scheduleEntries = queue
+                  .filter((entry) => entry.jobId === schedule.id)
+                  .sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt));
+                const activeEntry = scheduleEntries.find((entry) =>
+                  ["queued", "leased", "running", "blocked-auth"].includes(entry.state)
+                );
                 return (
                   <>
               <span className="schedule-row__icon" aria-hidden="true">
@@ -212,6 +224,24 @@ export function SchedulePanel({
                     <summary>Last result · {lastRun.status}</summary>
                     <p>{lastRun.failureReason ?? "Workflow completed."}</p>
                   </details>
+                ) : null}
+                {activeEntry ? (
+                  <span className={`schedule-row__state schedule-row__state--${activeEntry.state}`}>
+                    {activeEntry.state === "blocked-auth"
+                      ? "Blocked — waiting for backend to reconnect"
+                      : activeEntry.state === "running"
+                        ? "Running"
+                        : "Queued"}
+                    {onCancelRun && activeEntry.state !== "blocked-auth" ? (
+                      <button
+                        type="button"
+                        className="schedule-row__cancel"
+                        onClick={() => onCancelRun(activeEntry.runId)}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                  </span>
                 ) : null}
               </div>
               <div className="schedule-row__actions">

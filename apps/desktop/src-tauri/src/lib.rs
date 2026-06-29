@@ -53,15 +53,24 @@ pub fn run() {
                 .map_err(|_| "Fable could not resolve the app data folder.")?;
             store::initialize(&app_data)?;
             // Load the durable scheduler store once and manage it as process
-            // state. The in-process tick leases due entries; because Tauri is a
-            // single shared process, the lease map is the cross-window duplicate-
+            // state. The in-process tick leases due entries; because Tauri is
+            // a single shared process, the lease map is the cross-window duplicate-
             // execution guard (two windows can never lease the same occurrence).
+            // Any entry left leased/running by a prior crash is recovered here.
             let handle = app.handle().clone();
-            let store = scheduler::read_store(&paths::scheduler_store_path(&handle)?)
-                .unwrap_or_else(|_| scheduler::SchedulerState::empty());
-            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(Some(
-                store,
-            ))));
+            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(None)));
+            if let Err(error) = scheduler::initialize_store(&handle) {
+                // Fall back to an empty store so the app still starts; the error
+                // is surfaced via the read commands' own error paths.
+                eprintln!("scheduler initialize failed: {error}");
+                let mut guard = app
+                    .state::<scheduler::SchedulerState>()
+                    .inner()
+                    .0
+                    .lock()
+                    .expect("scheduler lock");
+                *guard = Some(scheduler::SchedulerState::empty());
+            }
 
             // In-process scheduler tick. Stops when the app exits. An
             // interrupted tick only ever leaves entries leased until their short
@@ -134,6 +143,9 @@ pub fn run() {
             scheduler::set_job_status,
             scheduler::enqueue_job_run,
             scheduler::report_job_attempt,
+            scheduler::renew_job_lease,
+            scheduler::requeue_blocked_job_run,
+            scheduler::cancel_job_run,
             workflows::save_workflow_run,
             workflows::save_workflow_definition,
             workflows::list_workflow_definitions,

@@ -24,7 +24,9 @@ import type {
   MemoryRecord,
   PermissionMode,
   RuntimeSnapshot,
+  ScheduledExecutionRoute,
   ScheduledJob,
+  SchedulerQueueEntry,
   ThreadSummary,
   WorkflowDefinition,
   WorkflowRun,
@@ -34,6 +36,7 @@ import type {
 import { assembleContext, chunkSourceText, retrieve } from "@fable/knowledge";
 import {
   FIRST_WAVE_CONNECTOR_IDS,
+  captureExecutionRoute,
   hasRunnableAdapter,
   importFixtureConnectorItem,
   importLocalTextFile,
@@ -82,11 +85,15 @@ import {
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
   listRuntimeSchedulerJobs,
+  listRuntimeSchedulerQueue,
   listRuntimeWorkflowRuns,
   listRuntimeWorkflowDefinitions,
   listenRuntimeSchedulerRunRequest,
   enqueueRuntimeJobRun,
   reportRuntimeJobAttempt,
+  renewRuntimeJobLease,
+  requeueRuntimeBlockedJobRun,
+  cancelRuntimeJobRun,
   saveRuntimeScheduledJob,
   saveRuntimeWorkflowDefinition,
   saveRuntimeWorkflowRun,
@@ -274,9 +281,21 @@ export interface ShellRuntime {
   scheduledJobs: ScheduledJob[];
   workflowRuns: WorkflowRun[];
   notificationHistory: NotificationRecord[];
-  pendingWorkflowRuns: Array<{ runId: string; jobId: string; prompt: string }>;
+  pendingWorkflowRuns: Array<{
+    runId: string;
+    jobId: string;
+    prompt: string;
+    leaseToken?: string;
+    execution?: ScheduledExecutionRoute;
+  }>;
   runScheduleNow: (job: ScheduledJob) => void;
   completeWorkflowRun: (runId: string, ok: boolean, result?: string) => void;
+  /** Cancel a queued/leased/running scheduled run. */
+  cancelScheduledRun: (runId: string) => void;
+  /** The durable scheduler queue (Rust authority), surfaced for the Schedules UI. */
+  schedulerQueue: SchedulerQueueEntry[];
+  /** Re-fetch the scheduler queue from Rust (poll on demand). */
+  refreshSchedulerQueue: () => void;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -369,8 +388,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([]);
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
   const [pendingWorkflowRuns, setPendingWorkflowRuns] = useState<
-    Array<{ runId: string; jobId: string; prompt: string }>
+    Array<{
+      runId: string;
+      jobId: string;
+      prompt: string;
+      leaseToken?: string;
+      execution?: ScheduledExecutionRoute;
+    }>
   >([]);
+  // The durable scheduler queue (Rust authority). Loaded on mount so the
+  // Schedules UI can surface queued/running/blocked-auth/cancelled states.
+  const [schedulerQueue, setSchedulerQueue] = useState<SchedulerQueueEntry[]>([]);
   const [notificationHistory, setNotificationHistory] = useState<NotificationRecord[]>(() => {
     try {
       return JSON.parse(window.localStorage.getItem("fable.notification-history.v1") ?? "[]");
@@ -567,10 +595,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     let active = true;
     void Promise.all([
       listRuntimeSchedulerJobs(),
+      listRuntimeSchedulerQueue(),
       listRuntimeWorkflowDefinitions(),
       listRuntimeWorkflowRuns()
-    ]).then(([jobs, definitions, runs]) => {
+    ]).then(([jobs, queue, definitions, runs]) => {
       if (!active) return;
+      if (queue) setSchedulerQueue(queue);
       if (jobs) {
         const now = new Date();
         const recoveredJobs = jobs.map((job) => {
@@ -629,7 +659,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     let active = true;
     let unlisten: (() => void) | null = null;
     void listenRuntimeSchedulerRunRequest((event) => {
-      if (active) queueWorkflowRun(event.jobId, event.runId);
+      if (active)
+        queueWorkflowRun(event.jobId, event.runId, {
+          leaseToken: event.leaseToken,
+          execution: event.execution
+        });
     }).then((dispose) => {
       unlisten = dispose;
     });
@@ -638,6 +672,28 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       void unlisten?.();
     };
   }, [scheduledJobs, workflowDefinitions]);
+
+  // Auto-requeue blocked-auth entries when a backend reconnects. The Rust tick
+  // parks runs whose backend was unavailable in `blocked-auth`; once a backend
+  // is connected again we requeue them so they retry without manual action.
+  useEffect(() => {
+    if (!connectedAgentBackend) return;
+    for (const entry of schedulerQueue) {
+      if (entry.state === "blocked-auth") {
+        void requeueRuntimeBlockedJobRun(entry.runId).then((requeued) => {
+          if (requeued) {
+            setSchedulerQueue((current) =>
+              current.map((candidate) =>
+                candidate.runId === entry.runId
+                  ? { ...candidate, state: "queued", availableAt: "", lastError: "" }
+                  : candidate
+              )
+            );
+          }
+        });
+      }
+    }
+  }, [connectedAgentBackend, schedulerQueue]);
 
   useEffect(() => {
     if (!runtimeSnapshotReady) {
@@ -1748,6 +1804,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
       }
     };
+    // Capture the frozen execution route at create time so a schedule never
+    // silently switches provider/model/permission. Pinned when a backend is
+    // connected; current-default (resolved live) otherwise.
+    const execution = captureExecutionRoute(
+      connectedAgentBackend,
+      resolvedSelectedModelId,
+      permissionMode
+    );
     const job: ScheduledJob = {
       id,
       schemaVersion: 1,
@@ -1760,6 +1824,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       nextRunAt: nextOccurrence(trigger, now)?.toISOString() ?? "",
       lastRunAt: "",
       lastRunId: "",
+      execution,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
     };
@@ -1882,7 +1947,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setLastAction(`Schedule deleted: ${schedule.name}`);
   };
 
-  function queueWorkflowRun(jobId: string, runId: string) {
+  function queueWorkflowRun(
+    jobId: string,
+    runId: string,
+    options: { leaseToken?: string; execution?: ScheduledExecutionRoute } = {}
+  ) {
     const job = scheduledJobs.find((candidate) => candidate.id === jobId);
     if (!job || job.status !== "active") return;
     const definition = workflowDefinitions.find(
@@ -1908,10 +1977,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       updatedAt: now
     };
     setWorkflowRuns((current) => [run, ...current.filter((entry) => entry.id !== runId)]);
+    // Prefer the lease-time execution route from the event; fall back to the
+    // job's captured route so the headless runner always has a route to resolve.
+    const execution = options.execution ?? job.execution;
     setPendingWorkflowRuns((current) =>
       current.some((entry) => entry.runId === runId)
         ? current
-        : [...current, { runId, jobId, prompt }]
+        : [...current, { runId, jobId, prompt, leaseToken: options.leaseToken, execution }]
     );
     void saveRuntimeWorkflowRun(run);
     void reportRuntimeJobAttempt(runId, {
@@ -2012,6 +2084,46 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     if (!notification.suppressed) void deliverRuntimeNotification(notification);
   };
 
+  /** Cancel a scheduled run from the Schedules UI (queued/leased/running). */
+  const cancelScheduledRun = (runId: string) => {
+    void cancelRuntimeJobRun(runId)
+      .then((cancelled) => {
+        if (cancelled) {
+          setSchedulerQueue((current) =>
+            current.map((entry) =>
+              entry.runId === runId ? { ...entry, state: "cancelled" as const } : entry
+            )
+          );
+          setPendingWorkflowRuns((current) => current.filter((run) => run.runId !== runId));
+          setWorkflowRuns((current) =>
+            current.map((run) =>
+              run.id === runId
+                ? {
+                    ...run,
+                    status: "cancelled",
+                    failureReason: "Cancelled.",
+                    finishedAt: new Date().toISOString()
+                  }
+                : run
+            )
+          );
+        }
+      })
+      .catch((error) => {
+        setLastAction(
+          error instanceof Error ? error.message : "Fable could not cancel that run."
+        );
+      });
+    setLastAction("Run cancellation requested.");
+  };
+
+  /** Refresh the scheduler queue from the Rust authority (poll on demand). */
+  const refreshSchedulerQueue = () => {
+    void listRuntimeSchedulerQueue().then((queue) => {
+      if (queue) setSchedulerQueue(queue);
+    });
+  };
+
   return {
     activeItem,
     setActiveItem,
@@ -2105,8 +2217,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     workflowRuns,
     notificationHistory,
     pendingWorkflowRuns,
+    schedulerQueue,
     runScheduleNow,
     completeWorkflowRun,
+    cancelScheduledRun,
+    refreshSchedulerQueue,
     backendProviders,
     connectedBackendIds,
     backendStatus,

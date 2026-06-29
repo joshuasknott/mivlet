@@ -30,6 +30,7 @@ import type {
   NotificationRecord,
   PersistedAgentRun,
   RuntimeSnapshot,
+  ScheduledExecutionRoute,
   ScheduledJob,
   ScheduledJobStatus,
   SchedulerQueueEntry,
@@ -855,13 +856,51 @@ export async function reportRuntimeJobAttempt(runId: string, attempt: JobAttempt
   }
 }
 
+/** Renew a running entry's lease (heartbeat). Rejects stale tokens in Rust. */
+export async function renewRuntimeJobLease(runId: string, leaseToken: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<boolean>("renew_job_lease", { runId, leaseToken });
+  } catch {
+    return null;
+  }
+}
+
+/** Re-queue a blocked-auth entry once its backend reconnected. */
+export async function requeueRuntimeBlockedJobRun(runId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<boolean>("requeue_blocked_job_run", { runId });
+  } catch {
+    return null;
+  }
+}
+
+/** Cancel a queued/leased/running entry from the Schedules UI. */
+export async function cancelRuntimeJobRun(runId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<boolean>("cancel_job_run", { runId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 /**
  * Listen for the Rust tick's run-request events (a due occurrence was leased).
- * The TS scheduler driver starts a workflow run in response. Returns an
- * unlisten function (or null outside Tauri).
+ * The TS scheduler driver starts a workflow run in response. The payload now
+ * carries a fencing `leaseToken` and the frozen `execution` route so the
+ * headless runner can resolve the backend/model without a job lookup. Returns
+ * an unlisten function (or null outside Tauri).
  */
 export async function listenRuntimeSchedulerRunRequest(
-  onRun: (event: { jobId: string; runId: string; scheduledAt: string }) => void
+  onRun: (event: {
+    jobId: string;
+    runId: string;
+    scheduledAt: string;
+    leaseToken?: string;
+    execution?: ScheduledExecutionRoute;
+  }) => void
 ) {
   if (!hasTauriRuntime()) return null;
   try {
@@ -869,6 +908,8 @@ export async function listenRuntimeSchedulerRunRequest(
       jobId: string;
       runId: string;
       scheduledAt: string;
+      leaseToken?: string;
+      execution?: ScheduledExecutionRoute;
     }>("fable://scheduler/run-request", (event) => onRun(event.payload));
     return unlisten;
   } catch {

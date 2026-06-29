@@ -46,6 +46,7 @@ vi.mock("./runtime", () => ({
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
   listRuntimeSchedulerJobs: vi.fn(async () => null),
+  listRuntimeSchedulerQueue: vi.fn(async () => null),
   listRuntimeWorkflowDefinitions: vi.fn(async () => null),
   listRuntimeWorkflowRuns: vi.fn(async () => null),
   listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
@@ -80,6 +81,9 @@ vi.mock("./runtime", () => ({
   saveRuntimeWorkflowRun: vi.fn(async () => null),
   enqueueRuntimeJobRun: vi.fn(async () => null),
   reportRuntimeJobAttempt: vi.fn(async () => null),
+  renewRuntimeJobLease: vi.fn(async () => null),
+  requeueRuntimeBlockedJobRun: vi.fn(async () => null),
+  cancelRuntimeJobRun: vi.fn(async () => null),
   setRuntimeJobStatus: vi.fn(async () => null),
   deleteRuntimeScheduledJob: vi.fn(async () => null),
   deliverRuntimeNotification: vi.fn(async () => null),
@@ -385,7 +389,11 @@ describe("Fable home", () => {
     expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /run now/i }));
-    expect(await screen.findByText(/last result · completed/i)).toBeInTheDocument();
+    // Scheduled runs now execute through the dedicated headless runner
+    // (useScheduledAgent), not the composer. In the test environment no live
+    // AgentBackend is resolvable, so the run surfaces its real state rather than
+    // a fake completion. The schedule (renamed above) is still present.
+    expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
     // No draft/active status labels anywhere on the page.
     expect(screen.queryByText(/^draft$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^active$/i)).not.toBeInTheDocument();

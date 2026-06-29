@@ -10,8 +10,19 @@
 //!   - A lease is held by exactly one instance until its short deadline; an
 //!     interrupted tick only ever leaves entries leased until expiry, after
 //!     which the next tick re-queues them (crash-safe).
+//!   - Each lease carries a fencing `lease_token`. `renew_job_lease` and
+//!     `report_job_attempt` reject calls whose token does not match, so a stale
+//!     response from a crashed run cannot mutate a freshly re-leased occurrence.
+//!   - Transient failures set `available_at` (exponential backoff); the tick
+//!     will not re-lease an entry before that time. After `SCHEDULER_MAX_RETRIES`
+//!     a failed entry becomes `dead`.
+//!   - `blocked-auth` entries (provider unavailable / auth expired) are parked
+//!     until `requeue_blocked_job_run` re-queues them on reconnect.
 //!   - Missed occurrences and next-run math live in the TypeScript layer
 //!     (`@fable/connectors/scheduler`); Rust owns durability + the lease lock.
+//!
+//! SECRET INVARIANT: the execution route stored on jobs/entries carries only
+//! provider/model ids + permission mode — never keys, tokens, or credentials.
 
 use std::{
     fs,
@@ -24,8 +35,9 @@ use std::{
 use std::path::PathBuf;
 
 use crate::models::{
-    JobAttempt, ScheduledJob, SchedulerQueueEntry, SchedulerStore, JOB_ATTEMPT_STATUSES,
-    MAX_JOB_ATTEMPTS, MAX_SCHEDULED_JOBS, MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES,
+    JobAttempt, ScheduledExecutionRoute, ScheduledJob, SchedulerQueueEntry, SchedulerStore,
+    JOB_ATTEMPT_STATUSES, MAX_JOB_ATTEMPTS, MAX_OCCURRENCE_LEDGER, MAX_SCHEDULED_JOBS,
+    MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES, RUNNING_LEASE_MS, RETRY_BASE_MS,
     SCHEDULED_JOB_STATUSES, SCHEDULER_LEASE_MS, SCHEDULER_STORE_VERSION,
 };
 use crate::paths::{normalize_spaces, scheduler_store_path, truncate_characters};
@@ -57,6 +69,7 @@ fn empty_store(instance_id: &str) -> SchedulerStore {
         queue: Vec::new(),
         instance_id: instance_id.to_string(),
         updated_at: now_iso(),
+        occurrence_ledger: Vec::new(),
     }
 }
 
@@ -72,6 +85,13 @@ fn now_epoch_ms() -> i64 {
 
 fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+/// ISO timestamp for the given epoch milliseconds.
+fn iso_from_ms(ms: i64) -> String {
+    DateTime::from_timestamp_millis(ms)
+        .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
+        .unwrap_or_default()
 }
 
 /// Parse the canonical RFC 3339 wire timestamp. Numeric epoch milliseconds are
@@ -95,6 +115,31 @@ fn canonical_timestamp(value: &str) -> Result<String, String> {
         .to_rfc3339_opts(SecondsFormat::Millis, true))
 }
 
+/// A fresh opaque fencing token. Embedded in run-request events and checked on
+/// renew/report so a stale call from a crashed run is rejected.
+fn fresh_lease_token() -> String {
+    // Process-unique enough for fencing: instance id + epoch + nanos. Not a
+    // secret — its only job is to prove the caller held the current lease.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("lease-{nanos:x}")
+}
+
+fn normalize_route(route: ScheduledExecutionRoute) -> Result<ScheduledExecutionRoute, String> {
+    let policy = normalize_spaces(&route.policy);
+    if !matches!(policy.as_str(), "pinned" | "current-default") {
+        return Err("Execution route policy must be \"pinned\" or \"current-default\".".to_string());
+    }
+    Ok(ScheduledExecutionRoute {
+        policy,
+        backend_id: truncate_characters(&normalize_spaces(&route.backend_id), 160),
+        model_id: truncate_characters(&normalize_spaces(&route.model_id), 160),
+        permission_mode: normalize_spaces(&route.permission_mode),
+    })
+}
+
 fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
     job.id = truncate_characters(&normalize_spaces(&job.id), 160);
     job.name = truncate_characters(&normalize_spaces(&job.name), 200);
@@ -106,6 +151,9 @@ fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
     job.next_run_at = normalize_spaces(&job.next_run_at);
     job.last_run_at = normalize_spaces(&job.last_run_at);
     job.last_run_id = truncate_characters(&normalize_spaces(&job.last_run_id), 160);
+    if let Some(route) = job.execution.take() {
+        job.execution = Some(normalize_route(route)?);
+    }
 
     if job.id.is_empty() || job.name.is_empty() || job.workflow_definition_id.is_empty() {
         return Err("Scheduled job needs id, name, and workflow id.".to_string());
@@ -135,6 +183,14 @@ fn normalize_attempt(mut attempt: JobAttempt) -> Result<JobAttempt, String> {
     attempt.run_id = truncate_characters(&normalize_spaces(&attempt.run_id), 160);
     attempt.status = normalize_spaces(&attempt.status).to_ascii_lowercase();
     attempt.started_at = normalize_spaces(&attempt.started_at);
+    if let Some(token) = attempt.lease_token.take() {
+        attempt.lease_token = Some(normalize_spaces(&token));
+    }
+    if let Some(error) = attempt.error.take() {
+        // Errors are persisted; cap them and strip nothing else here (no secrets
+        // should ever reach this path — adapters classify auth as a code).
+        attempt.error = Some(truncate_characters(&normalize_spaces(&error), 500));
+    }
     if attempt.run_id.is_empty() || attempt.started_at.is_empty() {
         return Err("Job attempt needs runId and startedAt.".to_string());
     }
@@ -192,14 +248,33 @@ fn persist<F: FnOnce(&mut SchedulerStore)>(app: &AppHandle, mutate: F) -> Result
 
 /// Emit a run-request event so the TS scheduler driver picks up a due job.
 fn emit_run_request(app: &AppHandle, entry: &SchedulerQueueEntry) {
+    let execution = entry.execution.as_ref().map(|route| {
+        serde_json::json!({
+            "policy": route.policy,
+            "backendId": route.backend_id,
+            "modelId": route.model_id,
+            "permissionMode": route.permission_mode,
+        })
+    });
     let _ = app.emit(
         "fable://scheduler/run-request",
         serde_json::json!({
             "jobId": entry.job_id,
             "runId": entry.run_id,
             "scheduledAt": entry.scheduled_at,
+            "leaseToken": entry.lease_token,
+            "execution": execution,
         }),
     );
+}
+
+/// The number of failed attempts (excluding the in-flight one) for an entry.
+fn failed_count(entry: &SchedulerQueueEntry) -> u32 {
+    entry
+        .attempts
+        .iter()
+        .filter(|a| a.status == "failed")
+        .count() as u32
 }
 
 #[tauri::command]
@@ -256,7 +331,7 @@ pub fn set_job_status(app: AppHandle, job_id: String, status: String) -> Result<
 }
 
 /// Enqueue a run for a job occurrence. Deduplicates by (jobId, scheduledAt); a
-/// duplicate enqueue is a no-op that returns an error so the caller knows.
+/// duplicate enqueue (in-queue OR in the occurrence ledger) is a no-op error.
 #[tauri::command]
 pub fn enqueue_job_run(
     app: AppHandle,
@@ -276,6 +351,14 @@ pub fn enqueue_job_run(
         if store.queue.iter().any(|e| e.deduplication_key == key) {
             return;
         }
+        if store.occurrence_ledger.iter().any(|seen| seen == &key) {
+            return;
+        }
+        let execution = store
+            .jobs
+            .iter()
+            .find(|job| job.id == job_id)
+            .and_then(|job| job.execution.clone());
         let entry = SchedulerQueueEntry {
             job_id: job_id.clone(),
             run_id: run_id.clone(),
@@ -285,6 +368,10 @@ pub fn enqueue_job_run(
             lease_expires_at: String::new(),
             attempts: Vec::new(),
             deduplication_key: key.clone(),
+            lease_token: String::new(),
+            available_at: String::new(),
+            last_error: String::new(),
+            execution,
         };
         created = Some(entry.clone());
         store.queue.push(entry);
@@ -295,7 +382,9 @@ pub fn enqueue_job_run(
 
 /// Report an attempt outcome for a queued/leased run. Updates the attempt
 /// history and advances the entry state (done on success/cancel, dead after
-/// max retries on failure).
+/// max retries on failure, blocked-auth parked until requeue). The optional
+/// `lease_token` is a fencing token: when present and non-empty it must match
+/// the entry's current lease, else the call is rejected as stale.
 #[tauri::command]
 pub fn report_job_attempt(
     app: AppHandle,
@@ -305,10 +394,20 @@ pub fn report_job_attempt(
     let attempt = normalize_attempt(attempt)?;
     let run_id = normalize_spaces(&run_id);
     let max_retries = crate::models::SCHEDULER_MAX_RETRIES;
+    let mut remembered: Option<String> = None;
     persist(&app, |store| {
         for entry in &mut store.queue {
             if entry.run_id != run_id {
                 continue;
+            }
+            // Fencing: a non-empty token on the attempt must match the entry.
+            if let Some(token) = attempt.lease_token.as_ref() {
+                if !token.is_empty() && !entry.lease_token.is_empty() && token != &entry.lease_token
+                {
+                    // Stale report from a superseded run: ignore it rather than
+                    // mutating the freshly re-leased occurrence.
+                    continue;
+                }
             }
             let status = attempt.status.clone();
             entry.attempts.push(attempt.clone());
@@ -316,34 +415,186 @@ pub fn report_job_attempt(
                 let drop = entry.attempts.len() - MAX_JOB_ATTEMPTS;
                 entry.attempts.drain(0..drop);
             }
-            if status == "succeeded" || status == "cancelled" {
+            entry.last_error = attempt.error.clone().unwrap_or_default();
+            if status == "succeeded" {
                 entry.state = "done".to_string();
+            } else if status == "cancelled" {
+                entry.state = "cancelled".to_string();
+            } else if status == "blocked-auth" {
+                entry.state = "blocked-auth".to_string();
             } else if status == "failed" {
-                let fails = entry
-                    .attempts
-                    .iter()
-                    .filter(|a| a.status == "failed")
-                    .count() as u32;
-                entry.state = if fails > max_retries {
-                    "dead".to_string()
+                let fails = failed_count(entry);
+                if fails > max_retries {
+                    entry.state = "dead".to_string();
                 } else {
-                    "queued".to_string()
-                };
+                    // Transient: re-queue with exponential backoff.
+                    entry.state = "queued".to_string();
+                    let backoff = RETRY_BASE_MS.saturating_mul(1_i64 << (fails.saturating_sub(1)));
+                    entry.available_at = iso_from_ms(now_epoch_ms() + backoff);
+                }
             } else if status == "running" {
                 // Acknowledgement: keep the entry leased but extend it so the
                 // five-second tick cannot start a duplicate while the workflow
                 // is active. A crashed process eventually recovers the lease.
                 entry.state = "leased".to_string();
-                entry.lease_expires_at =
-                    DateTime::from_timestamp_millis(now_epoch_ms() + 15 * 60 * 1_000)
-                        .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
-                        .unwrap_or_default();
+                entry.lease_expires_at = iso_from_ms(now_epoch_ms() + RUNNING_LEASE_MS);
                 continue;
             }
             entry.lease_holder.clear();
             entry.lease_expires_at.clear();
+            entry.lease_token.clear();
+            if entry.state == "done" || entry.state == "cancelled" || entry.state == "dead" {
+                remembered = Some(entry.deduplication_key.clone());
+            }
+        }
+        if let Some(key) = remembered.take() {
+            remember_occurrence(store, &key);
         }
     })
+}
+
+/// Record an occurrence in the bounded ledger so it can never be re-queued.
+fn remember_occurrence(store: &mut SchedulerStore, key: &str) {
+    if store.occurrence_ledger.iter().any(|seen| seen == key) {
+        return;
+    }
+    store.occurrence_ledger.insert(0, key.to_string());
+    if store.occurrence_ledger.len() > MAX_OCCURRENCE_LEDGER {
+        let drop = store.occurrence_ledger.len() - MAX_OCCURRENCE_LEDGER;
+        store.occurrence_ledger.truncate(store.occurrence_ledger.len() - drop);
+    }
+}
+
+/// Renew the lease on a running entry. Rejects stale callers via the fencing
+/// token. Used by the headless runner's heartbeat so a long run is not
+/// re-queued by the tick while it is still active.
+#[tauri::command]
+pub fn renew_job_lease(
+    app: AppHandle,
+    run_id: String,
+    lease_token: String,
+) -> Result<bool, String> {
+    let run_id = normalize_spaces(&run_id);
+    let lease_token = normalize_spaces(&lease_token);
+    let mut renewed = false;
+    persist(&app, |store| {
+        for entry in &mut store.queue {
+            if entry.run_id != run_id {
+                continue;
+            }
+            // Fencing: the caller's token must match the entry's current lease.
+            if !entry.lease_token.is_empty() && !lease_token.is_empty() && entry.lease_token != lease_token
+            {
+                continue;
+            }
+            entry.lease_expires_at = iso_from_ms(now_epoch_ms() + RUNNING_LEASE_MS);
+            renewed = true;
+        }
+    })?;
+    Ok(renewed)
+}
+
+/// Re-queue a `blocked-auth` entry once its backend is connected again. No-op
+/// (returns false) for entries that are not blocked.
+#[tauri::command]
+pub fn requeue_blocked_job_run(app: AppHandle, run_id: String) -> Result<bool, String> {
+    let run_id = normalize_spaces(&run_id);
+    let mut requeued = false;
+    persist(&app, |store| {
+        for entry in &mut store.queue {
+            if entry.run_id == run_id && entry.state == "blocked-auth" {
+                entry.state = "queued".to_string();
+                entry.available_at = String::new();
+                entry.last_error = String::new();
+                requeued = true;
+            }
+        }
+    })?;
+    Ok(requeued)
+}
+
+/// Cancel a queued/leased/running entry. Records a cancelled attempt and
+/// transitions the entry to `cancelled`. Used by the Schedules UI.
+#[tauri::command]
+pub fn cancel_job_run(app: AppHandle, run_id: String) -> Result<bool, String> {
+    let run_id = normalize_spaces(&run_id);
+    let now = now_iso();
+    let mut cancelled = false;
+    let mut remembered: Option<String> = None;
+    persist(&app, |store| {
+        for entry in &mut store.queue {
+            if entry.run_id != run_id {
+                continue;
+            }
+            if entry.state == "done" || entry.state == "dead" || entry.state == "cancelled" {
+                continue;
+            }
+            entry.attempts.push(JobAttempt {
+                run_id: entry.run_id.clone(),
+                status: "cancelled".to_string(),
+                attempt_number: entry.attempts.len() as u32 + 1,
+                started_at: now.clone(),
+                finished_at: Some(now.clone()),
+                error: None,
+                retryable: Some(false),
+                lease_token: None,
+            });
+            if entry.attempts.len() > MAX_JOB_ATTEMPTS {
+                let drop = entry.attempts.len() - MAX_JOB_ATTEMPTS;
+                entry.attempts.drain(0..drop);
+            }
+            entry.state = "cancelled".to_string();
+            entry.lease_holder.clear();
+            entry.lease_expires_at.clear();
+            entry.lease_token.clear();
+            remembered = Some(entry.deduplication_key.clone());
+            cancelled = true;
+        }
+        if let Some(key) = remembered.take() {
+            remember_occurrence(store, &key);
+        }
+    })?;
+    Ok(cancelled)
+}
+
+/// Reconcile the store on startup: any entry left `leased` or `running` by a
+/// crashed process is re-queued (its lease is stale). Called once at setup.
+pub fn recover_store_at(store: &mut SchedulerStore) {
+    for entry in &mut store.queue {
+        if entry.state == "leased" || entry.state == "running" {
+            entry.state = "queued".to_string();
+            entry.lease_holder.clear();
+            entry.lease_expires_at.clear();
+            entry.lease_token.clear();
+        }
+    }
+}
+
+/// Initialize the scheduler store into managed state: read it, recover any
+/// stale leases from a prior crash, and persist the recovered state. Called at
+/// app setup.
+pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
+    let path = scheduler_store_path(app)?;
+    let mut store = read_store(&path)?;
+    let mut changed = false;
+    for entry in &store.queue {
+        if entry.state == "leased" || entry.state == "running" {
+            changed = true;
+        }
+    }
+    if changed {
+        recover_store_at(&mut store);
+        store.updated_at = now_iso();
+        write_store(&path, &store)?;
+    }
+    with_state(app, |mutex| {
+        let mut guard = mutex
+            .lock()
+            .map_err(|_| "Scheduler lock poisoned.".to_string())?;
+        *guard = Some(store);
+        Ok::<(), String>(())
+    })?;
+    Ok(())
 }
 
 /// The scheduler tick: expire stale leases, then lease due queued entries owned
@@ -371,22 +622,30 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
             if !entry.lease_holder.is_empty() && parse_ms(&entry.lease_expires_at) <= now_ms {
                 entry.lease_holder.clear();
                 entry.lease_expires_at.clear();
-                if entry.state == "leased" {
+                entry.lease_token.clear();
+                if entry.state == "leased" || entry.state == "running" {
                     entry.state = "queued".to_string();
                 }
             }
         }
-        // 2. Lease due queued entries (scheduled-at <= now), owned by this instance.
+        // 2. Lease due queued entries (scheduled-at <= now AND backoff elapsed),
+        //    owned by this instance.
         for entry in &mut store.queue {
-            if entry.state == "queued" && parse_ms(&entry.scheduled_at) <= now_ms {
-                entry.state = "leased".to_string();
-                entry.lease_holder = instance.clone();
-                entry.lease_expires_at =
-                    DateTime::from_timestamp_millis(now_ms + SCHEDULER_LEASE_MS)
-                        .map(|value| value.to_rfc3339_opts(SecondsFormat::Millis, true))
-                        .unwrap_or_default();
-                newly_leased.push(entry.clone());
+            if entry.state != "queued" {
+                continue;
             }
+            if parse_ms(&entry.scheduled_at) > now_ms {
+                continue;
+            }
+            // Honor retry backoff: do not lease before `available_at`.
+            if !entry.available_at.is_empty() && parse_ms(&entry.available_at) > now_ms {
+                continue;
+            }
+            entry.state = "leased".to_string();
+            entry.lease_holder = instance.clone();
+            entry.lease_expires_at = iso_from_ms(now_ms + SCHEDULER_LEASE_MS);
+            entry.lease_token = fresh_lease_token();
+            newly_leased.push(entry.clone());
         }
     })?;
 
@@ -432,6 +691,24 @@ mod tests {
             last_run_id: String::new(),
             created_at: "0".to_string(),
             updated_at: "0".to_string(),
+            execution: None,
+        }
+    }
+
+    fn sample_entry(id: &str, state: &str) -> SchedulerQueueEntry {
+        SchedulerQueueEntry {
+            job_id: id.to_string(),
+            run_id: format!("run-{id}"),
+            scheduled_at: "1970-01-01T00:00:00.000Z".to_string(),
+            state: state.to_string(),
+            lease_holder: String::new(),
+            lease_expires_at: String::new(),
+            attempts: Vec::new(),
+            deduplication_key: format!("{id}:1970-01-01T00:00:00.000Z"),
+            lease_token: String::new(),
+            available_at: String::new(),
+            last_error: String::new(),
+            execution: None,
         }
     }
 
@@ -443,6 +720,28 @@ mod tests {
         let read = read_store(&p).unwrap();
         assert_eq!(read.jobs.len(), 0);
         assert_eq!(read.schema_version, SCHEDULER_STORE_VERSION);
+        assert!(read.occurrence_ledger.is_empty());
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn store_round_trips_with_occurrence_ledger_and_execution() {
+        let p = tmp_path();
+        let mut store = empty_store("inst");
+        let mut job = sample_job("j", "active");
+        job.execution = Some(ScheduledExecutionRoute {
+            policy: "pinned".to_string(),
+            backend_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
+            permission_mode: "read-only".to_string(),
+        });
+        store.jobs.push(job);
+        store.occurrence_ledger.push("j:1970-01-01T00:00:00.000Z".to_string());
+        write_store(&p, &store).unwrap();
+        let read = read_store(&p).unwrap();
+        assert_eq!(read.occurrence_ledger.len(), 1);
+        let route = read.jobs[0].execution.as_ref().expect("execution present");
+        assert_eq!(route.backend_id, "openai");
         let _ = fs::remove_file(&p);
     }
 
@@ -468,6 +767,18 @@ mod tests {
     }
 
     #[test]
+    fn normalize_rejects_bad_route_policy() {
+        let mut job = sample_job("j", "active");
+        job.execution = Some(ScheduledExecutionRoute {
+            policy: "loose".to_string(),
+            backend_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
+            permission_mode: "read-only".to_string(),
+        });
+        assert!(normalize_job(job).is_err());
+    }
+
+    #[test]
     fn normalize_accepts_a_valid_job() {
         let job = sample_job("j", "active");
         assert!(normalize_job(job).is_ok());
@@ -482,5 +793,98 @@ mod tests {
         assert!(canonical_timestamp("2026-06-28T09:30:00+01:00")
             .unwrap()
             .ends_with('Z'));
+    }
+
+    #[test]
+    fn fresh_lease_token_is_unique() {
+        let a = fresh_lease_token();
+        let b = fresh_lease_token();
+        assert!(!a.is_empty());
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn recover_store_requeues_stale_leases() {
+        let mut store = empty_store("inst");
+        store.queue.push(sample_entry("a", "leased"));
+        store.queue.push(sample_entry("b", "running"));
+        store.queue.push(sample_entry("c", "queued"));
+        recover_store_at(&mut store);
+        assert_eq!(store.queue[0].state, "queued");
+        assert_eq!(store.queue[0].lease_token, "");
+        assert_eq!(store.queue[1].state, "queued");
+        assert_eq!(store.queue[1].lease_token, "");
+        assert_eq!(store.queue[2].state, "queued");
+    }
+
+    #[test]
+    fn remember_occurrence_is_deduplicating_and_bounded() {
+        let mut store = empty_store("inst");
+        for _ in 0..(MAX_OCCURRENCE_LEDGER + 50) {
+            remember_occurrence(&mut store, "k");
+        }
+        assert_eq!(store.occurrence_ledger.len(), 1);
+        for i in 0..(MAX_OCCURRENCE_LEDGER + 10) {
+            remember_occurrence(&mut store, &format!("k{i}"));
+        }
+        assert!(store.occurrence_ledger.len() <= MAX_OCCURRENCE_LEDGER);
+    }
+
+    /// Pure helper: apply a normalized attempt to an entry, mirroring the
+    /// command's transition logic. Keeps the test free of Tauri state.
+    fn apply_attempt(entry: &mut SchedulerQueueEntry, status: &str) {
+        let max_retries = crate::models::SCHEDULER_MAX_RETRIES;
+        entry.attempts.push(JobAttempt {
+            run_id: entry.run_id.clone(),
+            status: status.to_string(),
+            attempt_number: entry.attempts.len() as u32 + 1,
+            started_at: "1970-01-01T00:00:00.000Z".to_string(),
+            finished_at: Some("1970-01-01T00:00:00.000Z".to_string()),
+            error: None,
+            retryable: None,
+            lease_token: None,
+        });
+        match status {
+            "succeeded" => entry.state = "done".to_string(),
+            "cancelled" => entry.state = "cancelled".to_string(),
+            "blocked-auth" => entry.state = "blocked-auth".to_string(),
+            "failed" => {
+                let fails = entry.attempts.iter().filter(|a| a.status == "failed").count() as u32;
+                if fails > max_retries {
+                    entry.state = "dead".to_string();
+                } else {
+                    entry.state = "queued".to_string();
+                }
+            }
+            "running" => {
+                entry.state = "leased".to_string();
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn failed_attempts_dead_after_max_retries() {
+        let mut entry = sample_entry("a", "leased");
+        apply_attempt(&mut entry, "failed");
+        assert_eq!(entry.state, "queued"); // 1 fail <= 2
+        apply_attempt(&mut entry, "failed");
+        assert_eq!(entry.state, "queued"); // 2 fails <= 2
+        apply_attempt(&mut entry, "failed");
+        assert_eq!(entry.state, "dead"); // 3 fails > 2
+    }
+
+    #[test]
+    fn blocked_auth_parks_until_requeue() {
+        let mut entry = sample_entry("a", "leased");
+        apply_attempt(&mut entry, "blocked-auth");
+        assert_eq!(entry.state, "blocked-auth");
+    }
+
+    #[test]
+    fn cancel_transitions_to_cancelled() {
+        let mut entry = sample_entry("a", "leased");
+        apply_attempt(&mut entry, "cancelled");
+        assert_eq!(entry.state, "cancelled");
     }
 }

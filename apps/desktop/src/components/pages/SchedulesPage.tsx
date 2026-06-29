@@ -5,8 +5,10 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
 /**
  * Standalone Schedules page. Hosts the create form and the list of saved
- * schedules. Schedules persist locally as definitions; no background scheduler
- * or automatic execution path exists yet.
+ * schedules. Schedules persist locally and execute through the local
+ * AgentBackend runtime while the desktop app is open; no hosted runner is
+ * configured. Queue states (queued, running, blocked-auth, cancelled) are
+ * surfaced so the user can see and cancel live runs.
  */
 export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
   return (
@@ -24,7 +26,9 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         onDelete={runtime.deleteSchedule}
         jobs={runtime.scheduledJobs}
         runs={runtime.workflowRuns}
+        queue={runtime.schedulerQueue}
         onRunNow={runtime.runScheduleNow}
+        onCancelRun={runtime.cancelScheduledRun}
       />
       {runtime.notificationHistory.length > 0 ? (
         <details className="notification-history">

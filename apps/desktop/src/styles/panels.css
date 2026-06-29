@@ -926,6 +926,39 @@
   line-height: 1.45;
 }
 
+.schedule-row__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--text-12);
+  background: var(--surface-muted, rgba(0, 0, 0, 0.05));
+  color: var(--ink-muted);
+}
+
+.schedule-row__state--running {
+  color: var(--success, #2f855a);
+}
+
+.schedule-row__state--blocked-auth {
+  color: var(--warning, #975a16);
+}
+
+.schedule-row__cancel {
+  padding: 0 6px;
+  font-size: var(--text-12);
+  color: var(--destructive);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.schedule-row__cancel:hover {
+  text-decoration: underline;
+}
+
 .schedule-row__actions {
   display: inline-flex;
   align-items: center;
