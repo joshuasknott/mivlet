@@ -29,8 +29,10 @@ runtime already enforces this by failing closed — see the "Fail-closed
 configuration" section.
 
 The core desktop workspace does **not** require the broker. Local files, memory,
-approvals, the runtime snapshot, the native API-key agent loop, and Google
-public-client (PKCE) connectors remain fully usable without any hosted service.
+approvals, the runtime snapshot, and the native API-key agent loop remain fully
+usable without any hosted service. Google Drive, Gmail, and Calendar now use the
+same hosted broker lifecycle as the other OAuth connectors and fail closed when
+the broker or Google Cloud client configuration is missing.
 
 ## Purpose and scope
 
@@ -100,14 +102,11 @@ These guarantees hold whether or not a broker is deployed:
 - **API-key agent providers** (openai, anthropic, gemini, xai, openrouter) store
   their key in OS secure storage and call the provider directly. No broker
   dependency.
-- **Google connectors** (Drive, Gmail, Calendar) are public PKCE clients. The
-  desktop binds a loopback redirect, performs the code exchange directly with
-  Google, and stores tokens in OS secure storage. No broker dependency.
 - **Local Files, memory, approvals, and the runtime snapshot** are entirely
   local and have no external auth.
 
-The broker is required only by the confidential-client connectors: **github,
-vercel, notion, slack, linear**. This set is pinned in code
+The broker is required only by OAuth connectors: **github, vercel, notion,
+slack, linear, google-drive, gmail, google-calendar**. This set is pinned in code
 (`BROKER_REQUIRED_CONNECTOR_IDS`) and verified by tests.
 
 ## Cloudflare Workers target setup
@@ -255,8 +254,8 @@ The fail-closed and non-proxying boundaries are covered by tests in
 - `broker_resolver_accepts_https_and_derives_only_oauth_paths`
 - `broker_resolver_accepts_a_loopback_url_for_local_development`
 - `broker_resolver_derives_no_model_search_import_or_action_endpoint`
-- `only_confidential_connectors_require_the_auth_broker`
-- `google_connectors_are_public_pkce_and_broker_free`
+- `only_oauth_connectors_require_the_auth_broker`
+- `google_connectors_are_broker_gated`
 - `broker_resolver_fail_closed_keeps_core_workspace_usable`
 
 ## Deployment prerequisites (future)
@@ -267,9 +266,8 @@ When the broker is built, it must, at minimum:
    provider's confidential-client flow.
 2. Store client secrets and signing material in its own server-side secret store
    (never in repo config, never shipped to the desktop).
-3. Return the final authorization code and state to the exact desktop redirect
-   URI it was given — it must not mint its own tokens or hold long-lived
-   desktop-scoped sessions.
+3. Return only a short-lived handoff ticket and state to the exact desktop
+   redirect URI it was given. Long-lived desktop-scoped sessions are forbidden.
 4. Be deployed behind HTTPS with registered callback URLs in each provider
    console.
 5. Undergo independent security review before confidential-client providers are

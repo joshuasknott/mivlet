@@ -5,6 +5,12 @@ import {
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
+import {
+  googleConfigurationMessage,
+  googleConnectorPermissions,
+  googleScopeDescriptions,
+  googleScopeIds
+} from "./google-shared";
 
 export const GOOGLE_CALENDAR_CAPABILITIES = [
   { id: "calendar.list", kind: "read", consequential: false, description: "List accessible calendars." },
@@ -14,6 +20,11 @@ export const GOOGLE_CALENDAR_CAPABILITIES = [
   { id: "google-calendar.cancel-event", kind: "write", consequential: true, description: "Cancel an approved event." },
   { id: "google-calendar.delete-event", kind: "write", consequential: true, description: "Delete an approved event." }
 ] satisfies ConnectorCapability[];
+
+export const GOOGLE_CALENDAR_OAUTH_SCOPES = googleScopeIds("google-calendar");
+export const GOOGLE_CALENDAR_SCOPE_DESCRIPTIONS = googleScopeDescriptions("google-calendar");
+export const GOOGLE_CALENDAR_PERMISSIONS = googleConnectorPermissions("google-calendar");
+export const GOOGLE_CALENDAR_SETUP_MESSAGE = googleConfigurationMessage("google-calendar");
 
 export interface GoogleCalendarPayload {
   id: string;

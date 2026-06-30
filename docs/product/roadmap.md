@@ -23,7 +23,7 @@
 - Done: Local files connector imports selected text/Markdown/JSON/CSV/YAML through the Rust runtime with browser fallback tests.
 - Done: first-wave GitHub, Vercel, Google Drive, Notion, Gmail, Slack, Google Calendar, and Linear protocol/catalog and pure fixture adapters.
 - Done: connector status, health, scopes, search/import, and approval-gated action command boundaries fail closed when secure configuration is absent.
-- Done: native credential boundaries and provider egress code paths for API-key agent providers, Google public-client connectors, and broker-gated connector adapters.
+- Done: native credential boundaries and provider egress code paths for API-key agent providers and broker-gated connector adapters, including Google Drive, Gmail, and Google Calendar.
 - Next: deploy the Fable auth broker, configure provider-console apps, and validate each live OAuth flow with non-production test accounts.
 
 ## Milestone 4: Voice And Automations

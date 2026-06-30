@@ -101,13 +101,13 @@ boundaries. Schedules do not require Convex or a hosted Fable account.
 
 The native connector boundary exposes status, auth start/complete/clear, health refresh, search, import, action preparation, approved-action execution, and detailed connector approval audit commands.
 
-- Public desktop OAuth clients use Authorization Code with PKCE S256 and loopback/HTTPS callbacks.
+- OAuth connectors use Authorization Code with PKCE S256 through the configured auth broker and loopback/HTTPS desktop handoff callbacks.
 - Access tokens, refresh tokens, and pending PKCE verifiers are stored in the OS credential store.
 - Plain local connection state contains account identity, scopes, expiry, status, and an opaque credential reference only.
 - GitHub, Notion, Slack, Vercel, Linear, or another provider that requires confidential credentials routes through the configured HTTPS auth broker. The broker is limited to authorization start/callback, one-time handoff redemption, refresh, internal identity resolution, and revocation; it is not a general connector proxy.
 - Every external write capability must be marked consequential. The shared runtime rejects non-consequential write declarations and requires a fresh matching per-action approval record before calling an adapter.
 
-Authenticated provider egress exists on the desktop path for the first-wave external connectors, but availability is gated by each connector's auth boundary. Google Drive, Gmail, and Google Calendar use public-client loopback PKCE and can run without the auth broker once Google desktop OAuth configuration is supplied. GitHub, Vercel, Notion, Slack, and Linear are confidential-client or provider-installation flows; they require the HTTPS auth broker and provider-console callback registration before users can connect them. Browser preview remains explicitly fixture-backed, and missing configuration fails closed instead of claiming a live connection.
+Authenticated provider egress exists on the desktop path for the first-wave external connectors, but availability is gated by each connector's auth boundary. GitHub, Vercel, Notion, Slack, Linear, Google Drive, Gmail, and Google Calendar require the HTTPS auth broker and provider-console callback registration before users can connect them. Browser preview remains explicitly fixture-backed, and missing configuration fails closed instead of claiming a live connection.
 
 Native API providers use bounded dynamic model discovery with explicit success,
 empty, unsupported, offline, and failed outcomes. Discovery filters

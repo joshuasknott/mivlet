@@ -17,6 +17,10 @@ import type {
   ThreadSummary,
   WorkspaceDirective
 } from "@fable/protocol";
+import {
+  googleConfigurationMessage,
+  googleConnectorPermissions
+} from "./providers/google-shared";
 
 export const connectorFixtures = [
   {
@@ -89,16 +93,14 @@ export const connectorFixtures = [
     permissions: ["read files explicitly selected with Google Picker"],
     healthSummary: "Preview data loaded; Google OAuth setup required",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
-    authMode: "oauth-pkce",
-    scopes: [
-      { id: "drive.file", label: "Selected Drive files", access: "read", required: true, granted: false }
-    ],
+    authMode: "oauth-broker",
+    scopes: googleConnectorPermissions("google-drive"),
     health: {
       state: "unknown",
       summary: "Fixture adapter only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Enable Drive API and create a desktop OAuth client.",
+    setupMessage: googleConfigurationMessage("google-drive"),
     supportsSearch: true,
     supportsImport: true,
     supportedActions: []
@@ -131,17 +133,14 @@ export const connectorFixtures = [
     permissions: ["read selected search results", "prepare email drafts; never send by default"],
     healthSummary: "Preview data loaded; Google OAuth setup required",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
-    authMode: "oauth-pkce",
-    scopes: [
-      { id: "gmail.readonly", label: "Read mail", access: "read", required: true, granted: false },
-      { id: "gmail.compose", label: "Create drafts", access: "write", required: false, granted: false }
-    ],
+    authMode: "oauth-broker",
+    scopes: googleConnectorPermissions("gmail"),
     health: {
       state: "unknown",
       summary: "Fixture adapter only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Enable Gmail API, create a desktop OAuth client, and complete Google verification.",
+    setupMessage: googleConfigurationMessage("gmail"),
     supportsSearch: true,
     supportsImport: true,
     supportedActions: ["gmail.create-draft", "gmail.send"]
@@ -176,18 +175,14 @@ export const connectorFixtures = [
     permissions: ["read calendars and events", "prepare event create or update requests"],
     healthSummary: "Preview data loaded; Google OAuth setup required",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
-    authMode: "oauth-pkce",
-    scopes: [
-      { id: "calendar.calendarlist.readonly", label: "Calendar list", access: "read", required: true, granted: false },
-      { id: "calendar.events.readonly", label: "Calendar events", access: "read", required: true, granted: false },
-      { id: "calendar.events", label: "Create or update events", access: "write", required: false, granted: false }
-    ],
+    authMode: "oauth-broker",
+    scopes: googleConnectorPermissions("google-calendar"),
     health: {
       state: "unknown",
       summary: "Fixture adapter only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Enable Calendar API and create a desktop OAuth client.",
+    setupMessage: googleConfigurationMessage("google-calendar"),
     supportsSearch: true,
     supportsImport: true,
     supportedActions: [

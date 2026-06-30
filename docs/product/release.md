@@ -36,13 +36,12 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 ## Gated paths
 
-- Confidential-client connectors (GitHub, Vercel, Notion, Slack, Linear)
-  require a deployed Fable auth broker plus provider-console callback
-  registration. Without that configuration, they fail closed.
-- Google Drive, Gmail, and Google Calendar use public-client loopback PKCE and
-  do not require the broker, but they still require Google Cloud OAuth client
-  setup, consent configuration, and any provider verification required by
-  Google.
+- OAuth connectors (GitHub, Vercel, Notion, Slack, Linear, Google Drive,
+  Gmail, and Google Calendar) require a deployed Fable auth broker plus
+  provider-console callback registration. Without that configuration, they fail
+  closed.
+- Google connectors still require Google Cloud OAuth client setup, consent
+  configuration, and any provider verification required by Google.
 - Codex runs through the local `codex app-server` process when the Codex CLI is
   installed and authenticated. Cursor and Grok run through their ACP CLI
   processes when installed and signed in. GitHub Copilot remains cataloged but
@@ -66,8 +65,8 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 ## Remaining ship blockers
 
-- Deploy and review the auth broker before enabling confidential-client
-  connectors for external users.
+- Deploy and review the auth broker before enabling OAuth connectors for
+  external users.
 - Complete provider-console setup, callback registration, OAuth consent review,
   and live non-production validation for each external connector.
 - Migrate schedules and workflows from raw JSON files to structured encrypted SQLite tables with migrations (Goal 8).

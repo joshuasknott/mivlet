@@ -139,6 +139,9 @@ export class FableBroker {
     if (profile.scopes.length) {
       url.searchParams.set("scope", profile.scopes.join(" "));
     }
+    for (const [key, value] of Object.entries(profile.authorizationParams ?? {})) {
+      url.searchParams.set(key, value);
+    }
     url.searchParams.set("state", request.state);
 
     let verifier: string | undefined;

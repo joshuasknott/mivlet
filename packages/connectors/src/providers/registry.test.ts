@@ -15,6 +15,13 @@ import {
   prepareGoogleCalendarDelete,
   prepareGoogleDriveAction,
   prepareFixtureConnectorAction,
+  googleConnectorPermissions,
+  googleHealthFromLifecycle,
+  googleReconnectMessage,
+  googleScopeIds,
+  googleStatusFromLifecycle,
+  mergeGoogleTokenRefresh,
+  resolveGoogleLifecycleState,
   searchFixtureConnector,
   shapeConnectorSearchRequest
 } from "../index";
@@ -264,5 +271,71 @@ describe("provider error and action boundaries", () => {
       consequence: "Deletes or cancels the selected calendar event after explicit approval.",
       confirmationPhrase: "delete calendar event"
     });
+  });
+});
+
+describe("shared Google connector lifecycle", () => {
+  it("defines service-specific scope boundaries behind a shared Google identity grant", () => {
+    expect(googleScopeIds("google-drive")).toContain("openid");
+    expect(googleScopeIds("google-drive")).toContain("https://www.googleapis.com/auth/drive.file");
+    expect(googleScopeIds("gmail")).toContain("https://www.googleapis.com/auth/gmail.send");
+    expect(googleScopeIds("google-calendar")).toContain("https://www.googleapis.com/auth/calendar.events");
+    expect(googleConnectorPermissions("gmail").map((scope) => scope.label)).toEqual([
+      "Read mail",
+      "Create drafts",
+      "Send approved mail"
+    ]);
+  });
+
+  it("preserves existing refresh tokens and scopes when Google omits them during refresh", () => {
+    expect(mergeGoogleTokenRefresh(
+      {
+        accessToken: "old-access",
+        refreshToken: "keep-refresh",
+        tokenType: "Bearer",
+        expiresAt: "2026-07-01T00:00:00.000Z",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+      },
+      {
+        accessToken: "new-access",
+        tokenType: "Bearer",
+        expiresAt: "2026-07-01T01:00:00.000Z",
+        scopes: []
+      }
+    )).toMatchObject({
+      accessToken: "new-access",
+      refreshToken: "keep-refresh",
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+    });
+  });
+
+  it("maps connected, stale, expired, revoked, and partial-failure states without token data", () => {
+    const base = {
+      connectorId: "google-calendar" as const,
+      account: { id: "google-sub", displayName: "Google User" },
+      grantedScopes: googleScopeIds("google-calendar"),
+      expiresAt: "2026-07-01T00:00:00.000Z",
+      lastCheckedAt: "2026-06-30T12:00:00.000Z"
+    };
+
+    expect(resolveGoogleLifecycleState(base, Date.parse("2026-06-30T12:00:00.000Z"))).toBe("connected");
+    expect(resolveGoogleLifecycleState({ ...base, grantedScopes: ["openid"] })).toBe("stale");
+    expect(resolveGoogleLifecycleState(base, Date.parse("2026-07-01T00:00:01.000Z"))).toBe("expired");
+    expect(resolveGoogleLifecycleState({ ...base, revokedAt: "2026-06-30T12:01:00.000Z" })).toBe("revoked");
+    expect(resolveGoogleLifecycleState({
+      ...base,
+      lastError: {
+        code: "provider-unavailable",
+        connectorId: "google-calendar",
+        message: "Google Calendar unavailable.",
+        retryable: true
+      }
+    })).toBe("partial-failure");
+
+    expect(googleStatusFromLifecycle("configuration-required")).toBe("unavailable");
+    expect(googleHealthFromLifecycle("google-calendar", "partial-failure", base.lastCheckedAt)).toMatchObject({
+      state: "degraded"
+    });
+    expect(googleReconnectMessage("gmail")).toMatch(/Reconnect Gmail/);
   });
 });

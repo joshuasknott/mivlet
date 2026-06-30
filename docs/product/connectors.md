@@ -28,11 +28,11 @@ Every connector exposes:
 | GitHub | Register a GitHub OAuth client through the auth broker | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Account identity, organization membership, repositories, issues, and pull requests read; live GitHub writes are not enabled in this batch |
 | Vercel | Create a connectable-account integration and select API permissions | External Flow redirect, proposed `https://auth.fable.app/oauth/vercel/callback` | Team, project, deployment, domain, log, and environment-variable metadata read; deployment/project/domain writes only when enabled |
 | Linear | Create an OAuth application and select workspace scopes | Broker callback, proposed `https://auth.fable.app/oauth/linear/callback` | Workspace, team, project, cycle, issue, comment, label, and user read; issue/comment mutation only when enabled |
-| Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `drive.metadata.readonly`; incremental `drive.readonly` and `drive.file` |
+| Google Drive | Enable Drive API, create Google OAuth client for the broker, configure consent | Broker callback, proposed `https://auth.fable.app/oauth/google-drive/callback` | `drive.file` plus OpenID identity |
 | Notion | Create a public connection and select connection capabilities | Broker callback, proposed `https://auth.fable.app/oauth/notion/callback` | Read content on user-selected pages/workspaces |
-| Gmail | Enable Gmail API, create Desktop OAuth client, configure consent and verification | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `gmail.readonly`; optional `gmail.compose` |
+| Gmail | Enable Gmail API, create Google OAuth client for the broker, configure consent and verification | Broker callback, proposed `https://auth.fable.app/oauth/gmail/callback` | `gmail.readonly`; optional `gmail.compose` and `gmail.send` |
 | Slack | Create/distribute a Slack app, configure scopes and token rotation | HTTPS broker callback, proposed `https://auth.fable.app/oauth/slack/callback` | Selected conversation read scopes; optional `chat:write` |
-| Google Calendar | Enable Calendar API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | Calendar-list and event read; optional event write |
+| Google Calendar | Enable Calendar API, create Google OAuth client for the broker, configure consent | Broker callback, proposed `https://auth.fable.app/oauth/google-calendar/callback` | Calendar-list and event read; optional event write |
 
 The proposed production callback host is documentation only. It is not active
 until the auth broker is deployed and the exact URLs are registered in each
@@ -74,29 +74,29 @@ data is transmitted or stored on servers, may require a security assessment.
 The implementation and operational setup are detailed in
 [Google Drive, Gmail, and Calendar](../connectors/google.md).
 
-Google Drive, Gmail, and Google Calendar share the desktop OAuth implementation:
+Google Drive, Gmail, and Google Calendar share the auth-broker OAuth implementation:
 
 - create a Google Cloud project;
 - enable the Google Drive API, Gmail API, and Google Calendar API as needed;
 - configure the OAuth consent screen and add local developers as test users
   while the app is in testing mode;
-- create an OAuth client with application type `Desktop app`;
-- provide the client id through the desktop connector configuration;
-- use the loopback redirect URI that Fable opens for the active authorization
-  attempt.
+- create a Google OAuth client for the Cloudflare Workers broker;
+- provide `FABLE_BROKER_GOOGLE_CLIENT_ID` and `FABLE_BROKER_GOOGLE_CLIENT_SECRET`
+  in the broker environment;
+- register the broker callback URLs for Drive, Gmail, and Calendar.
 
-The desktop flow uses Authorization Code with PKCE, validates the returned
-OAuth state and callback values, and stores access/refresh tokens only through
-the native credential boundary. Google refresh tokens are reused across
-incremental scope grants when Google returns only a new access token.
+The broker flow uses Authorization Code with PKCE, validates OAuth state,
+returns only a one-time handoff to the desktop, and stores access/refresh tokens
+only through the native credential boundary. Google refresh tokens are reused
+across incremental scope grants when Google returns only a new access token.
 
 Fable requests only required scopes initially and asks for optional scopes
 when a user invokes capabilities that need them:
 
 | Connector | Initial read scopes | Incremental scopes |
 | --- | --- | --- |
-| Google Drive | `https://www.googleapis.com/auth/drive.metadata.readonly` | `drive.readonly` for downloads/exports; `drive.file` for create/update/move/rename/share/delete |
-| Gmail | `https://www.googleapis.com/auth/gmail.readonly` | `gmail.compose` for drafts and sends |
+| Google Drive | `https://www.googleapis.com/auth/drive.file` | Same bounded file grant for create/update/move/rename/share/delete on files opened or created with Fable |
+| Gmail | `https://www.googleapis.com/auth/gmail.readonly` | `gmail.compose` for drafts; `gmail.send` for explicit sends |
 | Google Calendar | `calendar.calendarlist.readonly`, `calendar.events.readonly` | `calendar.events` for create/update/delete |
 
 Google Drive supports metadata search/read, supported file downloads,
@@ -150,9 +150,9 @@ connectors (GitHub, Vercel, Notion, Slack, Linear) fail closed until your Cloudf
 deployed and configured; the core desktop workspace and Google public-client (PKCE) connectors
 do not depend on it.
 
-Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
-the authorization code; access and refresh tokens are written through OS secure
-storage/keyring. The desktop app does not rely on a client secret.
+Google OAuth now uses the shared broker lifecycle. A loopback listener receives
+only the broker handoff; access and refresh tokens are written through OS secure
+storage/keyring after direct handoff redemption.
 
 GitHub OAuth client secret and the Vercel, Notion, and Slack client secrets
 must remain in an Fable auth broker or equivalent server-side secret boundary.

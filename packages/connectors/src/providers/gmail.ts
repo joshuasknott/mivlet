@@ -5,6 +5,12 @@ import {
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
+import {
+  googleConfigurationMessage,
+  googleConnectorPermissions,
+  googleScopeDescriptions,
+  googleScopeIds
+} from "./google-shared";
 
 export const GMAIL_CAPABILITIES = [
   { id: "gmail.search", kind: "read", consequential: false, description: "Search selected mailbox results." },
@@ -12,6 +18,11 @@ export const GMAIL_CAPABILITIES = [
   { id: "gmail.create-draft", kind: "write", consequential: true, description: "Create an approved draft." },
   { id: "gmail.send", kind: "write", consequential: true, description: "Send one explicitly approved message." }
 ] satisfies ConnectorCapability[];
+
+export const GMAIL_OAUTH_SCOPES = googleScopeIds("gmail");
+export const GMAIL_SCOPE_DESCRIPTIONS = googleScopeDescriptions("gmail");
+export const GMAIL_PERMISSIONS = googleConnectorPermissions("gmail");
+export const GMAIL_SETUP_MESSAGE = googleConfigurationMessage("gmail");
 
 export interface GmailPayload {
   id: string;
