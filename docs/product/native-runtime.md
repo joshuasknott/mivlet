@@ -16,6 +16,26 @@ filtered. A newly discovered model remains visible but disabled until Fable has
 an execution-capability contract for it. Provider pagination, model counts, page
 counts, and response bytes are bounded.
 
+## Settings provider UX states
+
+The Settings → Providers view reflects real runtime state instead of optimistic
+copy. Each connected API-key provider row carries a per-provider model-discovery
+lifecycle layered on top of its auth state (not a new auth state):
+
+- `loading` — a spinner; the Refresh/Retry control is disabled mid-flight.
+- `success` — the connected badge reads "Connected"; models are shown.
+- `empty` — the account surfaced no usable models; the hint points at the plan
+  or billing, never at the key.
+- `offline` / `failed` — "connected but degraded": the key is fine, the model
+  list just couldn't be confirmed. Recoverable via the per-row Refresh action,
+  which re-runs discovery without reconnecting.
+- `unsupported` — the provider exposes no model list; the user picks manually.
+
+Connect outcomes distinguish a **missing** key ("No API key stored… add a key",
+signalled by the boundary's missing-key message) from a **rejected** key ("key
+was rejected or has expired"). Transient outcomes never mention the key, and no
+secret or stack trace is ever surfaced.
+
 ## Runs and recovery
 
 Each run checkpoints its provider, model, active thread, transcript, usage,
