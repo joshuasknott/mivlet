@@ -45,6 +45,9 @@ pub(crate) fn ensure_rustls_provider() {
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod store_tests;
+
 use std::time::Duration;
 
 use tauri::Manager;
