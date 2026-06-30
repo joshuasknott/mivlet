@@ -31,6 +31,7 @@ export function createSlackAdapter(options: SlackAdapterOptions): ConnectorAdapt
     revocationEndpoint: new URL("oauth/slack/revoke", broker).toString(),
     scopes: [
       "channels:read", "groups:read", "im:read", "mpim:read",
+      "channels:history", "groups:history",
       "users:read", "search:read", "chat:write", "reactions:write"
     ]
   });

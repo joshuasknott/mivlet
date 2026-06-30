@@ -171,7 +171,7 @@ export async function resolveIdentity(
         authorization: `${tokens.tokenType} ${tokens.accessToken}`
       },
       body: JSON.stringify({
-        query: "query { viewer { id name email avatarUrl } }"
+        query: "query { viewer { id name email avatarUrl organization { id name urlKey } } }"
       })
     });
     if (!response.ok) {
