@@ -1102,6 +1102,29 @@
   border-color: var(--line);
 }
 
+.connector-detail__status--expired,
+.connector-detail__status--unavailable,
+.connector-detail__status--permission-limited {
+  color: var(--ink-muted);
+  background: var(--caution-subtle);
+  border-color: var(--line);
+}
+
+.connector-detail__status--revoked,
+.connector-detail__status--failed {
+  color: var(--ink-muted);
+  background: var(--destructive-subtle);
+  border-color: var(--line);
+}
+
+.connector-detail__status--syncing,
+.connector-detail__status--needs-auth,
+.connector-detail__status--fixture {
+  color: var(--ink-soft);
+  background: var(--accent-subtle);
+  border-color: var(--line);
+}
+
 .connector-detail__body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr);

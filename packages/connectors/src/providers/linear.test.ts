@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Mock } from "vitest";
 import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
 import { ConnectorRuntime } from "../sdk";
 import type { ProviderFetch } from "./http";
@@ -20,12 +21,12 @@ function response(body: unknown, status = 200, headers?: Record<string, string>)
 }
 
 /** Build a fetcher that maps each GraphQL operation root to a canned payload. */
-function graphqlFetch(roots: Record<string, unknown>): ProviderFetch {
-  return vi.fn(async () => response({ data: roots }));
+function graphqlFetch(roots: Record<string, unknown>): Mock<ProviderFetch> {
+  return vi.fn<ProviderFetch>(async () => response({ data: roots }));
 }
 
 /** Read the parsed GraphQL body sent by the adapter. */
-async function sentBody(fetcher: vi.Mock) {
+async function sentBody(fetcher: Mock<ProviderFetch>) {
   const init = fetcher.mock.calls[0][1] as RequestInit | undefined;
   return JSON.parse(String(init?.body)) as { query: string; variables: Record<string, unknown> };
 }

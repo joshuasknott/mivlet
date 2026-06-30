@@ -206,7 +206,7 @@ export const connectorFixtures = [
       { id: "comments:create", label: "Comments", access: "write", required: false, granted: false }
     ],
     health: { state: "unknown", summary: "Fixture adapter only", checkedAt: "2026-06-27T09:00:00.000Z" },
-    setupMessage: "Create a Linear OAuth application and configure the Fable auth broker callback.",
+    setupMessage: "Create a Linear OAuth application and configure the Fable auth broker.",
     supportsSearch: true,
     supportsImport: true,
     supportedActions: ["linear.create-issue", "linear.update-issue", "linear.comment"]
