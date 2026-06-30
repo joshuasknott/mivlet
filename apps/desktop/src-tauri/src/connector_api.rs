@@ -786,7 +786,9 @@ fn required(
             )
         })
 }
-fn github_repository_path(input: &BTreeMap<String, Value>) -> Result<String, ConnectorCommandError> {
+fn github_repository_path(
+    input: &BTreeMap<String, Value>,
+) -> Result<String, ConnectorCommandError> {
     let repository = required(input, "repository", "github")?;
     let mut parts = repository.split('/');
     let owner = parts.next().unwrap_or_default();
@@ -936,7 +938,10 @@ mod tests {
 
     #[test]
     fn github_repositories_list_maps_to_authenticated_repos() {
-        let request = github_request("repositories.list", std::iter::empty::<(&'static str, Value)>());
+        let request = github_request(
+            "repositories.list",
+            std::iter::empty::<(&'static str, Value)>(),
+        );
         let (method, url, query, body) = map_read(&request).expect("mapped");
         assert_eq!(method, Method::GET);
         assert_eq!(url, "https://api.github.com/user/repos");
@@ -959,10 +964,7 @@ mod tests {
         assert!(issue_query.contains(&("per_page".to_string(), "10".to_string())));
         assert!(issue_query.contains(&("state".to_string(), "open".to_string())));
 
-        let pulls = github_request(
-            "pull-requests.read",
-            [("repository", json!("acme/fable"))],
-        );
+        let pulls = github_request("pull-requests.read", [("repository", json!("acme/fable"))]);
         let (_, pulls_url, pulls_query, _) = map_read(&pulls).expect("pulls mapped");
         assert_eq!(pulls_url, "https://api.github.com/repos/acme/fable/pulls");
         assert!(pulls_query.contains(&("state".to_string(), "all".to_string())));

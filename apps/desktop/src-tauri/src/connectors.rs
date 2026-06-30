@@ -74,7 +74,12 @@ struct ConnectorActionPolicy {
 
 const GITHUB_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read:user", "Account identity", "read", true),
-    ("repo", "Repositories, issues, and pull requests", "read", true),
+    (
+        "repo",
+        "Repositories, issues, and pull requests",
+        "read",
+        true,
+    ),
     ("read:org", "Organization membership", "read", false),
 ];
 const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
