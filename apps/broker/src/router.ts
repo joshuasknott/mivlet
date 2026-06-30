@@ -1,0 +1,333 @@
+/**
+ * Runtime-neutral request router for the auth broker.
+ *
+ * Everything transport-specific in the old `http.ts` that is NOT tied to a
+ * particular I/O API — routing, contract version gating, CORS, rate limiting,
+ * correlation ids, body parsing, and structured redacted error responses — lives
+ * here, expressed against the standard Web `Request`/`Response` types. Those are
+ * available on both Node.js (>= 18) and the Cloudflare Workers runtime, so the
+ * same handler backs both transports.
+ *
+ * Security invariants (unchanged from the Node-only version):
+ *   - Secrets and provider tokens never cross this layer into logs or responses.
+ *     The token set appears only in the handoff-redeem response body (the one
+ *     allowed crossing) and is never logged.
+ *   - Every error response is a redacted {@link BrokerErrorResponse}.
+ *   - `state` is single-use and consumed before any token exchange (enforced in
+ *     the broker service, not here).
+ */
+
+import {
+  BrokerContractError,
+  BROKER_CONTRACT_VERSION,
+  type BrokerErrorResponse,
+  type BrokerProviderId,
+  isBrokerProvider
+} from "@fable/connectors";
+
+import type { FableBroker } from "./broker.js";
+import {
+  createRateLimiter,
+  newCorrelationId,
+  rateLimitKey,
+  redactForLog
+} from "./rate-limiter.js";
+
+export const CORRELATION_HEADER = "x-fable-request-id";
+
+export interface BrokerRouterOptions {
+  broker: FableBroker;
+  /** Requests per minute per route+peer. Default 60. */
+  requestsPerMinute?: number;
+  /** Allowed CORS origins. Default: loopback only. */
+  allowedOrigins?: string[];
+}
+
+/** A logger sink the transports can supply; never receives bodies or secrets. */
+export type BrokerLogger = (line: string) => void;
+
+export interface BrokerRouter {
+  /**
+   * Handle a standard Web Request. The peer address (for rate-limit keying) is
+   * supplied by the transport, since the Workers fetch handler reads it from the
+   * request CF metadata while Node reads it from the socket.
+   */
+  handle(request: Request, peer: string | undefined, log?: BrokerLogger): Promise<Response>;
+}
+
+/**
+ * Build the runtime-neutral handler. Exposed so tests can drive it directly with
+ * a `Request` without binding any socket, and so both Node and Workers transports
+ * share one implementation.
+ */
+export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
+  const limiter = createRateLimiter({
+    limit: options.requestsPerMinute ?? 60,
+    windowMs: 60_000
+  });
+  const allowedOrigins = new Set(options.allowedOrigins ?? loopbackOrigins());
+
+  return {
+    async handle(request, peer, log = defaultLog) {
+      const correlation = request.headers.get(CORRELATION_HEADER) ?? newCorrelationId();
+
+      const url = new URL(request.url);
+      const segments = url.pathname.split("/").filter(Boolean);
+
+      // CORS preflight + origin reflection. Safe-listed origins only.
+      const origin = request.headers.get("origin") ?? undefined;
+      const corsHeaders: Record<string, string> = {};
+      if (origin && allowedOrigins.has(origin)) {
+        corsHeaders["access-control-allow-origin"] = origin;
+        corsHeaders.vary = "origin";
+      }
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            ...corsHeaders,
+            "access-control-allow-methods": "GET, POST, OPTIONS",
+            "access-control-allow-headers": `content-type, ${CORRELATION_HEADER}`,
+            "access-control-max-age": "600",
+            "cache-control": "no-store"
+          }
+        });
+      }
+
+      // Health is exempt from rate limiting so monitoring is always green.
+      if (request.method === "GET" && segments[0] === "healthz") {
+        return jsonResponse(
+          200,
+          options.broker.health(),
+          { [CORRELATION_HEADER]: correlation },
+          corsHeaders
+        );
+      }
+
+      // Rate limit every OAuth route per route+peer.
+      const limit = limiter.check(rateLimitKey(url.pathname, peer));
+      if (!limit.allowed) {
+        log(redactLog("rate-limited", request.method, url.pathname, correlation));
+        return jsonResponse(
+          429,
+          errorResponse(new BrokerContractError("rate-limited", "Too many broker requests.", true)),
+          {
+            [CORRELATION_HEADER]: correlation,
+            "retry-after": String(Math.ceil(limit.retryAfterMs / 1000))
+          },
+          corsHeaders
+        );
+      }
+
+      try {
+        return await route(request, url, segments, options.broker, corsHeaders, correlation);
+      } catch (error) {
+        const normalized = error instanceof BrokerContractError
+          ? error
+          : new BrokerContractError("provider-unavailable", "An unexpected broker error occurred.", true);
+        log(redactLog(normalized.error, request.method, url.pathname, correlation));
+        return jsonResponse(
+          httpStatusFor(normalized),
+          errorResponse(normalized),
+          { [CORRELATION_HEADER]: correlation },
+          corsHeaders
+        );
+      }
+    }
+  };
+}
+
+async function route(
+  request: Request,
+  url: URL,
+  segments: string[],
+  broker: FableBroker,
+  corsHeaders: Record<string, string>,
+  correlation: string
+): Promise<Response> {
+  const headers = { [CORRELATION_HEADER]: correlation };
+
+  // /oauth/{provider}/authorize
+  if (request.method === "GET" && segments[0] === "oauth" && segments[2] === "authorize") {
+    const provider = parseProvider(segments[1]);
+    const { response } = await broker.authorize({
+      contractVersion: BROKER_CONTRACT_VERSION,
+      provider,
+      redirectUri: requireQuery(url, "redirect_uri"),
+      state: requireQuery(url, "state"),
+      codeChallenge: requireQuery(url, "code_challenge"),
+      codeChallengeMethod: "S256" as const
+    });
+    return new Response(null, {
+      status: 302,
+      headers: { ...headers, ...corsHeaders, location: response.authorizationUrl, "cache-control": "no-store" }
+    });
+  }
+
+  // /oauth/{provider}/callback (the provider's registered callback)
+  if (request.method === "GET" && segments[0] === "oauth" && segments[2] === "callback") {
+    const provider = parseProvider(segments[1]);
+    const { redirect } = await broker.callback(provider, url.searchParams);
+    return new Response(null, {
+      status: 302,
+      headers: { ...headers, ...corsHeaders, location: redirect.toString(), "cache-control": "no-store" }
+    });
+  }
+
+  // /oauth/{provider}/handoff
+  if (request.method === "POST" && segments[0] === "oauth" && segments[2] === "handoff") {
+    const provider = parseProvider(segments[1]);
+    const body = await readJson(request);
+    const response = await broker.redeem({
+      contractVersion: contractVersionOf(body),
+      provider,
+      handoff: stringRequired(body, "handoff"),
+      state: stringRequired(body, "state")
+    });
+    return jsonResponse(200, response, headers, corsHeaders);
+  }
+
+  // /oauth/{provider}/refresh
+  if (request.method === "POST" && segments[0] === "oauth" && segments[2] === "refresh") {
+    const provider = parseProvider(segments[1]);
+    const body = await readJson(request);
+    const response = await broker.refresh({
+      contractVersion: contractVersionOf(body),
+      provider,
+      refreshToken: stringRequired(body, "refreshToken")
+    });
+    return jsonResponse(200, response, headers, corsHeaders);
+  }
+
+  // /oauth/{provider}/revoke
+  if (request.method === "POST" && segments[0] === "oauth" && segments[2] === "revoke") {
+    const provider = parseProvider(segments[1]);
+    const body = await readJson(request);
+    const response = await broker.revoke({
+      contractVersion: contractVersionOf(body),
+      provider,
+      token: stringRequired(body, "token"),
+      tokenTypeHint: tokenTypeHint(body)
+    });
+    return jsonResponse(200, response, headers, corsHeaders);
+  }
+
+  throw new BrokerContractError("invalid-request", "Unknown broker route.", false);
+}
+
+function parseProvider(value: string | undefined): BrokerProviderId {
+  if (!isBrokerProvider(value)) {
+    throw new BrokerContractError("unknown-provider", "Unknown broker provider.", false);
+  }
+  return value;
+}
+
+function requireQuery(url: URL, key: string): string {
+  const value = url.searchParams.get(key);
+  if (!value) {
+    throw new BrokerContractError("invalid-request", `Missing required "${key}" parameter.`, false);
+  }
+  return value;
+}
+
+const MAX_BODY_BYTES = 64 * 1024;
+
+async function readJson(request: Request): Promise<Record<string, unknown>> {
+  const text = await request.text();
+  if (text.length > MAX_BODY_BYTES) {
+    throw new BrokerContractError("invalid-request", "Request body too large.", false);
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    throw new BrokerContractError("invalid-request", "Request body was not valid JSON.", false);
+  }
+}
+
+function stringRequired(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  if (typeof value !== "string" || !value) {
+    throw new BrokerContractError("invalid-request", `Missing required "${key}".`, false);
+  }
+  return value;
+}
+
+function tokenTypeHint(body: Record<string, unknown>): "access_token" | "refresh_token" | undefined {
+  const value = body.tokenTypeHint;
+  if (value === "access_token" || value === "refresh_token") return value;
+  return undefined;
+}
+
+/** Parse + validate the contract version against the literal expected value. */
+function contractVersionOf(body: Record<string, unknown>): typeof BROKER_CONTRACT_VERSION {
+  const value = body.contractVersion;
+  if (value !== BROKER_CONTRACT_VERSION) {
+    throw new BrokerContractError("unsupported-version", "Unsupported broker contract version.", false);
+  }
+  return value;
+}
+
+function jsonResponse(
+  status: number,
+  body: unknown,
+  ...headerSets: Record<string, string>[]
+): Response {
+  const payload = JSON.stringify(body);
+  return new Response(payload, {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      ...Object.assign({}, ...headerSets)
+    }
+  });
+}
+
+function errorResponse(error: BrokerContractError): BrokerErrorResponse {
+  return error.toResponse();
+}
+
+function httpStatusFor(error: BrokerContractError): number {
+  switch (error.error) {
+    case "configuration-required":
+      return 503;
+    case "unknown-provider":
+    case "unsupported-version":
+    case "invalid-request":
+    case "invalid-state":
+    case "invalid-handoff":
+    case "expired-handoff":
+      return 400;
+    case "needs-auth":
+      return 401;
+    case "rate-limited":
+      return 429;
+    case "provider-unavailable":
+      return 502;
+    default:
+      return 500;
+  }
+}
+
+function loopbackOrigins(): string[] {
+  return [
+    "http://127.0.0.1",
+    "http://localhost",
+    "http://127.0.0.1:8788",
+    "http://localhost:8788"
+  ];
+}
+
+/** Redact-then-log a request line as structured JSON. Never logs bodies/tokens. */
+function redactLog(event: string, method: string | undefined, path: string, correlation: string): string {
+  const safe = redactForLog(`${method ?? "?"} ${path}`);
+  return JSON.stringify({ level: "info", event, path: safe, correlationId: correlation });
+}
+
+const defaultLog: BrokerLogger = (line) => {
+  // eslint-disable-next-line no-console
+  console.log(line);
+};

@@ -11,9 +11,9 @@ import { BROKER_CONTRACT_VERSION } from "@fable/connectors";
 
 import { FableBroker } from "./broker.js";
 import { createBrokerHandler } from "./http.js";
-import { providerProfile } from "./provider-profiles.js";
+import { providerProfile, type BrokerEnv } from "./provider-profiles.js";
 
-const ENV: NodeJS.ProcessEnv = {
+const ENV: BrokerEnv = {
   FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
   FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
 };
@@ -59,6 +59,12 @@ function drive(
         if (h) Object.assign(this.headers, h);
       },
       setHeader(name: string, value: string | string[]) { this.headers[name] = value; },
+      // The transport streams the Web Response body via write() in chunks; a real
+      // Node ServerResponse supports it, so the double does too. Accept a string or
+      // a Uint8Array (what the reader yields) and accumulate as UTF-8 text.
+      write(chunk: Uint8Array | string) {
+        this.chunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+      },
       end(chunk?: string) {
         if (chunk) this.chunks.push(chunk);
         resolve({ status: this.status, body: this.chunks.join(""), headers: this.headers, location: this.headers.location as string | undefined });
@@ -105,7 +111,7 @@ describe("broker http routing + security", () => {
   it("handoff redeem maps to the broker and returns tokens", async () => {
     const b = broker();
     const h = createBrokerHandler({ broker: b, port: 0 });
-    b.authorize({
+    await b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
       redirectUri: "http://127.0.0.1:1/callback", state: "hs", codeChallenge: "ch", codeChallengeMethod: "S256"
     });
@@ -119,7 +125,7 @@ describe("broker http routing + security", () => {
   it("callback route redirects (302) to the desktop redirect", async () => {
     const b = broker();
     const h = createBrokerHandler({ broker: b, port: 0 });
-    b.authorize({
+    await b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
       redirectUri: "http://127.0.0.1:1/callback", state: "cb1", codeChallenge: "ch", codeChallengeMethod: "S256"
     });

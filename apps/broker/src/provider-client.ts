@@ -13,8 +13,10 @@ import type { BrokerProviderId } from "@fable/connectors";
 import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
 
 import type { BrokerClock } from "./clock.js";
+import { base64String } from "./crypto-web.js";
 import {
   providerProfile,
+  resolveEndpoint,
   type ProviderCredentials,
   type ProviderProfile
 } from "./provider-profiles.js";
@@ -130,9 +132,11 @@ export async function revokeToken(
   // Vercel/Linear want Basic auth for revocation; Slack wants the token in-body.
   // Basic auth (client id:secret) is used by GitHub. We send both the body and
   // basic auth — providers ignore what they don't use, and the secret is only
-  // sent to the provider revocation endpoint over TLS.
+  // sent to the provider revocation endpoint over TLS. GitHub's grant endpoint
+  // is keyed by client id; resolveEndpoint substitutes the {clientId} placeholder.
   const auth = basicAuth(options.credentials);
-  const response = await fetcher(profile.revocationEndpoint, {
+  const endpoint = resolveEndpoint(profile.revocationEndpoint, options.credentials);
+  const response = await fetcher(endpoint, {
     method: "POST",
     headers: {
       "content-type": "application/x-www-form-urlencoded",
@@ -339,7 +343,7 @@ function identityInlineFor(
 
 function basicAuth(credentials: ProviderCredentials): string | undefined {
   if (!credentials.clientId || !credentials.clientSecret) return undefined;
-  return `Basic ${Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString("base64")}`;
+  return `Basic ${base64String(`${credentials.clientId}:${credentials.clientSecret}`)}`;
 }
 
 function profileLabel(provider: BrokerProviderId): string {

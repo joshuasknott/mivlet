@@ -191,12 +191,34 @@ const PROFILES: Record<BrokerProviderId, ProviderProfile> = {
   slack: SLACK_PROFILE
 };
 
+/**
+ * Environment shape the broker reads credentials from. Runtime-neutral: Node's
+ * `process.env` and a Cloudflare Worker `env` binding both satisfy it. Only the
+ * configured provider id/secret env vars are read; nothing here is serialized,
+ * logged, or returned.
+ */
+export type BrokerEnv = Record<string, string | undefined>;
+
 export function providerProfile(provider: BrokerProviderId): ProviderProfile {
   return PROFILES[provider];
 }
 
+/**
+ * Resolve a profile endpoint, substituting any `{clientId}` placeholder with the
+ * confidential client id. GitHub's token-grant revocation endpoint is keyed by
+ * the application's client id (`/applications/{clientId}/grant`); other providers
+ * have static endpoints and resolve unchanged. The client id is not a secret.
+ */
+export function resolveEndpoint(
+  endpoint: string,
+  credentials: ProviderCredentials
+): string {
+  if (!endpoint.includes("{clientId}")) return endpoint;
+  return endpoint.replaceAll("{clientId}", credentials.clientId);
+}
+
 export function configuredProviders(
-  env: NodeJS.ProcessEnv
+  env: BrokerEnv
 ): BrokerProviderId[] {
   const configured: BrokerProviderId[] = [];
   for (const [provider, profile] of Object.entries(PROFILES) as Array<
@@ -217,7 +239,7 @@ export interface ProviderCredentials {
 
 export function resolveCredentials(
   provider: BrokerProviderId,
-  env: NodeJS.ProcessEnv
+  env: BrokerEnv
 ): ProviderCredentials {
   const profile = providerProfile(provider);
   const clientId = env[profile.clientIdEnv];
