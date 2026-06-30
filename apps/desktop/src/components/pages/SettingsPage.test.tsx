@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { BackendProvider } from "@fable/protocol";
 import { SettingsPage } from "./SettingsPage";
@@ -13,7 +13,22 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
  * is cast through Partial so the component sees a well-typed runtime.
  */
 function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
-  return { ...(over as ShellRuntime) } as ShellRuntime;
+  return {
+    memoryDisabled: false,
+    toggleMemoryDisabled: () => {},
+    connectorManifests: [],
+    backendProviders: [],
+    connectedBackendIds: [],
+    backendStatus: null,
+    modelDiscoveryByProvider: {},
+    connectBackendWithVerify: vi.fn(),
+    disconnectBackend: vi.fn(),
+    refreshModels: vi.fn(),
+    refreshConnector: vi.fn(),
+    disconnectConnector: vi.fn(),
+    exportMemory: vi.fn(),
+    ...over
+  } as unknown as ShellRuntime;
 }
 
 const nativeProvider = (over: Partial<BackendProvider> = {}): BackendProvider => ({
@@ -215,5 +230,136 @@ describe("Settings → Providers UX states", () => {
     fireEvent.submit(keyInput2.closest("form")!);
     const rejectedStatus = await screen.findByRole("status");
     expect(rejectedStatus.textContent?.toLowerCase()).toMatch(/reject|expired/);
+  });
+});
+
+describe("Settings → Privacy UX states", () => {
+  const googleConnector = {
+    id: "google-drive",
+    name: "Google Drive",
+    status: "connected" as const,
+    permissions: [],
+    healthSummary: "Healthy",
+    lastCheckedAt: "2026-06-30T10:00:00Z",
+    account: { id: "user-1", email: "user@example.com", displayName: "User One" }
+  };
+
+  function renderPrivacy(runtime: ShellRuntime) {
+    return render(
+      <SettingsPage
+        runtime={runtime}
+        theme="dark"
+        onThemeChange={() => {}}
+        activeTab="privacy"
+        workspaceName="Fable"
+      />
+    );
+  }
+
+  it("renders privacy settings controls and lists active connectors", () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    const exportMemory = vi.fn().mockResolvedValue(undefined);
+    const toggleMemoryDisabled = vi.fn();
+
+    renderPrivacy(
+      stubRuntime({
+        connectorManifests: [googleConnector],
+        refreshConnector: refresh,
+        disconnectConnector: disconnect,
+        exportMemory: exportMemory,
+        memoryDisabled: false,
+        toggleMemoryDisabled: toggleMemoryDisabled
+      })
+    );
+
+    expect(screen.getByRole("heading", { name: "Privacy" })).toBeTruthy();
+    expect(screen.getByText("Google Drive")).toBeTruthy();
+    expect(screen.getByText("Active: user@example.com")).toBeTruthy();
+    expect(screen.getByLabelText("Toggle personal memory")).toBeTruthy();
+  });
+
+  it("handles connector resync and disconnect", async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+
+    renderPrivacy(
+      stubRuntime({
+        connectorManifests: [googleConnector],
+        refreshConnector: refresh,
+        disconnectConnector: disconnect
+      })
+    );
+
+    const resyncBtn = screen.getByRole("button", { name: /resync google drive/i });
+    await act(async () => {
+      fireEvent.click(resyncBtn);
+    });
+    expect(refresh).toHaveBeenCalledWith("google-drive");
+
+    const disconnectBtn = screen.getByRole("button", { name: /disconnect google drive/i });
+    await act(async () => {
+      fireEvent.click(disconnectBtn);
+    });
+    expect(disconnect).toHaveBeenCalledWith("google-drive");
+  });
+
+  it("handles memory toggle and export actions", async () => {
+    const exportMemory = vi.fn().mockResolvedValue(undefined);
+    const toggleMemoryDisabled = vi.fn();
+
+    renderPrivacy(
+      stubRuntime({
+        connectorManifests: [],
+        exportMemory: exportMemory,
+        memoryDisabled: false,
+        toggleMemoryDisabled: toggleMemoryDisabled
+      })
+    );
+
+    const checkbox = screen.getByLabelText("Toggle personal memory");
+    await act(async () => {
+      fireEvent.click(checkbox);
+    });
+    expect(toggleMemoryDisabled).toHaveBeenCalled();
+
+    const exportBtn = screen.getByRole("button", { name: /export memory/i });
+    await act(async () => {
+      fireEvent.click(exportBtn);
+    });
+    expect(exportMemory).toHaveBeenCalled();
+  });
+
+  it("handles bulk disconnect of all connectors", async () => {
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderPrivacy(
+      stubRuntime({
+        connectorManifests: [
+          googleConnector,
+          {
+            id: "slack",
+            name: "Slack",
+            status: "connected" as const,
+            permissions: [],
+            healthSummary: "Healthy",
+            lastCheckedAt: "2026-06-30T10:00:00Z"
+          }
+        ],
+        disconnectConnector: disconnect
+      })
+    );
+
+    const bulkBtn = screen.getByRole("button", { name: /disconnect all connectors/i });
+    await act(async () => {
+      fireEvent.click(bulkBtn);
+    });
+
+    await screen.findByText("Successfully disconnected all connectors.");
+
+    expect(disconnect).toHaveBeenCalledTimes(2);
+    expect(disconnect).toHaveBeenNthCalledWith(1, "google-drive");
+    expect(disconnect).toHaveBeenNthCalledWith(2, "slack");
   });
 });

@@ -98,15 +98,13 @@ adapters perform direct Google OAuth and API calls through the shared connector
 contract. Their mocked tests cover pagination, cancellation, redaction,
 refresh/revoke, approval gating, and per-service failure isolation.
 
-## Current limits
+## Current limits and data lifecycle
 
-- Reads are on demand; there is no continuous sync, scheduled polling, or
-  automatic knowledge ingestion.
-- Provider content is not kept as a full-content cache.
-- Live-provider validation is not part of the default test suite and requires
-  external Google Cloud configuration and deliberate test accounts.
-- OAuth consent verification and any restricted-scope security assessment are
-  external production blockers.
+- **Manual, on-demand sync:** Reads are performed on demand when requested. There is no continuous background sync, scheduled polling, or automatic crawler indexing of your Google account data.
+- **Cache boundaries:** Raw provider responses and unselected account content are not persisted. Account metadata, granted scopes, active status, connection health, and normalized user-selected cache items may be stored in the encrypted workspace-scoped cache. Tokens never enter that cache.
+- **Stale states (Missing scopes):** If a user disconnects or unchecks required scopes during the Google authorization consent step, the connector enters a `stale` (Error) state. A full reconnect is required to request and restore the missing required scopes.
+- **Verification constraints:** Live-provider validation is not part of the default test suite and requires external Google Cloud configuration and deliberate test accounts.
+- **Production blocking:** OAuth consent verification and any restricted-scope security assessment are external production blockers.
 
 ## Verification
 

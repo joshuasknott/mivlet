@@ -235,11 +235,29 @@ redacts token-shaped values and fails closed when a secret marker survives
 redaction. Provider tokens remain in OS secure storage under a separate
 lifecycle.
 
-Disconnect should revoke provider authorization where supported, clear access
-and refresh tokens from secure storage, reset account/scopes/health, and keep
-only imported records the user has chosen to retain. Slack tokens can also be
-revoked through `auth.revoke`; provider-side app removal must be handled as an
-expired/unavailable auth state.
+Continuous background synchronization, streaming, and full-account crawling
+are not active. The persisted `auto_sync` cache setting is policy state for a
+future worker; it does not start background network activity in this release.
+
+Disabling cache, disconnecting a connector, deleting cached data, resyncing, and
+exporting are distinct operations:
+
+- **Disable cache** blocks cache reads and writes at workspace or connector
+  scope. It does not revoke credentials or delete existing encrypted rows.
+- **Disconnect** revokes provider authorization where supported and removes
+  credentials from secure storage. It does not implicitly delete user-retained
+  cache rows.
+- **Delete or clear cache** removes one row or a workspace-scoped set of rows
+  without changing provider authorization. Deleted rows are not recreated by a
+  background worker because none is active.
+- **Resync cache** marks rows after an explicit provider re-pull; it does not
+  itself fetch provider data or reconnect an account.
+- **Export cache** emits credential-free, workspace-scoped cache JSON. This is
+  separate from personal-memory export in Settings.
+
+Missing required scopes or credentials that cannot be refreshed fail closed.
+The user must reconnect to replace revoked authorization or grant missing
+scopes.
 
 ## Known limitations
 
