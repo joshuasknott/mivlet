@@ -433,6 +433,8 @@ pub fn resolve_approval_request(
     app: tauri::AppHandle,
     request: ApprovalResolutionRequest,
 ) -> Result<ApprovalResolutionResponse, String> {
+    let req = request.request.clone();
+    let decision = request.decision.clone();
     let response = resolve_approval(request)?;
     let audit_path = approval_audit_path(&app)?;
     let audit = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
@@ -444,6 +446,13 @@ pub fn resolve_approval_request(
         grant => grant,
     };
 
+    // Capture the audit-note + decision time before they are moved into the
+    // persisted response, so the unified action-history recorder can observe the
+    // resolution (observation only; the typed approval table + execution permit
+    // remain the authority).
+    let audit_note = audit.entry.note.clone();
+    let audit_decided_at = audit.entry.decided_at.clone();
+
     let persisted_response = ApprovalResolutionResponse {
         persisted: true,
         audit_entry: audit.entry,
@@ -452,5 +461,23 @@ pub fn resolve_approval_request(
         grant,
     };
     record_execution_decision(&execution_approvals_path(&app)?, &persisted_response)?;
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::APPROVAL,
+        &req.service,
+        &req.action,
+        &decision,
+    )
+    .actor("user")
+    .mode(&req.mode)
+    .risk(&req.risk_level)
+    .correlation(&req.id)
+    .summary(&audit_note)
+    .detail(serde_json::json!({
+        "requestId": req.id,
+        "dataUsed": req.data_used,
+        "consequence": req.consequence,
+        "decidedAt": audit_decided_at,
+    }))
+    .record();
     Ok(persisted_response)
 }

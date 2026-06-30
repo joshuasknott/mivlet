@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -57,6 +57,33 @@ CREATE TABLE IF NOT EXISTS connector_cache_settings (
   payload_nonce BLOB NOT NULL,
   PRIMARY KEY (workspace_id, connector_id)
 );
+"#;
+
+/// Forward schema step `v2 → v3`: extends `audit_event` with non-secret query
+/// columns so inspectable action history can be filtered without decrypting
+/// payloads. Existing databases receive these columns through this delta; fresh
+/// databases already receive them through [`SCHEMA_V1`] (the complete current
+/// DDL, kept idempotent). SQLite `ALTER TABLE ... ADD COLUMN` does not support
+/// `IF NOT EXISTS`, so the step is guarded by a column-presence probe.
+pub const SCHEMA_V2_TO_V3: &str = r#"
+PRAGMA foreign_keys = ON;
+
+-- Inspectable, non-secret query columns for action history. Every column here
+-- is deliberately non-secret (category/service/action enums, status, risk/mode,
+-- correlation id, normalized failure code, safe summary); the encrypted payload
+-- still holds the richer detail. Defaults keep legacy rows queryable.
+ALTER TABLE audit_event ADD COLUMN category TEXT NOT NULL DEFAULT 'approval';
+ALTER TABLE audit_event ADD COLUMN service TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN action TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN status TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN risk_level TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN mode TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN correlation_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN error_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE audit_event ADD COLUMN summary TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_event(category);
+CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_event(status);
+CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_event(correlation_id);
 "#;
 
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
@@ -163,15 +190,31 @@ CREATE TABLE IF NOT EXISTS approval (
 );
 CREATE INDEX IF NOT EXISTS idx_approval_run ON approval(run_id);
 
+-- Inspectable action history. Query columns are non-secret only (category,
+-- service, action, status, risk/mode, correlation id, normalized failure code,
+-- safe summary); the encrypted payload holds richer detail (safe summaries,
+-- redacted previews). See `repos::action_history`.
 CREATE TABLE IF NOT EXISTS audit_event (
   id TEXT PRIMARY KEY,
   kind TEXT NOT NULL,
   actor TEXT NOT NULL,
   created_at TEXT NOT NULL,
   payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  payload_nonce BLOB NOT NULL,
+  category TEXT NOT NULL DEFAULT 'approval',
+  service TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  risk_level TEXT NOT NULL DEFAULT '',
+  mode TEXT NOT NULL DEFAULT '',
+  correlation_id TEXT NOT NULL DEFAULT '',
+  error_code TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_event(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_event(category);
+CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_event(status);
+CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_event(correlation_id);
 
 CREATE TABLE IF NOT EXISTS artifact (
   id TEXT PRIMARY KEY,

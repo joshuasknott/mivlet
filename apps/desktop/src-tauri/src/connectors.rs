@@ -976,6 +976,40 @@ pub(crate) fn redact_connector_text(value: &str) -> String {
     truncate_characters(&normalized, 240)
 }
 
+/// Record a connector action into the unified action-history store (observation
+/// only). The connector-approval-records store remains the rich per-action
+/// audit; this mirrors the terminal states into the inspectable history surface.
+/// Best-effort: never blocks execution.
+fn audit_connector_action(
+    action: &ConnectorActionRequest,
+    status: &str,
+    error_code: &str,
+    message: &str,
+) {
+    let approval = &action.approval;
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::CONNECTOR_ACTION,
+        &action.connector_id,
+        &action.action,
+        status,
+    )
+    .actor("system")
+    .mode(&approval.mode)
+    .risk(&approval.risk_level)
+    .correlation(&approval.id)
+    .error(error_code)
+    .summary(message)
+    // Payload keys are non-secret identifiers (target/preview); values are
+    // redacted by the recorder before sealing. Never include tokens/keys.
+    .detail(serde_json::json!({
+        "connectorId": action.connector_id,
+        "proposedAction": action.action,
+        "target": action.payload.get("target").cloned().unwrap_or_default(),
+        "preview": action.payload.get("preview").cloned().unwrap_or_default(),
+    }))
+    .record();
+}
+
 #[tauri::command]
 pub fn list_connector_statuses(app: tauri::AppHandle) -> Vec<ConnectorManifest> {
     let boundary = connector_connections_path(&app)
@@ -1315,6 +1349,7 @@ pub async fn execute_approved_connector_action(
             &resolution.audit_entry.decided_at,
             None,
         );
+        audit_connector_action(&action, "blocked", "denied", "Connector action denied by user.");
         return Ok(ConnectorActionResult {
             request_id: action.id,
             connector_id: action.connector_id,
@@ -1371,6 +1406,7 @@ pub async fn execute_approved_connector_action(
                 .map_err(|message| {
                     command_error("unknown", &action.connector_id, &message, false)
                 })?;
+                audit_connector_action(&action, "ok", "", "Google connector action executed.");
                 return Ok(result);
             }
             Err(provider_error) => {
@@ -1380,6 +1416,12 @@ pub async fn execute_approved_connector_action(
                     "failed",
                     &resolution.audit_entry.decided_at,
                     Some(&provider_error.code),
+                );
+                audit_connector_action(
+                    &action,
+                    "failed",
+                    &provider_error.code,
+                    "Google connector action failed.",
                 );
                 return Err(provider_error);
             }
@@ -1399,6 +1441,12 @@ pub async fn execute_approved_connector_action(
                 .map_err(|message| {
                     command_error("unknown", &action.connector_id, &message, false)
                 })?;
+                audit_connector_action(
+                    &action,
+                    "ok",
+                    "",
+                    "Collaboration connector action executed.",
+                );
                 return Ok(result);
             }
             Err(error) => {
@@ -1408,6 +1456,12 @@ pub async fn execute_approved_connector_action(
                     "failed",
                     &resolution.audit_entry.decided_at,
                     Some(&error.code),
+                );
+                audit_connector_action(
+                    &action,
+                    "failed",
+                    &error.code,
+                    "Collaboration connector action failed.",
                 );
                 return Err(error);
             }
@@ -1427,6 +1481,12 @@ pub async fn execute_approved_connector_action(
                 .map_err(|message| {
                     command_error("unknown", &action.connector_id, &message, false)
                 })?;
+                audit_connector_action(
+                    &action,
+                    "ok",
+                    "",
+                    "Provider connector action executed.",
+                );
                 return Ok(ConnectorActionResult {
                     request_id: action.id,
                     connector_id: action.connector_id,
@@ -1444,6 +1504,12 @@ pub async fn execute_approved_connector_action(
                     &resolution.audit_entry.decided_at,
                     Some(&error.code),
                 );
+                audit_connector_action(
+                    &action,
+                    "failed",
+                    &error.code,
+                    "Provider connector action failed.",
+                );
                 return Err(error);
             }
         }
@@ -1455,6 +1521,12 @@ pub async fn execute_approved_connector_action(
         "failed",
         &resolution.audit_entry.decided_at,
         Some("configuration-required"),
+    );
+    audit_connector_action(
+        &action,
+        "failed",
+        "configuration-required",
+        "Connector is not configured for this action.",
     );
     Err(configuration_required(&action.connector_id))
 }

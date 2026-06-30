@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { BackendProvider } from "@fable/protocol";
+import type { ActionHistoryEvent, BackendProvider } from "@fable/protocol";
 import { SettingsPage } from "./SettingsPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
@@ -361,5 +361,168 @@ describe("Settings → Privacy UX states", () => {
     expect(disconnect).toHaveBeenCalledTimes(2);
     expect(disconnect).toHaveBeenNthCalledWith(1, "google-drive");
     expect(disconnect).toHaveBeenNthCalledWith(2, "slack");
+  });
+});
+
+describe("Settings → History (inspectable action history)", () => {
+  function renderHistory(runtime: ShellRuntime) {
+    return render(
+      <SettingsPage
+        runtime={runtime}
+        theme="dark"
+        onThemeChange={() => {}}
+        activeTab="history"
+        workspaceName="Fable"
+      />
+    );
+  }
+
+  const historyEvents: ActionHistoryEvent[] = [
+    {
+      id: "ah-1",
+      category: "tool-action",
+      service: "tool",
+      action: "read-file",
+      status: "ok",
+      actor: "system",
+      createdAt: "2026-06-30T10:00:00.000Z",
+      riskLevel: "low",
+      mode: "read-only",
+      correlationId: "req-1",
+      errorCode: "",
+      summary: "read-file src/index.ts",
+      detail: { tool: "read-file", preview: "src/index.ts" }
+    },
+    {
+      id: "ah-2",
+      category: "approval",
+      service: "github",
+      action: "github.comment",
+      status: "approved",
+      actor: "user",
+      createdAt: "2026-06-30T11:00:00.000Z",
+      riskLevel: "medium",
+      mode: "trusted-scope",
+      correlationId: "req-2",
+      errorCode: "",
+      summary: "github github.comment",
+      detail: { requestId: "req-2", consequence: "Posts a comment." }
+    },
+    {
+      id: "ah-3",
+      category: "policy-block",
+      service: "tool",
+      action: "run-shell",
+      status: "blocked",
+      actor: "system",
+      createdAt: "2026-06-30T12:00:00.000Z",
+      riskLevel: "critical",
+      mode: "full-access",
+      correlationId: "req-3",
+      errorCode: "permit",
+      summary: "run-shell: approval metadata changed after the user decision",
+      detail: { tool: "run-shell" }
+    }
+  ];
+
+  it("renders type, summary, status, time, actor, and safe details for each event", () => {
+    renderHistory(
+      stubRuntime({
+        actionHistory: historyEvents,
+        refreshActionHistory: vi.fn()
+      })
+    );
+
+    // Category + action (type).
+    expect(screen.getByText(/Tool \/ shell · read-file/)).toBeInTheDocument();
+    // Summary.
+    expect(screen.getByText("read-file src/index.ts")).toBeInTheDocument();
+    // Status.
+    expect(screen.getByText("ok")).toBeInTheDocument();
+    expect(screen.getByText("approved")).toBeInTheDocument();
+    expect(screen.getByText("blocked")).toBeInTheDocument();
+    // Actor + correlation id (safe details).
+    expect(screen.getAllByText(/actor: system/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/id: req-1/i).length).toBeGreaterThan(0);
+    // Safe detail payload (requestId) is surfaced.
+    expect(screen.getAllByText("req-2").length).toBeGreaterThan(0);
+  });
+
+  it("filters events by category using the plaintext category chips", () => {
+    renderHistory(
+      stubRuntime({
+        actionHistory: historyEvents,
+        refreshActionHistory: vi.fn()
+      })
+    );
+
+    // Initially all three events are present.
+    expect(screen.getAllByRole("listitem").length).toBe(3);
+
+    // Filter to approvals only.
+    fireEvent.click(screen.getByRole("button", { name: "Approvals" }));
+
+    const approvalRows = screen.getAllByRole("listitem");
+    expect(approvalRows.length).toBe(1);
+    expect(approvalRows[0]).toHaveAttribute(
+      "data-action-history-category",
+      "approval"
+    );
+  });
+
+  it("shows an empty state when no actions are recorded", () => {
+    renderHistory(
+      stubRuntime({
+        actionHistory: [],
+        refreshActionHistory: vi.fn()
+      })
+    );
+
+    expect(screen.getByTestId("action-history-empty")).toBeInTheDocument();
+  });
+
+  it("invokes refreshActionHistory when the refresh button is clicked", () => {
+    const refreshActionHistory = vi.fn();
+    renderHistory(
+      stubRuntime({
+        actionHistory: historyEvents,
+        refreshActionHistory
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh action history/i }));
+    expect(refreshActionHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a redacted detail value without leaking secret-shaped data", () => {
+    // The Rust boundary redacts secrets before they reach the UI; this asserts
+    // the UI renders the (already-redacted) "[redacted]" placeholder faithfully
+    // rather than dropping the row.
+    const event: ActionHistoryEvent = {
+      id: "ah-redacted",
+      category: "tool-action",
+      service: "tool",
+      action: "run-shell",
+      status: "ok",
+      actor: "system",
+      createdAt: "2026-06-30T13:00:00.000Z",
+      riskLevel: "critical",
+      mode: "full-access",
+      correlationId: "req-r",
+      errorCode: "",
+      summary: "run-shell echo hi",
+      detail: { token: "[redacted]", command: "echo hi" }
+    };
+
+    renderHistory(
+      stubRuntime({
+        actionHistory: [event],
+        refreshActionHistory: vi.fn()
+      })
+    );
+
+    const detailValues = screen.getAllByTestId("action-history-detail-value").map((node) => node.textContent);
+    expect(detailValues).toContain("[redacted]");
+    expect(detailValues).toContain("echo hi");
   });
 });

@@ -59,6 +59,7 @@
 - Adapters cannot downgrade writes to non-consequential operations: the shared connector runtime rejects any external write capability that is not declared consequential.
 - Native provider retries are bounded and limited to connection failures, rate limits, and server failures. Connector writes are not blindly replayed after an ambiguous provider success.
 - Agent runs and connector state persist only non-secret metadata. Interrupted runs are marked recoverable after restart; an old approval permit cannot be replayed.
+- Inspectable action history records every auditable category (model calls, connector actions, shell/tool actions, browser/web actions, approvals, schedules, and blocked policy decisions) at the execution boundary. Audit observes actions only; it never grants execution authority, and recording is best-effort so it can never weaken the approval or permit gate. Query columns are non-secret (category, service, action, status, risk/mode, correlation id, normalized failure code, safe summary, actor, time) and indexed for filtering without decryption; the encrypted payload holds only redacted safe detail. Tokens, API keys, raw provider secrets, auth handoff codes, full private file content, full email bodies, and environment-variable values are redacted at the storage boundary and never persisted.
 
 ## Remaining Security Work
 

@@ -1311,6 +1311,61 @@ export interface ApprovalAuditEntry {
   note: string;
 }
 
+/**
+ * Inspectable action-history categories. Audit observes actions; it never grants
+ * execution authority. These mirror the Rust `action_history::category`
+ * constants and stay forward-compatible (new categories may appear).
+ */
+export type ActionHistoryCategory =
+  | "model-call"
+  | "connector-action"
+  | "tool-action"
+  | "web-action"
+  | "approval"
+  | "schedule"
+  | "policy-block";
+
+/**
+ * A normalized, inspectable action-history event. Query fields are non-secret
+ * (category/service/action/status, risk/mode, correlation id, normalized failure
+ * code, safe summary, actor, time); `detail` holds redacted richer detail that is
+ * only surfaced by an authorized inspectable surface. Never carries tokens, API
+ * keys, raw provider secrets, auth handoff codes, full private file content,
+ * full email bodies, or environment-variable values.
+ */
+export interface ActionHistoryEvent {
+  id: string;
+  category: ActionHistoryCategory | string;
+  service: string;
+  action: string;
+  status: string;
+  actor: string;
+  /** ISO timestamp. */
+  createdAt: string;
+  riskLevel: string;
+  mode: string;
+  correlationId: string;
+  errorCode: string;
+  summary: string;
+  /** Safe, redacted richer detail (preview, normalized failure message). */
+  detail?: unknown;
+}
+
+/** Payload for the `record_action_history` Tauri command. */
+export interface RecordActionHistoryRequest {
+  category: ActionHistoryCategory | string;
+  service: string;
+  action: string;
+  status: string;
+  actor?: string;
+  riskLevel?: string;
+  mode?: string;
+  correlationId?: string;
+  errorCode?: string;
+  summary?: string;
+  detail?: unknown;
+}
+
 export interface RuntimeSnapshot {
   version: 1;
   activeItem: string;

@@ -482,13 +482,30 @@ pub async fn execute_tool_call(
     app: tauri::AppHandle,
     request: ToolExecutionRequest,
 ) -> Result<ToolResult, String> {
-    validate_tool_name(&request.tool)?;
-    validate_tool_approval_binding(&request.tool, &request.arguments, &request.approval.request)?;
-    verify_and_consume_execution_approval(
+    let tool = request.tool.clone();
+    let arguments = request.arguments.clone();
+    let request_id = request.approval.request.id.clone();
+    let decided_at = request.approval.decided_at.clone();
+    let (mode, risk) = tool_policy(&tool).unwrap_or(("read-only", "low"));
+    // Audit records the *attempt*; it observes the boundary and never grants
+    // authority. Recording is best-effort and never blocks execution.
+    audit_tool_attempt(&tool, &arguments, &request_id, mode, risk, &decided_at);
+    if let Err(error) = validate_tool_name(&tool) {
+        audit_tool_outcome(&tool, &request_id, mode, risk, "rejected", "unknown-tool", &error);
+        return Err(error);
+    }
+    if let Err(error) = validate_tool_approval_binding(&tool, &arguments, &request.approval.request) {
+        audit_tool_outcome(&tool, &request_id, mode, risk, "blocked", "approval-binding", &error);
+        return Err(error);
+    }
+    if let Err(error) = verify_and_consume_execution_approval(
         &execution_approvals_path(&app)?,
         &request.approval.request,
-        &request.approval.decided_at,
-    )?;
+        &decided_at,
+    ) {
+        audit_tool_outcome(&tool, &request_id, mode, risk, "blocked", "permit", &error);
+        return Err(error);
+    }
     if request.tool == "search-notion" || request.tool == "search-slack" {
         let connector_id = if request.tool == "search-notion" {
             "notion"
@@ -521,18 +538,21 @@ pub async fn execute_tool_call(
             },
         )
         .await
-        .map_err(|error| error.message)?;
-        return Ok(ToolResult {
-            ok: true,
-            output: serde_json::to_string(&result)
-                .map_err(|_| "Fable could not encode connector results.".to_string())?,
-        });
+        .map_err(|error| {
+            audit_tool_outcome(&tool, &request_id, mode, risk, "failed", "connector", &error.message);
+            error.message
+        })?;
+        let output = serde_json::to_string(&result)
+            .map_err(|_| "Fable could not encode connector results.".to_string())?;
+        audit_tool_outcome(&tool, &request_id, mode, risk, "ok", "", &format!("{tool} executed"));
+        return Ok(ToolResult { ok: true, output });
     }
     // The caller may never select its own authority root. Resolve the workspace
     // at the native boundary so a forged request cannot point at an arbitrary
     // directory and then appear "confined" beneath it.
     let root = resolve_workspace_root(&app)?;
-    match execute_tool_outcome(request, &root) {
+    let outcome = execute_tool_outcome(request, &root);
+    let result = match outcome {
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,
         ToolOutcome::NeedsConnectorRead { request } => {
@@ -549,7 +569,94 @@ pub async fn execute_tool_call(
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|error| error.message)
         }
+    };
+    match &result {
+        Ok(tool_result) if tool_result.ok => {
+            audit_tool_outcome(&tool, &request_id, mode, risk, "ok", "", &format!("{tool} executed"));
+        }
+        Ok(tool_result) => {
+            audit_tool_outcome(&tool, &request_id, mode, risk, "failed", "tool", &tool_result.output);
+        }
+        Err(message) => {
+            audit_tool_outcome(&tool, &request_id, mode, risk, "failed", "tool", message);
+        }
     }
+    result
+}
+
+/// Record a tool execution attempt (observation only, best-effort).
+fn audit_tool_attempt(
+    tool: &str,
+    arguments: &serde_json::Value,
+    request_id: &str,
+    mode: &str,
+    risk: &str,
+    decided_at: &str,
+) {
+    let category = if tool == "web-fetch" {
+        crate::action_history::categories::WEB_ACTION
+    } else {
+        crate::action_history::categories::TOOL_ACTION
+    };
+    let preview = preview_tool_arguments(tool, arguments);
+    crate::action_history::Recorder::new(category, "tool", tool, "attempted")
+        .actor("system")
+        .mode(mode)
+        .risk(risk)
+        .correlation(request_id)
+        .summary(&format!("{tool} {preview}"))
+        .detail(serde_json::json!({
+            "tool": tool,
+            "preview": preview,
+            "decidedAt": decided_at,
+        }))
+        .record();
+}
+
+/// Record the final tool execution outcome (observation only, best-effort).
+fn audit_tool_outcome(
+    tool: &str,
+    request_id: &str,
+    mode: &str,
+    risk: &str,
+    status: &str,
+    error_code: &str,
+    message: &str,
+) {
+    let category = if tool == "web-fetch" {
+        crate::action_history::categories::WEB_ACTION
+    } else {
+        crate::action_history::categories::TOOL_ACTION
+    };
+    crate::action_history::Recorder::new(category, "tool", tool, status)
+        .actor("system")
+        .mode(mode)
+        .risk(risk)
+        .correlation(request_id)
+        .error(error_code)
+        .summary(&format!("{tool}: {message}"))
+        .record();
+}
+
+/// Build a short, non-secret preview of the tool arguments. Never returns raw
+/// file content, env values, or command payloads beyond a bounded prefix.
+fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
+    let pick = match tool {
+        "read-file" | "write-file" => "path",
+        "run-shell" => "command",
+        "web-fetch" => "url",
+        _ => "query",
+    };
+    let value = arguments
+        .get(pick)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    if value.is_empty() {
+        return String::new();
+    }
+    // Bounded preview only; never the full content/command body.
+    let bounded: String = value.chars().take(80).collect();
+    bounded
 }
 
 /// Issue the approved web-fetch GET and classify the response into the pure

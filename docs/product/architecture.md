@@ -28,6 +28,12 @@ Core domains:
 
 Implemented runtime commands cover approval resolution, one-time execution permits, standing approval rules, approval audit persistence, native agent-run journaling and restart recovery, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
 
+### Action History (Audit)
+
+A single normalized action-history event covers every auditable category: model calls, connector actions, shell/tool actions, browser/web actions, approvals, schedules, and blocked policy decisions. Events are recorded at execution boundaries (native tool execution, connector prepare/execute, approval resolution, backend/model call lifecycle, web/browser fetch, scheduler queue/run/cancel/block), carry correlation ids where available, and expose status, risk/profile/mode, actor, a safe summary, and a normalized failure code.
+
+Storage is the encrypted SQLite `audit_event` table (schema v3). Query columns are non-secret and indexed (category, service, action, status, risk_level, mode, correlation_id, error_code, summary, actor, created_at); the encrypted payload holds only redacted safe detail. Tokens, API keys, raw provider secrets, auth handoff codes, full private file content, full email bodies, and environment-variable values are redacted at the storage boundary and never persisted. Audit observes actions only — it never grants execution authority, and recording is best-effort so it can never weaken the approval or permit gate. The `list_action_history` and `record_action_history` commands back the Settings → History inspectable surface, which shows type, summary, status, time, actor, and safe details with category filtering. The legacy `ApprovalAuditEntry` shape and `list_approval_audit` command remain compatible.
+
 ## Knowledge And Memory
 
 `@fable/knowledge` is the pure domain layer for ingestion, chunking, retrieval,
