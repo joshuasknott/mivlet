@@ -2061,7 +2061,8 @@ mod tests {
             expires_at: None,
             scopes: scopes.iter().map(|scope| scope.to_string()).collect(),
             revocation_endpoint: None,
-            token_endpoint: "https://example.invalid/token".to_string(),
+            token_endpoint: Some("https://example.invalid/token".to_string()),
+            handoff_endpoint: None,
             client_id: "test-client".to_string(),
             brokered: false,
         }
