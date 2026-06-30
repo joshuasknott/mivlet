@@ -134,7 +134,7 @@ async function route(
       codeChallenge: requireQuery(url, "code_challenge"),
       codeChallengeMethod: "S256" as const
     };
-    const { response } = broker.authorize(request);
+    const { response } = await broker.authorize(request);
     res.writeHead(302, { location: response.authorizationUrl, "cache-control": "no-store" });
     res.end();
     return;
