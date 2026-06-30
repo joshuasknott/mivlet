@@ -283,6 +283,27 @@ describe("Fable home", () => {
     expect(runtimeMocks.connectorOAuthCalls).toContain("github");
   });
 
+  it("routes the vercel provider-installation connector through the same broker OAuth path", async () => {
+    // Vercel uses the distinct `provider-installation` auth_mode, but it is a
+    // confidential connector and must connect through the same loopback OAuth /
+    // auth-broker path as GitHub. Pinning this prevents the distinct auth_mode
+    // from silently bypassing or breaking the broker-gated connect flow.
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+
+    const vercelCard = screen
+      .getAllByText("Vercel")
+      .map((node) => node.closest("article"))
+      .find(Boolean);
+    expect(vercelCard).not.toBeNull();
+
+    await user.click(
+      within(vercelCard as HTMLElement).getByRole("button", { name: /^connect$/i })
+    );
+
+    expect(runtimeMocks.connectorOAuthCalls).toContain("vercel");
+  });
+
   it("prepares connector writes as approval requests instead of executing them", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));

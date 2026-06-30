@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
 import { ConnectorRuntime, type ConnectorApprovalBoundary } from "../sdk";
+import type { ProviderFetch } from "./http";
 import { createGitHubAdapter, GITHUB_CAPABILITIES } from "./github";
 import { createVercelAdapter, VERCEL_CAPABILITIES } from "./vercel";
 import { createLinearAdapter, LINEAR_CAPABILITIES } from "./linear";
@@ -216,14 +217,14 @@ describe("Vercel production adapter", () => {
   });
 
   it("keeps the bearer token in the Authorization header, never in the URL", async () => {
-    const fetcher = vi.fn(async () => response({ projects: [] }));
+    const fetcher = vi.fn<ProviderFetch>(async () => response({ projects: [] }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
     await adapter.read({ capability: "projects.read", input: { teamId: "team_1" } }, tokens);
-    const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
+    const [url, init] = fetcher.mock.calls[0];
     // The token travels only in the Authorization header; the URL/query stay clean so
     // access tokens never leak into logs, browser history, or provider query params.
     expect(String(url)).not.toContain("test-token");
-    expect(init?.headers?.authorization ?? "").toContain("Bearer test-token");
+    expect(init?.headers).toMatchObject({ authorization: "Bearer test-token" });
   });
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
@@ -233,7 +234,7 @@ describe("Vercel production adapter", () => {
   });
 
   it("redeems, refreshes, and revokes through the versioned broker contract", async () => {
-    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const fetcher = vi.fn<ProviderFetch>(async (url, init) => {
       const path = new URL(String(url)).pathname;
       const body = JSON.parse(String(init?.body));
       expect(body.contractVersion).toBe(1);
