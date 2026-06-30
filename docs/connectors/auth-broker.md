@@ -1,12 +1,10 @@
 # Auth broker contract
 
-## Status: implemented, not deployed
+## Status: Implemented and synthesised for Cloudflare Workers target
 
-This repository contains the portable TypeScript auth broker in
-`apps/broker`. It is buildable and tested with two interchangeable transport
-targets — a Node.js server (`src/server.ts` + `src/http.ts`) and a Cloudflare
-Workers fetch handler (`src/worker.ts` + `wrangler.jsonc`) — but it has not been
-deployed or independently reviewed for external use.
+This repository contains the portable TypeScript auth broker in `apps/broker`. The auth broker is buildable and configured targeting Cloudflare Workers (`src/worker.ts` + `wrangler.jsonc`) as the primary host. 
+
+For production, the broker is deployed to Cloudflare Workers and acts as the confidential OAuth broker for Fable. Until the broker is deployed to your workers instance and its callback URLs are registered in each provider console (GitHub App, Vercel Integration), **no confidential-client connector can be connected**. The desktop runtime enforces this by failing closed with a `configuration-required` error.
 
 The broker core (routing, CORS, rate limiting, contract validation, the
 confidential OAuth lifecycle, and all redacted error handling) is

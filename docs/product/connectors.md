@@ -142,11 +142,11 @@ actually connected.
 
 ## Credential storage and auth broker
 
-The auth broker is implemented in `apps/broker` (targeting Cloudflare Workers for production deployment), but it is not yet deployed in production.
+The auth broker is implemented in `apps/broker` and synthesised targeting Cloudflare Workers.
 The narrow broker contract, its non-proxying boundary, the fail-closed
 configuration checks, and the local-first guarantees are documented in
 [Auth broker contract](../connectors/auth-broker.md). Confidential-client
-connectors (GitHub, Vercel, Notion, Slack, Linear) fail closed until a broker is
+connectors (GitHub, Vercel, Notion, Slack, Linear) fail closed until your Cloudflare Workers broker is
 deployed and configured; the core desktop workspace and Google public-client (PKCE) connectors
 do not depend on it.
 
