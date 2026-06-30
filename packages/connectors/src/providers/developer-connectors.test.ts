@@ -393,6 +393,124 @@ describe("Linear production adapter", () => {
     const malformed = createLinearAdapter({ ...common, fetch: vi.fn(async () => response({ unexpected: true })) });
     await expect(malformed.read({ capability: "teams.read", input: {} }, tokens)).rejects.toThrow(/malformed/i);
   });
+
+  it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
+    const start = await createLinearAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: "c" });
+    expect(start.authorizationUrl).toContain("https://auth.example/oauth/linear/authorize");
+    expect(start.state).toBe("s");
+  });
+
+  it("redeems, refreshes, and revokes through the versioned broker contract", async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const body = JSON.parse(String(init?.body));
+      expect(body.contractVersion).toBe(1);
+      expect(body.provider).toBe("linear");
+      if (path.endsWith("/handoff")) return response({ contractVersion: 1, tokens: { accessToken: "a", refreshToken: "r", tokenType: "Bearer", scopes: [] }, account: { id: "ws", displayName: "Workspace" } });
+      if (path.endsWith("/refresh")) return response({ contractVersion: 1, tokens: { accessToken: "a2", tokenType: "Bearer", scopes: [] } });
+      return response({ contractVersion: 1, revoked: true });
+    });
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    expect(auth).toMatchObject({ tokens: { accessToken: "a", refreshToken: "r" }, account: { id: "ws" } });
+    await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "a2", refreshToken: "r" });
+    await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();
+    expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/oauth/linear/handoff", "/oauth/linear/refresh", "/oauth/linear/revoke"
+    ]);
+  });
+
+  it("handles missing broker configuration (HTTP 503 / broker_configuration)", async () => {
+    const fetcher = vi.fn(async () => response({ error: "configuration-required", message: "Linear is not configured on this broker." }, 503));
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "configuration-required",
+      message: "Linear is not configured on this broker."
+    });
+  });
+
+  it("handles unconfigured/expired refresh tokens when token lacks refresh token", async () => {
+    const adapter = createLinearAdapter({ ...common, fetch: vi.fn() });
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "expired-auth",
+      message: expect.stringContaining("expired")
+    });
+  });
+
+  it("handles expired credentials from broker refresh (HTTP 401 / needs-auth)", async () => {
+    const fetcher = vi.fn(async () => response({ error: "needs-auth", message: "Refresh token was rejected." }, 401));
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "expired-auth",
+      message: "Refresh token was rejected."
+    });
+  });
+
+  it("handles token revocation success (200) and idempotent success (404)", async () => {
+    const fetcher = vi.fn(async () => response(undefined, 200));
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://auth.example/oauth/linear/revoke",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          contractVersion: 1,
+          provider: "linear",
+          token: "refresh",
+          tokenTypeHint: "refresh_token"
+        })
+      })
+    );
+
+    const fetcher404 = vi.fn(async () => response(undefined, 404));
+    const adapter404 = createLinearAdapter({ ...common, fetch: fetcher404 });
+    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
+  });
+
+  it("handles broker refresh failure (HTTP 500 / provider-unavailable)", async () => {
+    const fetcher = vi.fn(async () => response({ error: "provider-unavailable", message: "Broker is temporarily unavailable." }, 500));
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "provider-unavailable",
+      message: "Broker is temporarily unavailable.",
+      retryable: true
+    });
+  });
+
+  it("handles missing broker (network connection error or broker HTTP 404)", async () => {
+    const fetcher = vi.fn(async () => { throw new Error("TypeError: fetch failed"); });
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toThrow();
+
+    const fetcher404 = vi.fn(async () => response(undefined, 404));
+    const adapter404 = createLinearAdapter({ ...common, fetch: fetcher404 });
+    await expect(adapter404.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "not-found"
+    });
+  });
+
+  it("handles provider unavailable (HTTP 502 / network error on Linear API request)", async () => {
+    const fetcher = vi.fn(async () => new Response("Internal Server Error", { status: 502 }));
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.read({ capability: "teams.read", input: {} }, tokens)).rejects.toMatchObject({
+      code: "provider-unavailable",
+      retryable: true
+    });
+
+    const networkErrorFetcher = vi.fn(async () => { throw new Error("socket hang up"); });
+    const networkAdapter = createLinearAdapter({ ...common, fetch: networkErrorFetcher });
+    await expect(networkAdapter.read({ capability: "teams.read", input: {} }, tokens)).rejects.toMatchObject({
+      code: "provider-unavailable",
+      message: "The provider network request failed.",
+      retryable: true
+    });
+  });
+
+  it("normalizes GraphQL AUTHENTICATION_ERROR to expired-auth", async () => {
+    const unauthorized = createLinearAdapter({ ...common, fetch: vi.fn(async () => response({ errors: [{ extensions: { code: "AUTHENTICATION_ERROR" } }] })) });
+    await expect(unauthorized.read({ capability: "teams.read", input: {} }, tokens)).rejects.toMatchObject({ code: "expired-auth" });
+  });
 });
 
 describe("developer connector capability and approval registration", () => {
