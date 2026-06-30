@@ -37,7 +37,7 @@ public-client (PKCE) connectors remain fully usable without any hosted service.
 ## Purpose and scope
 
 The broker exists for exactly one reason: confidential-client OAuth. Some
-providers (GitHub App, Vercel, Notion, Slack, Linear) require a client secret or
+providers (GitHub OAuth, Vercel, Notion, Slack, Linear) require a client secret or
 signing material that must never live in a desktop binary, React assets, logs,
 snapshots, or local JSON state. The broker holds those secrets server-side and
 performs the OAuth operations that need them.
@@ -360,7 +360,7 @@ the callback URL that routes to the auth broker:
 
 Examples:
 
-- GitHub App: `https://<your-broker-domain>/oauth/github/callback`
+- GitHub OAuth: `https://<your-broker-domain>/oauth/github/callback`
 - Vercel Integration: `https://<your-broker-domain>/oauth/vercel/callback`
 - Linear Application: `https://<your-broker-domain>/oauth/linear/callback`
 - Notion Public Integration: `https://<your-broker-domain>/oauth/notion/callback`

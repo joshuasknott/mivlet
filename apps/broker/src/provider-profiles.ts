@@ -57,7 +57,7 @@ const GITHUB_PROFILE: ProviderProfile = {
   tokenEndpoint: "https://github.com/login/oauth/access_token",
   revocationEndpoint: `https://api.github.com/applications/${"{clientId}"}/grant`,
   identityEndpoint: "https://api.github.com/user",
-  scopes: ["read:user", "read:org", "repo", "workflow"],
+  scopes: ["read:user", "read:org", "repo"],
   clientIdEnv: "FABLE_BROKER_GITHUB_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_GITHUB_CLIENT_SECRET",
   pkce: "broker-pkce",

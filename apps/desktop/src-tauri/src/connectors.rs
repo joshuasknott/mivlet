@@ -73,9 +73,9 @@ struct ConnectorActionPolicy {
 }
 
 const GITHUB_SCOPES: &[(&str, &str, &str, bool)] = &[
-    ("contents:read", "Repository contents", "read", true),
-    ("issues:read", "Issues", "read", true),
-    ("pull_requests:write", "Draft pull requests", "write", false),
+    ("read:user", "Account identity", "read", true),
+    ("repo", "Repositories, issues, and pull requests", "read", true),
+    ("read:org", "Organization membership", "read", false),
 ];
 const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("project:read", "Projects", "read", true),
@@ -153,21 +153,12 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         name: "GitHub",
         auth_mode: "oauth-broker",
         permissions: &[
-            "read repositories and selected files",
-            "prepare draft pull requests and comments",
+            "read authenticated account identity",
+            "read repositories, issues, and pull requests",
         ],
         scopes: GITHUB_SCOPES,
         setup_message: "Register a GitHub App and configure the Fable auth broker.",
-        actions: &[
-            "github.draft-pull-request",
-            "github.comment",
-            "github.create-issue",
-            "github.update-issue",
-            "github.create-review",
-            "github.update-file",
-            "github.create-branch",
-            "github.dispatch-workflow",
-        ],
+        actions: &[],
     },
     ConnectorCatalogEntry {
         id: "vercel",

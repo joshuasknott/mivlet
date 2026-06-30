@@ -486,19 +486,39 @@ fn map_read(
             )
         }
         ("github", capability) => {
-            let repo = required(input, "repository", id)?;
+            let repo = github_repository_path(input)?;
             let path = match capability {
                 "branches.read" => "branches".into(),
                 "commits.read" => "commits".into(),
                 "files.read" => format!("contents/{}", required(input, "path", id)?),
-                "issues.read" => input
-                    .get("number")
-                    .map(|v| format!("issues/{}", value_text(v)))
-                    .unwrap_or_else(|| "issues".into()),
-                "pull-requests.read" => input
-                    .get("number")
-                    .map(|v| format!("pulls/{}", value_text(v)))
-                    .unwrap_or_else(|| "pulls".into()),
+                "issues.read" => match input.get("number") {
+                    Some(number) => format!("issues/{}", value_text(number)),
+                    None => {
+                        page_query.push((
+                            "state".into(),
+                            input
+                                .get("state")
+                                .map(value_text)
+                                .filter(|state| !state.trim().is_empty())
+                                .unwrap_or_else(|| "all".into()),
+                        ));
+                        "issues".into()
+                    }
+                },
+                "pull-requests.read" => match input.get("number") {
+                    Some(number) => format!("pulls/{}", value_text(number)),
+                    None => {
+                        page_query.push((
+                            "state".into(),
+                            input
+                                .get("state")
+                                .map(value_text)
+                                .filter(|state| !state.trim().is_empty())
+                                .unwrap_or_else(|| "all".into()),
+                        ));
+                        "pulls".into()
+                    }
+                },
                 "comments.read" => format!("issues/{}/comments", required(input, "number", id)?),
                 "reviews.read" => format!("pulls/{}/reviews", required(input, "number", id)?),
                 "checks.read" => format!("commits/{}/check-runs", required(input, "ref", id)?),
@@ -716,14 +736,11 @@ fn map_write(action: &ConnectorActionRequest) -> Result<WriteRequestSpec, Connec
         )
     };
     match action.action.as_str(){
-        "github.draft-pull-request"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/pulls",reqs(p,"repository",id)?),vec![],json!({"head":reqs(p,"head",id)?,"base":reqs(p,"base",id)?,"title":reqs(p,"title",id)?,"draft":true}))),
-        "github.comment"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/issues/{}/comments",reqs(p,"repository",id)?,reqs(p,"targetId",id)?),vec![],json!({"body":reqs(p,"body",id)?}))),
-        "github.create-issue"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/issues",reqs(p,"repository",id)?),vec![],without_strings(p,&["repository","targetId"]))),
-        "github.update-issue"=>Ok((Method::PATCH,format!("https://api.github.com/repos/{}/issues/{}",reqs(p,"repository",id)?,reqs(p,"targetId",id)?),vec![],without_strings(p,&["repository","targetId"]))),
-        "github.create-review"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/pulls/{}/reviews",reqs(p,"repository",id)?,reqs(p,"targetId",id)?),vec![],without_strings(p,&["repository","targetId"]))),
-        "github.update-file"=>Ok((Method::PUT,format!("https://api.github.com/repos/{}/contents/{}",reqs(p,"repository",id)?,reqs(p,"path",id)?),vec![],without_strings(p,&["repository","path","targetId"]))),
-        "github.create-branch"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/git/refs",reqs(p,"repository",id)?),vec![],json!({"ref":format!("refs/heads/{}",reqs(p,"branch",id)?),"sha":reqs(p,"sha",id)?}))),
-        "github.dispatch-workflow"=>Ok((Method::POST,format!("https://api.github.com/repos/{}/actions/workflows/{}/dispatches",reqs(p,"repository",id)?,reqs(p,"workflow",id)?),vec![],json!({"ref":reqs(p,"ref",id)?}))),
+        "github.draft-pull-request" | "github.comment" | "github.create-issue" |
+        "github.update-issue" | "github.create-review" | "github.update-file" |
+        "github.create-branch" | "github.dispatch-workflow" => {
+            Err(error("invalid-request", id, "GitHub live writes are not enabled.", false))
+        }
         "vercel.promote"=>Ok((Method::POST,format!("https://api.vercel.com/v10/projects/{}/promote/{}",reqs(p,"project",id)?,reqs(p,"targetId",id)?),team_query(p),json!({}))),
         "vercel.rollback"=>Ok((Method::POST,format!("https://api.vercel.com/v10/projects/{}/rollback/{}",reqs(p,"project",id)?,reqs(p,"targetId",id)?),team_query(p),json!({}))),
         "vercel.create-deployment"=>Ok((Method::POST,"https://api.vercel.com/v13/deployments".into(),team_query(p),without_strings(p,&["teamId","targetId"]))),
@@ -768,6 +785,29 @@ fn required(
                 false,
             )
         })
+}
+fn github_repository_path(input: &BTreeMap<String, Value>) -> Result<String, ConnectorCommandError> {
+    let repository = required(input, "repository", "github")?;
+    let mut parts = repository.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let name = parts.next().unwrap_or_default();
+    if owner.is_empty()
+        || name.is_empty()
+        || parts.next().is_some()
+        || !owner.chars().all(is_github_path_component)
+        || !name.chars().all(is_github_path_component)
+    {
+        return Err(error(
+            "invalid-request",
+            "github",
+            "GitHub repository must be in owner/name form.",
+            false,
+        ));
+    }
+    Ok(format!("{owner}/{name}"))
+}
+fn is_github_path_component(value: char) -> bool {
+    value.is_ascii_alphanumeric() || matches!(value, '-' | '_' | '.')
 }
 fn reqs(
     input: &BTreeMap<String, String>,
@@ -872,5 +912,70 @@ pub(crate) async fn probe_health(app: &tauri::AppHandle, connector_id: &str) -> 
             checked_at,
             retry_after: failure.retry_after,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn github_request(
+        capability: &str,
+        input: impl IntoIterator<Item = (&'static str, Value)>,
+    ) -> ConnectorCapabilityRequest {
+        ConnectorCapabilityRequest {
+            connector_id: "github".to_string(),
+            capability: capability.to_string(),
+            input: input
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+            cursor: None,
+        }
+    }
+
+    #[test]
+    fn github_repositories_list_maps_to_authenticated_repos() {
+        let request = github_request("repositories.list", std::iter::empty::<(&'static str, Value)>());
+        let (method, url, query, body) = map_read(&request).expect("mapped");
+        assert_eq!(method, Method::GET);
+        assert_eq!(url, "https://api.github.com/user/repos");
+        assert!(query.contains(&("per_page".to_string(), "30".to_string())));
+        assert!(body.is_none());
+    }
+
+    #[test]
+    fn github_issue_and_pull_request_reads_use_repo_paths_and_state() {
+        let issues = github_request(
+            "issues.read",
+            [
+                ("repository", json!("acme/fable")),
+                ("state", json!("open")),
+                ("limit", json!(10)),
+            ],
+        );
+        let (_, issue_url, issue_query, _) = map_read(&issues).expect("issues mapped");
+        assert_eq!(issue_url, "https://api.github.com/repos/acme/fable/issues");
+        assert!(issue_query.contains(&("per_page".to_string(), "10".to_string())));
+        assert!(issue_query.contains(&("state".to_string(), "open".to_string())));
+
+        let pulls = github_request(
+            "pull-requests.read",
+            [("repository", json!("acme/fable"))],
+        );
+        let (_, pulls_url, pulls_query, _) = map_read(&pulls).expect("pulls mapped");
+        assert_eq!(pulls_url, "https://api.github.com/repos/acme/fable/pulls");
+        assert!(pulls_query.contains(&("state".to_string(), "all".to_string())));
+    }
+
+    #[test]
+    fn github_repository_input_must_be_owner_slash_name() {
+        let request = github_request(
+            "issues.read",
+            [("repository", json!("https://github.com/acme/fable"))],
+        );
+        let error = map_read(&request).expect_err("invalid repo rejected");
+        assert_eq!(error.code, "invalid-request");
+        assert_eq!(error.connector_id, "github");
     }
 }

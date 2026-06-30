@@ -27,6 +27,27 @@ describe("GitHub production adapter", () => {
     expect(result.items[0]).toMatchObject({ id: 1, full_name: "acme/fable" });
   });
 
+  it("maps issue and pull request reads to repository REST paths", async () => {
+    const fetcher = vi.fn(async () => response([{ id: 2, number: 7, title: "Ship" }]));
+    const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
+    await adapter.read({
+      capability: "issues.read",
+      input: { repository: "acme/fable", state: "open", limit: 5 }
+    }, tokens);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.stringMatching(/repos\/acme\/fable\/issues.*per_page=5.*state=open/),
+      expect.objectContaining({ method: "GET" })
+    );
+    await adapter.read({
+      capability: "pull-requests.read",
+      input: { repository: "acme/fable", limit: 5 }
+    }, tokens);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.stringMatching(/repos\/acme\/fable\/pulls.*state=all/),
+      expect.objectContaining({ method: "GET" })
+    );
+  });
+
   it("maps permissions, expired access, rate limits, network errors, and malformed bodies", async () => {
     for (const [status, code] of [[401, "expired-auth"], [403, "permission-denied"], [429, "rate-limited"]] as const) {
       const adapter = createGitHubAdapter({ ...common, fetch: vi.fn(async () => response({ message: "secret provider detail" }, status)) });
@@ -46,6 +67,88 @@ describe("GitHub production adapter", () => {
     });
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
     await expect(adapter.read({ capability: "identity.read", input: {}, signal: controller.signal }, tokens)).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("redeems, refreshes, and revokes through the versioned broker contract", async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      const target = new URL(url);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      if (target.pathname === "/oauth/github/handoff") {
+        expect(body).toMatchObject({ contractVersion: 1, provider: "github", handoff: "ticket", state: "state-1" });
+        return response({
+          contractVersion: 1,
+          tokens: { accessToken: "gho_access", refreshToken: "gho_refresh", tokenType: "Bearer", scopes: ["repo", "read:user"] },
+          account: { id: "123", displayName: "The Octocat", handle: "octocat" }
+        });
+      }
+      if (target.pathname === "/oauth/github/refresh") {
+        expect(body).toMatchObject({ contractVersion: 1, provider: "github", refreshToken: "gho_refresh" });
+        return response({
+          contractVersion: 1,
+          tokens: { accessToken: "gho_new", tokenType: "Bearer", scopes: ["repo"] }
+        });
+      }
+      if (target.pathname === "/oauth/github/revoke") {
+        expect(body).toMatchObject({ contractVersion: 1, provider: "github", token: "gho_refresh", tokenTypeHint: "refresh_token" });
+        return response({ contractVersion: 1, revoked: true });
+      }
+      return response({}, 404);
+    });
+    const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
+    const started = await adapter.startAuth({
+      redirectUri: common.redirectUri,
+      state: "state-1",
+      codeChallenge: "challenge"
+    });
+    const authorize = new URL(started.authorizationUrl);
+    expect(authorize.pathname).toBe("/oauth/github/authorize");
+    expect(authorize.searchParams.get("code_challenge")).toBe("challenge");
+    expect(authorize.searchParams.get("scope")).toBe("read:user read:org repo");
+
+    const completed = await adapter.completeAuth({
+      callbackUrl: `${common.redirectUri}?handoff=ticket&state=state-1`,
+      expectedState: "state-1",
+      codeVerifier: "verifier"
+    });
+    expect(completed.account).toMatchObject({ id: "123", handle: "octocat" });
+    expect(completed.tokens.accessToken).toBe("gho_access");
+
+    const refreshed = await adapter.refresh(completed.tokens);
+    expect(refreshed).toMatchObject({ accessToken: "gho_new", refreshToken: "gho_refresh" });
+    await adapter.revoke(refreshed);
+  });
+
+  it("surfaces broker configuration and expired-token failures", async () => {
+    const adapter = createGitHubAdapter({
+      ...common,
+      fetch: vi.fn(async () => response({
+        contractVersion: 1,
+        error: "configuration-required",
+        message: "GitHub is not configured on this broker.",
+        retryable: false
+      }, 503))
+    });
+    await expect(adapter.completeAuth({
+      callbackUrl: `${common.redirectUri}?handoff=ticket&state=state-1`,
+      expectedState: "state-1",
+      codeVerifier: "verifier"
+    })).rejects.toMatchObject({
+      code: "configuration-required",
+      message: "GitHub is not configured on this broker.",
+      retryable: false
+    });
+
+    const expired = createGitHubAdapter({
+      ...common,
+      fetch: vi.fn(async () => response({
+        contractVersion: 1,
+        error: "needs-auth",
+        message: "Refresh token was rejected.",
+        retryable: false
+      }, 401))
+    });
+    await expect(expired.refresh({ ...tokens, refreshToken: "secret-refresh" }))
+      .rejects.toMatchObject({ code: "expired-auth", message: "Refresh token was rejected." });
   });
 });
 
@@ -93,9 +196,10 @@ describe("developer connector capability and approval registration", () => {
       expect(capabilities.some((capability) => capability.kind === "read")).toBe(true);
       expect(capabilities.filter((capability) => capability.kind === "write").every((capability) => capability.consequential)).toBe(true);
     }
+    expect(GITHUB_CAPABILITIES.every((capability) => capability.kind === "read" && !capability.consequential)).toBe(true);
   });
 
-  it("cannot execute a GitHub write without a matching explicit approval", async () => {
+  it("does not execute unadvertised GitHub live writes", async () => {
     const fetcher = vi.fn(async () => response({ id: 1 }));
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
     const boundary: ConnectorApprovalBoundary = {
@@ -103,7 +207,8 @@ describe("developer connector capability and approval registration", () => {
       complete: vi.fn(async () => undefined)
     };
     const runtime = new ConnectorRuntime({ approvals: boundary }); runtime.register(adapter);
-    await expect(runtime.write({ connectorId: "github", account: { id: "u1", displayName: "User" }, tokens }, { capability: "issues.create", input: { repository: "acme/fable", title: "Issue" }, target: "acme/fable", preview: "Create issue Issue", riskLevel: "high" })).rejects.toMatchObject({ code: "approval-required" });
+    await expect(runtime.write({ connectorId: "github", account: { id: "u1", displayName: "User" }, tokens }, { capability: "issues.create", input: { repository: "acme/fable", title: "Issue" }, target: "acme/fable", preview: "Create issue Issue", riskLevel: "high" })).rejects.toThrow(/does not support write capability/);
+    expect(boundary.approve).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
   });
 });

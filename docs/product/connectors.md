@@ -25,7 +25,7 @@ Every connector exposes:
 
 | Provider | Console setup | Callback model | Initial access |
 | --- | --- | --- | --- |
-| GitHub | Register a GitHub OAuth/App client and installation policy | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Metadata, repository contents, branches, commits, issues, pull requests, checks, reviews, comments, and Actions workflow read; selected issue/comment/review/file/branch/workflow writes only when enabled |
+| GitHub | Register a GitHub OAuth client through the auth broker | Broker callback, proposed `https://auth.fable.app/oauth/github/callback` | Account identity, organization membership, repositories, issues, and pull requests read; live GitHub writes are not enabled in this batch |
 | Vercel | Create a connectable-account integration and select API permissions | External Flow redirect, proposed `https://auth.fable.app/oauth/vercel/callback` | Team, project, deployment, domain, log, and environment-variable metadata read; deployment/project/domain writes only when enabled |
 | Linear | Create an OAuth application and select workspace scopes | Broker callback, proposed `https://auth.fable.app/oauth/linear/callback` | Workspace, team, project, cycle, issue, comment, label, and user read; issue/comment mutation only when enabled |
 | Google Drive | Enable Drive API, create Desktop OAuth client, configure consent | Dynamic loopback `http://127.0.0.1:{port}` with PKCE | `drive.metadata.readonly`; incremental `drive.readonly` and `drive.file` |
@@ -38,10 +38,11 @@ The proposed production callback host is documentation only. It is not active
 until the auth broker is deployed and the exact URLs are registered in each
 provider console.
 
-GitHub App permissions should start with repository Metadata read, Contents
-read, Issues read, Pull requests read, Checks read, and Actions read. Issue,
-comment, review, file-content, branch, and workflow dispatch operations require
-the corresponding provider write permission and Fable approval.
+GitHub OAuth currently requests `read:user`, `read:org`, and `repo` through the
+broker so private repository, issue, and pull request reads can work. GitHub's
+OAuth `repo` scope is broader than Fable's live surface; the desktop runtime
+does not advertise or map GitHub live writes, and unsupported GitHub mutations
+fail closed.
 
 Vercel should request team/account read plus Project, Deployment, Domain, Log,
 and Environment Variable read metadata permissions. Deployment write is needed
@@ -126,7 +127,7 @@ Imported content is not durable memory. The existing memory-promotion approval
 is the only path from connector knowledge to durable memory.
 
 Draft creation is a provider write and requires approval even when it does not
-send or publish. Sending Gmail, posting Slack, GitHub repository changes,
+send or publish. Sending Gmail, posting Slack,
 Vercel deployment/configuration changes, Linear issue/comment changes, and any
 public/destructive action use high-risk full-access confirmation. No adapter
 executes a consequential write directly; the native runtime records a prepared
@@ -135,9 +136,9 @@ approval preview and requires a matching explicit user decision before egress.
 The native AI runtime exposes read-only tools for authenticated GitHub, Vercel,
 and Linear capabilities. These call the live provider APIs only after native
 credential resolution and return structured items with pagination and rate-limit
-metadata. Supported write capabilities are functional provider calls only after
-the same explicit approval boundary and only when the connector is actually
-connected.
+metadata. Supported non-GitHub write capabilities are functional provider calls
+only after the same explicit approval boundary and only when the connector is
+actually connected.
 
 ## Credential storage and auth broker
 
@@ -153,7 +154,7 @@ Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
 the authorization code; access and refresh tokens are written through OS secure
 storage/keyring. The desktop app does not rely on a client secret.
 
-GitHub App signing material and the Vercel, Notion, and Slack client secrets
+GitHub OAuth client secret and the Vercel, Notion, and Slack client secrets
 must remain in an Fable auth broker or equivalent server-side secret boundary.
 They must not be compiled into React assets, Rust binaries, logs, snapshots,
 or local JSON state.
@@ -198,9 +199,8 @@ expired/unavailable auth state.
   capabilities still fail closed.
 - Imported connector records are session-local until encrypted connector cache
   persistence is added.
-- GitHub/Vercel/Linear coverage intentionally targets practical high-value
-  provider operations; unsupported provider features still fail closed as
-  undeclared capabilities.
+- GitHub coverage is live-read only for repositories, issues, and pull requests;
+  live GitHub writes intentionally fail closed.
 - Live Google integration tests are opt-in and require deliberately supplied
   credentials and test account data.
 - Live Notion and Slack integration tests are opt-in and require deliberately

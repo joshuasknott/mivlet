@@ -159,7 +159,7 @@ export function oauthClient(options: OAuthClientOptions) {
         headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, handoff, state: callback.expectedState })
       });
-      if (!response.ok) throw providerError(options.connectorId, response.status, "token_exchange");
+      if (!response.ok) throw await brokerError(options.connectorId, "handoff", response);
       const body = await safeJson(response);
       if (!isObject(body) || !isObject(body.tokens) || !isObject(body.account)) {
         throw providerError(options.connectorId, 502, "malformed_handoff");
@@ -173,7 +173,7 @@ export function oauthClient(options: OAuthClientOptions) {
         headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, refreshToken: tokens.refreshToken })
       });
-      if (!response.ok) throw providerError(options.connectorId, response.status, "refresh_failed");
+      if (!response.ok) throw await brokerError(options.connectorId, "refresh", response);
       const body = await safeJson(response);
       if (!isObject(body) || !isObject(body.tokens)) throw providerError(options.connectorId, 502, "malformed_refresh");
       const refreshed = connectorTokenSet(body.tokens);
@@ -187,7 +187,7 @@ export function oauthClient(options: OAuthClientOptions) {
         body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, token: tokens.refreshToken ?? tokens.accessToken, tokenTypeHint: tokens.refreshToken ? "refresh_token" : "access_token" })
       });
       if (!response.ok && response.status !== 404) {
-        throw providerError(options.connectorId, response.status, "revocation_failed");
+        throw await brokerError(options.connectorId, "revoke", response);
       }
     }
   };
@@ -237,6 +237,47 @@ export function providerError(
   };
 }
 
+async function brokerError(
+  connectorId: ConnectorId,
+  operation: "handoff" | "refresh" | "revoke",
+  response: Response
+): Promise<ConnectorError> {
+  const body = await optionalJson(response);
+  const brokerCode = stringValue(body, "error");
+  const message = stringValue(body, "message") ?? `The Fable auth broker ${operation} was unsuccessful.`;
+  const retryable = isObject(body) && typeof body.retryable === "boolean" ? body.retryable : undefined;
+  const retryAfter = response.headers.get("retry-after") ?? undefined;
+  if (brokerCode === "configuration-required") {
+    return { connectorId, code: "configuration-required", message, retryable: false };
+  }
+  if (brokerCode === "rate-limited") {
+    return { connectorId, code: "rate-limited", message, retryable: true, ...(retryAfter ? { retryAfter: String(Number(retryAfter) * 1000) } : {}) };
+  }
+  if (brokerCode === "provider-unavailable") {
+    return { connectorId, code: "provider-unavailable", message, retryable: retryable ?? true };
+  }
+  if (
+    brokerCode === "needs-auth" ||
+    brokerCode === "invalid-state" ||
+    brokerCode === "invalid-handoff" ||
+    brokerCode === "expired-handoff" ||
+    brokerCode === "unsupported-version" ||
+    brokerCode === "invalid-request" ||
+    brokerCode === "unknown-provider"
+  ) {
+    return {
+      connectorId,
+      code: operation === "refresh" ? "expired-auth" : "needs-auth",
+      message,
+      retryable: false
+    };
+  }
+  if (retryable === true) {
+    return { connectorId, code: "provider-unavailable", message, retryable: true };
+  }
+  return providerError(connectorId, response.status, brokerCode, retryAfter);
+}
+
 export function asObjects(value: unknown): JsonObject[] {
   return Array.isArray(value) ? value.filter(isObject) : [];
 }
@@ -283,14 +324,14 @@ function accountSummary(value: unknown): ConnectorAccountSummary {
   const id = ["id", "sub", "user_id", "team_id", "organizationId"]
     .map((key) => value[key]).find((candidate) => typeof candidate === "string" || typeof candidate === "number");
   if (id === undefined) throw providerError("connector", 502, "malformed_identity");
-  const displayName = ["name", "login", "username", "email"]
+  const displayName = ["displayName", "name", "login", "username", "email"]
     .map((key) => value[key]).find((candidate): candidate is string => typeof candidate === "string") ?? String(id);
   return {
     id: String(id), displayName,
-    ...(typeof value.login === "string" ? { handle: value.login } : {}),
+    ...(typeof value.handle === "string" ? { handle: value.handle } : typeof value.login === "string" ? { handle: value.login } : {}),
     ...(typeof value.email === "string" ? { email: value.email } : {}),
     ...(typeof value.workspace === "string" ? { workspace: value.workspace } : {}),
-    ...(typeof value.avatar_url === "string" ? { avatarUrl: value.avatar_url } : {})
+    ...(typeof value.avatarUrl === "string" ? { avatarUrl: value.avatarUrl } : typeof value.avatar_url === "string" ? { avatarUrl: value.avatar_url } : {})
   };
 }
 function nestedString(value: unknown, outer: string, inner: string) {

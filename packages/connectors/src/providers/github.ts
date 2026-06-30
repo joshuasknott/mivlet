@@ -1,5 +1,5 @@
 import type { ConnectorCapability, ConnectorPage, ConnectorSearchItem } from "@fable/protocol";
-import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
+import type { ConnectorAdapter, ConnectorRequest } from "../sdk";
 import {
   ProviderHttpClient,
   asObjects,
@@ -92,13 +92,11 @@ export function mapGitHubError(error: ProviderErrorLike) {
 export const GITHUB_CAPABILITIES = [
   "identity.read", "organizations.read", "repositories.list", "repositories.search",
   "branches.read", "commits.read", "files.read", "issues.read", "pull-requests.read",
-  "comments.read", "reviews.read", "checks.read", "actions.read",
-  "issues.create", "issues.update", "comments.create", "reviews.create",
-  "pull-requests.create", "files.update", "branches.create", "actions.dispatch"
+  "comments.read", "reviews.read", "checks.read", "actions.read"
 ].map((id): ConnectorCapability => ({
   id,
-  kind: id.endsWith(".create") || id.endsWith(".update") || id.endsWith(".dispatch") ? "write" : "read",
-  consequential: id.endsWith(".create") || id.endsWith(".update") || id.endsWith(".dispatch"),
+  kind: "read",
+  consequential: false,
   description: `GitHub ${id.replaceAll(".", " ")}`
 }));
 
@@ -118,7 +116,7 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
     tokenEndpoint: new URL("oauth/github/token", authBase).toString(),
     identityEndpoint: new URL("oauth/github/identity", authBase).toString(),
     revocationEndpoint: new URL("oauth/github/revoke", authBase).toString(),
-    scopes: ["read:user", "read:org", "repo", "workflow"]
+    scopes: ["read:user", "read:org", "repo"]
   });
   const http = new ProviderHttpClient("github", options.apiBaseUrl ?? "https://api.github.com/", options.fetch);
   return {
@@ -134,9 +132,9 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
       return page(rawItems.map(redactGitHubObject), response, githubNextCursor(response));
     },
     async write(request, tokens) {
-      const { data } = await http.request<unknown>(githubWriteRequest(request), tokens);
-      if (!isObject(data)) throw new Error("GitHub returned a malformed write response.");
-      return redactGitHubObject(data);
+      void request;
+      void tokens;
+      throw new Error("GitHub live writes are not enabled by this adapter.");
     }
   };
 }
@@ -151,33 +149,16 @@ function githubReadRequest(request: ConnectorRequest): ProviderRequest {
     case "organizations.read": return { path: "/user/orgs", ...common };
     case "repositories.list": return { path: "/user/repos", ...common, query: { ...common.query, affiliation: "owner,collaborator,organization_member", sort: "updated" } };
     case "repositories.search": return { path: "/search/repositories", ...common, query: { ...common.query, q: required(input, "query") } };
-    case "branches.read": return { path: `/repos/${required(input,"repository")}/branches`, ...common };
-    case "commits.read": return { path: `/repos/${required(input,"repository")}/commits`, ...common, query: { ...common.query, sha: optional(input, "ref") } };
-    case "files.read": return { path: `/repos/${required(input,"repository")}/contents/${encodePath(required(input, "path"))}`, signal: request.signal, query: { ref: optional(input, "ref") } };
-    case "issues.read": return { path: number ? `/repos/${required(input,"repository")}/issues/${number}` : `/repos/${required(input,"repository")}/issues`, ...common, query: { ...common.query, state: optional(input, "state") ?? "all" } };
-    case "pull-requests.read": return { path: number ? `/repos/${required(input,"repository")}/pulls/${number}` : `/repos/${required(input,"repository")}/pulls`, ...common, query: { ...common.query, state: optional(input, "state") ?? "all" } };
-    case "comments.read": return { path: `/repos/${required(input,"repository")}/issues/${required(input, "number")}/comments`, ...common };
-    case "reviews.read": return { path: `/repos/${required(input,"repository")}/pulls/${required(input, "number")}/reviews`, ...common };
-    case "checks.read": return { path: `/repos/${required(input,"repository")}/commits/${required(input, "ref")}/check-runs`, ...common, headers: { accept: "application/vnd.github+json" } };
-    case "actions.read": return { path: `/repos/${required(input,"repository")}/actions/${optional(input, "resource") ?? "runs"}`, ...common };
+    case "branches.read": return { path: `/repos/${githubRepository(input)}/branches`, ...common };
+    case "commits.read": return { path: `/repos/${githubRepository(input)}/commits`, ...common, query: { ...common.query, sha: optional(input, "ref") } };
+    case "files.read": return { path: `/repos/${githubRepository(input)}/contents/${encodePath(required(input, "path"))}`, signal: request.signal, query: { ref: optional(input, "ref") } };
+    case "issues.read": return { path: number ? `/repos/${githubRepository(input)}/issues/${number}` : `/repos/${githubRepository(input)}/issues`, ...common, query: { ...common.query, state: optional(input, "state") ?? "all" } };
+    case "pull-requests.read": return { path: number ? `/repos/${githubRepository(input)}/pulls/${number}` : `/repos/${githubRepository(input)}/pulls`, ...common, query: { ...common.query, state: optional(input, "state") ?? "all" } };
+    case "comments.read": return { path: `/repos/${githubRepository(input)}/issues/${required(input, "number")}/comments`, ...common };
+    case "reviews.read": return { path: `/repos/${githubRepository(input)}/pulls/${required(input, "number")}/reviews`, ...common };
+    case "checks.read": return { path: `/repos/${githubRepository(input)}/commits/${required(input, "ref")}/check-runs`, ...common, headers: { accept: "application/vnd.github+json" } };
+    case "actions.read": return { path: `/repos/${githubRepository(input)}/actions/${optional(input, "resource") ?? "runs"}`, ...common };
     default: throw new Error(`Unsupported GitHub read capability: ${request.capability}`);
-  }
-}
-
-function githubWriteRequest(request: ConnectorWriteRequest): ProviderRequest {
-  const i = request.input;
-  const repo = required(i, "repository");
-  const body = { ...i }; delete body.repository;
-  switch (request.capability) {
-    case "issues.create": return { method: "POST", path: `/repos/${repo}/issues`, body, signal: request.signal };
-    case "issues.update": return { method: "PATCH", path: `/repos/${repo}/issues/${required(i, "number")}`, body: without(body, "number"), signal: request.signal };
-    case "comments.create": return { method: "POST", path: `/repos/${repo}/issues/${required(i, "number")}/comments`, body: { body: required(i, "body") }, signal: request.signal };
-    case "reviews.create": return { method: "POST", path: `/repos/${repo}/pulls/${required(i, "number")}/reviews`, body: without(body, "number"), signal: request.signal };
-    case "pull-requests.create": return { method: "POST", path: `/repos/${repo}/pulls`, body, signal: request.signal };
-    case "files.update": return { method: "PUT", path: `/repos/${repo}/contents/${encodePath(required(i, "path"))}`, body: without(body, "path"), signal: request.signal };
-    case "branches.create": return { method: "POST", path: `/repos/${repo}/git/refs`, body: { ref: `refs/heads/${required(i, "branch")}`, sha: required(i, "sha") }, signal: request.signal };
-    case "actions.dispatch": return { method: "POST", path: `/repos/${repo}/actions/workflows/${required(i, "workflow")}/dispatches`, body: { ref: required(i, "ref"), ...(isObject(i.inputs) ? { inputs: i.inputs } : {}) }, signal: request.signal };
-    default: throw new Error(`Unsupported GitHub write capability: ${request.capability}`);
   }
 }
 
@@ -199,4 +180,9 @@ function required(input: Record<string, unknown>, key: string): string {
 function optional(input: Record<string, unknown>, key: string) { const v = input[key]; return typeof v === "string" && v ? v : undefined; }
 function bounded(value: unknown) { return typeof value === "number" ? Math.max(1, Math.min(100, Math.floor(value))) : 30; }
 function encodePath(path: string) { return path.split("/").map(encodeURIComponent).join("/"); }
-function without(value: Record<string, unknown>, key: string) { const copy = { ...value }; delete copy[key]; return copy; }
+function githubRepository(input: Record<string, unknown>) {
+  const repository = required(input, "repository");
+  const [owner, name, ...rest] = repository.split("/");
+  if (!owner || !name || rest.length > 0) throw new Error("GitHub repository must be in owner/name form.");
+  return `${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}

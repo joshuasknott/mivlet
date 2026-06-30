@@ -143,6 +143,30 @@ describe("ConnectorRuntime", () => {
     });
     expect(read).toHaveBeenCalledTimes(2);
   });
+
+  it("refreshes and retries once when provider egress reports expired auth", async () => {
+    const read = vi
+      .fn()
+      .mockRejectedValueOnce({
+        code: "expired-auth",
+        connectorId: "fixture",
+        message: "expired",
+        retryable: false
+      })
+      .mockResolvedValueOnce({ items: ["after-refresh"] });
+    const adapter = fixtureAdapter({ read });
+    const runtime = new ConnectorRuntime({ approvals: approvals() });
+    runtime.register(adapter);
+    const account = session({ refreshToken: "refresh" });
+    await expect(runtime.read(account, { capability: "items.read", input: {} })).resolves.toEqual({
+      items: ["after-refresh"]
+    });
+    expect(adapter.refresh).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenLastCalledWith(
+      { capability: "items.read", input: {} },
+      expect.objectContaining({ accessToken: "refreshed" })
+    );
+  });
 });
 
 it("uses a refresh leeway for token expiry", () => {
