@@ -229,6 +229,11 @@ export async function* runAgentLoop(
         yield event;
       }
     } catch (error) {
+      const candidate = error as { code?: unknown };
+      if (candidate?.code === "cancelled") {
+        yield { type: "cancelled" };
+        return;
+      }
       yield transportErrorEvent(error);
       yield { type: "done", finishReason: "error" };
       return;

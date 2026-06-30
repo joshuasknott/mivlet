@@ -380,6 +380,23 @@ fn catalog_entry(provider_id: &str) -> Option<&'static BackendCatalogEntry> {
     CATALOG.iter().find(|entry| entry.id == provider_id)
 }
 
+fn validate_backend_secret(secret: &str) -> Result<String, String> {
+    if secret.chars().any(|character| character.is_control()) {
+        return Err("Backend credentials cannot contain control characters.".to_string());
+    }
+
+    let normalized = normalize_spaces(secret);
+
+    if normalized.is_empty() {
+        return Err("Backend credentials need a non-empty secret.".to_string());
+    }
+    if normalized.chars().count() > MAX_BACKEND_SECRET_CHARACTERS {
+        return Err("Backend credential exceeds the supported length.".to_string());
+    }
+
+    Ok(normalized)
+}
+
 /// Resolve auth state from the credential store. Only native API-key providers
 /// can become connected through this boundary. Catalog-only subscription/CLI
 /// providers stay gated until a real runtime adapter reports capabilities.
@@ -562,14 +579,7 @@ pub(crate) fn store_credential_into<S: BackendCredentialStore>(
             entry.label
         ));
     }
-    let secret = truncate_characters(
-        &normalize_spaces(&request.secret),
-        MAX_BACKEND_SECRET_CHARACTERS,
-    );
-
-    if secret.is_empty() {
-        return Err("Backend credentials need a non-empty secret.".to_string());
-    }
+    let secret = validate_backend_secret(&request.secret)?;
 
     log_pre_release_warning_once();
     store.set(&provider_id, &secret)?;

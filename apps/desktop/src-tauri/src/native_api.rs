@@ -403,6 +403,7 @@ pub async fn stream_backend_completion(
                                 attempt: attempt + 1,
                                 retry_after_ms: None,
                             });
+                            completed = true;
                             break;
                         }
                         None => {
@@ -626,7 +627,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
                 message: Some(format!(
                     "Add an {provider_id} API key before discovering models."
                 )),
-            })
+            });
         }
     };
     let url = models_endpoint_for(&provider_id)?;
@@ -768,7 +769,7 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
                 provider_id: provider_id.clone(),
                 outcome: "auth-failed".to_string(),
                 message: Some(missing_key_message(&provider_id)),
-            })
+            });
         }
     };
 

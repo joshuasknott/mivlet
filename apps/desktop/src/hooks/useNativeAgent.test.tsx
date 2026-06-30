@@ -424,6 +424,24 @@ describe("useNativeAgent", () => {
     });
   });
 
+  it("maps Rust boundary cancellation to a cancelled terminal state", async () => {
+    installDesktopRuntime();
+    mocks.lines = ["[CANCELLED]"];
+    mocks.emitDone = false;
+
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
+
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
+
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.status).toBe("cancelled");
+    expect(result.current.state.lastError).toBeNull();
+  });
+
   it("bails cooperatively when the cancel path flips the shouldCancel flag", async () => {
     installDesktopRuntime();
     // Mirrors App.tsx exactly: shouldCancel reads a cancel flag, and onCancel

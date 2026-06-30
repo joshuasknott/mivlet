@@ -418,6 +418,83 @@ describe("createNativeApiBackend", () => {
     await expect(backend?.cancel("run-1")).resolves.toBeUndefined();
   });
 
+  it("surfaces boundary cancellation as a cancelled event", async () => {
+    const transport = {
+      async *stream(): AsyncIterable<string> {
+        const error = new Error("Provider request was cancelled.");
+        (error as Error & { code: string; retryable: boolean }).code = "cancelled";
+        (error as Error & { code: string; retryable: boolean }).retryable = false;
+        throw error;
+      }
+    };
+    const backend = createNativeApiBackend(nativeProvider(), {
+      createTransport: () => ({ transport, cancel: async () => {} })
+    });
+    const events = await collect(
+      backend?.run(baseRunRequest, { execute: async () => "ok" }) as AsyncIterable<BackendAgentEvent>
+    );
+    expect(events).toEqual([{ type: "cancelled" }]);
+  });
+
+  it("cancels the active boundary request when cooperative cancellation fires", async () => {
+    let requestStarted: ((requestId: string) => void) | null = null;
+    const cancelled: string[] = [];
+    const transport = {
+      async *stream(): AsyncIterable<string> {
+        requestStarted?.("request-native-1");
+        yield 'data: {"choices":[{"delta":{"content":"first"}}]}';
+        yield 'data: {"choices":[{"delta":{"content":"second"}}]}';
+      }
+    };
+    const backend = createNativeApiBackend(nativeProvider(), {
+      createTransport: (_provider, handlers) => {
+        requestStarted = handlers.onRequestStarted;
+        return {
+          transport,
+          cancel: async (requestId) => {
+            cancelled.push(requestId);
+          }
+        };
+      }
+    });
+    let shouldCancel = false;
+    const events: BackendAgentEvent[] = [];
+    for await (const event of backend?.run(baseRunRequest, {
+      execute: async () => "ok",
+      shouldCancel: () => shouldCancel
+    }) as AsyncIterable<BackendAgentEvent>) {
+      events.push(event);
+      shouldCancel = true;
+    }
+    expect(events).toContainEqual({ type: "cancelled" });
+    expect(cancelled).toEqual(["request-native-1"]);
+  });
+
+  it("fails closed when tools are requested without tool and approval capabilities", async () => {
+    const backend = createNativeApiBackend(
+      nativeProvider({ capabilities: ["authentication", "streaming", "cancellation"] }),
+      fixtureDeps(['data: {"choices":[{"finish_reason":"stop"}]}'])
+    );
+    const events = await collect(
+      backend?.run(
+        {
+          ...baseRunRequest,
+          tools: [{ name: "read_file", description: "Read a file", parameters: "{}" }]
+        },
+        { execute: async () => "ok" }
+      ) as AsyncIterable<BackendAgentEvent>
+    );
+    expect(events).toEqual([
+      {
+        type: "error",
+        message: "Tool calls/approvals are not supported by this backend's capabilities.",
+        code: "invalid-request",
+        retryable: false
+      },
+      { type: "done", finishReason: "error" }
+    ]);
+  });
+
   it("listModels() returns unsupported when discovery is not wired", async () => {
     const backend = createNativeApiBackend(nativeProvider(), {
       createTransport: () => ({ transport: new FixtureTransport([]), cancel: async () => {} })

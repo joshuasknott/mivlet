@@ -1112,12 +1112,19 @@ fn native_api_providers_connect_list_and_clear_through_the_key_boundary() {
             "{provider_id} must be a native-api provider"
         );
         assert_eq!(provider.auth_state, "needs-auth");
-        assert!(provider.capabilities.is_empty(), "fail-closed before connect");
+        assert!(
+            provider.capabilities.is_empty(),
+            "fail-closed before connect"
+        );
         assert!(provider.models.iter().all(|m| !m.available));
 
         // Storing a credential marks the provider connected and capability-bearing.
-        store_credential_into(&mut store, &path, credential_request(provider_id, "real-key"))
-            .expect("native provider stores through the key boundary");
+        store_credential_into(
+            &mut store,
+            &path,
+            credential_request(provider_id, "real-key"),
+        )
+        .expect("native provider stores through the key boundary");
         assert!(
             read_connected_backends(&path)
                 .expect("read manifest")
@@ -1131,7 +1138,10 @@ fn native_api_providers_connect_list_and_clear_through_the_key_boundary() {
             .find(|p| p.id == provider_id)
             .expect("provider still listed");
         assert_eq!(provider.auth_state, "connected");
-        assert!(!provider.capabilities.is_empty(), "capabilities appear when connected");
+        assert!(
+            !provider.capabilities.is_empty(),
+            "capabilities appear when connected"
+        );
         assert!(provider.models.iter().all(|m| m.available));
 
         // Clearing fails the provider closed again and drops it from the manifest.
@@ -1156,11 +1166,10 @@ fn native_api_providers_connect_list_and_clear_through_the_key_boundary() {
     }
 }
 
-/// An over-long secret is truncated to the boundary cap and still stored; the
-/// stored value never exceeds `MAX_BACKEND_SECRET_CHARACTERS`. Guards the
-/// `truncate_characters` normalization in `store_credential_into`.
+/// An over-long secret is rejected instead of silently truncated, so the value
+/// never reaches storage in a mutated form and no connected manifest is written.
 #[test]
-fn oversize_backend_secret_is_truncated_to_the_cap_and_stored() {
+fn oversize_backend_secret_is_rejected_without_storing() {
     use crate::models::MAX_BACKEND_SECRET_CHARACTERS;
 
     let path = temp_backends_path("backends-secret-cap");
@@ -1168,26 +1177,42 @@ fn oversize_backend_secret_is_truncated_to_the_cap_and_stored() {
 
     let mut store = HashMap::new();
     let oversized = "k".repeat(MAX_BACKEND_SECRET_CHARACTERS + 250);
-    store_credential_into(&mut store, &path, credential_request("openai", &oversized))
-        .expect("oversized secret is accepted after truncation");
+    let error = store_credential_into(&mut store, &path, credential_request("openai", &oversized))
+        .expect_err("oversized secret should fail");
 
-    // The stored secret is bounded by the cap — a pathologically long value
-    // never reaches the credential store unbounded.
-    let stored = store
-        .get("openai")
-        .expect("credential was stored")
-        .len();
-    assert_eq!(
-        stored,
-        MAX_BACKEND_SECRET_CHARACTERS,
-        "secret must be truncated to the cap"
+    assert!(error.contains("exceeds the supported length"));
+    assert!(
+        !store.contains_key("openai"),
+        "oversized secret must not be stored"
     );
     assert!(
-        read_connected_backends(&path)
+        !read_connected_backends(&path)
             .expect("manifest readable")
             .has("openai"),
-        "truncated secret still connects"
+        "oversized secret must not mark the provider connected"
     );
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn rejects_backend_secrets_with_control_characters() {
+    let path = temp_backends_path("backends-secret-control");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    let error = store_credential_into(
+        &mut store,
+        &path,
+        credential_request("openai", "sk-test\nwith-newline"),
+    )
+    .expect_err("control characters should fail");
+
+    assert!(error.contains("control characters"));
+    assert!(!store.contains_key("openai"));
+    assert!(!read_connected_backends(&path)
+        .expect("manifest readable")
+        .has("openai"));
 
     let _ = fs::remove_file(&path);
 }
