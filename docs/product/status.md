@@ -87,7 +87,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 - No deployed production auth broker or externally validated confidential OAuth session.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
-- No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the deferred auth broker.
+- No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, and raw JSON files for schedules/workflows. Backend and connector credentials remain separately handled by OS secure storage.
 - No local model runtime path. The onboarding UI labels local models as planned and disabled.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
