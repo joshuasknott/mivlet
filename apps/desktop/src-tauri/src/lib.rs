@@ -68,7 +68,9 @@ pub fn run() {
             // execution guard (two windows can never lease the same occurrence).
             // Any entry left leased/running by a prior crash is recovered here.
             let handle = app.handle().clone();
-            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(None)));
+            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(
+                std::collections::BTreeMap::new(),
+            )));
             // Mobile remote-control trust list. In-memory in this foundation
             // pass; the durable store lands with the transport layer. The
             // command surface is registered below and fails closed until then.
@@ -83,7 +85,10 @@ pub fn run() {
                     .0
                     .lock()
                     .expect("scheduler lock");
-                *guard = Some(scheduler::SchedulerState::empty());
+                guard.insert(
+                    store::repos::scope::DEFAULT_WORKSPACE_ID.to_string(),
+                    scheduler::SchedulerState::empty(),
+                );
             }
 
             // In-process scheduler tick. Stops when the app exits. An

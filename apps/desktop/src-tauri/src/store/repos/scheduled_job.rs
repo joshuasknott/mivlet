@@ -10,12 +10,11 @@
 //! The execution route carries only provider/model ids + permission mode —
 //! never keys or tokens.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
-use crate::models::{
-    MISSED_RUN_POLICIES, SCHEDULED_JOB_STATUSES, SCHEDULER_STORE_VERSION,
-};
+use crate::models::{MISSED_RUN_POLICIES, SCHEDULED_JOB_STATUSES, SCHEDULER_STORE_VERSION};
+use crate::store::repos::scope::DataScope;
 use crate::store::repos::{open_json, seal_json};
 use crate::store::{Result, Store, StoreError};
 
@@ -48,6 +47,24 @@ pub fn upsert_from_value(
     now: &str,
 ) -> Result<()> {
     let workspace_id = normalize_workspace(workspace_id);
+    let project_id = value
+        .get("projectId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string);
+    let scope = DataScope::new(workspace_id.clone(), project_id)?;
+    scope.ensure_exists(tx)?;
+    if let Some(payload_workspace) = value
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+    {
+        if payload_workspace != workspace_id {
+            return Err(StoreError::Invalid(
+                "Scheduled job workspace does not match the requested workspace.".into(),
+            ));
+        }
+    }
     let id = value
         .get("id")
         .and_then(Value::as_str)
@@ -138,6 +155,21 @@ pub fn upsert_from_value(
     // trigger it describes; nothing secret ever reaches this blob.
     let payload = value.clone();
     let sealed = seal_json(store, &payload, &aad(&workspace_id, &id))?;
+    let existing_owner: Option<String> = tx
+        .query_row(
+            "SELECT workspace_id FROM scheduled_job WHERE id=?1;",
+            [&id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing_owner
+        .as_deref()
+        .is_some_and(|owner| owner != workspace_id)
+    {
+        return Err(StoreError::Invalid(
+            "Scheduled job is owned by another workspace.".into(),
+        ));
+    }
     tx.execute(
         "INSERT INTO scheduled_job
            (id, workspace_id, status, workflow_definition_id, trigger_kind,
@@ -145,8 +177,7 @@ pub fn upsert_from_value(
             created_at, updated_at, payload, payload_nonce)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
-           workspace_id=excluded.workspace_id, status=excluded.status,
-           workflow_definition_id=excluded.workflow_definition_id,
+           status=excluded.status, workflow_definition_id=excluded.workflow_definition_id,
            trigger_kind=excluded.trigger_kind,
            missed_run_policy=excluded.missed_run_policy,
            schema_version=excluded.schema_version, next_run_at=excluded.next_run_at,
@@ -260,15 +291,19 @@ mod tests {
         })
     }
 
+    fn add_workspace(store: &Store, id: &str) {
+        store
+            .transaction(|tx| crate::store::repos::workspace::upsert(tx, id, id, "now"))
+            .unwrap();
+    }
+
     #[test]
     fn round_trips_a_job() {
         let store = store();
         store
             .transaction(|tx| upsert_from_value(tx, &store, "", sample_job("j1"), "now"))
             .unwrap();
-        let rows = store
-            .with_conn(|conn| list(conn, &store, ""))
-            .unwrap();
+        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value["name"], "Weekly brief");
         assert_eq!(rows[0].value["execution"]["backendId"], "openai");
@@ -321,21 +356,35 @@ mod tests {
     #[test]
     fn workspace_isolation() {
         let store = store();
+        add_workspace(&store, "ws-a");
+        add_workspace(&store, "ws-b");
         store
             .transaction(|tx| upsert_from_value(tx, &store, "ws-a", sample_job("j1"), "now"))
             .unwrap();
         store
             .transaction(|tx| upsert_from_value(tx, &store, "ws-b", sample_job("j2"), "now"))
             .unwrap();
-        let a = store
-            .with_conn(|conn| list(conn, &store, "ws-a"))
-            .unwrap();
-        let b = store
-            .with_conn(|conn| list(conn, &store, "ws-b"))
-            .unwrap();
+        let a = store.with_conn(|conn| list(conn, &store, "ws-a")).unwrap();
+        let b = store.with_conn(|conn| list(conn, &store, "ws-b")).unwrap();
         assert_eq!(a.len(), 1);
         assert_eq!(a[0].id, "j1");
         assert_eq!(b.len(), 1);
         assert_eq!(b[0].id, "j2");
+    }
+
+    #[test]
+    fn rejects_cross_workspace_id_takeover() {
+        let store = store();
+        add_workspace(&store, "ws-a");
+        add_workspace(&store, "ws-b");
+        store
+            .transaction(|tx| upsert_from_value(tx, &store, "ws-a", sample_job("j1"), "now"))
+            .unwrap();
+        let error = store
+            .transaction(|tx| upsert_from_value(tx, &store, "ws-b", sample_job("j1"), "now"))
+            .unwrap_err();
+        assert!(matches!(error, StoreError::Invalid(_)));
+        let rows = store.with_conn(|conn| list(conn, &store, "ws-a")).unwrap();
+        assert_eq!(rows.len(), 1);
     }
 }

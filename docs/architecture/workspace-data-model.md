@@ -47,6 +47,7 @@ Repositories validate the workspace and, when supplied, the workspace/project re
 1. **No Shared Keyring References**: A connector account's keyring reference (`credential_ref`, pointing to OS secure credentials) cannot be shared across workspaces. Attempts to register the same credential reference in a different workspace are rejected at the storage layer to prevent cross-workspace identity theft.
 2. **Strict Record Ownership Protection**: The helper function `ensure_record_owner` checks existing records before write. An ID owned by workspace A cannot be modified, claimed, or deleted by a query using workspace B. Cross-workspace deletes are treated as no-ops instead of failing, preventing leakage.
 3. **Fails Closed on Missing Workspaces**: Connector credentials commands and commands targeting non-existent workspaces will fail closed (returning an error) instead of falling back to the `default` workspace.
+4. **Portable Archive Isolation**: Workspace export traverses project-owned descendants through the target workspace and binds directly scoped sections to the same workspace. Import validates project ownership before mutation and rejects cross-workspace ID takeovers.
 
 ---
 

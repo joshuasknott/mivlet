@@ -25,6 +25,7 @@
 //! provider/model ids + permission mode — never keys, tokens, or credentials.
 
 use std::{
+    collections::BTreeMap,
     fs,
     path::Path,
     sync::Mutex,
@@ -60,7 +61,7 @@ fn command_scope(
 
 /// Process-global scheduler state held behind Tauri's managed state.
 /// Loaded once at setup; the tick mutates + persists it under the mutex.
-pub struct SchedulerState(pub Mutex<Option<SchedulerStore>>);
+pub struct SchedulerState(pub Mutex<BTreeMap<String, SchedulerStore>>);
 
 impl SchedulerState {
     /// An empty store used before a real file is loaded.
@@ -72,7 +73,10 @@ impl SchedulerState {
 /// Resolve the managed scheduler state. Managed state is registered at app
 /// setup, so this is always present in the running app. Unit tests that call
 /// the pure helpers directly (`read_store`, `normalize_*`) do not need it.
-fn with_state<R>(app: &AppHandle, f: impl FnOnce(&Mutex<Option<SchedulerStore>>) -> R) -> R {
+fn with_state<R>(
+    app: &AppHandle,
+    f: impl FnOnce(&Mutex<BTreeMap<String, SchedulerStore>>) -> R,
+) -> R {
     f(&app.state::<SchedulerState>().inner().0)
 }
 
@@ -320,7 +324,7 @@ fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, 
 /// and queue entry in the default workspace transactionally. Returns
 /// `Ok(false)` only when the global store is not initialized (unit-test path);
 /// callers then fall back to the legacy JSON write.
-fn write_store_to_sqlite(store_value: &SchedulerStore) -> Result<bool, String> {
+fn write_store_to_sqlite(workspace_id: &str, store_value: &SchedulerStore) -> Result<bool, String> {
     let now = now_iso();
     let jobs: Vec<serde_json::Value> = store_value
         .jobs
@@ -338,15 +342,25 @@ fn write_store_to_sqlite(store_value: &SchedulerStore) -> Result<bool, String> {
         .map_err(|_| "Fable could not encode a queue entry.".to_string())?;
     let written = crate::store::with_store(|store| {
         store.transaction(|tx| {
-            crate::store::repos::scheduled_job::delete_all(tx, "")?;
-            crate::store::repos::scheduler_queue::delete_all(tx, "")?;
+            crate::store::repos::scheduler_queue::delete_all(tx, workspace_id)?;
+            crate::store::repos::scheduled_job::delete_all(tx, workspace_id)?;
             for value in &jobs {
                 crate::store::repos::scheduled_job::upsert_from_value(
-                    tx, store, "", value.clone(), &now,
+                    tx,
+                    store,
+                    workspace_id,
+                    value.clone(),
+                    &now,
                 )?;
             }
             for value in &queue {
-                crate::store::repos::scheduler_queue::upsert_entry(tx, store, "", value, &now)?;
+                crate::store::repos::scheduler_queue::upsert_entry(
+                    tx,
+                    store,
+                    workspace_id,
+                    value,
+                    &now,
+                )?;
             }
             Ok(())
         })
@@ -362,22 +376,28 @@ fn write_store_to_sqlite(store_value: &SchedulerStore) -> Result<bool, String> {
 /// data migration at startup) and is otherwise a write-only mirror so a
 /// downgrade/rollback remains possible — it is never deleted by this path. In
 /// the unit-test path (no global store) the JSON file remains the sole store.
-fn persist<F: FnOnce(&mut SchedulerStore)>(app: &AppHandle, mutate: F) -> Result<(), String> {
+fn persist<F: FnOnce(&mut SchedulerStore)>(
+    app: &AppHandle,
+    workspace_id: &str,
+    mutate: F,
+) -> Result<(), String> {
     let path = scheduler_store_path(app)?;
     with_state(app, |mutex| {
         let mut guard = mutex
             .lock()
             .map_err(|_| "Scheduler lock poisoned.".to_string())?;
-        if guard.is_none() {
-            *guard = Some(load_store(app, &path)?);
+        if !guard.contains_key(workspace_id) {
+            let loaded = load_store(app, &path, workspace_id)?;
+            guard.insert(workspace_id.to_string(), loaded);
         }
-        let store = guard.as_mut().expect("store loaded");
+        let store = guard.get_mut(workspace_id).expect("store loaded");
         mutate(store);
         store.updated_at = now_iso();
         // SQLite is the authority in production; fall back to JSON in tests.
-        match write_store_to_sqlite(store)? {
+        match write_store_to_sqlite(workspace_id, store)? {
             true => Ok(()),
-            false => write_store(&path, store),
+            false if workspace_id == DEFAULT_WORKSPACE_ID => write_store(&path, store),
+            false => Ok(()),
         }
     })
 }
@@ -385,26 +405,14 @@ fn persist<F: FnOnce(&mut SchedulerStore)>(app: &AppHandle, mutate: F) -> Result
 /// Resolve the scheduler store: SQLite first (production), then the legacy JSON
 /// file (unit tests / pre-migration). The JSON file is never the source of
 /// truth once SQLite has been migrated into.
-fn load_store(app: &AppHandle, path: &Path) -> Result<SchedulerStore, String> {
-    let instance = instance_id_of(app);
-    if let Some(store) = load_store_from_sqlite(&instance)? {
+fn load_store(_app: &AppHandle, path: &Path, workspace_id: &str) -> Result<SchedulerStore, String> {
+    if let Some(store) = load_store_from_sqlite(workspace_id)? {
         return Ok(store);
     }
-    read_store(path)
-}
-
-fn instance_id_of(app: &AppHandle) -> String {
-    app.state::<SchedulerState>()
-        .inner()
-        .0
-        .lock()
-        .map(|guard| {
-            guard
-                .as_ref()
-                .map(|s| s.instance_id.clone())
-                .unwrap_or_else(|| "unset".to_string())
-        })
-        .unwrap_or_else(|_| "unset".to_string())
+    if workspace_id == DEFAULT_WORKSPACE_ID {
+        return read_store(path);
+    }
+    Ok(empty_store(workspace_id))
 }
 
 /// Emit a run-request event so the TS scheduler driver picks up a due job.
@@ -449,9 +457,11 @@ pub fn list_scheduler_jobs(
 ) -> Result<Vec<ScheduledJob>, String> {
     let scope = command_scope(workspace_id, project_id)?;
     if let Some(store) = load_store_from_sqlite(scope.workspace_id())? {
-        return Ok(store.jobs.into_iter().filter(|job| {
-            job.project_id.as_deref() == scope.project_id()
-        }).collect());
+        return Ok(store
+            .jobs
+            .into_iter()
+            .filter(|job| job.project_id.as_deref() == scope.project_id())
+            .collect());
     }
     let path = scheduler_store_path(&app)?;
     Ok(read_store(&path)?
@@ -472,9 +482,11 @@ pub fn list_scheduler_queue(
 ) -> Result<Vec<SchedulerQueueEntry>, String> {
     let scope = command_scope(workspace_id, project_id)?;
     if let Some(store) = load_store_from_sqlite(scope.workspace_id())? {
-        return Ok(store.queue.into_iter().filter(|entry| {
-            entry.project_id.as_deref() == scope.project_id()
-        }).collect());
+        return Ok(store
+            .queue
+            .into_iter()
+            .filter(|entry| entry.project_id.as_deref() == scope.project_id())
+            .collect());
     }
     let path = scheduler_store_path(&app)?;
     Ok(read_store(&path)?
@@ -498,7 +510,7 @@ pub fn save_scheduled_job(
     job.workspace_id = scope.workspace_id().to_string();
     job.project_id = scope.project_id().map(str::to_string);
     let job = normalize_job(job)?;
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         store.jobs.retain(|j| {
             j.id != job.id || j.workspace_id != job.workspace_id || j.project_id != job.project_id
         });
@@ -517,7 +529,7 @@ pub fn delete_scheduled_job(
 ) -> Result<(), String> {
     let scope = command_scope(workspace_id, project_id)?;
     let job_id = normalize_spaces(&job_id);
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         store.jobs.retain(|j| {
             j.id != job_id
                 || j.workspace_id != scope.workspace_id()
@@ -546,7 +558,7 @@ pub fn set_job_status(
         return Err("Unknown job status.".to_string());
     }
     let job_id_norm = normalize_spaces(&job_id);
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         for job in &mut store.jobs {
             if job.id == job_id_norm
                 && job.workspace_id == scope.workspace_id()
@@ -586,7 +598,7 @@ pub fn enqueue_job_run(
         return Err("Enqueue needs jobId, runId, and scheduledAt.".to_string());
     }
     let mut created: Option<SchedulerQueueEntry> = None;
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         if store.queue.iter().any(|e| e.deduplication_key == key) {
             return;
         }
@@ -662,7 +674,7 @@ pub fn report_job_attempt(
     let run_id = normalize_spaces(&run_id);
     let max_retries = crate::models::SCHEDULER_MAX_RETRIES;
     let mut remembered: Option<String> = None;
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         for entry in &mut store.queue {
             if entry.run_id != run_id
                 || entry.workspace_id != scope.workspace_id()
@@ -770,7 +782,7 @@ pub fn renew_job_lease(
     let run_id = normalize_spaces(&run_id);
     let lease_token = normalize_spaces(&lease_token);
     let mut renewed = false;
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         for entry in &mut store.queue {
             if entry.run_id != run_id
                 || entry.workspace_id != scope.workspace_id()
@@ -804,7 +816,7 @@ pub fn requeue_blocked_job_run(
     let scope = command_scope(workspace_id, project_id)?;
     let run_id = normalize_spaces(&run_id);
     let mut requeued = false;
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         for entry in &mut store.queue {
             if entry.run_id == run_id
                 && entry.workspace_id == scope.workspace_id()
@@ -835,7 +847,7 @@ pub fn cancel_job_run(
     let now = now_iso();
     let mut cancelled = false;
     let mut remembered: Option<String> = None;
-    persist(&app, |store| {
+    persist(&app, scope.workspace_id(), |store| {
         for entry in &mut store.queue {
             if entry.run_id != run_id
                 || entry.workspace_id != scope.workspace_id()
@@ -906,7 +918,7 @@ pub fn recover_store_at(store: &mut SchedulerStore) {
 /// deleted by this path — it remains as a downgrade/rollback target.
 pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
     let path = scheduler_store_path(app)?;
-    let mut store = load_store(app, &path)?;
+    let mut store = load_store(app, &path, DEFAULT_WORKSPACE_ID)?;
     let mut changed = false;
     for entry in &store.queue {
         if entry.state == "leased" || entry.state == "running" {
@@ -917,7 +929,7 @@ pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
         recover_store_at(&mut store);
         store.updated_at = now_iso();
         // SQLite is the authority in production; fall back to JSON in tests.
-        match write_store_to_sqlite(&store)? {
+        match write_store_to_sqlite(DEFAULT_WORKSPACE_ID, &store)? {
             true => {}
             false => {
                 write_store(&path, &store)?;
@@ -928,7 +940,7 @@ pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
         let mut guard = mutex
             .lock()
             .map_err(|_| "Scheduler lock poisoned.".to_string())?;
-        *guard = Some(store);
+        guard.insert(DEFAULT_WORKSPACE_ID.to_string(), store);
         Ok::<(), String>(())
     })?;
     Ok(())
@@ -946,14 +958,14 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
             .map_err(|_| "Scheduler lock poisoned.".to_string())?;
         Ok::<String, String>(
             guard
-                .as_ref()
-                .map(|s| s.instance_id.clone())
+                .get(DEFAULT_WORKSPACE_ID)
+                .map(|store| store.instance_id.clone())
                 .unwrap_or_else(|| "unset".to_string()),
         )
     })?;
 
     let mut newly_leased = Vec::new();
-    persist(app, |store| {
+    persist(app, DEFAULT_WORKSPACE_ID, |store| {
         // 1. Expire leases whose deadline has passed.
         for entry in &mut store.queue {
             if !entry.lease_holder.is_empty() && parse_ms(&entry.lease_expires_at) <= now_ms {

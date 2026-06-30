@@ -71,7 +71,8 @@ fn omitted_summary() -> Value {
             "connector_cache_settings (cache controls, not user content)"
         ],
         "transient": [
-            "run_state is exported (user-recoverable), but documented here as recoverable state"
+            "run_state is exported (user-recoverable), but documented here as recoverable state",
+            "scheduler_queue_entry is execution state and is rebuilt; it is never imported as live authority"
         ],
         "bookkeeping": [
             "schema_meta (DB-internal version row)",
@@ -127,6 +128,9 @@ pub struct Sections {
     pub knowledge_sources: Vec<KnowledgeSourceRecord>,
     pub memory_records: Vec<MemoryRecord>,
     pub schedules: Vec<ScheduleRecord>,
+    pub scheduled_jobs: Vec<ScheduledJobRecord>,
+    pub workflow_definitions: Vec<WorkflowDefinitionRecord>,
+    pub workflow_runs: Vec<WorkflowRunRecord>,
     pub model_configs: Vec<ModelConfigRecord>,
     pub drafts: Vec<DraftRecord>,
     pub run_states: Vec<RunStateRecord>,
@@ -244,6 +248,7 @@ record!(ArtifactRecord {
 // portable. Import writes these `disconnected` with no credential ref.
 record!(ConnectorAccountRecord {
     connector_id: String,
+    project_id: Option<String>,
     account_id: Option<String>,
     status: String,
     expires_at: Option<i64>,
@@ -260,6 +265,7 @@ record!(BackendConnectionRecord {
 
 record!(KnowledgeSourceRecord {
     id: String,
+    project_id: Option<String>,
     connector_id: String,
     kind: String,
     trust: String,
@@ -273,6 +279,7 @@ record!(KnowledgeSourceRecord {
 
 record!(MemoryRecord {
     id: String,
+    project_id: Option<String>,
     kind: String,
     pinned: bool,
     approved: bool,
@@ -282,10 +289,37 @@ record!(MemoryRecord {
 
 record!(ScheduleRecord {
     id: String,
+    project_id: Option<String>,
     weekday: String,
     time: String,
     enabled: bool,
     created_at: String,
+    payload: Value,
+});
+
+record!(ScheduledJobRecord {
+    id: String,
+    project_id: Option<String>,
+    payload: Value,
+});
+
+record!(WorkflowDefinitionRecord {
+    id: String,
+    project_id: Option<String>,
+    version: u32,
+    created_at: String,
+    updated_at: String,
+    payload: Value,
+});
+
+record!(WorkflowRunRecord {
+    id: String,
+    project_id: Option<String>,
+    definition_id: String,
+    definition_version: u32,
+    status: String,
+    started_at: String,
+    updated_at: String,
     payload: Value,
 });
 
@@ -322,6 +356,7 @@ fn read_rows(
     store: &Store,
     table: &str,
     sql: &str,
+    params: &[&dyn rusqlite::ToSql],
     // (column index in SELECT (0-based), camelCase json key, cast)
     plain_cols: &[(usize, &str, Cast)],
 ) -> Result<Vec<Value>> {
@@ -331,7 +366,7 @@ fn read_rows(
     // Last two columns are always payload, payload_nonce.
     debug_assert!(row_count >= n_cols + 2);
     let partials: Vec<(Vec<Value>, Sealed, Vec<String>)> = stmt
-        .query_map([], |row| {
+        .query_map(params, |row| {
             // Read plaintext column values as their JSON form first.
             let mut plains = Vec::with_capacity(n_cols);
             let mut keys = Vec::with_capacity(n_cols);
@@ -410,9 +445,26 @@ fn open_json_value(store: &Store, sealed: &Sealed, aad: &str) -> Result<Value> {
 
 /// Build a deterministic portable workspace manifest from the store. Validates
 /// referential integrity before returning; on failure produces no artifact.
+#[cfg(test)]
 pub fn export_workspace(store: &Store) -> Result<Manifest> {
-    let sections = store.with_conn(|conn| read_sections(conn, store))?;
+    export_workspace_for(store, crate::store::repos::scope::DEFAULT_WORKSPACE_ID)
+}
+
+pub fn export_workspace_for(store: &Store, workspace_id: &str) -> Result<Manifest> {
+    let scope = crate::store::repos::scope::DataScope::workspace(workspace_id.to_string())?;
+    let sections = store.with_conn(|conn| {
+        scope.ensure_exists(conn)?;
+        let mut foreign_key_check = conn.prepare("PRAGMA foreign_key_check;")?;
+        if foreign_key_check.query([])?.next()?.is_some() {
+            return Err(StoreError::Invalid(
+                "The local database contains a broken ownership reference; export was cancelled."
+                    .into(),
+            ));
+        }
+        read_sections(conn, store, scope.workspace_id())
+    })?;
     validate_integrity(&sections)?;
+    validate_no_secrets(&sections)?;
     Ok(Manifest {
         format: PORTABLE_FORMAT_NAME.to_string(),
         format_version: PORTABLE_FORMAT_VERSION,
@@ -425,19 +477,23 @@ pub fn export_workspace(store: &Store) -> Result<Manifest> {
     })
 }
 
-fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
+fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result<Sections> {
     // profile (singleton id=1)
-    let profile = read_profile(conn, store)?;
+    let profile = if workspace_id == crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
+        read_profile(conn, store)?
+    } else {
+        None
+    };
 
     // preferences: the encrypted payload *is* the value (there is no separate
     // payload document), so read it directly into the `value` field.
     let preferences = {
         let mut stmt = conn.prepare(
             "SELECT key, updated_at, payload, payload_nonce FROM preferences
-             WHERE workspace_id='default' ORDER BY key;",
+             WHERE workspace_id=?1 ORDER BY key;",
         )?;
         let partials: Vec<(String, String, Sealed)> = stmt
-            .query_map([], |row| {
+            .query_map([workspace_id], |row| {
                 Ok((
                     row.get(0)?,
                     row.get(1)?,
@@ -450,7 +506,8 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut out = Vec::with_capacity(partials.len());
         for (key, updated_at, sealed) in partials {
-            let value = open_json_value(store, &sealed, &format!("preferences:default:{key}"))?;
+            let value =
+                open_json_value(store, &sealed, &format!("preferences:{workspace_id}:{key}"))?;
             out.push(PreferenceRecord {
                 key,
                 updated_at,
@@ -465,7 +522,8 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         store,
         "project",
         "SELECT id, title_fingerprint, created_at, updated_at, payload, payload_nonce
-         FROM project WHERE workspace_id='default' ORDER BY id;",
+         FROM project WHERE workspace_id=?1 ORDER BY id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "titleFingerprint", Cast::Text),
@@ -481,8 +539,10 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "thread",
-        "SELECT id, project_id, created_at, updated_at, payload, payload_nonce
-         FROM thread ORDER BY project_id, id;",
+        "SELECT t.id, t.project_id, t.created_at, t.updated_at, t.payload, t.payload_nonce
+         FROM thread t JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 ORDER BY t.project_id, t.id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "projectId", Cast::Text),
@@ -498,8 +558,11 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "message",
-        "SELECT id, thread_id, role, seq, created_at, payload, payload_nonce
-         FROM message ORDER BY thread_id, seq, id;",
+        "SELECT m.id, m.thread_id, m.role, m.seq, m.created_at, m.payload, m.payload_nonce
+         FROM message m JOIN thread t ON t.id=m.thread_id
+         JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 ORDER BY m.thread_id, m.seq, m.id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "threadId", Cast::Text),
@@ -516,9 +579,13 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "run",
-        "SELECT id, thread_id, provider_id, model, status, turn, recoverable,
-                retry_count, created_at, updated_at, payload, payload_nonce
-         FROM run ORDER BY created_at, id;",
+        "SELECT r.id, r.thread_id, r.provider_id, r.model, r.status, r.turn, r.recoverable,
+                r.retry_count, r.created_at, r.updated_at, r.payload, r.payload_nonce
+         FROM run r LEFT JOIN thread t ON t.id=r.thread_id
+         LEFT JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 OR (r.thread_id IS NULL AND ?1='default')
+         ORDER BY r.created_at, r.id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "threadId", Cast::NullableText),
@@ -540,8 +607,12 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "tool_call",
-        "SELECT id, run_id, tool, status, created_at, payload, payload_nonce
-         FROM tool_call ORDER BY run_id, created_at, id;",
+        "SELECT tc.id, tc.run_id, tc.tool, tc.status, tc.created_at, tc.payload, tc.payload_nonce
+         FROM tool_call tc JOIN run r ON r.id=tc.run_id
+         LEFT JOIN thread t ON t.id=r.thread_id LEFT JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 OR (r.thread_id IS NULL AND ?1='default')
+         ORDER BY tc.run_id, tc.created_at, tc.id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "runId", Cast::Text),
@@ -558,9 +629,13 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "approval",
-        "SELECT id, run_id, service, action, mode, risk_level, decision,
-                request_fingerprint, decided_at, payload, payload_nonce
-         FROM approval ORDER BY decided_at, id;",
+        "SELECT a.id, a.run_id, a.service, a.action, a.mode, a.risk_level, a.decision,
+                a.request_fingerprint, a.decided_at, a.payload, a.payload_nonce
+         FROM approval a LEFT JOIN run r ON r.id=a.run_id
+         LEFT JOIN thread t ON t.id=r.thread_id LEFT JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 OR (a.run_id IS NULL AND ?1='default')
+         ORDER BY a.decided_at, a.id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "runId", Cast::NullableText),
@@ -583,7 +658,8 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         "audit_event",
         "SELECT id, kind, actor, created_at, category, service, action, status,
                 risk_level, mode, correlation_id, error_code, summary, payload, payload_nonce
-         FROM audit_event ORDER BY created_at, id;",
+         FROM audit_event WHERE ?1='default' ORDER BY created_at, id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "kind", Cast::Text),
@@ -608,9 +684,13 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "artifact",
-        "SELECT id, run_id, kind, content_fingerprint, size_bytes, created_at,
-                payload, payload_nonce
-         FROM artifact ORDER BY created_at, id;",
+        "SELECT a.id, a.run_id, a.kind, a.content_fingerprint, a.size_bytes, a.created_at,
+                a.payload, a.payload_nonce
+         FROM artifact a LEFT JOIN run r ON r.id=a.run_id
+         LEFT JOIN thread t ON t.id=r.thread_id LEFT JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 OR (a.run_id IS NULL AND ?1='default')
+         ORDER BY a.created_at, a.id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "runId", Cast::NullableText),
@@ -628,17 +708,19 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let connector_accounts = read_rows(
         conn,
         store,
-        "connector_account:default",
-        "SELECT connector_id, account_id, status, expires_at, connected_at,
+        &format!("connector_account:{workspace_id}"),
+        "SELECT connector_id, project_id, account_id, status, expires_at, connected_at,
                 updated_at, payload, payload_nonce
-         FROM connector_account WHERE workspace_id='default' ORDER BY connector_id;",
+         FROM connector_account WHERE workspace_id=?1 ORDER BY connector_id;",
+        &[&workspace_id],
         &[
             (0, "connectorId", Cast::Text),
-            (1, "accountId", Cast::NullableText),
-            (2, "status", Cast::Text),
-            (3, "expiresAt", Cast::NullableInt),
-            (4, "connectedAt", Cast::Text),
-            (5, "updatedAt", Cast::Text),
+            (1, "projectId", Cast::NullableText),
+            (2, "accountId", Cast::NullableText),
+            (3, "status", Cast::Text),
+            (4, "expiresAt", Cast::NullableInt),
+            (5, "connectedAt", Cast::Text),
+            (6, "updatedAt", Cast::Text),
         ],
     )?
     .into_iter()
@@ -646,7 +728,7 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     .collect::<Result<_>>()?;
 
     // backend_connection — no payload columns; read directly.
-    let backend_connections: Vec<BackendConnectionRecord> = {
+    let backend_connections: Vec<BackendConnectionRecord> = if workspace_id == "default" {
         let mut stmt = conn.prepare(
             "SELECT provider_id, connected_at, updated_at FROM backend_connection ORDER BY provider_id;",
         )?;
@@ -662,25 +744,29 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
             out.push(r?);
         }
         out
+    } else {
+        Vec::new()
     };
 
     let knowledge_sources = read_rows(
         conn,
         store,
-        "knowledge_source:default",
-        "SELECT id, connector_id, kind, trust, pinned, content_fingerprint,
+        &format!("knowledge_source:{workspace_id}"),
+        "SELECT id, project_id, connector_id, kind, trust, pinned, content_fingerprint,
                 size_bytes, imported_at, origin, payload, payload_nonce
-         FROM knowledge_source WHERE workspace_id='default' ORDER BY imported_at, id;",
+         FROM knowledge_source WHERE workspace_id=?1 ORDER BY imported_at, id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
-            (1, "connectorId", Cast::Text),
-            (2, "kind", Cast::Text),
-            (3, "trust", Cast::Text),
-            (4, "pinned", Cast::Bool),
-            (5, "contentFingerprint", Cast::Text),
-            (6, "sizeBytes", Cast::Int),
-            (7, "importedAt", Cast::Text),
-            (8, "origin", Cast::Text),
+            (1, "projectId", Cast::NullableText),
+            (2, "connectorId", Cast::Text),
+            (3, "kind", Cast::Text),
+            (4, "trust", Cast::Text),
+            (5, "pinned", Cast::Bool),
+            (6, "contentFingerprint", Cast::Text),
+            (7, "sizeBytes", Cast::Int),
+            (8, "importedAt", Cast::Text),
+            (9, "origin", Cast::Text),
         ],
     )?
     .into_iter()
@@ -690,15 +776,17 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let memory_records = read_rows(
         conn,
         store,
-        "memory_record:default",
-        "SELECT id, kind, pinned, approved, created_at, payload, payload_nonce
-         FROM memory_record WHERE workspace_id='default' ORDER BY created_at, id;",
+        &format!("memory_record:{workspace_id}"),
+        "SELECT id, project_id, kind, pinned, approved, created_at, payload, payload_nonce
+         FROM memory_record WHERE workspace_id=?1 ORDER BY created_at, id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
-            (1, "kind", Cast::Text),
-            (2, "pinned", Cast::Bool),
-            (3, "approved", Cast::Bool),
-            (4, "createdAt", Cast::Text),
+            (1, "projectId", Cast::NullableText),
+            (2, "kind", Cast::Text),
+            (3, "pinned", Cast::Bool),
+            (4, "approved", Cast::Bool),
+            (5, "createdAt", Cast::Text),
         ],
     )?
     .into_iter()
@@ -708,20 +796,49 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let schedules = read_rows(
         conn,
         store,
-        "schedule:default",
-        "SELECT id, weekday, time, enabled, created_at, payload, payload_nonce
-         FROM schedule WHERE workspace_id='default' ORDER BY created_at, id;",
+        &format!("schedule:{workspace_id}"),
+        "SELECT id, project_id, weekday, time, enabled, created_at, payload, payload_nonce
+         FROM schedule WHERE workspace_id=?1 ORDER BY created_at, id;",
+        &[&workspace_id],
         &[
             (0, "id", Cast::Text),
-            (1, "weekday", Cast::Text),
-            (2, "time", Cast::Text),
-            (3, "enabled", Cast::Bool),
-            (4, "createdAt", Cast::Text),
+            (1, "projectId", Cast::NullableText),
+            (2, "weekday", Cast::Text),
+            (3, "time", Cast::Text),
+            (4, "enabled", Cast::Bool),
+            (5, "createdAt", Cast::Text),
         ],
     )?
     .into_iter()
     .map(|v| record_from::<ScheduleRecord>(v, "schedule"))
     .collect::<Result<_>>()?;
+
+    let scheduled_jobs = read_rows(
+        conn,
+        store,
+        &format!("scheduled_job:{workspace_id}"),
+        "SELECT id, payload, payload_nonce FROM scheduled_job
+         WHERE workspace_id=?1 ORDER BY created_at, id;",
+        &[&workspace_id],
+        &[(0, "id", Cast::Text)],
+    )?
+    .into_iter()
+    .map(|mut value| {
+        let project_id = value
+            .get("payload")
+            .and_then(|payload| payload.get("projectId"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        value
+            .as_object_mut()
+            .expect("portable row is an object")
+            .insert("projectId".into(), project_id);
+        record_from::<ScheduledJobRecord>(value, "scheduled_job")
+    })
+    .collect::<Result<_>>()?;
+
+    let workflow_definitions = read_workflow_definitions(conn, store, workspace_id)?;
+    let workflow_runs = read_workflow_runs(conn, store, workspace_id)?;
 
     // model_config — composite key (provider_id, model_id). AAD uses provider_id
     // as the leading id segment per the established convention.
@@ -730,7 +847,8 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         store,
         "model_config",
         "SELECT provider_id, model_id, selected, payload, payload_nonce
-         FROM model_config ORDER BY provider_id, model_id;",
+         FROM model_config WHERE ?1='default' ORDER BY provider_id, model_id;",
+        &[&workspace_id],
         &[
             (0, "providerId", Cast::Text),
             (1, "modelId", Cast::Text),
@@ -745,7 +863,9 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "draft",
-        "SELECT id, updated_at, payload, payload_nonce FROM draft ORDER BY id;",
+        "SELECT id, updated_at, payload, payload_nonce FROM draft
+         WHERE ?1='default' ORDER BY id;",
+        &[&workspace_id],
         &[(0, "id", Cast::Text), (1, "updatedAt", Cast::Text)],
     )?
     .into_iter()
@@ -756,7 +876,12 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         conn,
         store,
         "run_state",
-        "SELECT id, updated_at, payload, payload_nonce FROM run_state ORDER BY id;",
+        "SELECT rs.id, rs.updated_at, rs.payload, rs.payload_nonce
+         FROM run_state rs JOIN run r ON r.id=rs.id
+         LEFT JOIN thread t ON t.id=r.thread_id LEFT JOIN project p ON p.id=t.project_id
+         WHERE p.workspace_id=?1 OR (r.thread_id IS NULL AND ?1='default')
+         ORDER BY rs.id;",
+        &[&workspace_id],
         &[(0, "id", Cast::Text), (1, "updatedAt", Cast::Text)],
     )?
     .into_iter()
@@ -779,6 +904,9 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         knowledge_sources,
         memory_records,
         schedules,
+        scheduled_jobs,
+        workflow_definitions,
+        workflow_runs,
         model_configs,
         drafts,
         run_states,
@@ -802,7 +930,10 @@ fn read_profile(conn: &Connection, store: &Store) -> Result<Option<ProfileRecord
             };
             // AAD for the singleton profile row is "profile:1".
             let payload = open_json_value(store, &sealed, "profile:1")?;
-            Ok(Some(ProfileRecord { updated_at, payload }))
+            Ok(Some(ProfileRecord {
+                updated_at,
+                payload,
+            }))
         }
     }
 }
@@ -817,6 +948,11 @@ fn validate_integrity(s: &Sections) -> Result<()> {
     let thread_ids: std::collections::BTreeSet<&str> =
         s.threads.iter().map(|t| t.id.as_str()).collect();
     let run_ids: std::collections::BTreeSet<&str> = s.runs.iter().map(|r| r.id.as_str()).collect();
+    let workflow_definition_ids: std::collections::BTreeSet<(&str, u32)> = s
+        .workflow_definitions
+        .iter()
+        .map(|definition| (definition.id.as_str(), definition.version))
+        .collect();
 
     // duplicates
     if has_dup(&s.projects, |r| &r.id) {
@@ -851,10 +987,7 @@ fn validate_integrity(s: &Sections) -> Result<()> {
     for r in &s.runs {
         if let Some(tid) = &r.thread_id {
             if !thread_ids.contains(tid.as_str()) {
-                errors.push(format!(
-                    "Run {} references unknown thread {}.",
-                    r.id, tid
-                ));
+                errors.push(format!("Run {} references unknown thread {}.", r.id, tid));
             }
         }
     }
@@ -871,10 +1004,7 @@ fn validate_integrity(s: &Sections) -> Result<()> {
     for a in &s.approvals {
         if let Some(rid) = &a.run_id {
             if !run_ids.contains(rid.as_str()) {
-                errors.push(format!(
-                    "Approval {} references unknown run {}.",
-                    a.id, rid
-                ));
+                errors.push(format!("Approval {} references unknown run {}.", a.id, rid));
             }
         }
     }
@@ -887,6 +1017,74 @@ fn validate_integrity(s: &Sections) -> Result<()> {
                     ar.id, rid
                 ));
             }
+        }
+    }
+    for (kind, id, project_id) in s
+        .connector_accounts
+        .iter()
+        .map(|record| {
+            (
+                "connector account",
+                record.connector_id.as_str(),
+                record.project_id.as_deref(),
+            )
+        })
+        .chain(s.knowledge_sources.iter().map(|record| {
+            (
+                "knowledge source",
+                record.id.as_str(),
+                record.project_id.as_deref(),
+            )
+        }))
+        .chain(s.memory_records.iter().map(|record| {
+            (
+                "memory record",
+                record.id.as_str(),
+                record.project_id.as_deref(),
+            )
+        }))
+        .chain(
+            s.schedules
+                .iter()
+                .map(|record| ("schedule", record.id.as_str(), record.project_id.as_deref())),
+        )
+        .chain(s.scheduled_jobs.iter().map(|record| {
+            (
+                "scheduled job",
+                record.id.as_str(),
+                record.project_id.as_deref(),
+            )
+        }))
+        .chain(s.workflow_definitions.iter().map(|record| {
+            (
+                "workflow definition",
+                record.id.as_str(),
+                record.project_id.as_deref(),
+            )
+        }))
+        .chain(s.workflow_runs.iter().map(|record| {
+            (
+                "workflow run",
+                record.id.as_str(),
+                record.project_id.as_deref(),
+            )
+        }))
+    {
+        if let Some(project_id) = project_id {
+            if !project_ids.contains(project_id) {
+                errors.push(format!(
+                    "Exported {kind} {id} references unknown project {project_id}."
+                ));
+            }
+        }
+    }
+    for run in &s.workflow_runs {
+        if !workflow_definition_ids.contains(&(run.definition_id.as_str(), run.definition_version))
+        {
+            errors.push(format!(
+                "Workflow run {} references an unknown workflow definition version.",
+                run.id
+            ));
         }
     }
 
@@ -912,7 +1110,9 @@ fn has_dup<T, F: Fn(&T) -> &String>(v: &[T], key: F) -> bool {
 
 fn record_from<T: for<'de> Deserialize<'de>>(value: Value, table: &str) -> Result<T> {
     serde_json::from_value::<T>(value).map_err(|e| {
-        StoreError::Invalid(format!("Could not decode a {table} record for export: {e}."))
+        StoreError::Invalid(format!(
+            "Could not decode a {table} record for export: {e}."
+        ))
     })
 }
 
@@ -966,21 +1166,209 @@ impl ImportReport {
 /// `manifest_json` is the raw manifest text. Apply happens inside a single
 /// `Store::transaction`; on failure the transaction rolls back and the store is
 /// byte-for-byte unchanged.
+#[cfg(test)]
 pub fn import_workspace(
     store: &Store,
     manifest_json: &str,
     options: ImportOptions,
 ) -> std::result::Result<ImportReport, ImportError> {
+    import_workspace_for(
+        store,
+        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+        manifest_json,
+        options,
+    )
+}
+
+fn read_workflow_definitions(
+    conn: &Connection,
+    store: &Store,
+    workspace_id: &str,
+) -> Result<Vec<WorkflowDefinitionRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, version, created_at, updated_at, payload, payload_nonce
+         FROM workflow_definition WHERE workspace_id=?1
+         ORDER BY id, version;",
+    )?;
+    let rows = stmt
+        .query_map([workspace_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, u32>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                Sealed {
+                    ciphertext: row.get(5)?,
+                    nonce: row.get(6)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(
+            |(id, project_id, version, created_at, updated_at, sealed)| {
+                let payload = open_json_value(
+                    store,
+                    &sealed,
+                    &format!("workflow_definition:{workspace_id}:{id}:{version}"),
+                )?;
+                Ok(WorkflowDefinitionRecord {
+                    id,
+                    project_id,
+                    version,
+                    created_at,
+                    updated_at,
+                    payload,
+                })
+            },
+        )
+        .collect()
+}
+
+fn read_workflow_runs(
+    conn: &Connection,
+    store: &Store,
+    workspace_id: &str,
+) -> Result<Vec<WorkflowRunRecord>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, project_id, definition_id, definition_version, status,
+                started_at, updated_at, payload, payload_nonce
+         FROM workflow_run WHERE workspace_id=?1 ORDER BY updated_at, id;",
+    )?;
+    let rows = stmt
+        .query_map([workspace_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, u32>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                Sealed {
+                    ciphertext: row.get(7)?,
+                    nonce: row.get(8)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(
+            |(
+                id,
+                project_id,
+                definition_id,
+                definition_version,
+                status,
+                started_at,
+                updated_at,
+                sealed,
+            )| {
+                let payload =
+                    open_json_value(store, &sealed, &format!("workflow_run:{workspace_id}:{id}"))?;
+                Ok(WorkflowRunRecord {
+                    id,
+                    project_id,
+                    definition_id,
+                    definition_version,
+                    status,
+                    started_at,
+                    updated_at,
+                    payload,
+                })
+            },
+        )
+        .collect()
+}
+
+fn validate_no_secrets(sections: &Sections) -> Result<()> {
+    let value = serde_json::to_value(sections)
+        .map_err(|_| StoreError::Invalid("Could not validate the portable archive.".into()))?;
+    if contains_secret_material(&value, None) {
+        return Err(StoreError::Invalid(
+            "The workspace contains credential-shaped data that cannot be exported.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn contains_secret_material(value: &Value, key: Option<&str>) -> bool {
+    let normalized_key = key
+        .map(|key| {
+            key.chars()
+                .filter(|ch| ch.is_ascii_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    if matches!(
+        normalized_key.as_str(),
+        "credentialref"
+            | "token"
+            | "accesstoken"
+            | "refreshtoken"
+            | "idtoken"
+            | "secret"
+            | "clientsecret"
+            | "password"
+            | "apikey"
+            | "authorization"
+            | "cookie"
+            | "privatekey"
+    ) {
+        return true;
+    }
+    match value {
+        Value::String(text) => {
+            let trimmed = text.trim();
+            let lower = trimmed.to_ascii_lowercase();
+            lower.starts_with("bearer ")
+                || lower.starts_with("oauth-token:")
+                || lower.starts_with("ghp_")
+                || lower.starts_with("github_pat_")
+                || lower.starts_with("sk-")
+                || lower.starts_with("ya29.")
+                || lower.starts_with("1//")
+        }
+        Value::Array(items) => items
+            .iter()
+            .any(|item| contains_secret_material(item, None)),
+        Value::Object(map) => map
+            .iter()
+            .any(|(key, item)| contains_secret_material(item, Some(key))),
+        _ => false,
+    }
+}
+
+pub fn import_workspace_for(
+    store: &Store,
+    workspace_id: &str,
+    manifest_json: &str,
+    options: ImportOptions,
+) -> std::result::Result<ImportReport, ImportError> {
+    let scope = crate::store::repos::scope::DataScope::workspace(workspace_id.to_string())
+        .map_err(|error| ImportError::Invalid(error.to_string()))?;
     let manifest = parse_and_validate(manifest_json)?;
+    validate_no_secrets(&manifest.sections)
+        .map_err(|error| ImportError::Invalid(error.to_string()))?;
     let mut report = ImportReport::new();
 
     // Plan: detect which incoming ids already exist. Done inside the same
     // transaction that applies, so the plan is consistent with the apply.
     let apply_result: Result<ImportReport> = store.transaction(|tx| {
+        scope.ensure_exists(tx)?;
         // Re-validate incoming integrity (a manifest could be edited after export).
         validate_integrity(&manifest.sections)?;
 
-        plan_and_apply(tx, store, &manifest, options, &mut report)?;
+        plan_and_apply(
+            tx,
+            store,
+            scope.workspace_id(),
+            &manifest,
+            options,
+            &mut report,
+        )?;
         Ok(report.clone())
     });
 
@@ -1018,7 +1406,9 @@ impl std::fmt::Display for ImportError {
 
 fn parse_and_validate(json: &str) -> std::result::Result<Manifest, ImportError> {
     let manifest: Manifest = serde_json::from_str(json).map_err(|e| {
-        ImportError::Invalid(format!("The manifest is not valid portable-workspace JSON: {e}."))
+        ImportError::Invalid(format!(
+            "The manifest is not valid portable-workspace JSON: {e}."
+        ))
     })?;
     if manifest.format != PORTABLE_FORMAT_NAME {
         return Err(ImportError::Invalid(format!(
@@ -1046,13 +1436,17 @@ fn parse_and_validate(json: &str) -> std::result::Result<Manifest, ImportError> 
 /// Placeholder migration seam for future format versions. Currently a no-op:
 /// the only supported version is 1. Documented as an integration point.
 #[allow(dead_code)]
-fn migrate_manifest(_manifest: &mut Manifest, _target: u32) -> std::result::Result<(), ImportError> {
+fn migrate_manifest(
+    _manifest: &mut Manifest,
+    _target: u32,
+) -> std::result::Result<(), ImportError> {
     Ok(())
 }
 
 fn plan_and_apply(
     tx: &Connection,
     store: &Store,
+    workspace_id: &str,
     manifest: &Manifest,
     options: ImportOptions,
     report: &mut ImportReport,
@@ -1081,16 +1475,32 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.preferences,
         "preferences",
         "key",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.value, &format!("preferences:default:{}", r.key))?;
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM preferences WHERE workspace_id=?1 AND key=?2);",
+                rusqlite::params![workspace_id, r.key],
+                |row| row.get(0),
+            )?;
+            if exists {
+                return Ok(());
+            }
+            let sealed = store
+                .seal_json_owned(&r.value, &format!("preferences:{workspace_id}:{}", r.key))?;
             tx.execute(
                 "INSERT INTO preferences (workspace_id, key, updated_at, payload, payload_nonce)
-                 VALUES ('default', ?1, ?2, ?3, ?4);",
-                rusqlite::params![r.key, r.updated_at, sealed.ciphertext, sealed.nonce],
+                 VALUES (?1, ?2, ?3, ?4, ?5);",
+                rusqlite::params![
+                    workspace_id,
+                    r.key,
+                    r.updated_at,
+                    sealed.ciphertext,
+                    sealed.nonce
+                ],
             )?;
             Ok(())
         },
@@ -1099,17 +1509,34 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.projects,
         "projects",
         "id",
         report,
         |tx, store, r| {
+            let owner: Option<String> = tx
+                .query_row(
+                    "SELECT workspace_id FROM project WHERE id=?1;",
+                    [&r.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if let Some(owner) = owner {
+                if owner != workspace_id {
+                    return Err(StoreError::Invalid(
+                        "An imported project id is owned by another workspace.".into(),
+                    ));
+                }
+                return Ok(());
+            }
             let sealed = store.seal_json_owned(&r.payload, &format!("project:{}", r.id))?;
             tx.execute(
                 "INSERT INTO project (id, workspace_id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, 'default', ?2, ?3, ?4, ?5, ?6);",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
                     r.title_fingerprint,
                     r.created_at,
                     r.updated_at,
@@ -1124,6 +1551,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.threads,
         "threads",
         "id",
@@ -1149,6 +1577,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.messages,
         "messages",
         "id",
@@ -1175,6 +1604,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.runs,
         "runs",
         "id",
@@ -1207,6 +1637,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.tool_calls,
         "toolCalls",
         "id",
@@ -1233,6 +1664,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.approvals,
         "approvals",
         "id",
@@ -1264,6 +1696,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.audit_events,
         "auditEvents",
         "id",
@@ -1300,6 +1733,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.artifacts,
         "artifacts",
         "id",
@@ -1330,18 +1764,24 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.connector_accounts,
         "connectorAccounts",
         "connectorId",
         report,
         |tx, store, r| {
-            let sealed =
-                store.seal_json_owned(&r.payload, &format!("connector_account:default:{}", r.connector_id))?;
+            ensure_target_project(tx, workspace_id, r.project_id.as_deref())?;
+            let sealed = store.seal_json_owned(
+                &r.payload,
+                &format!("connector_account:{workspace_id}:{}", r.connector_id),
+            )?;
             tx.execute(
                 "INSERT INTO connector_account (workspace_id, project_id, connector_id, account_id, status, expires_at,
                           credential_ref, connected_at, updated_at, payload, payload_nonce)
-                 VALUES ('default', NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
                 rusqlite::params![
+                    workspace_id,
+                    r.project_id,
                     r.connector_id,
                     r.account_id,
                     "disconnected", // forced: never auto-activate
@@ -1383,18 +1823,25 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.knowledge_sources,
         "knowledgeSources",
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("knowledge_source:default:{}", r.id))?;
+            ensure_target_project(tx, workspace_id, r.project_id.as_deref())?;
+            let sealed = store.seal_json_owned(
+                &r.payload,
+                &format!("knowledge_source:{workspace_id}:{}", r.id),
+            )?;
             tx.execute(
                 "INSERT INTO knowledge_source (id, workspace_id, project_id, connector_id, kind, trust, pinned,
                           content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce)
-                 VALUES (?1, 'default', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
+                    r.project_id,
                     r.connector_id,
                     r.kind,
                     r.trust,
@@ -1414,17 +1861,24 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.memory_records,
         "memoryRecords",
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("memory_record:default:{}", r.id))?;
+            ensure_target_project(tx, workspace_id, r.project_id.as_deref())?;
+            let sealed = store.seal_json_owned(
+                &r.payload,
+                &format!("memory_record:{workspace_id}:{}", r.id),
+            )?;
             tx.execute(
                 "INSERT INTO memory_record (id, workspace_id, project_id, kind, pinned, approved, created_at, payload, payload_nonce)
-                 VALUES (?1, 'default', NULL, ?2, ?3, ?4, ?5, ?6, ?7);",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
+                    r.project_id,
                     r.kind,
                     r.pinned as i64,
                     r.approved as i64,
@@ -1441,17 +1895,22 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.schedules,
         "schedules",
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("schedule:default:{}", r.id))?;
+            ensure_target_project(tx, workspace_id, r.project_id.as_deref())?;
+            let sealed =
+                store.seal_json_owned(&r.payload, &format!("schedule:{workspace_id}:{}", r.id))?;
             tx.execute(
                 "INSERT INTO schedule (id, workspace_id, project_id, weekday, time, enabled, created_at, payload, payload_nonce)
-                 VALUES (?1, 'default', NULL, ?2, ?3, ?4, ?5, ?6, ?7);",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
+                    r.project_id,
                     r.weekday,
                     r.time,
                     0, // forced disabled: never auto-activate an imported schedule
@@ -1463,6 +1922,128 @@ fn plan_and_apply(
             Ok(())
         },
     )?;
+
+    for record in &manifest.sections.workflow_definitions {
+        ensure_target_project(tx, workspace_id, record.project_id.as_deref())?;
+        let existing_project: Option<Option<String>> = tx
+            .query_row(
+                "SELECT project_id FROM workflow_definition
+                 WHERE workspace_id=?1 AND id=?2 AND version=?3;",
+                rusqlite::params![workspace_id, record.id, record.version],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing_project) = existing_project {
+            if existing_project != record.project_id {
+                return Err(StoreError::Invalid(
+                    "An imported workflow definition is owned by another project.".into(),
+                ));
+            }
+            report.inc_skipped("workflowDefinitions");
+            continue;
+        }
+        let scope = crate::store::repos::scope::DataScope::new(
+            workspace_id.to_string(),
+            record.project_id.clone(),
+        )?;
+        crate::store::repos::workflow::upsert_definition(
+            tx,
+            store,
+            &scope,
+            &record.id,
+            record.version,
+            &record.created_at,
+            &record.updated_at,
+            &record.payload,
+        )?;
+        report.inc_inserted("workflowDefinitions");
+    }
+
+    for record in &manifest.sections.workflow_runs {
+        ensure_target_project(tx, workspace_id, record.project_id.as_deref())?;
+        let existing_project: Option<Option<String>> = tx
+            .query_row(
+                "SELECT project_id FROM workflow_run WHERE workspace_id=?1 AND id=?2;",
+                rusqlite::params![workspace_id, record.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(existing_project) = existing_project {
+            if existing_project != record.project_id {
+                return Err(StoreError::Invalid(
+                    "An imported workflow run is owned by another project.".into(),
+                ));
+            }
+            report.inc_skipped("workflowRuns");
+            continue;
+        }
+        let scope = crate::store::repos::scope::DataScope::new(
+            workspace_id.to_string(),
+            record.project_id.clone(),
+        )?;
+        crate::store::repos::workflow::upsert_run(
+            tx,
+            store,
+            &scope,
+            &record.id,
+            &record.definition_id,
+            record.definition_version,
+            &record.status,
+            &record.started_at,
+            &record.updated_at,
+            &record.payload,
+        )?;
+        report.inc_inserted("workflowRuns");
+    }
+
+    for record in &manifest.sections.scheduled_jobs {
+        ensure_target_project(tx, workspace_id, record.project_id.as_deref())?;
+        let owner: Option<String> = tx
+            .query_row(
+                "SELECT workspace_id FROM scheduled_job WHERE id=?1;",
+                [&record.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match owner {
+            Some(owner) if owner == workspace_id => {
+                report.inc_skipped("scheduledJobs");
+                continue;
+            }
+            Some(_) => {
+                return Err(StoreError::Invalid(
+                    "An imported scheduled job id is owned by another workspace.".into(),
+                ));
+            }
+            None => {}
+        }
+        let mut payload = record.payload.clone();
+        let object = payload.as_object_mut().ok_or_else(|| {
+            StoreError::Invalid("An imported scheduled job payload is not an object.".into())
+        })?;
+        object.insert("id".into(), Value::String(record.id.clone()));
+        object.insert(
+            "workspaceId".into(),
+            Value::String(workspace_id.to_string()),
+        );
+        object.insert(
+            "projectId".into(),
+            record
+                .project_id
+                .clone()
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
+        object.insert("status".into(), Value::String("paused".into()));
+        crate::store::repos::scheduled_job::upsert_from_value(
+            tx,
+            store,
+            workspace_id,
+            payload,
+            &now,
+        )?;
+        report.inc_inserted("scheduledJobs");
+    }
 
     // model_config — composite key.
     {
@@ -1477,10 +2058,8 @@ fn plan_and_apply(
                 report.inc_skipped(section);
                 continue;
             }
-            let sealed = store.seal_json_owned(
-                &r.payload,
-                &format!("model_config:{}", r.provider_id),
-            )?;
+            let sealed =
+                store.seal_json_owned(&r.payload, &format!("model_config:{}", r.provider_id))?;
             tx.execute(
                 "INSERT INTO model_config (provider_id, model_id, selected, payload, payload_nonce)
                  VALUES (?1, ?2, ?3, ?4, ?5);",
@@ -1499,6 +2078,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.drafts,
         "drafts",
         "id",
@@ -1517,6 +2097,7 @@ fn plan_and_apply(
     apply_simple(
         tx,
         store,
+        workspace_id,
         &manifest.sections.run_states,
         "runStates",
         "id",
@@ -1546,16 +2127,47 @@ fn plan_and_apply(
             manifest.sections.schedules.len()
         ));
     }
+    if !manifest.sections.scheduled_jobs.is_empty() {
+        report.warnings.push(format!(
+            "{} scheduled job(s) imported paused; re-enable them explicitly to activate.",
+            manifest.sections.scheduled_jobs.len()
+        ));
+    }
 
     // keep `now` referenced for clarity of "apply-time" semantics
     let _ = now;
     Ok(())
 }
 
+fn ensure_target_project(
+    tx: &Connection,
+    workspace_id: &str,
+    project_id: Option<&str>,
+) -> Result<()> {
+    let Some(project_id) = project_id else {
+        return Ok(());
+    };
+    let owner: Option<String> = tx
+        .query_row(
+            "SELECT workspace_id FROM project WHERE id=?1;",
+            [project_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if owner.as_deref() != Some(workspace_id) {
+        return Err(StoreError::Invalid(
+            "An imported record references a project outside the target workspace.".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Apply a homogeneous list of records under the skip-on-conflict policy.
+#[allow(clippy::too_many_arguments)]
 fn apply_simple<T, F>(
     tx: &Connection,
     store: &Store,
+    workspace_id: &str,
     records: &[T],
     section: &str,
     id_col: &str,
@@ -1567,7 +2179,7 @@ where
     T: KeyedRecord,
 {
     for r in records {
-        if r.exists(tx, id_col)? {
+        if r.exists(tx, id_col, workspace_id)? {
             report.inc_skipped(section);
             continue;
         }
@@ -1582,7 +2194,7 @@ where
 trait KeyedRecord {
     /// Returns true if a row with this record's key already exists in `table`.
     /// `id_col` is the SQL column name of the single-string primary key.
-    fn exists(&self, tx: &Connection, _table: &str) -> Result<bool>;
+    fn exists(&self, tx: &Connection, _table: &str, workspace_id: &str) -> Result<bool>;
 }
 
 /// Implement `KeyedRecord` for a record whose single-string primary key is the
@@ -1590,18 +2202,45 @@ trait KeyedRecord {
 macro_rules! impl_keyed_str {
     ($ty:ty, $id_field:ident, $table:expr, $col:expr) => {
         impl KeyedRecord for $ty {
-            fn exists(&self, tx: &Connection, _table: &str) -> Result<bool> {
-                let sql = format!("SELECT EXISTS(SELECT 1 FROM {} WHERE {} = ?1);", $table, $col);
-                Ok(tx.query_row(&sql, rusqlite::params![&self.$id_field], |row| {
-                    row.get(0)
-                })?)
+            fn exists(&self, tx: &Connection, _table: &str, _workspace_id: &str) -> Result<bool> {
+                let sql = format!(
+                    "SELECT EXISTS(SELECT 1 FROM {} WHERE {} = ?1);",
+                    $table, $col
+                );
+                Ok(tx.query_row(&sql, rusqlite::params![&self.$id_field], |row| row.get(0))?)
             }
         }
     };
 }
 
-impl_keyed_str!(PreferenceRecord, key, "preferences", "key");
-impl_keyed_str!(ProjectRecord, id, "project", "id");
+impl KeyedRecord for PreferenceRecord {
+    fn exists(&self, tx: &Connection, _table: &str, workspace_id: &str) -> Result<bool> {
+        Ok(tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM preferences WHERE workspace_id=?1 AND key=?2);",
+            rusqlite::params![workspace_id, self.key],
+            |row| row.get(0),
+        )?)
+    }
+}
+
+impl KeyedRecord for ProjectRecord {
+    fn exists(&self, tx: &Connection, _table: &str, workspace_id: &str) -> Result<bool> {
+        let owner: Option<String> = tx
+            .query_row(
+                "SELECT workspace_id FROM project WHERE id=?1;",
+                [&self.id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match owner {
+            Some(owner) if owner == workspace_id => Ok(true),
+            Some(_) => Err(StoreError::Invalid(
+                "An imported project id is owned by another workspace.".into(),
+            )),
+            None => Ok(false),
+        }
+    }
+}
 impl_keyed_str!(ThreadRecord, id, "thread", "id");
 impl_keyed_str!(MessageRecord, id, "message", "id");
 impl_keyed_str!(RunRecord, id, "run", "id");
@@ -1609,7 +2248,17 @@ impl_keyed_str!(ToolCallRecord, id, "tool_call", "id");
 impl_keyed_str!(ApprovalRecord, id, "approval", "id");
 impl_keyed_str!(AuditEventRecord, id, "audit_event", "id");
 impl_keyed_str!(ArtifactRecord, id, "artifact", "id");
-impl_keyed_str!(ConnectorAccountRecord, connector_id, "connector_account", "connector_id");
+impl KeyedRecord for ConnectorAccountRecord {
+    fn exists(&self, tx: &Connection, _table: &str, workspace_id: &str) -> Result<bool> {
+        Ok(tx.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM connector_account WHERE workspace_id=?1 AND connector_id=?2
+             );",
+            rusqlite::params![workspace_id, self.connector_id],
+            |row| row.get(0),
+        )?)
+    }
+}
 impl_keyed_str!(KnowledgeSourceRecord, id, "knowledge_source", "id");
 impl_keyed_str!(MemoryRecord, id, "memory_record", "id");
 impl_keyed_str!(ScheduleRecord, id, "schedule", "id");
@@ -1638,11 +2287,14 @@ impl Store {
 /// Export the workspace as a pretty-printed portable manifest string. Secrets
 /// are structurally absent; the artifact never touches the network or keyring.
 #[tauri::command]
-pub fn export_workspace_archive() -> std::result::Result<String, String> {
-    let store = crate::store::try_global().ok_or_else(|| {
-        "Fable's encrypted store is not initialized.".to_string()
-    })?;
-    let manifest = export_workspace(store).map_err(|e| e.to_string())?;
+pub fn export_workspace_archive(
+    workspace_id: Option<String>,
+) -> std::result::Result<String, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let workspace_id = workspace_id
+        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    let manifest = export_workspace_for(store, &workspace_id).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&manifest)
         .map_err(|_| "Fable could not encode the workspace archive.".into())
 }
@@ -1653,12 +2305,19 @@ pub fn export_workspace_archive() -> std::result::Result<String, String> {
 #[tauri::command]
 pub fn import_workspace_archive(
     manifest_json: String,
+    workspace_id: Option<String>,
 ) -> std::result::Result<ImportReport, String> {
-    let store = crate::store::try_global().ok_or_else(|| {
-        "Fable's encrypted store is not initialized.".to_string()
-    })?;
-    import_workspace(store, &manifest_json, ImportOptions::default())
-        .map_err(|e| e.to_string())
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let workspace_id = workspace_id
+        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    import_workspace_for(
+        store,
+        &workspace_id,
+        &manifest_json,
+        ImportOptions::default(),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// The manifest format version this build understands (for UI pre-checks).
@@ -1684,7 +2343,9 @@ mod tests {
     /// decrypting payloads with the store vault. Returns the ids inserted.
     fn seed(store: &Store) {
         // profile
-        let sealed = store.seal_json_owned(&serde_json::json!({ "name": "Alice" }), "profile:1").unwrap();
+        let sealed = store
+            .seal_json_owned(&serde_json::json!({ "name": "Alice" }), "profile:1")
+            .unwrap();
         store
             .transaction(|tx| {
                 tx.execute(
@@ -1866,7 +2527,7 @@ mod tests {
 
         let b = store();
         seed(&b); // pre-populate with the SAME ids
-        // sanity: project p1 has its original payload
+                  // sanity: project p1 has its original payload
         let before = export_workspace(&b).unwrap();
         let original_title = before.sections.projects[0].payload["title"].clone();
 
@@ -1937,11 +2598,9 @@ mod tests {
         import_workspace(&b, &json, ImportOptions::default()).unwrap();
         let enabled: i64 = b
             .with_conn(|conn| {
-                conn.query_row(
-                    "SELECT enabled FROM schedule WHERE id='s1';",
-                    [],
-                    |row| row.get(0),
-                )
+                conn.query_row("SELECT enabled FROM schedule WHERE id='s1';", [], |row| {
+                    row.get(0)
+                })
                 .map_err(StoreError::from)
             })
             .unwrap();
@@ -1950,10 +2609,12 @@ mod tests {
 
     #[test]
     fn connector_cache_does_not_leak_into_export() {
-        let store = Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap())
-            .unwrap();
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         // insert a connector_cache row directly (the excluded table)
-        let sealed = store.seal_json_owned(&serde_json::json!({}), "connector_cache:x").unwrap();
+        let sealed = store
+            .seal_json_owned(&serde_json::json!({}), "connector_cache:x")
+            .unwrap();
         store
             .transaction(|tx| {
                 tx.execute(

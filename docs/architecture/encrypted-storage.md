@@ -86,16 +86,20 @@ Fable supports a versioned, portable archive format (`fable.portable-workspace`)
 ### Export manifest (JSON)
 - **Plaintext JSON**: Plaintext archive containing decrypted domain values (so the format is independent of DB internals).
 - **Format Versioning**: The export uses `formatVersion: 1`, which is versioned independently from the SQLite schema version.
+- **Workspace Isolation**: Every project-rooted section is selected through the target workspace's projects, and directly scoped sections bind `workspace_id`. Project ownership is preserved in the manifest.
+- **Automation Coverage**: Workflow definitions, workflow runs, schedules, and scheduled jobs are portable. Scheduler queue entries are excluded because they are live execution authority rather than user-authored configuration.
 - **Omissions (Secret-Free Guarantee)**: To prevent accidental credential leaks, the export **deliberately excludes**:
   - API keys, OAuth tokens, and secure vault keys (keyring data).
   - The `connector_account.credential_ref` (dropped on export).
   - The `connector_cache` and `connector_cache_settings` tables.
   - Absolute local machine paths.
   - Database metadata (`schema_meta`, `migration_log`).
+  - Scheduler queue state, lease tokens, and deduplication/runtime bookkeeping.
+- **Fail-Closed Credential Scan**: Export and import reject credential-shaped keys and known token prefixes, even when nested in an encrypted payload.
 
 ### The Import Pipeline
 1. **Parse**: Deserialize archive JSON; reject malformed payloads.
-2. **Validate**: Verify `format` header and `formatVersion`. Ensure `credentialsIncluded` is `false` (archives claiming to carry credentials are rejected). Verify referential integrity of imported records (e.g. messages link to valid threads).
+2. **Validate**: Verify `format` header and `formatVersion`. Ensure `credentialsIncluded` is `false` (archives claiming to carry credentials are rejected), reject credential-shaped content, and verify workspace/project and record referential integrity.
 3. **Plan Conflicts**: Determine inserts vs. duplicates.
 4. **Apply Transactionally**: All records are written inside a single SQLite transaction. A mid-import failure rolls back the database to its exact pre-import state.
 5. **Report**: Emit an `ImportReport` detailing counts of imported, skipped, and remapped records, alongside warning alerts.
@@ -107,6 +111,7 @@ The import engine enforces a strict **skip-existing** policy. If a record ID mat
 Imported records are kept inactive to ensure local-first safety:
 - **Connector Invalidation**: Imported connectors are written with `status = "disconnected"` and empty credential references. They cannot connect to external services until the user manually triggers a fresh OAuth handshake.
 - **Schedule Disabling**: Imported schedules are written with `enabled = false`. They will not execute until explicitly enabled by the user.
+- **Scheduled Job Pausing**: Imported scheduled jobs are forced to `status = "paused"` and queue entries are never imported.
 
 ---
 

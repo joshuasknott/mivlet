@@ -596,11 +596,7 @@ fn migrate_imported_knowledge(
 /// lands. IDs, timestamps, status/state, dedup keys, and the full trigger +
 /// execution route are preserved verbatim (the repo stores the whole record in
 /// its encrypted payload).
-fn migrate_scheduler_store(
-    store: &Store,
-    raw: &[u8],
-    now: &str,
-) -> Result<MigrationDiagnostics> {
+fn migrate_scheduler_store(store: &Store, raw: &[u8], now: &str) -> Result<MigrationDiagnostics> {
     // Parse leniently so unknown fields survive the round trip: read the whole
     // object, then pull the two arrays we migrate.
     let value = parse_value(raw)?;
@@ -637,10 +633,7 @@ fn migrate_scheduler_store(
     }
 
     store.transaction(|tx| {
-        for job in jobs
-            .into_iter()
-            .take(crate::models::MAX_SCHEDULED_JOBS)
-        {
+        for job in jobs.into_iter().take(crate::models::MAX_SCHEDULED_JOBS) {
             match repos::scheduled_job::upsert_from_value(tx, store, "", job, now) {
                 Ok(()) => diag.migrated += 1,
                 Err(_) => diag.note_skip("malformed scheduled job"),
@@ -674,21 +667,33 @@ fn migrate_workflow_definitions(
     now: &str,
 ) -> Result<MigrationDiagnostics> {
     let value = parse_value(raw)?;
-    let arr = value.as_array().ok_or_else(|| {
-        StoreError::Invalid("workflow-definitions.json is not an array.".into())
-    })?;
+    let arr = value
+        .as_array()
+        .ok_or_else(|| StoreError::Invalid("workflow-definitions.json is not an array.".into()))?;
     let mut diag = MigrationDiagnostics::default();
     let scope = repos::scope::DataScope::legacy_default();
     store.transaction(|tx| {
-        for definition in arr.iter().take(crate::models::MAX_WORKFLOW_DEFINITION_HISTORY) {
+        for definition in arr
+            .iter()
+            .take(crate::models::MAX_WORKFLOW_DEFINITION_HISTORY)
+        {
             let result = repos::workflow::upsert_definition(
                 tx,
                 store,
                 &scope,
                 definition.get("id").and_then(Value::as_str).unwrap_or(""),
-                definition.get("version").and_then(Value::as_u64).unwrap_or(0) as u32,
-                definition.get("createdAt").and_then(Value::as_str).unwrap_or(now),
-                definition.get("updatedAt").and_then(Value::as_str).unwrap_or(now),
+                definition
+                    .get("version")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as u32,
+                definition
+                    .get("createdAt")
+                    .and_then(Value::as_str)
+                    .unwrap_or(now),
+                definition
+                    .get("updatedAt")
+                    .and_then(Value::as_str)
+                    .unwrap_or(now),
                 definition,
             );
             match result {
@@ -726,8 +731,12 @@ fn migrate_workflow_runs(store: &Store, raw: &[u8], now: &str) -> Result<Migrati
                 store,
                 &scope,
                 run.get("id").and_then(Value::as_str).unwrap_or(""),
-                run.get("definitionId").and_then(Value::as_str).unwrap_or(""),
-                run.get("definitionVersion").and_then(Value::as_u64).unwrap_or(0) as u32,
+                run.get("definitionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or(""),
+                run.get("definitionVersion")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as u32,
                 status,
                 run.get("startedAt").and_then(Value::as_str).unwrap_or(now),
                 run.get("updatedAt").and_then(Value::as_str).unwrap_or(now),
@@ -948,20 +957,34 @@ mod tests {
     #[test]
     fn migrates_scheduler_store_and_workflows() {
         let dir = TempDir::new().unwrap();
-        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_SCHEDULER_STORE,
+            &sample_legacy_store().to_string(),
+        );
         write(
             dir.path(),
             SOURCE_WORKFLOW_DEFINITIONS,
             &sample_legacy_definitions().to_string(),
         );
-        write(dir.path(), SOURCE_WORKFLOW_RUNS, &sample_legacy_runs().to_string());
+        write(
+            dir.path(),
+            SOURCE_WORKFLOW_RUNS,
+            &sample_legacy_runs().to_string(),
+        );
         let store = store();
 
         migrate_all(&store, dir.path()).unwrap();
 
         assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), 1);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_definition;"), 1);
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"),
+            1
+        );
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM workflow_definition;"),
+            1
+        );
         assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), 1);
 
         // Decoded values round-trip, including the frozen execution route.
@@ -984,13 +1007,21 @@ mod tests {
     #[test]
     fn migration_is_idempotent() {
         let dir = TempDir::new().unwrap();
-        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_SCHEDULER_STORE,
+            &sample_legacy_store().to_string(),
+        );
         write(
             dir.path(),
             SOURCE_WORKFLOW_DEFINITIONS,
             &sample_legacy_definitions().to_string(),
         );
-        write(dir.path(), SOURCE_WORKFLOW_RUNS, &sample_legacy_runs().to_string());
+        write(
+            dir.path(),
+            SOURCE_WORKFLOW_RUNS,
+            &sample_legacy_runs().to_string(),
+        );
         let store = store();
 
         migrate_all(&store, dir.path()).unwrap();
@@ -1002,8 +1033,14 @@ mod tests {
         // Re-running with identical bytes is a no-op.
         migrate_all(&store, dir.path()).unwrap();
         assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), jobs);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), queue);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_definition;"), defs);
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"),
+            queue
+        );
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM workflow_definition;"),
+            defs
+        );
         assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), runs);
     }
 
@@ -1018,8 +1055,14 @@ mod tests {
         // A malformed source is recorded partial, not fatal; nothing is written.
         migrate_all(&store, dir.path()).unwrap();
         assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 0);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), 0);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_definition;"), 0);
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"),
+            0
+        );
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM workflow_definition;"),
+            0
+        );
         assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), 0);
 
         for source in [
@@ -1041,7 +1084,11 @@ mod tests {
         }
 
         // Repairing the file and re-running migrates successfully.
-        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_SCHEDULER_STORE,
+            &sample_legacy_store().to_string(),
+        );
         migrate_all(&store, dir.path()).unwrap();
         assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
     }
@@ -1051,17 +1098,20 @@ mod tests {
         let dir = TempDir::new().unwrap();
         // A store with one valid job and one malformed (bad status) job.
         let mut store_value = sample_legacy_store();
-        store_value["jobs"].as_array_mut().unwrap().push(serde_json::json!({
-            "id": "j-bad",
-            "schemaVersion": crate::models::SCHEDULER_STORE_VERSION,
-            "name": "Bad",
-            "workflowDefinitionId": "wf-1",
-            "trigger": {"kind": "recurring"},
-            "missedRunPolicy": "skip",
-            "status": "bogus",
-            "createdAt": "2026-06-01T00:00:00.000Z",
-            "updatedAt": "2026-06-01T00:00:00.000Z"
-        }));
+        store_value["jobs"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "j-bad",
+                "schemaVersion": crate::models::SCHEDULER_STORE_VERSION,
+                "name": "Bad",
+                "workflowDefinitionId": "wf-1",
+                "trigger": {"kind": "recurring"},
+                "missedRunPolicy": "skip",
+                "status": "bogus",
+                "createdAt": "2026-06-01T00:00:00.000Z",
+                "updatedAt": "2026-06-01T00:00:00.000Z"
+            }));
         write(dir.path(), SOURCE_SCHEDULER_STORE, &store_value.to_string());
         let store = store();
 
@@ -1108,7 +1158,10 @@ mod tests {
 
         migrate_all(&store, dir.path()).unwrap();
         // Only one queue entry for the occurrence survives (no duplicate).
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), 1);
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"),
+            1
+        );
     }
 
     #[test]
@@ -1116,7 +1169,11 @@ mod tests {
         // Pre-seed SQLite with a valid migrated job, then attempt a migration
         // whose source is structurally invalid. The prior row must survive.
         let dir = TempDir::new().unwrap();
-        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_SCHEDULER_STORE,
+            &sample_legacy_store().to_string(),
+        );
         let store = store();
         migrate_all(&store, dir.path()).unwrap();
         assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
@@ -1135,13 +1192,21 @@ mod tests {
     #[test]
     fn migrated_payloads_are_encrypted_at_rest() {
         let dir = TempDir::new().unwrap();
-        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_SCHEDULER_STORE,
+            &sample_legacy_store().to_string(),
+        );
         write(
             dir.path(),
             SOURCE_WORKFLOW_DEFINITIONS,
             &sample_legacy_definitions().to_string(),
         );
-        write(dir.path(), SOURCE_WORKFLOW_RUNS, &sample_legacy_runs().to_string());
+        write(
+            dir.path(),
+            SOURCE_WORKFLOW_RUNS,
+            &sample_legacy_runs().to_string(),
+        );
         let store = store();
         migrate_all(&store, dir.path()).unwrap();
 

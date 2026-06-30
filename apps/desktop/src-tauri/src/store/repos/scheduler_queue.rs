@@ -9,11 +9,12 @@
 //! The `deduplication_key` is unique per workspace so a duplicate enqueue
 //! (in-queue or already-completed) is rejected at the storage layer.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
-use crate::store::repos::{open_json, seal_json, payload_of};
 use crate::store::repos::scheduled_job::normalize_workspace;
+use crate::store::repos::scope::DataScope;
+use crate::store::repos::{open_json, payload_of, seal_json};
 use crate::store::{Result, Store, StoreError};
 
 /// A durable scheduler-queue row. `value` is the full camelCase
@@ -38,6 +39,24 @@ pub fn upsert_entry(
     now: &str,
 ) -> Result<Option<QueueRow>> {
     let workspace_id = normalize_workspace(workspace_id);
+    let project_id = value
+        .get("projectId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string);
+    let scope = DataScope::new(workspace_id.clone(), project_id)?;
+    scope.ensure_exists(tx)?;
+    if let Some(payload_workspace) = value
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+    {
+        if payload_workspace != workspace_id {
+            return Err(StoreError::Invalid(
+                "Queue entry workspace does not match the requested workspace.".into(),
+            ));
+        }
+    }
     let job_id = value
         .get("jobId")
         .and_then(Value::as_str)
@@ -56,6 +75,18 @@ pub fn upsert_entry(
     if job_id.is_empty() || run_id.is_empty() || deduplication_key.is_empty() {
         return Err(StoreError::Invalid(
             "Queue entry needs jobId, runId, and deduplicationKey.".into(),
+        ));
+    }
+    let job_owner: Option<String> = tx
+        .query_row(
+            "SELECT workspace_id FROM scheduled_job WHERE id=?1;",
+            [&job_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if job_owner.as_deref() != Some(workspace_id.as_str()) {
+        return Err(StoreError::Invalid(
+            "Queue entry job was not found in the requested workspace.".into(),
         ));
     }
     // Already queued for this workspace+occurrence → reject (no duplicate).
@@ -99,11 +130,16 @@ pub fn upsert_entry(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let last_error = value
+    let last_error = if value
         .get("lastError")
         .and_then(Value::as_str)
         .unwrap_or("")
-        .to_string();
+        .is_empty()
+    {
+        ""
+    } else {
+        "present"
+    };
     let sealed = seal_json(store, value, &aad(&workspace_id, &id))?;
     tx.execute(
         "INSERT INTO scheduler_queue_entry
@@ -179,11 +215,16 @@ pub fn apply_state(
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let last_error = value
+    let last_error = if value
         .get("lastError")
         .and_then(Value::as_str)
         .unwrap_or("")
-        .to_string();
+        .is_empty()
+    {
+        ""
+    } else {
+        "present"
+    };
     let sealed = seal_json(store, value, &aad(&workspace_id, id))?;
     let touched = tx.execute(
         "UPDATE scheduler_queue_entry SET
@@ -300,9 +341,36 @@ mod tests {
         })
     }
 
+    fn seed_job(store: &Store, workspace_id: &str, job_id: &str) {
+        store
+            .transaction(|tx| {
+                crate::store::repos::workspace::upsert(tx, workspace_id, workspace_id, "now")?;
+                crate::store::repos::scheduled_job::upsert_from_value(
+                    tx,
+                    store,
+                    workspace_id,
+                    serde_json::json!({
+                        "id": job_id,
+                        "schemaVersion": crate::models::SCHEDULER_STORE_VERSION,
+                        "name": "Job",
+                        "workflowDefinitionId": "wf",
+                        "trigger": {"kind": "once"},
+                        "missedRunPolicy": "skip",
+                        "status": "active",
+                        "workspaceId": workspace_id,
+                        "createdAt": "now",
+                        "updatedAt": "now"
+                    }),
+                    "now",
+                )
+            })
+            .unwrap();
+    }
+
     #[test]
     fn deduplication_rejects_duplicate_occurrence() {
         let store = store();
+        seed_job(&store, "default", "j");
         store
             .transaction(|tx| {
                 assert!(upsert_entry(tx, &store, "", &entry("j", "r1"), "now")?.is_some());
@@ -311,28 +379,24 @@ mod tests {
                 Ok(())
             })
             .unwrap();
-        let rows = store
-            .with_conn(|conn| list(conn, &store, ""))
-            .unwrap();
+        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
         assert_eq!(rows.len(), 1);
     }
 
     #[test]
     fn workspace_isolation() {
         let store = store();
+        seed_job(&store, "ws-a", "j-a");
+        seed_job(&store, "ws-b", "j-b");
         store
             .transaction(|tx| {
-                assert!(upsert_entry(tx, &store, "ws-a", &entry("j", "r1"), "now")?.is_some());
-                assert!(upsert_entry(tx, &store, "ws-b", &entry("j", "r1"), "now")?.is_some());
+                assert!(upsert_entry(tx, &store, "ws-a", &entry("j-a", "r1"), "now")?.is_some());
+                assert!(upsert_entry(tx, &store, "ws-b", &entry("j-b", "r1"), "now")?.is_some());
                 Ok(())
             })
             .unwrap();
-        let a = store
-            .with_conn(|conn| list(conn, &store, "ws-a"))
-            .unwrap();
-        let b = store
-            .with_conn(|conn| list(conn, &store, "ws-b"))
-            .unwrap();
+        let a = store.with_conn(|conn| list(conn, &store, "ws-a")).unwrap();
+        let b = store.with_conn(|conn| list(conn, &store, "ws-b")).unwrap();
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 1);
     }
@@ -340,6 +404,7 @@ mod tests {
     #[test]
     fn payload_is_encrypted_at_rest() {
         let store = store();
+        seed_job(&store, "default", "j");
         store
             .transaction(|tx| {
                 let mut e = entry("j", "r1");
@@ -358,9 +423,21 @@ mod tests {
                 .map_err(StoreError::from)
             })
             .unwrap();
+        let plaintext_error: String = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT last_error FROM scheduler_queue_entry
+                     WHERE id='queue:default:r1';",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
         assert!(
             !String::from_utf8_lossy(&raw_blob).contains("very-secret-error"),
             "queue payload leaked into plaintext"
         );
+        assert_eq!(plaintext_error, "present");
     }
 }

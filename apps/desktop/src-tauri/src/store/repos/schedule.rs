@@ -178,7 +178,7 @@ fn list_where(
          FROM schedule
          WHERE workspace_id=?1 AND project_id IS ?2 AND (?3=0 OR enabled=1)
          ORDER BY created_at;";
-    let mut stmt = tx.prepare(&sql)?;
+    let mut stmt = tx.prepare(sql)?;
     let partials: Vec<SchedulePartial> = stmt
         .query_map(
             rusqlite::params![

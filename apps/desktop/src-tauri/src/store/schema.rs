@@ -104,7 +104,7 @@ PRAGMA foreign_keys = ON;
 -- (which carries only provider/model ids + permission mode — never secrets).
 CREATE TABLE IF NOT EXISTS scheduled_job (
   id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'active',
   workflow_definition_id TEXT NOT NULL DEFAULT '',
   trigger_kind TEXT NOT NULL DEFAULT '',
@@ -130,8 +130,8 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_job_definition ON scheduled_job(workflo
 -- is authoritative.
 CREATE TABLE IF NOT EXISTS scheduler_queue_entry (
   id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  job_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES scheduled_job(id) ON DELETE CASCADE,
   state TEXT NOT NULL DEFAULT 'queued',
   lease_holder TEXT NOT NULL DEFAULT '',
   lease_expires_at TEXT NOT NULL DEFAULT '',
@@ -517,7 +517,7 @@ CREATE TABLE IF NOT EXISTS connector_cache_settings (
 -- `repos::scheduled_job`.
 CREATE TABLE IF NOT EXISTS scheduled_job (
   id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   status TEXT NOT NULL DEFAULT 'active',
   workflow_definition_id TEXT NOT NULL DEFAULT '',
   trigger_kind TEXT NOT NULL DEFAULT '',
@@ -540,8 +540,8 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_job_definition ON scheduled_job(workflo
 -- history + frozen execution route snapshot. See `repos::scheduler_queue`.
 CREATE TABLE IF NOT EXISTS scheduler_queue_entry (
   id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  job_id TEXT NOT NULL,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  job_id TEXT NOT NULL REFERENCES scheduled_job(id) ON DELETE CASCADE,
   state TEXT NOT NULL DEFAULT 'queued',
   lease_holder TEXT NOT NULL DEFAULT '',
   lease_expires_at TEXT NOT NULL DEFAULT '',
