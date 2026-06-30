@@ -731,4 +731,31 @@ mod tests {
             .unwrap();
         assert!(!raw.contains("ghp_supersecretvalue"));
     }
+
+    #[test]
+    fn redact_excludes_required_threat_model_secrets() {
+        let input = serde_json::json!({
+            "token": "ghp_sometoken",
+            "apikey": "xoxb-somekey",
+            "api_key": "some-key-value",
+            "code": "auth-code-123",
+            "body": "This is a full email body or message body with credentials.",
+            "content": "Secret file contents here.",
+            "env": { "API_SECRET": "critical-secret" },
+            "environment": { "PATH": "/bin" },
+            "value": "some value to redact"
+        });
+
+        let redacted = redact_safe_detail(&input);
+
+        assert_eq!(redacted["token"], "[redacted]");
+        assert_eq!(redacted["apikey"], "[redacted]");
+        assert_eq!(redacted["api_key"], "[redacted]");
+        assert_eq!(redacted["code"], "[redacted]");
+        assert_eq!(redacted["body"], "[redacted]");
+        assert_eq!(redacted["content"], "[redacted]");
+        assert_eq!(redacted["env"], "[redacted]");
+        assert_eq!(redacted["environment"], "[redacted]");
+        assert_eq!(redacted["value"], "[redacted]");
+    }
 }

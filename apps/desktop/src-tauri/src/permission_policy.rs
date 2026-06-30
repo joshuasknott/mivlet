@@ -172,6 +172,34 @@ mod tests {
         assert!(
             ensure_permission_allowed("read-only", None, "schedule-execution", "medium").is_err()
         );
+        assert!(
+            ensure_permission_allowed("read-only", None, "schedule-mutation", "medium").is_err()
+        );
+        assert!(
+            ensure_permission_allowed("read-only", None, "connector-write", "high").is_err()
+        );
+    }
+
+    #[test]
+    fn trusted_requires_approval_for_consequential_and_blocks_shell() {
+        // Consequential allowed but require approval
+        for effect in &["local-write", "connector-write", "app-state-mutation", "schedule-mutation", "schedule-execution"] {
+            let decision = evaluate_permission_policy("trusted-scope", None, effect, "low").unwrap();
+            assert!(decision.allowed);
+            assert!(decision.approval_required);
+        }
+        // Shell and cache mutations are blocked
+        assert!(ensure_permission_allowed("trusted-scope", None, "shell-execution", "medium").is_err());
+        assert!(ensure_permission_allowed("trusted-scope", None, "cache-mutation", "medium").is_err());
+    }
+
+    #[test]
+    fn full_access_allows_consequential_but_requires_approval() {
+        for effect in &["local-write", "shell-execution", "connector-write", "cache-mutation", "app-state-mutation", "schedule-mutation", "schedule-execution"] {
+            let decision = evaluate_permission_policy("full-access", None, effect, "low").unwrap();
+            assert!(decision.allowed);
+            assert!(decision.approval_required);
+        }
     }
 
     #[test]

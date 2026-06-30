@@ -266,4 +266,32 @@ mod tests {
             .expect("fresh permit remains usable");
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn reshaping_or_downgrading_approval_fails_closed() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-reshape-approval-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let approved = request();
+        record_execution_decision(&path, &response(approved.clone())).expect("record");
+
+        // 1. Downgrading mode
+        let mut downgraded = approved.clone();
+        downgraded.mode = "read-only".to_string();
+        assert!(verify_and_consume_execution_approval(&path, &downgraded, "2026-06-27T12:00:02Z").is_err());
+
+        // 2. Modifying risk level
+        let mut risk_changed = approved.clone();
+        risk_changed.risk_level = "low".to_string();
+        assert!(verify_and_consume_execution_approval(&path, &risk_changed, "2026-06-27T12:00:02Z").is_err());
+
+        // 3. Changing data used
+        let mut data_changed = approved.clone();
+        data_changed.data_used = vec!["path".to_string()];
+        assert!(verify_and_consume_execution_approval(&path, &data_changed, "2026-06-27T12:00:02Z").is_err());
+
+        let _ = fs::remove_file(path);
+    }
 }
