@@ -53,6 +53,7 @@ export * from "./providers/github";
 export * from "./providers/vercel";
 export * from "./providers/linear";
 export * from "./providers/linear-actions";
+export * from "./providers/linear-items";
 export * from "./providers/google-drive";
 export * from "./providers/google-shared";
 export * from "./providers/notion";
