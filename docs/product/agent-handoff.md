@@ -33,8 +33,8 @@ Connectors are split into public-client (PKCE) and broker-gated confidential-cli
 - **Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear)**
   - Fail closed until the HTTPS auth broker is configured and deployed.
   - TS definitions: [packages/connectors/src/providers/github.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/providers/github.ts), [vercel.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/providers/vercel.ts), [slack.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/providers/slack.ts)
-  - Rust auth client: [apps/desktop/src-tauri/src/connector_auth.rs](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/connector_auth.rs)
-  - Rust connector logic: [apps/desktop/src-tauri/src/connectors.rs](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/connectors.rs)
+  - Rust auth client: [apps/desktop/src-tauri/src/connector_auth.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/connector_auth.rs)
+  - Rust connector logic: [apps/desktop/src-tauri/src/connectors.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/connectors.rs)
 
 ## 3. Remote Control (Mobile connection)
 
