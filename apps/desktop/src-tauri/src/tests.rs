@@ -2196,6 +2196,81 @@ fn google_connectors_are_public_pkce_and_broker_free() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Vercel live path: Vercel is a confidential connector that authenticates
+// through the auth broker, even though its catalog `auth_mode` is the distinct
+// `provider-installation` value. The desktop must route it through the same
+// broker contract as the other confidential connectors (GitHub, Notion, Slack,
+// Linear), so the local-first broker boundary applies identically. These pin
+// the invariants the Vercel read/search/identity/health flows depend on:
+//   1. Vercel is classified Confidential and is broker-required.
+//   2. Its broker endpoints resolve to exactly the four routes the Cloudflare
+//      broker serves (authorize, handoff, refresh, revoke) — never a token or
+//      identity route, which the broker does not serve.
+//   3. A missing broker fails closed for Vercel, scoped to the Vercel
+//      connector id, without touching public PKCE paths.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn vercel_is_a_confidential_broker_required_connector() {
+    // Vercel uses the `provider-installation` auth_mode, but `provider_config`
+    // routes every non-PKCE mode through the broker. The classification and the
+    // broker-required list must agree so Vercel never appears as a public/local
+    // connector that could bypass the confidential boundary.
+    assert_eq!(
+        connector_auth_boundary("vercel"),
+        Some(ConnectorAuthBoundary::Confidential),
+        "Vercel must be classified Confidential"
+    );
+    assert!(
+        BROKER_REQUIRED_CONNECTOR_IDS.contains(&"vercel"),
+        "Vercel must be in the broker-required set"
+    );
+}
+
+#[test]
+fn vercel_broker_endpoints_resolve_to_the_four_contract_routes() {
+    // The desktop derives only the routes the broker actually serves. Vercel
+    // must resolve the same four routes as GitHub/Linear/Notion/Slack — there is
+    // no per-provider route vocabulary. A path-prefixed broker (common for a
+    // Cloudflare Worker mounted behind a route) must keep its prefix.
+    let endpoints =
+        resolve_broker_endpoints("vercel", Some("https://auth.fable.app/")).expect("https ok");
+    assert_eq!(
+        endpoints.authorization_endpoint,
+        "https://auth.fable.app/oauth/vercel/authorize"
+    );
+    assert_eq!(
+        endpoints.handoff_endpoint,
+        "https://auth.fable.app/oauth/vercel/handoff"
+    );
+    assert_eq!(
+        endpoints.refresh_endpoint,
+        "https://auth.fable.app/oauth/vercel/refresh"
+    );
+    assert_eq!(
+        endpoints.revocation_endpoint,
+        "https://auth.fable.app/oauth/vercel/revoke"
+    );
+    let serialized = serde_json::to_string(&endpoints).expect("serialize");
+    assert!(!serialized.contains("/token"));
+    assert!(!serialized.contains("/identity"));
+    assert!(!serialized.contains("/search"));
+    assert!(!serialized.contains("/model"));
+}
+
+#[test]
+fn vercel_fails_closed_when_no_broker_is_configured() {
+    // With no broker URL, the Vercel connector fails closed with a
+    // configuration-required error scoped to the Vercel connector id. This is
+    // the honest "unconfigured" state — never a silent fixture fallback or a
+    // claim that Vercel is connected.
+    let error = resolve_broker_endpoints("vercel", None).expect_err("must fail closed");
+    assert_eq!(error.code, "configuration-required");
+    assert_eq!(error.connector_id, "vercel");
+    assert!(!error.retryable);
+}
+
 #[test]
 fn broker_resolver_fail_closed_keeps_core_workspace_usable() {
     // With no broker configured, confidential connectors fail closed — but the
