@@ -296,6 +296,53 @@ describe("reindexIndex", () => {
     const result = reindexIndex([other], [], "local-files");
     expect(result.removedSourceIds).toEqual([]);
   });
+
+  it("handles a comprehensive resync cycle (created, updated, unchanged, and deleted)", () => {
+    const fpUnchanged = contentHash("unchanged doc content");
+    const fpToUpdate = contentHash("old content that will change");
+    const fpToMove = contentHash("content that will move to new file");
+
+    const existing = [
+      { id: "s-unchanged", title: "unchanged.md", kind: "document" as const, connectorId: "local-files", provenance: "Local file", freshness: "Imported now", pinned: false, contentFingerprint: fpUnchanged },
+      { id: "s-update", title: "update.md", kind: "document" as const, connectorId: "local-files", provenance: "Local file", freshness: "Imported now", pinned: false, contentFingerprint: fpToUpdate },
+      { id: "s-move", title: "old-path.md", kind: "document" as const, connectorId: "local-files", provenance: "Local file", freshness: "Imported now", pinned: false, contentFingerprint: fpToMove },
+      { id: "s-delete", title: "deleted.md", kind: "document" as const, connectorId: "local-files", provenance: "Local file", freshness: "Imported now", pinned: false, contentFingerprint: contentHash("delete me") }
+    ];
+
+    const candidates = [
+      candidate({ title: "unchanged.md", content: "unchanged doc content" }),
+      candidate({ title: "update.md", content: "fresh new content after update" }),
+      candidate({ title: "new-path.md", content: "content that will move to new file" }),
+      candidate({ title: "brand-new.md", content: "brand new doc content" })
+    ];
+
+    const result = reindexIndex(existing, candidates, "local-files");
+    expect(result.outcomes).toHaveLength(4);
+
+    // 1. unchanged
+    expect(result.outcomes[0].kind).toBe("unchanged");
+    expect(result.outcomes[0].source.id).toBe("s-unchanged");
+
+    // 2. updated
+    expect(result.outcomes[1].kind).toBe("updated");
+    expect(result.outcomes[1].source.id).toBe("s-update");
+    if (result.outcomes[1].kind === "updated") {
+      expect(result.outcomes[1].previousFingerprint).toBe(fpToUpdate);
+    }
+
+    // 3. moved (matches by content hash, so it's unchanged with title changed)
+    expect(result.outcomes[2].kind).toBe("unchanged");
+    expect(result.outcomes[2].source.id).toBe("s-move");
+
+    // 4. created
+    expect(result.outcomes[3].kind).toBe("created");
+
+    // 5. deleted/vanished
+    expect(result.removedSourceIds).toContain("s-delete");
+    expect(result.removedSourceIds).not.toContain("s-unchanged");
+    expect(result.removedSourceIds).not.toContain("s-update");
+    expect(result.removedSourceIds).not.toContain("s-move");
+  });
 });
 
 describe("ingestFolder", () => {
@@ -325,6 +372,19 @@ describe("ingestFolder", () => {
     if (created[0].kind === "created" && created[1].kind === "created") {
       expect(created[0].source.id).toBe(created[1].source.id);
     }
+  });
+
+  it("handles folders with partial failures by skipping bad files and ingesting good ones", () => {
+    const files = [
+      { name: "good.txt", content: "valid body text", sizeBytes: 15 },
+      { name: "empty.txt", content: "   ", sizeBytes: 3 }, // empty content -> skipped
+      { name: "bad.bin", content: "binary\u0000data", sizeBytes: 11 } // binary -> skipped
+    ];
+    const outcomes = ingestFolder(files, { connectorId: "local-files" });
+    expect(outcomes).toHaveLength(3);
+    expect(outcomes[0].kind).toBe("created");
+    expect(outcomes[1]).toMatchObject({ kind: "skipped", reason: "empty" });
+    expect(outcomes[2]).toMatchObject({ kind: "skipped", reason: "binary" });
   });
 
   it("default maxFiles is 500", () => {

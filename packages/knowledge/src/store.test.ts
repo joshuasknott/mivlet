@@ -165,6 +165,37 @@ describe("knowledge store", () => {
     expect(snap.memories).toEqual([]);
     expect(snap.pinned).toEqual([]);
   });
+
+  it("can disable and re-enable sources to hide/reveal them", () => {
+    const store = createKnowledgeStore();
+    const source = makeSource();
+    store.upsertSource({ source });
+    expect(store.sources()).toHaveLength(1);
+
+    // Disable
+    store.upsertSource({ source: { ...source, disabled: true } });
+    expect(store.sources()).toHaveLength(0);
+    expect(store.source(source.id)?.disabled).toBe(true);
+
+    // Re-enable
+    store.upsertSource({ source: { ...source, disabled: false } });
+    expect(store.sources()).toHaveLength(1);
+    expect(store.source(source.id)?.disabled).toBe(false);
+  });
+
+  it("handles deleted cache by initializing and restoring from an empty snapshot", () => {
+    const store = createKnowledgeStore();
+    store.upsertSource({ source: makeSource(), chunks: [makeChunk("s1", 0)] });
+    store.upsertMemory(makeMemory());
+    expect(store.sources()).toHaveLength(1);
+
+    // Delete cache / empty snap
+    const emptySnap = emptyKnowledgeStoreState();
+    const restored = createKnowledgeStore(emptySnap);
+    expect(restored.sources()).toHaveLength(0);
+    expect(restored.memories()).toHaveLength(0);
+    expect(restored.pinned(GLOBAL_SCOPE)).toHaveLength(0);
+  });
 });
 
 describe("scope helpers", () => {
