@@ -21,8 +21,8 @@ export function createLinearAdapter(options: LinearAdapterOptions): ConnectorAda
   const auth = oauthClient({
     ...options, connectorId: "linear",
     authorizationEndpoint: new URL("oauth/linear/authorize", broker).toString(),
-    tokenEndpoint: new URL("oauth/linear/token", broker).toString(),
-    identityEndpoint: new URL("oauth/linear/identity", broker).toString(),
+    handoffEndpoint: new URL("oauth/linear/handoff", broker).toString(),
+    refreshEndpoint: new URL("oauth/linear/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/linear/revoke", broker).toString(),
     scopes: ["read", "write", "issues:create", "comments:create"]
   });
@@ -30,11 +30,13 @@ export function createLinearAdapter(options: LinearAdapterOptions): ConnectorAda
   return {
     id: "linear", capabilities: LINEAR_CAPABILITIES, ...auth,
     async read(request, tokens) {
-      const { query, variables, root } = linearReadQuery(request);
+      const { query, variables, root, connectionPath } = linearReadQuery(request);
       const { data, response } = await http.request<JsonObject>({ method: "POST", path: "/graphql", body: { query, variables }, signal: request.signal }, tokens);
       const payload = unwrapGraphql(data);
       const result = payload[root];
-      const connection = isObject(result) ? result : undefined;
+      // Most reads select a top-level Relay connection (`payload[root]`), but
+      // comments.read nests it under the issue (`payload[issue].comments`).
+      const connection = resolveConnection(result, connectionPath);
       const items = connection && Array.isArray(connection.nodes) ? asObjects(connection.nodes) : result && isObject(result) ? [result] : [];
       const pageInfo = connection && isObject(connection.pageInfo) ? connection.pageInfo : undefined;
       return page(items, response, pageInfo && pageInfo.hasNextPage === true ? stringValue(pageInfo, "endCursor") : undefined);
@@ -50,7 +52,7 @@ export function createLinearAdapter(options: LinearAdapterOptions): ConnectorAda
   };
 }
 
-function linearReadQuery(request: ConnectorRequest): { query: string; variables: JsonObject; root: string } {
+function linearReadQuery(request: ConnectorRequest): { query: string; variables: JsonObject; root: string; connectionPath?: readonly string[] } {
   const first = Math.max(1, Math.min(50, typeof request.input.limit === "number" ? Math.floor(request.input.limit) : 30));
   const variables: JsonObject = { first, after: request.cursor ?? null };
   const pageInfo = "pageInfo { hasNextPage endCursor }";
@@ -66,11 +68,21 @@ function linearReadQuery(request: ConnectorRequest): { query: string; variables:
         : { root: "issues", variables, query: `query($first:Int!,$after:String){ issues(first:$first,after:$after,orderBy:updatedAt){ nodes { id identifier title description priority url state { id name type } assignee { id name } team { id key name } updatedAt } ${pageInfo} } }` };
     }
     case "issues.search": return { root: "searchIssues", variables: { ...variables, query: required(request.input, "query") }, query: `query($query:String!,$first:Int!,$after:String){ searchIssues(term:$query,first:$first,after:$after){ nodes { id identifier title description url state { id name type } team { id key name } updatedAt } ${pageInfo} } }` };
-    case "comments.read": return { root: "issue", variables: { id: required(request.input, "issueId"), first, after: request.cursor ?? null }, query: `query($id:String!,$first:Int!,$after:String){ issue(id:$id){ comments(first:$first,after:$after){ nodes { id body createdAt updatedAt user { id name } } ${pageInfo} } } }` };
+    case "comments.read": return { root: "issue", connectionPath: ["comments"], variables: { id: required(request.input, "issueId"), first, after: request.cursor ?? null }, query: `query($id:String!,$first:Int!,$after:String){ issue(id:$id){ comments(first:$first,after:$after){ nodes { id body createdAt updatedAt user { id name } } ${pageInfo} } } }` };
     case "labels.read": return { root: "issueLabels", variables, query: `query($first:Int!,$after:String){ issueLabels(first:$first,after:$after){ nodes { id name description color } ${pageInfo} } }` };
     case "users.read": return { root: "users", variables, query: `query($first:Int!,$after:String){ users(first:$first,after:$after){ nodes { id name displayName email active } ${pageInfo} } }` };
     default: throw new Error(`Unsupported Linear read capability: ${request.capability}`);
   }
+}
+
+/** Walks a Relay connection out of a GraphQL result, honoring a nested path. */
+function resolveConnection(value: unknown, path?: readonly string[]): JsonObject | undefined {
+  let cursor = value;
+  for (const key of path ?? []) {
+    if (!isObject(cursor)) return undefined;
+    cursor = cursor[key];
+  }
+  return isObject(cursor) ? cursor : undefined;
 }
 
 function linearWriteQuery(request: ConnectorWriteRequest): { query: string; variables: JsonObject; root: string } {

@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { BackendProvider, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
+import type { BackendProvider, ConnectorManifest, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { resolveDetailedStatus } from "./components/PluginPanel";
+import { listRuntimeConnectorStatuses } from "./runtime";
 
 const runtimeMocks = vi.hoisted(() => ({
   snapshot: null as RuntimeSnapshot | null,
@@ -195,6 +197,8 @@ describe("Fable home", () => {
     runtimeMocks.connectorOAuthCalls = [];
     runtimeMocks.agentRuns = [];
     connectRuntimeBackendSpy.mockClear();
+    vi.mocked(listRuntimeConnectorStatuses).mockReset();
+    vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
     removeDesktopRuntime();
   });
 
@@ -1148,6 +1152,177 @@ describe("Fable home", () => {
     // the agent.run call site turns into request.model.
     await waitFor(() => {
       expect(runtimeMocks.savedSnapshots.at(-1)?.selectedModelId).toBe("o3");
+    });
+  });
+
+  it("renders connector details for connected, configured, unconfigured, expired, syncing, failed, unavailable, and permission-limited states", async () => {
+    const customManifests = [
+      {
+        id: "slack",
+        name: "Slack",
+        status: "connected",
+        permissions: ["read selected conversations"],
+        healthSummary: "Connected; provider identity verified.",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-broker",
+        health: { state: "healthy", summary: "Connected; provider identity verified.", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "notion",
+        name: "Notion",
+        status: "unconfigured",
+        permissions: ["read user-selected pages"],
+        healthSummary: "Provider configuration required",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-broker",
+        setupMessage: "Create a Notion public connection and broker callback.",
+        health: { state: "error", summary: "Provider configuration required", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "linear",
+        name: "Linear",
+        status: "expired",
+        permissions: ["read workspace"],
+        healthSummary: "Linear token expired",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-broker",
+        health: { state: "error", summary: "Linear token expired; reconnect is required.", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "google-calendar",
+        name: "Google Calendar",
+        status: "configured",
+        permissions: ["read selected records"],
+        healthSummary: "Ready to connect",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-broker",
+        setupMessage: "Choose Connect to authorize this provider.",
+        health: { state: "unknown", summary: "Ready to connect", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "github",
+        name: "GitHub",
+        status: "connected",
+        permissions: ["read repos"],
+        healthSummary: "Connected; provider identity verified.",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-broker",
+        health: { state: "unknown", summary: "Credentials available; live provider health has not been checked.", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "vercel",
+        name: "Vercel",
+        status: "provider-error",
+        permissions: ["read deployments"],
+        healthSummary: "Egress failed",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "provider-installation",
+        health: { state: "error", summary: "The vercel API rate limit was exceeded.", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "gmail",
+        name: "Gmail",
+        status: "unavailable",
+        permissions: ["read emails"],
+        healthSummary: "Gmail API is temporarily disabled",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-pkce",
+        health: { state: "error", summary: "Gmail API is temporarily disabled.", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
+        id: "google-drive",
+        name: "Google Drive",
+        status: "connected",
+        permissions: ["read drive files"],
+        healthSummary: "Stale scopes",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-pkce",
+        scopes: [{ id: "drive.readonly", label: "Read files", access: "read", required: true, granted: false }],
+        health: { state: "error", summary: "Google Drive is missing required Google scopes.", checkedAt: "2026-06-27T09:00:00.000Z" }
+      }
+    ];
+
+    vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(customManifests as any);
+
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+
+    // Test Slack (connected)
+    await user.click(screen.getByText("Slack"));
+    expect(screen.getByRole("heading", { name: "Slack" })).toBeInTheDocument();
+    const slackDetails = screen.getByRole("article", { name: "Slack details" });
+    expect(within(slackDetails).getByText("Connected")).toBeInTheDocument();
+    expect(within(slackDetails).getAllByText("Slack account connected.").length).toBeGreaterThan(0);
+
+    // Test Notion (Configuration Required)
+    await user.click(screen.getByText("Notion"));
+    expect(screen.getByRole("heading", { name: "Notion" })).toBeInTheDocument();
+    const notionDetails = screen.getByRole("article", { name: "Notion details" });
+    expect(within(notionDetails).getByText("Configuration Required")).toBeInTheDocument();
+    expect(within(notionDetails).getAllByText("Notion is not configured on the Fable auth broker.").length).toBeGreaterThan(0);
+
+    // Test configured (ready to authorize)
+    await user.click(screen.getByText("Google Calendar"));
+    const configuredDetails = screen.getByRole("article", { name: "Google Calendar details" });
+    expect(within(configuredDetails).getByText("Ready")).toBeInTheDocument();
+    expect(within(configuredDetails).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
+
+    // Test Linear (expired)
+    await user.click(screen.getByText("Linear"));
+    expect(screen.getByRole("heading", { name: "Linear" })).toBeInTheDocument();
+    const linearDetails = screen.getByRole("article", { name: "Linear details" });
+    expect(within(linearDetails).getByText("Expired")).toBeInTheDocument();
+    expect(within(linearDetails).getAllByText("Linear authorization expired; reconnect or refresh is required.").length).toBeGreaterThan(0);
+    expect(within(linearDetails).getByRole("button", { name: /^reconnect$/i })).toBeInTheDocument();
+
+    // Test GitHub (syncing)
+    await user.click(screen.getByText("GitHub"));
+    expect(screen.getByRole("heading", { name: "GitHub" })).toBeInTheDocument();
+    const githubDetails = screen.getByRole("article", { name: "GitHub details" });
+    expect(within(githubDetails).getByText("Syncing")).toBeInTheDocument();
+    expect(within(githubDetails).getAllByText("Verifying connection with GitHub...").length).toBeGreaterThan(0);
+
+    // Test Vercel (failed)
+    await user.click(screen.getByText("Vercel"));
+    expect(screen.getByRole("heading", { name: "Vercel" })).toBeInTheDocument();
+    const vercelDetails = screen.getByRole("article", { name: "Vercel details" });
+    expect(within(vercelDetails).getByText("Failed")).toBeInTheDocument();
+    expect(within(vercelDetails).getAllByText("The vercel API rate limit was exceeded.").length).toBeGreaterThan(0);
+
+    // Test Gmail (unavailable)
+    await user.click(screen.getByText("Gmail"));
+    expect(screen.getByRole("heading", { name: "Gmail" })).toBeInTheDocument();
+    const gmailDetails = screen.getByRole("article", { name: "Gmail details" });
+    expect(within(gmailDetails).getByText("Unavailable")).toBeInTheDocument();
+    expect(within(gmailDetails).getAllByText("Gmail service is temporarily unavailable.").length).toBeGreaterThan(0);
+
+    // Test Google Drive (permission-limited)
+    await user.click(screen.getByText("Google Drive"));
+    expect(screen.getByRole("heading", { name: "Google Drive" })).toBeInTheDocument();
+    const driveDetails = screen.getByRole("article", { name: "Google Drive details" });
+    expect(within(driveDetails).getByText("Permission Limited")).toBeInTheDocument();
+    expect(within(driveDetails).getAllByText("Google Drive is missing required scopes or permissions.").length).toBeGreaterThan(0);
+  });
+
+  it("preserves the revoked lifecycle state in connector UI copy", () => {
+    const revoked = {
+      id: "linear",
+      name: "Linear",
+      status: "revoked",
+      permissions: ["read workspace"],
+      healthSummary: "Connection revoked",
+      lastCheckedAt: "2026-06-27T09:00:00.000Z",
+      authMode: "oauth-broker",
+      health: {
+        state: "error",
+        summary: "Connection revoked",
+        checkedAt: "2026-06-27T09:00:00.000Z"
+      }
+    } satisfies ConnectorManifest;
+
+    expect(resolveDetailedStatus(revoked)).toMatchObject({
+      label: "Revoked",
+      className: "revoked"
     });
   });
 });

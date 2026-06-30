@@ -20,8 +20,10 @@ export interface OAuthClientOptions {
   connectorId: ConnectorId;
   clientId: string;
   authorizationEndpoint: string;
-  tokenEndpoint: string;
-  identityEndpoint: string;
+  tokenEndpoint?: string;
+  identityEndpoint?: string;
+  handoffEndpoint?: string;
+  refreshEndpoint?: string;
   revocationEndpoint?: string;
   scopes: readonly string[];
   redirectUri: string;
@@ -128,9 +130,19 @@ export function page<T>(
 export function oauthClient(options: OAuthClientOptions) {
   const fetcher = options.fetch ?? fetch;
   const brokerEndpoint = (segment: "handoff" | "refresh" | "revoke") => {
-    const url = new URL(options.tokenEndpoint);
+    const explicit = segment === "handoff"
+      ? options.handoffEndpoint
+      : segment === "refresh"
+        ? options.refreshEndpoint
+        : options.revocationEndpoint;
+    if (explicit) return explicit;
+
+    const url = new URL(options.tokenEndpoint ?? options.authorizationEndpoint);
     const parts = url.pathname.split("/").filter(Boolean);
-    if (parts.at(-1) !== "token") throw providerError(options.connectorId, 500, "broker_configuration");
+    const last = parts.at(-1);
+    if (last !== "token" && last !== "authorize") {
+      throw providerError(options.connectorId, 500, "broker_configuration");
+    }
     parts[parts.length - 1] = segment;
     url.pathname = `/${parts.join("/")}`;
     return url.toString();
@@ -205,6 +217,10 @@ export function oauthClient(options: OAuthClientOptions) {
  */
 export function googleOAuthClient(options: OAuthClientOptions) {
   const fetcher = options.fetch ?? fetch;
+  const tokenEndpoint = () => {
+    if (!options.tokenEndpoint) throw providerError(options.connectorId, 500, "provider_configuration");
+    return options.tokenEndpoint;
+  };
   return {
     async startAuth(context: ConnectorAuthContext): Promise<ConnectorAuthStart> {
       const url = new URL(options.authorizationEndpoint);
@@ -240,7 +256,7 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       const codes = callbackUrl.searchParams.getAll("code");
       if (codes.length !== 1 || !codes[0]) throw providerError(options.connectorId, 400, "missing_code");
       const code = codes[0];
-      const response = await fetcher(options.tokenEndpoint, {
+      const response = await fetcher(tokenEndpoint(), {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -263,7 +279,7 @@ export function googleOAuthClient(options: OAuthClientOptions) {
     },
     async refresh(tokens: ConnectorTokenSet): Promise<ConnectorTokenSet> {
       if (!tokens.refreshToken) throw providerError(options.connectorId, 401, "expired_token");
-      const response = await fetcher(options.tokenEndpoint, {
+      const response = await fetcher(tokenEndpoint(), {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({

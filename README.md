@@ -29,7 +29,7 @@ Local-first and private by default, Fable is built for people who want powerful 
 | **BYOK Native APIs** | **Implemented (Live)** | OpenAI, Anthropic, Gemini, xAI, and OpenRouter backend model execution using local keyring credentials |
 | **Google Connectors** | **Functional (Gated)** | Google Drive, Gmail, and Calendar read/write via loopback PKCE; requires user Google Cloud Console config |
 | **ACP/Codex Providers** | **Functional (Gated)** | Cursor, Grok, and Codex run via local stdio JSON-RPC or CLI app-server if installed and authenticated |
-| **Confidential Connectors** | **Planned (Gated)** | GitHub, Vercel, Notion, Slack, Linear require auth broker callback registration; currently fail closed |
+| **Confidential Connectors** | **Functional (Gated)** | Brokered adapters and fail-closed lifecycle states are implemented for GitHub, Vercel, Notion, Slack, and Linear; deployment, provider configuration, and live OAuth validation remain external |
 | **Browser Preview Mode** | **Preview/Stub** | Purely synthetic fixture responses using `localStorage` instead of SQLite |
 | **Mobile Remote Control** | **Preview/Stub** | Sidebar device button triggers state/accessibility announcement change only; no socket or remote protocol |
 | **Voice Dictation** | **Preview/Stub** | Composer voice toggle changes UI status; no audio capture or transcription pipeline |

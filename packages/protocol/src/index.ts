@@ -234,9 +234,12 @@ export type ConnectorId = "local-files" | FirstWaveConnectorId | (string & {});
 export type ConnectorStatus =
   | "fixture"
   | "needs-auth"
+  | "unconfigured"
   | "configured"
   | "connected"
   | "expired"
+  | "revoked"
+  | "provider-error"
   | "error"
   | "unavailable";
 

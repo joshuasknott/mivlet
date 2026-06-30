@@ -32,6 +32,18 @@ Create and distribute a Slack app, enable OAuth v2, and install it separately in
 
 Implemented API operations: workspace identity; accessible conversation list; supported message search; channel history; threads/replies; users; post/reply/edit/delete messages; and add/remove reactions. Archived or inaccessible channels remain provider errors. Every mutation requires a fresh per-action Fable approval showing account, workspace, channel, message/thread target, and exact text or reaction. Model-generated content is never posted automatically.
 
+## Implemented Connector State Behaviors
+
+Both Notion and Slack connectors implement the following standard state behaviors:
+
+1. **Configured**: The broker prerequisites are present and the connector is ready to authorize. Successful authorization stores access/refresh tokens in the native OS keyring and advances the connector to connected.
+2. **Unconfigured**: If the broker is not configured (returning HTTP 503 `configuration-required`), the connector fails closed.
+3. **Expired**: If token refresh fails (HTTP 401 `needs-auth`), a token lacks a refresh token, or the API request rejects with status 401 (e.g. `invalid_auth` or `token_revoked`), the adapter returns `expired-auth` so the runtime can prompt the user to reconnect.
+4. **Revoked**: Disconnecting the connector triggers token revocation on `/oauth/{provider}/revoke` handling both HTTP 200 (success) and HTTP 404 (idempotent success).
+5. **Refresh Failure**: If the broker refresh returns HTTP 500, it maps to `provider-unavailable` with `retryable: true`.
+6. **Missing Broker**: If the broker is offline (network error) or returns HTTP 404, it throws the failure or returns `not-found`.
+7. **Provider Unavailable**: Direct API requests returning HTTP 502 or network socket failures map to `provider-unavailable` with `retryable: true`.
+
 ## Development and tests
 
 Production paths never fall back to fixtures. Deterministic fixtures and mocked HTTP responses are test-only. Live tests are opt-in through `FABLE_LIVE_CONNECTOR_TESTS` and must obtain deliberately supplied credentials through the native credential boundary; credentials and provider content must never be committed or logged.

@@ -115,12 +115,14 @@ const LINEAR_PROFILE: ProviderProfile = {
     const data = asObject(payload, "data");
     const viewer = asObject(data, "viewer");
     const id = pickString(viewer, "id");
+    const organization = asObject(viewer, "organization");
     if (!id) throw identityError("Linear");
     return {
       id,
       displayName: pickString(viewer, "name") ?? id,
       email: pickString(viewer, "email"),
-      avatarUrl: pickString(viewer, "avatarUrl")
+      avatarUrl: pickString(viewer, "avatarUrl"),
+      workspace: pickString(organization, "name")
     };
   }
 };
@@ -139,8 +141,8 @@ const NOTION_PROFILE: ProviderProfile = {
     const p = asObject(payload);
     const bot = asObject(p, "bot");
     const owner = asObject(bot, "owner");
-    const workspaceId = pickString(bot, "workspace_id");
-    const id = pickString(p, "id") ?? workspaceId ?? pickString(owner, "workspace_id");
+    const workspaceId = pickString(bot, "workspace_id") ?? pickString(owner, "workspace_id");
+    const id = workspaceId ?? pickString(p, "id");
     if (!id) throw identityError("Notion");
     return {
       id,
@@ -159,6 +161,8 @@ const SLACK_PROFILE: ProviderProfile = {
   scopes: [
     "channels:read",
     "groups:read",
+    "channels:history",
+    "groups:history",
     "im:read",
     "mpim:read",
     "users:read",
@@ -172,11 +176,13 @@ const SLACK_PROFILE: ProviderProfile = {
   normalizeIdentity(payload) {
     const p = asObject(payload);
     if (p.ok === false) throw identityError("Slack");
-    const id = pickString(p, "user_id") ?? pickString(p, "bot_id");
-    if (!id) throw identityError("Slack");
+    const userId = pickString(p, "user_id") ?? pickString(p, "bot_id");
+    const teamId = pickString(p, "team_id");
+    if (!userId) throw identityError("Slack");
+    const id = teamId ? teamId + ":" + userId : userId;
     return {
       id,
-      displayName: pickString(p, "user") ?? "Slack account",
+      displayName: pickString(p, "user") ?? pickString(p, "team") ?? "Slack account",
       workspace: pickString(p, "team"),
       handle: pickString(p, "url")
     };

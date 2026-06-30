@@ -31,8 +31,8 @@ export function createNotionAdapter(options: NotionAdapterOptions): ConnectorAda
   const auth = oauthClient({
     ...options, connectorId: "notion",
     authorizationEndpoint: new URL("oauth/notion/authorize", broker).toString(),
-    tokenEndpoint: new URL("oauth/notion/token", broker).toString(),
-    identityEndpoint: new URL("oauth/notion/identity", broker).toString(),
+    handoffEndpoint: new URL("oauth/notion/handoff", broker).toString(),
+    refreshEndpoint: new URL("oauth/notion/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/notion/revoke", broker).toString(),
     scopes: []
   });
