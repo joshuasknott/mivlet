@@ -758,27 +758,6 @@
   font-size: var(--text-11);
 }
 
-.status-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  margin-top: 5px;
-  border-radius: var(--radius-pill);
-}
-
-.status-dot--ready {
-  background: var(--positive);
-}
-
-.status-dot--needs-auth,
-.status-dot--draft {
-  background: var(--caution);
-}
-
-.status-dot--paused {
-  background: var(--ink-soft);
-}
-
 .automation-row {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto auto;

@@ -33,6 +33,7 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import { permissionModeFor } from "../lib/agent-run";
+import { describeBackendError } from "../lib/backend-errors";
 import { createDesktopAcpTransport } from "../lib/acp-transport";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
@@ -357,10 +358,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             };
             setState((current) => ({ ...current, status: "streaming" }));
           } else if (event.type === "error") {
-            setState((current) => ({ ...current, lastError: event.message }));
+            // Classify so a configuration error (rejected/expired key) is
+            // distinguishable from a runtime/provider failure. The structured
+            // code travels on the event from the Rust transport boundary.
+            const described = describeBackendError(
+              event.message,
+              event.code,
+              event.retryable
+            );
+            setState((current) => ({ ...current, lastError: described.message }));
             persisted = {
               ...persisted,
-              error: event.message,
+              error: described.message,
               updatedAt: new Date().toISOString()
             };
           } else if (event.type === "done" || event.type === "cancelled") {
@@ -401,7 +410,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Agent run failed.";
+        // A thrown BackendRuntimeError carries the structured code from the
+        // transport boundary; classify it so config vs runtime is visible.
+        const thrown = error as { code?: string; retryable?: boolean };
+        const rawMessage = error instanceof Error ? error.message : "Agent run failed.";
+        const described = describeBackendError(rawMessage, thrown.code, thrown.retryable);
+        const message = described.message;
         const cancelled = Boolean(shouldCancelRef.current?.());
         const terminalRun: PersistedAgentRun = {
           ...persisted!,

@@ -191,9 +191,28 @@ function ProviderAccessView({
                   pending={pendingProviderId === provider.id}
                   onStatus={onStatus}
                   onConnect={(providerId, secret) =>
-                    void runtime.connectBackend(providerId, secret).then(() => {
-                      onStatus(`${providerId} connected.`);
-                    })
+                    void runtime
+                      .connectBackendWithVerify(providerId, secret)
+                      .then((result) => {
+                        // Report accurately: never claim "connected" when the
+                        // key was rejected or verification failed. The verified
+                        // path already surfaces a useful message via
+                        // backendStatus; mirror the outcome here so the page
+                        // status does not fake a success.
+                        if (result.outcome === "ready") {
+                          onStatus(`${providerId} connected.`);
+                        } else if (result.outcome === "auth-failed") {
+                          onStatus(
+                            result.message ??
+                              `${providerId} rejected this key. Check the key and try again.`
+                          );
+                        } else {
+                          onStatus(
+                            result.message ??
+                              `${providerId} could not be verified right now. It is connected; try a run to confirm.`
+                          );
+                        }
+                      })
                   }
                   onDisconnect={(providerId) =>
                     void runtime.disconnectBackend(providerId).then(() => {
@@ -303,7 +322,12 @@ function NativeProviderRow({
             </span>
           ) : provider.models.length > 0 ? (
             <span className="provider-access-models provider-access-models--muted">
-              No models available on this account
+              {connected
+                ? // Connected but the account surfaced no usable models.
+                  "No models available on this account"
+                : // Not connected yet: this is a configuration gap, not an
+                  // account problem — point the user at connecting first.
+                  "Connect to see available models"}
             </span>
           ) : null}
         </div>

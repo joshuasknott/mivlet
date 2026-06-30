@@ -1088,6 +1088,135 @@ fn rejects_empty_backend_secrets() {
     let _ = fs::remove_file(&path);
 }
 
+/// Every native-API provider must be able to complete a full connect → list →
+/// clear cycle through the API-key boundary. xAI and OpenRouter previously had
+/// only endpoint-URL coverage; this locks their catalog/manifest/auth-state
+/// behavior at the boundary so a regression in their native-api wiring is
+/// caught here rather than at runtime.
+#[test]
+fn native_api_providers_connect_list_and_clear_through_the_key_boundary() {
+    for provider_id in ["xai", "openrouter"] {
+        let path = temp_backends_path(&format!("backends-cycle-{provider_id}"));
+        let _ = fs::remove_file(&path);
+
+        let mut store = HashMap::new();
+
+        // Before any credential, the provider is fail-closed.
+        let providers = list_providers_from(&store, &path).expect("providers list");
+        let provider = providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .unwrap_or_else(|| panic!("{provider_id} provider exists"));
+        assert_eq!(
+            provider.backend_type, "native-api",
+            "{provider_id} must be a native-api provider"
+        );
+        assert_eq!(provider.auth_state, "needs-auth");
+        assert!(
+            provider.capabilities.is_empty(),
+            "fail-closed before connect"
+        );
+        assert!(provider.models.iter().all(|m| !m.available));
+
+        // Storing a credential marks the provider connected and capability-bearing.
+        store_credential_into(
+            &mut store,
+            &path,
+            credential_request(provider_id, "real-key"),
+        )
+        .expect("native provider stores through the key boundary");
+        assert!(
+            read_connected_backends(&path)
+                .expect("read manifest")
+                .has(provider_id),
+            "connected manifest records the provider"
+        );
+
+        let providers = list_providers_from(&store, &path).expect("providers list after connect");
+        let provider = providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .expect("provider still listed");
+        assert_eq!(provider.auth_state, "connected");
+        assert!(
+            !provider.capabilities.is_empty(),
+            "capabilities appear when connected"
+        );
+        assert!(provider.models.iter().all(|m| m.available));
+
+        // Clearing fails the provider closed again and drops it from the manifest.
+        clear_credential_into(&mut store, &path, provider_id).expect("clear credential");
+        assert!(
+            !read_connected_backends(&path)
+                .expect("read manifest after clear")
+                .has(provider_id),
+            "manifest drops the provider after clear"
+        );
+
+        let providers = list_providers_from(&store, &path).expect("providers list after clear");
+        let provider = providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .expect("provider still listed after clear");
+        assert_eq!(provider.auth_state, "needs-auth");
+        assert!(provider.capabilities.is_empty());
+        assert!(provider.models.iter().all(|m| !m.available));
+
+        let _ = fs::remove_file(&path);
+    }
+}
+
+/// An over-long secret is rejected instead of silently truncated, so the value
+/// never reaches storage in a mutated form and no connected manifest is written.
+#[test]
+fn oversize_backend_secret_is_rejected_without_storing() {
+    use crate::models::MAX_BACKEND_SECRET_CHARACTERS;
+
+    let path = temp_backends_path("backends-secret-cap");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    let oversized = "k".repeat(MAX_BACKEND_SECRET_CHARACTERS + 250);
+    let error = store_credential_into(&mut store, &path, credential_request("openai", &oversized))
+        .expect_err("oversized secret should fail");
+
+    assert!(error.contains("exceeds the supported length"));
+    assert!(
+        !store.contains_key("openai"),
+        "oversized secret must not be stored"
+    );
+    assert!(
+        !read_connected_backends(&path)
+            .expect("manifest readable")
+            .has("openai"),
+        "oversized secret must not mark the provider connected"
+    );
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn rejects_backend_secrets_with_control_characters() {
+    let path = temp_backends_path("backends-secret-control");
+    let _ = fs::remove_file(&path);
+
+    let mut store = HashMap::new();
+    let error = store_credential_into(
+        &mut store,
+        &path,
+        credential_request("openai", "sk-test\nwith-newline"),
+    )
+    .expect_err("control characters should fail");
+
+    assert!(error.contains("control characters"));
+    assert!(!store.contains_key("openai"));
+    assert!(!read_connected_backends(&path)
+        .expect("manifest readable")
+        .has("openai"));
+
+    let _ = fs::remove_file(&path);
+}
+
 #[test]
 fn records_backend_consequential_event_as_audit_without_bypassing() {
     let event = BackendConsequentialEvent {

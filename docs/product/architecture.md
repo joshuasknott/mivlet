@@ -137,8 +137,8 @@ workflows) through the native store. Schedules and workflows still use raw
 JSON files. Credentials remain in OS secure storage. See
 [Encrypted local storage](../architecture/encrypted-storage.md).
 
-A paired mobile device is a second approval, observation, and schedule-control
-surface — never an authority and never a cloud backend. Pairing is pairwise and
+A paired mobile device is designed as a second approval, observation, and schedule-control
+surface (currently planned/deferred; only a UI stub exists on the desktop shell and no active socket or remote protocol is implemented). When implemented, pairing is pairwise and
 LAN-local (no hosted account), mobile decisions are inputs to the existing
 approval queue rather than execution authority, and no secret crosses the remote
 channel. See [Mobile remote control](../architecture/mobile-remote.md).
@@ -157,4 +157,4 @@ Fable did not reuse TokenMaxxer’s quota scraping, fixed blended cost estimates
 
 ## Convex Boundary
 
-Convex is optional. If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for realtime shared state. Without it, the core desktop workspace, local files, approvals, runtime snapshots, memory controls, schedules, and API-key providers remain usable.
+Convex is optional. If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for realtime shared state, though collaboration schema and synchronization logic are not implemented on the main branch. Without it, the core desktop workspace, local files, approvals, runtime snapshots, memory controls, schedules, and API-key providers remain usable.
