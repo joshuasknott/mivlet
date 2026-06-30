@@ -168,6 +168,109 @@ describe("Vercel production adapter", () => {
     await adapter.write({ capability: "deployments.promote", input: { teamId: "team_1", project: "fable", deploymentId: "dpl_1" }, target: "team_1/fable/dpl_1", preview: "Promote dpl_1 to production", riskLevel: "high" }, tokens);
     expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/v10/projects/fable/promote/dpl_1"), expect.objectContaining({ method: "POST" }));
   });
+
+  it("maps project reads, the teamId query param, and cursor pagination", async () => {
+    const fetcher = vi.fn(async (_url: string) => response({ projects: [{ id: "prj_1", name: "fable" }], pagination: { next: 1700000000000 } }));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    const result = await adapter.read({ capability: "projects.read", input: { teamId: "team_1", limit: 5 }, cursor: "1690000000000" }, tokens);
+    const [url] = fetcher.mock.calls[0];
+    expect(String(url)).toContain("/v9/projects");
+    expect(String(url)).toContain("teamId=team_1");
+    expect(String(url)).toContain("limit=5");
+    expect(String(url)).toContain("until=1690000000000");
+    expect(result.items[0]).toMatchObject({ id: "prj_1", name: "fable" });
+    expect(result.nextCursor).toBe("1700000000000");
+  });
+
+  it("scopes deployments reads to a project and team", async () => {
+    const fetcher = vi.fn(async (_url: string) => response({ deployments: [{ id: "dpl_1", name: "fable", state: "READY", url: "fable.vercel.app" }] }));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    const result = await adapter.read({ capability: "deployments.read", input: { teamId: "team_1", projectId: "prj_1", state: "READY" } }, tokens);
+    const [url] = fetcher.mock.calls[0];
+    expect(String(url)).toContain("/v6/deployments");
+    expect(String(url)).toContain("teamId=team_1");
+    expect(String(url)).toContain("projectId=prj_1");
+    expect(String(url)).toContain("state=READY");
+    expect(result.items[0]).toMatchObject({ id: "dpl_1", state: "READY" });
+  });
+
+  it("maps revoked access, permission denial, rate limits, network errors, and malformed bodies", async () => {
+    for (const [status, code] of [[401, "expired-auth"], [403, "permission-denied"], [429, "rate-limited"]] as const) {
+      const adapter = createVercelAdapter({ ...common, fetch: vi.fn(async () => response({ error: { code: "secret provider detail" } }, status)) });
+      await expect(adapter.read({ capability: "identity.read", input: {} }, tokens)).rejects.toMatchObject({ code });
+    }
+    const network = createVercelAdapter({ ...common, fetch: vi.fn(async () => { throw new Error("socket and token details"); }) });
+    await expect(network.read({ capability: "identity.read", input: {} }, tokens)).rejects.toMatchObject({ code: "provider-unavailable" });
+    const malformed = createVercelAdapter({ ...common, fetch: vi.fn(async () => new Response("not-json", { status: 200 })) });
+    await expect(malformed.read({ capability: "identity.read", input: {} }, tokens)).rejects.toMatchObject({ code: "provider-unavailable" });
+  });
+
+  it("passes cancellation to provider egress", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.signal).toBe(controller.signal);
+      throw new DOMException("cancelled", "AbortError");
+    });
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.read({ capability: "teams.read", input: {}, signal: controller.signal }, tokens)).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("keeps the bearer token in the Authorization header, never in the URL", async () => {
+    const fetcher = vi.fn(async () => response({ projects: [] }));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    await adapter.read({ capability: "projects.read", input: { teamId: "team_1" } }, tokens);
+    const [url, init] = fetcher.mock.calls[0] as [string, RequestInit];
+    // The token travels only in the Authorization header; the URL/query stay clean so
+    // access tokens never leak into logs, browser history, or provider query params.
+    expect(String(url)).not.toContain("test-token");
+    expect(init?.headers?.authorization ?? "").toContain("Bearer test-token");
+  });
+
+  it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
+    const start = await createVercelAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: "c" });
+    expect(start.authorizationUrl).toContain("https://auth.example/oauth/vercel/authorize");
+    expect(start.state).toBe("s");
+  });
+
+  it("redeems, refreshes, and revokes through the versioned broker contract", async () => {
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      const body = JSON.parse(String(init?.body));
+      expect(body.contractVersion).toBe(1);
+      expect(body.provider).toBe("vercel");
+      if (path.endsWith("/handoff")) return response({ contractVersion: 1, tokens: { accessToken: "a", refreshToken: "r", tokenType: "Bearer", scopes: [] }, account: { id: "vercel-uid", displayName: "Vercel User" } });
+      if (path.endsWith("/refresh")) return response({ contractVersion: 1, tokens: { accessToken: "a2", tokenType: "Bearer", scopes: [] } });
+      return response({ contractVersion: 1, revoked: true });
+    });
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    expect(auth).toMatchObject({ tokens: { accessToken: "a", refreshToken: "r" }, account: { id: "vercel-uid" } });
+    await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "a2", refreshToken: "r" });
+    await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();
+    expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+      "/oauth/vercel/handoff", "/oauth/vercel/refresh", "/oauth/vercel/revoke"
+    ]);
+  });
+
+  it("rejects a handoff whose callback state does not match before any network call", async () => {
+    const fetcher = vi.fn(async () => response({ contractVersion: 1, tokens: { accessToken: "a", tokenType: "Bearer", scopes: [] }, account: { id: "vercel-uid", displayName: "Vercel User" } }));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    // State mismatch fails closed with an invalid-request before the broker is contacted.
+    await expect(adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=attacker`, expectedState: "expected", codeVerifier: "unused" })).rejects.toMatchObject({ code: "invalid-request" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("cannot execute a Vercel write without a matching explicit approval", async () => {
+    const fetcher = vi.fn(async () => response({ id: "dpl_1" }));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    const boundary: ConnectorApprovalBoundary = {
+      approve: vi.fn(async (record: ConnectorApprovalRecord) => ({ ...record, result: "denied" as const, decidedAt: new Date().toISOString() })),
+      complete: vi.fn(async () => undefined)
+    };
+    const runtime = new ConnectorRuntime({ approvals: boundary }); runtime.register(adapter);
+    await expect(runtime.write({ connectorId: "vercel", account: { id: "vercel-uid", displayName: "Vercel User" }, tokens }, { capability: "deployments.promote", input: { teamId: "team_1", project: "fable", deploymentId: "dpl_1" }, target: "team_1/fable/dpl_1", preview: "Promote dpl_1", riskLevel: "high" })).rejects.toMatchObject({ code: "approval-required" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });
 
 describe("Linear production adapter", () => {
