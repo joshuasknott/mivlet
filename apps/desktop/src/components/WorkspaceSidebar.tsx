@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   CaretDown,
   CaretRight,
+  Clock,
   DeviceMobile,
   FolderOpen,
   Gear,
@@ -34,6 +35,7 @@ const userSettingsTabs = [
   { id: "providers" as const, label: "Providers", icon: Plugs },
   { id: "appearance" as const, label: "Appearance", icon: Moon },
   { id: "privacy" as const, label: "Privacy", icon: LockKey },
+  { id: "history" as const, label: "History", icon: Clock },
   { id: "notifications" as const, label: "Notifications", icon: WarningCircle }
 ];
 

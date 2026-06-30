@@ -33,6 +33,7 @@ vi.mock("../runtime", () => ({
   listRuntimeWorkflowDefinitions: vi.fn(async () => null),
   listRuntimeWorkflowRuns: vi.fn(async () => null),
   listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
+  loadRuntimeActionHistory: vi.fn(async () => null),
   loadRuntimeApprovalAudit: vi.fn(async () => null),
   loadRuntimeApprovalRules: vi.fn(async () => null),
   loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),

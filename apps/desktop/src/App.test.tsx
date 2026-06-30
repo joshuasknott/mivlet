@@ -63,6 +63,7 @@ vi.mock("./runtime", () => ({
   // null = no desktop runtime in tests, so the curated catalogue fallback
   // drives model selection (discovery did not run) — matching prior behavior.
   listRuntimeBackendModels: vi.fn(async () => null),
+  loadRuntimeActionHistory: vi.fn(async () => null),
   loadRuntimeApprovalAudit: vi.fn(async () => null),
   loadRuntimeApprovalRules: vi.fn(async () => null),
   loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),

@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { LocalTextFileCandidate } from "@fable/connectors";
 import type {
+  ActionHistoryCategory,
+  ActionHistoryEvent,
   ApprovalAuditEntry,
   ApprovalGrant,
   ApprovalResolutionRequest,
@@ -32,6 +34,7 @@ import type {
   MemoryPromotionResponse,
   NotificationRecord,
   PersistedAgentRun,
+  RecordActionHistoryRequest,
   RuntimeSnapshot,
   ScheduledExecutionRoute,
   ScheduledJob,
@@ -287,6 +290,57 @@ export async function recordRuntimeApprovalDecision(entry: ApprovalAuditEntry) {
     return response.persisted ? response.entry : null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Inspectable action history.
+//
+// Audit observes actions across model calls, connector actions, shell/tool
+// actions, browser/web actions, approvals, schedules, and blocked policy
+// decisions. It never grants execution authority and never carries secrets.
+// Browser preview returns null so the shell can render an empty history without
+// claiming a live store.
+// ---------------------------------------------------------------------------
+
+/**
+ * List recent action-history events, newest first. Optionally filtered by
+ * category. Returns null outside Tauri so callers can fall back to in-memory
+ * state without surfacing a hard error.
+ */
+export async function loadRuntimeActionHistory(
+  category?: ActionHistoryCategory | string,
+  limit?: number
+) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+
+  try {
+    return await invoke<ActionHistoryEvent[]>("list_action_history", {
+      category: category ?? null,
+      limit: limit ?? null
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Record an action-history event from the UI/runtime (observation only). Returns
+ * whether the event was persisted; outside Tauri this is always false.
+ */
+export async function recordRuntimeActionHistory(
+  request: RecordActionHistoryRequest
+) {
+  if (!hasTauriRuntime()) {
+    return false;
+  }
+
+  try {
+    return await invoke<boolean>("record_action_history", { request });
+  } catch {
+    return false;
   }
 }
 

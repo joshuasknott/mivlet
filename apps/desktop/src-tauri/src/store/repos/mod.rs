@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use crate::store::{Result, Store};
 
+pub mod action_history;
 pub mod approval;
 pub mod audit_event;
 pub mod backend_connection;
