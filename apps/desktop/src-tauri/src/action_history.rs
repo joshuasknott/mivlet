@@ -15,7 +15,14 @@
 use serde_json::Value;
 
 use crate::store::repos::action_history::{category, ActionHistoryEvent, Record};
-use crate::store::with_store;
+
+/// Borrow the process-global encrypted store when initialized (the production
+/// path). Returns `None` in the unit-test path that does not bring up Tauri.
+/// Mirrors `store::with_store` but lends the `&Store` so execution boundaries
+/// can route through the testable [`Recorder::record_into`] seam.
+pub(crate) fn try_store() -> Option<&'static crate::store::Store> {
+    crate::store::try_global()
+}
 
 /// Build a recorder for one auditable action. Fields are optional; only
 /// `category`, `service`, `action`, and `status` carry strong meaning. The
@@ -95,40 +102,47 @@ impl Recorder {
     /// Record this event into the encrypted store. Best-effort: any failure is
     /// logged to stderr and swallowed so audit can never block or weaken an
     /// execution boundary. Returns whether the event was persisted.
+    ///
+    /// Uses the process-global store (the production path). Execution boundaries
+    /// that have an explicit `&Store` available should prefer [`record_into`],
+    /// which is the testable seam that drives the same write without the global.
     pub fn record(self) -> bool {
+        match try_store() {
+            Some(store) => self.record_into(store),
+            None => false,
+        }
+    }
+
+    /// Record this event into an explicit store. Best-effort: any failure is
+    /// logged to stderr and swallowed so audit can never block or weaken an
+    /// execution boundary. Returns whether the event was persisted. This is the
+    /// testable seam used by execution-boundary audit-path tests.
+    pub fn record_into(&self, store: &crate::store::Store) -> bool {
         let id = self.synthesize_id();
-        let recorder = self;
-        let outcome = with_store(|store| {
-            store.transaction(|tx| {
-                // The repo redacts the detail at the storage boundary (defense
-                // in depth); the facade passes the raw detail through.
-                crate::store::repos::action_history::record(
-                    tx,
-                    store,
-                    Record {
-                        id: id.clone(),
-                        category: recorder.category.clone(),
-                        service: recorder.service.clone(),
-                        action: recorder.action.clone(),
-                        status: recorder.status.clone(),
-                        actor: recorder.actor.clone(),
-                        created_at: recorder.created_at.clone(),
-                        risk_level: recorder.risk_level.clone(),
-                        mode: recorder.mode.clone(),
-                        correlation_id: recorder.correlation_id.clone(),
-                        error_code: recorder.error_code.clone(),
-                        summary: recorder.summary.clone(),
-                        detail: recorder.detail.clone(),
-                    },
-                )
-            })
-        });
-        match outcome {
-            Ok(Some(())) => true,
-            Ok(None) => {
-                // Store not initialized (unit-test path). Not an error.
-                false
-            }
+        match store.transaction(|tx| {
+            // The repo redacts the detail at the storage boundary (defense in
+            // depth); the facade passes the raw detail through.
+            crate::store::repos::action_history::record(
+                tx,
+                store,
+                Record {
+                    id: id.clone(),
+                    category: self.category.clone(),
+                    service: self.service.clone(),
+                    action: self.action.clone(),
+                    status: self.status.clone(),
+                    actor: self.actor.clone(),
+                    created_at: self.created_at.clone(),
+                    risk_level: self.risk_level.clone(),
+                    mode: self.mode.clone(),
+                    correlation_id: self.correlation_id.clone(),
+                    error_code: self.error_code.clone(),
+                    summary: self.summary.clone(),
+                    detail: self.detail.clone(),
+                },
+            )
+        }) {
+            Ok(()) => true,
             Err(error) => {
                 eprintln!("action-history record failed: {error}");
                 false
@@ -153,23 +167,40 @@ impl Recorder {
 /// List recent action-history events (newest first). Returns an empty vector
 /// when the store is not initialized (the unit-test path).
 pub fn list(limit: i64) -> Result<Vec<ActionHistoryEvent>, String> {
-    let events = with_store(|store| {
-        store.with_conn(|conn| {
-            crate::store::repos::action_history::list(conn, store, limit)
-        })
-    })?;
+    let events = try_store().map(|store| list_into(store, limit)).transpose()?;
     Ok(events.unwrap_or_default())
 }
 
 /// List recent action-history events filtered by category. Uses the plaintext
 /// category index (no decryption needed to filter).
 pub fn list_by_category(category: &str, limit: i64) -> Result<Vec<ActionHistoryEvent>, String> {
-    let events = with_store(|store| {
-        store.with_conn(|conn| {
+    let events = try_store()
+        .map(|store| list_by_category_into(store, category, limit))
+        .transpose()?;
+    Ok(events.unwrap_or_default())
+}
+
+/// List recent action-history events from an explicit store (the testable seam
+/// used by execution-boundary audit-path tests).
+pub(crate) fn list_into(
+    store: &crate::store::Store,
+    limit: i64,
+) -> Result<Vec<ActionHistoryEvent>, String> {
+    store
+        .with_conn(|conn| crate::store::repos::action_history::list(conn, store, limit))
+        .map_err(|error| error.to_string())
+}
+
+fn list_by_category_into(
+    store: &crate::store::Store,
+    category: &str,
+    limit: i64,
+) -> Result<Vec<ActionHistoryEvent>, String> {
+    store
+        .with_conn(|conn| {
             crate::store::repos::action_history::list_by_category(conn, store, category, limit)
         })
-    })?;
-    Ok(events.unwrap_or_default())
+        .map_err(|error| error.to_string())
 }
 
 fn now_rfc3339() -> String {

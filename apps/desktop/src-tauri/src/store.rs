@@ -277,6 +277,14 @@ fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Res
     Ok(())
 }
 
+/// Borrow the process-global encrypted store when initialized, or `None`. This
+/// is the production-path accessor used by execution boundaries that record
+/// audit through an explicit `&Store` (via the testable recorder seam); it
+/// returns `None` in the unit-test path that does not bring up Tauri.
+pub fn try_global() -> Option<&'static Store> {
+    GLOBAL_STORE.get()
+}
+
 /// Run `f` against the global encrypted store when it is initialized. Returns
 /// `Ok(None)` only when the global store is not initialized (the unit-test path
 /// that does not bring up Tauri); command layers translate `None` into an

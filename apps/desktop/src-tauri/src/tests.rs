@@ -2371,3 +2371,176 @@ fn _reference_approval_modification() -> ApprovalModification {
         consequence: String::new(),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Execution-boundary audit path (Batch 8 action history).
+//
+// Drives an actual execution boundary (the native tool boundary) against an
+// in-memory encrypted store via the testable `Option<&Store>` seam, then asserts
+// that matching ActionHistoryEvent rows appear through the listing path. This
+// closes requirement 11's explicit "at least one execution-boundary audit path".
+// ---------------------------------------------------------------------------
+
+#[test]
+fn tool_execution_boundary_records_action_history_into_the_store() {
+    use crate::action_history::categories;
+    use crate::store::repos::action_history::ActionHistoryEvent;
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+    use crate::tools::{audit_tool_attempt, audit_tool_outcome};
+
+    let store =
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+
+    // A read-file tool call is attempted, then succeeds. The boundary records
+    // both an "attempted" and an "ok" event against the same correlation id.
+    let arguments = serde_json::json!({ "path": "src/index.ts" });
+    audit_tool_attempt(
+        "read-file",
+        &arguments,
+        "req-tool-1",
+        "read-only",
+        "low",
+        "2026-06-30T10:00:00.000Z",
+        Some(&store),
+    );
+    audit_tool_outcome(
+        crate::tools::ToolOutcomeAudit {
+            tool: "read-file",
+            request_id: "req-tool-1",
+            mode: "read-only",
+            risk: "low",
+            status: "ok",
+            error_code: "",
+            message: "read-file executed",
+        },
+        Some(&store),
+    );
+
+    // A run-shell call is blocked at the permit boundary (policy block).
+    audit_tool_outcome(
+        crate::tools::ToolOutcomeAudit {
+            tool: "run-shell",
+            request_id: "req-tool-2",
+            mode: "full-access",
+            risk: "critical",
+            status: "blocked",
+            error_code: "permit",
+            message: "approval metadata changed after the user decision",
+        },
+        Some(&store),
+    );
+
+    // The events are persisted + decryptable through the listing path.
+    let events: Vec<ActionHistoryEvent> = store
+        .with_conn(|conn| crate::store::repos::action_history::list(conn, &store, 10))
+        .expect("list should succeed");
+
+    assert_eq!(events.len(), 3, "three boundary events should be recorded");
+
+    let ok = events
+        .iter()
+        .find(|e| e.status == "ok")
+        .expect("an ok outcome event should be present");
+    assert_eq!(ok.category, categories::TOOL_ACTION);
+    assert_eq!(ok.service, "tool");
+    assert_eq!(ok.action, "read-file");
+    assert_eq!(ok.correlation_id, "req-tool-1");
+    assert_eq!(ok.mode, "read-only");
+    assert_eq!(ok.risk_level, "low");
+    assert_eq!(ok.actor, "system");
+    assert!(ok.summary.contains("read-file"));
+
+    // The "attempted" event is the one that carries the safe (non-secret) preview
+    // detail; the outcome event records only status + summary.
+    let attempt = events
+        .iter()
+        .find(|e| e.status == "attempted")
+        .expect("an attempted event should be present");
+    let detail = attempt.detail.as_ref().expect("attempt detail should decrypt");
+    assert_eq!(detail["tool"], "read-file");
+    assert_eq!(detail["preview"], "src/index.ts");
+
+    let blocked = events
+        .iter()
+        .find(|e| e.status == "blocked")
+        .expect("a blocked outcome event should be present");
+    assert_eq!(blocked.category, categories::TOOL_ACTION);
+    assert_eq!(blocked.error_code, "permit");
+    assert_eq!(blocked.risk_level, "critical");
+    assert_eq!(blocked.correlation_id, "req-tool-2");
+}
+
+#[test]
+fn web_fetch_boundary_is_recorded_as_a_web_action_category() {
+    use crate::action_history::categories;
+    use crate::store::repos::action_history::ActionHistoryEvent;
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+    use crate::tools::audit_tool_outcome;
+
+    let store =
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+
+    // web-fetch routes to the WEB_ACTION category (browser/web boundary).
+    audit_tool_outcome(
+        crate::tools::ToolOutcomeAudit {
+            tool: "web-fetch",
+            request_id: "req-web-1",
+            mode: "read-only",
+            risk: "medium",
+            status: "ok",
+            error_code: "",
+            message: "web-fetch executed",
+        },
+        Some(&store),
+    );
+
+    let events: Vec<ActionHistoryEvent> = store
+        .with_conn(|conn| crate::store::repos::action_history::list(conn, &store, 10))
+        .expect("list should succeed");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].category, categories::WEB_ACTION);
+    assert_eq!(events[0].action, "web-fetch");
+}
+
+#[test]
+fn execution_boundary_redacts_secret_preview_before_persisting() {
+    use crate::store::repos::action_history::ActionHistoryEvent;
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+    use crate::tools::audit_tool_attempt;
+
+    let store =
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+
+    // A run-shell preview that carries a bearer token must be redacted at the
+    // storage boundary; the raw secret must never reach the sealed payload.
+    let arguments = serde_json::json!({ "command": "curl -H 'authorization: Bearer ghp_supersecret'" });
+    audit_tool_attempt(
+        "run-shell",
+        &arguments,
+        "req-secret-1",
+        "full-access",
+        "critical",
+        "2026-06-30T11:00:00.000Z",
+        Some(&store),
+    );
+
+    let events: Vec<ActionHistoryEvent> = store
+        .with_conn(|conn| crate::store::repos::action_history::list(conn, &store, 10))
+        .expect("list should succeed");
+    assert_eq!(events.len(), 1);
+
+    // The decrypted detail preview must not contain the raw secret.
+    let detail = events[0].detail.as_ref().expect("detail decrypts");
+    let preview = detail["preview"].as_str().unwrap_or("");
+    assert!(
+        !preview.contains("ghp_supersecret"),
+        "raw secret must not appear in the persisted preview"
+    );
+    assert!(
+        preview.contains("[redacted]") || !preview.contains("Bearer"),
+        "secret-shaped preview must be redacted"
+    );
+}

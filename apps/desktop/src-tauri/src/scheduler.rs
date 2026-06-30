@@ -379,7 +379,20 @@ pub fn enqueue_job_run(
         store.queue.push(entry);
         store.queue.truncate(MAX_SCHEDULER_QUEUE_ENTRIES);
     })?;
-    created.ok_or_else(|| "A run for this occurrence is already queued.".to_string())
+    let entry = created.ok_or_else(|| "A run for this occurrence is already queued.".to_string())?;
+    // Observe the queue transition in the unified action-history store
+    // (observation only; the scheduler store remains the queue authority).
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "scheduler",
+        &entry.job_id,
+        "queued",
+    )
+    .actor("system")
+    .correlation(&entry.run_id)
+    .summary(&format!("Scheduled job {} queued for run.", entry.job_id))
+    .record();
+    Ok(entry)
 }
 
 /// Report an attempt outcome for a queued/leased run. Updates the attempt
