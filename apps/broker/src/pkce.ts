@@ -5,16 +5,16 @@
  * requires it.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { randomBase64Url, sha256Base64Url } from "./crypto.js";
 
 /** Generate a high-entropy PKCE verifier. */
 export function generateVerifier(): string {
-  return randomBytes(48).toString("base64url");
+  return randomBase64Url(48);
 }
 
 /** S256 code challenge for a verifier. */
-export function challengeFor(verifier: string): string {
-  return createHash("sha256").update(verifier).digest("base64url");
+export async function challengeFor(verifier: string): Promise<string> {
+  return sha256Base64Url(verifier);
 }
 
 export interface BrokerPkcePair {
@@ -23,7 +23,7 @@ export interface BrokerPkcePair {
 }
 
 /** Generate a verifier + its S256 challenge. */
-export function generatePkcePair(): BrokerPkcePair {
+export async function generatePkcePair(): Promise<BrokerPkcePair> {
   const verifier = generateVerifier();
-  return { verifier, challenge: challengeFor(verifier) };
+  return { verifier, challenge: await challengeFor(verifier) };
 }

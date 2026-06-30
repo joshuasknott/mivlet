@@ -105,7 +105,7 @@ describe("broker http routing + security", () => {
   it("handoff redeem maps to the broker and returns tokens", async () => {
     const b = broker();
     const h = createBrokerHandler({ broker: b, port: 0 });
-    b.authorize({
+    await b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
       redirectUri: "http://127.0.0.1:1/callback", state: "hs", codeChallenge: "ch", codeChallengeMethod: "S256"
     });
@@ -119,7 +119,7 @@ describe("broker http routing + security", () => {
   it("callback route redirects (302) to the desktop redirect", async () => {
     const b = broker();
     const h = createBrokerHandler({ broker: b, port: 0 });
-    b.authorize({
+    await b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
       redirectUri: "http://127.0.0.1:1/callback", state: "cb1", codeChallenge: "ch", codeChallengeMethod: "S256"
     });

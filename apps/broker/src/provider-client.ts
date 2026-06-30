@@ -13,6 +13,7 @@ import type { BrokerProviderId } from "@fable/connectors";
 import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
 
 import type { BrokerClock } from "./clock.js";
+import { base64Encode } from "./crypto.js";
 import {
   providerProfile,
   type ProviderCredentials,
@@ -339,7 +340,7 @@ function identityInlineFor(
 
 function basicAuth(credentials: ProviderCredentials): string | undefined {
   if (!credentials.clientId || !credentials.clientSecret) return undefined;
-  return `Basic ${Buffer.from(`${credentials.clientId}:${credentials.clientSecret}`).toString("base64")}`;
+  return `Basic ${base64Encode(`${credentials.clientId}:${credentials.clientSecret}`)}`;
 }
 
 function profileLabel(provider: BrokerProviderId): string {

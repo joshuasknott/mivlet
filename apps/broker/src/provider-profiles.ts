@@ -8,6 +8,7 @@
  */
 
 import type { BrokerProviderId } from "@fable/connectors";
+import type { BrokerEnvironment } from "./broker.js";
 
 /**
  * How a provider wants the broker's own PKCE verifier handled.
@@ -196,7 +197,7 @@ export function providerProfile(provider: BrokerProviderId): ProviderProfile {
 }
 
 export function configuredProviders(
-  env: NodeJS.ProcessEnv
+  env: BrokerEnvironment
 ): BrokerProviderId[] {
   const configured: BrokerProviderId[] = [];
   for (const [provider, profile] of Object.entries(PROFILES) as Array<
@@ -217,7 +218,7 @@ export interface ProviderCredentials {
 
 export function resolveCredentials(
   provider: BrokerProviderId,
-  env: NodeJS.ProcessEnv
+  env: BrokerEnvironment
 ): ProviderCredentials {
   const profile = providerProfile(provider);
   const clientId = env[profile.clientIdEnv];

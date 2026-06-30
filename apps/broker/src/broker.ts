@@ -61,14 +61,18 @@ import {
 import { createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
 
 export interface BrokerOptions {
-  env: NodeJS.ProcessEnv;
+  env: BrokerEnvironment;
   /** Public HTTPS (or loopback development) base URL registered with providers. */
   publicBaseUrl?: string;
+  /** Worker deployments must provide an explicit registered callback base URL. */
+  requirePublicBaseUrl?: boolean;
   clock?: BrokerClock;
   fetch?: BrokerFetch;
   pending?: PendingExchangeStore;
   handoff?: HandoffStore;
 }
+
+export type BrokerEnvironment = Record<string, string | undefined>;
 
 export interface BrokerAuthorizeOutput {
   response: BrokerAuthorizeResponse;
@@ -84,12 +88,18 @@ export class FableBroker {
   private readonly fetcher?: BrokerFetch;
   private readonly pending: PendingExchangeStore;
   private readonly handoff: HandoffStore;
-  private readonly env: NodeJS.ProcessEnv;
-  private readonly publicBaseUrl: URL;
+  private readonly env: BrokerEnvironment;
+  private readonly publicBaseUrl?: URL;
+  private readonly requirePublicBaseUrl: boolean;
 
   constructor(options: BrokerOptions) {
     this.env = options.env;
-    this.publicBaseUrl = new URL(options.publicBaseUrl ?? "http://127.0.0.1:8788/");
+    this.requirePublicBaseUrl = options.requirePublicBaseUrl ?? false;
+    try {
+      this.publicBaseUrl = options.publicBaseUrl ? new URL(options.publicBaseUrl) : undefined;
+    } catch {
+      this.publicBaseUrl = undefined;
+    }
     this.clock = options.clock ?? { nowMs: () => Date.now() };
     this.fetcher = options.fetch;
     const stores = createStores(this.clock);
@@ -108,14 +118,14 @@ export class FableBroker {
   }
 
   /** GET /oauth/{provider}/authorize — begin the confidential flow. */
-  authorize(request: BrokerAuthorizeRequest): BrokerAuthorizeOutput {
+  async authorize(request: BrokerAuthorizeRequest): Promise<BrokerAuthorizeOutput> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
     this.requireConfigured(request.provider);
     const profile = providerProfile(request.provider);
     const credentials = resolveCredentials(request.provider, this.env);
     validateDesktopRedirect(request.redirectUri, this.env);
-    const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrl).toString();
+    const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
 
     const url = new URL(profile.authorizationEndpoint);
     url.searchParams.set("client_id", credentials.clientId);
@@ -128,7 +138,7 @@ export class FableBroker {
 
     let verifier: string | undefined;
     if (profile.pkce === "broker-pkce") {
-      const pair = generatePkcePair();
+      const pair = await generatePkcePair();
       verifier = pair.verifier;
       url.searchParams.set("code_challenge", pair.challenge);
       url.searchParams.set("code_challenge_method", "S256");
@@ -307,6 +317,18 @@ export class FableBroker {
       );
     }
   }
+
+  private publicBaseUrlOrDefault(): URL {
+    if (this.publicBaseUrl) return this.publicBaseUrl;
+    if (this.requirePublicBaseUrl) {
+      throw new BrokerContractError(
+        "configuration-required",
+        "The broker public URL is not configured.",
+        false
+      );
+    }
+    return new URL("http://127.0.0.1:8788/");
+  }
 }
 
 /**
@@ -314,7 +336,7 @@ export class FableBroker {
  * explicitly listed for managed desktop schemes. Loopback ports are ephemeral,
  * but host and path are fixed and query/fragment/userinfo are forbidden.
  */
-function validateDesktopRedirect(value: string, env: NodeJS.ProcessEnv): void {
+function validateDesktopRedirect(value: string, env: BrokerEnvironment): void {
   let redirect: URL;
   try {
     redirect = new URL(value);

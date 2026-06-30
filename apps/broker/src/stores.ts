@@ -14,12 +14,11 @@
  * broker is stateless across restarts, and an in-flight OAuth flow simply restarts.
  */
 
-import { randomBytes } from "node:crypto";
-
 import { BROKER_HANDOFF_TTL_SECONDS, type BrokerProviderId } from "@fable/connectors";
 import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
 
 import type { BrokerClock } from "./clock.js";
+import { randomBase64Url } from "./crypto.js";
 
 interface PendingExchange {
   provider: BrokerProviderId;
@@ -115,5 +114,5 @@ export function createStores(clock: BrokerClock): {
 
 /** Generate a URL-safe opaque token of the requested byte length. */
 export function urlSafeToken(bytes: number): string {
-  return randomBytes(bytes).toString("base64url");
+  return randomBase64Url(bytes);
 }
