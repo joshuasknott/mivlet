@@ -28,6 +28,7 @@ import { registeredToolSpecs } from "./tools";
 import { lookupTool } from "./tools";
 import type { HttpTransport } from "./transport";
 import { classifyBackendError } from "../agent-runtime/utils/errors";
+import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
 
 type FinishReason = "stop" | "tool-calls" | "length" | "error";
 
@@ -66,31 +67,24 @@ export const MAX_TOOL_ARGUMENT_CHARACTERS = 64_000;
 export const MAX_TOOL_OUTPUT_CHARACTERS = 64_000;
 export const MAX_TOOL_CALLS_PER_RUN = 32;
 
-/** Permission rank so a stricter mode forbids tools requiring a looser one. */
-const PERMISSION_RANK: Record<PermissionMode, number> = {
-  "read-only": 0,
-  "trusted-scope": 1,
-  "full-access": 2
-};
-
-/**
- * Does the current permission mode allow a tool whose approval requires the
- * given mode? A read-only run forbids full-access tools (write/shell); a
- * full-access run allows everything.
- */
-function modeAllows(running: PermissionMode, required: PermissionMode): boolean {
-  return PERMISSION_RANK[running] >= PERMISSION_RANK[required];
-}
-
 /** Wrap the executor so the permission mode gates tool dispatch before approval. */
 function permissionGatedExecutor(
   execute: ToolExecutor,
   permissionMode: PermissionMode
 ): ToolExecutor {
   return async (approval, args) => {
-    if (!modeAllows(permissionMode, approval.mode)) {
+    const toolName = approval.action.split(/\s+/)[0];
+    const effect = effectForTool(toolName);
+    const decision = effect
+      ? evaluatePermissionPolicy({
+          mode: permissionMode,
+          effect,
+          riskLevel: approval.riskLevel
+        })
+      : null;
+    if (!decision?.allowed) {
       throw new Error(
-        `Permission denied: ${permissionMode} mode forbids ${approval.mode} tool (${approval.action}).`
+        `Permission denied: ${permissionMode} profile forbids ${approval.action}. ${decision?.reason ?? "Unknown tool effect."}`
       );
     }
     return execute(approval, args);

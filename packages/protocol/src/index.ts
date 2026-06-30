@@ -1,4 +1,5 @@
 export type PermissionMode = "read-only" | "trusted-scope" | "full-access";
+export type PermissionProfileId = "read-only" | "trusted" | "full-with-approvals";
 
 export type ApprovalDecision = "once" | "session" | "rule" | "modify" | "deny";
 export type ApprovalRiskLevel = "low" | "medium" | "high" | "critical";
@@ -9,6 +10,7 @@ export interface ApprovalRequest {
   service: string;
   action: string;
   mode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
   riskLevel: ApprovalRiskLevel;
   dataUsed: string[];
   consequence: string;
@@ -19,6 +21,7 @@ export interface ApprovalRequest {
 
 export interface ApprovalModification {
   mode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
   dataUsed: string[];
   consequence: string;
 }
@@ -30,6 +33,7 @@ export interface ApprovalGrant {
   service: string;
   action: string;
   mode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
   dataUsed: string[];
   createdAt: string;
 }
@@ -463,6 +467,8 @@ export interface ConnectorActionRequest {
   connectorId: FirstWaveConnectorId;
   action: ConnectorActionKind;
   payload: Record<string, string>;
+  permissionMode?: PermissionMode;
+  permissionProfile?: PermissionProfileId;
   approval: ApprovalRequest;
 }
 
@@ -1357,6 +1363,7 @@ export interface RuntimeSnapshot {
    * approvals (read-only suppresses write/shell tool calls, etc.).
    */
   permissionMode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
   savedAt: string;
 }
 
@@ -1426,6 +1433,7 @@ export interface ScheduledExecutionRoute {
   backendId: string;
   modelId: string;
   permissionMode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
 }
 
 /**

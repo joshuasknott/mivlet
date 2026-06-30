@@ -871,6 +871,17 @@ pub(crate) fn validate_connector_execution_request(
             false,
         ));
     }
+    let route_mode = action
+        .permission_mode
+        .as_deref()
+        .unwrap_or(action.approval.mode.as_str());
+    crate::permission_policy::ensure_permission_allowed(
+        route_mode,
+        action.permission_profile.as_deref(),
+        "connector-write",
+        &action.approval.risk_level,
+    )
+    .map_err(|message| command_error("approval-required", &action.connector_id, &message, false))?;
     let resolution = resolve_approval(request.approval).map_err(|_| {
         command_error(
             "approval-required",
@@ -944,6 +955,17 @@ pub(crate) fn validate_connector_action(
             false,
         ));
     }
+    let route_mode = request
+        .permission_mode
+        .as_deref()
+        .unwrap_or(request.approval.mode.as_str());
+    crate::permission_policy::ensure_permission_allowed(
+        route_mode,
+        request.permission_profile.as_deref(),
+        "connector-write",
+        request.approval.risk_level.as_str(),
+    )
+    .map_err(|message| command_error("approval-required", entry.id, &message, false))?;
     Ok(request)
 }
 

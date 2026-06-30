@@ -24,6 +24,7 @@
 import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@fable/protocol";
 import { lookupTool } from "./tools";
 import type { ToolExecutor } from "./agent-loop";
+import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
 
 /** The outcome of an approval gate check for a tool call. */
 export type DecisionResult = "granted" | "denied";
@@ -240,6 +241,8 @@ export interface CreateToolExecutorOptions {
   runtime: ToolRuntime;
   /** The approval gate the executor awaits before running any tool. Required. */
   gate: ApprovalGate;
+  /** Active permission profile for this executor. Defaults to full with approvals. */
+  permissionMode?: PermissionMode;
 }
 
 /**
@@ -249,13 +252,13 @@ export interface CreateToolExecutorOptions {
  * raw arguments, and resolves to a tool-result string the loop appends.
  */
 export function createToolExecutor(options: CreateToolExecutorOptions): ToolExecutor {
-  const { runtime, gate } = options;
+  const { runtime, gate, permissionMode = "full-access" } = options;
   return async (approval, args) => {
     const decision = await gate.waitForDecision(approval);
     if (decision !== "granted") {
       throw new Error(`Tool call denied: ${approval.action}.`);
     }
-    return dispatch(approval, args, runtime);
+    return dispatch(approval, args, runtime, permissionMode);
   };
 }
 
@@ -263,13 +266,27 @@ export function createToolExecutor(options: CreateToolExecutorOptions): ToolExec
 async function dispatch(
   approval: ApprovalRequest,
   args: string,
-  runtime: ToolRuntime
+  runtime: ToolRuntime,
+  permissionMode: PermissionMode
 ): Promise<string> {
   // The tool name is the first whitespace-delimited token of the action, which
   // buildToolApproval shapes as "<tool-name> <args>". Registered tools dispatch
   // by name; anything else fails closed.
   const toolName = approval.action.split(/\s+/)[0];
   const tool = lookupTool(toolName);
+  const effect = effectForTool(toolName);
+  const policy = effect
+    ? evaluatePermissionPolicy({
+        mode: permissionMode,
+        effect,
+        riskLevel: approval.riskLevel
+      })
+    : null;
+  if (!policy?.allowed) {
+    throw new Error(
+      `Permission denied: ${permissionMode} profile forbids ${toolName}. ${policy?.reason ?? "Unknown tool effect."}`
+    );
+  }
   if (!tool) {
     throw new Error(`Unknown tool "${toolName}" — not in Fable's tool registry.`);
   }

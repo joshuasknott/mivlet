@@ -26,6 +26,7 @@ mod native_api;
 mod notifications;
 mod oauth_loopback;
 mod paths;
+mod permission_policy;
 mod remote_control;
 mod scheduler;
 mod snapshot;

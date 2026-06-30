@@ -553,8 +553,8 @@ describe("useNativeAgent", () => {
     );
 
     await act(async () => {
-      // "Confirm every action" maps to read-only — accepted + threaded into the run.
-      await result.current.run(baseRequest, undefined, "Confirm every action");
+      // Read-only is accepted and threaded into the run.
+      await result.current.run(baseRequest, undefined, "Read-only");
     });
 
     // The write-file tool call surfaced to the shell (read-only gates execution,

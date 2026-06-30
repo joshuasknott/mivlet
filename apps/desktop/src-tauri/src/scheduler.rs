@@ -134,12 +134,34 @@ fn normalize_route(route: ScheduledExecutionRoute) -> Result<ScheduledExecutionR
             "Execution route policy must be \"pinned\" or \"current-default\".".to_string(),
         );
     }
+    let permission_mode = normalize_spaces(&route.permission_mode);
+    let permission_profile = route
+        .permission_profile
+        .as_deref()
+        .map(normalize_spaces)
+        .filter(|profile| !profile.is_empty());
+    let (permission_mode, permission_profile) =
+        crate::permission_policy::normalize_permission_route(
+            &permission_mode,
+            permission_profile.as_deref(),
+        )?;
     Ok(ScheduledExecutionRoute {
         policy,
         backend_id: truncate_characters(&normalize_spaces(&route.backend_id), 160),
         model_id: truncate_characters(&normalize_spaces(&route.model_id), 160),
-        permission_mode: normalize_spaces(&route.permission_mode),
+        permission_mode,
+        permission_profile: Some(permission_profile),
     })
+}
+
+fn ensure_route_allows(route: &ScheduledExecutionRoute, effect: &str) -> Result<(), String> {
+    crate::permission_policy::ensure_permission_allowed(
+        &route.permission_mode,
+        route.permission_profile.as_deref(),
+        effect,
+        "medium",
+    )
+    .map(|_| ())
 }
 
 fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
@@ -154,7 +176,9 @@ fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
     job.last_run_at = normalize_spaces(&job.last_run_at);
     job.last_run_id = truncate_characters(&normalize_spaces(&job.last_run_id), 160);
     if let Some(route) = job.execution.take() {
-        job.execution = Some(normalize_route(route)?);
+        let route = normalize_route(route)?;
+        ensure_route_allows(&route, "schedule-mutation")?;
+        job.execution = Some(route);
     }
 
     if job.id.is_empty() || job.name.is_empty() || job.workflow_definition_id.is_empty() {
@@ -256,6 +280,7 @@ fn emit_run_request(app: &AppHandle, entry: &SchedulerQueueEntry) {
             "backendId": route.backend_id,
             "modelId": route.model_id,
             "permissionMode": route.permission_mode,
+            "permissionProfile": route.permission_profile,
         })
     });
     let _ = app.emit(
@@ -361,6 +386,11 @@ pub fn enqueue_job_run(
             .iter()
             .find(|job| job.id == job_id)
             .and_then(|job| job.execution.clone());
+        if let Some(route) = execution.as_ref() {
+            if ensure_route_allows(route, "schedule-execution").is_err() {
+                return;
+            }
+        }
         let entry = SchedulerQueueEntry {
             job_id: job_id.clone(),
             run_id: run_id.clone(),
@@ -739,7 +769,8 @@ mod tests {
             policy: "pinned".to_string(),
             backend_id: "openai".to_string(),
             model_id: "gpt-4".to_string(),
-            permission_mode: "read-only".to_string(),
+            permission_mode: "trusted-scope".to_string(),
+            permission_profile: Some("trusted".to_string()),
         });
         store.jobs.push(job);
         store
@@ -781,7 +812,21 @@ mod tests {
             policy: "loose".to_string(),
             backend_id: "openai".to_string(),
             model_id: "gpt-4".to_string(),
+            permission_mode: "trusted-scope".to_string(),
+            permission_profile: Some("trusted".to_string()),
+        });
+        assert!(normalize_job(job).is_err());
+    }
+
+    #[test]
+    fn normalize_rejects_read_only_scheduled_execution_route() {
+        let mut job = sample_job("j", "active");
+        job.execution = Some(ScheduledExecutionRoute {
+            policy: "pinned".to_string(),
+            backend_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
             permission_mode: "read-only".to_string(),
+            permission_profile: Some("read-only".to_string()),
         });
         assert!(normalize_job(job).is_err());
     }

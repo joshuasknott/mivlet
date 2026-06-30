@@ -161,6 +161,8 @@ fn connector_action(action: &str, connector_id: &str, service: &str) -> Connecto
         connector_id: connector_id.to_string(),
         action: action.to_string(),
         payload: BTreeMap::from([("targetId".to_string(), "fixture-target".to_string())]),
+        permission_mode: Some(mode.to_string()),
+        permission_profile: crate::permission_policy::profile_for_mode(mode).map(str::to_string),
         approval: ApprovalRequest {
             id,
             service: service.to_string(),
@@ -200,6 +202,17 @@ fn rejects_connector_actions_with_downgraded_approval_risk() {
     let error =
         validate_connector_action(action).expect_err("high-risk policy must be runtime-owned");
     assert_eq!(error.code, "invalid-request");
+}
+
+#[test]
+fn rejects_connector_writes_when_workspace_profile_is_read_only() {
+    let mut action = connector_action("gmail.send", "gmail", "Gmail");
+    action.permission_mode = Some("read-only".to_string());
+    action.permission_profile = Some("read-only".to_string());
+
+    let error =
+        validate_connector_action(action).expect_err("read-only must block connector writes");
+    assert_eq!(error.code, "approval-required");
 }
 
 #[test]

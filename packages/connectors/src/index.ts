@@ -21,6 +21,16 @@ export {
 } from "./local-files";
 export type { LocalTextFileCandidate } from "./local-files";
 export { searchKnowledgeSources } from "./knowledge-search";
+export {
+  effectForTool,
+  evaluatePermissionPolicy,
+  normalizePermissionProfile,
+  permissionModeForProfile,
+  permissionProfileForMode,
+  type PermissionEffect,
+  type PermissionPolicyDecision,
+  type PermissionPolicyInput
+} from "./permission-policy";
 
 // data (preview/demo fixtures)
 export {

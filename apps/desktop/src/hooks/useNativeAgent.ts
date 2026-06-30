@@ -475,7 +475,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           maxTokens: 2_048
         },
         undefined,
-        "Confirm every action",
+        "Read-only",
         runToRetry.id
       );
     },

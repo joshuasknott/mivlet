@@ -124,15 +124,15 @@ describe("buildAgentRequest", () => {
 
 describe("permission profile mapping", () => {
   it("maps each UI label to its PermissionMode", () => {
-    expect(permissionModeFor("Full access")).toBe("full-access");
-    expect(permissionModeFor("Standard access")).toBe("trusted-scope");
-    expect(permissionModeFor("Confirm every action")).toBe("read-only");
+    expect(permissionModeFor("Full with approvals")).toBe("full-access");
+    expect(permissionModeFor("Trusted")).toBe("trusted-scope");
+    expect(permissionModeFor("Read-only")).toBe("read-only");
   });
 
   it("round-trips the default label back from a PermissionMode", () => {
-    expect(permissionLabelFor("full-access")).toBe("Full access");
-    expect(permissionLabelFor("trusted-scope")).toBe("Standard access");
-    expect(permissionLabelFor("read-only")).toBe("Confirm every action");
+    expect(permissionLabelFor("full-access")).toBe("Full with approvals");
+    expect(permissionLabelFor("trusted-scope")).toBe("Trusted");
+    expect(permissionLabelFor("read-only")).toBe("Read-only");
   });
 });
 

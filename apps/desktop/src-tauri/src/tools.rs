@@ -228,6 +228,14 @@ pub(crate) fn validate_tool_approval_binding(
             "Tool {tool} approval does not match its required permission policy."
         ));
     }
+    let effect = crate::permission_policy::effect_for_tool(tool)
+        .ok_or_else(|| format!("Tool {tool} has no permission effect."))?;
+    crate::permission_policy::ensure_permission_allowed(
+        &approval.mode,
+        None,
+        effect,
+        &approval.risk_level,
+    )?;
     if approval.action.split_whitespace().next() != Some(tool) {
         return Err(format!(
             "Tool {tool} approval is bound to a different action."

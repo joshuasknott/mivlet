@@ -26,7 +26,8 @@ describe("captureExecutionRoute", () => {
       policy: "pinned",
       backendId: "openai",
       modelId: "model-a",
-      permissionMode: PM
+      permissionMode: PM,
+      permissionProfile: "read-only"
     });
   });
 
@@ -53,13 +54,12 @@ describe("resolveExecutionRoute", () => {
     expect(resolved?.fellBack).toBe(false);
   });
 
-  it("falls back to the default backend when the pinned one is gone", () => {
+  it("fails closed when the pinned backend is gone", () => {
     const resolved = resolveExecutionRoute(
       { policy: "pinned", backendId: "anthropic", modelId: "claude", permissionMode: PM },
       provider("openai")
     );
-    expect(resolved?.backend.id).toBe("openai");
-    expect(resolved?.fellBack).toBe(true);
+    expect(resolved).toBeNull();
   });
 
   it("returns null when no backend is connected", () => {
