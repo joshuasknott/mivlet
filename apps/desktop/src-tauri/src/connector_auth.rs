@@ -30,9 +30,12 @@ const OAUTH_PENDING_MAX_AGE_SECONDS: u64 = 5 * 60;
 #[derive(Clone, Debug)]
 pub(crate) struct OAuthProviderConfig {
     pub authorization_endpoint: String,
-    pub token_endpoint: String,
+    /// Public PKCE: the provider's token endpoint. Brokered: `None`.
+    pub token_endpoint: Option<String>,
     pub revocation_endpoint: Option<String>,
     pub userinfo_endpoint: Option<String>,
+    /// Confidential broker handoff endpoint. `None` for public PKCE.
+    pub handoff_endpoint: Option<String>,
     pub client_id: String,
     pub scopes: Vec<String>,
     pub brokered: bool,
@@ -44,9 +47,16 @@ struct PendingOAuth {
     state: String,
     verifier: String,
     redirect_uri: String,
-    token_endpoint: String,
+    /// Provider (public PKCE) or broker (confidential) token endpoint. For a
+    /// brokered connector this is `None`: the desktop never POSTs a token code
+    /// to the broker (the broker has no `/token` route); it redeems the handoff
+    /// at {@link PendingOAuth::handoff_endpoint} instead.
+    token_endpoint: Option<String>,
     revocation_endpoint: Option<String>,
     userinfo_endpoint: Option<String>,
+    /// Confidential broker handoff redemption endpoint. `None` for public PKCE.
+    /// Stored so completion does not have to re-derive it from the env var.
+    handoff_endpoint: Option<String>,
     client_id: String,
     scopes: Vec<String>,
     brokered: bool,
@@ -62,7 +72,15 @@ pub(crate) struct StoredTokenSet {
     pub expires_at: Option<u64>,
     pub scopes: Vec<String>,
     pub revocation_endpoint: Option<String>,
-    pub token_endpoint: String,
+    /// Public PKCE: the provider's token endpoint (used for refresh). Brokered:
+    /// `None` — the desktop rotates through the broker refresh endpoint instead.
+    #[serde(default)]
+    pub token_endpoint: Option<String>,
+    /// Confidential broker handoff endpoint, persisted so a later refresh or
+    /// revoke can derive its sibling routes without re-reading the env var.
+    /// `None` for public PKCE connectors.
+    #[serde(default)]
+    pub handoff_endpoint: Option<String>,
     pub client_id: String,
     pub brokered: bool,
 }
@@ -174,8 +192,8 @@ fn now_epoch() -> u64 {
 
 /// Resolve and validate the configured auth broker for a confidential-client
 /// provider. The broker exists ONLY for confidential-client OAuth: it owns the
-/// provider client secret and performs authorization, token exchange/refresh,
-/// identity, and revocation. It never proxies model calls, connector searches,
+/// provider client secret and performs authorization, handoff redemption, token
+/// refresh, and revocation. It never proxies model calls, connector searches,
 /// connector imports, or connector actions — those go directly from the desktop
 /// to the provider API after native token resolution.
 ///
@@ -185,8 +203,15 @@ fn now_epoch() -> u64 {
 ///
 /// `broker_url` is passed in (rather than read from the environment inline) so
 /// the fail-closed checks are unit-testable without env-var races across the
-/// parallel test process. Only the four OAuth paths are derived from the base
-/// URL, so this module can never surface a model/search/import/action endpoint.
+/// parallel test process. Only the four OAuth paths the broker actually serves
+/// are derived from the base URL, so this module can never surface a
+/// model/search/import/action endpoint.
+///
+/// The base URL may be a bare host (`https://auth.fable.app`) or carry a path
+/// prefix (`https://app.example.com/broker/`) — common for a broker mounted at a
+/// route, including a Cloudflare Workers deployment exposed behind a path. A
+/// trailing slash is optional; the route is built by extending the base path so
+/// the prefix is always preserved.
 pub(crate) fn resolve_broker_endpoints(
     connector_id: &str,
     broker_url: Option<&str>,
@@ -219,36 +244,55 @@ pub(crate) fn resolve_broker_endpoints(
             false,
         ));
     }
-    let route = |suffix: &str| -> Result<String, ConnectorCommandError> {
-        broker
-            .join(suffix)
-            .map_err(|_| {
-                command_error(
-                    "configuration-required",
-                    connector_id,
-                    "Auth broker route is invalid.",
-                    false,
-                )
-            })
-            .map(|url| url.to_string())
-    };
     Ok(BrokerEndpoints {
-        authorization_endpoint: route(&format!("oauth/{connector_id}/authorize"))?,
-        token_endpoint: route(&format!("oauth/{connector_id}/token"))?,
-        identity_endpoint: route(&format!("oauth/{connector_id}/identity"))?,
-        revocation_endpoint: route(&format!("oauth/{connector_id}/revoke"))?,
+        authorization_endpoint: broker_route(&broker, connector_id, "authorize")?,
+        handoff_endpoint: broker_route(&broker, connector_id, "handoff")?,
+        refresh_endpoint: broker_route(&broker, connector_id, "refresh")?,
+        revocation_endpoint: broker_route(&broker, connector_id, "revoke")?,
     })
 }
 
-/// The narrow, exhaustive OAuth surface the auth broker implements. The broker
-/// has no model, search, import, or action endpoint; those never derive from the
-/// broker base URL. Keeping this as a dedicated, closed type makes the
-/// non-proxying boundary explicit and testable.
+/// Build a single broker OAuth route by extending the broker base path. The base
+/// path keeps any prefix (e.g. `/broker/`) so a route-mounted broker — including
+/// a Cloudflare Worker behind a path — resolves correctly with or without a
+/// trailing slash. The closed vocabulary of segments is enforced at the call
+/// sites; nothing here can invent a non-OAuth route.
+fn broker_route(
+    broker: &Url,
+    connector_id: &str,
+    segment: &str,
+) -> Result<String, ConnectorCommandError> {
+    let base_path = broker.path().trim_end_matches('/');
+    let mut url = broker.clone();
+    url.set_path(&format!("{base_path}/oauth/{connector_id}/{segment}"));
+    url.set_query(None);
+    url.set_fragment(None);
+    // `Url::set_path` rejects cannot-be-a-base URLs, but those were already
+    // rejected as a malformed broker URL above. Treat any residual failure as a
+    // configuration error so the desktop never falls back to a guessed route.
+    if url.path().ends_with(segment) {
+        Ok(url.to_string())
+    } else {
+        Err(command_error(
+            "configuration-required",
+            connector_id,
+            "Auth broker route is invalid.",
+            false,
+        ))
+    }
+}
+
+/// The narrow, exhaustive OAuth surface the auth broker implements. These are
+/// exactly the routes the broker serves: `authorize`, `handoff`, `refresh`, and
+/// `revoke`. There is no `token` and no `identity` route, and no model, search,
+/// import, or action endpoint ever derives from the broker base URL. Keeping
+/// this as a dedicated, closed type makes the non-proxying boundary explicit
+/// and testable.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct BrokerEndpoints {
     pub authorization_endpoint: String,
-    pub token_endpoint: String,
-    pub identity_endpoint: String,
+    pub handoff_endpoint: String,
+    pub refresh_endpoint: String,
     pub revocation_endpoint: String,
 }
 
@@ -290,9 +334,10 @@ fn provider_config(
         }));
         return Ok(OAuthProviderConfig {
             authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
-            token_endpoint: "https://oauth2.googleapis.com/token".to_string(),
+            token_endpoint: Some("https://oauth2.googleapis.com/token".to_string()),
             revocation_endpoint: Some("https://oauth2.googleapis.com/revoke".to_string()),
             userinfo_endpoint: Some("https://openidconnect.googleapis.com/v1/userinfo".to_string()),
+            handoff_endpoint: None,
             client_id,
             scopes: provider_scopes,
             brokered: false,
@@ -303,9 +348,13 @@ fn provider_config(
     let endpoints = resolve_broker_endpoints(connector_id, broker_url.as_deref())?;
     Ok(OAuthProviderConfig {
         authorization_endpoint: endpoints.authorization_endpoint,
-        token_endpoint: endpoints.token_endpoint,
+        // The broker has no `/token` route; the desktop never posts a code to it.
+        token_endpoint: None,
         revocation_endpoint: Some(endpoints.revocation_endpoint),
-        userinfo_endpoint: Some(endpoints.identity_endpoint),
+        // The broker has no `/identity` route; the handoff response carries the
+        // resolved account, so no userinfo fallback is needed.
+        userinfo_endpoint: None,
+        handoff_endpoint: Some(endpoints.handoff_endpoint),
         client_id: "fable-desktop".to_string(),
         scopes,
         brokered: true,
@@ -373,6 +422,7 @@ fn start_with_store(
         token_endpoint: config.token_endpoint,
         revocation_endpoint: config.revocation_endpoint,
         userinfo_endpoint: config.userinfo_endpoint,
+        handoff_endpoint: config.handoff_endpoint,
         client_id: config.client_id,
         scopes: config.scopes,
         brokered: config.brokered,
@@ -421,58 +471,47 @@ struct HandoffResponse {
     account: Option<ConnectorAccountSummary>,
 }
 
-/// Derive a sibling broker OAuth endpoint from the stored token endpoint by
-/// swapping the final `token` path segment for `segment`. The broker derives its
-/// OAuth routes from a single base URL, so the handoff/refresh/revoke paths are
-/// always siblings of the token path. A malformed endpoint fails closed.
-fn broker_sibling_endpoint(
-    token_endpoint: &str,
-    segment: &str,
-) -> Result<String, ConnectorCommandError> {
-    let parsed = Url::parse(token_endpoint).map_err(|_| {
+/// Derive a broker OAuth endpoint (other than the stored one) from the stored
+/// endpoint by replacing its final path segment. Used when only the handoff (or
+/// refresh) endpoint is persisted but a sibling route — refresh or revoke — is
+/// needed for token rotation or disconnect. A malformed endpoint fails closed
+/// rather than guessing a route.
+fn broker_sibling_endpoint(endpoint: &str, segment: &str) -> Result<String, ConnectorCommandError> {
+    let mut url = Url::parse(endpoint).map_err(|_| {
         command_error(
             "configuration-required",
             "oauth",
-            "The configured broker token endpoint is invalid.",
+            "The configured broker endpoint is invalid.",
             false,
         )
     })?;
-    // Collect owned path segments so we can mutate and rebuild without borrowing
-    // `parsed` (which we need to move for the final URL).
-    let mut segments: Vec<String> = parsed
+    let mut segments: Vec<String> = url
         .path_segments()
         .map(|parts| parts.map(str::to_string).collect())
         .unwrap_or_default();
-    match segments.last().map(|value| value.as_str()) {
-        Some("token") => {
-            let len = segments.len();
-            segments[len - 1] = segment.to_string();
-        }
-        _ => segments.push(segment.to_string()),
+    if segments.last().is_some() {
+        let len = segments.len();
+        segments[len - 1] = segment.to_string();
+        url.path_segments_mut()
+            .map_err(|_| {
+                command_error(
+                    "configuration-required",
+                    "oauth",
+                    "The configured broker endpoint cannot be resolved.",
+                    false,
+                )
+            })?
+            .clear()
+            .extend(segments.iter().map(|value| value.as_str()));
+        Ok(url.to_string())
+    } else {
+        Err(command_error(
+            "configuration-required",
+            "oauth",
+            "The configured broker endpoint cannot be resolved.",
+            false,
+        ))
     }
-    let mut url = parsed;
-    url.path_segments_mut()
-        .map_err(|_| {
-            command_error(
-                "configuration-required",
-                "oauth",
-                "The configured broker token endpoint cannot be resolved.",
-                false,
-            )
-        })?
-        .clear()
-        .extend(segments.iter().map(|value| value.as_str()));
-    Ok(url.to_string())
-}
-
-/// Derive the broker handoff endpoint (sibling of the token endpoint).
-fn broker_handoff_endpoint(token_endpoint: &str) -> Result<String, ConnectorCommandError> {
-    broker_sibling_endpoint(token_endpoint, "handoff")
-}
-
-/// Derive the broker refresh endpoint (sibling of the token endpoint).
-fn broker_refresh_endpoint(token_endpoint: &str) -> Result<String, ConnectorCommandError> {
-    broker_sibling_endpoint(token_endpoint, "refresh")
 }
 
 /// Mark the matching connection expired, persist the full list, and surface the
@@ -500,9 +539,133 @@ fn refresh_rejected(
     ))
 }
 
+/// The redacted error shape every broker route emits on failure (mirrors
+/// `BrokerErrorResponse` in `packages/connectors/.../broker-contract.ts`). Only
+/// the fields the desktop needs to normalize are parsed; the body is never
+/// surfaced verbatim so a malformed or hostile message cannot leak.
+#[derive(Deserialize)]
+struct BrokerErrorBody {
+    error: Option<String>,
+    message: Option<String>,
+    retryable: Option<bool>,
+}
+
+/// Normalize a failed broker response into a structured connector error. The
+/// broker emits a redacted `{ error, message, retryable }` body; we map its
+/// error code onto the desktop's `ConnectorErrorCode` vocabulary and surface its
+/// human-safe `message`. Anything we cannot parse becomes a retryable
+/// `provider-unavailable` so an intermittent/unreachable broker stays
+/// recoverable and understandable rather than failing silently or permanently.
+async fn broker_error_from_response(
+    connector_id: &str,
+    operation: &str,
+    response: reqwest::Response,
+) -> ConnectorCommandError {
+    let status = response.status().as_u16();
+    let retry_after = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    let body: Option<BrokerErrorBody> = response.json().await.ok();
+    let code = body.as_ref().and_then(|body| body.error.as_deref());
+    let message = body
+        .as_ref()
+        .and_then(|body| body.message.as_deref())
+        .filter(|message| !message.trim().is_empty())
+        .map(|message| message.to_string());
+    let broker_retryable = body.as_ref().and_then(|body| body.retryable);
+    broker_error(
+        connector_id,
+        operation,
+        code,
+        message,
+        broker_retryable,
+        status,
+        retry_after,
+    )
+}
+
+/// Map a broker error code + status to a `ConnectorCommandError`. Factored out
+/// of {@link broker_error_from_response} so unit tests can pin the mapping
+/// without an HTTP round-trip.
+fn broker_error(
+    connector_id: &str,
+    operation: &str,
+    code: Option<&str>,
+    message: Option<String>,
+    broker_retryable: Option<bool>,
+    status: u16,
+    retry_after: Option<String>,
+) -> ConnectorCommandError {
+    let default_message = format!("The Fable auth broker {operation} was unsuccessful.");
+    let human = message.unwrap_or_else(|| default_message.clone());
+    let retry_after = if retry_after.as_deref().is_some_and(|value| value.trim().is_empty()) {
+        None
+    } else {
+        retry_after
+    };
+    match code {
+        // The broker is not configured for this provider. Not retryable as-is:
+        // the operator must set it up before the user can connect.
+        Some("configuration-required") => {
+            command_error("configuration-required", connector_id, &human, false)
+        }
+        // Throttled. Retryable; honor the broker's Retry-After when present.
+        Some("rate-limited") => ConnectorCommandError {
+            code: "rate-limited".to_string(),
+            connector_id: connector_id.to_string(),
+            message: human,
+            retryable: true,
+            retry_after,
+        },
+        // A provider outage upstream of the broker. Retryable.
+        Some("provider-unavailable") => {
+            command_error("provider-unavailable", connector_id, &human, true)
+        }
+        // Version drift, an invalid/expired/substituted handoff or state, or a
+        // malformed request: the transaction is no longer usable, so the user
+        // must reconnect (needs-auth). Not retryable.
+        Some("unsupported-version")
+        | Some("invalid-handoff")
+        | Some("expired-handoff")
+        | Some("invalid-state")
+        | Some("invalid-request")
+        | Some("unknown-provider")
+        | Some("needs-auth") => command_error("needs-auth", connector_id, &human, false),
+        // No recognized code: classify by HTTP status so an unconfigured broker
+        // (503) is honest and recoverable, while a malformed body still fails
+        // closed without pretending success.
+        None => match status {
+            502 | 503 | 504 => command_error("provider-unavailable", connector_id, &default_message, true),
+            429 => ConnectorCommandError {
+                code: "rate-limited".to_string(),
+                connector_id: connector_id.to_string(),
+                message: default_message,
+                retryable: true,
+                retry_after,
+            },
+            _ if broker_retryable.unwrap_or(false) => {
+                command_error("provider-unavailable", connector_id, &default_message, true)
+            }
+            _ => command_error("needs-auth", connector_id, &default_message, false),
+        },
+        // Unknown code: fall back to the broker's own retryability hint, if any,
+        // otherwise treat as a non-retryable auth failure (fail closed).
+        Some(_) => {
+            if broker_retryable.unwrap_or(false) {
+                command_error("provider-unavailable", connector_id, &default_message, true)
+            } else {
+                command_error("needs-auth", connector_id, &default_message, false)
+            }
+        }
+    }
+}
+
 /// Redeem a single-use broker handoff ticket for the token set + account. The
 /// ticket is bound to the desktop state and single-use, so a replayed or
-/// substituted handoff is rejected by the broker.
+/// substituted handoff is rejected by the broker. Broker errors are normalized
+/// to structured, recoverable connector codes via {@link broker_error_from_response}.
 async fn redeem_handoff(
     connector_id: &str,
     handoff_endpoint: &str,
@@ -523,23 +686,18 @@ async fn redeem_handoff(
             command_error(
                 "provider-unavailable",
                 connector_id,
-                "OAuth handoff redemption failed.",
+                "The Fable auth broker could not be reached.",
                 true,
             )
         })?;
     if !response.status().is_success() {
-        return Err(command_error(
-            "needs-auth",
-            connector_id,
-            "OAuth handoff redemption was rejected.",
-            false,
-        ));
+        return Err(broker_error_from_response(connector_id, "handoff", response).await);
     }
     let handoff_response: HandoffResponse = response.json().await.map_err(|_| {
         command_error(
             "provider-unavailable",
             connector_id,
-            "OAuth handoff response was invalid.",
+            "The Fable auth broker handoff response was invalid.",
             true,
         )
     })?;
@@ -668,9 +826,18 @@ async fn complete_with_store(
         // Confidential broker flow: the broker already performed the secret-bound
         // exchange and minted a single-use handoff bound to this state. Redeem it
         // directly (not in the browser) so the token set crosses only to the
-        // desktop. The handoff endpoint is the broker's token path with the final
-        // segment swapped from `token` to `handoff`.
-        let handoff_endpoint = broker_handoff_endpoint(&pending.token_endpoint)?;
+        // desktop. The handoff endpoint is the exact broker route derived from the
+        // configured base URL (see {@link resolve_broker_endpoints}); it is not
+        // re-derived at completion, so a stale config change mid-flight fails
+        // closed rather than guessing a route.
+        let handoff_endpoint = pending.handoff_endpoint.clone().ok_or_else(|| {
+            command_error(
+                "configuration-required",
+                connector_id,
+                "This provider requires the configured Fable auth broker.",
+                false,
+            )
+        })?;
         redeem_handoff(
             connector_id,
             &handoff_endpoint,
@@ -682,8 +849,16 @@ async fn complete_with_store(
         let code_value = code.expect("validated above: code or handoff present");
         // Public PKCE flow: exchange the authorization code directly with the
         // provider using the stored verifier.
+        let token_endpoint = pending.token_endpoint.clone().ok_or_else(|| {
+            command_error(
+                "configuration-required",
+                connector_id,
+                "Provider token endpoint is required.",
+                false,
+            )
+        })?;
         let response = reqwest::Client::new()
-            .post(&pending.token_endpoint)
+            .post(&token_endpoint)
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("code", &code_value),
@@ -718,9 +893,22 @@ async fn complete_with_store(
             )
         })?
     };
-    let account = match response.account {
-        Some(account) => account,
-        None => {
+    // The broker contract always returns the resolved account in the handoff
+    // response, and the broker has no `/identity` route. So for a brokered
+    // connector a missing account is an honest, retryable provider-unavailable
+    // failure — never a reason to hit a non-existent endpoint. Public PKCE
+    // connectors fall back to the provider's userinfo endpoint as before.
+    let account = match (pending.brokered, response.account) {
+        (_, Some(account)) => account,
+        (true, None) => {
+            return Err(command_error(
+                "provider-unavailable",
+                connector_id,
+                "The auth broker did not return the connected account.",
+                true,
+            ));
+        }
+        (false, None) => {
             fetch_identity(
                 connector_id,
                 pending.userinfo_endpoint.as_deref(),
@@ -756,6 +944,7 @@ async fn complete_with_store(
         scopes: granted_scopes,
         revocation_endpoint: pending.revocation_endpoint,
         token_endpoint: pending.token_endpoint,
+        handoff_endpoint: pending.handoff_endpoint,
         client_id: pending.client_id,
         brokered: pending.brokered,
     };
@@ -1254,9 +1443,19 @@ pub(crate) async fn refresh_connection(
     crate::ensure_rustls_provider();
     let refreshed: TokenResponse = if tokens.brokered {
         // Confidential broker flow: rotate through the broker's refresh endpoint,
-        // which alone holds the client secret. The broker returns tokens nested
-        // under `tokens`; flatten onto TokenResponse.
-        let refresh_endpoint = broker_refresh_endpoint(&tokens.token_endpoint)?;
+        // which alone holds the client secret. The refresh endpoint is a sibling
+        // of the stored handoff endpoint (both derive from the same broker base),
+        // so it is derived here rather than re-read from the env var. The broker
+        // returns tokens nested under `tokens`; flatten onto TokenResponse.
+        let handoff_endpoint = tokens.handoff_endpoint.clone().ok_or_else(|| {
+            command_error(
+                "configuration-required",
+                connector_id,
+                "This provider requires the configured Fable auth broker.",
+                false,
+            )
+        })?;
+        let refresh_endpoint = broker_sibling_endpoint(&handoff_endpoint, "refresh")?;
         let response = reqwest::Client::new()
             .post(&refresh_endpoint)
             .json(&serde_json::json!({
@@ -1270,23 +1469,32 @@ pub(crate) async fn refresh_connection(
                 command_error(
                     "provider-unavailable",
                     connector_id,
-                    "Token refresh failed.",
+                    "The Fable auth broker could not be reached.",
                     true,
                 )
             })?;
         if !response.status().is_success() {
-            return refresh_rejected(
-                connector_id,
-                &connection.account.id,
-                &path,
-                &mut connections,
-            );
+            let error = broker_error_from_response(connector_id, "refresh", response).await;
+            // A definitive auth failure (revoked/invalid token) expires the
+            // connection so the user reconnects. A transient broker outage
+            // (provider-unavailable / rate-limited) is surfaced as-is so a
+            // temporary broker problem does not permanently disconnect an
+            // otherwise-valid account.
+            if error.code == "needs-auth" || error.code == "configuration-required" {
+                return refresh_rejected(
+                    connector_id,
+                    &connection.account.id,
+                    &path,
+                    &mut connections,
+                );
+            }
+            return Err(error);
         }
         let refreshed: HandoffResponse = response.json().await.map_err(|_| {
             command_error(
                 "provider-unavailable",
                 connector_id,
-                "Token refresh response was invalid.",
+                "The Fable auth broker refresh response was invalid.",
                 true,
             )
         })?;
@@ -1295,8 +1503,16 @@ pub(crate) async fn refresh_connection(
         tokens
     } else {
         // Public PKCE flow: rotate directly with the provider.
+        let token_endpoint = tokens.token_endpoint.clone().ok_or_else(|| {
+            command_error(
+                "configuration-required",
+                connector_id,
+                "Provider token endpoint is required.",
+                false,
+            )
+        })?;
         let response = reqwest::Client::new()
-            .post(&tokens.token_endpoint)
+            .post(&token_endpoint)
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token.as_str()),
@@ -1424,7 +1640,7 @@ pub(crate) async fn access_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -1450,12 +1666,29 @@ mod tests {
     fn fixture_config() -> OAuthProviderConfig {
         OAuthProviderConfig {
             authorization_endpoint: "https://provider.example/authorize".to_string(),
-            token_endpoint: "https://provider.example/token".to_string(),
+            token_endpoint: Some("https://provider.example/token".to_string()),
             revocation_endpoint: None,
             userinfo_endpoint: None,
+            handoff_endpoint: None,
             client_id: "desktop-client".to_string(),
             scopes: vec!["items.read".to_string()],
             brokered: false,
+        }
+    }
+
+    /// A brokered (confidential) provider config like the one `provider_config`
+    /// builds for GitHub/Notion/Slack/Linear/Vercel: the handoff endpoint is set
+    /// and there is no token/identity endpoint, because the broker serves none.
+    fn brokered_config(handoff_endpoint: &str) -> OAuthProviderConfig {
+        OAuthProviderConfig {
+            authorization_endpoint: "https://broker.example/oauth/github/authorize".to_string(),
+            token_endpoint: None,
+            revocation_endpoint: Some("https://broker.example/oauth/github/revoke".to_string()),
+            userinfo_endpoint: None,
+            handoff_endpoint: Some(handoff_endpoint.to_string()),
+            client_id: "fable-desktop".to_string(),
+            scopes: vec!["items.read".to_string()],
+            brokered: true,
         }
     }
 
@@ -1593,7 +1826,7 @@ mod tests {
         )
         .await;
         let mut config = fixture_config();
-        config.token_endpoint = token_endpoint;
+        config.token_endpoint = Some(token_endpoint);
         config.scopes = vec!["items.write".to_string()];
         let started =
             start_with_store("fixture", "http://127.0.0.1:43123/callback", config, &store).unwrap();
@@ -1611,7 +1844,8 @@ mod tests {
             expires_at: None,
             scopes: vec!["items.read".to_string()],
             revocation_endpoint: None,
-            token_endpoint: "https://example.invalid/token".to_string(),
+            token_endpoint: Some("https://example.invalid/token".to_string()),
+            handoff_endpoint: None,
             client_id: "desktop-client".to_string(),
             brokered: false,
         };
@@ -1716,13 +1950,19 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Auth broker fail-closed contract (confidential OAuth only).
+    // Auth broker endpoint resolution (confidential OAuth only).
     //
-    // The broker is deferred: it must be deployed before any confidential-client
-    // connector (GitHub, Vercel, Linear, Notion, Slack) can connect. Until then,
-    // `resolve_broker_endpoints` fails closed with `configuration-required`. It
-    // never silently falls back, and it never derives a model/search/import/
-    // action endpoint from the broker base URL — only the four OAuth paths.
+    // The broker serves exactly four OAuth routes: `authorize`, `handoff`,
+    // `refresh`, `revoke`. There is NO `/token` and NO `/identity` route. The
+    // desktop derives those four from the configured base URL only, so it can
+    // never surface a model/search/import/action endpoint. A missing, malformed,
+    // or non-secure (non-loopback http) base URL fails closed with
+    // `configuration-required` — never a silent fallback.
+    //
+    // The base URL may be a bare host (https://auth.fable.app), a Cloudflare
+    // Workers host (https://fable-broker.workers.dev), or a path-prefixed route
+    // (https://app.example.com/broker/). All resolve correctly with or without a
+    // trailing slash.
     // -------------------------------------------------------------------------
 
     #[test]
@@ -1749,7 +1989,9 @@ mod tests {
     }
 
     #[test]
-    fn broker_resolver_accepts_https_and_derives_only_oauth_paths() {
+    fn broker_resolver_derives_only_the_four_routes_the_broker_serves() {
+        // The desktop must match the broker contract exactly: authorize, handoff,
+        // refresh, revoke. No `/token`, no `/identity` (the broker has neither).
         let endpoints =
             resolve_broker_endpoints("github", Some("https://auth.fable.app/")).expect("https ok");
         assert_eq!(
@@ -1757,17 +1999,58 @@ mod tests {
             "https://auth.fable.app/oauth/github/authorize"
         );
         assert_eq!(
-            endpoints.token_endpoint,
-            "https://auth.fable.app/oauth/github/token"
+            endpoints.handoff_endpoint,
+            "https://auth.fable.app/oauth/github/handoff"
         );
         assert_eq!(
-            endpoints.identity_endpoint,
-            "https://auth.fable.app/oauth/github/identity"
+            endpoints.refresh_endpoint,
+            "https://auth.fable.app/oauth/github/refresh"
         );
         assert_eq!(
             endpoints.revocation_endpoint,
             "https://auth.fable.app/oauth/github/revoke"
         );
+        let serialized = serde_json::to_string(&endpoints).expect("serialize");
+        assert!(!serialized.contains("/token"));
+        assert!(!serialized.contains("/identity"));
+    }
+
+    #[test]
+    fn broker_resolver_accepts_a_cloudflare_workers_url() {
+        // A workers.dev host resolves the same four routes; no token/identity.
+        let endpoints =
+            resolve_broker_endpoints("linear", Some("https://fable-broker.example.workers.dev"))
+                .expect("workers.dev ok");
+        assert_eq!(
+            endpoints.handoff_endpoint,
+            "https://fable-broker.example.workers.dev/oauth/linear/handoff"
+        );
+        assert_eq!(
+            endpoints.refresh_endpoint,
+            "https://fable-broker.example.workers.dev/oauth/linear/refresh"
+        );
+    }
+
+    #[test]
+    fn broker_resolver_preserves_a_path_prefix_with_or_without_trailing_slash() {
+        // A broker mounted behind a route prefix (common for a CF Worker exposed
+        // under a path) must keep that prefix for every derived route.
+        let prefixed =
+            resolve_broker_endpoints("notion", Some("https://app.example.com/broker/"))
+                .expect("prefixed ok");
+        assert_eq!(
+            prefixed.handoff_endpoint,
+            "https://app.example.com/broker/oauth/notion/handoff"
+        );
+        assert_eq!(
+            prefixed.revocation_endpoint,
+            "https://app.example.com/broker/oauth/notion/revoke"
+        );
+        let no_slash =
+            resolve_broker_endpoints("notion", Some("https://app.example.com/broker"))
+                .expect("no trailing slash ok");
+        assert_eq!(no_slash.handoff_endpoint, prefixed.handoff_endpoint);
+        assert_eq!(no_slash.refresh_endpoint, prefixed.refresh_endpoint);
     }
 
     #[test]
@@ -1775,8 +2058,8 @@ mod tests {
         let endpoints = resolve_broker_endpoints("linear", Some("http://127.0.0.1:8788/"))
             .expect("loopback ok");
         assert_eq!(
-            endpoints.token_endpoint,
-            "http://127.0.0.1:8788/oauth/linear/token"
+            endpoints.handoff_endpoint,
+            "http://127.0.0.1:8788/oauth/linear/handoff"
         );
     }
 
@@ -1799,49 +2082,336 @@ mod tests {
     }
 
     // -------------------------------------------------------------------------
-    // Broker handoff / refresh / revoke endpoint derivation (confidential flow).
+    // Broker sibling-endpoint derivation (refresh/revoke from the stored handoff).
     //
-    // The desktop derives the broker handoff + refresh endpoints from the stored
-    // token endpoint by swapping the final `token` segment. A malformed endpoint
-    // fails closed; the desktop never guesses or invents a route.
+    // Only the handoff endpoint is persisted on a brokered connection; refresh
+    // and revoke are derived as siblings by replacing the final path segment.
+    // A malformed or path-less endpoint fails closed rather than guessing a route.
     // -------------------------------------------------------------------------
 
     #[test]
-    fn broker_handoff_and_refresh_endpoints_are_siblings_of_the_token_endpoint() {
-        let token = "https://auth.fable.app/oauth/github/token";
+    fn broker_refresh_and_revoke_are_siblings_of_the_stored_handoff_endpoint() {
+        let handoff = "https://auth.fable.app/oauth/github/handoff";
         assert_eq!(
-            broker_handoff_endpoint(token).unwrap(),
-            "https://auth.fable.app/oauth/github/handoff"
-        );
-        assert_eq!(
-            broker_refresh_endpoint(token).unwrap(),
+            broker_sibling_endpoint(handoff, "refresh").unwrap(),
             "https://auth.fable.app/oauth/github/refresh"
         );
-    }
-
-    #[test]
-    fn broker_handoff_endpoint_handles_a_loopback_dev_url_with_port() {
-        let token = "http://127.0.0.1:8788/oauth/linear/token";
         assert_eq!(
-            broker_handoff_endpoint(token).unwrap(),
-            "http://127.0.0.1:8788/oauth/linear/handoff"
+            broker_sibling_endpoint(handoff, "revoke").unwrap(),
+            "https://auth.fable.app/oauth/github/revoke"
         );
     }
 
     #[test]
-    fn broker_handoff_endpoint_fails_closed_for_a_non_token_path() {
-        // A token endpoint that does not end in `token` is treated as
-        // misconfigured for sibling derivation; the helper appends the segment
-        // rather than failing, but the canonical broker always ends in `token`,
-        // so a non-canonical endpoint still produces a derivable route.
-        let result =
-            broker_handoff_endpoint("https://auth.fable.app/oauth/github/exchange").unwrap();
-        assert!(result.ends_with("/exchange/handoff"));
+    fn broker_sibling_endpoint_preserves_a_path_prefix_and_loopback_port() {
+        assert_eq!(
+            broker_sibling_endpoint("https://app.example.com/broker/oauth/notion/handoff", "refresh")
+                .unwrap(),
+            "https://app.example.com/broker/oauth/notion/refresh"
+        );
+        assert_eq!(
+            broker_sibling_endpoint("http://127.0.0.1:8788/oauth/linear/handoff", "refresh")
+                .unwrap(),
+            "http://127.0.0.1:8788/oauth/linear/refresh"
+        );
     }
 
     #[test]
-    fn broker_handoff_endpoint_fails_closed_for_a_malformed_url() {
-        let error = broker_handoff_endpoint("not a url").expect_err("malformed");
+    fn broker_sibling_endpoint_fails_closed_for_a_malformed_url() {
+        let error = broker_sibling_endpoint("not a url", "refresh").expect_err("malformed");
         assert_eq!(error.code, "configuration-required");
+    }
+
+    // -------------------------------------------------------------------------
+    // Broker error normalization (unavailable ⇒ recoverable & understandable).
+    //
+    // The broker emits a redacted `{ error, message, retryable }` body on failure.
+    // The desktop maps it onto its own connector error vocabulary so a transient
+    // outage stays retryable, a throttled request honors Retry-After, and a
+    // definitive auth/version/handoff failure fails closed honestly. A body the
+    // desktop cannot parse is classified by HTTP status, never silently success.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn broker_error_maps_configuration_required_non_retryable() {
+        let error = broker_error(
+            "github",
+            "handoff",
+            Some("configuration-required"),
+            Some("Broker is not configured.".to_string()),
+            Some(false),
+            503,
+            None,
+        );
+        assert_eq!(error.code, "configuration-required");
+        assert!(!error.retryable);
+        assert_eq!(error.message, "Broker is not configured.");
+    }
+
+    #[test]
+    fn broker_error_maps_rate_limited_retryable_with_retry_after() {
+        let error = broker_error(
+            "github",
+            "handoff",
+            Some("rate-limited"),
+            None,
+            Some(true),
+            429,
+            Some("30".to_string()),
+        );
+        assert_eq!(error.code, "rate-limited");
+        assert!(error.retryable);
+        assert_eq!(error.retry_after.as_deref(), Some("30"));
+    }
+
+    #[test]
+    fn broker_error_maps_provider_unavailable_retryable() {
+        let error = broker_error(
+            "slack",
+            "refresh",
+            Some("provider-unavailable"),
+            None,
+            Some(true),
+            502,
+            None,
+        );
+        assert_eq!(error.code, "provider-unavailable");
+        assert!(error.retryable);
+    }
+
+    #[test]
+    fn broker_error_maps_handoff_and_version_failures_to_needs_auth() {
+        for code in [
+            "expired-handoff",
+            "invalid-handoff",
+            "invalid-state",
+            "unsupported-version",
+            "invalid-request",
+        ] {
+            let error = broker_error("github", "handoff", Some(code), None, Some(false), 400, None);
+            assert_eq!(error.code, "needs-auth", "code {code} should map to needs-auth");
+            assert!(!error.retryable);
+        }
+    }
+
+    #[test]
+    fn broker_error_classifies_unparseable_body_by_status() {
+        // An unconfigured/unreachable broker returns 503 with no JSON body.
+        let unavailable =
+            broker_error("github", "handoff", None, None, None, 503, None);
+        assert_eq!(unavailable.code, "provider-unavailable");
+        assert!(unavailable.retryable);
+        // A throttled broker returns 429 with an unparseable body.
+        let throttled = broker_error("github", "handoff", None, None, None, 429, None);
+        assert_eq!(throttled.code, "rate-limited");
+        assert!(throttled.retryable);
+    }
+
+    // -------------------------------------------------------------------------
+    // Brokered completion against a mocked broker (confidential flow, end-to-end).
+    //
+    // These exercise the real `complete_with_store` handoff path against an
+    // in-process HTTP broker mock: the desktop must never report a connector
+    // connected when auth cannot complete, must normalize broker errors to
+    // recoverable codes, and must store tokens + consume state on the happy path.
+    //
+    // The mock speaks the broker's real response shapes (mirrors `Broker*Response`
+    // and `BrokerErrorResponse` in `packages/connectors/.../broker-contract.ts`).
+    // -------------------------------------------------------------------------
+
+    /// A scripted broker mock bound to an ephemeral loopback port. It responds to
+    /// every request with the configured status + body, recording the request so
+    /// tests can assert the desktop posted to the right route with the right body.
+    struct BrokerMock {
+        address: std::net::SocketAddr,
+        requests: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl BrokerMock {
+        /// Start a mock returning `status` + `body` for every request. The body
+        /// is captured by move so each test owns its own scripted response.
+        async fn start(status: u16, body: String, retry_after: Option<&'static str>) -> BrokerMock {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let recorded = requests.clone();
+            tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0_u8; 8192];
+                let read = stream.read(&mut request).await.unwrap();
+                recorded
+                    .lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&request[..read]).to_string());
+                let mut response = format!(
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+                    body.len()
+                );
+                if let Some(value) = retry_after {
+                    response.push_str(&format!("Retry-After: {value}\r\n"));
+                }
+                response.push_str("\r\n");
+                response.push_str(&body);
+                stream.write_all(response.as_bytes()).await.unwrap();
+            });
+            BrokerMock { address, requests }
+        }
+
+        fn handoff_url(&self) -> String {
+            format!("http://{}/oauth/github/handoff", self.address)
+        }
+
+        fn take_request(&self) -> String {
+            self.requests.lock().unwrap().remove(0)
+        }
+    }
+
+    /// Build an in-flight brokered pending state by starting the OAuth flow, then
+    /// return the state + redirect so a test can drive completion with a callback.
+    fn start_brokered_flow(store: &MemoryStore, handoff_endpoint: &str) -> String {
+        let started = start_with_store(
+            "github",
+            "http://127.0.0.1:43123/callback",
+            brokered_config(handoff_endpoint),
+            store,
+        )
+        .expect("start brokered");
+        let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
+        authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned()
+    }
+
+    #[tokio::test]
+    async fn brokered_completion_normalizes_an_unavailable_broker_to_provider_unavailable() {
+        // The broker is reachable but reports configuration-required (503). The
+        // desktop must NOT report connected; it surfaces a non-retryable
+        // configuration-required so the operator knows to set the broker up.
+        let store = MemoryStore::default();
+        let body = r#"{"contractVersion":1,"error":"configuration-required","message":"Broker is not configured for this provider.","retryable":false}"#;
+        let broker = BrokerMock::start(503, body.to_string(), None).await;
+        let state = start_brokered_flow(&store, &broker.handoff_url());
+        let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
+        let error = complete_with_store("github", &callback, &store)
+            .await
+            .expect_err("must not connect when broker is unavailable");
+        assert_eq!(error.code, "configuration-required");
+        assert!(!error.retryable);
+        // The desktop never stored a token and the connection is not live.
+        assert!(store.get(&token_key("github", "any")).unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn brokered_completion_normalizes_a_rate_limited_broker() {
+        let store = MemoryStore::default();
+        let body = r#"{"contractVersion":1,"error":"rate-limited","message":"Too many requests.","retryable":true}"#;
+        let broker = BrokerMock::start(429, body.to_string(), Some("30")).await;
+        let state = start_brokered_flow(&store, &broker.handoff_url());
+        let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
+        let error = complete_with_store("github", &callback, &store)
+            .await
+            .expect_err("must not connect when broker throttles");
+        assert_eq!(error.code, "rate-limited");
+        assert!(error.retryable);
+        assert_eq!(error.retry_after.as_deref(), Some("30"));
+    }
+
+    #[tokio::test]
+    async fn brokered_completion_treats_an_expired_handoff_as_needs_auth() {
+        let store = MemoryStore::default();
+        let body = r#"{"contractVersion":1,"error":"expired-handoff","message":"Handoff expired.","retryable":false}"#;
+        let broker = BrokerMock::start(400, body.to_string(), None).await;
+        let state = start_brokered_flow(&store, &broker.handoff_url());
+        let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
+        let error = complete_with_store("github", &callback, &store)
+            .await
+            .expect_err("expired handoff must not connect");
+        assert_eq!(error.code, "needs-auth");
+        assert!(!error.retryable);
+    }
+
+    #[tokio::test]
+    async fn brokered_completion_is_unreachable_broker_is_provider_unavailable() {
+        // No broker listening at all: connection refused. The desktop must surface
+        // a retryable provider-unavailable, never pretending success.
+        let store = MemoryStore::default();
+        // An unset port on loopback that nothing binds: connection refused.
+        let dead_handoff = "http://127.0.0.1:1/oauth/github/handoff";
+        let state = start_brokered_flow(&store, dead_handoff);
+        let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
+        let error = complete_with_store("github", &callback, &store)
+            .await
+            .expect_err("dead broker must not connect");
+        assert_eq!(error.code, "provider-unavailable");
+        assert!(error.retryable);
+    }
+
+    #[tokio::test]
+    async fn brokered_completion_succeeds_and_stores_tokens_on_the_happy_path() {
+        // The broker returns the contract's handoff-redemption shape: tokens +
+        // account nested. The desktop stores the token set in the secret store,
+        // resolves the account from the response (no /identity call), reports
+        // connected, and consumes the single-use state.
+        let store = MemoryStore::default();
+        let body = r#"{"contractVersion":1,"tokens":{"accessToken":"gho_access","refreshToken":"gho_refresh","tokenType":"Bearer","expiresIn":3600,"scope":"items.read"},"account":{"id":"octocat","displayName":"The Octocat","handle":"octocat"}}"#;
+        let broker = BrokerMock::start(200, body.to_string(), None).await;
+        let handoff_url = broker.handoff_url();
+        let state = start_brokered_flow(&store, &handoff_url);
+        let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
+
+        let (tokens, account, credential_ref) =
+            complete_with_store("github", &callback, &store)
+                .await
+                .expect("happy path connects");
+        assert_eq!(account.id, "octocat");
+        assert_eq!(account.handle.as_deref(), Some("octocat"));
+        assert_eq!(tokens.access_token, "gho_access");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("gho_refresh"));
+        assert!(tokens.brokered);
+        // The persisted token set carries the handoff endpoint so a later
+        // refresh/revoke can derive its sibling routes.
+        assert_eq!(tokens.handoff_endpoint.as_deref(), Some(handoff_url.as_str()));
+        assert!(tokens.token_endpoint.is_none());
+
+        // The token set is persisted in the secret store under the credential ref.
+        let stored = store.get(&credential_ref).unwrap().unwrap();
+        assert!(stored.contains("gho_access"));
+        // The single-use state was consumed: replaying the callback fails closed.
+        assert!(store
+            .get(&pending_key("github", &state))
+            .unwrap()
+            .is_none());
+        let replay = complete_with_store("github", &callback, &store)
+            .await
+            .expect_err("replay must fail");
+        assert_eq!(replay.code, "invalid-request");
+
+        // The desktop posted the contract-shaped body to the handoff route.
+        let request = broker.take_request();
+        assert!(request.starts_with("POST /oauth/github/handoff"));
+        assert!(request.contains("\"contractVersion\":1"));
+        assert!(request.contains("\"provider\":\"github\""));
+        assert!(request.contains("\"handoff\":\"ticket\""));
+        assert!(request.contains(&format!("\"state\":\"{state}\"")));
+    }
+
+    #[tokio::test]
+    async fn brokered_completion_with_missing_account_is_provider_unavailable() {
+        // The broker contract always returns `account`; if it omits it, the
+        // desktop does NOT fall back to a non-existent /identity route — it fails
+        // honestly with a retryable provider-unavailable.
+        let store = MemoryStore::default();
+        let body = r#"{"contractVersion":1,"tokens":{"accessToken":"gho_access","tokenType":"Bearer","expiresIn":3600,"scope":"items.read"}}"#;
+        let broker = BrokerMock::start(200, body.to_string(), None).await;
+        let state = start_brokered_flow(&store, &broker.handoff_url());
+        let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
+        let error = complete_with_store("github", &callback, &store)
+            .await
+            .expect_err("missing account must not connect");
+        assert_eq!(error.code, "provider-unavailable");
+        assert!(error.retryable);
     }
 }
