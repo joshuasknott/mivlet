@@ -1193,7 +1193,7 @@ describe("Fable onboarding", () => {
       backendType: "native-api",
       label: "Anthropic",
       description:
-        "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
+        "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: false }]
@@ -1202,7 +1202,7 @@ describe("Fable onboarding", () => {
       id: "gemini",
       backendType: "native-api",
       label: "Gemini",
-      description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
+      description: "Reach Gemini via a Google AI API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "gemini-2-pro", label: "Gemini 2 Pro", available: false }]
@@ -1364,8 +1364,9 @@ describe("Fable onboarding", () => {
     // No Claude.ai subscription login; no Google AI Pro/Ultra subscription reuse.
     expect(text).not.toMatch(/claude\.ai/);
     expect(text).not.toMatch(/google ai (pro|ultra)/);
-    // The allowed key/vertex/bedrock paths are named.
-    expect(text).toMatch(/vertex|api key|bedrock/);
+    // The implemented direct API-key path is named, without future routing copy.
+    expect(text).toMatch(/api key/);
+    expect(text).not.toMatch(/vertex|bedrock/);
   });
 
   it("connects a native API-key backend via the verified path and clears the gate", async () => {

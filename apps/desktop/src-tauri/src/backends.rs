@@ -143,7 +143,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
     },
     // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
-    // API-key only; compliance copy names only the allowed auth paths.
+    // API-key only; compliance copy names only the implemented auth path.
     BackendCatalogEntry {
         id: "openai",
         backend_type: "native-api",
@@ -161,7 +161,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "anthropic",
         backend_type: "native-api",
         label: "Anthropic",
-        description: "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
+        description: "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[
             ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
@@ -173,7 +173,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "gemini",
         backend_type: "native-api",
         label: "Gemini",
-        description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
+        description: "Reach Gemini via a Google AI API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[
             ("gemini-3.5-flash", "Gemini 3.5 Flash"),

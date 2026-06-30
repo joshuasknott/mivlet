@@ -46,14 +46,14 @@ describe("backend registry", () => {
     expect(gemini?.backendType).toBe("native-api");
 
     // Compliance: no Claude.ai or Google AI subscription auth path is offered —
-    // the copy only names API key / Vertex / Bedrock.
+    // the copy names direct API-key setup only.
     const serialized = JSON.stringify(providers).toLowerCase();
     expect(serialized).not.toMatch(/claude\.ai/);
     expect(serialized).not.toMatch(/google ai (pro|ultra)/);
 
-    // The native auth copy must name the allowed key/Vertex/Bedrock paths.
-    expect(anthropic?.description.toLowerCase()).toMatch(/api key|vertex|bedrock/);
-    expect(gemini?.description.toLowerCase()).toMatch(/api key|vertex/);
+    expect(anthropic?.description.toLowerCase()).toContain("api key");
+    expect(gemini?.description.toLowerCase()).toContain("api key");
+    expect(serialized).not.toMatch(/vertex|bedrock/);
   });
 
   it("exposes the canonical provider id list", () => {

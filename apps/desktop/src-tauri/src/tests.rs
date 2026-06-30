@@ -1648,8 +1648,10 @@ fn native_catalog_copy_carries_no_forbidden_subscription_phrases() {
     assert!(!lower.contains("claude.ai"));
     assert!(!lower.contains("google ai pro"));
     assert!(!lower.contains("google ai ultra"));
-    // Anthropic + Gemini copy must name an allowed key/vertex/bedrock path.
-    assert!(lower.contains("vertex") || lower.contains("api key"));
+    // Anthropic + Gemini copy must name the implemented API-key path only.
+    assert!(lower.contains("api key"));
+    assert!(!lower.contains("vertex"));
+    assert!(!lower.contains("bedrock"));
 
     let _ = fs::remove_file(&path);
 }

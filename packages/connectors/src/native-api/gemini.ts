@@ -1,13 +1,12 @@
 /**
- * Gemini generateContent shaping + SSE parsing (Google AI API key + Vertex AI).
+ * Gemini generateContent shaping + SSE parsing for the Google AI API key path.
  *
  * Gemini streams JSON-per-line (not SSE `data:` frames) and models tools as
- * `functionCall` parts. Compliance: Gemini is API key / Vertex only — no Google
- * AI Pro/Ultra subscription reuse (copy lives in fixtures).
+ * `functionCall` parts. Compliance: no Google AI Pro/Ultra subscription reuse;
+ * Vertex AI routing is a future extension.
  *
- * The host (generativelanguage.googleapis.com vs a Vertex regional endpoint) is
- * selected by Rust from the provider id; this shaper only owns the body + the
- * event parse.
+ * Rust owns the direct API-key host and credential injection; this shaper only
+ * owns the body and event parse.
  */
 
 import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";

@@ -9,7 +9,7 @@
  * Compliance constraints baked into these fixtures:
  *   - No claim that any tier includes Grok Build (entitlement detected
  *     post-login only).
- *   - No Claude or Gemini provider entries surfaced this goal.
+ *   - Claude and Gemini are surfaced only as direct API-key native providers.
  *   - Install hints name a user-installed CLI; nothing is redistributed.
  */
 
@@ -103,10 +103,10 @@ export interface NativeFixture {
 /**
  * Native API provider catalogs — the providers Fable reaches directly over
  * HTTP/SSE, owning the entire agent loop. Compliance baked into copy:
- *   - Anthropic: API key / Vertex / Bedrock only — no Claude.ai subscription
- *     (Anthropic blocks third-party Claude.ai login without approval).
- *   - Gemini: API key / Vertex only — no Google AI Pro/Ultra subscription reuse
- *     (Google's CLI terms forbid third-party OAuth to its underlying services).
+ *   - Anthropic: direct API key only; no Claude.ai subscription, Vertex AI, or
+ *     Amazon Bedrock route is presented as live.
+ *   - Gemini: direct Google AI API key only; no Google AI Pro/Ultra subscription
+ *     reuse and no Vertex AI route is presented as live.
  *   - xAI/Grok: never assert any entitlement (carried over from goal 1).
  */
 export const nativeFixtures: NativeFixture[] = [
@@ -126,8 +126,8 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "anthropic",
     label: "Anthropic",
     description:
-      "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
-    authLabel: "Anthropic API key / Vertex / Bedrock",
+      "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
+    authLabel: "Anthropic API key",
     models: [
       { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8" }
@@ -137,8 +137,8 @@ export const nativeFixtures: NativeFixture[] = [
     providerId: "gemini",
     label: "Gemini",
     description:
-      "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
-    authLabel: "Google AI API key / Vertex AI",
+      "Reach Gemini via a Google AI API key. Fable owns the agent loop.",
+    authLabel: "Google AI API key",
     models: [
       { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
       { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" }
