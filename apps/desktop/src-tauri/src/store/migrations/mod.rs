@@ -38,6 +38,12 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // so the step probes for the `category` column and only runs the
             // ALTER batch when it is absent (idempotent over a partial apply).
             2 => apply_v2_to_v3(conn)?,
+            // 3 → 4: add the encrypted scheduler/workflow tables. Fresh
+            // databases already have them through SCHEMA_V1; existing v3
+            // databases receive them through the idempotent SCHEMA_V3_TO_V4
+            // delta. All tables are new (`CREATE TABLE IF NOT EXISTS`), so no
+            // column probe is required — re-running is a strict no-op.
+            3 => conn.execute_batch(crate::store::schema::SCHEMA_V3_TO_V4)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."

@@ -63,6 +63,11 @@ pub fn save_workflow_definition(
     definition: WorkflowDefinitionRecord,
 ) -> Result<WorkflowDefinitionRecord, String> {
     let definition = normalize_definition(definition)?;
+    // Encrypted SQLite is the production authority. Fall back to the legacy JSON
+    // file in the unit-test path (no global store); the file is never deleted.
+    if let Some(true) = save_definition_to_sqlite(&definition)? {
+        return Ok(definition);
+    }
     let path = workflow_definitions_path(&app)?;
     let mut definitions = read_definitions(&path)?;
     definitions
@@ -77,7 +82,48 @@ pub fn save_workflow_definition(
 pub fn list_workflow_definitions(
     app: tauri::AppHandle,
 ) -> Result<Vec<WorkflowDefinitionRecord>, String> {
+    if let Some(definitions) = list_definitions_from_sqlite()? {
+        return Ok(definitions);
+    }
     read_definitions(&workflow_definitions_path(&app)?)
+}
+
+/// Persist a workflow definition into encrypted SQLite. Returns `Ok(None)` in
+/// the unit-test path (no global store).
+fn save_definition_to_sqlite(
+    definition: &WorkflowDefinitionRecord,
+) -> Result<Option<bool>, String> {
+    let value = serde_json::to_value(definition)
+        .map_err(|_| "Fable could not encode a workflow definition.".to_string())?;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let written = crate::store::with_store(|store| {
+        store.transaction(|tx| {
+            crate::store::repos::workflow::upsert_definition_from_value(tx, store, "", value, &now)
+        })
+    })?;
+    Ok(written.map(|_| true))
+}
+
+/// List workflow definitions from encrypted SQLite. Returns `Ok(None)` in the
+/// unit-test path.
+fn list_definitions_from_sqlite() -> Result<Option<Vec<WorkflowDefinitionRecord>>, String> {
+    let rows = crate::store::with_store(|store| {
+        store.with_conn(|conn| {
+            crate::store::repos::workflow::list_definitions(conn, store, "")
+        })
+    })?;
+    let rows = match rows {
+        Some(rows) => rows,
+        None => return Ok(None),
+    };
+    let definitions = rows
+        .into_iter()
+        .map(|row| {
+            serde_json::from_value::<WorkflowDefinitionRecord>(row.value)
+                .map_err(|_| "Fable could not decode a workflow definition.".to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(Some(definitions))
 }
 
 fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String> {
@@ -138,11 +184,18 @@ pub fn save_workflow_run(
     app: tauri::AppHandle,
     run: WorkflowRunRecord,
 ) -> Result<WorkflowRunRecord, String> {
+    let run = normalize_run(run)?;
+    if let Some(true) = save_run_to_sqlite(&run)? {
+        return Ok(run);
+    }
     persist_run(&workflow_runs_path(&app)?, run)
 }
 
 #[tauri::command]
 pub fn list_workflow_runs(app: tauri::AppHandle) -> Result<Vec<WorkflowRunRecord>, String> {
+    if let Some(runs) = list_runs_from_sqlite(None)? {
+        return Ok(runs);
+    }
     read_runs(&workflow_runs_path(&app)?)
 }
 
@@ -152,11 +205,56 @@ pub fn list_workflow_runs_for_definition(
     definition_id: String,
 ) -> Result<Vec<WorkflowRunRecord>, String> {
     let definition_id = normalize_spaces(&definition_id);
+    if let Some(runs) = list_runs_from_sqlite(Some(&definition_id))? {
+        return Ok(runs);
+    }
     let runs = read_runs(&workflow_runs_path(&app)?)?;
     Ok(runs
         .into_iter()
         .filter(|r| r.definition_id == definition_id)
         .collect())
+}
+
+/// Persist a workflow run into encrypted SQLite. Returns `Ok(None)` in the
+/// unit-test path (no global store).
+fn save_run_to_sqlite(run: &WorkflowRunRecord) -> Result<Option<bool>, String> {
+    let value = serde_json::to_value(run)
+        .map_err(|_| "Fable could not encode a workflow run.".to_string())?;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let written = crate::store::with_store(|store| {
+        store.transaction(|tx| {
+            crate::store::repos::workflow::upsert_run_from_value(tx, store, "", value, &now)
+        })
+    })?;
+    Ok(written.map(|_| true))
+}
+
+/// List workflow runs from encrypted SQLite. `definition_id` filters when
+/// provided. Returns `Ok(None)` in the unit-test path.
+fn list_runs_from_sqlite(
+    definition_id: Option<&str>,
+) -> Result<Option<Vec<WorkflowRunRecord>>, String> {
+    let rows = crate::store::with_store(|store| {
+        store.with_conn(|conn| {
+            if let Some(id) = definition_id {
+                crate::store::repos::workflow::list_runs_for_definition(conn, store, "", id)
+            } else {
+                crate::store::repos::workflow::list_runs(conn, store, "")
+            }
+        })
+    })?;
+    let rows = match rows {
+        Some(rows) => rows,
+        None => return Ok(None),
+    };
+    let runs = rows
+        .into_iter()
+        .map(|row| {
+            serde_json::from_value::<WorkflowRunRecord>(row.value)
+                .map_err(|_| "Fable could not decode a workflow run.".to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(Some(runs))
 }
 
 #[cfg(test)]

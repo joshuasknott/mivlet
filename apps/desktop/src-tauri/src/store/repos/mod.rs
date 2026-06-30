@@ -27,6 +27,9 @@ pub mod preferences;
 pub mod run;
 pub mod run_state;
 pub mod schedule;
+pub mod scheduled_job;
+pub mod scheduler_queue;
+pub mod workflow;
 
 /// Helper: encrypt a JSON value into a sealed payload bound to `aad`.
 pub(crate) fn seal_json(

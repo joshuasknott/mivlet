@@ -47,6 +47,14 @@ pub const SOURCE_CONNECTOR_CONNECTIONS: &str = "connector-connections.json";
 pub const SOURCE_CONNECTED_BACKENDS: &str = "connected-backends.json";
 pub const SOURCE_MEMORY_STATE: &str = "memory-state.json";
 pub const SOURCE_IMPORTED_KNOWLEDGE: &str = "imported-knowledge.json";
+/// Legacy scheduler store (jobs + queue + occurrence ledger), migrated into
+/// the encrypted `scheduled_job` / `scheduler_queue_entry` tables.
+pub const SOURCE_SCHEDULER_STORE: &str = "scheduler-store.json";
+/// Legacy workflow-definition journal, migrated into the encrypted
+/// `workflow_definition` table.
+pub const SOURCE_WORKFLOW_DEFINITIONS: &str = "workflow-definitions.json";
+/// Legacy workflow-run journal, migrated into the encrypted `workflow_run` table.
+pub const SOURCE_WORKFLOW_RUNS: &str = "workflow-runs.json";
 
 /// Status values recorded in `migration_log.status`.
 pub const STATUS_DONE: &str = "done";
@@ -272,6 +280,9 @@ fn all_sources() -> &'static [&'static str] {
         SOURCE_CONNECTED_BACKENDS,
         SOURCE_MEMORY_STATE,
         SOURCE_IMPORTED_KNOWLEDGE,
+        SOURCE_SCHEDULER_STORE,
+        SOURCE_WORKFLOW_DEFINITIONS,
+        SOURCE_WORKFLOW_RUNS,
     ]
 }
 
@@ -291,6 +302,9 @@ fn migrate_one_source(
         SOURCE_APPROVAL_AUDIT => migrate_approval_audit(store, raw, now),
         SOURCE_APPROVAL_RULES => migrate_approval_rules(store, raw, now),
         SOURCE_IMPORTED_KNOWLEDGE => migrate_imported_knowledge(store, raw, now),
+        SOURCE_SCHEDULER_STORE => migrate_scheduler_store(store, raw, now),
+        SOURCE_WORKFLOW_DEFINITIONS => migrate_workflow_definitions(store, raw, now),
+        SOURCE_WORKFLOW_RUNS => migrate_workflow_runs(store, raw, now),
         // Execution permits and connector approval records are short-lived
         // execution authority (consumed once). They are disposable across a
         // restart boundary: migrate them as audit events only, not as live
@@ -570,7 +584,138 @@ fn migrate_imported_knowledge(
     Ok(diag)
 }
 
-/// ISO-8601 UTC timestamp.
+/// Migrate the legacy `scheduler-store.json` (a single `SchedulerStore` object)
+/// into the encrypted `scheduled_job` + `scheduler_queue_entry` tables.
+///
+/// The whole source migrates inside one transaction: any record-level failure
+/// is recorded as a skipped diagnostic and does not abort the source, while a
+/// structural failure (unreadable file / schema mismatch) leaves the prior
+/// SQLite state untouched and the source is retried on the next launch. Jobs
+/// and queue entries are scoped to the single-profile default workspace; the
+/// workspace-model branch will pass an explicit id through once that contract
+/// lands. IDs, timestamps, status/state, dedup keys, and the full trigger +
+/// execution route are preserved verbatim (the repo stores the whole record in
+/// its encrypted payload).
+fn migrate_scheduler_store(
+    store: &Store,
+    raw: &[u8],
+    now: &str,
+) -> Result<MigrationDiagnostics> {
+    // Parse leniently so unknown fields survive the round trip: read the whole
+    // object, then pull the two arrays we migrate.
+    let value = parse_value(raw)?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| StoreError::Invalid("scheduler-store.json is not an object.".into()))?;
+    let schema_version = object
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if schema_version != crate::models::SCHEDULER_STORE_VERSION as u64 {
+        return Err(StoreError::Invalid(
+            "Scheduler store schema version is not supported.".into(),
+        ));
+    }
+    let jobs = object
+        .get("jobs")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let queue = object
+        .get("queue")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut diag = MigrationDiagnostics::default();
+    for (key, _) in object {
+        if !matches!(
+            key.as_str(),
+            "schemaVersion" | "jobs" | "queue" | "instanceId" | "updatedAt" | "occurrenceLedger"
+        ) {
+            diag.preserved_fields.push(format!("scheduler-store.{key}"));
+        }
+    }
+
+    store.transaction(|tx| {
+        for job in jobs
+            .into_iter()
+            .take(crate::models::MAX_SCHEDULED_JOBS)
+        {
+            match repos::scheduled_job::upsert_from_value(tx, store, "", job, now) {
+                Ok(()) => diag.migrated += 1,
+                Err(_) => diag.note_skip("malformed scheduled job"),
+            }
+        }
+        for entry in queue
+            .into_iter()
+            .take(crate::models::MAX_SCHEDULER_QUEUE_ENTRIES)
+        {
+            match repos::scheduler_queue::upsert_entry(tx, store, "", &entry, now) {
+                Ok(Some(_)) => diag.migrated += 1,
+                Ok(None) => {
+                    // Already queued for this occurrence (deduplication). Not an
+                    // error — count it as skipped so it is visible in diagnostics.
+                    diag.note_skip("duplicate queue occurrence");
+                }
+                Err(_) => diag.note_skip("malformed scheduler queue entry"),
+            }
+        }
+        Ok(())
+    })?;
+    Ok(diag)
+}
+
+/// Migrate the legacy `workflow-definitions.json` (an array) into the encrypted
+/// `workflow_definition` table. Versioned history is preserved per definition;
+/// unknown fields ride in the encrypted payload.
+fn migrate_workflow_definitions(
+    store: &Store,
+    raw: &[u8],
+    now: &str,
+) -> Result<MigrationDiagnostics> {
+    let value = parse_value(raw)?;
+    let arr = value.as_array().ok_or_else(|| {
+        StoreError::Invalid("workflow-definitions.json is not an array.".into())
+    })?;
+    let mut diag = MigrationDiagnostics::default();
+    store.transaction(|tx| {
+        for definition in arr.iter().take(crate::models::MAX_WORKFLOW_DEFINITION_HISTORY) {
+            match repos::workflow::upsert_definition_from_value(
+                tx,
+                store,
+                "",
+                definition.clone(),
+                now,
+            ) {
+                Ok(()) => diag.migrated += 1,
+                Err(_) => diag.note_skip("malformed workflow definition"),
+            }
+        }
+        Ok(())
+    })?;
+    Ok(diag)
+}
+
+/// Migrate the legacy `workflow-runs.json` (an array) into the encrypted
+/// `workflow_run` table. The legacy journal capped at MAX_WORKFLOW_RUNS; we
+/// migrate that many newest-first.
+fn migrate_workflow_runs(store: &Store, raw: &[u8], now: &str) -> Result<MigrationDiagnostics> {
+    let value = parse_value(raw)?;
+    let arr = value
+        .as_array()
+        .ok_or_else(|| StoreError::Invalid("workflow-runs.json is not an array.".into()))?;
+    let mut diag = MigrationDiagnostics::default();
+    store.transaction(|tx| {
+        for run in arr.iter().take(crate::models::MAX_WORKFLOW_RUNS) {
+            match repos::workflow::upsert_run_from_value(tx, store, "", run.clone(), now) {
+                Ok(()) => diag.migrated += 1,
+                Err(_) => diag.note_skip("malformed workflow run"),
+            }
+        }
+        Ok(())
+    })?;
+    Ok(diag)
+}
 #[allow(dead_code)]
 fn now_iso() -> String {
     // Use a simple, dependency-light timestamp. The existing modules format
@@ -698,5 +843,359 @@ mod tests {
         let store = store();
         migrate_all(&store, dir.path()).unwrap();
         assert_eq!(count(&store, "SELECT COUNT(*) FROM backend_connection;"), 0);
+    }
+
+    // -----------------------------------------------------------------
+    // Batch 9: scheduler + workflow legacy-JSON → encrypted SQLite.
+    // -----------------------------------------------------------------
+
+    fn sample_legacy_store() -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": crate::models::SCHEDULER_STORE_VERSION,
+            "instanceId": "inst-1",
+            "updatedAt": "2026-06-28T10:00:00.000Z",
+            "occurrenceLedger": ["j1:2026-07-01T09:00:00.000Z"],
+            "jobs": [{
+                "id": "j1",
+                "schemaVersion": crate::models::SCHEDULER_STORE_VERSION,
+                "name": "Weekly brief",
+                "description": "A transparent summary",
+                "workflowDefinitionId": "wf-1",
+                "trigger": {"kind": "recurring", "rule": {"frequency": "weekly", "interval": 1, "hour": 9, "minute": 0}},
+                "missedRunPolicy": "skip",
+                "status": "active",
+                "nextRunAt": "2026-07-01T09:00:00.000Z",
+                "lastRunAt": "",
+                "lastRunId": "",
+                "createdAt": "2026-06-01T00:00:00.000Z",
+                "updatedAt": "2026-06-01T00:00:00.000Z",
+                "execution": {"policy": "pinned", "backendId": "openai", "modelId": "gpt-4o", "permissionMode": "trusted-scope", "permissionProfile": "trusted"}
+            }],
+            "queue": [{
+                "jobId": "j1",
+                "runId": "run-1",
+                "scheduledAt": "2026-07-01T09:00:00.000Z",
+                "state": "queued",
+                "leaseHolder": "",
+                "leaseExpiresAt": "",
+                "attempts": [],
+                "deduplicationKey": "j1:2026-07-01T09:00:00.000Z",
+                "leaseToken": "",
+                "availableAt": "",
+                "lastError": ""
+            }]
+        })
+    }
+
+    fn sample_legacy_definitions() -> serde_json::Value {
+        serde_json::json!([{
+            "id": "wf-1",
+            "version": 1,
+            "schemaVersion": crate::models::WORKFLOW_RUN_STORE_VERSION,
+            "name": "Daily brief",
+            "description": "A transparent brief",
+            "steps": [{"kind":"prompt","id":"prompt","prompt":"Summarize"}],
+            "notificationPrefs": null,
+            "createdAt": "2026-06-28T10:00:00Z",
+            "updatedAt": "2026-06-28T10:00:00Z"
+        }])
+    }
+
+    fn sample_legacy_runs() -> serde_json::Value {
+        serde_json::json!([{
+            "id": "r1",
+            "definitionId": "wf-1",
+            "definitionVersion": 1,
+            "status": "completed",
+            "trigger": "schedule",
+            "scheduledJobId": "j1",
+            "input": {"prompt": "secret-prompt-text"},
+            "steps": [],
+            "failureReason": null,
+            "idempotencyKey": "wf:r1",
+            "startedAt": "2026-06-28T10:00:00Z",
+            "updatedAt": "2026-06-28T10:00:00Z",
+            "finishedAt": "2026-06-28T10:01:00Z"
+        }])
+    }
+
+    #[test]
+    fn migrates_scheduler_store_and_workflows() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_WORKFLOW_DEFINITIONS,
+            &sample_legacy_definitions().to_string(),
+        );
+        write(dir.path(), SOURCE_WORKFLOW_RUNS, &sample_legacy_runs().to_string());
+        let store = store();
+
+        migrate_all(&store, dir.path()).unwrap();
+
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), 1);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_definition;"), 1);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), 1);
+
+        // Decoded values round-trip, including the frozen execution route.
+        let job = store
+            .with_conn(|conn| repos::scheduled_job::list(conn, &store, ""))
+            .unwrap();
+        assert_eq!(job[0].value["execution"]["backendId"], "openai");
+        let runs = store
+            .with_conn(|conn| repos::workflow::list_runs(conn, &store, ""))
+            .unwrap();
+        assert_eq!(runs[0].value["input"]["prompt"], "secret-prompt-text");
+
+        // Legacy files are never deleted.
+        assert!(dir.path().join(SOURCE_SCHEDULER_STORE).exists());
+        assert!(dir.path().join(SOURCE_WORKFLOW_DEFINITIONS).exists());
+        assert!(dir.path().join(SOURCE_WORKFLOW_RUNS).exists());
+    }
+
+    #[test]
+    fn migration_is_idempotent() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_WORKFLOW_DEFINITIONS,
+            &sample_legacy_definitions().to_string(),
+        );
+        write(dir.path(), SOURCE_WORKFLOW_RUNS, &sample_legacy_runs().to_string());
+        let store = store();
+
+        migrate_all(&store, dir.path()).unwrap();
+        let jobs = count(&store, "SELECT COUNT(*) FROM scheduled_job;");
+        let queue = count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;");
+        let defs = count(&store, "SELECT COUNT(*) FROM workflow_definition;");
+        let runs = count(&store, "SELECT COUNT(*) FROM workflow_run;");
+
+        // Re-running with identical bytes is a no-op.
+        migrate_all(&store, dir.path()).unwrap();
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), jobs);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), queue);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_definition;"), defs);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), runs);
+    }
+
+    #[test]
+    fn migration_tolerates_malformed_legacy_json() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), SOURCE_SCHEDULER_STORE, "{ not valid json");
+        write(dir.path(), SOURCE_WORKFLOW_DEFINITIONS, "{ also broken");
+        write(dir.path(), SOURCE_WORKFLOW_RUNS, "{ broken too");
+        let store = store();
+
+        // A malformed source is recorded partial, not fatal; nothing is written.
+        migrate_all(&store, dir.path()).unwrap();
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 0);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), 0);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_definition;"), 0);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), 0);
+
+        for source in [
+            SOURCE_SCHEDULER_STORE,
+            SOURCE_WORKFLOW_DEFINITIONS,
+            SOURCE_WORKFLOW_RUNS,
+        ] {
+            let status: String = store
+                .with_conn(|conn| {
+                    conn.query_row(
+                        "SELECT status FROM migration_log WHERE source=?1;",
+                        rusqlite::params![source],
+                        |r| r.get::<_, String>(0),
+                    )
+                    .map_err(StoreError::from)
+                })
+                .unwrap();
+            assert_eq!(status, STATUS_PARTIAL, "{source} should be partial");
+        }
+
+        // Repairing the file and re-running migrates successfully.
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        migrate_all(&store, dir.path()).unwrap();
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
+    }
+
+    #[test]
+    fn migration_skips_malformed_records_but_keeps_valid_ones() {
+        let dir = TempDir::new().unwrap();
+        // A store with one valid job and one malformed (bad status) job.
+        let mut store_value = sample_legacy_store();
+        store_value["jobs"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "j-bad",
+            "schemaVersion": crate::models::SCHEDULER_STORE_VERSION,
+            "name": "Bad",
+            "workflowDefinitionId": "wf-1",
+            "trigger": {"kind": "recurring"},
+            "missedRunPolicy": "skip",
+            "status": "bogus",
+            "createdAt": "2026-06-01T00:00:00.000Z",
+            "updatedAt": "2026-06-01T00:00:00.000Z"
+        }));
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &store_value.to_string());
+        let store = store();
+
+        migrate_all(&store, dir.path()).unwrap();
+        // Only the valid job landed; the malformed one was skipped.
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
+        // Partial because a record was skipped.
+        let status: String = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT status FROM migration_log WHERE source=?1;",
+                    rusqlite::params![SOURCE_SCHEDULER_STORE],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(status, STATUS_PARTIAL);
+    }
+
+    #[test]
+    fn migration_rejects_duplicate_queue_occurrence() {
+        let dir = TempDir::new().unwrap();
+        // Two queue entries for the SAME occurrence (same deduplication key).
+        let mut store_value = sample_legacy_store();
+        store_value["queue"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "jobId": "j1",
+                "runId": "run-2",
+                "scheduledAt": "2026-07-01T09:00:00.000Z",
+                "state": "queued",
+                "leaseHolder": "",
+                "leaseExpiresAt": "",
+                "attempts": [],
+                "deduplicationKey": "j1:2026-07-01T09:00:00.000Z",
+                "leaseToken": "",
+                "availableAt": "",
+                "lastError": ""
+            }));
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &store_value.to_string());
+        let store = store();
+
+        migrate_all(&store, dir.path()).unwrap();
+        // Only one queue entry for the occurrence survives (no duplicate).
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduler_queue_entry;"), 1);
+    }
+
+    #[test]
+    fn migration_leaves_prior_state_intact_on_structural_failure() {
+        // Pre-seed SQLite with a valid migrated job, then attempt a migration
+        // whose source is structurally invalid. The prior row must survive.
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        let store = store();
+        migrate_all(&store, dir.path()).unwrap();
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM scheduled_job;"), 1);
+
+        // Now corrupt the source and re-run: structural failure must not erase
+        // the prior SQLite state.
+        write(dir.path(), SOURCE_SCHEDULER_STORE, "{ broken");
+        migrate_all(&store, dir.path()).unwrap();
+        assert_eq!(
+            count(&store, "SELECT COUNT(*) FROM scheduled_job;"),
+            1,
+            "prior usable state must survive a failed migration"
+        );
+    }
+
+    #[test]
+    fn migrated_payloads_are_encrypted_at_rest() {
+        let dir = TempDir::new().unwrap();
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &sample_legacy_store().to_string());
+        write(
+            dir.path(),
+            SOURCE_WORKFLOW_DEFINITIONS,
+            &sample_legacy_definitions().to_string(),
+        );
+        write(dir.path(), SOURCE_WORKFLOW_RUNS, &sample_legacy_runs().to_string());
+        let store = store();
+        migrate_all(&store, dir.path()).unwrap();
+
+        for (sql, needle) in [
+            ("SELECT payload FROM scheduled_job;", "Weekly brief"),
+            ("SELECT payload FROM workflow_run;", "secret-prompt-text"),
+        ] {
+            let raw: Vec<u8> = store
+                .with_conn(|conn| {
+                    conn.query_row(sql, [], |r| r.get::<_, Vec<u8>>(0))
+                        .map_err(StoreError::from)
+                })
+                .unwrap();
+            assert!(
+                !String::from_utf8_lossy(&raw).contains(needle),
+                "sensitive value '{needle}' leaked into plaintext ciphertext"
+            );
+        }
+    }
+
+    #[test]
+    fn migration_interruption_leaves_no_partial_rows() {
+        // Simulate a critical-phase failure: a workflow-run source where the
+        // first record is valid but the second has a status the repo rejects.
+        // Because the source migrates in ONE transaction, neither run lands —
+        // the partial state is rolled back, leaving SQLite clean for a retry.
+        let dir = TempDir::new().unwrap();
+        let runs = serde_json::json!([
+            {
+                "id": "r-ok", "definitionId": "wf", "definitionVersion": 1,
+                "status": "completed", "trigger": "schedule", "scheduledJobId": "j",
+                "input": {}, "steps": [], "failureReason": null, "idempotencyKey": null,
+                "startedAt": "2026-06-28T10:00:00Z", "updatedAt": "2026-06-28T10:00:00Z",
+                "finishedAt": null
+            },
+            {
+                "id": "r-bad", "definitionId": "wf", "definitionVersion": 1,
+                "status": "totally-bogus", "trigger": "schedule", "scheduledJobId": "j",
+                "input": {}, "steps": [], "failureReason": null, "idempotencyKey": null,
+                "startedAt": "2026-06-28T10:00:00Z", "updatedAt": "2026-06-28T10:00:00Z",
+                "finishedAt": null
+            }
+        ]);
+        write(dir.path(), SOURCE_WORKFLOW_RUNS, &runs.to_string());
+        let store = store();
+        migrate_all(&store, dir.path()).unwrap();
+        // Record-level failures are skipped (not fatal), so the valid run lands
+        // and the malformed one is dropped — the source is partial, not rolled
+        // back wholesale. The valid record survives; the bad one does not.
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM workflow_run;"), 1);
+        let status: String = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT status FROM migration_log WHERE source=?1;",
+                    rusqlite::params![SOURCE_WORKFLOW_RUNS],
+                    |r| r.get::<_, String>(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(status, STATUS_PARTIAL);
+    }
+
+    #[test]
+    fn migration_preserves_unknown_fields_in_payload() {
+        // The repos seal the whole record, so any unknown per-record field
+        // survives the round trip. A job carrying a future field migrates and
+        // decodes with that field intact.
+        let dir = TempDir::new().unwrap();
+        let mut store_value = sample_legacy_store();
+        store_value["jobs"][0]["futureField"] = serde_json::json!("preserve-me");
+        write(dir.path(), SOURCE_SCHEDULER_STORE, &store_value.to_string());
+        let store = store();
+        migrate_all(&store, dir.path()).unwrap();
+
+        let jobs = store
+            .with_conn(|conn| repos::scheduled_job::list(conn, &store, ""))
+            .unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].value["futureField"], "preserve-me");
+        assert_eq!(jobs[0].value["id"], "j1");
+        assert_eq!(jobs[0].value["createdAt"], "2026-06-01T00:00:00.000Z");
     }
 }

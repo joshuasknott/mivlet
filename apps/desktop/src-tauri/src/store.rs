@@ -250,6 +250,10 @@ fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Res
         "connected-backends.json",
         "memory-state.json",
         "imported-knowledge.json",
+        // The scheduler store, workflow definitions, and workflow runs are
+        // migrated into dedicated encrypted tables by `migrations::legacy`; do
+        // NOT seed them as opaque documents — their typed rows are the source of
+        // truth once migration has run.
     ];
     for name in DOCUMENTS {
         let path = app_data_dir.join(name);
@@ -436,6 +440,10 @@ pub fn delete_local_data(
                  DELETE FROM knowledge_source;
                  DELETE FROM memory_record;
                  DELETE FROM schedule;
+                 DELETE FROM scheduled_job;
+                 DELETE FROM scheduler_queue_entry;
+                 DELETE FROM workflow_definition;
+                 DELETE FROM workflow_run;
                  DELETE FROM model_config;
                  DELETE FROM draft;
                  DELETE FROM connector_cache;
@@ -463,6 +471,9 @@ pub fn delete_local_data(
         "connected-backends.json",
         "memory-state.json",
         "imported-knowledge.json",
+        "scheduler-store.json",
+        "workflow-definitions.json",
+        "workflow-runs.json",
     ] {
         let _ = std::fs::remove_file(app_data.join(name));
     }
