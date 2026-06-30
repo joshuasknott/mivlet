@@ -15,6 +15,7 @@ import type {
   PermissionMode,
   ScheduledExecutionRoute
 } from "@fable/protocol";
+import { normalizePermissionProfile } from "../permission-policy";
 
 /**
  * Capture a route at schedule-create time. If a connected backend is present
@@ -26,19 +27,22 @@ export function captureExecutionRoute(
   selectedModelId: string,
   permissionMode: PermissionMode
 ): ScheduledExecutionRoute {
+  const profile = normalizePermissionProfile({ mode: permissionMode });
   if (!connectedBackend) {
     return {
       policy: "current-default",
       backendId: "",
       modelId: selectedModelId,
-      permissionMode
+      permissionMode: profile.mode,
+      permissionProfile: profile.profile
     };
   }
   return {
     policy: "pinned",
     backendId: connectedBackend.id,
     modelId: selectedModelId || (connectedBackend.models.find((m) => m.available)?.id ?? ""),
-    permissionMode
+    permissionMode: profile.mode,
+    permissionProfile: profile.profile
   };
 }
 
@@ -48,7 +52,7 @@ export function captureExecutionRoute(
  * surfaces `blocked-auth`).
  *
  * - `pinned`: use the pinned backend if still connected + model still available,
- *   else fall back to the default connected backend.
+ *   else fail closed.
  * - `current-default`: use the default connected backend + its first available
  *   model.
  */
@@ -81,7 +85,7 @@ export function resolveExecutionRoute(
         };
       }
     }
-    // Pinned backend unavailable or model gone: fall back to default.
+    return null;
   }
 
   const model = defaultConnected.models.find((candidate) => candidate.available);

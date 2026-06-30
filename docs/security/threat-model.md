@@ -33,7 +33,8 @@
 
 ## Controls
 
-- Read-only, trusted-scope, and full-access modes.
+- User-facing read-only, trusted, and full-with-approvals profiles mapped onto
+  the stable `read-only`, `trusted-scope`, and `full-access` protocol modes.
 - Consequence summaries before consequential actions.
 - Approve once, session, rule, modify, and deny outcomes.
 - Stronger confirmation for destructive, public, or financial actions.
@@ -54,8 +55,12 @@
 - OAuth uses high-entropy state and PKCE S256. Pending verifiers are stored in the OS credential store, callbacks require exact state, and plain HTTP redirects are restricted to literal loopback IP addresses.
 - The auth broker is required only for confidential-client or provider-installation flows. It has no model endpoint and no authority to execute connector actions.
 - General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, unconsumed permit.
-- Native tools recheck the registered permission/risk policy and the exact argument preview. File operations remain workspace-confined.
-- Connector writes always require a fresh per-action record containing connector, account, proposed action, target, human-readable preview, risk, result, timestamps, actor, request/run correlation, and normalized failure code.
+- Native tools recheck the registered permission/risk policy, active profile,
+  and exact argument preview. File operations remain workspace-confined.
+- Connector writes always require a fresh per-action record containing connector, account, proposed action, target, human-readable preview, risk, result, timestamps, actor, request/run correlation, and normalized failure code. Preparation and execution fail closed when the captured profile is read-only or otherwise does not allow connector writes.
+- Schedules capture the selected backend, model, and permission route at
+  creation time. Read-only routes cannot create or execute scheduled runs, and
+  pinned routes fail closed rather than silently switching backend.
 - Adapters cannot downgrade writes to non-consequential operations: the shared connector runtime rejects any external write capability that is not declared consequential.
 - Native provider retries are bounded and limited to connection failures, rate limits, and server failures. Connector writes are not blindly replayed after an ambiguous provider success.
 - Agent runs and connector state persist only non-secret metadata. Interrupted runs are marked recoverable after restart; an old approval permit cannot be replayed.

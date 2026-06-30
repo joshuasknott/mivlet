@@ -29,18 +29,18 @@ export interface PermissionProfile {
 
 export const PERMISSION_PROFILES: readonly PermissionProfile[] = [
   {
-    label: "Full access",
-    description: "Run permitted actions without asking each time",
+    label: "Full with approvals",
+    description: "Propose broad actions; approve consequential work",
     mode: "full-access"
   },
   {
-    label: "Standard access",
-    description: "Ask before sensitive or external actions",
+    label: "Trusted",
+    description: "Allow trusted work; approve sensitive or external actions",
     mode: "trusted-scope"
   },
   {
-    label: "Confirm every action",
-    description: "Request approval before using any tool",
+    label: "Read-only",
+    description: "Read local and connected sources only",
     mode: "read-only"
   }
 ];
@@ -52,7 +52,7 @@ export function permissionModeFor(label: string): PermissionMode {
   return PERMISSION_PROFILES.find((profile) => profile.label === label)?.mode ?? "full-access";
 }
 
-/** The composer label for a PermissionMode (default = Full access). */
+/** The composer label for a PermissionMode (default = full with approvals). */
 export function permissionLabelFor(mode: PermissionMode): string {
   return PERMISSION_PROFILES.find((profile) => profile.mode === mode)?.label ?? DEFAULT_PERMISSION_LABEL;
 }

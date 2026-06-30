@@ -50,7 +50,8 @@ const pinnedRoute = (backendId = "openai"): ScheduledExecutionRoute => ({
   policy: "pinned",
   backendId,
   modelId: "gpt-4",
-  permissionMode: "read-only" as PermissionMode
+  permissionMode: "trusted-scope" as PermissionMode,
+  permissionProfile: "trusted"
 });
 
 const baseInput = {
@@ -152,6 +153,23 @@ describe("executeScheduledPrompt", () => {
       backend: null
     });
     expect(result.status).toBe("blocked-auth");
+  });
+
+  it("fails closed when the captured route is read-only", async () => {
+    const result = await executeScheduledPrompt({
+      ...baseInput,
+      route: {
+        policy: "pinned",
+        backendId: "openai",
+        modelId: "gpt-4",
+        permissionMode: "read-only" as PermissionMode,
+        permissionProfile: "read-only"
+      },
+      runId: "run-read-only",
+      provider: connectedProvider(),
+      backend: fakeBackend("openai", [{ type: "done", finishReason: "stop" }])
+    });
+    expect(result).toMatchObject({ status: "failed", code: "permission-denied", retryable: false });
   });
 
   it("returns failed (backend-unavailable) when run() yields null", async () => {

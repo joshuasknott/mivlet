@@ -31,6 +31,7 @@ import type {
 } from "@fable/protocol";
 import type { AgentBackend } from "../agent-runtime";
 import type { ToolExecutor } from "../native-api/agent-loop";
+import { evaluatePermissionPolicy } from "../permission-policy";
 
 export type ScheduledExecutionResult =
   | { status: "completed"; transcript: string }
@@ -83,6 +84,21 @@ function errorMetadata(error: unknown): { message: string; code: string; retryab
 export async function executeScheduledPrompt(
   input: ScheduledExecutionInput
 ): Promise<ScheduledExecutionResult> {
+  const permissionMode = input.permissionMode ?? input.route?.permissionMode ?? "read-only";
+  const schedulePolicy = evaluatePermissionPolicy({
+    mode: permissionMode,
+    profile: input.route?.permissionProfile,
+    effect: "schedule-execution",
+    riskLevel: "medium"
+  });
+  if (!schedulePolicy.allowed) {
+    return fail(
+      `The captured permission profile does not allow scheduled execution. ${schedulePolicy.reason}`,
+      "permission-denied",
+      false
+    );
+  }
+
   // No provider connected at all -> blocked-auth (auto-requeued on reconnect).
   if (!input.provider || input.provider.authState !== "connected") {
     return {
@@ -115,7 +131,7 @@ export async function executeScheduledPrompt(
   const stream = input.backend.run(request, {
     execute: input.execute,
     shouldCancel: input.shouldCancel,
-    permissionMode: input.permissionMode ?? input.route?.permissionMode ?? "read-only",
+    permissionMode,
     runId: input.runId,
     onRetry: input.onRetry
   });

@@ -69,6 +69,12 @@ Fable owns the native API agent loop while preserving provider-specific wire for
   Interrupted runs surface in chat and can be explicitly retried from the
   durable user prompt without replaying prior tool side effects.
 - Model tool calls are untrusted proposals. The shell obtains a user decision; Rust issues a request-fingerprinted, one-time execution permit and rechecks the tool policy, exact argument preview, workspace path confinement, and permit immediately before dispatch.
+- Workspace permission profiles are explicit policy, not UI-only state. The
+  public protocol keeps `read-only`, `trusted-scope`, and `full-access` values,
+  while the user-facing profiles are read-only, trusted, and full with
+  approvals. Read-only permits safe local, connector, cache, and web reads only;
+  trusted and full with approvals still keep consequential work behind approval
+  and native permit checks.
 - Token usage comes from provider responses. Displayed cost is explicitly an estimate from Fable's maintained rate table when the provider does not return cost; Fable does not invent subscription quota or balance data.
 
 Native API credentials are BYOK. Codex app-server and ACP providers are
@@ -86,6 +92,9 @@ create local structured state and, when a backend is connected, submit a
 follow-up prompt through the same `AgentBackend` run path as normal composer
 messages. `/schedule` creates a validated one-time or recurring schedule; the
 runtime pins the selected backend/model/permission route at creation time.
+Pinned scheduled routes fail closed when the captured backend, model, or
+permission profile no longer permits execution; they do not silently fall back
+to a different backend for a due run.
 
 The Tauri scheduler leases due occurrences, writes queue records, and exposes
 pending workflow runs to a headless scheduled-agent hook. Jobs and queue records
@@ -108,7 +117,7 @@ The native connector boundary exposes status, auth start/complete/clear, health 
 - Access tokens, refresh tokens, and pending PKCE verifiers are stored in the OS credential store.
 - Plain local connection state contains account identity, scopes, expiry, status, and an opaque credential reference only.
 - GitHub, Notion, Slack, Vercel, Linear, or another provider that requires confidential credentials routes through the configured HTTPS auth broker. The broker is limited to authorization start/callback, one-time handoff redemption, refresh, internal identity resolution, and revocation; it is not a general connector proxy.
-- Every external write capability must be marked consequential. The shared runtime rejects non-consequential write declarations and requires a fresh matching per-action approval record before calling an adapter.
+- Every external write capability must be marked consequential. The shared runtime rejects non-consequential write declarations and requires a fresh matching per-action approval record before calling an adapter. Connector action preparation and execution also re-check the captured workspace permission profile, so read-only workspaces cannot prepare or run connector writes.
 
 Authenticated provider egress exists on the desktop path for the first-wave
 external connectors, but availability is gated by each connector's auth

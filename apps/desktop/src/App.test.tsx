@@ -364,9 +364,9 @@ describe("Fable home", () => {
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /select permissions/i }));
-    await user.click(screen.getByRole("menuitemradio", { name: /standard access/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: /trusted/i }));
     expect(screen.getByRole("button", { name: /select permissions/i })).toHaveTextContent(
-      "Standard access"
+      "Trusted"
     );
   });
 

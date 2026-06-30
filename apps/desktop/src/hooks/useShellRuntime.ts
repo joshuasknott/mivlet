@@ -59,6 +59,7 @@ import {
   nextOccurrence,
   shapeWorkflowNotification,
   executeCommand,
+  evaluatePermissionPolicy,
   type CommandRuntime,
   type ToolApprovalGate,
   type ModelDiscoveryResult,
@@ -1672,7 +1673,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     payload: Record<string, string>
   ) => {
     try {
-      const fixtureRequest = prepareFixtureConnectorAction(action, payload);
+      const fixtureRequest = {
+        ...prepareFixtureConnectorAction(action, payload),
+        permissionMode
+      };
       const prepared =
         (await prepareRuntimeConnectorAction(fixtureRequest)) ?? fixtureRequest;
       setPreparedConnectorActions((current) => [
@@ -2061,6 +2065,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     day: Weekday;
     time: string;
   }) => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: permissionMode,
+      effect: "schedule-mutation",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      setLastAction(`Schedule not created: ${schedulePolicy.reason}`);
+      return;
+    }
     const now = new Date();
     const id = `schedule-${toSlug(name)}-${toSlug(now.toISOString())}`;
     const [hour, minute] = time.split(":").map(Number);
@@ -2131,6 +2144,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     trigger: import("@fable/protocol").ScheduleTrigger;
     id?: string;
   }): ScheduledJob => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: permissionMode,
+      effect: "schedule-mutation",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      throw new Error(`Schedule not created: ${schedulePolicy.reason}`);
+    }
     const now = new Date();
     const id = providedId ?? `schedule-${toSlug(name)}-${toSlug(now.toISOString())}`;
     const definition: WorkflowDefinition = {
@@ -2322,6 +2343,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const toggleSchedule = (schedule: Schedule) => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: permissionMode,
+      effect: "schedule-mutation",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      setLastAction(`Schedule unchanged: ${schedulePolicy.reason}`);
+      return;
+    }
     setSchedules((current) =>
       current.map((entry) =>
         entry.id === schedule.id ? { ...entry, enabled: !entry.enabled } : entry
@@ -2358,6 +2388,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const editSchedule = (schedule: Schedule) => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: permissionMode,
+      effect: "schedule-mutation",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      setLastAction(`Schedule not updated: ${schedulePolicy.reason}`);
+      return;
+    }
     const now = new Date();
     setSchedules((current) =>
       current.map((entry) => (entry.id === schedule.id ? schedule : entry))
@@ -2418,6 +2457,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const deleteSchedule = (schedule: Schedule) => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: permissionMode,
+      effect: "schedule-mutation",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      setLastAction(`Schedule not deleted: ${schedulePolicy.reason}`);
+      return;
+    }
     setSchedules((current) => current.filter((entry) => entry.id !== schedule.id));
     setScheduledJobs((current) => current.filter((entry) => entry.id !== schedule.id));
     void deleteRuntimeScheduledJob(schedule.id);
@@ -2472,6 +2520,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }
 
   const runScheduleNow = (job: ScheduledJob) => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: job.execution?.permissionMode ?? permissionMode,
+      profile: job.execution?.permissionProfile,
+      effect: "schedule-execution",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      setLastAction(`Run not queued: ${schedulePolicy.reason}`);
+      return;
+    }
     const now = new Date().toISOString();
     const runId = `workflow-run-${toSlug(job.id)}-${Date.now()}`;
     void enqueueRuntimeJobRun(job.id, runId, now).then((queued) => {

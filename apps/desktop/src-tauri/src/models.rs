@@ -535,6 +535,10 @@ pub struct ConnectorActionRequest {
     pub connector_id: String,
     pub action: String,
     pub payload: BTreeMap<String, String>,
+    #[serde(default)]
+    pub permission_mode: Option<String>,
+    #[serde(default)]
+    pub permission_profile: Option<String>,
     pub approval: ApprovalRequest,
 }
 
@@ -912,6 +916,8 @@ pub struct ScheduledExecutionRoute {
     pub backend_id: String,
     pub model_id: String,
     pub permission_mode: String,
+    #[serde(default)]
+    pub permission_profile: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

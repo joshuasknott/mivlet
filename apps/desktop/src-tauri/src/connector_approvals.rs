@@ -379,6 +379,8 @@ mod tests {
                 ("to".to_string(), target.to_string()),
                 ("subject".to_string(), "Status update".to_string()),
             ]),
+            permission_mode: Some("full-access".to_string()),
+            permission_profile: Some("full-with-approvals".to_string()),
             approval: ApprovalRequest {
                 id: "action-1".to_string(),
                 service: "Gmail".to_string(),
@@ -446,6 +448,8 @@ mod tests {
                 ),
                 ("attachments".to_string(), "report.pdf".to_string()),
             ]),
+            permission_mode: Some("full-access".to_string()),
+            permission_profile: Some("full-with-approvals".to_string()),
             approval: ApprovalRequest {
                 id: "action-preview".to_string(),
                 service: "Gmail".to_string(),
