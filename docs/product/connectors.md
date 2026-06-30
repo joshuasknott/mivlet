@@ -141,12 +141,12 @@ connected.
 
 ## Credential storage and auth broker
 
-The auth broker is **deferred**: this repo has no deployable broker app yet.
+The auth broker is implemented in `apps/broker` (targeting Cloudflare Workers for production deployment), but it is not yet deployed in production.
 The narrow broker contract, its non-proxying boundary, the fail-closed
 configuration checks, and the local-first guarantees are documented in
 [Auth broker contract](../connectors/auth-broker.md). Confidential-client
 connectors (GitHub, Vercel, Notion, Slack, Linear) fail closed until a broker is
-deployed; the core desktop workspace and Google public-client (PKCE) connectors
+deployed and configured; the core desktop workspace and Google public-client (PKCE) connectors
 do not depend on it.
 
 Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
