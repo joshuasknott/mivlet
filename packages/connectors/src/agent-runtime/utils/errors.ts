@@ -23,7 +23,7 @@ export function classifyBackendError(
   message: string
 ): Pick<BackendErrorMetadata, "code" | "retryable"> {
   if (
-    /auth|unauthor|forbidden|401|403|credential|sign[- ]?in|login|token|api key|invalid key|bad key/i.test(
+    /auth|unauthor|forbidden|401|403|credential|sign[- ]?in|login|token|api[-_ ]?key|invalid key|bad key/i.test(
       message
     )
   ) {
