@@ -181,6 +181,32 @@ describe("retrieve — scope isolation", () => {
     const ids = result.citations.map((c) => c.sourceId).sort();
     expect(ids).toEqual(["global", "thread"]);
   });
+
+  it("project run sees global + matching project sources but excludes other projects or thread sources", async () => {
+    const sources = [
+      src(makeSource({ id: "global", title: "Global doc", scope: GLOBAL_SCOPE }), [
+        makeChunk("global", 0, "connector")
+      ]),
+      src(
+        makeSource({ id: "project-match", title: "Project matched doc", scope: { level: "project", projectId: "p1" } }),
+        [makeChunk("project-match", 0, "connector")]
+      ),
+      src(
+        makeSource({ id: "project-other", title: "Project other doc", scope: { level: "project", projectId: "p2" } }),
+        [makeChunk("project-other", 0, "connector")]
+      ),
+      src(
+        makeSource({ id: "thread-match", title: "Thread matched doc", scope: { level: "thread", threadId: "t1", projectId: "p1" } }),
+        [makeChunk("thread-match", 0, "connector")]
+      )
+    ];
+    const result = await retrieve(sources, {
+      query: "connector",
+      scope: { level: "project", projectId: "p1" }
+    });
+    const ids = result.citations.map((c) => c.sourceId).sort();
+    expect(ids).toEqual(["global", "project-match"]);
+  });
 });
 
 describe("retrieve — stale / disabled exclusion", () => {
@@ -217,6 +243,19 @@ describe("retrieve — stale / disabled exclusion", () => {
     ];
     const result = await retrieve(sources, { query: "connector" });
     expect(result.citations.map((citation) => citation.sourceId)).toEqual(["fresh"]);
+  });
+
+  it("handles partial failure retrieval by filtering out errored, stale, and disabled sources", async () => {
+    const sources = [
+      src(makeSource({ id: "good-1", title: "Valid doc 1" }), [makeChunk("good-1", 0, "connector integration")]),
+      src(makeSource({ id: "good-2", title: "Valid doc 2" }), [makeChunk("good-2", 0, "connector testing")]),
+      src(makeSource({ id: "stale-1", title: "Stale doc", status: "stale" }), [makeChunk("stale-1", 0, "connector stale")]),
+      src(makeSource({ id: "error-1", title: "Errored doc", status: "error" }), [makeChunk("error-1", 0, "connector error")]),
+      src(makeSource({ id: "disabled-1", title: "Disabled doc", disabled: true }), [makeChunk("disabled-1", 0, "connector disabled")])
+    ];
+    const result = await retrieve(sources, { query: "connector" });
+    const ids = result.citations.map((c) => c.sourceId).sort();
+    expect(ids).toEqual(["good-1", "good-2"]);
   });
 });
 

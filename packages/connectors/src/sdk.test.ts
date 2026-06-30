@@ -167,6 +167,101 @@ describe("ConnectorRuntime", () => {
       expect.objectContaining({ accessToken: "refreshed" })
     );
   });
+
+  it("respects custom maxRetries option and sleep delays on retryable failure", async () => {
+    const read = vi
+      .fn()
+      .mockRejectedValue({
+        code: "rate-limited",
+        connectorId: "fixture",
+        message: "slow down",
+        retryable: true
+      });
+    const adapter = fixtureAdapter({ read });
+    const sleep = vi.fn(async () => undefined);
+    const runtime = new ConnectorRuntime({
+      approvals: approvals(),
+      maxRetries: 3,
+      sleep
+    });
+    runtime.register(adapter);
+    await expect(runtime.read(session(), { capability: "items.read", input: {} })).rejects.toThrow();
+    // 1 initial attempt + 3 retries = 4 attempts total
+    expect(read).toHaveBeenCalledTimes(4);
+    // sleep called 3 times: 100 * 2^0, 100 * 2^1, 100 * 2^2
+    expect(sleep).toHaveBeenNthCalledWith(1, 100);
+    expect(sleep).toHaveBeenNthCalledWith(2, 200);
+    expect(sleep).toHaveBeenNthCalledWith(3, 400);
+  });
+
+  it("does not retry when the error is marked non-retryable", async () => {
+    const read = vi.fn().mockRejectedValue({
+      code: "invalid-request",
+      connectorId: "fixture",
+      message: "bad request",
+      retryable: false
+    });
+    const adapter = fixtureAdapter({ read });
+    const sleep = vi.fn(async () => undefined);
+    const runtime = new ConnectorRuntime({ approvals: approvals(), sleep });
+    runtime.register(adapter);
+    await expect(runtime.read(session(), { capability: "items.read", input: {} })).rejects.toThrow();
+    expect(read).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it("propagates token refresh errors without retrying operation", async () => {
+    const refresh = vi.fn().mockRejectedValue(new Error("Refresh service down"));
+    const adapter = fixtureAdapter({ refresh });
+    const runtime = new ConnectorRuntime({
+      approvals: approvals(),
+      now: () => new Date("2026-06-27T12:00:00.000Z")
+    });
+    runtime.register(adapter);
+    // Expiring token to trigger refresh
+    const account = session({ expiresAt: "2026-06-27T12:00:30.000Z" });
+    await expect(runtime.read(account, { capability: "items.read", input: {} })).rejects.toThrow("Refresh service down");
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(adapter.read).not.toHaveBeenCalled();
+  });
+
+  it("does not refresh token when token has not expired and expiresAt is far in future or null", async () => {
+    const adapter = fixtureAdapter();
+    const runtime = new ConnectorRuntime({
+      approvals: approvals(),
+      now: () => new Date("2026-06-27T12:00:00.000Z")
+    });
+    runtime.register(adapter);
+    // 1. Far in future
+    const account1 = session({ expiresAt: "2026-06-27T13:00:00.000Z" });
+    await runtime.read(account1, { capability: "items.read", input: {} });
+    expect(adapter.refresh).not.toHaveBeenCalled();
+
+    // 2. null expiresAt
+    const account2 = session({ expiresAt: undefined });
+    await runtime.read(account2, { capability: "items.read", input: {} });
+    expect(adapter.refresh).not.toHaveBeenCalled();
+  });
+
+  it("propagates cancellation signal and AbortError", async () => {
+    const read = vi.fn().mockImplementation(async (req) => {
+      if (req.signal?.aborted) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+      return { items: [] };
+    });
+    const adapter = fixtureAdapter({ read });
+    const runtime = new ConnectorRuntime({ approvals: approvals() });
+    runtime.register(adapter);
+
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runtime.read(session(), { capability: "items.read", input: {}, signal: controller.signal })
+    ).rejects.toThrow(/aborted/);
+    expect(read).toHaveBeenCalledOnce();
+  });
 });
 
 it("uses a refresh leeway for token expiry", () => {
