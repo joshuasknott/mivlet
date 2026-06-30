@@ -111,10 +111,7 @@ metadata, draft creation, and explicit sends. Google Calendar supports calendar
 listing, event reads, event details, free/busy checks, and approved event
 create/update/delete actions.
 
-Google write actions require a fresh explicit approval. Standing session/rule
-grants are intentionally not accepted for Google mutations. Gmail sends also
-require per-message approval and show the sending account, recipients, subject,
-body preview, and attachments before execution.
+Google write actions require a fresh explicit approval. Standing session approvals or saved rules are not accepted for Google modifications; each action requires a fresh, explicit approval. Gmail sends also require per-message approval and show the sending account, recipients, subject, body preview, and attachments before execution.
 
 ## Read and write behavior
 
@@ -131,12 +128,7 @@ record with:
 Imported content is not durable memory. The existing memory-promotion approval
 is the only path from connector knowledge to durable memory.
 
-Draft creation is a provider write and requires approval even when it does not
-send or publish. Sending Gmail, posting Slack,
-Vercel deployment/configuration changes, Linear issue/comment changes, and any
-public/destructive action use high-risk full-access confirmation. No adapter
-executes a consequential write directly; the native runtime records a prepared
-approval preview and requires a matching explicit user decision before egress.
+Draft creation is a provider write and requires approval even when it does not send or publish. Sending Gmail, posting Slack, Vercel deployment or configuration changes, Linear issue or comment changes, and any public or destructive action require typing a confirmation phrase before execution. No adapter executes a consequential write directly; the native runtime records a prepared approval preview and requires a matching explicit user decision before egress. Saved rules do not bypass these execution-boundary checks.
 
 The native AI runtime exposes read-only tools for authenticated GitHub, Vercel,
 and Linear capabilities. These call the live provider APIs only after native
