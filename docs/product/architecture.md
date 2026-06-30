@@ -106,8 +106,7 @@ to a different backend for a due run.
 
 The Tauri scheduler leases due occurrences, writes queue records, and exposes
 pending workflow runs to a headless scheduled-agent hook. Jobs and queue records
-persist in the raw JSON file `scheduler-store.json` (migration to SQLite is a
-release blocker). Scheduled prompts use
+persist in the encrypted SQLite database under schema v4. Scheduled prompts use
 the same adapter contract as interactive prompts, so native API, Codex
 app-server, and ACP runs share cancellation, blocked-auth handling, and approval
 boundaries. Schedules do not require Convex or a hosted Fable account.
