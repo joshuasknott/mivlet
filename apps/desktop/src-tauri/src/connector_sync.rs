@@ -227,6 +227,7 @@ pub async fn sync_connector(
     let finished = match crate::connectors::refresh_connector_health(
         app,
         request.connector_id.clone(),
+        Some(request.workspace_id.clone()),
     )
     .await
     {

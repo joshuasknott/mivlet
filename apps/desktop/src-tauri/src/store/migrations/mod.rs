@@ -38,6 +38,11 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // so the step probes for the `category` column and only runs the
             // ALTER batch when it is absent (idempotent over a partial apply).
             2 => apply_v2_to_v3(conn)?,
+            // 3 → 4: introduce the workspace ownership root, attach legacy
+            // user-owned records to the compatibility workspace, and create
+            // the workflow hand-off tables, then add the durable scheduler
+            // tables from the schedule-SQLite integration.
+            3 => apply_v3_to_v4(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -48,6 +53,198 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
     }
     let _ = (conn, to); // schema step closures land here in future versions
     Ok(())
+}
+
+fn apply_v3_to_v4(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS workspace (
+           id TEXT PRIMARY KEY,
+           name TEXT NOT NULL,
+           created_at TEXT NOT NULL,
+           updated_at TEXT NOT NULL
+         );",
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO workspace (id, name, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3);",
+        rusqlite::params![
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            "My Workspace",
+            "1970-01-01T00:00:00Z"
+        ],
+    )?;
+
+    // These two tables used their domain key as the primary key before v4.
+    // Rebuild them so the same setting/connector can exist in two workspaces.
+    if table_exists(conn, "preferences")? && !table_has_column(conn, "preferences", "workspace_id")?
+    {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE preferences RENAME TO preferences_v3;
+            CREATE TABLE preferences (
+              workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+              key TEXT NOT NULL,
+              payload BLOB NOT NULL,
+              payload_nonce BLOB NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY (workspace_id, key)
+            );
+            INSERT INTO preferences (workspace_id, key, payload, payload_nonce, updated_at)
+              SELECT 'default', key, payload, payload_nonce, updated_at FROM preferences_v3;
+            DROP TABLE preferences_v3;
+            "#,
+        )?;
+    }
+    if table_exists(conn, "connector_account")?
+        && !table_has_column(conn, "connector_account", "workspace_id")?
+    {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE connector_account RENAME TO connector_account_v3;
+            CREATE TABLE connector_account (
+              workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+              project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+              connector_id TEXT NOT NULL,
+              account_id TEXT,
+              status TEXT NOT NULL,
+              expires_at INTEGER,
+              credential_ref TEXT NOT NULL,
+              connected_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              payload BLOB NOT NULL,
+              payload_nonce BLOB NOT NULL,
+              PRIMARY KEY (workspace_id, connector_id)
+            );
+            INSERT INTO connector_account (
+              workspace_id, project_id, connector_id, account_id, status,
+              expires_at, credential_ref, connected_at, updated_at, payload, payload_nonce
+            )
+              SELECT 'default', NULL, connector_id, account_id, status,
+                     expires_at, credential_ref, connected_at, updated_at, payload, payload_nonce
+              FROM connector_account_v3;
+            DROP TABLE connector_account_v3;
+            "#,
+        )?;
+    }
+
+    add_ownership_columns(conn, "project", false)?;
+    add_ownership_columns(conn, "knowledge_source", true)?;
+    add_ownership_columns(conn, "memory_record", true)?;
+    add_ownership_columns(conn, "schedule", true)?;
+    if table_exists(conn, "connector_cache")?
+        && !table_has_column(conn, "connector_cache", "project_id")?
+    {
+        conn.execute(
+            "ALTER TABLE connector_cache ADD COLUMN project_id TEXT;",
+            [],
+        )?;
+    }
+
+    if table_exists(conn, "project")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_project_workspace ON project(workspace_id);",
+        )?;
+    }
+    if table_exists(conn, "connector_account")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_connector_account_workspace
+             ON connector_account(workspace_id);",
+        )?;
+    }
+    if table_exists(conn, "knowledge_source")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_workspace
+             ON knowledge_source(workspace_id, project_id);",
+        )?;
+    }
+    if table_exists(conn, "memory_record")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_memory_workspace
+             ON memory_record(workspace_id, project_id);",
+        )?;
+    }
+    if table_exists(conn, "schedule")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_schedule_workspace
+             ON schedule(workspace_id, project_id, enabled);",
+        )?;
+    }
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS workflow_definition (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+          id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL,
+          PRIMARY KEY (workspace_id, id, version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_definition_workspace
+          ON workflow_definition(workspace_id, project_id, updated_at);
+        CREATE TABLE IF NOT EXISTS workflow_run (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+          id TEXT NOT NULL,
+          definition_id TEXT NOT NULL,
+          definition_version INTEGER NOT NULL,
+          status TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL,
+          PRIMARY KEY (workspace_id, id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace
+          ON workflow_run(workspace_id, project_id, updated_at);
+        CREATE INDEX IF NOT EXISTS idx_workflow_run_definition
+          ON workflow_run(workspace_id, definition_id, definition_version);
+        "#,
+    )?;
+    conn.execute_batch(crate::store::schema::SCHEMA_V3_TO_V4)?;
+    Ok(())
+}
+
+fn add_ownership_columns(
+    conn: &Connection,
+    table: &str,
+    include_project: bool,
+) -> super::Result<()> {
+    if !table_exists(conn, table)? {
+        return Ok(());
+    }
+    if !table_has_column(conn, table, "workspace_id")? {
+        // Table names are fixed internal constants, never user input.
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default';"
+        ))?;
+    }
+    if include_project && !table_has_column(conn, table, "project_id")? {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN project_id TEXT;"))?;
+    }
+    Ok(())
+}
+
+fn table_exists(conn: &Connection, table: &str) -> super::Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1);",
+        [table],
+        |row| row.get(0),
+    )?)
+}
+
+fn table_has_column(conn: &Connection, table: &str, name: &str) -> super::Result<bool> {
+    use rusqlite::types::Value;
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table});"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, Value>(1))?;
+    for row in rows {
+        if matches!(row?, Value::Text(ref text) if text == name) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Apply the v2→v3 audit_event extension, idempotently. The presence of the
@@ -278,5 +475,80 @@ mod tests {
         apply(&conn, 2, CURRENT_SCHEMA_VERSION).unwrap();
         apply(&conn, 2, CURRENT_SCHEMA_VERSION).unwrap();
         assert!(audit_event_has_column(&conn, "category").unwrap());
+    }
+
+    #[test]
+    fn v3_to_v4_preserves_legacy_rows_under_default_workspace() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE preferences (
+              key TEXT PRIMARY KEY, payload BLOB NOT NULL,
+              payload_nonce BLOB NOT NULL, updated_at TEXT NOT NULL
+            );
+            CREATE TABLE connector_account (
+              connector_id TEXT PRIMARY KEY, account_id TEXT, status TEXT NOT NULL,
+              expires_at INTEGER, credential_ref TEXT NOT NULL, connected_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            CREATE TABLE project (
+              id TEXT PRIMARY KEY, title_fingerprint TEXT NOT NULL,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+              payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            CREATE TABLE knowledge_source (
+              id TEXT PRIMARY KEY, connector_id TEXT NOT NULL, kind TEXT NOT NULL,
+              trust TEXT NOT NULL, pinned INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL, imported_at TEXT NOT NULL, origin TEXT NOT NULL,
+              payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            INSERT INTO preferences VALUES ('shell', x'01', x'02', 'now');
+            INSERT INTO connector_account VALUES (
+              'github', NULL, 'connected', NULL, 'oauth-token:github:1',
+              'now', 'now', x'03', x'04'
+            );
+            INSERT INTO project VALUES ('p1', 'fp', 'now', 'now', x'05', x'06');
+            INSERT INTO knowledge_source VALUES (
+              'k1', 'local-files', 'document', 'untrusted', 0, 'fp', 1,
+              'now', 'local-import', x'07', x'08'
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 3, 4).unwrap();
+        apply(&conn, 3, 4).unwrap();
+
+        let workspace_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM workspace WHERE id='default';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let preference_owner: String = conn
+            .query_row(
+                "SELECT workspace_id FROM preferences WHERE key='shell';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let project_owner: String = conn
+            .query_row("SELECT workspace_id FROM project WHERE id='p1';", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let knowledge_owner: String = conn
+            .query_row(
+                "SELECT workspace_id FROM knowledge_source WHERE id='k1';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(workspace_count, 1);
+        assert_eq!(preference_owner, "default");
+        assert_eq!(project_owner, "default");
+        assert_eq!(knowledge_owner, "default");
     }
 }

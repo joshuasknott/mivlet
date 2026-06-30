@@ -220,6 +220,7 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     let store = Store::open(&db_path, vault).map_err(|error| error.to_string())?;
     migrations::migrate_all(&store, app_data_dir).map_err(|error| error.to_string())?;
     seed_legacy_documents(&store, app_data_dir)?;
+    migrate_legacy_workflows(&store, app_data_dir)?;
     GLOBAL_STORE
         .set(store)
         .map_err(|_| "Fable's encrypted store was initialized twice.".to_string())
@@ -241,6 +242,7 @@ fn timestamp() -> String {
 }
 
 fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Result<(), String> {
+    let scope = repos::scope::DataScope::legacy_default();
     const DOCUMENTS: &[&str] = &[
         "runtime-snapshot.json",
         "agent-runs.json",
@@ -250,6 +252,10 @@ fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Res
         "connected-backends.json",
         "memory-state.json",
         "imported-knowledge.json",
+        // The scheduler store, workflow definitions, and workflow runs are
+        // migrated into dedicated encrypted tables by `migrations::legacy`; do
+        // NOT seed them as opaque documents — their typed rows are the source of
+        // truth once migration has run.
     ];
     for name in DOCUMENTS {
         let path = app_data_dir.join(name);
@@ -258,7 +264,7 @@ fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Res
         }
         let key = document_key(&path)?;
         let exists = store
-            .with_conn(|conn| repos::preferences::get(conn, store, &key))
+            .with_conn(|conn| repos::preferences::get_scoped(conn, store, &scope, &key))
             .map_err(|error| error.to_string())?
             .is_some();
         if exists {
@@ -271,7 +277,9 @@ fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Res
             continue;
         };
         store
-            .transaction(|tx| repos::preferences::upsert(tx, store, &key, &value, &timestamp()))
+            .transaction(|tx| {
+                repos::preferences::upsert_scoped(tx, store, &scope, &key, &value, &timestamp())
+            })
             .map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -305,12 +313,113 @@ pub fn with_store<R>(
 pub fn read_document<T: serde::de::DeserializeOwned>(
     path: &Path,
 ) -> std::result::Result<Option<T>, String> {
+    read_workspace_document(path, &repos::scope::DataScope::legacy_default())
+}
+
+fn migrate_legacy_workflows(store: &Store, app_data_dir: &Path) -> std::result::Result<(), String> {
+    let scope = repos::scope::DataScope::legacy_default();
+    let definitions_path = app_data_dir.join("workflow-definitions.json");
+    if let Ok(bytes) = std::fs::read(&definitions_path) {
+        if let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
+            store
+                .transaction(|tx| {
+                    for value in values {
+                        let Some(id) = value.get("id").and_then(serde_json::Value::as_str) else {
+                            continue;
+                        };
+                        let Some(version) =
+                            value.get("version").and_then(serde_json::Value::as_u64)
+                        else {
+                            continue;
+                        };
+                        let created_at = value
+                            .get("createdAt")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("1970-01-01T00:00:00Z");
+                        let updated_at = value
+                            .get("updatedAt")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(created_at);
+                        repos::workflow::upsert_definition(
+                            tx,
+                            store,
+                            &scope,
+                            id,
+                            version as u32,
+                            created_at,
+                            updated_at,
+                            &value,
+                        )?;
+                    }
+                    Ok(())
+                })
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let runs_path = app_data_dir.join("workflow-runs.json");
+    if let Ok(bytes) = std::fs::read(&runs_path) {
+        if let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
+            store
+                .transaction(|tx| {
+                    for value in values {
+                        let Some(id) = value.get("id").and_then(serde_json::Value::as_str) else {
+                            continue;
+                        };
+                        let Some(definition_id) = value
+                            .get("definitionId")
+                            .and_then(serde_json::Value::as_str)
+                        else {
+                            continue;
+                        };
+                        let Some(definition_version) = value
+                            .get("definitionVersion")
+                            .and_then(serde_json::Value::as_u64)
+                        else {
+                            continue;
+                        };
+                        let status = value
+                            .get("status")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("failed");
+                        let started_at = value
+                            .get("startedAt")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("1970-01-01T00:00:00Z");
+                        let updated_at = value
+                            .get("updatedAt")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(started_at);
+                        repos::workflow::upsert_run(
+                            tx,
+                            store,
+                            &scope,
+                            id,
+                            definition_id,
+                            definition_version as u32,
+                            status,
+                            started_at,
+                            updated_at,
+                            &value,
+                        )?;
+                    }
+                    Ok(())
+                })
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn read_workspace_document<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    scope: &repos::scope::DataScope,
+) -> std::result::Result<Option<T>, String> {
     let Some(store) = GLOBAL_STORE.get() else {
         return Ok(None);
     };
     let key = document_key(path)?;
     let value = store
-        .with_conn(|conn| repos::preferences::get(conn, store, &key))
+        .with_conn(|conn| repos::preferences::get_scoped(conn, store, scope, &key))
         .map_err(|error| error.to_string())?;
     value
         .map(serde_json::from_value)
@@ -325,6 +434,14 @@ pub fn write_document<T: serde::Serialize>(
     path: &Path,
     value: &T,
 ) -> std::result::Result<bool, String> {
+    write_workspace_document(path, &repos::scope::DataScope::legacy_default(), value)
+}
+
+pub fn write_workspace_document<T: serde::Serialize>(
+    path: &Path,
+    scope: &repos::scope::DataScope,
+    value: &T,
+) -> std::result::Result<bool, String> {
     let Some(store) = GLOBAL_STORE.get() else {
         return Ok(false);
     };
@@ -332,7 +449,9 @@ pub fn write_document<T: serde::Serialize>(
     let value = serde_json::to_value(value)
         .map_err(|_| "Fable could not encode an encrypted local document.".to_string())?;
     store
-        .transaction(|tx| repos::preferences::upsert(tx, store, &key, &value, &timestamp()))
+        .transaction(|tx| {
+            repos::preferences::upsert_scoped(tx, store, scope, &key, &value, &timestamp())
+        })
         .map_err(|error| error.to_string())?;
     Ok(true)
 }
@@ -363,17 +482,21 @@ pub fn encrypted_store_status() -> std::result::Result<EncryptedStoreStatus, Str
 /// Export encrypted-store documents as credential-free JSON. OAuth/API keys
 /// never enter the database and therefore cannot enter this export.
 #[tauri::command]
-pub fn export_local_data() -> std::result::Result<String, String> {
+pub fn export_local_data(workspace_id: Option<String>) -> std::result::Result<String, String> {
     let store = GLOBAL_STORE
         .get()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = repos::scope::DataScope::workspace(
+        workspace_id.unwrap_or_else(|| repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+    )
+    .map_err(|error| error.to_string())?;
     let keys = store
-        .with_conn(repos::preferences::keys)
+        .with_conn(|conn| repos::preferences::keys_scoped(conn, &scope))
         .map_err(|error| error.to_string())?;
     let mut documents = serde_json::Map::new();
     for key in keys.into_iter().filter(|key| key.starts_with("document:")) {
         if let Some(value) = store
-            .with_conn(|conn| repos::preferences::get(conn, store, &key))
+            .with_conn(|conn| repos::preferences::get_scoped(conn, store, &scope, &key))
             .map_err(|error| error.to_string())?
         {
             documents.insert(key.trim_start_matches("document:").to_string(), value);
@@ -381,6 +504,7 @@ pub fn export_local_data() -> std::result::Result<String, String> {
     }
     serde_json::to_string_pretty(&serde_json::json!({
         "version": CURRENT_SCHEMA_VERSION,
+        "workspaceId": scope.workspace_id(),
         "credentialsIncluded": false,
         "documents": documents,
     }))
@@ -436,13 +560,20 @@ pub fn delete_local_data(
                  DELETE FROM knowledge_source;
                  DELETE FROM memory_record;
                  DELETE FROM schedule;
+                  DELETE FROM scheduled_job;
+                  DELETE FROM scheduler_queue_entry;
+                  DELETE FROM workflow_definition;
+                  DELETE FROM workflow_run;
                  DELETE FROM model_config;
                  DELETE FROM draft;
                  DELETE FROM connector_cache;
                  DELETE FROM connector_cache_settings;
                  DELETE FROM preferences;
                  DELETE FROM profile;
-                 DELETE FROM migration_log;",
+                 DELETE FROM migration_log;
+                 DELETE FROM workspace;
+                 INSERT INTO workspace (id, name, created_at, updated_at)
+                   VALUES ('default', 'My Workspace', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');",
             )?;
             Ok(())
         })
@@ -463,6 +594,9 @@ pub fn delete_local_data(
         "connected-backends.json",
         "memory-state.json",
         "imported-knowledge.json",
+        "scheduler-store.json",
+        "workflow-definitions.json",
+        "workflow-runs.json",
     ] {
         let _ = std::fs::remove_file(app_data.join(name));
     }
@@ -672,7 +806,7 @@ mod tests {
         store
             .transaction(|tx| {
                 tx.execute(
-                    "INSERT INTO project(id,title_fingerprint,created_at,updated_at,payload,payload_nonce) VALUES('p','f','t','t',?1,?2)",
+                    "INSERT INTO project(id,workspace_id,title_fingerprint,created_at,updated_at,payload,payload_nonce) VALUES('p','default','f','t','t',?1,?2)",
                     rusqlite::params![sealed.ciphertext, sealed.nonce],
                 )?;
                 tx.execute(

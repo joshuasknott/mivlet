@@ -13,6 +13,19 @@ use crate::models::{
 use crate::paths::{
     normalize_spaces, truncate_characters, workflow_definitions_path, workflow_runs_path,
 };
+use crate::store::repos::{scope::DataScope, workflow};
+
+fn data_scope(
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<DataScope, String> {
+    DataScope::new(
+        workspace_id
+            .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+        project_id,
+    )
+    .map_err(|error| error.to_string())
+}
 
 fn normalize_definition(
     mut definition: WorkflowDefinitionRecord,
@@ -61,8 +74,31 @@ fn write_definitions(path: &Path, definitions: &[WorkflowDefinitionRecord]) -> R
 pub fn save_workflow_definition(
     app: tauri::AppHandle,
     definition: WorkflowDefinitionRecord,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<WorkflowDefinitionRecord, String> {
     let definition = normalize_definition(definition)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    let value = serde_json::to_value(&definition)
+        .map_err(|_| "Fable could not encode workflow definition.".to_string())?;
+    if crate::store::with_store(|store| {
+        store.transaction(|tx| {
+            workflow::upsert_definition(
+                tx,
+                store,
+                &scope,
+                &definition.id,
+                definition.version,
+                &definition.created_at,
+                &definition.updated_at,
+                &value,
+            )
+        })
+    })?
+    .is_some()
+    {
+        return Ok(definition);
+    }
     let path = workflow_definitions_path(&app)?;
     let mut definitions = read_definitions(&path)?;
     definitions
@@ -76,7 +112,21 @@ pub fn save_workflow_definition(
 #[tauri::command]
 pub fn list_workflow_definitions(
     app: tauri::AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<Vec<WorkflowDefinitionRecord>, String> {
+    let scope = data_scope(workspace_id, project_id)?;
+    if let Some(values) = crate::store::with_store(|store| {
+        store.with_conn(|conn| workflow::list_definitions(conn, store, &scope))
+    })? {
+        return values
+            .into_iter()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|_| "Fable could not decode workflow definition.".to_string())
+            })
+            .collect();
+    }
     read_definitions(&workflow_definitions_path(&app)?)
 }
 
@@ -137,12 +187,54 @@ pub fn persist_run(path: &Path, run: WorkflowRunRecord) -> Result<WorkflowRunRec
 pub fn save_workflow_run(
     app: tauri::AppHandle,
     run: WorkflowRunRecord,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<WorkflowRunRecord, String> {
+    let run = normalize_run(run)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    let value = serde_json::to_value(&run)
+        .map_err(|_| "Fable could not encode workflow run.".to_string())?;
+    if crate::store::with_store(|store| {
+        store.transaction(|tx| {
+            workflow::upsert_run(
+                tx,
+                store,
+                &scope,
+                &run.id,
+                &run.definition_id,
+                run.definition_version,
+                &run.status,
+                &run.started_at,
+                &run.updated_at,
+                &value,
+            )
+        })
+    })?
+    .is_some()
+    {
+        return Ok(run);
+    }
     persist_run(&workflow_runs_path(&app)?, run)
 }
 
 #[tauri::command]
-pub fn list_workflow_runs(app: tauri::AppHandle) -> Result<Vec<WorkflowRunRecord>, String> {
+pub fn list_workflow_runs(
+    app: tauri::AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<WorkflowRunRecord>, String> {
+    let scope = data_scope(workspace_id, project_id)?;
+    if let Some(values) = crate::store::with_store(|store| {
+        store.with_conn(|conn| workflow::list_runs(conn, store, &scope, None))
+    })? {
+        return values
+            .into_iter()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|_| "Fable could not decode workflow run.".to_string())
+            })
+            .collect();
+    }
     read_runs(&workflow_runs_path(&app)?)
 }
 
@@ -150,8 +242,22 @@ pub fn list_workflow_runs(app: tauri::AppHandle) -> Result<Vec<WorkflowRunRecord
 pub fn list_workflow_runs_for_definition(
     app: tauri::AppHandle,
     definition_id: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<Vec<WorkflowRunRecord>, String> {
     let definition_id = normalize_spaces(&definition_id);
+    let scope = data_scope(workspace_id, project_id)?;
+    if let Some(values) = crate::store::with_store(|store| {
+        store.with_conn(|conn| workflow::list_runs(conn, store, &scope, Some(&definition_id)))
+    })? {
+        return values
+            .into_iter()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|_| "Fable could not decode workflow run.".to_string())
+            })
+            .collect();
+    }
     let runs = read_runs(&workflow_runs_path(&app)?)?;
     Ok(runs
         .into_iter()

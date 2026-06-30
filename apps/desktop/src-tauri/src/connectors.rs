@@ -1032,20 +1032,40 @@ fn audit_connector_action(
     .record();
 }
 
+fn require_connector_workspace(workspace_id: Option<String>) -> Result<(), ConnectorCommandError> {
+    let workspace_id = workspace_id
+        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    if workspace_id != crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
+        return Err(command_error(
+            "invalid-request",
+            "workspace",
+            "Connector credentials are not configured for this workspace.",
+            false,
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub fn list_connector_statuses(app: tauri::AppHandle) -> Vec<ConnectorManifest> {
+pub fn list_connector_statuses(
+    app: tauri::AppHandle,
+    workspace_id: Option<String>,
+) -> Result<Vec<ConnectorManifest>, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let boundary = connector_connections_path(&app)
         .map(|connections_path| NativeCredentialBoundary { connections_path });
-    match boundary {
+    Ok(match boundary {
         Ok(boundary) => list_connector_statuses_with(&boundary),
         Err(_) => list_connector_statuses_with(&UnavailableCredentialBoundary),
-    }
+    })
 }
 
 #[tauri::command]
 pub fn start_connector_auth(
     request: ConnectorAuthRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     let declared = entry
         .scopes
@@ -1093,7 +1113,9 @@ pub fn start_connector_auth(
 pub async fn complete_connector_auth(
     app: tauri::AppHandle,
     request: ConnectorAuthRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     complete_auth(&app, entry.id, request).await
 }
@@ -1107,7 +1129,9 @@ pub async fn complete_connector_auth(
 pub async fn begin_connector_oauth(
     app: tauri::AppHandle,
     request: ConnectorAuthRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     let declared = entry
         .scopes
@@ -1155,7 +1179,9 @@ pub async fn begin_connector_oauth(
 pub async fn clear_connector_auth(
     app: tauri::AppHandle,
     connector_id: String,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&connector_id)?;
     disconnect(&app, entry.id).await?;
     let path = connector_connections_path(&app)
@@ -1177,7 +1203,9 @@ pub async fn clear_connector_auth(
 pub fn list_connector_accounts(
     app: tauri::AppHandle,
     connector_id: String,
+    workspace_id: Option<String>,
 ) -> Result<Vec<crate::models::ConnectorAccountOption>, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
@@ -1195,7 +1223,9 @@ pub fn switch_connector_account(
     app: tauri::AppHandle,
     connector_id: String,
     account_id: String,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
@@ -1212,7 +1242,9 @@ pub fn switch_connector_account(
 pub async fn refresh_connector_health(
     app: tauri::AppHandle,
     connector_id: String,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&connector_id)?;
     // Refresh first: this rotates expiring tokens and fails closed when the
     // connection is missing or the refresh is rejected. A failed refresh is a
@@ -1235,7 +1267,9 @@ pub async fn refresh_connector_health(
 pub async fn search_connector(
     app: tauri::AppHandle,
     request: ConnectorSearchRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     if request.query.chars().count() > MAX_CONNECTOR_QUERY_CHARACTERS
         || !(1..=MAX_CONNECTOR_RESULT_LIMIT).contains(&request.limit.unwrap_or(20))
@@ -1263,7 +1297,9 @@ pub async fn search_connector(
 pub async fn read_connector_capability(
     app: tauri::AppHandle,
     request: ConnectorCapabilityRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorCapabilityResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     if !matches!(entry.id, "github" | "vercel" | "linear") {
         return Err(configuration_required(entry.id));
@@ -1275,7 +1311,9 @@ pub async fn read_connector_capability(
 pub async fn import_connector_item(
     app: tauri::AppHandle,
     request: ConnectorImportRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorImportResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     if request.item.connector_id != entry.id || request.imported_at.trim().is_empty() {
         return Err(command_error(
@@ -1322,7 +1360,9 @@ pub async fn import_connector_item(
 pub fn prepare_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorActionRequest, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let action = validate_connector_action(request)?;
     let connections_path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
@@ -1355,7 +1395,9 @@ pub fn prepare_connector_action(
 pub async fn execute_approved_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionExecutionRequest,
+    workspace_id: Option<String>,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
+    require_connector_workspace(workspace_id)?;
     let (action, resolution) = validate_connector_execution_request(request)?;
     let records_path = connector_approval_records_path(&app)
         .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
@@ -1556,4 +1598,15 @@ pub async fn execute_approved_connector_action(
 #[allow(dead_code)]
 fn _empty_provider_metadata() -> BTreeMap<String, String> {
     BTreeMap::new()
+}
+
+#[cfg(test)]
+mod workspace_scope_tests {
+    use super::*;
+
+    #[test]
+    fn connector_commands_fail_closed_for_an_unconfigured_workspace() {
+        let error = require_connector_workspace(Some("another-workspace".to_string())).unwrap_err();
+        assert_eq!(error.code, "invalid-request");
+    }
 }
