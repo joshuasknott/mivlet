@@ -9,7 +9,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - The repo is a private pnpm monorepo named `fable`, with `@fable/desktop`, `@fable/broker`, `@fable/connectors`, `@fable/knowledge`, and `@fable/protocol`.
 - The desktop app is Tauri 2 plus React, TypeScript, and Vite.
 - The Rust runtime is under `apps/desktop/src-tauri`.
-- Product docs already exist for thesis, roadmap, architecture, connectors, release notes, and threat model.
+- Product docs already exist for thesis, roadmap, architecture, connectors, native-runtime, release notes, and threat model.
 - Brand assets exist under `apps/desktop/public/brand`.
 
 ## Implemented
@@ -48,14 +48,14 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Schedules page: users can create, pause/resume, and delete local schedule records. Records persist locally in raw JSON; the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the provider-neutral `AgentBackend` path when a runnable backend is connected.
 - CI file: `.github/workflows/ci.yml` exists and uses pnpm for typecheck, tests, build, Tauri check, Rust tests, clippy, and fmt on Windows.
 - Tests exist across desktop, connectors, native API, local files, knowledge search, backend registry, and Rust runtime modules.
-
+ 
 ## Runtime Availability Matrix
-
+ 
 | Area | Category | Details / Location |
 | --- | --- | --- |
 | Local files, approvals, memory controls, knowledge search, runtime snapshots | **Finished** | Live local runtime paths in Tauri. Monolithic JSON documents intercept-routed to SQLite `preferences` table. |
 | Encrypted SQLite Core | **Finished** | Active in production Tauri path (keyring-backed AES-256-GCM vault). |
-| Native API-key Backends (BYOK) | **Finished** | Live OpenAI, Anthropic, Gemini, xAI, OpenRouter model execution when keys are supplied to local keyring. |
+| Native API-key Backends (BYOK) | **Finished** | Live OpenAI, Anthropic, Gemini, xAI, OpenRouter model execution when keys are supplied to local keyring. (See [Native Agent Runtime](native-runtime.md) for the capability matrix). |
 | Schedules Core | **Finished** | Local scheduler tick, leasing, queueing, and headless prompt execution are fully functional (depends on connected runnable backend). |
 | Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
 | ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
