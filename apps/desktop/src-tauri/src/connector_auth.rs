@@ -600,7 +600,10 @@ fn broker_error(
 ) -> ConnectorCommandError {
     let default_message = format!("The Fable auth broker {operation} was unsuccessful.");
     let human = message.unwrap_or_else(|| default_message.clone());
-    let retry_after = if retry_after.as_deref().is_some_and(|value| value.trim().is_empty()) {
+    let retry_after = if retry_after
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
         None
     } else {
         retry_after
@@ -637,7 +640,9 @@ fn broker_error(
         // (503) is honest and recoverable, while a malformed body still fails
         // closed without pretending success.
         None => match status {
-            502 | 503 | 504 => command_error("provider-unavailable", connector_id, &default_message, true),
+            502..=504 => {
+                command_error("provider-unavailable", connector_id, &default_message, true)
+            }
             429 => ConnectorCommandError {
                 code: "rate-limited".to_string(),
                 connector_id: connector_id.to_string(),
@@ -2043,9 +2048,8 @@ mod tests {
     fn broker_resolver_preserves_a_path_prefix_with_or_without_trailing_slash() {
         // A broker mounted behind a route prefix (common for a CF Worker exposed
         // under a path) must keep that prefix for every derived route.
-        let prefixed =
-            resolve_broker_endpoints("notion", Some("https://app.example.com/broker/"))
-                .expect("prefixed ok");
+        let prefixed = resolve_broker_endpoints("notion", Some("https://app.example.com/broker/"))
+            .expect("prefixed ok");
         assert_eq!(
             prefixed.handoff_endpoint,
             "https://app.example.com/broker/oauth/notion/handoff"
@@ -2054,9 +2058,8 @@ mod tests {
             prefixed.revocation_endpoint,
             "https://app.example.com/broker/oauth/notion/revoke"
         );
-        let no_slash =
-            resolve_broker_endpoints("notion", Some("https://app.example.com/broker"))
-                .expect("no trailing slash ok");
+        let no_slash = resolve_broker_endpoints("notion", Some("https://app.example.com/broker"))
+            .expect("no trailing slash ok");
         assert_eq!(no_slash.handoff_endpoint, prefixed.handoff_endpoint);
         assert_eq!(no_slash.refresh_endpoint, prefixed.refresh_endpoint);
     }
@@ -2113,8 +2116,11 @@ mod tests {
     #[test]
     fn broker_sibling_endpoint_preserves_a_path_prefix_and_loopback_port() {
         assert_eq!(
-            broker_sibling_endpoint("https://app.example.com/broker/oauth/notion/handoff", "refresh")
-                .unwrap(),
+            broker_sibling_endpoint(
+                "https://app.example.com/broker/oauth/notion/handoff",
+                "refresh"
+            )
+            .unwrap(),
             "https://app.example.com/broker/oauth/notion/refresh"
         );
         assert_eq!(
@@ -2196,8 +2202,19 @@ mod tests {
             "unsupported-version",
             "invalid-request",
         ] {
-            let error = broker_error("github", "handoff", Some(code), None, Some(false), 400, None);
-            assert_eq!(error.code, "needs-auth", "code {code} should map to needs-auth");
+            let error = broker_error(
+                "github",
+                "handoff",
+                Some(code),
+                None,
+                Some(false),
+                400,
+                None,
+            );
+            assert_eq!(
+                error.code, "needs-auth",
+                "code {code} should map to needs-auth"
+            );
             assert!(!error.retryable);
         }
     }
@@ -2205,8 +2222,7 @@ mod tests {
     #[test]
     fn broker_error_classifies_unparseable_body_by_status() {
         // An unconfigured/unreachable broker returns 503 with no JSON body.
-        let unavailable =
-            broker_error("github", "handoff", None, None, None, 503, None);
+        let unavailable = broker_error("github", "handoff", None, None, None, 503, None);
         assert_eq!(unavailable.code, "provider-unavailable");
         assert!(unavailable.retryable);
         // A throttled broker returns 429 with an unparseable body.
@@ -2370,10 +2386,9 @@ mod tests {
         let state = start_brokered_flow(&store, &handoff_url);
         let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
 
-        let (tokens, account, credential_ref) =
-            complete_with_store("github", &callback, &store)
-                .await
-                .expect("happy path connects");
+        let (tokens, account, credential_ref) = complete_with_store("github", &callback, &store)
+            .await
+            .expect("happy path connects");
         assert_eq!(account.id, "octocat");
         assert_eq!(account.handle.as_deref(), Some("octocat"));
         assert_eq!(tokens.access_token, "gho_access");
@@ -2381,17 +2396,17 @@ mod tests {
         assert!(tokens.brokered);
         // The persisted token set carries the handoff endpoint so a later
         // refresh/revoke can derive its sibling routes.
-        assert_eq!(tokens.handoff_endpoint.as_deref(), Some(handoff_url.as_str()));
+        assert_eq!(
+            tokens.handoff_endpoint.as_deref(),
+            Some(handoff_url.as_str())
+        );
         assert!(tokens.token_endpoint.is_none());
 
         // The token set is persisted in the secret store under the credential ref.
         let stored = store.get(&credential_ref).unwrap().unwrap();
         assert!(stored.contains("gho_access"));
         // The single-use state was consumed: replaying the callback fails closed.
-        assert!(store
-            .get(&pending_key("github", &state))
-            .unwrap()
-            .is_none());
+        assert!(store.get(&pending_key("github", &state)).unwrap().is_none());
         let replay = complete_with_store("github", &callback, &store)
             .await
             .expect_err("replay must fail");
@@ -2428,16 +2443,16 @@ mod tests {
     #[test]
     fn test_provider_config_pkce_missing_env_fails_closed() {
         let _lock = ENV_LOCK.lock().unwrap();
-        
+
         let old_val = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
         std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
-        
+
         let result = provider_config("google-drive", "oauth-pkce", vec![]);
-        
+
         if let Some(val) = old_val {
             std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", val);
         }
-        
+
         let err = result.expect_err("should fail when client id is missing");
         assert_eq!(err.code, "configuration-required");
         assert_eq!(err.connector_id, "google-drive");
@@ -2447,10 +2462,8 @@ mod tests {
     #[tokio::test]
     async fn test_disconnect_public_pkce_revocation() {
         let store = MemoryStore::default();
-        let path = std::env::temp_dir().join(format!(
-            "fable-disconnect-test-{}.json",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("fable-disconnect-test-{}.json", std::process::id()));
         let _ = fs::remove_file(&path);
 
         // Spin up a mock server for the revocation endpoint
@@ -2461,8 +2474,10 @@ mod tests {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0_u8; 4096];
             let read = stream.read(&mut request).await.unwrap();
-            request_tx.send(String::from_utf8_lossy(&request[..read]).to_string()).unwrap();
-            
+            request_tx
+                .send(String::from_utf8_lossy(&request[..read]).to_string())
+                .unwrap();
+
             let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
             stream.write_all(response.as_bytes()).await.unwrap();
         });
@@ -2482,7 +2497,9 @@ mod tests {
         };
 
         let cred_ref = "oauth-token:google-drive:acc-123";
-        store.set(cred_ref, &serde_json::to_string(&token_set).unwrap()).unwrap();
+        store
+            .set(cred_ref, &serde_json::to_string(&token_set).unwrap())
+            .unwrap();
 
         let connection = ConnectorConnection {
             connector_id: "google-drive".to_string(),
@@ -2506,7 +2523,9 @@ mod tests {
         write_connections(&path, &[connection]).unwrap();
 
         // Disconnect
-        disconnect_with_store_and_path("google-drive", &store, &path).await.unwrap();
+        disconnect_with_store_and_path("google-drive", &store, &path)
+            .await
+            .unwrap();
 
         // Check token removed from secret store
         assert!(store.get(cred_ref).unwrap().is_none());

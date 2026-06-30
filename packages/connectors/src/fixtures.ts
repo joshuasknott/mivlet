@@ -45,9 +45,9 @@ export const connectorFixtures = [
     name: "GitHub",
     status: "fixture",
     permissions: ["Read repositories and files", "Prepare draft pull requests and comments"],
-    healthSummary: "Preview mode active; requires GitHub App authorization on your Cloudflare Workers broker.",
+    healthSummary: "Preview mode active; requires GitHub OAuth App authorization on your Cloudflare Workers broker.",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
-    authMode: "oauth-broker",
+    authMode: "oauth-pkce",
     scopes: [
       { id: "contents:read", label: "Repository contents", access: "read", required: true, granted: false },
       { id: "issues:read", label: "Issues", access: "read", required: true, granted: false },
@@ -58,7 +58,7 @@ export const connectorFixtures = [
       summary: "Preview mode only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Authorize this connector using a GitHub App set up on your Cloudflare Workers broker.",
+    setupMessage: "Authorize this connector using a GitHub OAuth App set up on your Cloudflare Workers broker.",
     supportsSearch: true,
     supportsImport: true,
     supportedActions: ["github.draft-pull-request", "github.comment"]
@@ -93,7 +93,7 @@ export const connectorFixtures = [
     permissions: ["read files explicitly selected with Google Picker"],
     healthSummary: "Preview data loaded; Google OAuth setup required",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
-    authMode: "oauth-broker",
+    authMode: "oauth-pkce",
     scopes: googleConnectorPermissions("google-drive"),
     health: {
       state: "unknown",
@@ -112,7 +112,7 @@ export const connectorFixtures = [
     permissions: ["read user-selected pages and databases"],
     healthSummary: "Preview data loaded; Notion connection setup required",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
-    authMode: "oauth-broker",
+    authMode: "oauth-pkce",
     scopes: [
       { id: "read_content", label: "Read selected content", access: "read", required: true, granted: false }
     ],

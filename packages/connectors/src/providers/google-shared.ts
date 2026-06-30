@@ -145,6 +145,51 @@ export function googleScopeIds(connectorId: GoogleConnectorId): string[] {
   return [...profile.identityScope.split(" "), ...profile.scopes.map((scope) => scope.id)];
 }
 
+export function googleRequiredScopeIds(connectorId: GoogleConnectorId): string[] {
+  const profile = googleConnectorProfile(connectorId);
+  return [
+    ...profile.identityScope.split(" "),
+    ...profile.scopes.filter((scope) => scope.required).map((scope) => scope.id)
+  ];
+}
+
+export function assertGoogleScopes(
+  connectorId: GoogleConnectorId,
+  tokens: ConnectorTokenSet,
+  anyOf: readonly string[]
+): void {
+  const granted = tokens.scopes ?? [];
+  const allowed = anyOf.some((required) => granted.some((scope) =>
+    scope === required || scope.endsWith(`/${required}`)
+  ));
+  if (!allowed) {
+    throw {
+      connectorId,
+      code: "permission-denied",
+      message: `This operation needs additional ${googleConnectorProfile(connectorId).name} permission.`,
+      retryable: false
+    } satisfies ConnectorError;
+  }
+}
+
+export function googleOAuthEndpoints(authBaseUrl?: string) {
+  if (authBaseUrl) {
+    const base = new URL(authBaseUrl);
+    return {
+      authorizationEndpoint: new URL("o/oauth2/v2/auth", base).toString(),
+      tokenEndpoint: new URL("o/oauth2/token", base).toString(),
+      identityEndpoint: new URL("oauth2/v3/userinfo", base).toString(),
+      revocationEndpoint: new URL("o/oauth2/revoke", base).toString()
+    };
+  }
+  return {
+    authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+    tokenEndpoint: "https://oauth2.googleapis.com/token",
+    identityEndpoint: "https://openidconnect.googleapis.com/v1/userinfo",
+    revocationEndpoint: "https://oauth2.googleapis.com/revoke"
+  };
+}
+
 export function googleConnectorPermissions(
   connectorId: GoogleConnectorId,
   grantedScopes: readonly string[] = []
@@ -235,12 +280,12 @@ export function googleHealthFromLifecycle(
 
 export function googleReconnectMessage(connectorId: GoogleConnectorId): string {
   const profile = googleConnectorProfile(connectorId);
-  return `Reconnect ${profile.name} through the Fable auth broker to refresh account identity and scopes.`;
+  return `Reconnect ${profile.name} through Google to refresh account identity and scopes.`;
 }
 
 export function googleConfigurationMessage(connectorId: GoogleConnectorId): string {
   const profile = googleConnectorProfile(connectorId);
-  return `Configure ${profile.requiredApis.join(", ")}, OAuth consent, and ${profile.name} client credentials on the Cloudflare Workers auth broker.`;
+  return `Enable ${profile.requiredApis.join(", ")}, configure OAuth consent, create a desktop OAuth client, and set FABLE_GOOGLE_OAUTH_CLIENT_ID.`;
 }
 
 export function assertGoogleConnectorId(connectorId: ConnectorId): asserts connectorId is GoogleConnectorId {

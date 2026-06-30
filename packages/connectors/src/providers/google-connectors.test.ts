@@ -11,7 +11,15 @@ import {
 const tokens: ConnectorTokenSet = {
   accessToken: "test-token",
   tokenType: "Bearer",
-  scopes: []
+  scopes: [
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/calendar.events.readonly",
+    "https://www.googleapis.com/auth/calendar.events"
+  ]
 };
 // Google uses public PKCE directly against accounts.google.com; the adapter
 // supplies default auth base URLs, so only the OAuth client id + redirect uri
@@ -28,7 +36,38 @@ function response(body: unknown, status = 200, headers?: Record<string, string>)
   });
 }
 
+function fetchCall(fetcher: unknown, index = 0): [string, RequestInit?] {
+  return ((fetcher as { mock: { calls: unknown[] } }).mock.calls[index] ?? []) as [string, RequestInit?];
+}
+
+function fetchUrl(fetcher: unknown, index = 0): string {
+  return String(fetchCall(fetcher, index)[0]);
+}
+
+function fetchInit(fetcher: unknown, index = 0): RequestInit {
+  return fetchCall(fetcher, index)[1] ?? {};
+}
+
 describe("Google Drive production adapter", () => {
+  it("starts direct PKCE with the minimum default Drive scopes", async () => {
+    const adapter = createGoogleDriveAdapter({ ...common, fetch: vi.fn() });
+    const started = await adapter.startAuth({
+      redirectUri: common.redirectUri,
+      state: "state-1",
+      codeChallenge: "challenge-1"
+    });
+    const url = new URL(started.authorizationUrl);
+    expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(url.searchParams.get("scope")?.split(" ")).toEqual([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/drive.file"
+    ]);
+    expect(url.searchParams.get("include_granted_scopes")).toBe("true");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+  });
+
   it("maps file reads, nextPageToken pagination, and rate limits", async () => {
     const fetcher = vi.fn(async () =>
       response(
@@ -52,7 +91,7 @@ describe("Google Drive production adapter", () => {
       expect.objectContaining({ method: "GET" })
     );
     // The query string should carry the search term, page size, and fields mask.
-    const calledUrl = String(fetcher.mock.calls[0][0]);
+    const calledUrl = fetchUrl(fetcher);
     expect(calledUrl).toContain("q=roadmap");
     expect(calledUrl).toContain("pageSize=5");
     expect(result).toMatchObject({ nextCursor: "page-2", rateLimit: { remaining: 98 } });
@@ -68,7 +107,7 @@ describe("Google Drive production adapter", () => {
       { capability: "drive.read", input: { fileId: "file-9" } },
       tokens
     );
-    expect(String(fetcher.mock.calls[0][0])).toContain("files/file-9");
+    expect(fetchUrl(fetcher)).toContain("files/file-9");
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({ id: "file-9" });
   });
@@ -138,7 +177,7 @@ describe("Google Drive production adapter", () => {
 
   it("handles unconfigured/expired refresh tokens", async () => {
     const adapter = createGoogleDriveAdapter(common);
-    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "expired-auth",
       message: expect.stringContaining("expired")
     });
@@ -157,10 +196,10 @@ describe("Google Drive production adapter", () => {
     const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
     const refreshed = await adapter.refresh({ accessToken: "old", refreshToken: "old-refresh", tokenType: "Bearer", scopes: [] });
     expect(fetcher).toHaveBeenCalledWith(
-      expect.stringContaining("o/oauth2/token"),
+      "https://oauth2.googleapis.com/token",
       expect.objectContaining({ method: "POST" })
     );
-    const body = String((fetcher.mock.calls[0][1] as RequestInit).body);
+    const body = String(fetchInit(fetcher).body);
     expect(body).toContain("grant_type=refresh_token");
     expect(body).toContain("refresh_token=old-refresh");
     expect(body).toContain("client_id=google-client");
@@ -174,10 +213,10 @@ describe("Google Drive production adapter", () => {
       adapter.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })
     ).resolves.toBeUndefined();
     expect(fetcher).toHaveBeenCalledWith(
-      expect.stringContaining("o/oauth2/revoke"),
+      "https://oauth2.googleapis.com/revoke",
       expect.objectContaining({ method: "POST" })
     );
-    const body = String((fetcher.mock.calls[0][1] as RequestInit).body);
+    const body = String(fetchInit(fetcher).body);
     expect(body).toContain("token=refresh");
     expect(body).toContain("token_type_hint=refresh_token");
 
@@ -191,7 +230,7 @@ describe("Google Drive production adapter", () => {
 
   it("completes public-PKCE authorization by exchanging the code directly", async () => {
     const fetcher = vi.fn(async (url: string) => {
-      if (url.includes("o/oauth2/token")) {
+      if (url === "https://oauth2.googleapis.com/token") {
         return response({
           access_token: "access-1",
           refresh_token: "refresh-1",
@@ -200,20 +239,54 @@ describe("Google Drive production adapter", () => {
           scope: "https://www.googleapis.com/auth/drive.readonly"
         });
       }
-      if (url.includes("oauth2/v3/userinfo")) {
+      if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
         return response({ sub: "user-1", name: "Test User", email: "test@example.com" });
       }
       return response({}, 404);
     });
     const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
-    const callbackUrl = "https://127.0.0.1:43123/callback?state=state-xyz&code=auth-code-123";
+    const callbackUrl = "http://127.0.0.1:43123/callback?state=state-xyz&code=auth-code-123";
     const result = await adapter.completeAuth({ callbackUrl, expectedState: "state-xyz", codeVerifier: "verifier-abc" });
-    const exchangeBody = String((fetcher.mock.calls[0][1] as RequestInit).body);
+    const exchangeBody = String(fetchInit(fetcher).body);
     expect(exchangeBody).toContain("grant_type=authorization_code");
     expect(exchangeBody).toContain("code=auth-code-123");
     expect(exchangeBody).toContain("code_verifier=verifier-abc");
     expect(result.tokens.accessToken).toBe("access-1");
     expect(result.account).toMatchObject({ id: "user-1", displayName: "Test User" });
+  });
+
+  it("rejects callback substitution and missing scopes before provider egress", async () => {
+    const fetcher = vi.fn(async () => response({}));
+    const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.completeAuth({
+      callbackUrl: "http://127.0.0.1:43124/callback?state=state-1&code=code-1",
+      expectedState: "state-1",
+      codeVerifier: "verifier-1"
+    })).rejects.toMatchObject({ code: "invalid-request" });
+    await expect(adapter.read(
+      { capability: "drive.search", input: {} },
+      { accessToken: "access", tokenType: "Bearer", scopes: [] }
+    )).rejects.toMatchObject({ code: "permission-denied" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("preserves refresh tokens and granted scopes when Google omits replacements", async () => {
+    const fetcher = vi.fn(async () => response({
+      access_token: "new-access",
+      token_type: "Bearer",
+      expires_in: 3600
+    }));
+    const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({
+      accessToken: "old-access",
+      refreshToken: "old-refresh",
+      tokenType: "Bearer",
+      scopes: ["https://www.googleapis.com/auth/drive.file"]
+    })).resolves.toMatchObject({
+      accessToken: "new-access",
+      refreshToken: "old-refresh",
+      scopes: ["https://www.googleapis.com/auth/drive.file"]
+    });
   });
 
   it("ensures errors do not leak sensitive details in user-facing messages", async () => {
@@ -247,7 +320,7 @@ describe("Gmail production adapter", () => {
       expect.stringMatching(/gmail\/v1\/users\/me\/messages/),
       expect.objectContaining({ method: "GET" })
     );
-    const calledUrl = String(fetcher.mock.calls[0][0]);
+    const calledUrl = fetchUrl(fetcher);
     expect(calledUrl).toContain("q=from");
     expect(calledUrl).toContain("maxResults=10");
     expect(result).toMatchObject({ nextCursor: "page-2", rateLimit: { remaining: 200 } });
@@ -268,7 +341,7 @@ describe("Gmail production adapter", () => {
       { capability: "gmail.read", input: { messageId: "msg-7" } },
       tokens
     );
-    const calledUrl = String(fetcher.mock.calls[0][0]);
+    const calledUrl = fetchUrl(fetcher);
     expect(calledUrl).toContain("messages/msg-7");
     expect(calledUrl).toContain("format=metadata");
     expect(result.items).toHaveLength(1);
@@ -322,14 +395,14 @@ describe("Gmail production adapter", () => {
 
   it("handles unconfigured/expired refresh tokens and revokes directly", async () => {
     const adapter = createGmailAdapter(common);
-    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "expired-auth"
     });
     const fetcher = vi.fn(async () => response(undefined, 200));
     const revoker = createGmailAdapter({ ...common, fetch: fetcher });
     await revoker.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] });
     expect(fetcher).toHaveBeenCalledWith(
-      expect.stringContaining("o/oauth2/revoke"),
+      "https://oauth2.googleapis.com/revoke",
       expect.objectContaining({ method: "POST" })
     );
   });
@@ -356,7 +429,7 @@ describe("Google Calendar production adapter", () => {
       expect.stringMatching(/calendar\/v3\/users\/me\/calendarList/),
       expect.objectContaining({ method: "GET" })
     );
-    expect(String(fetcher.mock.calls[0][0])).toContain("maxResults=25");
+    expect(fetchUrl(fetcher)).toContain("maxResults=25");
     expect(result).toMatchObject({ nextCursor: "page-2", rateLimit: { remaining: 500 } });
     expect(result.items[0]).toMatchObject({ id: "cal-1@group.calendar.google.com", summary: "Work" });
   });
@@ -380,7 +453,7 @@ describe("Google Calendar production adapter", () => {
       },
       tokens
     );
-    const calledUrl = String(fetcher.mock.calls[0][0]);
+    const calledUrl = fetchUrl(fetcher);
     expect(calledUrl).toContain("calendars/primary/events");
     expect(calledUrl).toContain("singleEvents=true");
     expect(calledUrl).toContain("orderBy=startTime");
@@ -397,7 +470,7 @@ describe("Google Calendar production adapter", () => {
       { capability: "calendar.read", input: { calendarId: "primary", eventId: "evt-9" } },
       tokens
     );
-    expect(String(fetcher.mock.calls[0][0])).toContain("calendars/primary/events/evt-9");
+    expect(fetchUrl(fetcher)).toContain("calendars/primary/events/evt-9");
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({ id: "evt-9", summary: "1:1" });
   });
@@ -458,14 +531,14 @@ describe("Google Calendar production adapter", () => {
 
   it("handles unconfigured/expired refresh tokens and revokes directly", async () => {
     const adapter = createGoogleCalendarAdapter(common);
-    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "expired-auth"
     });
     const fetcher = vi.fn(async () => response(undefined, 200));
     const revoker = createGoogleCalendarAdapter({ ...common, fetch: fetcher });
     await revoker.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] });
     expect(fetcher).toHaveBeenCalledWith(
-      expect.stringContaining("o/oauth2/revoke"),
+      "https://oauth2.googleapis.com/revoke",
       expect.objectContaining({ method: "POST" })
     );
   });

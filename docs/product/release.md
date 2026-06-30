@@ -36,12 +36,13 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 ## Gated paths
 
-- OAuth connectors (GitHub, Vercel, Notion, Slack, Linear, Google Drive,
-  Gmail, and Google Calendar) require a deployed Fable auth broker plus
-  provider-console callback registration. Without that configuration, they fail
-  closed.
-- Google connectors still require Google Cloud OAuth client setup, consent
-  configuration, and any provider verification required by Google.
+- Confidential OAuth connectors (GitHub, Vercel, Notion, Slack, and Linear)
+  require a deployed Fable auth broker plus provider-console callback
+  registration. The current in-memory handoff store is not production-ready;
+  durable atomic storage is a release blocker.
+- Google connectors are independent desktop public clients. They require
+  `FABLE_GOOGLE_OAUTH_CLIENT_ID`, enabled Google APIs, consent configuration,
+  test users while unpublished, and any verification required by Google.
 - Codex runs through the local `codex app-server` process when the Codex CLI is
   installed and authenticated. Cursor and Grok run through their ACP CLI
   processes when installed and signed in. GitHub Copilot remains cataloged but

@@ -24,16 +24,13 @@ import type {
   ConnectorTokenSet
 } from "@fable/protocol";
 
-/** Confidential-client providers the broker serves. Google uses the shared Workers broker. */
+/** Confidential-client providers the broker serves. Google is direct public-client PKCE. */
 export const BROKER_PROVIDER_IDS = [
   "github",
   "vercel",
   "linear",
   "notion",
-  "slack",
-  "google-drive",
-  "gmail",
-  "google-calendar"
+  "slack"
 ] as const;
 
 export type BrokerProviderId = (typeof BROKER_PROVIDER_IDS)[number];

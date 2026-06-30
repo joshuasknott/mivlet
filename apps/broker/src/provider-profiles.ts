@@ -7,15 +7,11 @@
  * broker is the ONLY process that holds these secrets; the desktop never sees them.
  */
 
-import {
-  googleScopeIds,
-  type BrokerProviderId,
-  type GoogleConnectorId
-} from "@fable/connectors";
+import type { BrokerProviderId } from "@fable/connectors";
 
 /**
  * How a provider wants the broker's own PKCE verifier handled.
- * - `none`: provider does PKCE against the desktop-supplied challenge (GitHub App).
+ * - `none`: provider does PKCE against the desktop-supplied challenge.
  * - `broker-pkce`: the broker generates its own verifier/challenge and presents it
  *   to the provider, then uses the verifier in the confidential exchange (Vercel,
  *   Linear, Notion, Slack accept PKCE on the confidential client).
@@ -35,8 +31,6 @@ export interface ProviderProfile {
   identityEndpoint: string;
   /** Scopes the broker requests on the desktop's behalf. */
   scopes: readonly string[];
-  /** Extra non-secret authorization URL parameters required by the provider. */
-  authorizationParams?: Readonly<Record<string, string>>;
   /** Environment variable holding the confidential client id (display only here). */
   clientIdEnv: string;
   /** Environment variable holding the confidential client secret. */
@@ -189,45 +183,12 @@ const SLACK_PROFILE: ProviderProfile = {
   }
 };
 
-function googleProfile(provider: GoogleConnectorId, label: string): ProviderProfile {
-  return {
-    label,
-    authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
-    tokenEndpoint: "https://oauth2.googleapis.com/token",
-    revocationEndpoint: "https://oauth2.googleapis.com/revoke",
-    identityEndpoint: "https://openidconnect.googleapis.com/v1/userinfo",
-    scopes: googleScopeIds(provider),
-    authorizationParams: {
-      access_type: "offline",
-      include_granted_scopes: "true",
-      prompt: "consent"
-    },
-    clientIdEnv: "FABLE_BROKER_GOOGLE_CLIENT_ID",
-    clientSecretEnv: "FABLE_BROKER_GOOGLE_CLIENT_SECRET",
-    pkce: "broker-pkce",
-    normalizeIdentity(payload) {
-      const p = asObject(payload);
-      const id = pickString(p, "sub");
-      if (!id) throw identityError("Google");
-      return {
-        id,
-        displayName: pickString(p, "name") ?? pickString(p, "email") ?? id,
-        email: pickString(p, "email"),
-        avatarUrl: pickString(p, "picture")
-      };
-    }
-  };
-}
-
 const PROFILES: Record<BrokerProviderId, ProviderProfile> = {
   github: GITHUB_PROFILE,
   vercel: VERCEL_PROFILE,
   linear: LINEAR_PROFILE,
   notion: NOTION_PROFILE,
-  slack: SLACK_PROFILE,
-  "google-drive": googleProfile("google-drive", "Google Drive"),
-  gmail: googleProfile("gmail", "Gmail"),
-  "google-calendar": googleProfile("google-calendar", "Google Calendar")
+  slack: SLACK_PROFILE
 };
 
 /**

@@ -1,10 +1,16 @@
 # Auth broker contract
 
-## Status: Implemented and synthesised for Cloudflare Workers target
+## Status: implemented foundation; not production-ready
 
 This repository contains the portable TypeScript auth broker in `apps/broker`. The auth broker is buildable and configured targeting Cloudflare Workers (`src/worker.ts` + `wrangler.jsonc`) as the primary host. 
 
-For production, the broker is deployed to Cloudflare Workers and acts as the confidential OAuth broker for Fable. Until the broker is deployed to your workers instance and its callback URLs are registered in each provider console (GitHub App, Vercel Integration), **no confidential-client connector can be connected**. The desktop runtime enforces this by failing closed with a `configuration-required` error.
+The broker targets Cloudflare Workers but is not deployed or production-ready in
+this repository. Its pending authorization, one-time handoff, and rate-limit
+stores are process-local memory. Durable atomic storage is required before a
+multi-isolate or restart-tolerant production deployment. Until an operator
+deploys the broker and registers its callback URLs in each provider console
+(including a GitHub OAuth App and Vercel Integration), confidential-client
+connectors fail closed with `configuration-required`.
 
 The broker core (routing, CORS, rate limiting, contract validation, the
 confidential OAuth lifecycle, and all redacted error handling) is
@@ -30,9 +36,10 @@ configuration" section.
 
 The core desktop workspace does **not** require the broker. Local files, memory,
 approvals, the runtime snapshot, and the native API-key agent loop remain fully
-usable without any hosted service. Google Drive, Gmail, and Calendar now use the
-same hosted broker lifecycle as the other OAuth connectors and fail closed when
-the broker or Google Cloud client configuration is missing.
+usable without any hosted service. Google Drive, Gmail, and Calendar use a
+separate direct desktop public-client PKCE flow and remain independent of the
+broker. They fail closed only when their Google public client configuration is
+missing.
 
 ## Purpose and scope
 
@@ -105,8 +112,8 @@ These guarantees hold whether or not a broker is deployed:
 - **Local Files, memory, approvals, and the runtime snapshot** are entirely
   local and have no external auth.
 
-The broker is required only by OAuth connectors: **github, vercel, notion,
-slack, linear, google-drive, gmail, google-calendar**. This set is pinned in code
+The broker is required only by confidential OAuth connectors: **github, vercel,
+notion, slack, linear**. This set is pinned in code
 (`BROKER_REQUIRED_CONNECTOR_IDS`) and verified by tests.
 
 ## Cloudflare Workers target setup
@@ -254,13 +261,13 @@ The fail-closed and non-proxying boundaries are covered by tests in
 - `broker_resolver_accepts_https_and_derives_only_oauth_paths`
 - `broker_resolver_accepts_a_loopback_url_for_local_development`
 - `broker_resolver_derives_no_model_search_import_or_action_endpoint`
-- `only_oauth_connectors_require_the_auth_broker`
-- `google_connectors_are_broker_gated`
+- `only_confidential_connectors_require_the_auth_broker`
+- `google_connectors_are_direct_public_pkce`
 - `broker_resolver_fail_closed_keeps_core_workspace_usable`
 
 ## Deployment prerequisites (future)
 
-When the broker is built, it must, at minimum:
+Before the broker is enabled for external production use, it must, at minimum:
 
 1. Implement exactly the five operations above per provider, scoped to the
    provider's confidential-client flow.
@@ -356,7 +363,7 @@ the callback URL that routes to the auth broker:
 
 Examples:
 
-- GitHub OAuth: `https://<your-broker-domain>/oauth/github/callback`
+- GitHub OAuth App: `https://<your-broker-domain>/oauth/github/callback`
 - Vercel Integration: `https://<your-broker-domain>/oauth/vercel/callback`
 - Linear Application: `https://<your-broker-domain>/oauth/linear/callback`
 - Notion Public Integration: `https://<your-broker-domain>/oauth/notion/callback`

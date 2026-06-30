@@ -106,7 +106,7 @@ export interface GitHubAdapterOptions extends Omit<OAuthClientOptions, "connecto
   fetch?: FetchLike;
 }
 
-/** Real GitHub REST adapter. Confidential GitHub App exchange stays at the configured auth broker. */
+/** Real GitHub REST adapter. The GitHub OAuth App exchange stays at the configured auth broker. */
 export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
   const authBase = new URL(options.authBaseUrl);
   const auth = oauthClient({

@@ -41,7 +41,10 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Tool execution: the registered tools are `read-file`, `write-file`,
   `run-shell`, and `web-fetch`; calls are bounded and route through approval
   before Rust re-validates an exact, fresh, single-use execution permit.
-- First-wave connector catalog: GitHub, Vercel, Google Drive, Notion, Gmail, Slack, and Google Calendar are modeled with scopes, auth mode, health/status metadata, search/import/action protocol shapes, and fixture adapters.
+- First-wave connector catalog: GitHub, Vercel, Google Drive, Notion, Gmail,
+  Slack, Google Calendar, and Linear are modeled with scopes, auth mode,
+  health/status metadata, search/import/action protocol shapes, and fixture
+  adapters.
 - Connector writes: fixture-side connector write preparation creates approval requests for GitHub, Vercel, Gmail, Slack, and Calendar actions instead of directly executing them.
 - Tauri connector runtime: external connector commands expose status/auth/health/search/import/action boundaries. Google public-client connectors use loopback PKCE and OS secure storage; confidential-client connectors (GitHub, Vercel, Notion, Slack, Linear) are broker-gated and fail closed with `configuration-required` until the auth broker and provider configuration exist. GitHub live support is read-only for identity, repositories, issues, and pull requests; live GitHub writes are not advertised or mapped.
 - Google connectors: Drive, Gmail, and Calendar expose authenticated reads and approval-gated writes, incremental scopes, refresh-token preservation, explicit active-account selection, bounded responses, cancellation, and normalized provider errors. External use still requires Google Cloud configuration and applicable verification.
@@ -60,7 +63,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
 | ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
-| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth code exists and the auth broker targets Cloudflare Workers, but production deployment, provider secrets, and callback URL registration are still missing. GitHub's implemented live surface is read-only for repositories, issues, and pull requests. |
+| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth code exists and the auth broker targets Cloudflare Workers, but durable atomic handoff storage, production deployment, provider secrets, and callback URL registration are still missing. GitHub's implemented live surface is read-only for repositories, issues, and pull requests. |
 | Browser Preview Mode | **Preview/fixture-only** | Purely synthetic fixture responses. Persists via `localStorage` instead of SQLite. |
 | Mobile Remote Control | **Preview/fixture-only** | Sidebar UI button triggers state/accessibility announcement change only; no socket, protocol, or mobile backend. |
 | Schedules & Workflows SQLite migration | **Missing** | Structured database tables defined in schema, but runtime execution still falls back to raw JSON files (`scheduler-store.json`, `workflow-runs.json`). |
@@ -85,7 +88,9 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Not Implemented Yet
 
-- No deployed production auth broker or externally validated OAuth session.
+- No deployed production auth broker or externally validated OAuth session. The
+  broker's pending/handoff/rate-limit state is in memory and must move to
+  durable atomic storage before production use.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, and raw JSON files for schedules/workflows. Backend and connector credentials remain separately handled by OS secure storage.

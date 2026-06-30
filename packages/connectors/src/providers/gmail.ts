@@ -18,11 +18,18 @@ import {
   type ProviderErrorLike
 } from "./shared";
 import {
+  assertGoogleScopes,
   googleConfigurationMessage,
   googleConnectorPermissions,
+  googleOAuthEndpoints,
+  googleRequiredScopeIds,
   googleScopeDescriptions,
   googleScopeIds
 } from "./google-shared";
+
+const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
+const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
+const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 
 export const GMAIL_CAPABILITIES = [
   { id: "gmail.search", kind: "read", consequential: false, description: "Search selected mailbox results." },
@@ -122,18 +129,16 @@ export interface GmailAdapterOptions
   authBaseUrl?: string;
   apiBaseUrl?: string;
   fetch?: FetchLike;
+  scopes?: readonly string[];
 }
 
 export function createGmailAdapter(options: GmailAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
-  const authBase = new URL(options.authBaseUrl ?? "https://accounts.google.com/");
+  const endpoints = googleOAuthEndpoints(options.authBaseUrl);
   const auth = googleOAuthClient({
     ...options,
     connectorId: "gmail",
-    authorizationEndpoint: new URL("o/oauth2/v2/auth", authBase).toString(),
-    tokenEndpoint: new URL("o/oauth2/token", authBase).toString(),
-    identityEndpoint: new URL("oauth2/v3/userinfo", authBase).toString(),
-    revocationEndpoint: new URL("o/oauth2/revoke", authBase).toString(),
-    scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+    ...endpoints,
+    scopes: options.scopes ?? googleRequiredScopeIds("gmail")
   });
   const http = new ProviderHttpClient(
     "gmail",
@@ -145,6 +150,7 @@ export function createGmailAdapter(options: GmailAdapterOptions): ConnectorAdapt
     capabilities: GMAIL_CAPABILITIES,
     ...auth,
     async read(request, tokens) {
+      assertGoogleScopes("gmail", tokens, [GMAIL_READ_SCOPE]);
       const mapped = gmailReadRequest(request);
       const { data, response } = await http.request<unknown>(mapped, tokens);
       const messages = isObject(data) && Array.isArray(data.messages)
@@ -155,6 +161,13 @@ export function createGmailAdapter(options: GmailAdapterOptions): ConnectorAdapt
       return page(messages, response, gmailNextCursor(data));
     },
     async write(request, tokens) {
+      assertGoogleScopes(
+        "gmail",
+        tokens,
+        request.capability === "gmail.create-draft"
+          ? [GMAIL_COMPOSE_SCOPE]
+          : [GMAIL_SEND_SCOPE, GMAIL_COMPOSE_SCOPE]
+      );
       const { data } = await http.request<unknown>(gmailWriteRequest(request), tokens);
       if (!isObject(data)) throw new Error("Gmail returned a malformed write response.");
       return redactGmailObject(data);

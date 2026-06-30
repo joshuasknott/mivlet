@@ -174,7 +174,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "read repositories, issues, and pull requests",
         ],
         scopes: GITHUB_SCOPES,
-        setup_message: "Register a GitHub App and configure the Fable auth broker.",
+        setup_message: "Register a GitHub OAuth App and configure the Fable auth broker.",
         actions: &[],
     },
     ConnectorCatalogEntry {
@@ -201,14 +201,14 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "google-drive",
         name: "Google Drive",
-        auth_mode: "oauth-broker",
+        auth_mode: "oauth-pkce",
         permissions: &[
             "search accessible file metadata",
             "read or export content only when the matching scope is granted",
             "prepare approval-gated file changes",
         ],
         scopes: DRIVE_SCOPES,
-        setup_message: "Configure the Drive API, OAuth consent, and Google client credentials on the Fable auth broker.",
+        setup_message: "Enable the Drive API, create a desktop OAuth client, and set FABLE_GOOGLE_OAUTH_CLIENT_ID.",
         actions: &[
             "google-drive.create-file",
             "google-drive.update-file",
@@ -241,14 +241,14 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "gmail",
         name: "Gmail",
-        auth_mode: "oauth-broker",
+        auth_mode: "oauth-pkce",
         permissions: &[
             "read selected search results",
             "prepare email drafts; never send by default",
         ],
         scopes: GMAIL_SCOPES,
         setup_message:
-            "Configure the Gmail API, OAuth consent, Google verification, and client credentials on the Fable auth broker.",
+            "Enable the Gmail API, create a desktop OAuth client, set FABLE_GOOGLE_OAUTH_CLIENT_ID, and complete required Google verification.",
         actions: &["gmail.create-draft", "gmail.send"],
     },
     ConnectorCatalogEntry {
@@ -274,13 +274,13 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "google-calendar",
         name: "Google Calendar",
-        auth_mode: "oauth-broker",
+        auth_mode: "oauth-pkce",
         permissions: &[
             "read calendars and events",
             "prepare event create or update requests",
         ],
         scopes: CALENDAR_SCOPES,
-        setup_message: "Configure the Calendar API, OAuth consent, and Google client credentials on the Fable auth broker.",
+        setup_message: "Enable the Calendar API, create a desktop OAuth client, and set FABLE_GOOGLE_OAUTH_CLIENT_ID.",
         actions: &[
             "google-calendar.create-draft",
             "google-calendar.update-draft",
@@ -316,9 +316,10 @@ fn require_connector(
         .ok_or_else(|| command_error("invalid-request", &normalized, "Unknown connector.", false))
 }
 
-/// The auth boundary a connector sits behind. OAuth connectors route through
-/// the configured HTTPS auth broker; they fail closed until it is deployed.
-/// The local workspace itself remains local-first and has no external auth.
+/// The auth boundary a connector sits behind. Public Google desktop OAuth uses
+/// direct loopback PKCE and never needs the broker. Confidential connectors use
+/// the configured HTTPS broker and fail closed until it is deployed. The local
+/// workspace itself remains local-first and has no external auth.
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ConnectorAuthBoundary {
@@ -337,18 +338,10 @@ pub(crate) fn connector_auth_boundary(connector_id: &str) -> Option<ConnectorAut
     }
 }
 
-/// Connector ids that require the deployed auth broker.
+/// Confidential connector ids that require the deployed auth broker.
 #[cfg(test)]
-pub(crate) const BROKER_REQUIRED_CONNECTOR_IDS: &[&str] = &[
-    "github",
-    "vercel",
-    "google-drive",
-    "notion",
-    "gmail",
-    "slack",
-    "google-calendar",
-    "linear",
-];
+pub(crate) const BROKER_REQUIRED_CONNECTOR_IDS: &[&str] =
+    &["github", "vercel", "notion", "slack", "linear"];
 
 fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
     let policy = match action {

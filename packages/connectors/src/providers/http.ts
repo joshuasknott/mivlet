@@ -215,19 +215,31 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       url.searchParams.set("state", context.state);
       url.searchParams.set("code_challenge", context.codeChallenge);
       url.searchParams.set("code_challenge_method", "S256");
-      // prompt=consent + access_type=offline keep refresh tokens recoverable
-      // across reconnects, which is what makes long-lived sync possible.
+      // Offline access keeps refresh tokens recoverable across reconnects;
+      // incremental consent lets callers request optional scopes deliberately.
       url.searchParams.set("access_type", "offline");
+      url.searchParams.set("include_granted_scopes", "true");
       url.searchParams.set("prompt", "consent");
       return { authorizationUrl: url.toString(), state: context.state };
     },
     async completeAuth(callback: ConnectorAuthCallback): Promise<ConnectorAuthResult> {
       const callbackUrl = new URL(callback.callbackUrl);
-      if (callbackUrl.searchParams.get("state") !== callback.expectedState) {
+      const expectedRedirect = new URL(options.redirectUri);
+      if (
+        callbackUrl.protocol !== expectedRedirect.protocol ||
+        callbackUrl.hostname !== expectedRedirect.hostname ||
+        callbackUrl.port !== expectedRedirect.port ||
+        callbackUrl.pathname !== expectedRedirect.pathname
+      ) {
+        throw providerError(options.connectorId, 400, "redirect_mismatch");
+      }
+      const states = callbackUrl.searchParams.getAll("state");
+      if (states.length !== 1 || states[0] !== callback.expectedState) {
         throw providerError(options.connectorId, 400, "state_mismatch");
       }
-      const code = callbackUrl.searchParams.get("code");
-      if (!code) throw providerError(options.connectorId, 400, "missing_code");
+      const codes = callbackUrl.searchParams.getAll("code");
+      if (codes.length !== 1 || !codes[0]) throw providerError(options.connectorId, 400, "missing_code");
+      const code = codes[0];
       const response = await fetcher(options.tokenEndpoint, {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
@@ -241,7 +253,11 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       });
       if (!response.ok) throw providerError(options.connectorId, response.status, "token_exchange");
       const tokenBody = await safeJson(response);
-      const tokens = tokenSet(tokenBody);
+      const parsedTokens = tokenSet(tokenBody);
+      const tokens = {
+        ...parsedTokens,
+        scopes: parsedTokens.scopes.length ? parsedTokens.scopes : [...options.scopes]
+      };
       const account = await googleIdentity(tokens.accessToken);
       return { tokens, account };
     },
@@ -259,7 +275,11 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       if (!response.ok) throw providerError(options.connectorId, response.status, "refresh_failed");
       const refreshed = tokenSet(await safeJson(response));
       // Google does not always re-issue a refresh token; keep the prior one.
-      return { ...refreshed, refreshToken: refreshed.refreshToken ?? tokens.refreshToken };
+      return {
+        ...refreshed,
+        refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
+        scopes: refreshed.scopes.length ? refreshed.scopes : tokens.scopes
+      };
     },
     async revoke(tokens: ConnectorTokenSet): Promise<void> {
       if (!options.revocationEndpoint) return;
@@ -288,7 +308,11 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       headers: { accept: "application/json", authorization: `Bearer ${accessToken}` }
     });
     if (!response.ok) throw providerError(options.connectorId, response.status, "identity_failed");
-    return accountSummary(await safeJson(response));
+    const payload = await safeJson(response);
+    if (isObject(payload) && typeof payload.picture === "string") {
+      return accountSummary({ ...payload, avatarUrl: payload.picture });
+    }
+    return accountSummary(payload);
   }
 }
 

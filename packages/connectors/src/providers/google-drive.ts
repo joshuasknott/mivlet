@@ -19,11 +19,18 @@ import {
   type ProviderErrorLike
 } from "./shared";
 import {
+  assertGoogleScopes,
   googleConfigurationMessage,
   googleConnectorPermissions,
+  googleOAuthEndpoints,
+  googleRequiredScopeIds,
   googleScopeDescriptions,
   googleScopeIds
 } from "./google-shared";
+
+const DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly";
+const DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
 export const GOOGLE_DRIVE_CAPABILITIES = [
   { id: "drive.search", kind: "read", consequential: false, description: "Search accessible Drive metadata." },
@@ -115,23 +122,18 @@ export interface GoogleDriveAdapterOptions
   authBaseUrl?: string;
   apiBaseUrl?: string;
   fetch?: FetchLike;
+  scopes?: readonly string[];
 }
 
 export function createGoogleDriveAdapter(
   options: GoogleDriveAdapterOptions
 ): ConnectorAdapter<JsonObject, JsonObject> {
-  const authBase = new URL(options.authBaseUrl ?? "https://accounts.google.com/");
+  const endpoints = googleOAuthEndpoints(options.authBaseUrl);
   const auth = googleOAuthClient({
     ...options,
     connectorId: "google-drive",
-    authorizationEndpoint: new URL("o/oauth2/v2/auth", authBase).toString(),
-    tokenEndpoint: new URL("o/oauth2/token", authBase).toString(),
-    identityEndpoint: new URL("oauth2/v3/userinfo", authBase).toString(),
-    revocationEndpoint: new URL("o/oauth2/revoke", authBase).toString(),
-    scopes: [
-      "https://www.googleapis.com/auth/drive.metadata.readonly",
-      "https://www.googleapis.com/auth/drive.readonly"
-    ]
+    ...endpoints,
+    scopes: options.scopes ?? googleRequiredScopeIds("google-drive")
   });
   const http = new ProviderHttpClient(
     "google-drive",
@@ -143,6 +145,13 @@ export function createGoogleDriveAdapter(
     capabilities: GOOGLE_DRIVE_CAPABILITIES,
     ...auth,
     async read(request, tokens) {
+      assertGoogleScopes(
+        "google-drive",
+        tokens,
+        request.capability === "drive.search"
+          ? [DRIVE_FILE_SCOPE, DRIVE_METADATA_SCOPE, DRIVE_READ_SCOPE]
+          : [DRIVE_FILE_SCOPE, DRIVE_READ_SCOPE]
+      );
       const mapped = googleDriveReadRequest(request);
       const { data, response } = await http.request<unknown>(mapped, tokens);
       const files = isObject(data) && Array.isArray(data.files)
@@ -153,6 +162,7 @@ export function createGoogleDriveAdapter(
       return page(files, response, googleDriveNextCursor(data));
     },
     async write(request, tokens) {
+      assertGoogleScopes("google-drive", tokens, [DRIVE_FILE_SCOPE]);
       const { data } = await http.request<unknown>(googleDriveWriteRequest(request), tokens);
       if (!isObject(data)) throw new Error("Google Drive returned a malformed write response.");
       return redactDriveObject(data);

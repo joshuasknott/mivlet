@@ -18,11 +18,18 @@ import {
   type ProviderErrorLike
 } from "./shared";
 import {
+  assertGoogleScopes,
   googleConfigurationMessage,
   googleConnectorPermissions,
+  googleOAuthEndpoints,
+  googleRequiredScopeIds,
   googleScopeDescriptions,
   googleScopeIds
 } from "./google-shared";
+
+const CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+const CALENDAR_READ_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly";
+const CALENDAR_WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
 export const GOOGLE_CALENDAR_CAPABILITIES = [
   { id: "calendar.list", kind: "read", consequential: false, description: "List accessible calendars." },
@@ -168,20 +175,18 @@ export interface GoogleCalendarAdapterOptions
   authBaseUrl?: string;
   apiBaseUrl?: string;
   fetch?: FetchLike;
+  scopes?: readonly string[];
 }
 
 export function createGoogleCalendarAdapter(
   options: GoogleCalendarAdapterOptions
 ): ConnectorAdapter<JsonObject, JsonObject> {
-  const authBase = new URL(options.authBaseUrl ?? "https://accounts.google.com/");
+  const endpoints = googleOAuthEndpoints(options.authBaseUrl);
   const auth = googleOAuthClient({
     ...options,
     connectorId: "google-calendar",
-    authorizationEndpoint: new URL("o/oauth2/v2/auth", authBase).toString(),
-    tokenEndpoint: new URL("o/oauth2/token", authBase).toString(),
-    identityEndpoint: new URL("oauth2/v3/userinfo", authBase).toString(),
-    revocationEndpoint: new URL("o/oauth2/revoke", authBase).toString(),
-    scopes: ["https://www.googleapis.com/auth/calendar.readonly"]
+    ...endpoints,
+    scopes: options.scopes ?? googleRequiredScopeIds("google-calendar")
   });
   const http = new ProviderHttpClient(
     "google-calendar",
@@ -193,6 +198,13 @@ export function createGoogleCalendarAdapter(
     capabilities: GOOGLE_CALENDAR_CAPABILITIES,
     ...auth,
     async read(request, tokens) {
+      assertGoogleScopes(
+        "google-calendar",
+        tokens,
+        request.capability === "calendar.list"
+          ? [CALENDAR_LIST_SCOPE]
+          : [CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE]
+      );
       const mapped = googleCalendarReadRequest(request);
       const { data, response } = await http.request<unknown>(mapped, tokens);
       const items = isObject(data) && Array.isArray(data.items)
@@ -203,6 +215,7 @@ export function createGoogleCalendarAdapter(
       return page(items, response, calendarNextCursor(data));
     },
     async write(request, tokens) {
+      assertGoogleScopes("google-calendar", tokens, [CALENDAR_WRITE_SCOPE]);
       const { data } = await http.request<unknown>(googleCalendarWriteRequest(request), tokens);
       if (!isObject(data)) throw new Error("Google Calendar returned a malformed write response.");
       return redactCalendarObject(data);

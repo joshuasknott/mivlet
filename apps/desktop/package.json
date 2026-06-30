@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build",
+    "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build --configLoader runner",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "test": "vitest run",
+    "test": "vitest run --configLoader runner",
     "lint": "tsc -b --noEmit",
     "tauri": "tauri"
   },

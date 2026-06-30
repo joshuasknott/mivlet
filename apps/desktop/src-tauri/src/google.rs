@@ -84,16 +84,21 @@ fn require_scope(
 
 fn api_url(base: &str, path: &str) -> Result<Url, ConnectorCommandError> {
     let resolved_base = match base {
-        "https://www.googleapis.com/drive/v3/" => std::env::var("FABLE_GOOGLE_DRIVE_API")
-            .unwrap_or_else(|_| base.to_string()),
-        "https://www.googleapis.com/upload/drive/v3/" => std::env::var("FABLE_GOOGLE_DRIVE_UPLOAD_API")
-            .unwrap_or_else(|_| base.to_string()),
-        "https://gmail.googleapis.com/gmail/v1/" => std::env::var("FABLE_GOOGLE_GMAIL_API")
-            .unwrap_or_else(|_| base.to_string()),
-        "https://www.googleapis.com/calendar/v3/" => std::env::var("FABLE_GOOGLE_CALENDAR_API")
-            .unwrap_or_else(|_| base.to_string()),
-        "https://openidconnect.googleapis.com/v1/" => std::env::var("FABLE_GOOGLE_OPENID_API")
-            .unwrap_or_else(|_| base.to_string()),
+        "https://www.googleapis.com/drive/v3/" => {
+            std::env::var("FABLE_GOOGLE_DRIVE_API").unwrap_or_else(|_| base.to_string())
+        }
+        "https://www.googleapis.com/upload/drive/v3/" => {
+            std::env::var("FABLE_GOOGLE_DRIVE_UPLOAD_API").unwrap_or_else(|_| base.to_string())
+        }
+        "https://gmail.googleapis.com/gmail/v1/" => {
+            std::env::var("FABLE_GOOGLE_GMAIL_API").unwrap_or_else(|_| base.to_string())
+        }
+        "https://www.googleapis.com/calendar/v3/" => {
+            std::env::var("FABLE_GOOGLE_CALENDAR_API").unwrap_or_else(|_| base.to_string())
+        }
+        "https://openidconnect.googleapis.com/v1/" => {
+            std::env::var("FABLE_GOOGLE_OPENID_API").unwrap_or_else(|_| base.to_string())
+        }
         _ => base.to_string(),
     };
     Url::parse(&resolved_base)
@@ -2232,15 +2237,11 @@ mod tests {
     #[tokio::test]
     async fn test_drive_search_pagination() {
         let _lock = ENV_LOCK.lock().unwrap();
-        let (url, request_rx) = mock_response(
-            "200 OK",
-            r#"{"files":[],"nextPageToken":"drive-next"}"#,
-            0,
-        )
-        .await;
-        
+        let (url, request_rx) =
+            mock_response("200 OK", r#"{"files":[],"nextPageToken":"drive-next"}"#, 0).await;
+
         std::env::set_var("FABLE_GOOGLE_DRIVE_API", url.to_string());
-        
+
         let drive_tokens = tokens(&[DRIVE_READONLY]);
         let (_, next_cursor) = drive_search(
             "test-call",
@@ -2251,11 +2252,11 @@ mod tests {
         )
         .await
         .unwrap();
-        
+
         std::env::remove_var("FABLE_GOOGLE_DRIVE_API");
-        
+
         assert_eq!(next_cursor, Some("drive-next".to_string()));
-        
+
         let request = request_rx.await.unwrap();
         assert!(request.contains("pageToken=drive-cursor"));
     }
@@ -2269,9 +2270,9 @@ mod tests {
             0,
         )
         .await;
-        
+
         std::env::set_var("FABLE_GOOGLE_GMAIL_API", url.to_string());
-        
+
         let gmail_tokens = tokens(&[GMAIL_READONLY]);
         let (_, next_cursor) = gmail_search(
             "test-call",
@@ -2282,11 +2283,11 @@ mod tests {
         )
         .await
         .unwrap();
-        
+
         std::env::remove_var("FABLE_GOOGLE_GMAIL_API");
-        
+
         assert_eq!(next_cursor, Some("gmail-next".to_string()));
-        
+
         let request = request_rx.await.unwrap();
         assert!(request.contains("pageToken=gmail-cursor"));
     }
@@ -2294,30 +2295,21 @@ mod tests {
     #[tokio::test]
     async fn test_calendar_search_pagination() {
         let _lock = ENV_LOCK.lock().unwrap();
-        let (url, request_rx) = mock_response(
-            "200 OK",
-            r#"{"items":[],"nextPageToken":"cal-next"}"#,
-            0,
-        )
-        .await;
-        
+        let (url, request_rx) =
+            mock_response("200 OK", r#"{"items":[],"nextPageToken":"cal-next"}"#, 0).await;
+
         std::env::set_var("FABLE_GOOGLE_CALENDAR_API", url.to_string());
-        
+
         let cal_tokens = tokens(&[CALENDAR_READONLY]);
-        let (_, next_cursor) = calendar_search(
-            "test-call",
-            &cal_tokens,
-            "my query",
-            20,
-            Some("cal-cursor"),
-        )
-        .await
-        .unwrap();
-        
+        let (_, next_cursor) =
+            calendar_search("test-call", &cal_tokens, "my query", 20, Some("cal-cursor"))
+                .await
+                .unwrap();
+
         std::env::remove_var("FABLE_GOOGLE_CALENDAR_API");
-        
+
         assert_eq!(next_cursor, Some("cal-next".to_string()));
-        
+
         let request = request_rx.await.unwrap();
         assert!(request.contains("pageToken=cal-cursor"));
     }
@@ -2331,27 +2323,24 @@ mod tests {
             0,
         )
         .await;
-        
+
         std::env::set_var("FABLE_GOOGLE_GMAIL_API", url.to_string());
-        
+
         let gmail_tokens = tokens(&[GMAIL_READONLY]);
-        let (items, next_cursor) = gmail_search(
-            "test-call",
-            &gmail_tokens,
-            "query",
-            20,
-            None,
-        )
-        .await
-        .unwrap();
-        
+        let (items, next_cursor) = gmail_search("test-call", &gmail_tokens, "query", 20, None)
+            .await
+            .unwrap();
+
         std::env::remove_var("FABLE_GOOGLE_GMAIL_API");
-        
+
         assert_eq!(next_cursor, Some("gmail-next".to_string()));
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id, "msg-123");
         assert_eq!(items[0].title, "(message unavailable)");
-        assert_eq!(items[0].summary, "This message could not be read from Gmail.");
+        assert_eq!(
+            items[0].summary,
+            "This message could not be read from Gmail."
+        );
     }
 
     #[test]
@@ -2359,7 +2348,7 @@ mod tests {
         let err = provider_error("google-drive", StatusCode::BAD_REQUEST, None);
         assert_eq!(err.message, "Google rejected the request.");
         assert_eq!(err.code, "invalid-request");
-        
+
         // Ensure no private credentials or secrets are leaked
         let secret = "my-secret-oauth-token-12345";
         let err_unauthorized = provider_error("gmail", StatusCode::UNAUTHORIZED, None);

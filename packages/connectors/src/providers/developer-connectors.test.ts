@@ -165,7 +165,7 @@ describe("GitHub production adapter", () => {
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
     await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "configuration-required",
-      message: "This connector needs provider configuration before it can run."
+      message: "Broker is not configured"
     });
   });
 
@@ -337,7 +337,7 @@ describe("Vercel production adapter", () => {
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
     await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "configuration-required",
-      message: "This connector needs provider configuration before it can run."
+      message: "Broker is not configured"
     });
   });
 
