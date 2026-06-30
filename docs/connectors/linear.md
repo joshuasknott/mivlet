@@ -18,7 +18,6 @@ until a broker is deployed and configured.
 
 Set `FABLE_AUTH_BROKER_URL` to the HTTPS base URL of a broker that owns the
 Linear client secret and implements:
-
 - `GET /oauth/linear/authorize`
 - `GET /oauth/linear/callback`
 - `POST /oauth/linear/handoff`
@@ -68,6 +67,19 @@ codes map as follows: `RATELIMITED` → rate-limited (retryable),
 anything else → invalid-request. HTTP statuses and network failures map
 through the shared provider error boundary. The bearer token travels only in
 the `Authorization` header, never in the URL or GraphQL variables.
+
+## Connector state behavior
+
+- An unconfigured broker fails closed with `configuration-required`.
+- A missing refresh token, a broker `needs-auth` response, or a Linear
+  `AUTHENTICATION_ERROR` maps to `expired-auth` and requires reconnection.
+- Revocation treats both broker success and a missing remote token as success,
+  making disconnect idempotent.
+- Temporary broker failures, provider HTTP 502 responses, network failures,
+  and malformed provider responses map to retryable `provider-unavailable`
+  errors.
+- Missing broker routes surface as `not-found`; an unreachable broker
+  propagates a safe network failure without exposing credentials.
 
 ## User-safe result shapes
 
