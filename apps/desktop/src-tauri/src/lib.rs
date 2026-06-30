@@ -14,6 +14,7 @@ mod collaboration_connectors;
 mod connector_api;
 mod connector_approvals;
 mod connector_auth;
+mod connector_sync;
 mod connectors;
 mod execution_approvals;
 mod google;
@@ -128,6 +129,9 @@ pub fn run() {
             connectors::list_connector_accounts,
             connectors::switch_connector_account,
             connectors::refresh_connector_health,
+            connector_sync::list_connector_sync_states,
+            connector_sync::sync_connector,
+            connector_sync::cancel_connector_sync,
             connectors::search_connector,
             connectors::read_connector_capability,
             connectors::import_connector_item,

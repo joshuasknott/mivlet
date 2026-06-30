@@ -176,13 +176,40 @@ is missing, unavailable, expired without refresh, or lacks the required scope,
 live commands return a normalized connector error instead of using fixtures or
 claiming access.
 
+## Central sync lifecycle
+
+Connector sync is a local-first control plane around the existing on-demand
+provider reads; it does not replace search or capability reads. State is keyed
+by both local workspace id and connector id, so one workspace cannot observe or
+advance another workspace's cursor, retry, or health state.
+
+Manual sync is available for connected connectors. The same state model
+supports future background and retry triggers. Before probing a provider, sync
+uses the existing credential refresh boundary. A stale access token can recover
+without entering JavaScript; a rejected refresh fails closed as
+`auth-required`. Durable state contains no credentials or raw provider
+payloads.
+
+The lifecycle is `idle -> syncing -> succeeded | partial | failed | cancelled`.
+Failures normalize to `auth-required`, `permission-denied`,
+`provider-unavailable`, `rate-limited`, `partial-sync`, or `cancelled`. Only
+transient provider, rate-limit, and partial failures are retryable. Retry timing
+is recorded locally for a later background worker; this foundation does not
+start an always-on background process.
+
 ## Local cache, logging, and disconnect
 
-Fable may cache connector id, account summary, scope names, health, normalized
-import metadata, and user-approved previews. Raw provider responses are not
-the cache format. Email bodies, Slack messages, Drive/Notion text, cookies,
-authorization headers, and token-shaped values are excluded from logs and
-runtime errors.
+| Class | Local persistence | Export | Workspace deletion |
+| --- | --- | --- | --- |
+| Connector/account metadata, cursors, health, sync journal | Encrypted local store, workspace-scoped | Included | Deleted |
+| Searchable content explicitly selected/imported by the user | Encrypted local store, workspace-scoped, bounded retention | Included | Deleted |
+| Provider-owned user data not explicitly imported | Prohibited | Not applicable | No local copy |
+
+Tokens remain exclusively in OS secure storage and never enter cache exports.
+On-demand search results remain session responses unless the user explicitly
+imports them. Raw provider responses are not the cache format. Email bodies,
+Slack messages, Drive/Notion text, cookies, authorization headers, and
+token-shaped values are excluded from logs and runtime errors.
 
 Disconnect should revoke provider authorization where supported, clear access
 and refresh tokens from secure storage, reset account/scopes/health, and keep
@@ -202,8 +229,8 @@ expired/unavailable auth state.
   Google Drive, Gmail, Google Calendar, Notion, and Slack accounts, but each
   path remains gated by its credential boundary and provider setup. Undeclared
   capabilities still fail closed.
-- Imported connector records are session-local until encrypted connector cache
-  persistence is added.
+- Imported connector records remain session-local until the encrypted
+  searchable-content cache is implemented; sync state itself is durable.
 - GitHub coverage is live-read only for repositories, issues, and pull requests;
   live GitHub writes intentionally fail closed.
 - Live Google integration tests are opt-in and require deliberately supplied

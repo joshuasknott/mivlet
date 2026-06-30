@@ -21,6 +21,8 @@ import type {
   ConnectorManifest,
   ConnectorSearchRequest,
   ConnectorSearchResult,
+  ConnectorSyncRequest,
+  ConnectorSyncState,
   JobAttempt,
   KnowledgeSearchResponse,
   KnowledgeSource,
@@ -414,6 +416,28 @@ export async function refreshRuntimeConnectorHealth(connectorId: string) {
   }
   try {
     return await invoke<ConnectorManifest>("refresh_connector_health", { connectorId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listRuntimeConnectorSyncStates(workspaceId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorSyncState[]>("list_connector_sync_states", { workspaceId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function syncRuntimeConnector(request: ConnectorSyncRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<ConnectorSyncState>("sync_connector", { request });
   } catch (error) {
     throw toRuntimeError(error);
   }

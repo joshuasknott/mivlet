@@ -89,6 +89,7 @@ import {
   importRuntimeConnectorItem,
   importRuntimeLocalKnowledgeSource,
   listRuntimeConnectorStatuses,
+  listRuntimeConnectorSyncStates,
   listRuntimeConnectorAccounts,
   listRuntimeBackends,
   listRuntimeBackendModels,
@@ -124,6 +125,7 @@ import {
   searchRuntimeConnector,
   searchRuntimeKnowledgeSources,
   switchRuntimeConnectorAccount,
+  syncRuntimeConnector,
   verifyRuntimeBackend
 } from "../runtime";
 import {
@@ -964,13 +966,21 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   useEffect(() => {
     let active = true;
 
-    void listRuntimeConnectorStatuses().then((manifests) => {
+    void Promise.all([
+      listRuntimeConnectorStatuses(),
+      listRuntimeConnectorSyncStates("default")
+    ]).then(([manifests, syncStates]) => {
       if (!active || !manifests) {
         return;
       }
+      const syncById = new Map(syncStates?.map((state) => [state.connectorId, state]) ?? []);
       const runtimeById = new Map(manifests.map((manifest) => [manifest.id, manifest]));
       setConnectorManifests((current) =>
-        current.map((manifest) => runtimeById.get(manifest.id) ?? manifest)
+        current.map((manifest) => {
+          const runtime = runtimeById.get(manifest.id) ?? manifest;
+          const sync = syncById.get(manifest.id);
+          return sync ? { ...runtime, sync } : runtime;
+        })
       );
     });
 
@@ -1582,12 +1592,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
 
     try {
-      const manifest = await refreshRuntimeConnectorHealth(connectorId);
-      if (manifest) {
-        replaceConnectorManifest(manifest);
-        setConnectorStatus(`${connector.name} health refreshed.`);
+      const sync = await syncRuntimeConnector({
+        connectorId,
+        workspaceId: "default",
+        trigger: "manual"
+      });
+      if (sync) {
+        replaceConnectorManifest({ ...connector, sync });
+        const outcome =
+          sync.phase === "succeeded"
+            ? "sync complete"
+            : sync.failure?.message ?? `sync ${sync.phase}`;
+        setConnectorStatus(`${connector.name} ${outcome}.`);
       } else {
-        setConnectorStatus(`${connector.name} fixture health is static preview data.`);
+        setConnectorStatus(`${connector.name} sync is unavailable in preview mode.`);
       }
     } catch (error) {
       setConnectorStatus(

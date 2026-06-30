@@ -57,6 +57,11 @@ pub fn connector_connections_path(app: &tauri::AppHandle) -> Result<PathBuf, Str
     app_data_file_path(app, "connector-connections.json")
 }
 
+/// Workspace-scoped, credential-free connector sync journal.
+pub fn connector_sync_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "connector-sync-state.json")
+}
+
 /// Path for the connected-backend id manifest. Stores *which* backends are
 /// connected (provider ids only), never secrets. Secrets live in the OS-secure
 /// store (keychain); this manifest lets the Rust boundary re-resolve auth state

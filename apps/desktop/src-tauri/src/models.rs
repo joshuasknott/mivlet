@@ -310,6 +310,41 @@ pub struct ConnectorManifest {
     pub supported_actions: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSyncRequest {
+    pub connector_id: String,
+    pub workspace_id: String,
+    pub trigger: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSyncFailure {
+    pub kind: String,
+    pub message: String,
+    pub retryable: bool,
+    pub retry_after: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorSyncState {
+    pub connector_id: String,
+    pub workspace_id: String,
+    pub phase: String,
+    pub trigger: Option<String>,
+    pub attempt: u32,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub last_successful_at: Option<String>,
+    pub next_retry_at: Option<String>,
+    pub cursor: Option<String>,
+    pub items_processed: u64,
+    pub stale_token_recovered: bool,
+    pub failure: Option<ConnectorSyncFailure>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorAuthRequest {
