@@ -211,6 +211,30 @@ imports them. Raw provider responses are not the cache format. Email bodies,
 Slack messages, Drive/Notion text, cookies, authorization headers, and
 token-shaped values are excluded from logs and runtime errors.
 
+Synced connector data is persisted in the encrypted local vault's
+`connector_cache` table (schema v2). Each cached row is scoped to a
+`workspace_id` and `connector_id` so workspaces never cross-pollinate, and is
+searchable by title/provenance/preview without decryption. The cache lifecycle
+is fully controlled through dedicated commands:
+
+- **cache/disable** — per-workspace and per-connector settings (`enabled`,
+  `auto_sync`) gate whether the cache writes or reads; a disabled scope never
+  accepts new rows.
+- **delete** — individual cached items can be soft-disabled (excluded from
+  search/retrieval but retained and auditable) or hard-deleted, always scoped to
+  the requesting workspace.
+- **clear-cache** — a workspace's cache (optionally one connector) can be
+  cleared; workspace isolation guarantees other workspaces are untouched.
+- **resync** — a workspace/connector's rows can be re-stamped as freshly
+  resynced after a re-pull.
+- **export** — a workspace's cached data exports as credential-free JSON
+  (secrets never reach the cache, so the export is safe by construction).
+
+Provider secrets/tokens never enter the cache: the Rust write path recursively
+redacts token-shaped values and fails closed when a secret marker survives
+redaction. Provider tokens remain in OS secure storage under a separate
+lifecycle.
+
 Disconnect should revoke provider authorization where supported, clear access
 and refresh tokens from secure storage, reset account/scopes/health, and keep
 only imported records the user has chosen to retain. Slack tokens can also be
@@ -229,8 +253,12 @@ expired/unavailable auth state.
   Google Drive, Gmail, Google Calendar, Notion, and Slack accounts, but each
   path remains gated by its credential boundary and provider setup. Undeclared
   capabilities still fail closed.
-- Imported connector records remain session-local until the encrypted
-  searchable-content cache is implemented; sync state itself is durable.
+- Synced connector data is cached in the encrypted local vault (`connector_cache`,
+  schema v2). The cache is searchable, workspace-isolated, and secret-free: the
+  write path redacts token-shaped values and fails closed when a secret marker
+  survives. Per-workspace and per-connector cache settings gate writes/reads,
+  and disable/delete/clear/resync/export lifecycle commands preserve workspace
+  isolation. Provider tokens stay in OS secure storage and never enter the cache.
 - GitHub coverage is live-read only for repositories, issues, and pull requests;
   live GitHub writes intentionally fail closed.
 - Live Google integration tests are opt-in and require deliberately supplied

@@ -1,4 +1,4 @@
-//! SQL schema for the durable encrypted store (version 1).
+//! SQL schema for the durable encrypted store (version 2).
 //!
 //! See `docs/superpowers/specs/2026-06-28-encrypted-storage-design.md`.
 //!
@@ -9,10 +9,61 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
-/// The full v1 DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying it
-/// to a fresh database and re-running after a partial apply are both safe.
+/// Forward schema step `v1 → v2`: adds the connector-cache tables to an
+/// *existing* v1 database inside the migration transaction. Fresh databases
+/// already receive these tables through [`SCHEMA_V1`] (the complete current
+/// DDL, kept idempotent with `CREATE TABLE IF NOT EXISTS`), so this constant
+/// only carries the `v→v+1` delta.
+pub const SCHEMA_V1_TO_V2: &str = r#"
+PRAGMA foreign_keys = ON;
+
+-- Searchable, workspace-isolated cache of normalized connector data.
+-- Provider secrets/tokens never reach this table; the write path redacts
+-- token-shaped values before sealing the payload.
+CREATE TABLE IF NOT EXISTS connector_cache (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  provider_item_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  trust TEXT NOT NULL DEFAULT 'untrusted',
+  pinned INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  content_fingerprint TEXT NOT NULL DEFAULT '',
+  cached_at TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'connector-cache',
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_connector_cache_workspace ON connector_cache(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_connector_cache_connector ON connector_cache(connector_id);
+CREATE INDEX IF NOT EXISTS idx_connector_cache_search ON connector_cache(workspace_id, connector_id, disabled);
+
+-- Per-workspace and per-connector cache settings. `scope` is either
+-- "workspace" (a workspace-wide default) or "connector" (a per-connector
+-- override). `enabled` gates cache writes/reads; `auto_sync` gates background
+-- resync. Non-secret settings live in plaintext columns; the encrypted payload
+-- holds only an optional free-text note (never secrets).
+CREATE TABLE IF NOT EXISTS connector_cache_settings (
+  workspace_id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  auto_sync INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, connector_id)
+);
+"#;
+
+/// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
+/// it to a fresh database and re-running after a partial apply are both safe.
+/// Kept as the complete schema so a fresh database reaches the current version
+/// in one batch; existing databases reach it through the registered migration
+/// steps in [`super::migrations`].
 pub const SCHEMA_V1: &str = r#"
 PRAGMA foreign_keys = ON;
 
@@ -217,6 +268,39 @@ CREATE TABLE IF NOT EXISTS run_state (
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+-- connector cache (searchable, workspace-isolated, secret-free)
+CREATE TABLE IF NOT EXISTS connector_cache (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  provider_item_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  trust TEXT NOT NULL DEFAULT 'untrusted',
+  pinned INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  content_fingerprint TEXT NOT NULL DEFAULT '',
+  cached_at TEXT NOT NULL,
+  origin TEXT NOT NULL DEFAULT 'connector-cache',
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_connector_cache_workspace ON connector_cache(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_connector_cache_connector ON connector_cache(connector_id);
+CREATE INDEX IF NOT EXISTS idx_connector_cache_search ON connector_cache(workspace_id, connector_id, disabled);
+
+-- connector cache settings (per-workspace + per-connector)
+CREATE TABLE IF NOT EXISTS connector_cache_settings (
+  workspace_id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  auto_sync INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, connector_id)
 );
 
 -- migration bookkeeping (idempotency + diagnostics)
