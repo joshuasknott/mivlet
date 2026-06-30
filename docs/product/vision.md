@@ -8,7 +8,7 @@ The north star is a workspace where a person can describe an outcome, give bound
 
 Fable should be the user's local command center for delegated work:
 
-- A universal composer for chat, files, tools, slash commands, voice, models, and permission level.
+- A universal composer for chat, files, tools, slash commands, voice (planned/future capability), models, and permission level.
 - A backend-neutral agent runtime that can use subscriptions, API keys, and eventually local models without locking the workspace to one provider.
 - A connector system where GitHub, Vercel, Google Drive, Notion, Gmail, Slack, Calendar, local files, and future community adapters are explicit bridges with scopes, health, provenance, and removal paths.
 - A memory and knowledge layer where sources are inspectable, pinned context is deliberate, and durable memory is approved instead of silently inferred forever.

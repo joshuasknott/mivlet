@@ -603,6 +603,51 @@ describe("Fable home", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not fake a successful Settings connect when the key is rejected", async () => {
+    // The verified path returns auth-failed. Settings must report the failure
+    // accurately through the page status — it must never claim "connected".
+    runtimeMocks.backends = [
+      {
+        id: "anthropic",
+        backendType: "native-api",
+        label: "Anthropic",
+        description: "Reach Claude via an Anthropic API key.",
+        authState: "needs-auth",
+        capabilities: [],
+        models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: false }]
+      }
+    ];
+    const verifySpy = vi.mocked(runtimeModule.verifyRuntimeBackend);
+    verifySpy.mockResolvedValueOnce({
+      providerId: "anthropic",
+      outcome: "auth-failed",
+      message: "Anthropic rejected this key. Check the key and try again."
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+    await skipOnboarding();
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+
+    const anthropicCard = screen.getByText("Anthropic").closest("article");
+    await user.click(
+      within(anthropicCard as HTMLElement).getByRole("button", { name: /^connect$/i })
+    );
+    const keyInput = within(anthropicCard as HTMLElement).getByLabelText(/api key for anthropic/i);
+    await user.type(keyInput, "sk-bad");
+    await user.click(
+      within(anthropicCard as HTMLElement).getByRole("button", { name: /add key & connect/i })
+    );
+
+    // The page status surfaces the rejection — never a fake "connected".
+    const status = await screen.findByRole("status");
+    await waitFor(() => {
+      expect(status.textContent).toMatch(/rejected this key/i);
+    });
+    expect(status.textContent).not.toMatch(/connected/i);
+    verifySpy.mockRestore();
+  });
+
   it("turns slash commands into composer text", async () => {
     const user = await renderWorkspace();
 
@@ -1148,7 +1193,7 @@ describe("Fable onboarding", () => {
       backendType: "native-api",
       label: "Anthropic",
       description:
-        "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
+        "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: false }]
@@ -1157,7 +1202,7 @@ describe("Fable onboarding", () => {
       id: "gemini",
       backendType: "native-api",
       label: "Gemini",
-      description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
+      description: "Reach Gemini via a Google AI API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "gemini-2-pro", label: "Gemini 2 Pro", available: false }]
@@ -1319,8 +1364,9 @@ describe("Fable onboarding", () => {
     // No Claude.ai subscription login; no Google AI Pro/Ultra subscription reuse.
     expect(text).not.toMatch(/claude\.ai/);
     expect(text).not.toMatch(/google ai (pro|ultra)/);
-    // The allowed key/vertex/bedrock paths are named.
-    expect(text).toMatch(/vertex|api key|bedrock/);
+    // The implemented direct API-key path is named, without future routing copy.
+    expect(text).toMatch(/api key/);
+    expect(text).not.toMatch(/vertex|bedrock/);
   });
 
   it("connects a native API-key backend via the verified path and clears the gate", async () => {

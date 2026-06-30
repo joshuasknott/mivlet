@@ -57,6 +57,20 @@ export function createNativeApiBackend(
     if (!capabilities.includes("streaming")) {
       return null;
     }
+    if (
+      request.tools.length > 0 &&
+      (!capabilities.includes("tool-requests") || !capabilities.includes("approvals"))
+    ) {
+      return (async function* unsupportedTools(): AsyncIterable<BackendAgentEvent> {
+        yield {
+          type: "error",
+          message: "Tool calls/approvals are not supported by this backend's capabilities.",
+          code: "invalid-request",
+          retryable: false
+        };
+        yield { type: "done", finishReason: "error" };
+      })();
+    }
     const handlers: TransportHandlers = {
       onRequestStarted: (requestId) => {
         if (active) active.requestId = requestId;
@@ -91,8 +105,12 @@ export function createNativeApiBackend(
     if (!eventStream) return null;
 
     async function* wrappedStream(): AsyncIterable<BackendAgentEvent> {
+      let sawCancelled = false;
       try {
         for await (const event of eventStream) {
+          if (event.type === "cancelled") {
+            sawCancelled = true;
+          }
           if (event.type === "error") {
             yield normalizeBackendErrorEvent(event);
           } else {
@@ -103,6 +121,9 @@ export function createNativeApiBackend(
         yield backendErrorEvent(error, "Native-API run failed.");
         yield { type: "done", finishReason: "error" };
       } finally {
+        if (sawCancelled && capabilities.includes("cancellation") && active?.requestId) {
+          await active.cancel(active.requestId);
+        }
         active = null;
       }
     }

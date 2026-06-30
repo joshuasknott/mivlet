@@ -1,4 +1,5 @@
 import {
+  ArrowClockwise,
   CheckCircle,
   GearSix,
   Key,
@@ -19,7 +20,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type { BackendAuthState, BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
-import { stateViewFor } from "../../lib/backend-state";
+import {
+  connectResultCopy,
+  isDiscoveryDegraded,
+  modelDiscoveryView,
+  stateViewFor
+} from "../../lib/backend-state";
+import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
 import { ProviderIcon } from "../ProviderIcon";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
@@ -189,15 +196,36 @@ function ProviderAccessView({
                   provider={provider}
                   connected={runtime.connectedBackendIds.includes(provider.id)}
                   pending={pendingProviderId === provider.id}
+                  discoveryState={runtime.modelDiscoveryByProvider[provider.id] ?? "idle"}
                   onStatus={onStatus}
                   onConnect={(providerId, secret) =>
-                    void runtime.connectBackend(providerId, secret).then(() => {
-                      onStatus(`${providerId} connected.`);
-                    })
+                    void runtime
+                      .connectBackendWithVerify(providerId, secret)
+                      .then((result) => {
+                        // Report accurately: never claim "connected" when the
+                        // key was rejected or verification failed. Route every
+                        // outcome through connectResultCopy so a MISSING key
+                        // ('add a key') is distinguished from a REJECTED key
+                        // ('key was rejected/expired') and transient outcomes
+                        // never mention the key. Secrets/stack traces never
+                        // appear here — the message comes from the boundary.
+                        const missingKey = isMissingKeyMessage(result.message);
+                        onStatus(
+                          connectResultCopy(result.outcome, {
+                            missingKey,
+                            detail: result.message
+                          }).message
+                        );
+                      })
                   }
                   onDisconnect={(providerId) =>
                     void runtime.disconnectBackend(providerId).then(() => {
                       onStatus(`${providerId} disconnected.`);
+                    })
+                  }
+                  onRefreshModels={(providerId) =>
+                    void runtime.refreshModels(providerId).then(() => {
+                      onStatus(`${providerId} models refreshed.`);
                     })
                   }
                 />
@@ -235,16 +263,21 @@ function NativeProviderRow({
   provider,
   connected,
   pending,
+  discoveryState,
   onStatus,
   onConnect,
-  onDisconnect
+  onDisconnect,
+  onRefreshModels
 }: {
   provider: BackendProvider;
   connected: boolean;
   pending: boolean;
+  /** Per-provider model-discovery lifecycle (idle when discovery hasn't run). */
+  discoveryState: ModelDiscoveryOutcome;
   onStatus: (message: string) => void;
   onConnect: (providerId: string, secret: string) => void;
   onDisconnect: (providerId: string) => void;
+  onRefreshModels: (providerId: string) => void;
 }) {
   // UI-only flag: whether the inline key form is open. Holds no secret.
   const [revealed, setRevealed] = useState(false);
@@ -255,6 +288,13 @@ function NativeProviderRow({
   const availableModels = provider.models.filter((model) => model.available);
   const authLabel = authStateLabel(provider.authState, "native-api");
   const capabilityBearing = connected && capabilities.length > 0;
+  // Model-discovery UI is only meaningful for a connected provider: it reflects
+  // runtime model-list health layered on top of a verified key. Before connect
+  // the catalogue copy ("Connect to see available models") still drives.
+  const discoveryActive = connected && discoveryState !== "idle";
+  const discoveryView = modelDiscoveryView(discoveryState);
+  const discoveryDegraded = connected && isDiscoveryDegraded(discoveryState);
+  const discoveryLoading = discoveryState === "loading";
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -303,10 +343,33 @@ function NativeProviderRow({
             </span>
           ) : provider.models.length > 0 ? (
             <span className="provider-access-models provider-access-models--muted">
-              No models available on this account
+              {connected
+                ? // Connected but the account surfaced no usable models.
+                  "No models available on this account"
+                : // Not connected yet: this is a configuration gap, not an
+                  // account problem — point the user at connecting first.
+                  "Connect to see available models"}
+            </span>
+          ) : null}
+          {discoveryLoading ? (
+            <span className="provider-access-models provider-access-models--loading">
+              <Spinner size={12} /> {discoveryView.label}
             </span>
           ) : null}
         </div>
+
+        {/* Model-discovery runtime health: shown only when connected so the row
+            reflects the real model-list state instead of an optimistic
+            "connected". Degraded (empty/offline/failed/unsupported) is
+            recoverable — the Refresh action in the row footer re-runs discovery. */}
+        {discoveryActive && !discoveryLoading && (discoveryDegraded || availableModels.length === 0) ? (
+          <p
+            className={`provider-access-discovery provider-access-discovery--${discoveryView.tone}`}
+            role="status"
+          >
+            {discoveryView.hint}
+          </p>
+        ) : null}
 
         {revealed && !connected ? (
           <form className="provider-access-key-form" onSubmit={handleSubmit}>
@@ -366,14 +429,31 @@ function NativeProviderRow({
 
       <span className="provider-access-row__action">
         {connected ? (
-          <button
-            type="button"
-            onClick={() => onDisconnect(provider.id)}
-            disabled={pending}
-            title="Remove the stored credential from the local boundary."
-          >
-            Disconnect
-          </button>
+          <>
+            {/* Recoverable model refresh: re-runs discovery so the row reflects
+                the real model-list state and a failed/offline list can be
+                retried without reconnecting. Disabled while a refresh is in
+                flight or the connect round-trip is pending. */}
+            <button
+              type="button"
+              className="provider-access-row__refresh"
+              onClick={() => onRefreshModels(provider.id)}
+              disabled={pending || discoveryLoading}
+              title="Refresh the list of models this account can use."
+              aria-label={`Refresh models for ${provider.label}`}
+            >
+              {discoveryLoading ? <Spinner size={12} /> : <ArrowClockwise size={12} />}
+              {discoveryDegraded ? "Retry" : "Refresh models"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onDisconnect(provider.id)}
+              disabled={pending}
+              title="Remove the stored credential from the local boundary."
+            >
+              Disconnect
+            </button>
+          </>
         ) : (
           <button
             type="button"
@@ -456,6 +536,19 @@ function authStateLabel(
     return "Needs API key";
   }
   return stateViewFor(authState).label;
+}
+
+/**
+ * Recognize the Rust boundary's "no key stored" message. The boundary returns
+ * `auth-failed` for both a missing key and a rejected key; its
+ * `missing_key_message` ("Add an {provider} API key to connect.") is the only
+ * signal that distinguishes them. Matching the signature (rather than exact
+ * text) stays robust if the provider id wording changes. Pure, no secrets.
+ */
+function isMissingKeyMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  const lower = message.toLowerCase();
+  return lower.startsWith("add an") && lower.includes("api key to connect");
 }
 
 function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace"> }) {

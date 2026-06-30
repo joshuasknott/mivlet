@@ -594,10 +594,15 @@ export type BackendAuthState =
   | "failed"
   | "ready"
   | "entitlement-pending"
-  | "unavailable"
-  | "failed";
+  | "unavailable";
 
-/** States where the backend cannot serve any request (declares no caps). */
+/**
+ * States where the backend cannot serve any request (declares no caps). Every
+ * {@link BackendAuthState} except `connected` is fail-closed. The union of this
+ * list and `"connected"` must equal the full `BackendAuthState` vocabulary —
+ * this parity is asserted by `BACKEND_AUTH_STATE_PARITY` below so a duplicate or
+ * stray state is caught here rather than drifting into the Rust boundary.
+ */
 export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
   "needs-auth",
   "sign-in-required",
@@ -606,9 +611,71 @@ export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
   "expired",
   "unsupported",
   "failed",
+  "ready",
   "entitlement-pending",
   "unavailable",
 ] as const;
+
+/**
+ * Compile-time + runtime closed-vocabulary parity for backend auth states.
+ *
+ * `BACKEND_AUTH_STATE_VALUES` is the exhaustive, duplicate-free list of every
+ * `BackendAuthState`. `BACKEND_AUTH_STATE_PARITY` asserts the fail-closed set
+ * plus `"connected"` exactly covers the vocabulary (no missing state, no stray
+ * or duplicate value). A `const` assertion of an object whose keys span the
+ * union makes a missing/duplicate state a *type* error; the runtime check makes
+ * a parity drift between this list and `BACKEND_AUTH_FAIL_CLOSED_STATES` a load-
+ * time failure instead of silent dedupe. Mirrors `BACKEND_AUTH_STATES` in the
+ * Rust `models.rs` vocabulary (11 distinct values).
+ */
+export const BACKEND_AUTH_STATE_VALUES = [
+  "connected",
+  "needs-auth",
+  "sign-in-required",
+  "install-required",
+  "connecting",
+  "expired",
+  "unsupported",
+  "failed",
+  "ready",
+  "entitlement-pending",
+  "unavailable",
+] as const;
+
+// Type-level exhaustiveness: every value must map to a BackendAuthState member.
+const _BACKEND_AUTH_STATE_EXHAUSTIVE: Record<BackendAuthState, true> = {
+  connected: true,
+  "needs-auth": true,
+  "sign-in-required": true,
+  "install-required": true,
+  connecting: true,
+  expired: true,
+  unsupported: true,
+  failed: true,
+  ready: true,
+  "entitlement-pending": true,
+  unavailable: true
+};
+
+// Runtime parity: fail-closed ∪ {connected} must equal the vocabulary exactly.
+const _BACKEND_AUTH_STATE_PARITY_CHECK = (() => {
+  const expected = new Set<string>(BACKEND_AUTH_STATE_VALUES);
+  const actual = new Set<string>([...BACKEND_AUTH_FAIL_CLOSED_STATES, "connected"]);
+  if (expected.size !== BACKEND_AUTH_STATE_VALUES.length) {
+    throw new Error("BACKEND_AUTH_STATE_VALUES contains a duplicate auth state.");
+  }
+  if (expected.size !== actual.size) {
+    throw new Error("Backend auth-state vocabulary has drifted from the fail-closed set.");
+  }
+  for (const state of actual) {
+    if (!expected.has(state)) {
+      throw new Error(`Backend auth-state "${state}" is not in the vocabulary.`);
+    }
+  }
+  return true as const;
+})();
+export const BACKEND_AUTH_STATE_PARITY = _BACKEND_AUTH_STATE_PARITY_CHECK;
+void _BACKEND_AUTH_STATE_EXHAUSTIVE;
 
 /**
  * The closed capability set an adapter may declare dynamically. The UI may

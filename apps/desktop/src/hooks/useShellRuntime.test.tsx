@@ -180,8 +180,9 @@ describe("useShellRuntime — high-risk confirmation gating", () => {
     vi.clearAllMocks();
   });
 
-  it("gates high-risk approvals behind a pending confirmation instead of resolving immediately", () => {
+  it("gates high-risk approvals behind a pending confirmation instead of resolving immediately", async () => {
     const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
     const approval = highRiskApproval();
 
     act(() => {
@@ -257,8 +258,9 @@ describe("useShellRuntime — modify drafting", () => {
     vi.clearAllMocks();
   });
 
-  it("opens a modify draft seeded from the approval's current scope", () => {
+  it("opens a modify draft seeded from the approval's current scope", async () => {
     const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
     const approval = lowRiskApproval();
 
     act(() => {
@@ -274,8 +276,9 @@ describe("useShellRuntime — modify drafting", () => {
     expect(result.current.approvalModificationDraft.consequence).toBe(approval.consequence);
   });
 
-  it("rejects a save when allowed data or consequence is empty", () => {
+  it("rejects a save when allowed data or consequence is empty", async () => {
     const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
     const approval = lowRiskApproval();
 
     act(() => {

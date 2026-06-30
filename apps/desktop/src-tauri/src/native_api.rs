@@ -139,6 +139,14 @@ fn require_key(provider_id: &str) -> Result<String, String> {
     read_credential(provider_id)?.ok_or_else(|| format!("{provider_id} has no stored credential."))
 }
 
+/// The user-facing message for a native provider that has no stored key. This is
+/// a *configuration-state* gap, not a credential the provider rejected, so the
+/// copy must never say "rejected" — it directs the user to add a key. Pure so
+/// the boundary copy contract is unit-tested without a socket.
+pub fn missing_key_message(provider_id: &str) -> String {
+    format!("Add an {provider_id} API key to connect.")
+}
+
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -395,6 +403,7 @@ pub async fn stream_backend_completion(
                                 attempt: attempt + 1,
                                 retry_after_ms: None,
                             });
+                            completed = true;
                             break;
                         }
                         None => {
@@ -608,12 +617,17 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     }
     let key = match require_key(&provider_id) {
         Ok(key) => key,
-        Err(message) => {
+        Err(_) => {
+            // Discovery without a stored key is a configuration gap, not a
+            // provider/runtime failure. Keep the outcome actionable: the user
+            // must add a key before models can be discovered.
             return Ok(ModelDiscoveryResult {
                 outcome: "failed",
                 models: Vec::new(),
-                message: Some(message),
-            })
+                message: Some(format!(
+                    "Add an {provider_id} API key before discovering models."
+                )),
+            });
         }
     };
     let url = models_endpoint_for(&provider_id)?;
@@ -746,12 +760,16 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
 
     let key = match require_key(&provider_id) {
         Ok(key) => key,
-        Err(message) => {
+        Err(_) => {
+            // No credential is stored. This is a configuration-state gap, not a
+            // key the provider rejected, so the message must not say "rejected".
+            // The `auth-failed` outcome is correct (the provider cannot be used
+            // without auth), but the copy tells the user to add a key.
             return Ok(BackendVerifyResult {
                 provider_id: provider_id.clone(),
                 outcome: "auth-failed".to_string(),
-                message: Some(message),
-            })
+                message: Some(missing_key_message(&provider_id)),
+            });
         }
     };
 
@@ -939,6 +957,31 @@ mod transport_policy_tests {
             assert!(
                 BACKEND_VERIFY_OUTCOMES.contains(&outcome),
                 "outcome {outcome} is not in BACKEND_VERIFY_OUTCOMES"
+            );
+        }
+    }
+
+    #[test]
+    fn missing_key_message_directs_the_user_to_add_a_key() {
+        // A missing key is a configuration-state gap, not a provider rejection.
+        // The copy must never imply the key was "rejected" or "invalid".
+        for provider_id in ["openai", "anthropic", "gemini", "xai", "openrouter"] {
+            let message = missing_key_message(provider_id);
+            assert!(
+                message.contains("Add an"),
+                "missing-key message should direct the user to add a key: {message}"
+            );
+            assert!(
+                message.contains(provider_id),
+                "missing-key message should name the provider: {message}"
+            );
+            assert!(
+                !message.to_lowercase().contains("reject"),
+                "missing-key message must not say 'rejected': {message}"
+            );
+            assert!(
+                !message.to_lowercase().contains("invalid"),
+                "missing-key message must not say 'invalid': {message}"
             );
         }
     }

@@ -143,7 +143,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
     },
     // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
-    // API-key only; compliance copy names only the allowed auth paths.
+    // API-key only; compliance copy names only the implemented auth path.
     BackendCatalogEntry {
         id: "openai",
         backend_type: "native-api",
@@ -161,7 +161,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "anthropic",
         backend_type: "native-api",
         label: "Anthropic",
-        description: "Reach Claude via an Anthropic API key, Vertex AI, or Amazon Bedrock. Fable owns the agent loop.",
+        description: "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[
             ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
@@ -173,7 +173,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         id: "gemini",
         backend_type: "native-api",
         label: "Gemini",
-        description: "Reach Gemini via a Google AI API key or Vertex AI. Fable owns the agent loop.",
+        description: "Reach Gemini via a Google AI API key. Fable owns the agent loop.",
         install_hint: "",
         models: &[
             ("gemini-3.5-flash", "Gemini 3.5 Flash"),
@@ -380,6 +380,23 @@ fn catalog_entry(provider_id: &str) -> Option<&'static BackendCatalogEntry> {
     CATALOG.iter().find(|entry| entry.id == provider_id)
 }
 
+fn validate_backend_secret(secret: &str) -> Result<String, String> {
+    if secret.chars().any(|character| character.is_control()) {
+        return Err("Backend credentials cannot contain control characters.".to_string());
+    }
+
+    let normalized = normalize_spaces(secret);
+
+    if normalized.is_empty() {
+        return Err("Backend credentials need a non-empty secret.".to_string());
+    }
+    if normalized.chars().count() > MAX_BACKEND_SECRET_CHARACTERS {
+        return Err("Backend credential exceeds the supported length.".to_string());
+    }
+
+    Ok(normalized)
+}
+
 /// Resolve auth state from the credential store. Only native API-key providers
 /// can become connected through this boundary. Catalog-only subscription/CLI
 /// providers stay gated until a real runtime adapter reports capabilities.
@@ -562,14 +579,7 @@ pub(crate) fn store_credential_into<S: BackendCredentialStore>(
             entry.label
         ));
     }
-    let secret = truncate_characters(
-        &normalize_spaces(&request.secret),
-        MAX_BACKEND_SECRET_CHARACTERS,
-    );
-
-    if secret.is_empty() {
-        return Err("Backend credentials need a non-empty secret.".to_string());
-    }
+    let secret = validate_backend_secret(&request.secret)?;
 
     log_pre_release_warning_once();
     store.set(&provider_id, &secret)?;

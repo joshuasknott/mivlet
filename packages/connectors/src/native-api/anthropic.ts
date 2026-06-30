@@ -6,8 +6,8 @@
  * tool call is complete. This parser buffers partial JSON per content-block
  * index and emits a single tool-call event when the block closes.
  *
- * Pure: no network, no key. Anthropic is API key / Vertex / Bedrock only —
- * compliance copy lives in the fixtures, not here.
+ * Pure: no network, no key. Active egress is direct Anthropic API-key HTTP;
+ * Vertex AI and Amazon Bedrock routing are future extensions.
  */
 
 import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";

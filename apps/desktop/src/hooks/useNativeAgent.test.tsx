@@ -424,6 +424,24 @@ describe("useNativeAgent", () => {
     });
   });
 
+  it("maps Rust boundary cancellation to a cancelled terminal state", async () => {
+    installDesktopRuntime();
+    mocks.lines = ["[CANCELLED]"];
+    mocks.emitDone = false;
+
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
+
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
+
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.status).toBe("cancelled");
+    expect(result.current.state.lastError).toBeNull();
+  });
+
   it("bails cooperatively when the cancel path flips the shouldCancel flag", async () => {
     installDesktopRuntime();
     // Mirrors App.tsx exactly: shouldCancel reads a cancel flag, and onCancel
@@ -797,6 +815,43 @@ describe("useNativeAgent", () => {
     });
 
     expect(result.current.state.running).toBe(false);
-    expect(result.current.state.lastError).toBe("Provider rejected the API key.");
+    // The error is classified so a configuration failure (rejected/expired key)
+    // is distinguishable from a runtime/provider failure: the surfaced message
+    // points the user at their key in Settings and preserves the provider detail.
+    expect(result.current.state.lastError).toContain("API key");
+    expect(result.current.state.lastError).toContain("Settings");
+    expect(result.current.state.lastError).toContain("Provider rejected the API key.");
+  });
+
+  it("runtime provider errors are classified as retryable, not as a key problem", async () => {
+    installDesktopRuntime();
+    // A 5xx surfaces as `provider-unavailable` — a runtime failure, not a
+    // configuration one. The surfaced message must not point at the API key.
+    mocks.lines = [
+      JSON.stringify({
+        __fableTransport: {
+          kind: "error",
+          code: "provider-unavailable",
+          message: "Provider request failed with HTTP 503.",
+          retryable: true,
+          attempt: 3,
+          retryAfterMs: null
+        }
+      })
+    ];
+
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+    );
+
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
+
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.lastError).toContain("unavailable");
+    expect(result.current.state.lastError).toContain("HTTP 503");
+    // A runtime error must never be mislabeled as an API-key problem.
+    expect(result.current.state.lastError?.toLowerCase()).not.toContain("api key");
   });
 });

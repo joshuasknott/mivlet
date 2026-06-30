@@ -19,6 +19,7 @@ import type {
 } from "@fable/protocol";
 import {
   BackendRuntimeError,
+  classifyBackendError,
   shapeAnthropicRequest,
   shapeGeminiRequest,
   shapeOpenAiRequest,
@@ -79,7 +80,17 @@ function tauriTransport(
       let transportError: Error | null = null;
 
       const unlisten = await listenRuntimeBackendEvents(requestId, (line) => {
-        if (line === "[DONE]" || line === "[CANCELLED]") {
+        if (line === "[CANCELLED]") {
+          transportError = new BackendRuntimeError(
+            "Provider request was cancelled.",
+            "cancelled",
+            false
+          );
+          finished = true;
+          resolveNext?.(undefined);
+          return;
+        }
+        if (line === "[DONE]") {
           finished = true;
           resolveNext?.(undefined);
           return;
@@ -117,7 +128,20 @@ function tauriTransport(
         model: request.model,
         body: shapeBodyFor(request)
       }).catch((error) => {
-        transportError = error instanceof Error ? error : new Error("Provider request failed.");
+        if (!transportError) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : typeof error === "string" && error.trim()
+                ? error
+                : "Provider request failed.";
+          const classified = classifyBackendError(message);
+          transportError = new BackendRuntimeError(
+            message,
+            classified.code,
+            classified.retryable
+          );
+        }
         finished = true;
         resolveNext?.(undefined);
       });

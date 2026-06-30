@@ -17,7 +17,7 @@
  * that carry auth state + capabilities only.
  */
 
-import type { BackendAuthState, BackendProvider } from "@fable/protocol";
+import type { BackendAuthState, BackendProvider, BackendVerifyOutcome } from "@fable/protocol";
 
 /** How a provider authenticates. Determines the onboarding affordance. */
 export type BackendAuthKind = "api-key" | "provider-login" | "install-gated";
@@ -169,4 +169,152 @@ export function canActOnProvider(provider: BackendProvider): boolean {
 export function stateClassFor(state: BackendAuthState): string {
   const tone = stateViewFor(state).tone;
   return `og-provider--${tone}`;
+}
+
+/**
+ * The per-provider model-discovery lifecycle.
+ *
+ * This is a *runtime* condition layered on top of a provider's auth state, not
+ * a new auth state. A provider can be `connected` (its key verifies) while its
+ * model list is any of these — e.g. discovery `failed` means "key is good, we
+ * just couldn't fetch the catalogue right now," which is a recoverable runtime
+ * problem rather than a credentials problem.
+ *
+ * `idle` means discovery has not run yet for this provider.
+ */
+export type ModelDiscoveryOutcome =
+  | "idle"
+  | "loading"
+  | "success"
+  | "empty"
+  | "offline"
+  | "unsupported"
+  | "failed";
+
+/**
+ * Display view for a provider's model-discovery state. Kept here so the
+ * Settings refresh affordance and the connected-but-degraded hint never drift.
+ */
+export function modelDiscoveryView(
+  outcome: ModelDiscoveryOutcome
+): BackendStateView {
+  switch (outcome) {
+    case "loading":
+      return {
+        label: "Refreshing models",
+        tone: "info",
+        hint: "Checking which models this account can use…"
+      };
+    case "success":
+      return { label: "Models available", tone: "ready" };
+    case "empty":
+      return {
+        label: "No models found",
+        tone: "caution",
+        hint:
+          "This account surfaced no usable models. Check your plan or billing with the provider."
+      };
+    case "offline":
+      return {
+        label: "Models unavailable",
+        tone: "caution",
+        hint:
+          "Couldn't reach the provider to load models. Your key is fine — try refreshing in a moment."
+      };
+    case "failed":
+      return {
+        label: "Couldn't load models",
+        tone: "caution",
+        hint:
+          "Model loading failed. Your key is fine — refresh to try again."
+      };
+    case "unsupported":
+      return {
+        label: "Model list not supported",
+        tone: "danger",
+        hint: "This provider doesn't expose a model list. Pick a model manually."
+      };
+    case "idle":
+    default:
+      return { label: "Models", tone: "neutral" };
+  }
+}
+
+/**
+ * Whether a discovery outcome should surface the recoverable
+ * "connected-but-degraded" treatment: connected key, but we cannot confirm the
+ * model list. Used to keep the connected badge honest about runtime health.
+ */
+export function isDiscoveryDegraded(outcome: ModelDiscoveryOutcome): boolean {
+  return (
+    outcome === "empty" ||
+    outcome === "offline" ||
+    outcome === "failed" ||
+    outcome === "unsupported"
+  );
+}
+
+export interface ConnectResultCopy {
+  /** User-facing message. Never mentions the raw key value or stack traces. */
+  message: string;
+  tone: BackendStateTone;
+  /** Whether retrying may succeed (false for a rejected/missing key). */
+  retryable: boolean;
+}
+
+/**
+ * Turn a `BackendVerifyResult.outcome` (plus the missing-key flag the boundary
+ * raises for a never-stored credential) into user-facing copy.
+ *
+ * The Rust boundary returns `auth-failed` for both a missing key and a rejected
+ * key; `missingKey` distinguishes them so the message reads as a configuration
+ * gap ("add a key") rather than a wrong key ("your key was rejected"). Secrets
+ * and stack traces are never surfaced.
+ */
+export function connectResultCopy(
+  outcome: BackendVerifyOutcome,
+  options: { missingKey?: boolean; detail?: string } = {}
+): ConnectResultCopy {
+  const detail = options.detail ? ` (${options.detail})` : "";
+  switch (outcome) {
+    case "ready":
+      return {
+        message: "Connected and verified.",
+        tone: "ready",
+        retryable: false
+      };
+    case "auth-failed":
+      // Missing key is a configuration gap, not a wrong key. Rejected key is a
+      // wrong/expired credential. Both are non-retryable until the user acts.
+      return options.missingKey
+        ? {
+            message: `No API key stored for this provider yet. Add a key to connect.${detail}`,
+            tone: "danger",
+            retryable: false
+          }
+        : {
+            message: `The API key was rejected or has expired. Check the key and try again.${detail}`,
+            tone: "danger",
+            retryable: false
+          };
+    case "offline":
+      return {
+        message: `Couldn't reach the provider to confirm the connection. Try again in a moment.${detail}`,
+        tone: "caution",
+        retryable: true
+      };
+    case "unsupported":
+      return {
+        message: `This provider can't be verified from this build of Fable.${detail}`,
+        tone: "danger",
+        retryable: false
+      };
+    case "failed":
+    default:
+      return {
+        message: `Couldn't verify the connection right now. Try again in a moment.${detail}`,
+        tone: "caution",
+        retryable: true
+      };
+  }
 }
