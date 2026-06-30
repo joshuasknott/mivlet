@@ -40,8 +40,8 @@ export const connectorFixtures = [
     id: "github",
     name: "GitHub",
     status: "fixture",
-    permissions: ["read repositories and selected files", "prepare draft pull requests and comments"],
-    healthSummary: "Preview data loaded; live GitHub App setup required",
+    permissions: ["Read repositories and files", "Prepare draft pull requests and comments"],
+    healthSummary: "Preview mode active; requires GitHub App authorization on your Cloudflare Workers broker.",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
     authMode: "oauth-broker",
     scopes: [
@@ -51,10 +51,10 @@ export const connectorFixtures = [
     ],
     health: {
       state: "unknown",
-      summary: "Fixture adapter only",
+      summary: "Preview mode only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Register a GitHub App and configure the Fable auth broker.",
+    setupMessage: "Authorize this connector using a GitHub App set up on your Cloudflare Workers broker.",
     supportsSearch: true,
     supportsImport: true,
     supportedActions: ["github.draft-pull-request", "github.comment"]
@@ -63,8 +63,8 @@ export const connectorFixtures = [
     id: "vercel",
     name: "Vercel",
     status: "fixture",
-    permissions: ["read projects and deployments", "prepare promote or rollback requests"],
-    healthSummary: "Preview data loaded; live integration setup required",
+    permissions: ["Read projects and deployments", "Promote or rollback deployments"],
+    healthSummary: "Preview mode active; requires Vercel Integration authorization on your Cloudflare Workers broker.",
     lastCheckedAt: "2026-06-27T09:00:00.000Z",
     authMode: "provider-installation",
     scopes: [
@@ -74,10 +74,10 @@ export const connectorFixtures = [
     ],
     health: {
       state: "unknown",
-      summary: "Fixture adapter only",
+      summary: "Preview mode only",
       checkedAt: "2026-06-27T09:00:00.000Z"
     },
-    setupMessage: "Create a Vercel integration and configure its External Flow redirect.",
+    setupMessage: "Authorize this connector using a Vercel Integration set up on your Cloudflare Workers broker.",
     supportsSearch: true,
     supportsImport: true,
     supportedActions: ["vercel.promote", "vercel.rollback"]

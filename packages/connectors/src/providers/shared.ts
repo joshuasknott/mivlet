@@ -129,7 +129,13 @@ export function classifyConnectorError(
   let code: ConnectorErrorCode = "unknown";
   let retryable = false;
 
-  if (error.status === 401) {
+  if (
+    error.status === 503 ||
+    normalizedCode.includes("configuration") ||
+    normalizedCode.includes("broker")
+  ) {
+    code = "configuration-required";
+  } else if (error.status === 401) {
     code = normalizedCode.includes("expired") ? "expired-auth" : "needs-auth";
   } else if (error.status === 403) {
     code = "permission-denied";

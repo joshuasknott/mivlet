@@ -211,7 +211,9 @@ export function providerError(
   retryAfter?: string
 ): ConnectorError {
   const lowerCode = providerCode?.toLowerCase() ?? "";
-  const code = status === 401
+  const code = status === 503 || lowerCode.includes("configuration") || lowerCode.includes("broker")
+    ? "configuration-required"
+    : status === 401
     ? "expired-auth"
     : status === 403 ? "permission-denied"
     : status === 404 ? "not-found"
@@ -225,7 +227,8 @@ export function providerError(
   return {
     connectorId,
     code,
-    message: (code === "permission-denied" ? "The provider denied the required scope or permission."
+    message: (code === "configuration-required" ? "This connector needs provider configuration before it can run."
+      : code === "permission-denied" ? "The provider denied the required scope or permission."
       : code === "expired-auth" ? "The provider authorization expired; reconnect the account."
       : code === "rate-limited" ? "The provider rate limit was reached."
       : code === "not-found" ? "The requested provider resource was not found."
