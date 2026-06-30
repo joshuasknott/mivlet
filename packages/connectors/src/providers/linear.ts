@@ -21,8 +21,8 @@ export function createLinearAdapter(options: LinearAdapterOptions): ConnectorAda
   const auth = oauthClient({
     ...options, connectorId: "linear",
     authorizationEndpoint: new URL("oauth/linear/authorize", broker).toString(),
-    tokenEndpoint: new URL("oauth/linear/token", broker).toString(),
-    identityEndpoint: new URL("oauth/linear/identity", broker).toString(),
+    handoffEndpoint: new URL("oauth/linear/handoff", broker).toString(),
+    refreshEndpoint: new URL("oauth/linear/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/linear/revoke", broker).toString(),
     scopes: ["read", "write", "issues:create", "comments:create"]
   });

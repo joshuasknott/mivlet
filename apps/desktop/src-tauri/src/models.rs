@@ -125,12 +125,15 @@ pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 8] = [
     "google-calendar",
     "linear",
 ];
-pub const CONNECTOR_AUTH_STATES: [&str; 7] = [
+pub const CONNECTOR_AUTH_STATES: [&str; 10] = [
     "fixture",
     "needs-auth",
+    "unconfigured",
     "configured",
     "connected",
     "expired",
+    "revoked",
+    "provider-error",
     "error",
     "unavailable",
 ];

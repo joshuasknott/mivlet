@@ -26,8 +26,8 @@ export function createSlackAdapter(options: SlackAdapterOptions): ConnectorAdapt
   const auth = oauthClient({
     ...options, connectorId: "slack",
     authorizationEndpoint: new URL("oauth/slack/authorize", broker).toString(),
-    tokenEndpoint: new URL("oauth/slack/token", broker).toString(),
-    identityEndpoint: new URL("oauth/slack/identity", broker).toString(),
+    handoffEndpoint: new URL("oauth/slack/handoff", broker).toString(),
+    refreshEndpoint: new URL("oauth/slack/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/slack/revoke", broker).toString(),
     scopes: [
       "channels:read", "groups:read", "im:read", "mpim:read",

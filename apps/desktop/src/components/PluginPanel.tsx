@@ -212,13 +212,28 @@ function ConnectorDetails({
 }
 
 function statusLabel(connector: ConnectorManifest) {
-  if (connector.status === "connected") {
-    return "Connected";
+  switch (connector.status) {
+    case "connected":
+      return "Connected";
+    case "fixture":
+      return "Preview";
+    case "configured":
+      return "Ready";
+    case "unconfigured":
+      return "Setup needed";
+    case "expired":
+      return "Expired";
+    case "revoked":
+      return "Revoked";
+    case "provider-error":
+      return "Provider issue";
+    case "unavailable":
+      return "Unavailable";
+    case "error":
+      return "Error";
+    default:
+      return "Not connected";
   }
-  if (connector.status === "fixture") {
-    return "Preview";
-  }
-  return "Not connected";
 }
 
 function actionLabel(action: ConnectorActionKind) {

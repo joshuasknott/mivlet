@@ -75,6 +75,27 @@ describe("Notion production adapter", () => {
       "/oauth/notion/handoff", "/oauth/notion/refresh", "/oauth/notion/revoke"
     ]);
   });
+
+  it("never derives non-contract token or identity broker routes", async () => {
+    const seen: string[] = [];
+    const fetcher = vi.fn<ProviderFetch>(async (url, init) => {
+      seen.push(new URL(String(url)).pathname);
+      const path = new URL(String(url)).pathname;
+      const body = JSON.parse(String(init?.body));
+      expect(body.provider).toBe("notion");
+      if (path.endsWith("/handoff")) return json({ contractVersion: 1, tokens: { accessToken: "a", refreshToken: "r", tokenType: "Bearer", scopes: [] }, account: { id: "ws", displayName: "Workspace" } });
+      if (path.endsWith("/refresh")) return json({ contractVersion: 1, tokens: { accessToken: "a2", tokenType: "Bearer", scopes: [] } });
+      if (path.endsWith("/revoke")) return json({ contractVersion: 1, revoked: true });
+      return json({ error: "invalid route" }, 404);
+    });
+    const adapter = notion(fetcher);
+    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    await adapter.refresh(auth.tokens);
+    await adapter.revoke(auth.tokens);
+    expect(seen).toEqual(["/oauth/notion/handoff", "/oauth/notion/refresh", "/oauth/notion/revoke"]);
+    expect(seen).not.toContain("/oauth/notion/token");
+    expect(seen).not.toContain("/oauth/notion/identity");
+  });
 });
 
 describe("Slack production adapter", () => {
@@ -120,6 +141,27 @@ describe("Slack production adapter", () => {
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
     const start = await slack(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s2", codeChallenge: "c" });
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/slack/authorize");
+  });
+
+  it("redeems, refreshes, and revokes only through Slack broker contract routes", async () => {
+    const seen: string[] = [];
+    const fetcher = vi.fn<ProviderFetch>(async (url, init) => {
+      seen.push(new URL(String(url)).pathname);
+      const path = new URL(String(url)).pathname;
+      const body = JSON.parse(String(init?.body));
+      expect(body.provider).toBe("slack");
+      if (path.endsWith("/handoff")) return json({ contractVersion: 1, tokens: { accessToken: "xoxb-a", refreshToken: "xoxb-r", tokenType: "Bearer", scopes: [] }, account: { id: "U1", displayName: "Slack User", workspace: "Fable" } });
+      if (path.endsWith("/refresh")) return json({ contractVersion: 1, tokens: { accessToken: "xoxb-a2", tokenType: "Bearer", scopes: [] } });
+      if (path.endsWith("/revoke")) return json({ contractVersion: 1, revoked: true });
+      return json({ error: "invalid route" }, 404);
+    });
+    const adapter = slack(fetcher);
+    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s2`, expectedState: "s2", codeVerifier: "unused" });
+    await adapter.refresh(auth.tokens);
+    await adapter.revoke(auth.tokens);
+    expect(seen).toEqual(["/oauth/slack/handoff", "/oauth/slack/refresh", "/oauth/slack/revoke"]);
+    expect(seen).not.toContain("/oauth/slack/token");
+    expect(seen).not.toContain("/oauth/slack/identity");
   });
 });
 

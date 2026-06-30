@@ -672,16 +672,20 @@ fn build_manifest_with_health(
     health: Option<ConnectorHealth>,
 ) -> ConnectorManifest {
     let connection = boundary.connection(entry.id);
-    let connected = connection.is_some();
-    let status = if connected { "connected" } else { "needs-auth" };
+    let configuration_state = connector_configuration_state(entry);
+    let configured = configuration_state == "configured";
+    let status = connector_manifest_status(entry, connection.as_ref(), health.as_ref());
+    let connected = status == "connected";
     debug_assert!(CONNECTOR_AUTH_STATES.contains(&status));
 
     let health = health.unwrap_or(ConnectorHealth {
         state: "unknown".to_string(),
         summary: if connected {
             "Credentials available; live provider health has not been checked.".to_string()
-        } else {
+        } else if !configured {
             "Provider configuration required".to_string()
+        } else {
+            "Ready to connect".to_string()
         },
         checked_at: "Not checked".to_string(),
         retry_after: None,
@@ -692,6 +696,7 @@ fn build_manifest_with_health(
         _ if connected => {
             "Credentials available; live provider health has not been checked.".to_string()
         }
+        _ if configured => "Ready to connect".to_string(),
         _ => "Provider configuration required".to_string(),
     };
 
@@ -715,17 +720,30 @@ fn build_manifest_with_health(
                 label: (*label).to_string(),
                 access: (*access).to_string(),
                 required: *required,
-                granted: connection.as_ref().is_some_and(|connection| {
-                    connection
-                        .scopes
-                        .iter()
-                        .any(|scope| scope == id || scope.ends_with(&format!("/{id}")))
-                }),
+                granted: connected
+                    && connection.as_ref().is_some_and(|connection| {
+                        connection
+                            .scopes
+                            .iter()
+                            .any(|scope| scope == id || scope.ends_with(&format!("/{id}")))
+                    }),
             })
             .collect(),
         health,
-        account: connection.map(|connection| connection.account),
-        setup_message: (!connected).then(|| entry.setup_message.to_string()),
+        account: connected
+            .then(|| {
+                connection
+                    .as_ref()
+                    .map(|connection| connection.account.clone())
+            })
+            .flatten(),
+        setup_message: (!connected).then(|| {
+            if configured {
+                "Choose Connect to authorize this provider.".to_string()
+            } else {
+                entry.setup_message.to_string()
+            }
+        }),
         supports_search: true,
         supports_import: true,
         supported_actions: entry
@@ -733,6 +751,60 @@ fn build_manifest_with_health(
             .iter()
             .map(|action| (*action).to_string())
             .collect(),
+    }
+}
+
+fn connector_configuration_state(entry: &'static ConnectorCatalogEntry) -> &'static str {
+    match entry.auth_mode {
+        "oauth-pkce" => {
+            if std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID")
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                "configured"
+            } else {
+                "unconfigured"
+            }
+        }
+        "oauth-broker" | "provider-installation" => {
+            let broker_url = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+            if crate::connector_auth::resolve_broker_endpoints(entry.id, broker_url.as_deref())
+                .is_ok()
+            {
+                "configured"
+            } else {
+                "unconfigured"
+            }
+        }
+        _ => "configured",
+    }
+}
+
+fn connector_manifest_status(
+    entry: &'static ConnectorCatalogEntry,
+    connection: Option<&ConnectorConnection>,
+    health: Option<&ConnectorHealth>,
+) -> &'static str {
+    let configuration_state = connector_configuration_state(entry);
+    if configuration_state == "unconfigured" {
+        return "unconfigured";
+    }
+    let Some(connection) = connection else {
+        return "configured";
+    };
+    match connection.status.as_str() {
+        "connected" => match health.map(|health| health.state.as_str()) {
+            Some("degraded") | Some("error") => "provider-error",
+            _ => "connected",
+        },
+        "expired" => "expired",
+        "revoked" => "revoked",
+        "configured" => "configured",
+        "needs-auth" => "needs-auth",
+        "unavailable" => "unavailable",
+        "error" => "error",
+        "provider-error" => "provider-error",
+        _ => "provider-error",
     }
 }
 

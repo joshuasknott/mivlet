@@ -7,14 +7,16 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use crate::approvals::{
     persist_approval_audit_entry, persist_approval_rule, read_approval_audit_entries,
     read_approval_rules, resolve_approval,
 };
+use crate::connector_auth::ConnectorConnection;
 use crate::connectors::{
-    list_unconfigured_connector_statuses, redact_connector_text, validate_connector_action,
-    validate_connector_execution_request,
+    list_connector_statuses_with, list_unconfigured_connector_statuses, redact_connector_text,
+    validate_connector_action, validate_connector_execution_request, ConnectorCredentialBoundary,
 };
 use crate::knowledge::{import_local_text_file, search_knowledge_sources};
 use crate::memory::{
@@ -26,8 +28,16 @@ use crate::snapshot::{
     write_runtime_snapshot,
 };
 
+static ENV_LOCK: Mutex<()> = Mutex::new(());
+
 #[test]
 fn lists_first_wave_connectors_without_faking_live_connections() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let old_broker = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+    let old_google = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+    std::env::remove_var("FABLE_AUTH_BROKER_URL");
+    std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
+
     let manifests = list_unconfigured_connector_statuses();
 
     assert_eq!(
@@ -39,7 +49,7 @@ fn lists_first_wave_connectors_without_faking_live_connections() {
     );
     assert!(manifests
         .iter()
-        .all(|manifest| manifest.status == "needs-auth"));
+        .all(|manifest| manifest.status == "unconfigured"));
     assert!(manifests.iter().all(|manifest| manifest.account.is_none()));
     assert!(manifests
         .iter()
@@ -47,6 +57,71 @@ fn lists_first_wave_connectors_without_faking_live_connections() {
     assert!(manifests
         .iter()
         .all(|manifest| manifest.scopes.iter().all(|scope| !scope.granted)));
+
+    if let Some(value) = old_broker {
+        std::env::set_var("FABLE_AUTH_BROKER_URL", value);
+    }
+    if let Some(value) = old_google {
+        std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", value);
+    }
+}
+
+struct StaticConnectorBoundary {
+    connection: Option<ConnectorConnection>,
+}
+
+impl ConnectorCredentialBoundary for StaticConnectorBoundary {
+    fn connection(&self, connector_id: &str) -> Option<ConnectorConnection> {
+        self.connection
+            .as_ref()
+            .filter(|connection| connection.connector_id == connector_id)
+            .cloned()
+    }
+}
+
+fn slack_connection(status: &str) -> ConnectorConnection {
+    ConnectorConnection {
+        connector_id: "slack".to_string(),
+        account: ConnectorAccountSummary {
+            id: "U1".to_string(),
+            display_name: "Slack User".to_string(),
+            handle: None,
+            email: None,
+            workspace: Some("Fable".to_string()),
+            avatar_url: None,
+        },
+        status: status.to_string(),
+        scopes: vec!["channels:read".to_string(), "chat:write".to_string()],
+        expires_at: None,
+        credential_ref: "oauth-token:slack:U1".to_string(),
+        connected_at: "1".to_string(),
+        updated_at: "1".to_string(),
+        is_active: true,
+    }
+}
+
+#[test]
+fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let old_broker = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+    std::env::set_var("FABLE_AUTH_BROKER_URL", "https://auth.example/");
+
+    let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
+        connection: Some(slack_connection("expired")),
+    });
+    let slack = manifests
+        .iter()
+        .find(|manifest| manifest.id == "slack")
+        .unwrap();
+    assert_eq!(slack.status, "expired");
+    assert!(slack.account.is_none());
+    assert!(slack.scopes.iter().all(|scope| !scope.granted));
+
+    if let Some(value) = old_broker {
+        std::env::set_var("FABLE_AUTH_BROKER_URL", value);
+    } else {
+        std::env::remove_var("FABLE_AUTH_BROKER_URL");
+    }
 }
 
 fn connector_action(action: &str, connector_id: &str, service: &str) -> ConnectorActionRequest {
