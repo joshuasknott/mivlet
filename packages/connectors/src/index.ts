@@ -79,6 +79,8 @@ export {
   type ConnectorWriteRequest
 } from "./sdk";
 
+export * from "./sync";
+
 // agent-runtime backends (logic + data split, mirroring the connector pattern)
 export {
   BACKEND_PROVIDER_IDS,

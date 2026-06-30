@@ -266,6 +266,53 @@ export interface ConnectorHealth {
   retryAfter?: string;
 }
 
+export type ConnectorSyncPhase =
+  | "idle"
+  | "syncing"
+  | "succeeded"
+  | "partial"
+  | "failed"
+  | "cancelled";
+
+export type ConnectorSyncTrigger = "manual" | "background" | "retry";
+
+export type ConnectorSyncFailureKind =
+  | "auth-required"
+  | "permission-denied"
+  | "provider-unavailable"
+  | "rate-limited"
+  | "partial-sync"
+  | "cancelled";
+
+export interface ConnectorSyncFailure {
+  kind: ConnectorSyncFailureKind;
+  message: string;
+  retryable: boolean;
+  retryAfter?: string;
+}
+
+export interface ConnectorSyncState {
+  connectorId: ConnectorId;
+  workspaceId: string;
+  phase: ConnectorSyncPhase;
+  trigger?: ConnectorSyncTrigger;
+  attempt: number;
+  startedAt?: string;
+  completedAt?: string;
+  lastSuccessfulAt?: string;
+  nextRetryAt?: string;
+  cursor?: string;
+  itemsProcessed: number;
+  staleTokenRecovered: boolean;
+  failure?: ConnectorSyncFailure;
+}
+
+export interface ConnectorSyncRequest {
+  connectorId: FirstWaveConnectorId;
+  workspaceId: string;
+  trigger?: ConnectorSyncTrigger;
+}
+
 export interface ConnectorAccountSummary {
   id: string;
   displayName: string;
@@ -290,6 +337,7 @@ export interface ConnectorManifest {
   authMode?: ConnectorAuthMode;
   scopes?: ConnectorPermission[];
   health?: ConnectorHealth;
+  sync?: ConnectorSyncState;
   account?: ConnectorAccountSummary;
   setupMessage?: string;
   supportsSearch?: boolean;
