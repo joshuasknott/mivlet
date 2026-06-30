@@ -57,6 +57,14 @@ export function permissionLabelFor(mode: PermissionMode): string {
   return PERMISSION_PROFILES.find((profile) => profile.mode === mode)?.label ?? DEFAULT_PERMISSION_LABEL;
 }
 
+/** The plain description for a PermissionMode, surfaced wherever a profile is shown. */
+export function permissionDescriptionFor(mode: PermissionMode): string {
+  return (
+    PERMISSION_PROFILES.find((profile) => profile.mode === mode)?.description ??
+    PERMISSION_PROFILES[0].description
+  );
+}
+
 export interface BuildContextPrefixForRunInput {
   memoryRecords: MemoryRecord[];
   knowledgeSources: KnowledgeSource[];

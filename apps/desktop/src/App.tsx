@@ -219,7 +219,9 @@ export function App() {
         ) : null}
         {runtime.openApprovals.length > 0 ||
         runtime.editingApprovalId ||
-        runtime.pendingApprovalConfirmation ? (
+        runtime.pendingApprovalConfirmation ||
+        runtime.sessionApprovalGrants.length > 0 ||
+        runtime.approvalRules.length > 0 ? (
           <ApprovalPanel
             approvals={runtime.openApprovals}
             audit={runtime.approvalAudit}
