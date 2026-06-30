@@ -513,6 +513,126 @@ export interface ConnectorApprovalRecord {
   actionFingerprint?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Connector cache.
+//
+// A searchable, workspace-isolated, secret-free local cache for synced
+// connector data. Cached rows are normalized provider items scoped to a
+// workspace so workspaces never cross-pollinate. Provider secrets/tokens never
+// reach the cache: the Rust write path redacts token-shaped values and fails
+// closed when a secret marker survives. These are wire-only types; persistence
+// and lifecycle live in the Rust runtime boundary.
+// ---------------------------------------------------------------------------
+
+/** The trust vocabulary mirrored from knowledge sources for cached items. */
+export type ConnectorCacheTrust = "trusted" | "untrusted" | "verified";
+
+/** The default workspace scope used when a caller omits `workspaceId`. */
+export const CONNECTOR_CACHE_DEFAULT_WORKSPACE_ID = "default";
+
+/**
+ * A single cached connector item. Carries no secret material: titles,
+ * provenance, previews, and metadata are redacted before they are sealed.
+ */
+export interface CachedConnectorItem {
+  id: string;
+  workspaceId: string;
+  connectorId: ConnectorId;
+  providerItemId: string;
+  kind: string;
+  trust: ConnectorCacheTrust;
+  pinned: boolean;
+  disabled: boolean;
+  contentFingerprint: string;
+  cachedAt: string;
+  origin: string;
+  title: string;
+  provenance: string;
+  freshness: string;
+  contentPreview: string;
+  account: string;
+  providerMetadata: Record<string, unknown>;
+}
+
+/** Scope of a cache-settings row: a workspace-wide default or a per-connector override. */
+export type ConnectorCacheSettingsScope = "workspace" | "connector";
+
+/**
+ * Effective cache settings for a `(workspaceId, connectorId)` pair. A connector
+ * override wins over the workspace default, which wins over the built-in
+ * default (`enabled = true`, `autoSync = false`).
+ */
+export interface ConnectorCacheSettings {
+  workspaceId: string;
+  connectorId: string;
+  scope: ConnectorCacheSettingsScope;
+  /** When false, the cache neither writes nor reads for this scope. */
+  enabled: boolean;
+  /** When true, a background resync may run for this scope. */
+  autoSync: boolean;
+  updatedAt: string;
+  note: string;
+}
+
+/** Input for writing/refreshing a single cached connector item. */
+export interface CacheConnectorItemRequest {
+  workspaceId?: string;
+  /** A provider-shaped item (search result / import) to cache. */
+  item: Record<string, unknown>;
+}
+
+/** Input for toggling a cached item's disabled flag. */
+export interface SetConnectorCacheItemDisabledRequest {
+  workspaceId?: string;
+  id: string;
+  disabled: boolean;
+}
+
+/** Input for clearing a workspace's cache (optionally one connector). */
+export interface ClearConnectorCacheRequest {
+  workspaceId?: string;
+  /** When set, only this connector's cached rows are cleared. */
+  connectorId?: ConnectorId;
+  /** When true, also drop the per-workspace/per-connector settings rows. */
+  includeSettings?: boolean;
+}
+
+/** Input for marking a workspace/connector's cache freshly resynced. */
+export interface ResyncConnectorCacheRequest {
+  workspaceId?: string;
+  connectorId?: ConnectorId;
+}
+
+/** Input for reading effective cache settings. */
+export interface GetConnectorCacheSettingsRequest {
+  workspaceId?: string;
+  connectorId: ConnectorId;
+}
+
+/** Input for upserting cache settings. Empty `connectorId` sets the workspace default. */
+export interface SetConnectorCacheSettingsRequest {
+  workspaceId?: string;
+  connectorId: ConnectorId;
+  enabled: boolean;
+  autoSync?: boolean;
+  note?: string;
+}
+
+/** Input for deleting a cache settings row (restores the lower-precedence default). */
+export interface DeleteConnectorCacheSettingsRequest {
+  workspaceId?: string;
+  connectorId: ConnectorId;
+}
+
+/** Credential-free export of a workspace's cached connector data. */
+export interface ConnectorCacheExport {
+  workspaceId: string;
+  connectorId?: ConnectorId;
+  credentialsIncluded: false;
+  items: CachedConnectorItem[];
+  settings: ConnectorCacheSettings[];
+}
+
 export type AgentRunStatus =
   | "queued"
   | "streaming"
