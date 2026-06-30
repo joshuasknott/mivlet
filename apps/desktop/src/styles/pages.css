@@ -1233,7 +1233,54 @@
 
 .provider-access-row__action {
   display: inline-flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Recoverable model refresh: a lower-emphasis control than Disconnect so the
+   primary action (drop the credential) stays visually dominant. The shared
+   .provider-access-row button rule carries base sizing; this trims it. */
+.provider-access-row__refresh {
+  min-height: 32px;
+  padding: 0 12px;
+  gap: 6px;
+  color: var(--ink-muted);
+  background: transparent;
+  border-color: var(--line);
+  font-weight: 500;
+}
+
+.provider-access-row__refresh:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-raised);
+}
+
+.provider-access-models--loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Per-provider model-discovery runtime health note. Toned to match the badge
+   palette so degraded states read as cautionary, never as a hard error. */
+.provider-access-discovery {
+  margin: 6px 0 0;
+  font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.provider-access-discovery--neutral,
+.provider-access-discovery--info {
+  color: var(--ink-muted);
+}
+
+.provider-access-discovery--caution {
+  color: var(--caution);
+}
+
+.provider-access-discovery--danger {
+  color: var(--destructive);
 }
 
 /* Inline API-key form revealed by the native provider "Connect" action. The key
