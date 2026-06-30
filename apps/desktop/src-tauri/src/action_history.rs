@@ -155,7 +155,12 @@ impl Recorder {
     fn synthesize_id(&self) -> String {
         let basis = format!(
             "{}|{}|{}|{}|{}|{}",
-            self.category, self.service, self.action, self.status, self.correlation_id, self.created_at
+            self.category,
+            self.service,
+            self.action,
+            self.status,
+            self.correlation_id,
+            self.created_at
         );
         let digest = sha256_hex(basis.as_bytes());
         // 16 hex chars is plenty for collision safety within a local store and
@@ -167,7 +172,9 @@ impl Recorder {
 /// List recent action-history events (newest first). Returns an empty vector
 /// when the store is not initialized (the unit-test path).
 pub fn list(limit: i64) -> Result<Vec<ActionHistoryEvent>, String> {
-    let events = try_store().map(|store| list_into(store, limit)).transpose()?;
+    let events = try_store()
+        .map(|store| list_into(store, limit))
+        .transpose()?;
     Ok(events.unwrap_or_default())
 }
 
@@ -245,10 +252,13 @@ pub struct RecordActionHistoryRequest {
 
 /// Record an action-history event from the UI or runtime. Observation only.
 #[tauri::command]
-pub fn record_action_history(
-    request: RecordActionHistoryRequest,
-) -> Result<bool, String> {
-    let mut recorder = Recorder::new(&request.category, &request.service, &request.action, &request.status);
+pub fn record_action_history(request: RecordActionHistoryRequest) -> Result<bool, String> {
+    let mut recorder = Recorder::new(
+        &request.category,
+        &request.service,
+        &request.action,
+        &request.status,
+    );
     if let Some(actor) = request.actor {
         recorder = recorder.actor(&actor);
     }

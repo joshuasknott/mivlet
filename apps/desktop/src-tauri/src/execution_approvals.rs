@@ -280,17 +280,30 @@ mod tests {
         // 1. Downgrading mode
         let mut downgraded = approved.clone();
         downgraded.mode = "read-only".to_string();
-        assert!(verify_and_consume_execution_approval(&path, &downgraded, "2026-06-27T12:00:02Z").is_err());
+        assert!(
+            verify_and_consume_execution_approval(&path, &downgraded, "2026-06-27T12:00:02Z")
+                .is_err()
+        );
 
         // 2. Modifying risk level
         let mut risk_changed = approved.clone();
         risk_changed.risk_level = "low".to_string();
-        assert!(verify_and_consume_execution_approval(&path, &risk_changed, "2026-06-27T12:00:02Z").is_err());
+        assert!(verify_and_consume_execution_approval(
+            &path,
+            &risk_changed,
+            "2026-06-27T12:00:02Z"
+        )
+        .is_err());
 
         // 3. Changing data used
         let mut data_changed = approved.clone();
         data_changed.data_used = vec!["path".to_string()];
-        assert!(verify_and_consume_execution_approval(&path, &data_changed, "2026-06-27T12:00:02Z").is_err());
+        assert!(verify_and_consume_execution_approval(
+            &path,
+            &data_changed,
+            "2026-06-27T12:00:02Z"
+        )
+        .is_err());
 
         let _ = fs::remove_file(path);
     }

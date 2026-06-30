@@ -497,17 +497,42 @@ pub async fn execute_tool_call(
     let (mode, risk) = tool_policy(&tool).unwrap_or(("read-only", "low"));
     // Audit records the *attempt*; it observes the boundary and never grants
     // authority. Recording is best-effort and never blocks execution.
-    audit_tool_attempt(&tool, &arguments, &request_id, mode, risk, &decided_at, None);
+    audit_tool_attempt(
+        &tool,
+        &arguments,
+        &request_id,
+        mode,
+        risk,
+        &decided_at,
+        None,
+    );
     if let Err(error) = validate_tool_name(&tool) {
         audit_tool_outcome(
-            ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "rejected", error_code: "unknown-tool", message: &error },
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "rejected",
+                error_code: "unknown-tool",
+                message: &error,
+            },
             None,
         );
         return Err(error);
     }
-    if let Err(error) = validate_tool_approval_binding(&tool, &arguments, &request.approval.request) {
+    if let Err(error) = validate_tool_approval_binding(&tool, &arguments, &request.approval.request)
+    {
         audit_tool_outcome(
-            ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "blocked", error_code: "approval-binding", message: &error },
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "blocked",
+                error_code: "approval-binding",
+                message: &error,
+            },
             None,
         );
         return Err(error);
@@ -518,7 +543,15 @@ pub async fn execute_tool_call(
         &decided_at,
     ) {
         audit_tool_outcome(
-            ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "blocked", error_code: "permit", message: &error },
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "blocked",
+                error_code: "permit",
+                message: &error,
+            },
             None,
         );
         return Err(error);
@@ -557,7 +590,15 @@ pub async fn execute_tool_call(
         .await
         .map_err(|error| {
             audit_tool_outcome(
-                ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "failed", error_code: "connector", message: &error.message },
+                ToolOutcomeAudit {
+                    tool: &tool,
+                    request_id: &request_id,
+                    mode,
+                    risk,
+                    status: "failed",
+                    error_code: "connector",
+                    message: &error.message,
+                },
                 None,
             );
             error.message
@@ -565,7 +606,15 @@ pub async fn execute_tool_call(
         let output = serde_json::to_string(&result)
             .map_err(|_| "Fable could not encode connector results.".to_string())?;
         audit_tool_outcome(
-            ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "ok", error_code: "", message: &format!("{tool} executed") },
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "ok",
+                error_code: "",
+                message: &format!("{tool} executed"),
+            },
             None,
         );
         return Ok(ToolResult { ok: true, output });
@@ -596,19 +645,43 @@ pub async fn execute_tool_call(
     match &result {
         Ok(tool_result) if tool_result.ok => {
             audit_tool_outcome(
-                ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "ok", error_code: "", message: &format!("{tool} executed") },
+                ToolOutcomeAudit {
+                    tool: &tool,
+                    request_id: &request_id,
+                    mode,
+                    risk,
+                    status: "ok",
+                    error_code: "",
+                    message: &format!("{tool} executed"),
+                },
                 None,
             );
         }
         Ok(tool_result) => {
             audit_tool_outcome(
-                ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "failed", error_code: "tool", message: &tool_result.output },
+                ToolOutcomeAudit {
+                    tool: &tool,
+                    request_id: &request_id,
+                    mode,
+                    risk,
+                    status: "failed",
+                    error_code: "tool",
+                    message: &tool_result.output,
+                },
                 None,
             );
         }
         Err(message) => {
             audit_tool_outcome(
-                ToolOutcomeAudit { tool: &tool, request_id: &request_id, mode, risk, status: "failed", error_code: "tool", message },
+                ToolOutcomeAudit {
+                    tool: &tool,
+                    request_id: &request_id,
+                    mode,
+                    risk,
+                    status: "failed",
+                    error_code: "tool",
+                    message,
+                },
                 None,
             );
         }
@@ -665,10 +738,7 @@ pub(crate) struct ToolOutcomeAudit<'a> {
 ///
 /// `store` threads an explicit store for the testable seam; passing `None`
 /// routes through the process-global store (the production path).
-pub(crate) fn audit_tool_outcome(
-    audit: ToolOutcomeAudit<'_>,
-    store: Option<&crate::store::Store>,
-) {
+pub(crate) fn audit_tool_outcome(audit: ToolOutcomeAudit<'_>, store: Option<&crate::store::Store>) {
     let category = if audit.tool == "web-fetch" {
         crate::action_history::categories::WEB_ACTION
     } else {
@@ -686,10 +756,7 @@ pub(crate) fn audit_tool_outcome(
 
 /// Dispatch a recorder to either the explicit store (testable seam) or the
 /// process-global store (production path). Observation only, best-effort.
-fn record_audit(
-    recorder: crate::action_history::Recorder,
-    store: Option<&crate::store::Store>,
-) {
+fn record_audit(recorder: crate::action_history::Recorder, store: Option<&crate::store::Store>) {
     match store {
         Some(store) => {
             recorder.record_into(store);

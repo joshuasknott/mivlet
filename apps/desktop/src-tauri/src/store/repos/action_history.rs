@@ -143,7 +143,11 @@ pub fn record(tx: &Connection, store: &Store, event: Record) -> Result<()> {
 
 /// A row read from the encrypted store, decrypted into a normalized event.
 pub fn list(tx: &Connection, store: &Store, limit: i64) -> Result<Vec<ActionHistoryEvent>> {
-    let capped = if limit <= 0 { DEFAULT_LIST_LIMIT } else { limit };
+    let capped = if limit <= 0 {
+        DEFAULT_LIST_LIMIT
+    } else {
+        limit
+    };
     let mut stmt = tx.prepare(
         "SELECT id, kind, actor, created_at, payload, payload_nonce,
                 category, service, action, status, risk_level, mode,
@@ -207,7 +211,11 @@ pub fn list_by_category(
     category: &str,
     limit: i64,
 ) -> Result<Vec<ActionHistoryEvent>> {
-    let capped = if limit <= 0 { DEFAULT_LIST_LIMIT } else { limit };
+    let capped = if limit <= 0 {
+        DEFAULT_LIST_LIMIT
+    } else {
+        limit
+    };
     let normalized = normalize_category(category);
     let mut stmt = tx.prepare(
         "SELECT id, kind, actor, created_at, payload, payload_nonce,
@@ -501,42 +509,43 @@ mod tests {
 
     // --- Store-backed persistence / listing tests ---
 
-    use crate::store::Store;
     use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
 
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
     }
 
-    fn record_event(
-        store: &Store,
-        id: &str,
-        category: &str,
-        service: &str,
-        action: &str,
-        status: &str,
-        created_at: &str,
+    struct TestEvent<'a> {
+        id: &'a str,
+        category: &'a str,
+        service: &'a str,
+        action: &'a str,
+        status: &'a str,
+        created_at: &'a str,
         detail: serde_json::Value,
-    ) {
+    }
+
+    fn record_event(store: &Store, event: TestEvent<'_>) {
         store
             .transaction(|tx| {
                 record(
                     tx,
                     store,
                     Record {
-                        id: id.to_string(),
-                        category: category.to_string(),
-                        service: service.to_string(),
-                        action: action.to_string(),
-                        status: status.to_string(),
+                        id: event.id.to_string(),
+                        category: event.category.to_string(),
+                        service: event.service.to_string(),
+                        action: event.action.to_string(),
+                        status: event.status.to_string(),
                         actor: "system".to_string(),
-                        created_at: created_at.to_string(),
+                        created_at: event.created_at.to_string(),
                         risk_level: "low".to_string(),
                         mode: "read-only".to_string(),
                         correlation_id: "req-1".to_string(),
                         error_code: String::new(),
-                        summary: format!("{action} ran"),
-                        detail,
+                        summary: format!("{} ran", event.action),
+                        detail: event.detail,
                     },
                 )
             })
@@ -548,23 +557,27 @@ mod tests {
         let store = store();
         record_event(
             &store,
-            "ah-1",
-            category::TOOL_ACTION,
-            "tool",
-            "read-file",
-            "ok",
-            "2026-06-01T00:00:00.000Z",
-            serde_json::json!({"tool": "read-file"}),
+            TestEvent {
+                id: "ah-1",
+                category: category::TOOL_ACTION,
+                service: "tool",
+                action: "read-file",
+                status: "ok",
+                created_at: "2026-06-01T00:00:00.000Z",
+                detail: serde_json::json!({"tool": "read-file"}),
+            },
         );
         record_event(
             &store,
-            "ah-2",
-            category::APPROVAL,
-            "github",
-            "github.comment",
-            "approved",
-            "2026-06-02T00:00:00.000Z",
-            serde_json::json!({"requestId": "req-1"}),
+            TestEvent {
+                id: "ah-2",
+                category: category::APPROVAL,
+                service: "github",
+                action: "github.comment",
+                status: "approved",
+                created_at: "2026-06-02T00:00:00.000Z",
+                detail: serde_json::json!({"requestId": "req-1"}),
+            },
         );
 
         let events = store
@@ -589,33 +602,39 @@ mod tests {
         let store = store();
         record_event(
             &store,
-            "ah-1",
-            category::TOOL_ACTION,
-            "tool",
-            "read-file",
-            "ok",
-            "2026-06-01T00:00:00.000Z",
-            serde_json::json!({}),
+            TestEvent {
+                id: "ah-1",
+                category: category::TOOL_ACTION,
+                service: "tool",
+                action: "read-file",
+                status: "ok",
+                created_at: "2026-06-01T00:00:00.000Z",
+                detail: serde_json::json!({}),
+            },
         );
         record_event(
             &store,
-            "ah-2",
-            category::MODEL_CALL,
-            "openai",
-            "gpt-4",
-            "ok",
-            "2026-06-02T00:00:00.000Z",
-            serde_json::json!({}),
+            TestEvent {
+                id: "ah-2",
+                category: category::MODEL_CALL,
+                service: "openai",
+                action: "gpt-4",
+                status: "ok",
+                created_at: "2026-06-02T00:00:00.000Z",
+                detail: serde_json::json!({}),
+            },
         );
         record_event(
             &store,
-            "ah-3",
-            category::TOOL_ACTION,
-            "tool",
-            "write-file",
-            "ok",
-            "2026-06-03T00:00:00.000Z",
-            serde_json::json!({}),
+            TestEvent {
+                id: "ah-3",
+                category: category::TOOL_ACTION,
+                service: "tool",
+                action: "write-file",
+                status: "ok",
+                created_at: "2026-06-03T00:00:00.000Z",
+                detail: serde_json::json!({}),
+            },
         );
 
         let tools = store
@@ -633,28 +652,30 @@ mod tests {
         let store = store();
         record_event(
             &store,
-            "ah-1",
-            category::TOOL_ACTION,
-            "tool",
-            "read-file",
-            "attempted",
-            "2026-06-01T00:00:00.000Z",
-            serde_json::json!({"phase": "attempt"}),
+            TestEvent {
+                id: "ah-1",
+                category: category::TOOL_ACTION,
+                service: "tool",
+                action: "read-file",
+                status: "attempted",
+                created_at: "2026-06-01T00:00:00.000Z",
+                detail: serde_json::json!({"phase": "attempt"}),
+            },
         );
         // Same id, updated status + detail → upsert, not a duplicate.
         record_event(
             &store,
-            "ah-1",
-            category::TOOL_ACTION,
-            "tool",
-            "read-file",
-            "ok",
-            "2026-06-01T00:00:00.000Z",
-            serde_json::json!({"phase": "done"}),
+            TestEvent {
+                id: "ah-1",
+                category: category::TOOL_ACTION,
+                service: "tool",
+                action: "read-file",
+                status: "ok",
+                created_at: "2026-06-01T00:00:00.000Z",
+                detail: serde_json::json!({"phase": "done"}),
+            },
         );
-        let events = store
-            .with_conn(|conn| list(conn, &store, 10))
-            .unwrap();
+        let events = store.with_conn(|conn| list(conn, &store, 10)).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].status, "ok");
         assert_eq!(events[0].detail.as_ref().unwrap()["phase"], "done");
@@ -694,21 +715,21 @@ mod tests {
         // a redacted payload (token → "[redacted]"), never the raw secret.
         record_event(
             &store,
-            "ah-secret",
-            category::TOOL_ACTION,
-            "tool",
-            "run-shell",
-            "ok",
-            "2026-06-01T00:00:00.000Z",
-            serde_json::json!({
-                "token": "ghp_supersecretvalue",
-                "command": "echo hi"
-            }),
+            TestEvent {
+                id: "ah-secret",
+                category: category::TOOL_ACTION,
+                service: "tool",
+                action: "run-shell",
+                status: "ok",
+                created_at: "2026-06-01T00:00:00.000Z",
+                detail: serde_json::json!({
+                    "token": "ghp_supersecretvalue",
+                    "command": "echo hi"
+                }),
+            },
         );
 
-        let events = store
-            .with_conn(|conn| list(conn, &store, 10))
-            .unwrap();
+        let events = store.with_conn(|conn| list(conn, &store, 10)).unwrap();
         assert_eq!(events.len(), 1);
         let detail = events[0].detail.as_ref().expect("detail decrypts");
         assert_eq!(detail["token"], "[redacted]");

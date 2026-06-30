@@ -2048,21 +2048,24 @@ fn tool_approval_binding_rejects_mismatches() {
         "run-shell",
         &serde_json::json!({ "path": "safe.txt", "content": "safe" }),
         &approval,
-    ).is_err());
+    )
+    .is_err());
 
     // 2. Rejects argument substitution (e.g. adding unexpected arguments)
     assert!(validate_tool_approval_binding(
         "write-file",
         &serde_json::json!({ "path": "safe.txt", "content": "safe", "extra": "argument" }),
         &approval,
-    ).is_err());
+    )
+    .is_err());
 
     // 3. Rejects missing arguments
     assert!(validate_tool_approval_binding(
         "write-file",
         &serde_json::json!({ "path": "safe.txt" }),
         &approval,
-    ).is_err());
+    )
+    .is_err());
 }
 
 #[test]
@@ -2502,7 +2505,10 @@ fn tool_execution_boundary_records_action_history_into_the_store() {
         .iter()
         .find(|e| e.status == "attempted")
         .expect("an attempted event should be present");
-    let detail = attempt.detail.as_ref().expect("attempt detail should decrypt");
+    let detail = attempt
+        .detail
+        .as_ref()
+        .expect("attempt detail should decrypt");
     assert_eq!(detail["tool"], "read-file");
     assert_eq!(detail["preview"], "src/index.ts");
 
@@ -2561,7 +2567,8 @@ fn execution_boundary_redacts_secret_preview_before_persisting() {
 
     // A run-shell preview that carries a bearer token must be redacted at the
     // storage boundary; the raw secret must never reach the sealed payload.
-    let arguments = serde_json::json!({ "command": "curl -H 'authorization: Bearer ghp_supersecret'" });
+    let arguments =
+        serde_json::json!({ "command": "curl -H 'authorization: Bearer ghp_supersecret'" });
     audit_tool_attempt(
         "run-shell",
         &arguments,
@@ -2628,14 +2635,24 @@ fn integration_connector_writes_require_explicit_approval_once_or_modify() {
 #[test]
 fn integration_connector_reads_are_profile_gated() {
     // Evaluating permission policy for connector-read effect in read-only mode succeeds
-    let ro_decision = crate::permission_policy::evaluate_permission_policy("read-only", None, "connector-read", "low")
-        .expect("should evaluate");
+    let ro_decision = crate::permission_policy::evaluate_permission_policy(
+        "read-only",
+        None,
+        "connector-read",
+        "low",
+    )
+    .expect("should evaluate");
     assert!(ro_decision.allowed);
     assert!(!ro_decision.approval_required);
 
     // Evaluating connector-write in read-only mode fails
-    let ro_write_decision = crate::permission_policy::evaluate_permission_policy("read-only", None, "connector-write", "low")
-        .expect("should evaluate");
+    let ro_write_decision = crate::permission_policy::evaluate_permission_policy(
+        "read-only",
+        None,
+        "connector-write",
+        "low",
+    )
+    .expect("should evaluate");
     assert!(!ro_write_decision.allowed);
 }
 
@@ -2652,9 +2669,9 @@ fn integration_connector_production_path_never_falls_back_to_fixtures() {
 #[test]
 fn integration_unified_action_history_categories_are_safe_and_persisted() {
     use crate::action_history::categories;
+    use crate::action_history::Recorder;
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
-    use crate::action_history::Recorder;
 
     let store =
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
@@ -2676,7 +2693,7 @@ fn integration_unified_action_history_categories_are_safe_and_persisted() {
             .correlation(&format!("correlation-{index}"))
             .summary(&format!("summary-{category}"))
             .detail(serde_json::json!({ "category": *category }));
-        
+
         let recorded = recorder.record_into(&store);
         assert!(recorded);
     }
@@ -2688,7 +2705,9 @@ fn integration_unified_action_history_categories_are_safe_and_persisted() {
     assert_eq!(events.len(), categories_to_test.len());
 
     for category in &categories_to_test {
-        let found = events.iter().any(|e| e.category == *category && e.summary == format!("summary-{category}"));
+        let found = events
+            .iter()
+            .any(|e| e.category == *category && e.summary == format!("summary-{category}"));
         assert!(found, "event category {} was not persisted", category);
     }
 }

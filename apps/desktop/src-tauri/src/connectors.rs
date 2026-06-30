@@ -1371,7 +1371,12 @@ pub async fn execute_approved_connector_action(
             &resolution.audit_entry.decided_at,
             None,
         );
-        audit_connector_action(&action, "blocked", "denied", "Connector action denied by user.");
+        audit_connector_action(
+            &action,
+            "blocked",
+            "denied",
+            "Connector action denied by user.",
+        );
         return Ok(ConnectorActionResult {
             request_id: action.id,
             connector_id: action.connector_id,
@@ -1503,12 +1508,7 @@ pub async fn execute_approved_connector_action(
                 .map_err(|message| {
                     command_error("unknown", &action.connector_id, &message, false)
                 })?;
-                audit_connector_action(
-                    &action,
-                    "ok",
-                    "",
-                    "Provider connector action executed.",
-                );
+                audit_connector_action(&action, "ok", "", "Provider connector action executed.");
                 return Ok(ConnectorActionResult {
                     request_id: action.id,
                     connector_id: action.connector_id,
