@@ -28,6 +28,7 @@ mod notifications;
 mod oauth_loopback;
 mod paths;
 mod permission_policy;
+mod portable;
 mod remote_control;
 mod scheduler;
 mod snapshot;
@@ -167,6 +168,9 @@ pub fn run() {
             store::export_local_data,
             store::backup_local_data,
             store::delete_local_data,
+            portable::export_workspace_archive,
+            portable::import_workspace_archive,
+            portable::portable_format_version,
             scheduler::list_scheduler_jobs,
             scheduler::list_scheduler_queue,
             scheduler::save_scheduled_job,
