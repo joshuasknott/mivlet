@@ -377,6 +377,28 @@ describe("Vercel production adapter", () => {
 });
 
 describe("Linear production adapter", () => {
+  it("redeems, refreshes, and revokes only through the versioned broker contract", async () => {
+    const seen: string[] = [];
+    const fetcher = vi.fn<ProviderFetch>(async (url, init) => {
+      seen.push(new URL(String(url)).pathname);
+      const path = new URL(String(url)).pathname;
+      const body = JSON.parse(String(init?.body));
+      expect(body.contractVersion).toBe(1);
+      expect(body.provider).toBe("linear");
+      if (path.endsWith("/handoff")) return response({ contractVersion: 1, tokens: { accessToken: "lin-a", refreshToken: "lin-r", tokenType: "Bearer", scopes: ["read"] }, account: { id: "linear-id", displayName: "Linear User" } });
+      if (path.endsWith("/refresh")) return response({ contractVersion: 1, tokens: { accessToken: "lin-a2", tokenType: "Bearer", scopes: ["read"] } });
+      if (path.endsWith("/revoke")) return response({ contractVersion: 1, revoked: true });
+      return response({ error: "invalid route" }, 404);
+    });
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    await adapter.refresh(auth.tokens);
+    await adapter.revoke(auth.tokens);
+    expect(seen).toEqual(["/oauth/linear/handoff", "/oauth/linear/refresh", "/oauth/linear/revoke"]);
+    expect(seen).not.toContain("/oauth/linear/token");
+    expect(seen).not.toContain("/oauth/linear/identity");
+  });
+
   it("maps searchable issue data and cursor pagination", async () => {
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
       expect(String(init?.body)).toContain("searchIssues");

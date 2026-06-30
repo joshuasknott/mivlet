@@ -99,9 +99,9 @@ function identityFor(provider: BrokerProviderId): unknown {
   switch (provider) {
     case "github": return { id: 1234, login: "fable-user", name: "Fable User", avatar_url: "https://github.com/a.png" };
     case "vercel": return { user: { uid: "vercel-uid", email: "a@vercel.com" } };
-    case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "a@linear.app" } } };
+    case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "a@linear.app", organization: { id: "org-1", name: "Fable Linear", urlKey: "fable" } } } };
     case "notion": return { id: "notion-bot", bot: { workspace_id: "ws-1", workspace_name: "Fable Notion" } };
-    case "slack": return { ok: true, user_id: "U1", user: "Slack User", team: "Fable Slack", url: "https://x.slack.com" };
+    case "slack": return { ok: true, team_id: "T1", user_id: "U1", user: "Slack User", team: "Fable Slack", url: "https://x.slack.com" };
   }
 }
 
@@ -344,4 +344,16 @@ describe("broker provider coverage", () => {
       expect(redeemed.account.id).toBeTruthy();
     });
   }
+
+  it("normalizes Slack, Notion, and Linear account metadata to stable workspace-aware summaries", async () => {
+    const { broker: slackBroker } = makeBroker("slack", providerFetch("slack"));
+    await slackBroker.authorize(authorizeRequest("slack", "slack-state"));
+    const { redirect: slackRedirect } = await slackBroker.callback("slack", new URLSearchParams({ code: "c", state: "slack-state" }));
+    const slack = await slackBroker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "slack", handoff: slackRedirect.searchParams.get("handoff")!, state: "slack-state" });
+    expect(slack.account).toMatchObject({ id: "T1:U1", displayName: "Slack User", workspace: "Fable Slack" });
+
+    expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Fable Notion", workspace: "Fable Notion" });
+    expect(providerProfile("linear").normalizeIdentity(identityFor("linear"))).toMatchObject({ id: "linear-id", displayName: "Linear User", workspace: "Fable Linear" });
+    expect(providerProfile("slack").scopes).toEqual(expect.arrayContaining(["channels:history", "groups:history"]));
+  });
 });
