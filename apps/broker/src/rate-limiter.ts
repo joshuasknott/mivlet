@@ -7,8 +7,7 @@
  * configurable and tested.
  */
 
-import { randomBytes } from "node:crypto";
-
+import { base64url, randomBytes } from "./crypto-web.js";
 import type { BrokerClock } from "./clock.js";
 
 export interface RateLimiterOptions {
@@ -63,7 +62,7 @@ export function rateLimitKey(route: string, peer: string | undefined): string {
 
 /** Generate a short correlation id for request tracing. */
 export function newCorrelationId(): string {
-  return randomBytes(12).toString("base64url");
+  return base64url(randomBytes(12));
 }
 
 /** Redact any value that looks like a secret/token from a string before logging. */

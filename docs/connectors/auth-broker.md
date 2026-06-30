@@ -2,9 +2,19 @@
 
 ## Status: implemented, not deployed
 
-This repository contains the portable Node/TypeScript auth broker in
-`apps/broker`. It is buildable and tested, but it has not been deployed or
-independently reviewed for external use.
+This repository contains the portable TypeScript auth broker in
+`apps/broker`. It is buildable and tested with two interchangeable transport
+targets — a Node.js server (`src/server.ts` + `src/http.ts`) and a Cloudflare
+Workers fetch handler (`src/worker.ts` + `wrangler.toml`) — but it has not been
+deployed or independently reviewed for external use.
+
+The broker core (routing, CORS, rate limiting, contract validation, the
+confidential OAuth lifecycle, and all redacted error handling) is
+runtime-neutral: it uses only the Web Crypto API and standard
+`Request`/`Response`, and both transports delegate to one shared
+`src/router.ts`. Provider-specific differences (token/identity/revoke endpoint
+shapes, PKCE mode, identity normalization) are isolated in
+`src/provider-profiles.ts`.
 
 The implemented version-1 browser protocol is authoritative: `authorize`
 redirects to the provider, the provider returns to the broker `callback`, and
@@ -175,3 +185,63 @@ When the broker is built, it must, at minimum:
 Provider console creation, consent screens, distribution review, and Google
 restricted-scope verification remain external setup tasks independent of the
 broker.
+
+## Deployment targets
+
+The broker has two interchangeable transport targets over one runtime-neutral
+core:
+
+- **Node.js** — `src/server.ts` reads `process.env`, binds a loopback (dev) or
+  `0.0.0.0` (production, behind an HTTPS reverse proxy) socket via `node:http`,
+  and adapts each `IncomingMessage`/`ServerResponse` to the shared router. Run
+  locally with `pnpm --filter @fable/broker dev`.
+- **Cloudflare Workers** — `src/worker.ts` is the fetch handler. It reads the
+  Worker `env` binding, builds a `FableBroker`, and routes every inbound
+  `Request` through the same shared `src/router.ts`. Build with
+  `pnpm --filter @fable/broker build` (emits `dist/worker.js`) and deploy with
+  `npx wrangler deploy` (configuration in `apps/broker/wrangler.toml`).
+
+Both targets share `src/router.ts` (routing, CORS, rate limiting, correlation
+ids, contract version gating, body parsing, structured redacted error
+responses), `src/broker.ts` (the confidential OAuth lifecycle), and
+`src/provider-client.ts` (code exchange, refresh, revoke, identity). The core
+uses only the Web Crypto API (`globalThis.crypto`) and standard
+`Request`/`Response` — no Node `Buffer` or `node:crypto` — so the lifecycle is
+identical on both runtimes.
+
+### Lifecycle behavior
+
+Each operation fails closed on any validation failure and surfaces only a
+human-safe, redacted `BrokerErrorResponse` (never a secret, token, or raw
+provider diagnostic):
+
+- **`authorize`** — validates the contract version, provider, and that the
+  provider is configured (else `configuration-required`, HTTP 503); validates
+  the desktop `redirect_uri` against the narrow loopback/exact-HTTPS allowlist
+  (else `invalid-request`, 400); stores a single-use pending exchange keyed by
+  the desktop `state`; returns the provider authorization URL.
+- **`callback`** — a provider `error` param → `needs-auth` (401); missing
+  `code`/`state` → `invalid-request` (400); an unknown, expired, or already-used
+  `state` → `invalid-state` (400), rejected **before** any token exchange; a
+  provider/`state` mismatch → `invalid-state` (400). On success it performs the
+  confidential exchange, resolves identity, issues a single-use ≤60s handoff
+  bound to `state`, and 302-redirects to the exact desktop `redirect_uri` with
+  only the opaque handoff + state (no token in the URL).
+- **`handoff`** — validates the contract version and provider; an unknown,
+  expired, or already-redeemed handoff, or a `state` mismatch, → `invalid-handoff`
+  (400). Tokens cross to the desktop only here, over a direct (non-browser) call.
+- **`refresh`** — rotates the token through the confidential client; provider
+  401 → `needs-auth` (401, non-retryable), 429 → `rate-limited` (429, retryable),
+  5xx/0 → `provider-unavailable` (502, retryable). The supplied refresh token
+  never appears in the response.
+- **`revoke`** — revokes at the provider; HTTP 404 / unknown-token is treated as
+  success (already revoked). Non-404 failures map the same way as refresh. The
+  revoked token never appears in the response. GitHub's token-grant revocation
+  endpoint is keyed by client id; the `{clientId}` placeholder is substituted
+  with the configured confidential client id before the call.
+
+OAuth error responses are safe to show and log: every response is built from the
+broker's own redacted messages, and the logger redacts token/secret-shaped
+values (`code=`, `token=`, `access_token=`, `refresh_token=`, `client_secret=`,
+`Bearer …`, and the matching JSON fields) before writing a request line. Request
+bodies are never logged.

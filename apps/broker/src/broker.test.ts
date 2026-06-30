@@ -20,13 +20,14 @@ import { fixedClock } from "./clock.js";
 import {
   configuredProviders,
   providerProfile,
-  resolveCredentials
+  resolveCredentials,
+  type BrokerEnv
 } from "./provider-profiles.js";
 import { createStores } from "./stores.js";
 import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
 import type { BrokerFetch } from "./provider-client.js";
 
-const ENV: NodeJS.ProcessEnv = {
+const ENV: BrokerEnv = {
   FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
   FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
   FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
@@ -86,6 +87,10 @@ function providerFetch(provider: BrokerProviderId, overrides: Partial<{
     if (target.href === profile.revocationEndpoint) {
       return new Response(JSON.stringify({}), { status: 200 });
     }
+    // GitHub's revocation endpoint is templated ({clientId}); match the resolved form.
+    if (provider === "github" && target.href.startsWith("https://api.github.com/applications/")) {
+      return new Response(JSON.stringify({}), { status: 200 });
+    }
     return new Response(JSON.stringify({}), { status: 404 });
   }) as BrokerFetch;
 }
@@ -119,9 +124,9 @@ describe("broker provider profiles", () => {
 });
 
 describe("broker authorize", () => {
-  it("builds a confidential authorization URL with the broker client id and scopes", () => {
+  it("builds a confidential authorization URL with the broker client id and scopes", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    const { response } = broker.authorize(authorizeRequest("github", "s1"));
+    const { response } = await broker.authorize(authorizeRequest("github", "s1"));
     const url = new URL(response.authorizationUrl);
     expect(url.origin + url.pathname).toBe("https://github.com/login/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("gh-id");
@@ -133,34 +138,33 @@ describe("broker authorize", () => {
     expect(response.authorizationUrl).not.toContain("secret");
   });
 
-  it("uses the broker verifier for broker-pkce providers (not the desktop challenge)", () => {
+  it("uses the broker verifier for broker-pkce providers (not the desktop challenge)", async () => {
     const { broker } = makeBroker("vercel", providerFetch("vercel"));
-    const { response } = broker.authorize(authorizeRequest("vercel", "s2"));
+    const { response } = await broker.authorize(authorizeRequest("vercel", "s2"));
     const url = new URL(response.authorizationUrl);
     expect(url.searchParams.get("code_challenge")).not.toBe("desktop-challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
-  it("rejects an unknown provider and an unsupported contract version", () => {
+  it("rejects an unknown provider and an unsupported contract version", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    expect(() => broker.authorize({ ...authorizeRequest("github"), provider: "google" as BrokerProviderId }))
-      .toThrow(BrokerContractError);
-    expect(() => broker.authorize({ ...authorizeRequest("github"), contractVersion: 99 as number }))
-      .toThrow(/Unsupported broker contract version/);
+    await expect(broker.authorize({ ...authorizeRequest("github"), provider: "google" as BrokerProviderId }))
+      .rejects.toThrow(BrokerContractError);
+    await expect(broker.authorize({ ...authorizeRequest("github"), contractVersion: 99 as number }))
+      .rejects.toThrow(/Unsupported broker contract version/);
   });
 
-  it("fails closed when the provider is not configured", () => {
-    const { broker } = makeBroker("github", providerFetch("github"));
+  it("fails closed when the provider is not configured", async () => {
     const unconfigured = new FableBroker({ env: {} });
-    expect(() => unconfigured.authorize(authorizeRequest("github"))).toThrow(/GitHub is not configured/);
+    await expect(unconfigured.authorize(authorizeRequest("github"))).rejects.toThrow(/GitHub is not configured/);
   });
 
-  it("rejects desktop redirects outside the narrow callback allowlist", () => {
+  it("rejects desktop redirects outside the narrow callback allowlist", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    expect(() => broker.authorize({ ...authorizeRequest("github"), redirectUri: "https://evil.example/callback" }))
-      .toThrow(/not allowed/);
-    expect(() => broker.authorize({ ...authorizeRequest("github"), redirectUri: "http://127.0.0.1:9/other" }))
-      .toThrow(/not allowed/);
+    await expect(broker.authorize({ ...authorizeRequest("github"), redirectUri: "https://evil.example/callback" }))
+      .rejects.toThrow(/not allowed/);
+    await expect(broker.authorize({ ...authorizeRequest("github"), redirectUri: "http://127.0.0.1:9/other" }))
+      .rejects.toThrow(/not allowed/);
   });
 });
 
@@ -168,7 +172,7 @@ describe("broker callback + handoff", () => {
   it("exchanges the code confidentially and redirects to the exact desktop redirect with a single-use handoff", async () => {
     const fetch = providerFetch("github");
     const { broker } = makeBroker("github", fetch);
-    broker.authorize(authorizeRequest("github", "state-1"));
+    await broker.authorize(authorizeRequest("github", "state-1"));
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "provider-code", state: "state-1" }));
     expect(redirect.origin + redirect.pathname).toBe(REDIRECT);
     const handoff = redirect.searchParams.get("handoff");
@@ -189,7 +193,7 @@ describe("broker callback + handoff", () => {
 
   it("rejects a callback with an unknown / replayed state (single-use)", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    broker.authorize(authorizeRequest("github", "state-once"));
+    await broker.authorize(authorizeRequest("github", "state-once"));
     // First use succeeds.
     await broker.callback("github", new URLSearchParams({ code: "c", state: "state-once" }));
     // Replaying the same state is rejected (state was consumed).
@@ -202,27 +206,27 @@ describe("broker callback + handoff", () => {
 
   it("rejects callback substitution: provider mismatch on the same state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    broker.authorize(authorizeRequest("github", "state-mismatch"));
+    await broker.authorize(authorizeRequest("github", "state-mismatch"));
     await expect(broker.callback("slack", new URLSearchParams({ code: "c", state: "state-mismatch" })))
       .rejects.toThrow(/did not match the provider/);
   });
 
   it("rejects a callback reporting a provider error, or missing code/state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    broker.authorize(authorizeRequest("github", "e1"));
+    await broker.authorize(authorizeRequest("github", "e1"));
     await expect(broker.callback("github", new URLSearchParams({ error: "access_denied", state: "e1" })))
       .rejects.toThrow(/authorization error/i);
-    broker.authorize(authorizeRequest("github", "e2"));
+    await broker.authorize(authorizeRequest("github", "e2"));
     await expect(broker.callback("github", new URLSearchParams({ state: "e2" })))
       .rejects.toThrow(/missing a code/);
-    broker.authorize(authorizeRequest("github", "e3"));
+    await broker.authorize(authorizeRequest("github", "e3"));
     await expect(broker.callback("github", new URLSearchParams({ code: "x" })))
       .rejects.toThrow(/missing state/);
   });
 
   it("token replay is impossible: a redeemed handoff cannot be redeemed twice", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    broker.authorize(authorizeRequest("github", "replay"));
+    await broker.authorize(authorizeRequest("github", "replay"));
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "replay" }));
     const handoff = redirect.searchParams.get("handoff")!;
     const state = redirect.searchParams.get("state")!;
@@ -233,7 +237,7 @@ describe("broker callback + handoff", () => {
 
   it("rejects a handoff redeemed with the wrong bound state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    broker.authorize(authorizeRequest("github", "right"));
+    await broker.authorize(authorizeRequest("github", "right"));
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "right" }));
     const handoff = redirect.searchParams.get("handoff")!;
     await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: "wrong" }))
@@ -243,7 +247,7 @@ describe("broker callback + handoff", () => {
   it("handoff expires after its TTL and cannot be redeemed", async () => {
     const clock = fixedClock(1_000_000);
     const { broker } = makeBroker("github", providerFetch("github"), clock);
-    broker.authorize(authorizeRequest("github", "ttl"));
+    await broker.authorize(authorizeRequest("github", "ttl"));
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "ttl" }));
     const handoff = redirect.searchParams.get("handoff")!;
     clock.advance(BROKER_HANDOFF_TTL_SECONDS * 1000 + 1);
@@ -253,17 +257,17 @@ describe("broker callback + handoff", () => {
 
   it("normalizes provider exchange/identity errors into structured broker errors", async () => {
     const { broker: rejected } = makeBroker("github", providerFetch("github", { tokenStatus: 401 }));
-    rejected.authorize(authorizeRequest("github", "n1"));
+    await rejected.authorize(authorizeRequest("github", "n1"));
     await expect(rejected.callback("github", new URLSearchParams({ code: "c", state: "n1" })))
       .rejects.toMatchObject({ error: "needs-auth" });
 
     const { broker: limited } = makeBroker("github", providerFetch("github", { tokenStatus: 429 }));
-    limited.authorize(authorizeRequest("github", "n2"));
+    await limited.authorize(authorizeRequest("github", "n2"));
     await expect(limited.callback("github", new URLSearchParams({ code: "c", state: "n2" })))
       .rejects.toMatchObject({ error: "rate-limited", retryable: true });
 
     const { broker: unavailable } = makeBroker("github", providerFetch("github", { tokenStatus: 503 }));
-    unavailable.authorize(authorizeRequest("github", "n3"));
+    await unavailable.authorize(authorizeRequest("github", "n3"));
     await expect(unavailable.callback("github", new URLSearchParams({ code: "c", state: "n3" })))
       .rejects.toMatchObject({ error: "provider-unavailable", retryable: true });
   });
@@ -300,17 +304,21 @@ describe("broker refresh + revoke", () => {
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github", token: "provider-refresh-token"
     });
     expect(result.revoked).toBe(true);
-    const call = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
-      .find(([url]) => url === providerProfile("github").revocationEndpoint);
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls;
+    // GitHub's grant endpoint is keyed by client id; the {clientId} placeholder
+    // must be substituted with the configured confidential client id (gh-id).
+    const call = calls.find(([url]) => url === "https://api.github.com/applications/gh-id/grant");
     expect(call).toBeTruthy();
     expect(String(call![1].body)).toContain("token=provider-refresh-token");
+    // The placeholder must NEVER reach the provider verbatim.
+    expect(calls.some(([url]) => url.includes("{clientId}"))).toBe(false);
   });
 });
 
 describe("broker token redaction invariant", () => {
   it("never includes secrets or tokens in authorize URLs, redirects, or health", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
-    const { response } = broker.authorize(authorizeRequest("github", "redact"));
+    const { response } = await broker.authorize(authorizeRequest("github", "redact"));
     expect(response.authorizationUrl).not.toContain("gh-secret");
     expect(response.authorizationUrl).not.toContain("provider-access-token");
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "redact" }));
@@ -326,7 +334,7 @@ describe("broker provider coverage", () => {
   for (const provider of ["github", "vercel", "linear", "notion", "slack"] as BrokerProviderId[]) {
     it(`${provider} completes the full confidential flow + handoff`, async () => {
       const { broker } = makeBroker(provider, providerFetch(provider));
-      broker.authorize(authorizeRequest(provider, `state-${provider}`));
+      await broker.authorize(authorizeRequest(provider, `state-${provider}`));
       const { redirect } = await broker.callback(provider, new URLSearchParams({ code: "c", state: `state-${provider}` }));
       const handoff = redirect.searchParams.get("handoff")!;
       const redeemed = await broker.redeem({

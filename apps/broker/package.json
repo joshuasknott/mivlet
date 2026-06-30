@@ -13,7 +13,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "pnpm build && node ./dist/server.js",
     "start": "node ./dist/server.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy:worker": "pnpm build && wrangler deploy",
+    "dev:worker": "pnpm build && wrangler dev"
   },
   "dependencies": {
     "@fable/connectors": "workspace:*",

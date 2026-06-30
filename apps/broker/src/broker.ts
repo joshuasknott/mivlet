@@ -56,12 +56,19 @@ import {
 import {
   providerProfile,
   resolveCredentials,
-  configuredProviders
+  configuredProviders,
+  type BrokerEnv
 } from "./provider-profiles.js";
 import { createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
 
 export interface BrokerOptions {
-  env: NodeJS.ProcessEnv;
+  /**
+   * Provider credentials environment (e.g. `process.env` on Node, the Worker
+   * `env` binding on Cloudflare). Read for client id/secret env vars only; never
+   * serialized, logged, or returned. Typed as a plain record so the broker core
+   * is runtime-neutral — both `process.env` and a Worker `env` object satisfy it.
+   */
+  env: BrokerEnv;
   /** Public HTTPS (or loopback development) base URL registered with providers. */
   publicBaseUrl?: string;
   clock?: BrokerClock;
@@ -84,7 +91,7 @@ export class FableBroker {
   private readonly fetcher?: BrokerFetch;
   private readonly pending: PendingExchangeStore;
   private readonly handoff: HandoffStore;
-  private readonly env: NodeJS.ProcessEnv;
+  private readonly env: BrokerEnv;
   private readonly publicBaseUrl: URL;
 
   constructor(options: BrokerOptions) {
@@ -108,7 +115,7 @@ export class FableBroker {
   }
 
   /** GET /oauth/{provider}/authorize — begin the confidential flow. */
-  authorize(request: BrokerAuthorizeRequest): BrokerAuthorizeOutput {
+  async authorize(request: BrokerAuthorizeRequest): Promise<BrokerAuthorizeOutput> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
     this.requireConfigured(request.provider);
@@ -122,13 +129,13 @@ export class FableBroker {
     url.searchParams.set("redirect_uri", providerRedirectUri);
     url.searchParams.set("response_type", "code");
     if (profile.scopes.length) {
-      url.searchParams.set("scope", profile.scopes.join(profile === providerProfile("slack") ? " " : " "));
+      url.searchParams.set("scope", profile.scopes.join(" "));
     }
     url.searchParams.set("state", request.state);
 
     let verifier: string | undefined;
     if (profile.pkce === "broker-pkce") {
-      const pair = generatePkcePair();
+      const pair = await generatePkcePair();
       verifier = pair.verifier;
       url.searchParams.set("code_challenge", pair.challenge);
       url.searchParams.set("code_challenge_method", "S256");
@@ -314,7 +321,7 @@ export class FableBroker {
  * explicitly listed for managed desktop schemes. Loopback ports are ephemeral,
  * but host and path are fixed and query/fragment/userinfo are forbidden.
  */
-function validateDesktopRedirect(value: string, env: NodeJS.ProcessEnv): void {
+function validateDesktopRedirect(value: string, env: BrokerEnv): void {
   let redirect: URL;
   try {
     redirect = new URL(value);
