@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  BACKEND_AUTH_FAIL_CLOSED_STATES,
+  BACKEND_AUTH_STATE_PARITY,
+  BACKEND_AUTH_STATE_VALUES
+} from "@fable/protocol";
 import type { BackendProvider } from "@fable/protocol";
 import {
   actionLabelForProvider,
@@ -118,5 +123,29 @@ describe("stateClassFor", () => {
     expect(stateClassFor("connected")).toBe("og-provider--ready");
     expect(stateClassFor("install-required")).toBe("og-provider--caution");
     expect(stateClassFor("failed")).toBe("og-provider--danger");
+  });
+});
+
+describe("backend auth-state vocabulary parity", () => {
+  it("has no duplicate auth states in the canonical vocabulary list", () => {
+    // Guards against the duplicate-`failed` regression drifting back in.
+    expect(new Set(BACKEND_AUTH_STATE_VALUES).size).toBe(BACKEND_AUTH_STATE_VALUES.length);
+  });
+
+  it("covers every fail-closed state plus connected exactly", () => {
+    const expected = new Set([...BACKEND_AUTH_STATE_VALUES]);
+    const actual = new Set<string>([...BACKEND_AUTH_FAIL_CLOSED_STATES, "connected"]);
+    expect(actual).toEqual(expected);
+  });
+
+  it("passes the protocol parity assertion at import time", () => {
+    // The self-check runs on load; surfacing it as an explicit assertion keeps
+    // a drift caught here rather than only at the Rust boundary.
+    expect(BACKEND_AUTH_STATE_PARITY).toBe(true);
+  });
+
+  it("matches the Rust boundary's 11 distinct auth states", () => {
+    // Mirrors BACKEND_AUTH_STATES in apps/desktop/src-tauri/src/models.rs.
+    expect(BACKEND_AUTH_STATE_VALUES).toHaveLength(11);
   });
 });
