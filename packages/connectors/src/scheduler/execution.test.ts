@@ -172,6 +172,18 @@ describe("executeScheduledPrompt", () => {
     expect(result).toMatchObject({ status: "failed", code: "permission-denied", retryable: false });
   });
 
+  it("fails closed when the route is undefined, defaulting to read-only", async () => {
+    const result = await executeScheduledPrompt({
+      ...baseInput,
+      route: undefined,
+      runId: "run-undefined-route",
+      provider: connectedProvider(),
+      backend: fakeBackend("openai", [{ type: "done", finishReason: "stop" }])
+    });
+    expect(result).toMatchObject({ status: "failed", code: "permission-denied", retryable: false });
+    expect((result as any).error).toContain("does not allow scheduled execution");
+  });
+
   it("returns failed (backend-unavailable) when run() yields null", async () => {
     const result = await executeScheduledPrompt({
       ...baseInput,

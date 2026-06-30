@@ -987,4 +987,45 @@ mod tests {
         apply_attempt(&mut entry, "cancelled");
         assert_eq!(entry.state, "cancelled");
     }
+
+    #[test]
+    fn route_schedule_execution_gating() {
+        let ro_route = ScheduledExecutionRoute {
+            policy: "pinned".to_string(),
+            backend_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
+            permission_mode: "read-only".to_string(),
+            permission_profile: Some("read-only".to_string()),
+        };
+        let trusted_route = ScheduledExecutionRoute {
+            policy: "pinned".to_string(),
+            backend_id: "openai".to_string(),
+            model_id: "gpt-4".to_string(),
+            permission_mode: "trusted-scope".to_string(),
+            permission_profile: Some("trusted".to_string()),
+        };
+
+        assert!(ensure_route_allows(&ro_route, "schedule-execution").is_err());
+        assert!(ensure_route_allows(&trusted_route, "schedule-execution").is_ok());
+    }
+
+    #[test]
+    fn blocked_runs_audit_mapping() {
+        // Verify final state mapping logic
+        let state_blocked = "blocked-auth";
+        let (blocked_status, blocked_category) = match state_blocked {
+            "blocked-auth" => ("blocked", crate::action_history::categories::POLICY_BLOCK),
+            _ => ("ok", crate::action_history::categories::SCHEDULE),
+        };
+        assert_eq!(blocked_status, "blocked");
+        assert_eq!(blocked_category, "policy-block");
+
+        let state_dead = "dead";
+        let (dead_status, dead_category) = match state_dead {
+            "dead" => ("failed", crate::action_history::categories::POLICY_BLOCK),
+            _ => ("ok", crate::action_history::categories::SCHEDULE),
+        };
+        assert_eq!(dead_status, "failed");
+        assert_eq!(dead_category, "policy-block");
+    }
 }

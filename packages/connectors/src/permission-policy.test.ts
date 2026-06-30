@@ -19,21 +19,33 @@ describe("permission profile policy", () => {
     });
   });
 
-  it("blocks read-only writes, shell execution, and scheduled execution", () => {
+  it("blocks read-only writes, shell execution, sends/deletes, and schedule mutation/execution", () => {
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "local-read" }).allowed).toBe(true);
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "local-write" }).allowed).toBe(false);
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "shell-execution" }).allowed).toBe(false);
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "schedule-execution" }).allowed).toBe(false);
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect: "schedule-mutation" }).allowed).toBe(false);
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect: "connector-write" }).allowed).toBe(false);
   });
 
-  it("allows trusted connector writes only through approval-ready policy", () => {
-    const decision = evaluatePermissionPolicy({
-      mode: "trusted-scope",
-      effect: "connector-write",
-      riskLevel: "medium"
-    });
-    expect(decision.allowed).toBe(true);
-    expect(decision.approvalRequired).toBe(true);
+  it("ensures trusted mode allows reads, safe writes, schedule actions, but requires approvals for consequential actions, while blocking shell", () => {
+    // Allowed with approval required (consequential)
+    for (const effect of ["local-write", "connector-write", "app-state-mutation", "schedule-mutation", "schedule-execution"] as const) {
+      const decision = evaluatePermissionPolicy({ mode: "trusted-scope", effect });
+      expect(decision.allowed).toBe(true);
+      expect(decision.approvalRequired).toBe(true);
+    }
+    // Blocked entirely
+    expect(evaluatePermissionPolicy({ mode: "trusted-scope", effect: "shell-execution" }).allowed).toBe(false);
+    expect(evaluatePermissionPolicy({ mode: "trusted-scope", effect: "cache-mutation" }).allowed).toBe(false);
+  });
+
+  it("ensures full-access mode allows consequential actions but still requires approval/permits", () => {
+    for (const effect of ["local-write", "shell-execution", "connector-write", "cache-mutation", "app-state-mutation", "schedule-mutation", "schedule-execution"] as const) {
+      const decision = evaluatePermissionPolicy({ mode: "full-access", effect });
+      expect(decision.allowed).toBe(true);
+      expect(decision.approvalRequired).toBe(true);
+    }
   });
 
   it("maps registered tools to effects", () => {

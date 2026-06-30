@@ -2034,6 +2034,38 @@ fn execution_boundary_rejects_argument_substitution_and_permission_downgrade() {
 }
 
 #[test]
+fn tool_approval_binding_rejects_mismatches() {
+    let mut approval = tool_approval(
+        "write-file",
+        "full-access",
+        "high",
+        Some("approve write-file"),
+    );
+    approval.data_used = vec!["content: safe".to_string(), "path: safe.txt".to_string()];
+
+    // 1. Rejects mismatching tool name (e.g. approved write-file but invoking run-shell)
+    assert!(validate_tool_approval_binding(
+        "run-shell",
+        &serde_json::json!({ "path": "safe.txt", "content": "safe" }),
+        &approval,
+    ).is_err());
+
+    // 2. Rejects argument substitution (e.g. adding unexpected arguments)
+    assert!(validate_tool_approval_binding(
+        "write-file",
+        &serde_json::json!({ "path": "safe.txt", "content": "safe", "extra": "argument" }),
+        &approval,
+    ).is_err());
+
+    // 3. Rejects missing arguments
+    assert!(validate_tool_approval_binding(
+        "write-file",
+        &serde_json::json!({ "path": "safe.txt" }),
+        &approval,
+    ).is_err());
+}
+
+#[test]
 fn read_file_executes_after_an_approving_decision() {
     let root = temp_workspace();
     fs::write(root.join("notes.txt"), "hello rust").expect("seed file");
@@ -2556,4 +2588,107 @@ fn execution_boundary_redacts_secret_preview_before_persisting() {
         preview.contains("[redacted]") || !preview.contains("Bearer"),
         "secret-shaped preview must be redacted"
     );
+}
+
+#[test]
+fn integration_connector_writes_require_explicit_approval_once_or_modify() {
+    let action = connector_action("gmail.send", "gmail", "Gmail");
+    let request_session = ConnectorActionExecutionRequest {
+        action: action.clone(),
+        approval: ApprovalResolutionRequest {
+            request: action.approval.clone(),
+            decision: "session".to_string(),
+            decided_at: "2026-06-27T10:01:00.000Z".to_string(),
+            confirmation_text: Some("send email".to_string()),
+            modification: None,
+        },
+    };
+
+    // 1. session decision fails verification
+    let error = validate_connector_execution_request(request_session)
+        .expect_err("standing session approval should be rejected for connector writes");
+    assert_eq!(error.code, "approval-required");
+
+    // 2. rule decision fails verification
+    let request_rule = ConnectorActionExecutionRequest {
+        action: action.clone(),
+        approval: ApprovalResolutionRequest {
+            request: action.approval.clone(),
+            decision: "rule".to_string(),
+            decided_at: "2026-06-27T10:01:00.000Z".to_string(),
+            confirmation_text: Some("send email".to_string()),
+            modification: None,
+        },
+    };
+    let error = validate_connector_execution_request(request_rule)
+        .expect_err("standing rule approval should be rejected for connector writes");
+    assert_eq!(error.code, "approval-required");
+}
+
+#[test]
+fn integration_connector_reads_are_profile_gated() {
+    // Evaluating permission policy for connector-read effect in read-only mode succeeds
+    let ro_decision = crate::permission_policy::evaluate_permission_policy("read-only", None, "connector-read", "low")
+        .expect("should evaluate");
+    assert!(ro_decision.allowed);
+    assert!(!ro_decision.approval_required);
+
+    // Evaluating connector-write in read-only mode fails
+    let ro_write_decision = crate::permission_policy::evaluate_permission_policy("read-only", None, "connector-write", "low")
+        .expect("should evaluate");
+    assert!(!ro_write_decision.allowed);
+}
+
+#[test]
+fn integration_connector_production_path_never_falls_back_to_fixtures() {
+    // If a connector action is called with an invalid/unknown connector id, it must fail closed
+    let mut request = connector_action("gmail.send", "gmail", "Gmail");
+    request.connector_id = "unknown-connector".to_string();
+    let error = validate_connector_action(request)
+        .expect_err("unknown connector should fail closed and not fall back to fixtures");
+    assert_eq!(error.code, "invalid-request");
+}
+
+#[test]
+fn integration_unified_action_history_categories_are_safe_and_persisted() {
+    use crate::action_history::categories;
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+    use crate::action_history::Recorder;
+
+    let store =
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+
+    // Record events across different categories and ensure they are all safely persisted in plaintext index columns.
+    let categories_to_test = [
+        categories::MODEL_CALL,
+        categories::CONNECTOR_ACTION,
+        categories::TOOL_ACTION,
+        categories::WEB_ACTION,
+        categories::APPROVAL,
+        categories::SCHEDULE,
+        categories::POLICY_BLOCK,
+    ];
+
+    for (index, category) in categories_to_test.iter().enumerate() {
+        let recorder = Recorder::new(category, "test-service", "test-action", "ok")
+            .actor("system")
+            .correlation(&format!("correlation-{index}"))
+            .summary(&format!("summary-{category}"))
+            .detail(serde_json::json!({ "category": *category }));
+        
+        let recorded = recorder.record_into(&store);
+        assert!(recorded);
+    }
+
+    let events = store
+        .with_conn(|conn| crate::store::repos::action_history::list(conn, &store, 50))
+        .expect("list should succeed");
+
+    assert_eq!(events.len(), categories_to_test.len());
+
+    for category in &categories_to_test {
+        let found = events.iter().any(|e| e.category == *category && e.summary == format!("summary-{category}"));
+        assert!(found, "event category {} was not persisted", category);
+    }
 }

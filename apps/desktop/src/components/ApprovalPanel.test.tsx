@@ -126,8 +126,8 @@ describe("ApprovalPanel — required card fields", () => {
 
   it("renders the permission profile label (not just the raw mode)", () => {
     renderPanel();
-    // full-access -> "Full access" profile label.
-    expect(screen.getByText("Full access")).toBeInTheDocument();
+    // full-access -> "Full with approvals" profile label.
+    expect(screen.getByText("Full with approvals")).toBeInTheDocument();
   });
 });
 
@@ -243,7 +243,7 @@ describe("ApprovalPanel — modify flow", () => {
     expect(handlers.onUpdateModification.mock.calls.at(-1)?.[0].dataUsed).toBe("file: safer.md");
 
     // The permission mode segments also report changes.
-    fireEvent.click(screen.getByRole("button", { name: "Full access" }));
+    fireEvent.click(screen.getByRole("button", { name: "Full with approvals" }));
     expect(handlers.onUpdateModification.mock.calls.at(-1)?.[0].mode).toBe("full-access");
   });
 
