@@ -154,7 +154,7 @@ describe("GitHub production adapter", () => {
 
   it("handles unconfigured/expired refresh tokens", async () => {
     const adapter = createGitHubAdapter(common);
-    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "expired-auth",
       message: expect.stringContaining("expired")
     });
@@ -163,7 +163,7 @@ describe("GitHub production adapter", () => {
   it("handles missing broker configuration (HTTP 503 / broker_configuration)", async () => {
     const fetcher = vi.fn(async () => response({ error: "configuration-required", message: "Broker is not configured" }, 503));
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
-    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "configuration-required",
       message: "This connector needs provider configuration before it can run."
     });
@@ -172,7 +172,7 @@ describe("GitHub production adapter", () => {
   it("handles token revocation success (200) and idempotent success (404)", async () => {
     const fetcher = vi.fn(async () => response(undefined, 200));
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
-    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
     expect(fetcher).toHaveBeenCalledWith(
       "https://auth.example/oauth/github/revoke",
       expect.objectContaining({
@@ -188,7 +188,7 @@ describe("GitHub production adapter", () => {
 
     const fetcher404 = vi.fn(async () => response(undefined, 404));
     const adapter404 = createGitHubAdapter({ ...common, fetch: fetcher404 });
-    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
   });
 
   it("ensures errors do not leak sensitive details in user-facing messages", async () => {
@@ -326,7 +326,7 @@ describe("Vercel production adapter", () => {
 
   it("handles unconfigured/expired refresh tokens", async () => {
     const adapter = createVercelAdapter(common);
-    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "expired-auth",
       message: expect.stringContaining("expired")
     });
@@ -335,7 +335,7 @@ describe("Vercel production adapter", () => {
   it("handles missing broker configuration (HTTP 503 / broker_configuration)", async () => {
     const fetcher = vi.fn(async () => response({ error: "configuration-required", message: "Broker is not configured" }, 503));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
-    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh" })).rejects.toMatchObject({
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
       code: "configuration-required",
       message: "This connector needs provider configuration before it can run."
     });
@@ -344,7 +344,7 @@ describe("Vercel production adapter", () => {
   it("handles token revocation success (200) and idempotent success (404)", async () => {
     const fetcher = vi.fn(async () => response(undefined, 200));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
-    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
     expect(fetcher).toHaveBeenCalledWith(
       "https://auth.example/oauth/vercel/revoke",
       expect.objectContaining({
@@ -360,7 +360,7 @@ describe("Vercel production adapter", () => {
 
     const fetcher404 = vi.fn(async () => response(undefined, 404));
     const adapter404 = createVercelAdapter({ ...common, fetch: fetcher404 });
-    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
   });
 
   it("ensures errors do not leak sensitive details in user-facing messages", async () => {
