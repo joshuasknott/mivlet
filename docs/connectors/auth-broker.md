@@ -6,11 +6,7 @@ This repository contains the portable Node/TypeScript auth broker in
 `apps/broker`. It is buildable and tested, but it has not been deployed or
 independently reviewed for external use.
 
-The implemented version-1 browser protocol is authoritative: `authorize`
-redirects to the provider, the provider returns to the broker `callback`, and
-the broker redirects an opaque ticket to the desktop for one-time `handoff`
-redemption. Direct desktop operations use `refresh` and `revoke`. The earlier
-`token` and `identity` route sketch is superseded by this handoff protocol.
+**Cloudflare Workers** is the chosen production target host environment for the Fable auth broker. The core broker logic is implemented in a platform-agnostic way (`FableBroker` in `apps/broker/src/broker.ts`), allowing it to run within a Cloudflare Workers isolate or be wrapped in a Node.js HTTP server.
 
 Deploying, configuring, and independently reviewing the broker is explicitly a
 separate release task (see [Roadmap](../product/roadmap.md) Milestone 3 and
@@ -32,30 +28,16 @@ signing material that must never live in a desktop binary, React assets, logs,
 snapshots, or local JSON state. The broker holds those secrets server-side and
 performs the OAuth operations that need them.
 
-The broker is **not** a general connector gateway, API proxy, or aggregator. It
-is deliberately limited to four OAuth operations and nothing else.
+The broker is **not** a general connector gateway, API proxy, or aggregator. It does not intercept or proxy any model/inference calls, searches, imports, or mutations. Once the desktop client resolves an access token, it communicates directly with the provider APIs.
 
-### The broker MAY do (confidential OAuth only)
+### The broker responsibilities (confidential OAuth only)
 
-- **Authorization** — `GET /oauth/{provider}/authorize`: begin or resume the
-  authorization-code flow using the provider's confidential client, returning an
-  authorization URL (or redirecting) with Fable-supplied PKCE challenge, state,
-  and the exact desktop redirect URI.
-- **Token exchange** — `POST /oauth/{provider}/token`: exchange the provider
-  authorization code for access/refresh tokens using the confidential client
-  secret. The broker returns tokens and account identity to the desktop, which
-  stores them in OS secure storage.
-- **Token refresh** — `POST /oauth/{provider}/token` (grant_type=refresh_token):
-  rotate an expiring access token using the refresh token and confidential
-  credentials.
-- **Identity** — `GET /oauth/{provider}/identity`: resolve the connected
-  account's stable id, display name, handle, email, workspace, and avatar from
-  the provider's userinfo/identity endpoint.
-- **Revocation** — `POST /oauth/{provider}/revoke`: revoke the access/refresh
-  token at the provider during a desktop disconnect.
-
-The desktop resolves exactly these four routes from the broker base URL via
-`resolve_broker_endpoints` in `connector_auth.rs`. No other route is derivable.
+- **Authorization start** — `GET /oauth/{provider}/authorize`: Begin the authorization-code flow using the provider's confidential client, returning an authorization URL (or redirecting) with a Fable-supplied PKCE challenge, state, and the desktop redirect URI.
+- **Authorization callback** — `GET /oauth/{provider}/callback`: The provider redirects the user's browser back to this endpoint with a temporary authorization code and state. The broker consumes the state, performs the confidential client exchange with the provider, resolves the account identity, issues a single-use handoff ticket, and redirects the browser back to the desktop app.
+- **Token exchange (handoff)** — `POST /oauth/{provider}/handoff`: Direct POST from the desktop client. The desktop redeems the single-use handoff ticket for the final access/refresh tokens and normalized account identity.
+- **Token refresh** — `POST /oauth/{provider}/refresh`: Direct POST from the desktop client. Rotates an expiring access token using the refresh token and confidential client credentials.
+- **Revocation** — `POST /oauth/{provider}/revoke`: Direct POST from the desktop client. Revokes the access/refresh token at the provider during a desktop disconnect.
+- **Identity resolution (Internal)**: The broker resolves the connected account's stable ID, display name, handle, email, workspace, and avatar from the provider's userinfo/identity API. This resolution is performed **internally** by the broker during the callback handler and returned to the desktop during handoff redemption; it is not exposed as a public route.
 
 ### The broker MUST NOT do
 
@@ -97,6 +79,90 @@ The broker is required only by the confidential-client connectors: **github,
 vercel, notion, slack, linear**. This set is pinned in code
 (`BROKER_REQUIRED_CONNECTOR_IDS`) and verified by tests.
 
+## Cloudflare Workers Target Setup
+
+For production, the broker is deployed to Cloudflare Workers. 
+
+### Worker Entrypoint
+The core logic in `FableBroker` is wrapped in an ES module fetch handler (e.g. using Hono or raw Request/Response routing). The entrypoint instantiates `FableBroker` passing in the Cloudflare `env` bindings:
+
+```typescript
+export default {
+  async fetch(request, env, ctx) {
+    const publicBaseUrl = env.FABLE_BROKER_PUBLIC_URL;
+    const broker = new FableBroker({ env, publicBaseUrl });
+    // route and dispatch to broker.authorize(), broker.callback(), etc.
+  }
+}
+```
+
+### Wrangler Configuration (`wrangler.toml` / `wrangler.json`)
+The worker is configured and deployed using Wrangler, the Cloudflare Workers CLI. A typical `wrangler.toml` contains:
+
+```toml
+name = "fable-auth-broker"
+main = "src/index.ts"
+compatibility_date = "2026-06-30"
+compatibility_flags = [ "nodejs_compat" ] # Required for Node compatibility if using Node HTTP helpers
+
+[vars]
+FABLE_BROKER_PUBLIC_URL = "https://fable-auth-broker.<your-subdomain>.workers.dev/"
+FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS = ""
+FABLE_BROKER_RATE_LIMIT_PER_MINUTE = "60"
+```
+
+### Secret Management
+Confidential client secrets from the provider consoles must never be committed to repository files. Register them in the Cloudflare Worker production environment using Wrangler:
+
+```bash
+wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET
+wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET
+wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET
+wrangler secret put FABLE_BROKER_NOTION_CLIENT_SECRET
+wrangler secret put FABLE_BROKER_SLACK_CLIENT_SECRET
+```
+
+## Local Development Steps
+
+### Option A: Emulated Worker Environment (Wrangler)
+To run a local emulation of the Cloudflare Worker environment:
+1. Copy `.env.example` to `apps/broker/.dev.vars` (Wrangler uses `.dev.vars` to load environment variables locally).
+2. Populate the client IDs and secrets for local testing.
+3. Start the Wrangler dev server:
+   ```bash
+   pnpm wrangler dev
+   ```
+   This serves the broker at `http://127.0.0.1:8788`.
+4. Point the desktop app to the local broker:
+   ```bash
+   FABLE_AUTH_BROKER_URL=http://127.0.0.1:8788
+   ```
+
+### Option B: Standalone Node.js Server
+Alternatively, developers can run the bundled Node.js server wrapper locally:
+1. Copy `.env.example` to `apps/broker/.env`.
+2. Populate the client IDs and secrets.
+3. Start the dev script:
+   ```bash
+   pnpm --filter @fable/broker dev
+   ```
+   This builds and starts the Node.js server at `http://127.0.0.1:8788`.
+
+## Expected Environment Variables & Secrets
+
+The broker expects the following environment variables (which are loaded from process environment in Node or from environment bindings in Cloudflare Workers):
+
+| Variable | Scope | Description |
+| :--- | :--- | :--- |
+| `FABLE_BROKER_PUBLIC_URL` | Public Var | The public base URL of the broker (e.g. `https://fable-auth-broker.workers.dev/`). |
+| `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` | Public Var | Comma-separated list of allowed non-loopback desktop redirect URLs (optional). |
+| `FABLE_BROKER_RATE_LIMIT_PER_MINUTE` | Public Var | Rate limit threshold per peer and route (default: `60`). |
+| `FABLE_BROKER_PORT` / `FABLE_BROKER_HOST` | Public Var | Bind settings for the local Node.js fallback server. |
+| `FABLE_BROKER_<PROVIDER>_CLIENT_ID` | Secret | Public client ID registered in the provider's developer console. |
+| `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET` | Secret | Confidential client secret registered in the provider's developer console. |
+
+*Note: Replace `<PROVIDER>` with `GITHUB`, `VERCEL`, `LINEAR`, `NOTION`, or `SLACK`.*
+
 ## Fail-closed configuration
 
 The desktop resolves the broker URL from the `FABLE_AUTH_BROKER_URL` environment
@@ -114,11 +180,7 @@ A fail-closed result means the confidential connector surfaces a clear
 fixtures, never claims a connected state, and never downgrades to a public
 client.
 
-The desktop uses the same exact loopback receiver for public and confidential
-OAuth. For confidential providers, the authorization URL points at the broker,
-which owns the provider callback and returns the final code/state to the exact
-desktop loopback redirect. The desktop then completes exchange through the
-broker token endpoint without exposing tokens to JavaScript.
+Similarly, if the broker receives a request for a provider whose client credentials (`FABLE_BROKER_<PROVIDER>_CLIENT_ID` or `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET`) are missing from its env environment bindings, the broker **fails closed** by throwing a `configuration-required` error (which returns a HTTP 503 to the desktop), indicating that the provider is not configured.
 
 ### Why the checks are separated
 
@@ -141,6 +203,22 @@ lives in the pure resolver.
   provider-metadata JSON. Connector text is redacted before crossing any
   boundary (see `redact_connector_text`).
 
+## Provider OAuth Callback URL Guidance
+
+In the developer consoles of the supported confidential OAuth providers, you must register the callback URL that routes to the auth broker. 
+
+The callback URL pattern is structured as:
+`https://<your-broker-domain>/oauth/<provider>/callback`
+
+For example:
+- **GitHub App:** `https://<your-broker-domain>/oauth/github/callback`
+- **Vercel Integration:** `https://<your-broker-domain>/oauth/vercel/callback`
+- **Linear Application:** `https://<your-broker-domain>/oauth/linear/callback`
+- **Notion Public Integration:** `https://<your-broker-domain>/oauth/notion/callback`
+- **Slack App:** `https://<your-broker-domain>/oauth/slack/callback`
+
+*Note: Replace `<your-broker-domain>` with your actual Cloudflare Workers public origin (e.g. `fable-auth-broker.workers.dev` or a custom HTTPS domain bound to the worker).*
+
 ## Verification
 
 The fail-closed and non-proxying boundaries are covered by tests in
@@ -156,22 +234,3 @@ The fail-closed and non-proxying boundaries are covered by tests in
 - `google_connectors_are_public_pkce_and_broker_free`
 - `broker_resolver_fail_closed_keeps_core_workspace_usable`
 
-## Deployment prerequisites (future)
-
-When the broker is built, it must, at minimum:
-
-1. Implement exactly the five operations above per provider, scoped to the
-   provider's confidential-client flow.
-2. Store client secrets and signing material in its own server-side secret store
-   (never in repo config, never shipped to the desktop).
-3. Return the final authorization code and state to the exact desktop redirect
-   URI it was given — it must not mint its own tokens or hold long-lived
-   desktop-scoped sessions.
-4. Be deployed behind HTTPS with registered callback URLs in each provider
-   console.
-5. Undergo independent security review before confidential-client providers are
-   enabled for external users.
-
-Provider console creation, consent screens, distribution review, and Google
-restricted-scope verification remain external setup tasks independent of the
-broker.
