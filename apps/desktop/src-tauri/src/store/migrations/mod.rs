@@ -40,7 +40,8 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             2 => apply_v2_to_v3(conn)?,
             // 3 → 4: introduce the workspace ownership root, attach legacy
             // user-owned records to the compatibility workspace, and create
-            // the workflow hand-off tables.
+            // the workflow hand-off tables, then add the durable scheduler
+            // tables from the schedule-SQLite integration.
             3 => apply_v3_to_v4(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
@@ -202,6 +203,7 @@ fn apply_v3_to_v4(conn: &Connection) -> super::Result<()> {
           ON workflow_run(workspace_id, definition_id, definition_version);
         "#,
     )?;
+    conn.execute_batch(crate::store::schema::SCHEMA_V3_TO_V4)?;
     Ok(())
 }
 

@@ -19,11 +19,7 @@ pub fn upsert_definition(
     payload: &Value,
 ) -> Result<()> {
     scope.ensure_exists(tx)?;
-    let sealed = seal_json(
-        store,
-        payload,
-        &definition_aad(scope.workspace_id(), id, version),
-    )?;
+    let sealed = seal_json(store, payload, &definition_aad(scope.workspace_id(), id, version))?;
     let changed = tx.execute(
         "INSERT INTO workflow_definition (
            workspace_id, project_id, id, version, created_at, updated_at, payload, payload_nonce
@@ -33,14 +29,8 @@ pub fn upsert_definition(
            payload=excluded.payload, payload_nonce=excluded.payload_nonce
          WHERE workflow_definition.project_id IS excluded.project_id;",
         rusqlite::params![
-            scope.workspace_id(),
-            scope.project_id(),
-            id,
-            version,
-            created_at,
-            updated_at,
-            sealed.ciphertext,
-            sealed.nonce
+            scope.workspace_id(), scope.project_id(), id, version, created_at, updated_at,
+            sealed.ciphertext, sealed.nonce
         ],
     )?;
     if changed == 0 {
@@ -65,21 +55,14 @@ pub fn list_definitions(tx: &Connection, store: &Store, scope: &DataScope) -> Re
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, u32>(1)?,
-                    Sealed {
-                        ciphertext: row.get(2)?,
-                        nonce: row.get(3)?,
-                    },
+                    Sealed { ciphertext: row.get(2)?, nonce: row.get(3)? },
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     rows.into_iter()
         .map(|(id, version, sealed)| {
-            open_json(
-                store,
-                &sealed,
-                &definition_aad(scope.workspace_id(), &id, version),
-            )
+            open_json(store, &sealed, &definition_aad(scope.workspace_id(), &id, version))
         })
         .collect()
 }
@@ -109,16 +92,8 @@ pub fn upsert_run(
            payload_nonce=excluded.payload_nonce
          WHERE workflow_run.project_id IS excluded.project_id;",
         rusqlite::params![
-            scope.workspace_id(),
-            scope.project_id(),
-            id,
-            definition_id,
-            definition_version,
-            status,
-            started_at,
-            updated_at,
-            sealed.ciphertext,
-            sealed.nonce
+            scope.workspace_id(), scope.project_id(), id, definition_id, definition_version,
+            status, started_at, updated_at, sealed.ciphertext, sealed.nonce
         ],
     )?;
     if changed == 0 {
@@ -148,10 +123,7 @@ pub fn list_runs(
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    Sealed {
-                        ciphertext: row.get(1)?,
-                        nonce: row.get(2)?,
-                    },
+                    Sealed { ciphertext: row.get(1)?, nonce: row.get(2)? },
                 ))
             },
         )?

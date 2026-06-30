@@ -236,6 +236,8 @@ pub const SCHEDULER_QUEUE_STATES: [&str; 9] = [
 // Workflow-run store constants.
 pub const WORKFLOW_RUN_STORE_VERSION: u8 = 1;
 pub const MAX_WORKFLOW_RUNS: usize = 200;
+/// Legacy flat workflow-definition journal cap; migrated at most this many.
+pub const MAX_WORKFLOW_DEFINITION_HISTORY: usize = 500;
 pub const MAX_WORKFLOW_STEPS: usize = 24;
 pub const WORKFLOW_RUN_STATUSES: [&str; 7] = [
     "queued",

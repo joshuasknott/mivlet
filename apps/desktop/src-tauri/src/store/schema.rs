@@ -86,6 +86,109 @@ CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_event(status);
 CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_event(correlation_id);
 "#;
 
+/// Forward schema step `v3 → v4`: moves schedules and workflows out of raw
+/// JSON files into encrypted, workspace-isolated SQLite tables. Existing
+/// databases receive these tables through this delta; fresh databases already
+/// receive them through [`SCHEMA_V1`] (the complete current DDL, kept
+/// idempotent with `CREATE TABLE IF NOT EXISTS`). `ALTER TABLE ... ADD COLUMN`
+/// is unsupported with `IF NOT EXISTS`, so any column additions on existing
+/// tables would be guarded by a column probe in `apply_v3_to_v4` (none are
+/// needed here — every table is new).
+pub const SCHEMA_V3_TO_V4: &str = r#"
+PRAGMA foreign_keys = ON;
+
+-- Encrypted, workspace-isolated scheduled jobs (the durable automation engine
+-- record). Query columns are non-secret (workspace, status, timestamps, the
+-- linked workflow-definition id, and the trigger kind); the encrypted payload
+-- holds the sensitive free text + the full trigger + the frozen execution route
+-- (which carries only provider/model ids + permission mode — never secrets).
+CREATE TABLE IF NOT EXISTS scheduled_job (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  workflow_definition_id TEXT NOT NULL DEFAULT '',
+  trigger_kind TEXT NOT NULL DEFAULT '',
+  missed_run_policy TEXT NOT NULL DEFAULT 'skip',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT NOT NULL DEFAULT '',
+  last_run_at TEXT NOT NULL DEFAULT '',
+  last_run_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_workspace ON scheduled_job(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_status ON scheduled_job(status);
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_definition ON scheduled_job(workflow_definition_id);
+
+-- Encrypted, workspace-isolated scheduler queue. Query columns are the
+-- scheduler's runtime authority (state, lease holder + deadline, dedup key,
+-- retry backoff); the encrypted payload holds the attempt history + the frozen
+-- execution route snapshot. Queue-entry state is never accepted from the wire —
+-- it is advanced by the tick and `report_job_attempt` — so the `state` column
+-- is authoritative.
+CREATE TABLE IF NOT EXISTS scheduler_queue_entry (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'queued',
+  lease_holder TEXT NOT NULL DEFAULT '',
+  lease_expires_at TEXT NOT NULL DEFAULT '',
+  lease_token TEXT NOT NULL DEFAULT '',
+  deduplication_key TEXT NOT NULL,
+  available_at TEXT NOT NULL DEFAULT '',
+  last_error TEXT NOT NULL DEFAULT '',
+  scheduled_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  UNIQUE(workspace_id, deduplication_key)
+);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_workspace ON scheduler_queue_entry(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_job ON scheduler_queue_entry(job_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_state ON scheduler_queue_entry(workspace_id, state);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_dedup ON scheduler_queue_entry(workspace_id, deduplication_key);
+
+-- Encrypted workflow definitions, workspace + version scoped. The full step
+-- list lives in the encrypted payload (free-text prompts are sensitive); query
+-- columns are the non-secret identity/version/timestamps. `(workspace_id, id,
+-- version)` is unique so versioned history is retained without duplication.
+CREATE TABLE IF NOT EXISTS workflow_definition (
+  workspace_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_definition_workspace ON workflow_definition(workspace_id, id);
+
+-- Encrypted workflow-run journal, workspace scoped. Query columns are
+-- non-secret (definition id/version, status, trigger, timestamps); the
+-- encrypted payload holds the step records, inputs, and idempotency key.
+CREATE TABLE IF NOT EXISTS workflow_run (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  definition_id TEXT NOT NULL,
+  definition_version INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  scheduled_job_id TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL DEFAULT '',
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace ON workflow_run(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_definition ON workflow_run(workspace_id, definition_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_status ON workflow_run(status);
+"#;
+
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
 /// it to a fresh database and re-running after a partial apply are both safe.
 /// Kept as the complete schema so a fresh database reaches the current version
@@ -408,6 +511,89 @@ CREATE TABLE IF NOT EXISTS connector_cache_settings (
   payload_nonce BLOB NOT NULL,
   PRIMARY KEY (workspace_id, connector_id)
 );
+
+-- scheduler store: scheduled jobs (the durable automation engine record).
+-- Encrypted, workspace-isolated; query columns are non-secret. See
+-- `repos::scheduled_job`.
+CREATE TABLE IF NOT EXISTS scheduled_job (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  workflow_definition_id TEXT NOT NULL DEFAULT '',
+  trigger_kind TEXT NOT NULL DEFAULT '',
+  missed_run_policy TEXT NOT NULL DEFAULT 'skip',
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT NOT NULL DEFAULT '',
+  last_run_at TEXT NOT NULL DEFAULT '',
+  last_run_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_workspace ON scheduled_job(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_status ON scheduled_job(status);
+CREATE INDEX IF NOT EXISTS idx_scheduled_job_definition ON scheduled_job(workflow_definition_id);
+
+-- scheduler store: the durable queue (runtime authority for entry state).
+-- Encrypted, workspace-isolated; the encrypted payload holds the attempt
+-- history + frozen execution route snapshot. See `repos::scheduler_queue`.
+CREATE TABLE IF NOT EXISTS scheduler_queue_entry (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  job_id TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'queued',
+  lease_holder TEXT NOT NULL DEFAULT '',
+  lease_expires_at TEXT NOT NULL DEFAULT '',
+  lease_token TEXT NOT NULL DEFAULT '',
+  deduplication_key TEXT NOT NULL,
+  available_at TEXT NOT NULL DEFAULT '',
+  last_error TEXT NOT NULL DEFAULT '',
+  scheduled_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  UNIQUE(workspace_id, deduplication_key)
+);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_workspace ON scheduler_queue_entry(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_job ON scheduler_queue_entry(job_id);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_state ON scheduler_queue_entry(workspace_id, state);
+CREATE INDEX IF NOT EXISTS idx_scheduler_queue_dedup ON scheduler_queue_entry(workspace_id, deduplication_key);
+
+-- workflow definitions (versioned, workspace + version scoped). The full step
+-- list lives in the encrypted payload. See `repos::workflow`.
+CREATE TABLE IF NOT EXISTS workflow_definition (
+  workspace_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_definition_workspace ON workflow_definition(workspace_id, id);
+
+-- workflow-run journal (workspace scoped). Step records, inputs, and the
+-- idempotency key live in the encrypted payload. See `repos::workflow`.
+CREATE TABLE IF NOT EXISTS workflow_run (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  definition_id TEXT NOT NULL,
+  definition_version INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  scheduled_job_id TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL DEFAULT '',
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace ON workflow_run(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_definition ON workflow_run(workspace_id, definition_id);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_status ON workflow_run(status);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (

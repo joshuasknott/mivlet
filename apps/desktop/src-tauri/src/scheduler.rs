@@ -275,8 +275,93 @@ fn write_store(path: &Path, store: &SchedulerStore) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|_| "Fable could not commit scheduler store.".to_string())
 }
 
+/// Load the scheduler store from encrypted SQLite (the production authority).
+/// Returns `Ok(None)` when the global store is not initialized (the unit-test
+/// path); callers fall back to the legacy JSON file in that case. Every job +
+/// queue entry is scoped to the single-profile default workspace today.
+fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, String> {
+    let result = crate::store::with_store(|store| {
+        store.with_conn(|conn| {
+            let jobs = crate::store::repos::scheduled_job::list(conn, store, workspace_id)?;
+            let queue = crate::store::repos::scheduler_queue::list(conn, store, workspace_id)?;
+            Ok((jobs, queue))
+        })
+    })?;
+    let Some((jobs, queue)) = result else {
+        return Ok(None);
+    };
+    let jobs = jobs
+        .into_iter()
+        .map(|row| {
+            // Round-trip through the typed model so unknown payload fields are
+            // preserved by serde's flatten-free passthrough.
+            serde_json::from_value::<ScheduledJob>(row.value)
+                .map_err(|_| "Fable could not decode a scheduled job.".to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let queue = queue
+        .into_iter()
+        .map(|row| {
+            serde_json::from_value::<SchedulerQueueEntry>(row.value)
+                .map_err(|_| "Fable could not decode a queue entry.".to_string())
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(Some(SchedulerStore {
+        schema_version: SCHEDULER_STORE_VERSION,
+        jobs,
+        queue,
+        instance_id: workspace_id.to_string(),
+        updated_at: now_iso(),
+        occurrence_ledger: Vec::new(),
+    }))
+}
+
+/// Flush the full scheduler store back to encrypted SQLite, replacing every job
+/// and queue entry in the default workspace transactionally. Returns
+/// `Ok(false)` only when the global store is not initialized (unit-test path);
+/// callers then fall back to the legacy JSON write.
+fn write_store_to_sqlite(store_value: &SchedulerStore) -> Result<bool, String> {
+    let now = now_iso();
+    let jobs: Vec<serde_json::Value> = store_value
+        .jobs
+        .iter()
+        .take(MAX_SCHEDULED_JOBS)
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "Fable could not encode a scheduled job.".to_string())?;
+    let queue: Vec<serde_json::Value> = store_value
+        .queue
+        .iter()
+        .take(MAX_SCHEDULER_QUEUE_ENTRIES)
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "Fable could not encode a queue entry.".to_string())?;
+    let written = crate::store::with_store(|store| {
+        store.transaction(|tx| {
+            crate::store::repos::scheduled_job::delete_all(tx, "")?;
+            crate::store::repos::scheduler_queue::delete_all(tx, "")?;
+            for value in &jobs {
+                crate::store::repos::scheduled_job::upsert_from_value(
+                    tx, store, "", value.clone(), &now,
+                )?;
+            }
+            for value in &queue {
+                crate::store::repos::scheduler_queue::upsert_entry(tx, store, "", value, &now)?;
+            }
+            Ok(())
+        })
+    })?;
+    Ok(written.is_some())
+}
+
 /// Load the store into managed state if needed, then mutate + persist it
 /// atomically under the scheduler mutex.
+///
+/// Persistence authority: encrypted SQLite is the production store of truth.
+/// The legacy `scheduler-store.json` file is read once (during the one-time
+/// data migration at startup) and is otherwise a write-only mirror so a
+/// downgrade/rollback remains possible — it is never deleted by this path. In
+/// the unit-test path (no global store) the JSON file remains the sole store.
 fn persist<F: FnOnce(&mut SchedulerStore)>(app: &AppHandle, mutate: F) -> Result<(), String> {
     let path = scheduler_store_path(app)?;
     with_state(app, |mutex| {
@@ -284,13 +369,42 @@ fn persist<F: FnOnce(&mut SchedulerStore)>(app: &AppHandle, mutate: F) -> Result
             .lock()
             .map_err(|_| "Scheduler lock poisoned.".to_string())?;
         if guard.is_none() {
-            *guard = Some(read_store(&path)?);
+            *guard = Some(load_store(app, &path)?);
         }
         let store = guard.as_mut().expect("store loaded");
         mutate(store);
         store.updated_at = now_iso();
-        write_store(&path, store)
+        // SQLite is the authority in production; fall back to JSON in tests.
+        match write_store_to_sqlite(store)? {
+            true => Ok(()),
+            false => write_store(&path, store),
+        }
     })
+}
+
+/// Resolve the scheduler store: SQLite first (production), then the legacy JSON
+/// file (unit tests / pre-migration). The JSON file is never the source of
+/// truth once SQLite has been migrated into.
+fn load_store(app: &AppHandle, path: &Path) -> Result<SchedulerStore, String> {
+    let instance = instance_id_of(app);
+    if let Some(store) = load_store_from_sqlite(&instance)? {
+        return Ok(store);
+    }
+    read_store(path)
+}
+
+fn instance_id_of(app: &AppHandle) -> String {
+    app.state::<SchedulerState>()
+        .inner()
+        .0
+        .lock()
+        .map(|guard| {
+            guard
+                .as_ref()
+                .map(|s| s.instance_id.clone())
+                .unwrap_or_else(|| "unset".to_string())
+        })
+        .unwrap_or_else(|_| "unset".to_string())
 }
 
 /// Emit a run-request event so the TS scheduler driver picks up a due job.
@@ -334,6 +448,11 @@ pub fn list_scheduler_jobs(
     project_id: Option<String>,
 ) -> Result<Vec<ScheduledJob>, String> {
     let scope = command_scope(workspace_id, project_id)?;
+    if let Some(store) = load_store_from_sqlite(scope.workspace_id())? {
+        return Ok(store.jobs.into_iter().filter(|job| {
+            job.project_id.as_deref() == scope.project_id()
+        }).collect());
+    }
     let path = scheduler_store_path(&app)?;
     Ok(read_store(&path)?
         .jobs
@@ -352,6 +471,11 @@ pub fn list_scheduler_queue(
     project_id: Option<String>,
 ) -> Result<Vec<SchedulerQueueEntry>, String> {
     let scope = command_scope(workspace_id, project_id)?;
+    if let Some(store) = load_store_from_sqlite(scope.workspace_id())? {
+        return Ok(store.queue.into_iter().filter(|entry| {
+            entry.project_id.as_deref() == scope.project_id()
+        }).collect());
+    }
     let path = scheduler_store_path(&app)?;
     Ok(read_store(&path)?
         .queue
@@ -775,12 +899,14 @@ pub fn recover_store_at(store: &mut SchedulerStore) {
     }
 }
 
-/// Initialize the scheduler store into managed state: read it, recover any
-/// stale leases from a prior crash, and persist the recovered state. Called at
-/// app setup.
+/// Initialize the scheduler store into managed state: read it from the
+/// production SQLite authority (falling back to the legacy JSON file in the
+/// unit-test path), recover any stale leases from a prior crash, and persist
+/// the recovered state. Called at app setup. The legacy JSON file is never
+/// deleted by this path — it remains as a downgrade/rollback target.
 pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
     let path = scheduler_store_path(app)?;
-    let mut store = read_store(&path)?;
+    let mut store = load_store(app, &path)?;
     let mut changed = false;
     for entry in &store.queue {
         if entry.state == "leased" || entry.state == "running" {
@@ -790,7 +916,13 @@ pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
     if changed {
         recover_store_at(&mut store);
         store.updated_at = now_iso();
-        write_store(&path, &store)?;
+        // SQLite is the authority in production; fall back to JSON in tests.
+        match write_store_to_sqlite(&store)? {
+            true => {}
+            false => {
+                write_store(&path, &store)?;
+            }
+        }
     }
     with_state(app, |mutex| {
         let mut guard = mutex
