@@ -121,6 +121,93 @@ describe("Slack production adapter", () => {
     const start = await slack(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s2", codeChallenge: "c" });
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/slack/authorize");
   });
+
+  it("handles missing broker configuration (HTTP 503 / broker_configuration)", async () => {
+    const fetcher = vi.fn(async () => json({ error: "configuration-required", message: "Slack is not configured on this broker." }, 503));
+    const adapter = slack(fetcher);
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "configuration-required",
+      message: "Slack is not configured on this broker."
+    });
+  });
+
+  it("handles unconfigured/expired refresh tokens when token lacks refresh token", async () => {
+    const adapter = slack(vi.fn());
+    await expect(adapter.refresh({ accessToken: "access", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "expired-auth",
+      message: expect.stringContaining("expired")
+    });
+  });
+
+  it("handles expired credentials from broker refresh (HTTP 401 / needs-auth)", async () => {
+    const fetcher = vi.fn(async () => json({ error: "needs-auth", message: "Refresh token was rejected." }, 401));
+    const adapter = slack(fetcher);
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "expired-auth",
+      message: "Refresh token was rejected."
+    });
+  });
+
+  it("handles token revocation success (200) and idempotent success (404)", async () => {
+    const fetcher = vi.fn(async () => json(undefined, 200));
+    const adapter = slack(fetcher);
+    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://auth.example/oauth/slack/revoke",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          contractVersion: 1,
+          provider: "slack",
+          token: "refresh",
+          tokenTypeHint: "refresh_token"
+        })
+      })
+    );
+
+    const fetcher404 = vi.fn(async () => json(undefined, 404));
+    const adapter404 = slack(fetcher404);
+    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).resolves.toBeUndefined();
+  });
+
+  it("handles broker refresh failure (HTTP 500 / provider-unavailable)", async () => {
+    const fetcher = vi.fn(async () => json({ error: "provider-unavailable", message: "Broker is temporarily unavailable." }, 500));
+    const adapter = slack(fetcher);
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "provider-unavailable",
+      message: "Broker is temporarily unavailable.",
+      retryable: true
+    });
+  });
+
+  it("handles missing broker (network connection error or broker HTTP 404)", async () => {
+    const fetcher = vi.fn(async () => { throw new Error("TypeError: fetch failed"); });
+    const adapter = slack(fetcher);
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toThrow();
+
+    const fetcher404 = vi.fn(async () => json(undefined, 404));
+    const adapter404 = slack(fetcher404);
+    await expect(adapter404.refresh({ accessToken: "access", refreshToken: "refresh", tokenType: "Bearer", scopes: [] })).rejects.toMatchObject({
+      code: "not-found"
+    });
+  });
+
+  it("handles provider unavailable (HTTP 502 / network error on Slack API request)", async () => {
+    const fetcher = vi.fn(async () => new Response("Internal Server Error", { status: 502 }));
+    const adapter = slack(fetcher);
+    await expect(adapter.read({ capability: "slack.channels.list", input: {} }, tokens)).rejects.toMatchObject({
+      code: "provider-unavailable",
+      retryable: true
+    });
+
+    const networkErrorFetcher = vi.fn(async () => { throw new Error("socket hang up"); });
+    const networkAdapter = slack(networkErrorFetcher);
+    await expect(networkAdapter.read({ capability: "slack.channels.list", input: {} }, tokens)).rejects.toMatchObject({
+      code: "provider-unavailable",
+      message: "The provider network request failed.",
+      retryable: true
+    });
+  });
 });
 
 describe.runIf(Boolean(process.env.FABLE_LIVE_CONNECTOR_TESTS))("live collaboration connectors", () => {
