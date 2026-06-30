@@ -277,6 +277,21 @@ fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Res
     Ok(())
 }
 
+/// Run `f` against the global encrypted store when it is initialized. Returns
+/// `Ok(None)` only when the global store is not initialized (the unit-test path
+/// that does not bring up Tauri); command layers translate `None` into an
+/// explicit error. This is the typed-repo entrypoint used by domains that own
+/// dedicated tables (e.g. the connector cache), complementing the document
+/// helpers below.
+pub fn with_store<R>(
+    f: impl FnOnce(&Store) -> Result<R>,
+) -> std::result::Result<Option<R>, String> {
+    let Some(store) = GLOBAL_STORE.get() else {
+        return Ok(None);
+    };
+    f(store).map(Some).map_err(|error| error.to_string())
+}
+
 /// Read a production document from encrypted SQLite. `None` means the global
 /// store is not initialized (unit-test path) or the document is absent.
 pub fn read_document<T: serde::de::DeserializeOwned>(
@@ -415,6 +430,8 @@ pub fn delete_local_data(
                  DELETE FROM schedule;
                  DELETE FROM model_config;
                  DELETE FROM draft;
+                 DELETE FROM connector_cache;
+                 DELETE FROM connector_cache_settings;
                  DELETE FROM preferences;
                  DELETE FROM profile;
                  DELETE FROM migration_log;",

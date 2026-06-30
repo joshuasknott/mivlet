@@ -14,6 +14,7 @@ mod collaboration_connectors;
 mod connector_api;
 mod connector_approvals;
 mod connector_auth;
+mod connector_cache;
 mod connectors;
 mod execution_approvals;
 mod google;
@@ -133,6 +134,17 @@ pub fn run() {
             connectors::import_connector_item,
             connectors::prepare_connector_action,
             connectors::execute_approved_connector_action,
+            connector_cache::list_connector_cache,
+            connector_cache::search_connector_cache,
+            connector_cache::cache_connector_item,
+            connector_cache::set_connector_cache_item_disabled,
+            connector_cache::delete_connector_cache_item,
+            connector_cache::clear_connector_cache,
+            connector_cache::resync_connector_cache,
+            connector_cache::export_connector_cache,
+            connector_cache::get_connector_cache_settings,
+            connector_cache::set_connector_cache_settings,
+            connector_cache::delete_connector_cache_settings,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
             native_api::list_backend_models,
