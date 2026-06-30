@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApprovalAuditEntry,
   ApprovalDecision,
@@ -159,6 +159,7 @@ import {
   shellStateFromRuntimeSnapshot,
   shellStateToRuntimeSnapshot
 } from "../lib/persistence";
+import type { ModelDiscoveryOutcome } from "../lib/backend-state";
 
 /**
  * Owns all workspace shell state and the runtime-backed effects (snapshot
@@ -426,6 +427,20 @@ export interface ShellRuntime {
   ) => Promise<BackendVerifyResult>;
   disconnectBackend: (providerId: string) => Promise<void>;
   /**
+   * Per-provider model-discovery lifecycle (idle/loading/success/empty/offline/
+   * unsupported/failed). A runtime condition layered on top of auth state: a
+   * connected provider whose discovery is offline/failed is "connected but
+   * degraded" — the key is fine, the model list just can't be confirmed. Idle
+   * means discovery has not run for that provider yet.
+   */
+  modelDiscoveryByProvider: Record<string, ModelDiscoveryOutcome>;
+  /**
+   * Re-run model discovery for a connected provider and update its lifecycle.
+   * Recoverable: surfaces a fresh model list or a retryable failure. No-op
+   * outside the Tauri runtime (preview/fixture mode).
+   */
+  refreshModels: (providerId: string) => Promise<void>;
+  /**
    * The connected agent backend that drives the agent run, if any. Today only a
    * native-API backend can be connected + streaming, so this is equivalent to
    * the legacy `connectedNativeBackend`; it is named for the provider-neutral
@@ -574,6 +589,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // truthful: an omitted catalogue id is unavailable once discovery succeeded).
   const [discoveredModels, setDiscoveredModels] = useState<
     Record<string, ModelDiscoveryResult>
+  >({});
+  // Per-provider model-discovery lifecycle, surfaced to Settings so the row can
+  // show a refresh spinner and recoverable-failure copy. `idle` = not yet run.
+  const [modelDiscoveryByProvider, setModelDiscoveryByProvider] = useState<
+    Record<string, ModelDiscoveryOutcome>
   >({});
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
@@ -992,34 +1012,84 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
   }, []);
 
-  // Dynamic model discovery: when an agent backend connects, ask the Rust
-  // boundary to list that provider's models (fail closed — no key in JS) and
-  // merge the result with the curated catalogue. Outside Tauri this is a no-op,
-  // so the catalogue fallback drives selection and fixture tests stay green.
-  // Re-runs only when the connected provider id changes.
+  // Dynamic model discovery: ask the Rust boundary to list a connected
+  // provider's models (fail closed — no key in JS) and merge the result with the
+  // curated catalogue. Outside Tauri this is a no-op so the catalogue fallback
+  // drives selection and fixture tests stay green.
+  //
+  // `runModelDiscovery` is the single entry point for both the auto-run on
+  // connect and the manual Settings "Refresh models" action. It drives the
+  // per-provider lifecycle so Settings can show a spinner and recoverable
+  // failure copy. `active` guards stale completions if the provider changes
+  // mid-flight; the manual refresh path always resolves regardless (it sets
+  // its own lifecycle entry).
+  const runModelDiscovery = useCallback(
+    async (providerId: string): Promise<void> => {
+      setModelDiscoveryByProvider((current) => ({
+        ...current,
+        [providerId]: "loading"
+      }));
+      const result = await listRuntimeBackendModels(providerId);
+      // null means preview/no desktop runtime. Reset to idle so the row does not
+      // sit on a phantom "loading" state; every desktop outcome is retained.
+      if (result === null) {
+        setModelDiscoveryByProvider((current) => ({
+          ...current,
+          [providerId]: "idle"
+        }));
+        return;
+      }
+      setDiscoveredModels((current) => ({
+        ...current,
+        [providerId]: result
+      }));
+      // Map the runtime outcome onto the UI lifecycle. `empty`/`offline`/
+      // `unsupported`/`failed` are kept distinct so failed/offline never
+      // masquerade as an empty account.
+      setModelDiscoveryByProvider((current) => ({
+        ...current,
+        [providerId]: result.outcome
+      }));
+      if (result.outcome === "failed") {
+        setBackendStatus(result.message ?? "Model discovery failed; using the curated catalogue.");
+      }
+    },
+    []
+  );
+
+  // Auto-run discovery when the connected agent backend changes. Manual refresh
+  // reuses `runModelDiscovery` directly (see `refreshModels`).
   useEffect(() => {
     if (!connectedAgentBackend || connectedAgentBackend.authState !== "connected") {
       return;
     }
     const providerId = connectedAgentBackend.id;
     let active = true;
-    void listRuntimeBackendModels(providerId).then((result) => {
-      if (!active) return;
-      // null means preview/no desktop runtime. Every desktop outcome is retained
-      // explicitly so failed/offline/unsupported never masquerades as empty.
-      if (result === null) return;
-      setDiscoveredModels((current) => ({
-        ...current,
-        [providerId]: result
-      }));
-      if (result.outcome === "failed") {
-        setBackendStatus(result.message ?? "Model discovery failed; using the curated catalogue.");
-      }
+    void runModelDiscovery(providerId).then(() => {
+      // Completion is handled inside runModelDiscovery; this guard only
+      // suppresses work if the component unmounted/provider swapped.
+      void active;
     });
     return () => {
       active = false;
     };
-  }, [connectedAgentBackend?.id, connectedAgentBackend?.authState]);
+  }, [connectedAgentBackend?.id, connectedAgentBackend?.authState, runModelDiscovery]);
+
+  /**
+   * Manual model refresh for Settings. Re-runs discovery for a connected
+   * provider and updates its lifecycle so the row can show loading then a fresh
+   * result or a retryable failure. No-op when the provider isn't connected.
+   */
+  const refreshModels = useCallback(
+    async (providerId: string): Promise<void> => {
+      const provider = backendProviders.find((entry) => entry.id === providerId);
+      if (!provider || provider.authState !== "connected") {
+        return;
+      }
+      await runModelDiscovery(providerId);
+    },
+    [backendProviders, runModelDiscovery]
+  );
 
   const focusComposer = (value: string) => {
     window.requestAnimationFrame(() => {
@@ -2623,6 +2693,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     connectBackend,
     connectBackendWithVerify,
     disconnectBackend,
+    modelDiscoveryByProvider,
+    refreshModels,
     connectedAgentBackend,
     selectableModels,
     resolvedSelectedModelId,
