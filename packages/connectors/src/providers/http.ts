@@ -193,6 +193,105 @@ export function oauthClient(options: OAuthClientOptions) {
   };
 }
 
+/**
+ * Public-PKCE OAuth client for providers that live outside the auth broker.
+ *
+ * Google (Drive/Gmail/Calendar) is explicitly excluded from the broker's
+ * confidential-client set — the desktop performs the authorization-code +
+ * PKCE exchange directly against Google's OAuth2 endpoints, refreshes with a
+ * refresh token grant, and revokes via Google's revocation endpoint. The
+ * return shape matches `oauthClient()` so adapters can spread it in the same
+ * way, but there is no `handoff` ticket and no contract version.
+ */
+export function googleOAuthClient(options: OAuthClientOptions) {
+  const fetcher = options.fetch ?? fetch;
+  return {
+    async startAuth(context: ConnectorAuthContext): Promise<ConnectorAuthStart> {
+      const url = new URL(options.authorizationEndpoint);
+      url.searchParams.set("client_id", options.clientId);
+      url.searchParams.set("redirect_uri", context.redirectUri);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("scope", options.scopes.join(" "));
+      url.searchParams.set("state", context.state);
+      url.searchParams.set("code_challenge", context.codeChallenge);
+      url.searchParams.set("code_challenge_method", "S256");
+      // prompt=consent + access_type=offline keep refresh tokens recoverable
+      // across reconnects, which is what makes long-lived sync possible.
+      url.searchParams.set("access_type", "offline");
+      url.searchParams.set("prompt", "consent");
+      return { authorizationUrl: url.toString(), state: context.state };
+    },
+    async completeAuth(callback: ConnectorAuthCallback): Promise<ConnectorAuthResult> {
+      const callbackUrl = new URL(callback.callbackUrl);
+      if (callbackUrl.searchParams.get("state") !== callback.expectedState) {
+        throw providerError(options.connectorId, 400, "state_mismatch");
+      }
+      const code = callbackUrl.searchParams.get("code");
+      if (!code) throw providerError(options.connectorId, 400, "missing_code");
+      const response = await fetcher(options.tokenEndpoint, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: options.clientId,
+          grant_type: "authorization_code",
+          code,
+          redirect_uri: options.redirectUri,
+          code_verifier: callback.codeVerifier
+        }).toString()
+      });
+      if (!response.ok) throw providerError(options.connectorId, response.status, "token_exchange");
+      const tokenBody = await safeJson(response);
+      const tokens = tokenSet(tokenBody);
+      const account = await googleIdentity(tokens.accessToken);
+      return { tokens, account };
+    },
+    async refresh(tokens: ConnectorTokenSet): Promise<ConnectorTokenSet> {
+      if (!tokens.refreshToken) throw providerError(options.connectorId, 401, "expired_token");
+      const response = await fetcher(options.tokenEndpoint, {
+        method: "POST",
+        headers: { accept: "application/json", "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: options.clientId,
+          grant_type: "refresh_token",
+          refresh_token: tokens.refreshToken
+        }).toString()
+      });
+      if (!response.ok) throw providerError(options.connectorId, response.status, "refresh_failed");
+      const refreshed = tokenSet(await safeJson(response));
+      // Google does not always re-issue a refresh token; keep the prior one.
+      return { ...refreshed, refreshToken: refreshed.refreshToken ?? tokens.refreshToken };
+    },
+    async revoke(tokens: ConnectorTokenSet): Promise<void> {
+      if (!options.revocationEndpoint) return;
+      const response = await fetcher(options.revocationEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          token: tokens.refreshToken ?? tokens.accessToken,
+          token_type_hint: tokens.refreshToken ? "refresh_token" : "access_token"
+        }).toString()
+      });
+      // Google returns 200 on success; a 404 means the token is already gone.
+      if (!response.ok && response.status !== 404) {
+        throw providerError(options.connectorId, response.status, "revocation_failed");
+      }
+    }
+  };
+
+  async function googleIdentity(accessToken: string): Promise<ConnectorAccountSummary> {
+    if (!options.identityEndpoint) {
+      // Without an identity endpoint we can't enrich the account; surface a
+      // minimal summary so the runtime still has a stable account id.
+      return { id: "google-account", displayName: "Google account" };
+    }
+    const response = await fetcher(options.identityEndpoint, {
+      headers: { accept: "application/json", authorization: `Bearer ${accessToken}` }
+    });
+    if (!response.ok) throw providerError(options.connectorId, response.status, "identity_failed");
+    return accountSummary(await safeJson(response));
+  }
+}
+
 function connectorTokenSet(value: JsonObject): ConnectorTokenSet {
   if (typeof value.accessToken !== "string") throw providerError("connector", 502, "malformed_token");
   return {

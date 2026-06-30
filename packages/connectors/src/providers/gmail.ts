@@ -1,4 +1,16 @@
 import type { ConnectorCapability, ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
+import {
+  ProviderHttpClient,
+  googleOAuthClient,
+  isObject,
+  page,
+  stringValue,
+  type FetchLike,
+  type JsonObject,
+  type OAuthClientOptions,
+  type ProviderRequest
+} from "./http";
 import {
   classifyConnectorError,
   prepareConnectorAction,
@@ -93,4 +105,143 @@ export function prepareGmailSend(payload: {
 
 export function mapGmailError(error: ProviderErrorLike) {
   return classifyConnectorError("gmail", error);
+}
+
+/**
+ * Live Gmail adapter. Public-PKCE auth (no broker), per `broker-contract.ts`.
+ * Reads map to the Gmail v1 REST surface and walk `nextPageToken` cursors.
+ *
+ * Sync is conservative by design: list reads return message stubs only
+ * (id/threadId), and single-message reads use `format=metadata` limited to a
+ * small set of envelope headers plus the snippet — never full message bodies
+ * or attachments. That keeps synced data to useful metadata while avoiding
+ * pulling and persisting private email content wholesale.
+ */
+export interface GmailAdapterOptions
+  extends Omit<OAuthClientOptions, "connectorId" | "authorizationEndpoint" | "tokenEndpoint" | "identityEndpoint" | "revocationEndpoint" | "scopes"> {
+  authBaseUrl?: string;
+  apiBaseUrl?: string;
+  fetch?: FetchLike;
+}
+
+export function createGmailAdapter(options: GmailAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
+  const authBase = new URL(options.authBaseUrl ?? "https://accounts.google.com/");
+  const auth = googleOAuthClient({
+    ...options,
+    connectorId: "gmail",
+    authorizationEndpoint: new URL("o/oauth2/v2/auth", authBase).toString(),
+    tokenEndpoint: new URL("o/oauth2/token", authBase).toString(),
+    identityEndpoint: new URL("oauth2/v3/userinfo", authBase).toString(),
+    revocationEndpoint: new URL("o/oauth2/revoke", authBase).toString(),
+    scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+  });
+  const http = new ProviderHttpClient(
+    "gmail",
+    options.apiBaseUrl ?? "https://gmail.googleapis.com/gmail/v1/users/me/",
+    options.fetch
+  );
+  return {
+    id: "gmail",
+    capabilities: GMAIL_CAPABILITIES,
+    ...auth,
+    async read(request, tokens) {
+      const mapped = gmailReadRequest(request);
+      const { data, response } = await http.request<unknown>(mapped, tokens);
+      const messages = isObject(data) && Array.isArray(data.messages)
+        ? data.messages.map(redactGmailObject)
+        : isObject(data)
+          ? [redactGmailObject(data)]
+          : [];
+      return page(messages, response, gmailNextCursor(data));
+    },
+    async write(request, tokens) {
+      const { data } = await http.request<unknown>(gmailWriteRequest(request), tokens);
+      if (!isObject(data)) throw new Error("Gmail returned a malformed write response.");
+      return redactGmailObject(data);
+    }
+  };
+}
+
+// Gmail metadata reads return envelope headers + snippet without the raw body.
+// We never request format=raw in synced reads, so full message content is not
+// pulled wholesale.
+
+function gmailReadRequest(request: ConnectorRequest): ProviderRequest {
+  const input = request.input;
+  switch (request.capability) {
+    case "gmail.search":
+      return {
+        path: "messages",
+        signal: request.signal,
+        query: {
+          q: optional(input, "query"),
+          maxResults: bounded(input.limit),
+          pageToken: request.cursor
+        }
+      };
+    case "gmail.read":
+      return {
+        path: `messages/${required(input, "messageId")}`,
+        signal: request.signal,
+        // format=metadata returns envelope headers + snippet without the raw
+        // body. We don't restrict metadataHeaders because the shared query
+        // type carries scalars only; the default header set is conservative.
+        query: { format: "metadata" }
+      };
+    default:
+      throw new Error(`Unsupported Gmail read capability: ${request.capability}`);
+  }
+}
+
+function gmailWriteRequest(request: ConnectorWriteRequest): ProviderRequest {
+  const input = request.input;
+  switch (request.capability) {
+    case "gmail.create-draft":
+      return { method: "POST", path: "drafts", body: draftBody(input), signal: request.signal };
+    case "gmail.send":
+      return { method: "POST", path: "messages/send", body: { raw: required(input, "raw") }, signal: request.signal };
+    default:
+      throw new Error(`Unsupported Gmail write capability: ${request.capability}`);
+  }
+}
+
+function draftBody(input: Record<string, unknown>): JsonObject {
+  const message: JsonObject = {};
+  const headers: string[] = [];
+  const to = optional(input, "to");
+  if (to) headers.push(`To: ${to}`);
+  const subject = optional(input, "subject");
+  if (subject) headers.push(`Subject: ${subject}`);
+  if (headers.length) message.raw = btoa(`${headers.join("\r\n")}\r\n\r\n${optional(input, "body") ?? ""}`);
+  return { message };
+}
+
+function redactGmailObject(value: JsonObject): JsonObject {
+  // Strip raw payload bytes and any history/credential-like fields so the
+  // knowledge layer only ever sees envelope metadata, not message bodies.
+  const copy = { ...value };
+  for (const key of ["raw", "payload", "historyId", "sizeEstimate", "internalDate", "token", "apiKey"]) {
+    delete copy[key];
+  }
+  return copy;
+}
+
+function gmailNextCursor(data: unknown): string | undefined {
+  const token = stringValue(data, "nextPageToken");
+  return token && token.length > 0 ? token : undefined;
+}
+
+function required(input: Record<string, unknown>, key: string): string {
+  const value = input[key];
+  if ((typeof value !== "string" && typeof value !== "number") || String(value).trim() === "") {
+    throw new Error(`Gmail capability requires ${key}.`);
+  }
+  return String(value);
+}
+function optional(input: Record<string, unknown>, key: string): string | undefined {
+  const value = input[key];
+  return typeof value === "string" && value ? value : undefined;
+}
+function bounded(value: unknown): number {
+  return typeof value === "number" ? Math.max(1, Math.min(100, Math.floor(value))) : 20;
 }
