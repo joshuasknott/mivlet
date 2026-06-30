@@ -866,9 +866,7 @@ function HistorySettingsView({
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          Inspectable record of actions Fable took on your behalf. Audit observes
-          actions; it never grants execution authority, and secrets are stripped
-          before anything is stored.
+          This history shows the actions Fable has performed, such as model calls, connector updates, or local file access. It is a record of past activity and does not control what can run. To protect your privacy, all passwords, keys, and personal message details are completely removed before any history is saved.
         </p>
       </div>
 

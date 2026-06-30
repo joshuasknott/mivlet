@@ -29,8 +29,8 @@ Expected local Windows build outputs:
 - `apps/desktop/src-tauri/target/release/bundle/nsis/Fable_0.1.0_x64-setup.exe`
 
 The core desktop workspace does not require a hosted Fable account. It can run
-with local files, drafts, approvals, memory controls, schedules, runtime
-snapshots, and API-key providers. API keys for OpenAI-compatible, Anthropic,
+with local files, drafts, approvals, memory controls, schedules, action history,
+runtime snapshots, and API-key providers. API keys for OpenAI-compatible, Anthropic,
 Gemini, xAI, and OpenRouter providers are handed to the Rust credential
 boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
@@ -54,7 +54,7 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 ## Known limits
 
-- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Schedules and workflows are temporarily excluded and persist as direct JSON files (`scheduler-store.json` and `workflow-runs.json`).
+- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules and workflows are temporarily excluded and persist as direct JSON files (`scheduler-store.json` and `workflow-runs.json`).
 - Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by raw JSON file storage.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.

@@ -33,11 +33,11 @@
 
 ## Controls
 
-- User-facing read-only, trusted, and full-with-approvals profiles mapped onto
+- User-facing read-only, trusted, and full with approvals profiles mapped onto
   the stable `read-only`, `trusted-scope`, and `full-access` protocol modes.
 - Consequence summaries before consequential actions.
-- Approve once, session, rule, modify, and deny outcomes.
-- Stronger confirmation for destructive, public, or financial actions.
+- Approve once, allow for this session, save as rule, modify, and deny outcomes.
+- Stronger confirmation (typing a phrase) for high-risk or critical actions (e.g., destructive, public, or financial tasks).
 - Memory provenance, freshness, permissions, and fact/inference separation.
 - Connector health and permission review before execution.
 - Explicit fixture states; missing provider configuration never appears connected.
@@ -54,7 +54,7 @@
 - Connector logs/errors redact authorization headers, cookies, tokens, raw payloads, email bodies, Slack messages, and imported Drive/Notion content.
 - OAuth uses high-entropy state and PKCE S256. Pending verifiers are stored in the OS credential store, callbacks require exact state, and plain HTTP redirects are restricted to literal loopback IP addresses.
 - The auth broker is required only for confidential-client or provider-installation flows. It has no model endpoint and no authority to execute connector actions.
-- General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, unconsumed permit.
+- General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, unconsumed permit. Saved rules only automate the UI approval step and do not bypass execution-boundary rechecks or permit validation.
 - Native tools recheck the registered permission/risk policy, active profile,
   and exact argument preview. File operations remain workspace-confined.
 - Connector writes always require a fresh per-action record containing connector, account, proposed action, target, human-readable preview, risk, result, timestamps, actor, request/run correlation, and normalized failure code. Preparation and execution fail closed when the captured profile is read-only or otherwise does not allow connector writes.
@@ -64,7 +64,7 @@
 - Adapters cannot downgrade writes to non-consequential operations: the shared connector runtime rejects any external write capability that is not declared consequential.
 - Native provider retries are bounded and limited to connection failures, rate limits, and server failures. Connector writes are not blindly replayed after an ambiguous provider success.
 - Agent runs and connector state persist only non-secret metadata. Interrupted runs are marked recoverable after restart; an old approval permit cannot be replayed.
-- Inspectable action history records every auditable category (model calls, connector actions, shell/tool actions, browser/web actions, approvals, schedules, and blocked policy decisions) at the execution boundary. Audit observes actions only; it never grants execution authority, and recording is best-effort so it can never weaken the approval or permit gate. Query columns are non-secret (category, service, action, status, risk/mode, correlation id, normalized failure code, safe summary, actor, time) and indexed for filtering without decryption; the encrypted payload holds only redacted safe detail. Tokens, API keys, raw provider secrets, auth handoff codes, full private file content, full email bodies, and environment-variable values are redacted at the storage boundary and never persisted.
+- Action history provides an inspectable local record of Fable's past actions (such as model calls, connector actions, shell commands, web queries, approvals, schedules, and policy blocks). This log is saved locally in the encrypted SQLite `audit_event` table. For security and privacy, all secrets, keys, credentials, full file/email content, and environment variables are redacted at the storage boundary and never persisted. Action history only observes activity; it does not grant execution authority and does not bypass any security checks.
 
 ## Remaining Security Work
 

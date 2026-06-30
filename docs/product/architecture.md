@@ -16,8 +16,8 @@ The UI talks to the runtime through typed protocol objects in `packages/protocol
 Core domains:
 
 - `Directive`: workspace-aware prompt starters that write into the universal composer.
-- `ApprovalRequest`: consequence-aware approval prompts with once, session, rule, modify, and deny outcomes.
-- `ApprovalGrant`: scoped approval grants, either temporary for the current session or persisted as standing rules.
+- `ApprovalRequest`: consequence-aware approval prompts with approve once, allow for this session, save as rule, modify, and deny outcomes.
+- `ApprovalGrant`: scoped approval grants, either temporary for the current session or saved as rules.
 - `ApprovalAuditEntry`: local audit history for user decisions and resumable follow-up.
 - `MemoryRecord`: facts, inferences, provenance, freshness, permissions, and user controls.
 - `MemoryPromotionRequest`: approval-gated conversion of trusted or untrusted knowledge sources into durable memory.
@@ -30,9 +30,9 @@ Implemented runtime commands cover approval resolution, one-time execution permi
 
 ### Action History (Audit)
 
-A single normalized action-history event covers every auditable category: model calls, connector actions, shell/tool actions, browser/web actions, approvals, schedules, and blocked policy decisions. Events are recorded at execution boundaries (native tool execution, connector prepare/execute, approval resolution, backend/model call lifecycle, web/browser fetch, scheduler queue/run/cancel/block), carry correlation ids where available, and expose status, risk/profile/mode, actor, a safe summary, and a normalized failure code.
+Action history is a local record of actions Fable has performed, such as model calls, connector updates, shell commands, web queries, approvals, schedules, and blocked policy decisions. It provides an inspectable activity log so you can review Fable's past work on your device. Events are recorded at execution boundaries and contain a status, risk level, actor, safe summary, and correlation ID.
 
-Storage is the encrypted SQLite `audit_event` table (schema v3). Query columns are non-secret and indexed (category, service, action, status, risk_level, mode, correlation_id, error_code, summary, actor, created_at); the encrypted payload holds only redacted safe detail. Tokens, API keys, raw provider secrets, auth handoff codes, full private file content, full email bodies, and environment-variable values are redacted at the storage boundary and never persisted. Audit observes actions only — it never grants execution authority, and recording is best-effort so it can never weaken the approval or permit gate. The `list_action_history` and `record_action_history` commands back the Settings → History inspectable surface, which shows type, summary, status, time, actor, and safe details with category filtering. The legacy `ApprovalAuditEntry` shape and `list_approval_audit` command remain compatible.
+For privacy and security, all credentials, API keys, private tokens, auth codes, full file or email contents, and environment variables are automatically redacted at the storage boundary and never persisted. The history is saved locally in the encrypted SQLite `audit_event` table. This audit system only observes activity; it does not grant execution authority and does not bypass any security checks. You can refresh and inspect this history inside Settings → History, with options to filter by category. The legacy `ApprovalAuditEntry` shape and `list_approval_audit` command remain compatible.
 
 ## Knowledge And Memory
 
@@ -74,13 +74,15 @@ Fable owns the native API agent loop while preserving provider-specific wire for
   include the active thread plus bounded user, assistant, and tool exchanges.
   Interrupted runs surface in chat and can be explicitly retried from the
   durable user prompt without replaying prior tool side effects.
-- Model tool calls are untrusted proposals. The shell obtains a user decision; Rust issues a request-fingerprinted, one-time execution permit and rechecks the tool policy, exact argument preview, workspace path confinement, and permit immediately before dispatch.
-- Workspace permission profiles are explicit policy, not UI-only state. The
-  public protocol keeps `read-only`, `trusted-scope`, and `full-access` values,
-  while the user-facing profiles are read-only, trusted, and full with
-  approvals. Read-only permits safe local, connector, cache, and web reads only;
-  trusted and full with approvals still keep consequential work behind approval
-  and native permit checks.
+- Model tool calls are untrusted proposals. The shell obtains a user decision; Rust issues a request-fingerprinted, one-time execution permit and rechecks the tool policy, exact argument preview, workspace path confinement, and permit immediately before dispatch. Saved rules automate the UI approval step but never bypass these native execution-boundary checks, which are re-verified for every action before execution.
+- Workspace permission profiles are explicit policy, not UI-only state. The public protocol maps `read-only`, `trusted-scope`, and `full-access` modes to plain user-facing profiles:
+  - **read-only**: Read local and connected sources only.
+  - **trusted**: Allow trusted work; ask for permission on sensitive or external actions.
+  - **full with approvals**: Propose broad actions, but ask for permission before running consequential work.
+- Consequential actions are categorized by risk level:
+  - **Low / Medium risk**: Actions that query services or read data. Fable asks before running to keep you in control.
+  - **High risk**: Actions that make local modifications or configuration changes. Fable checks with you before these run.
+  - **Critical risk**: Actions that cannot be undone, such as sending messages or deleting resources. Fable requires typing a confirmation phrase to run them.
 - Token usage comes from provider responses. Displayed cost is explicitly an estimate from Fable's maintained rate table when the provider does not return cost; Fable does not invent subscription quota or balance data.
 
 Native API credentials are BYOK. Codex app-server and ACP providers are
