@@ -61,6 +61,70 @@
   padding: 17px;
 }
 
+.approval-card--high,
+.approval-card--critical {
+  border-color: var(--caution-subtle);
+}
+
+.approval-card--critical {
+  box-shadow: 0 0 0 1px var(--caution-subtle);
+}
+
+.approval-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.approval-card__summary {
+  color: var(--ink);
+  font-size: var(--text-14);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.approval-card__why {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-13);
+  line-height: 1.4;
+}
+
+.approval-risk {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.approval-risk--high,
+.approval-risk--critical {
+  color: var(--ink);
+  background: var(--caution-subtle);
+  border-color: var(--caution-subtle);
+}
+
+.approval-risk--low {
+  background: var(--positive-subtle);
+  border-color: var(--line);
+}
+
+.approval-profile {
+  display: block;
+  color: var(--ink);
+  font-size: var(--text-13);
+  font-weight: 600;
+}
+
 .approval-card h3,
 .memory-row strong,
 .connector-card strong,
@@ -114,10 +178,50 @@
   color: var(--ink);
 }
 
+.approval-details dd small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  font-weight: 400;
+  line-height: 1.35;
+}
+
 .approval-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.approval-action--deny {
+  color: var(--destructive);
+  border-color: var(--destructive-subtle);
+}
+
+.approval-action--deny:hover {
+  color: var(--surface);
+  background: var(--destructive);
+  border-color: var(--destructive);
+}
+
+.approval-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.approval-modify-preview {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--ink);
+  background: var(--accent-subtle);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
+  font-size: var(--text-13);
+  line-height: 1.4;
+}
+
+.approval-edit__label {
+  display: block;
 }
 
 .approval-actions button,
@@ -249,6 +353,13 @@
   border: 1px solid var(--accent-line);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
+}
+
+.approval-grant--rule {
+  background: var(--surface-raised);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .empty-state {
