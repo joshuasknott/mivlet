@@ -47,8 +47,8 @@ There is no active socket or remote protocol. The feature is represented as a UI
 Schedules lease due items and run tasks. Their files include:
 - Rust scheduler engine, queue, and tick: [apps/desktop/src-tauri/src/scheduler.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/scheduler.rs)
 - TS scheduler client/trigger drivers: [packages/connectors/src/scheduler/](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/scheduler/)
-- Persistence path: Resolves to `scheduler-store.json` via [apps/desktop/src-tauri/src/paths.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/paths.rs#L72).
-- **SQLite note:** The database schema has a `schedule` table and a corresponding Rust repository `src/store/repos/schedule.rs`, but the scheduler runtime has **not** been migrated to SQLite and still writes directly to raw JSON.
+- Persistence: Schedules are persisted inside the encrypted SQLite database (`fable-vault.db`) in the `scheduled_job` and `scheduler_queue_entry` tables.
+- **SQLite note:** In Batch 9, the scheduler runtime was fully migrated from `scheduler-store.json` to the encrypted SQLite database. Legacy JSON files are preserved on disk for rollback compatibility but are no longer the production authority.
 
 ## 5. Departments / Pipelines
 

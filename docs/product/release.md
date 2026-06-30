@@ -54,8 +54,8 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 
 ## Known limits
 
-- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules and workflows are temporarily excluded and persist as direct JSON files (`scheduler-store.json` and `workflow-runs.json`).
-- Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by raw JSON file storage.
+- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules and workflows persist in the encrypted SQLite database (`fable-vault.db`) under schema v4.
+- Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
 - Native API providers use bounded dynamic model discovery. Live availability
