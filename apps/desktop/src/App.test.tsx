@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { BackendProvider, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
+import type { BackendProvider, ConnectorManifest, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { resolveDetailedStatus } from "./components/PluginPanel";
 import { listRuntimeConnectorStatuses } from "./runtime";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -1154,7 +1155,7 @@ describe("Fable home", () => {
     });
   });
 
-  it("renders connector details for all 9 states (connected, unconfigured, configuration-required, expired, revoked, syncing, failed, unavailable, permission-limited)", async () => {
+  it("renders connector details for connected, configured, unconfigured, expired, syncing, failed, unavailable, and permission-limited states", async () => {
     const customManifests = [
       {
         id: "slack",
@@ -1169,7 +1170,7 @@ describe("Fable home", () => {
       {
         id: "notion",
         name: "Notion",
-        status: "needs-auth",
+        status: "unconfigured",
         permissions: ["read user-selected pages"],
         healthSummary: "Provider configuration required",
         lastCheckedAt: "2026-06-27T09:00:00.000Z",
@@ -1188,6 +1189,17 @@ describe("Fable home", () => {
         health: { state: "error", summary: "Linear token expired; reconnect is required.", checkedAt: "2026-06-27T09:00:00.000Z" }
       },
       {
+        id: "google-calendar",
+        name: "Google Calendar",
+        status: "configured",
+        permissions: ["read selected records"],
+        healthSummary: "Ready to connect",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        authMode: "oauth-broker",
+        setupMessage: "Choose Connect to authorize this provider.",
+        health: { state: "unknown", summary: "Ready to connect", checkedAt: "2026-06-27T09:00:00.000Z" }
+      },
+      {
         id: "github",
         name: "GitHub",
         status: "connected",
@@ -1200,7 +1212,7 @@ describe("Fable home", () => {
       {
         id: "vercel",
         name: "Vercel",
-        status: "error",
+        status: "provider-error",
         permissions: ["read deployments"],
         healthSummary: "Egress failed",
         lastCheckedAt: "2026-06-27T09:00:00.000Z",
@@ -1249,6 +1261,12 @@ describe("Fable home", () => {
     expect(within(notionDetails).getByText("Configuration Required")).toBeInTheDocument();
     expect(within(notionDetails).getAllByText("Notion is not configured on the Fable auth broker.").length).toBeGreaterThan(0);
 
+    // Test configured (ready to authorize)
+    await user.click(screen.getByText("Google Calendar"));
+    const configuredDetails = screen.getByRole("article", { name: "Google Calendar details" });
+    expect(within(configuredDetails).getByText("Ready")).toBeInTheDocument();
+    expect(within(configuredDetails).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
+
     // Test Linear (expired)
     await user.click(screen.getByText("Linear"));
     expect(screen.getByRole("heading", { name: "Linear" })).toBeInTheDocument();
@@ -1284,6 +1302,28 @@ describe("Fable home", () => {
     const driveDetails = screen.getByRole("article", { name: "Google Drive details" });
     expect(within(driveDetails).getByText("Permission Limited")).toBeInTheDocument();
     expect(within(driveDetails).getAllByText("Google Drive is missing required scopes or permissions.").length).toBeGreaterThan(0);
+  });
+
+  it("preserves the revoked lifecycle state in connector UI copy", () => {
+    const revoked = {
+      id: "linear",
+      name: "Linear",
+      status: "revoked",
+      permissions: ["read workspace"],
+      healthSummary: "Connection revoked",
+      lastCheckedAt: "2026-06-27T09:00:00.000Z",
+      authMode: "oauth-broker",
+      health: {
+        state: "error",
+        summary: "Connection revoked",
+        checkedAt: "2026-06-27T09:00:00.000Z"
+      }
+    } satisfies ConnectorManifest;
+
+    expect(resolveDetailedStatus(revoked)).toMatchObject({
+      label: "Revoked",
+      className: "revoked"
+    });
   });
 });
 

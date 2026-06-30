@@ -36,9 +36,9 @@ Implemented API operations: workspace identity; accessible conversation list; su
 
 Both Notion and Slack connectors implement the following standard state behaviors:
 
-1. **Configured**: Successfully authenticated using the Cloudflare Workers auth broker and OAuth 2 flows. Secure access/refresh tokens are stored in the native OS keyring.
+1. **Configured**: The broker prerequisites are present and the connector is ready to authorize. Successful authorization stores access/refresh tokens in the native OS keyring and advances the connector to connected.
 2. **Unconfigured**: If the broker is not configured (returning HTTP 503 `configuration-required`), the connector fails closed.
-3. **Expired**: If token refresh fails (HTTP 401 `needs-auth`), a token lacks a refresh token, or the API request rejects with status 401 (e.g. `invalid_auth` or `token_revoked`), the state becomes `expired-auth`, prompting the user to reconnect.
+3. **Expired**: If token refresh fails (HTTP 401 `needs-auth`), a token lacks a refresh token, or the API request rejects with status 401 (e.g. `invalid_auth` or `token_revoked`), the adapter returns `expired-auth` so the runtime can prompt the user to reconnect.
 4. **Revoked**: Disconnecting the connector triggers token revocation on `/oauth/{provider}/revoke` handling both HTTP 200 (success) and HTTP 404 (idempotent success).
 5. **Refresh Failure**: If the broker refresh returns HTTP 500, it maps to `provider-unavailable` with `retryable: true`.
 6. **Missing Broker**: If the broker is offline (network error) or returns HTTP 404, it throws the failure or returns `not-found`.

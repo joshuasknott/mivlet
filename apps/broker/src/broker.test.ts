@@ -98,8 +98,8 @@ function providerFetch(provider: BrokerProviderId, overrides: Partial<{
 function identityFor(provider: BrokerProviderId): unknown {
   switch (provider) {
     case "github": return { id: 1234, login: "fable-user", name: "Fable User", avatar_url: "https://github.com/a.png" };
-    case "vercel": return { user: { uid: "vercel-uid", email: "a@vercel.com" } };
-    case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "a@linear.app", organization: { id: "org-1", name: "Fable Linear", urlKey: "fable" } } } };
+    case "vercel": return { user: { uid: "vercel-uid", email: "user@example.invalid" } };
+    case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "user@example.invalid", organization: { id: "org-1", name: "Fable Linear", urlKey: "fable" } } } };
     case "notion": return { id: "notion-bot", bot: { workspace_id: "ws-1", workspace_name: "Fable Notion" } };
     case "slack": return { ok: true, team_id: "T1", user_id: "U1", user: "Slack User", team: "Fable Slack", url: "https://x.slack.com" };
   }

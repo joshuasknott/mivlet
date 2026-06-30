@@ -78,19 +78,19 @@ describe("GitHub production adapter", () => {
         expect(body).toMatchObject({ contractVersion: 1, provider: "github", handoff: "ticket", state: "state-1" });
         return response({
           contractVersion: 1,
-          tokens: { accessToken: "gho_access", refreshToken: "gho_refresh", tokenType: "Bearer", scopes: ["repo", "read:user"] },
+          tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: ["repo", "read:user"] },
           account: { id: "123", displayName: "The Octocat", handle: "octocat" }
         });
       }
       if (target.pathname === "/oauth/github/refresh") {
-        expect(body).toMatchObject({ contractVersion: 1, provider: "github", refreshToken: "gho_refresh" });
+        expect(body).toMatchObject({ contractVersion: 1, provider: "github", refreshToken: "synthetic-refresh" });
         return response({
           contractVersion: 1,
-          tokens: { accessToken: "gho_new", tokenType: "Bearer", scopes: ["repo"] }
+          tokens: { accessToken: "synthetic-access-2", tokenType: "Bearer", scopes: ["repo"] }
         });
       }
       if (target.pathname === "/oauth/github/revoke") {
-        expect(body).toMatchObject({ contractVersion: 1, provider: "github", token: "gho_refresh", tokenTypeHint: "refresh_token" });
+        expect(body).toMatchObject({ contractVersion: 1, provider: "github", token: "synthetic-refresh", tokenTypeHint: "refresh_token" });
         return response({ contractVersion: 1, revoked: true });
       }
       return response({}, 404);
@@ -112,10 +112,10 @@ describe("GitHub production adapter", () => {
       codeVerifier: "verifier"
     });
     expect(completed.account).toMatchObject({ id: "123", handle: "octocat" });
-    expect(completed.tokens.accessToken).toBe("gho_access");
+    expect(completed.tokens.accessToken).toBe("synthetic-access");
 
     const refreshed = await adapter.refresh(completed.tokens);
-    expect(refreshed).toMatchObject({ accessToken: "gho_new", refreshToken: "gho_refresh" });
+    expect(refreshed).toMatchObject({ accessToken: "synthetic-access-2", refreshToken: "synthetic-refresh" });
     await adapter.revoke(refreshed);
   });
 
@@ -148,7 +148,7 @@ describe("GitHub production adapter", () => {
         retryable: false
       }, 401))
     });
-    await expect(expired.refresh({ ...tokens, refreshToken: "secret-refresh" }))
+    await expect(expired.refresh({ ...tokens, refreshToken: "synthetic-refresh" }))
       .rejects.toMatchObject({ code: "expired-auth", message: "Refresh token was rejected." });
   });
 

@@ -245,14 +245,14 @@ describe("Linear production adapter — broker auth contract", () => {
       const body = JSON.parse(String(init?.body));
       expect(body.contractVersion).toBe(1);
       expect(body.provider).toBe("linear");
-      if (path.endsWith("/handoff")) return response({ contractVersion: 1, tokens: { accessToken: "lin_access", refreshToken: "lin_refresh", tokenType: "Bearer", scopes: ["read"] }, account: { id: "lin-uid", displayName: "Linear User" } });
-      if (path.endsWith("/refresh")) return response({ contractVersion: 1, tokens: { accessToken: "lin_new", tokenType: "Bearer", scopes: ["read"] } });
+      if (path.endsWith("/handoff")) return response({ contractVersion: 1, tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: ["read"] }, account: { id: "lin-uid", displayName: "Linear User" } });
+      if (path.endsWith("/refresh")) return response({ contractVersion: 1, tokens: { accessToken: "synthetic-access-2", tokenType: "Bearer", scopes: ["read"] } });
       return response({ contractVersion: 1, revoked: true });
     });
     const adapter = createLinearAdapter({ ...common, fetch: fetcher });
     const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
-    expect(auth).toMatchObject({ tokens: { accessToken: "lin_access", refreshToken: "lin_refresh" }, account: { id: "lin-uid" } });
-    await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "lin_new", refreshToken: "lin_refresh" });
+    expect(auth).toMatchObject({ tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh" }, account: { id: "lin-uid" } });
+    await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "synthetic-access-2", refreshToken: "synthetic-refresh" });
     await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();
     expect(fetcher.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
       "/oauth/linear/handoff", "/oauth/linear/refresh", "/oauth/linear/revoke"
@@ -271,7 +271,7 @@ describe("Linear production adapter — broker auth contract", () => {
     await expect(unconfigured.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" })).rejects.toMatchObject({ code: "configuration-required", message: "Linear is not configured on this broker." });
 
     const expired = createLinearAdapter({ ...common, fetch: vi.fn(async () => response({ error: "needs-auth", message: "Refresh token was rejected.", retryable: false }, 401)) });
-    await expect(expired.refresh({ ...tokens, refreshToken: "secret-refresh" })).rejects.toMatchObject({ code: "expired-auth", message: "Refresh token was rejected." });
+    await expect(expired.refresh({ ...tokens, refreshToken: "synthetic-refresh" })).rejects.toMatchObject({ code: "expired-auth", message: "Refresh token was rejected." });
   });
 });
 

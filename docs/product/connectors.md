@@ -51,7 +51,7 @@ for approved create/cancel/promote/rollback actions; project/domain write is
 needed only for approved configuration changes. Environment-variable secret
 values must never be returned to the model, audit log, or fixture snapshots.
 
-Linear should request read scopes for workspace metadata, teams, projects,
+Linear requests read scopes for workspace metadata, teams, projects,
 cycles, issues, comments, labels, and users. Issue create/update and comment
 write scopes are needed only for approved issue/comment mutations. Status,
 assignment, project, cycle, and label changes are represented as issue updates
