@@ -16,6 +16,18 @@ use crate::models::{
 };
 use crate::paths::approval_audit_path;
 use crate::paths::{file_slug, memory_state_path, normalize_spaces, truncate_characters};
+use crate::store::repos::scope::{DataScope, DEFAULT_WORKSPACE_ID};
+
+fn data_scope(
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<DataScope, String> {
+    DataScope::new(
+        workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
+        project_id,
+    )
+    .map_err(|error| error.to_string())
+}
 
 fn default_memory_state() -> MemoryControlState {
     MemoryControlState {
@@ -250,8 +262,16 @@ pub(crate) fn promote_knowledge_source(
 }
 
 #[tauri::command]
-pub fn list_memory_state(app: tauri::AppHandle) -> Result<MemoryControlState, String> {
+pub fn list_memory_state(
+    app: tauri::AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<MemoryControlState, String> {
     let path = memory_state_path(&app)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    if let Some(state) = crate::store::read_workspace_document(&path, &scope)? {
+        return normalize_memory_state(state);
+    }
     read_memory_state(&path)
 }
 
@@ -259,9 +279,16 @@ pub fn list_memory_state(app: tauri::AppHandle) -> Result<MemoryControlState, St
 pub fn save_memory_state(
     app: tauri::AppHandle,
     state: MemoryControlState,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<MemoryControlState, String> {
     let path = memory_state_path(&app)?;
-    write_memory_state(&path, state)
+    let scope = data_scope(workspace_id, project_id)?;
+    let normalized = normalize_memory_state(state)?;
+    if crate::store::write_workspace_document(&path, &scope, &normalized)? {
+        return Ok(normalized);
+    }
+    write_memory_state(&path, normalized)
 }
 
 #[tauri::command]
@@ -273,10 +300,17 @@ pub fn export_memory_state(state: MemoryControlState) -> Result<String, String> 
 pub fn promote_knowledge_source_to_memory(
     app: tauri::AppHandle,
     request: MemoryPromotionRequest,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<MemoryPromotionResponse, String> {
     let response = promote_knowledge_source(request)?;
     let memory_path = memory_state_path(&app)?;
-    let state = write_memory_state(&memory_path, response.state)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    let state = if crate::store::write_workspace_document(&memory_path, &scope, &response.state)? {
+        response.state
+    } else {
+        write_memory_state(&memory_path, response.state)?
+    };
     let audit_path = approval_audit_path(&app)?;
     let audit_response = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
 

@@ -29,6 +29,18 @@ use crate::models::{
 use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
 };
+use crate::store::repos::scope::{DataScope, DEFAULT_WORKSPACE_ID};
+
+fn data_scope(
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<DataScope, String> {
+    DataScope::new(
+        workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
+        project_id,
+    )
+    .map_err(|error| error.to_string())
+}
 
 #[tauri::command]
 pub fn runtime_status() -> RuntimeStatus {
@@ -164,6 +176,8 @@ fn write_imported_knowledge_sources(
 pub fn save_imported_knowledge_sources(
     app: tauri::AppHandle,
     sources: Vec<LocalFileImport>,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<Vec<LocalFileImport>, String> {
     let mut normalized = Vec::new();
     for source in sources.into_iter().take(MAX_IMPORTED_KNOWLEDGE_SOURCES) {
@@ -175,7 +189,11 @@ pub fn save_imported_knowledge_sources(
             normalized.push(source);
         }
     }
-    write_imported_knowledge_sources(&imported_knowledge_path(&app)?, &normalized)?;
+    let path = imported_knowledge_path(&app)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    if !crate::store::write_workspace_document(&path, &scope, &normalized)? {
+        write_imported_knowledge_sources(&path, &normalized)?;
+    }
     Ok(normalized)
 }
 
@@ -597,8 +615,14 @@ pub(crate) fn write_runtime_snapshot(
 #[tauri::command]
 pub fn list_imported_knowledge_sources(
     app: tauri::AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<Vec<LocalFileImport>, String> {
     let path = imported_knowledge_path(&app)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    if let Some(sources) = crate::store::read_workspace_document(&path, &scope)? {
+        return Ok(sources);
+    }
     read_imported_knowledge_sources(&path)
 }
 
@@ -606,15 +630,33 @@ pub fn list_imported_knowledge_sources(
 pub fn import_local_knowledge_source(
     app: tauri::AppHandle,
     candidate: LocalTextFileCandidate,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<LocalFileImport, String> {
     let imported = import_local_text_file(candidate)?;
     let path = imported_knowledge_path(&app)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    if crate::store::try_global().is_some() {
+        let mut sources: Vec<LocalFileImport> =
+            crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();
+        sources = append_imported_knowledge_source(sources, imported.clone());
+        crate::store::write_workspace_document(&path, &scope, &sources)?;
+        return Ok(imported);
+    }
     persist_imported_knowledge_source(&path, imported)
 }
 
 #[tauri::command]
-pub fn load_runtime_snapshot(app: tauri::AppHandle) -> Result<Option<RuntimeSnapshot>, String> {
+pub fn load_runtime_snapshot(
+    app: tauri::AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Option<RuntimeSnapshot>, String> {
     let path = runtime_snapshot_path(&app)?;
+    let scope = data_scope(workspace_id, project_id)?;
+    if let Some(snapshot) = crate::store::read_workspace_document(&path, &scope)? {
+        return normalize_runtime_snapshot(snapshot).map(Some);
+    }
     read_runtime_snapshot(&path)
 }
 
@@ -622,9 +664,16 @@ pub fn load_runtime_snapshot(app: tauri::AppHandle) -> Result<Option<RuntimeSnap
 pub fn save_runtime_snapshot(
     app: tauri::AppHandle,
     snapshot: RuntimeSnapshot,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<RuntimeSnapshot, String> {
     let path = runtime_snapshot_path(&app)?;
-    write_runtime_snapshot(&path, snapshot)
+    let scope = data_scope(workspace_id, project_id)?;
+    let normalized = normalize_runtime_snapshot(snapshot)?;
+    if crate::store::write_workspace_document(&path, &scope, &normalized)? {
+        return Ok(normalized);
+    }
+    write_runtime_snapshot(&path, normalized)
 }
 
 #[cfg(test)]

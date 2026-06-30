@@ -988,6 +988,32 @@ export interface WorkspaceDirective {
   connectorIds: string[];
 }
 
+/** Stable local ownership identifiers. They are opaque and never recycled. */
+export type WorkspaceId = string;
+export type ProjectId = string;
+
+/** Explicit persistence scope. A missing project means workspace-owned data. */
+export interface DataScope {
+  workspaceId: WorkspaceId;
+  projectId?: ProjectId;
+}
+
+export interface WorkspaceRecord {
+  id: WorkspaceId;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectRecord {
+  id: ProjectId;
+  workspaceId: WorkspaceId;
+  title: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ThreadSummary {
   id: string;
   title: string;
@@ -1496,6 +1522,10 @@ export interface ScheduledExecutionRoute {
  * ScheduleEntry remains for the legacy snapshot; this is the engine's record.
  */
 export interface ScheduledJob {
+  /** Durable local owner. Missing legacy values are read as "default". */
+  workspaceId?: string;
+  /** Optional project owner; absent means the record belongs to the workspace. */
+  projectId?: string;
   /** Stable id. */
   id: string;
   /** Schema version of this job record. */
@@ -1560,6 +1590,8 @@ export type SchedulerJobStateLegacy = "queued" | "leased" | "done" | "dead";
 
 /** A queued execution entry in the durable scheduler queue. */
 export interface SchedulerQueueEntry {
+  workspaceId?: string;
+  projectId?: string;
   /** Job id this entry is for. */
   jobId: string;
   /** Workflow run id to create/use. */

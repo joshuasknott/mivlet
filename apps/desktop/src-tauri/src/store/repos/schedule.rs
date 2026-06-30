@@ -6,16 +6,29 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::models::SCHEDULE_WEEKDAYS;
+use crate::store::repos::scope::{ensure_record_owner, DataScope};
 use crate::store::repos::{open_json, seal_json};
 use crate::store::{Result, Store, StoreError};
 
 /// Upsert from a legacy snapshot `Schedule` JSON value.
 pub fn upsert_from_value(tx: &Connection, store: &Store, value: Value, now: &str) -> Result<()> {
+    upsert_from_value_scoped(tx, store, &DataScope::legacy_default(), value, now)
+}
+
+pub fn upsert_from_value_scoped(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    value: Value,
+    now: &str,
+) -> Result<()> {
+    scope.ensure_exists(tx)?;
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| StoreError::Invalid("Schedule is missing an id.".into()))?
         .to_string();
+    ensure_record_owner(tx, "schedule", &id, scope)?;
     let weekday = value
         .get("day")
         .and_then(Value::as_str)
@@ -47,15 +60,18 @@ pub fn upsert_from_value(tx: &Connection, store: &Store, value: Value, now: &str
         "name": value.get("name").and_then(Value::as_str).unwrap_or(""),
         "description": value.get("description").and_then(Value::as_str).unwrap_or(""),
     });
-    let sealed = seal_json(store, &payload, &aad(&id))?;
+    let sealed = seal_json(store, &payload, &aad(scope.workspace_id(), &id))?;
     tx.execute(
-        "INSERT INTO schedule (id, weekday, time, enabled, created_at, payload, payload_nonce)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO schedule (
+           id, workspace_id, project_id, weekday, time, enabled, created_at, payload, payload_nonce
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(id) DO UPDATE SET
            weekday=excluded.weekday, time=excluded.time, enabled=excluded.enabled,
            payload=excluded.payload, payload_nonce=excluded.payload_nonce;",
         rusqlite::params![
             id,
+            scope.workspace_id(),
+            scope.project_id(),
             weekday,
             time,
             enabled as i64,
@@ -69,6 +85,8 @@ pub fn upsert_from_value(tx: &Connection, store: &Store, value: Value, now: &str
 
 pub struct ScheduleRow {
     pub id: String,
+    pub workspace_id: String,
+    pub project_id: Option<String>,
     pub weekday: String,
     pub time: String,
     pub enabled: bool,
@@ -77,21 +95,33 @@ pub struct ScheduleRow {
 }
 
 pub fn get(tx: &Connection, store: &Store, id: &str) -> Result<Option<ScheduleRow>> {
+    get_scoped(tx, store, &DataScope::legacy_default(), id)
+}
+
+pub fn get_scoped(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    id: &str,
+) -> Result<Option<ScheduleRow>> {
+    scope.ensure_exists(tx)?;
     let row = tx
         .query_row(
-            "SELECT id, weekday, time, enabled, created_at, payload, payload_nonce
-             FROM schedule WHERE id = ?1;",
-            rusqlite::params![id],
+            "SELECT id, workspace_id, project_id, weekday, time, enabled, created_at, payload, payload_nonce
+             FROM schedule WHERE id = ?1 AND workspace_id=?2 AND project_id IS ?3;",
+            rusqlite::params![id, scope.workspace_id(), scope.project_id()],
             |row| {
                 Ok(SchedulePartial {
                     id: row.get(0)?,
-                    weekday: row.get(1)?,
-                    time: row.get(2)?,
-                    enabled: row.get::<_, i64>(3)? != 0,
-                    created_at: row.get(4)?,
+                    workspace_id: row.get(1)?,
+                    project_id: row.get(2)?,
+                    weekday: row.get(3)?,
+                    time: row.get(4)?,
+                    enabled: row.get::<_, i64>(5)? != 0,
+                    created_at: row.get(6)?,
                     sealed: Sealed {
-                        ciphertext: row.get(5)?,
-                        nonce: row.get(6)?,
+                        ciphertext: row.get(7)?,
+                        nonce: row.get(8)?,
                     },
                 })
             },
@@ -100,9 +130,11 @@ pub fn get(tx: &Connection, store: &Store, id: &str) -> Result<Option<ScheduleRo
     match row {
         None => Ok(None),
         Some(p) => {
-            let payload = open_json(store, &p.sealed, &aad(&p.id))?;
+            let payload = open_schedule_payload(store, &p)?;
             Ok(Some(ScheduleRow {
                 id: p.id,
+                workspace_id: p.workspace_id,
+                project_id: p.project_id,
                 weekday: p.weekday,
                 time: p.time,
                 enabled: p.enabled,
@@ -115,40 +147,69 @@ pub fn get(tx: &Connection, store: &Store, id: &str) -> Result<Option<ScheduleRo
 
 /// List enabled schedules (the scheduler's main query in Goal 8).
 pub fn list_enabled(tx: &Connection, store: &Store) -> Result<Vec<ScheduleRow>> {
-    list_where(tx, store, "enabled = 1")
+    list_enabled_scoped(tx, store, &DataScope::legacy_default())
+}
+
+pub fn list_enabled_scoped(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+) -> Result<Vec<ScheduleRow>> {
+    list_where(tx, store, scope, true)
 }
 
 /// List all schedules.
 pub fn list(tx: &Connection, store: &Store) -> Result<Vec<ScheduleRow>> {
-    list_where(tx, store, "1 = 1")
+    list_scoped(tx, store, &DataScope::legacy_default())
 }
 
-fn list_where(tx: &Connection, store: &Store, cond: &str) -> Result<Vec<ScheduleRow>> {
-    let sql = format!(
-        "SELECT id, weekday, time, enabled, created_at, payload, payload_nonce
-         FROM schedule WHERE {cond} ORDER BY created_at;"
-    );
+pub fn list_scoped(tx: &Connection, store: &Store, scope: &DataScope) -> Result<Vec<ScheduleRow>> {
+    list_where(tx, store, scope, false)
+}
+
+fn list_where(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    enabled_only: bool,
+) -> Result<Vec<ScheduleRow>> {
+    scope.ensure_exists(tx)?;
+    let sql = "SELECT id, workspace_id, project_id, weekday, time, enabled, created_at, payload, payload_nonce
+         FROM schedule
+         WHERE workspace_id=?1 AND project_id IS ?2 AND (?3=0 OR enabled=1)
+         ORDER BY created_at;";
     let mut stmt = tx.prepare(&sql)?;
     let partials: Vec<SchedulePartial> = stmt
-        .query_map([], |row| {
-            Ok(SchedulePartial {
-                id: row.get(0)?,
-                weekday: row.get(1)?,
-                time: row.get(2)?,
-                enabled: row.get::<_, i64>(3)? != 0,
-                created_at: row.get(4)?,
-                sealed: Sealed {
-                    ciphertext: row.get(5)?,
-                    nonce: row.get(6)?,
-                },
-            })
-        })?
+        .query_map(
+            rusqlite::params![
+                scope.workspace_id(),
+                scope.project_id(),
+                enabled_only as i64
+            ],
+            |row| {
+                Ok(SchedulePartial {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    project_id: row.get(2)?,
+                    weekday: row.get(3)?,
+                    time: row.get(4)?,
+                    enabled: row.get::<_, i64>(5)? != 0,
+                    created_at: row.get(6)?,
+                    sealed: Sealed {
+                        ciphertext: row.get(7)?,
+                        nonce: row.get(8)?,
+                    },
+                })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut out = Vec::with_capacity(partials.len());
     for p in partials {
-        let payload = open_json(store, &p.sealed, &aad(&p.id))?;
+        let payload = open_schedule_payload(store, &p)?;
         out.push(ScheduleRow {
             id: p.id,
+            workspace_id: p.workspace_id,
+            project_id: p.project_id,
             weekday: p.weekday,
             time: p.time,
             enabled: p.enabled,
@@ -161,12 +222,22 @@ fn list_where(tx: &Connection, store: &Store, cond: &str) -> Result<Vec<Schedule
 
 /// Delete a schedule by id.
 pub fn delete(tx: &Connection, id: &str) -> Result<()> {
-    tx.execute("DELETE FROM schedule WHERE id = ?1;", rusqlite::params![id])?;
+    delete_scoped(tx, &DataScope::legacy_default(), id)
+}
+
+pub fn delete_scoped(tx: &Connection, scope: &DataScope, id: &str) -> Result<()> {
+    scope.ensure_exists(tx)?;
+    tx.execute(
+        "DELETE FROM schedule WHERE id=?1 AND workspace_id=?2 AND project_id IS ?3;",
+        rusqlite::params![id, scope.workspace_id(), scope.project_id()],
+    )?;
     Ok(())
 }
 
 struct SchedulePartial {
     id: String,
+    workspace_id: String,
+    project_id: Option<String>,
     weekday: String,
     time: String,
     enabled: bool,
@@ -176,7 +247,26 @@ struct SchedulePartial {
 
 use crate::store::vault::Sealed;
 
-fn aad(id: &str) -> String {
+fn open_schedule_payload(store: &Store, partial: &SchedulePartial) -> Result<Value> {
+    open_json(
+        store,
+        &partial.sealed,
+        &aad(&partial.workspace_id, &partial.id),
+    )
+    .or_else(|error| {
+        if partial.workspace_id == crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
+            open_json(store, &partial.sealed, &legacy_aad(&partial.id))
+        } else {
+            Err(error)
+        }
+    })
+}
+
+fn aad(workspace_id: &str, id: &str) -> String {
+    format!("schedule:{workspace_id}:{id}")
+}
+
+fn legacy_aad(id: &str) -> String {
     format!("schedule:{id}")
 }
 

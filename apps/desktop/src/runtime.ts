@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+
+const DEFAULT_DATA_SCOPE = { workspaceId: "default", projectId: null } as const;
 import type { LocalTextFileCandidate } from "@fable/connectors";
 import type {
   ActionHistoryCategory,
@@ -119,7 +121,7 @@ export async function loadRuntimeImportedKnowledgeSources() {
   }
 
   try {
-    return await invoke<LocalFileImport[]>("list_imported_knowledge_sources");
+    return await invoke<LocalFileImport[]>("list_imported_knowledge_sources", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -131,7 +133,10 @@ export async function saveRuntimeImportedKnowledgeSources(sources: LocalFileImpo
   }
 
   try {
-    return await invoke<LocalFileImport[]>("save_imported_knowledge_sources", { sources });
+    return await invoke<LocalFileImport[]>("save_imported_knowledge_sources", {
+      sources,
+      ...DEFAULT_DATA_SCOPE
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -144,7 +149,8 @@ export async function importRuntimeLocalKnowledgeSource(candidate: LocalTextFile
 
   try {
     return await invoke<LocalFileImport>("import_local_knowledge_source", {
-      candidate
+      candidate,
+      ...DEFAULT_DATA_SCOPE
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -177,7 +183,7 @@ export async function loadRuntimeMemoryState() {
   }
 
   try {
-    return await invoke<MemoryControlState>("list_memory_state");
+    return await invoke<MemoryControlState>("list_memory_state", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -189,7 +195,7 @@ export async function loadRuntimeSnapshot() {
   }
 
   try {
-    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot");
+    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -202,7 +208,8 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
 
   try {
     return await invoke<RuntimeSnapshot>("save_runtime_snapshot", {
-      snapshot
+      snapshot,
+      ...DEFAULT_DATA_SCOPE
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -243,7 +250,8 @@ export async function saveRuntimeMemoryState(state: MemoryControlState) {
 
   try {
     return await invoke<MemoryControlState>("save_memory_state", {
-      state
+      state,
+      ...DEFAULT_DATA_SCOPE
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -271,7 +279,8 @@ export async function promoteRuntimeKnowledgeSourceToMemory(request: MemoryPromo
 
   try {
     return await invoke<MemoryPromotionResponse>("promote_knowledge_source_to_memory", {
-      request
+      request,
+      ...DEFAULT_DATA_SCOPE
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -357,7 +366,7 @@ export async function listRuntimeConnectorStatuses() {
     return null;
   }
   try {
-    return await invoke<ConnectorManifest[]>("list_connector_statuses");
+    return await invoke<ConnectorManifest[]>("list_connector_statuses", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -368,7 +377,10 @@ export async function startRuntimeConnectorAuth(request: ConnectorAuthRequest) {
     return null;
   }
   try {
-    return await invoke<ConnectorAuthResult>("start_connector_auth", { request });
+    return await invoke<ConnectorAuthResult>("start_connector_auth", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -379,7 +391,10 @@ export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest
     return null;
   }
   try {
-    return await invoke<ConnectorAuthResult>("complete_connector_auth", { request });
+    return await invoke<ConnectorAuthResult>("complete_connector_auth", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -397,7 +412,10 @@ export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) 
     return null;
   }
   try {
-    return await invoke<ConnectorAuthResult>("begin_connector_oauth", { request });
+    return await invoke<ConnectorAuthResult>("begin_connector_oauth", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -433,7 +451,10 @@ export async function clearRuntimeConnectorAuth(connectorId: string) {
     return null;
   }
   try {
-    return await invoke<ConnectorManifest>("clear_connector_auth", { connectorId });
+    return await invoke<ConnectorManifest>("clear_connector_auth", {
+      connectorId,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -444,7 +465,10 @@ export async function listRuntimeConnectorAccounts(connectorId: string) {
     return null;
   }
   try {
-    return await invoke<ConnectorAccountOption[]>("list_connector_accounts", { connectorId });
+    return await invoke<ConnectorAccountOption[]>("list_connector_accounts", {
+      connectorId,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -457,7 +481,8 @@ export async function switchRuntimeConnectorAccount(connectorId: string, account
   try {
     return await invoke<ConnectorManifest>("switch_connector_account", {
       connectorId,
-      accountId
+      accountId,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -469,7 +494,10 @@ export async function refreshRuntimeConnectorHealth(connectorId: string) {
     return null;
   }
   try {
-    return await invoke<ConnectorManifest>("refresh_connector_health", { connectorId });
+    return await invoke<ConnectorManifest>("refresh_connector_health", {
+      connectorId,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -502,7 +530,10 @@ export async function searchRuntimeConnector(request: ConnectorSearchRequest) {
     return null;
   }
   try {
-    return await invoke<ConnectorSearchResult>("search_connector", { request });
+    return await invoke<ConnectorSearchResult>("search_connector", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -513,7 +544,10 @@ export async function importRuntimeConnectorItem(request: ConnectorImportRequest
     return null;
   }
   try {
-    return await invoke<ConnectorImportResult>("import_connector_item", { request });
+    return await invoke<ConnectorImportResult>("import_connector_item", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -524,7 +558,10 @@ export async function prepareRuntimeConnectorAction(request: ConnectorActionRequ
     return null;
   }
   try {
-    return await invoke<ConnectorActionRequest>("prepare_connector_action", { request });
+    return await invoke<ConnectorActionRequest>("prepare_connector_action", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -538,7 +575,10 @@ export async function executeRuntimeConnectorAction(request: {
     return null;
   }
   try {
-    return await invoke<ConnectorActionResult>("execute_approved_connector_action", { request });
+    return await invoke<ConnectorActionResult>("execute_approved_connector_action", {
+      request,
+      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -994,7 +1034,7 @@ export async function executeRuntimeToolCall(request: RuntimeToolRequest) {
 export async function listRuntimeSchedulerJobs() {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<ScheduledJob[]>("list_scheduler_jobs");
+    return await invoke<ScheduledJob[]>("list_scheduler_jobs", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -1003,7 +1043,7 @@ export async function listRuntimeSchedulerJobs() {
 export async function listRuntimeSchedulerQueue() {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<SchedulerQueueEntry[]>("list_scheduler_queue");
+    return await invoke<SchedulerQueueEntry[]>("list_scheduler_queue", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -1012,7 +1052,7 @@ export async function listRuntimeSchedulerQueue() {
 export async function saveRuntimeScheduledJob(job: ScheduledJob) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<ScheduledJob>("save_scheduled_job", { job });
+    return await invoke<ScheduledJob>("save_scheduled_job", { job, ...DEFAULT_DATA_SCOPE });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1021,7 +1061,7 @@ export async function saveRuntimeScheduledJob(job: ScheduledJob) {
 export async function deleteRuntimeScheduledJob(jobId: string) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<void>("delete_scheduled_job", { jobId });
+    return await invoke<void>("delete_scheduled_job", { jobId, ...DEFAULT_DATA_SCOPE });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1030,7 +1070,7 @@ export async function deleteRuntimeScheduledJob(jobId: string) {
 export async function setRuntimeJobStatus(jobId: string, status: ScheduledJobStatus) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<void>("set_job_status", { jobId, status });
+    return await invoke<void>("set_job_status", { jobId, status, ...DEFAULT_DATA_SCOPE });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1042,7 +1082,8 @@ export async function enqueueRuntimeJobRun(jobId: string, runId: string, schedul
     return await invoke<SchedulerQueueEntry>("enqueue_job_run", {
       jobId,
       runId,
-      scheduledAt
+      scheduledAt,
+      ...DEFAULT_DATA_SCOPE
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1052,7 +1093,7 @@ export async function enqueueRuntimeJobRun(jobId: string, runId: string, schedul
 export async function reportRuntimeJobAttempt(runId: string, attempt: JobAttempt) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<void>("report_job_attempt", { runId, attempt });
+    return await invoke<void>("report_job_attempt", { runId, attempt, ...DEFAULT_DATA_SCOPE });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1062,7 +1103,11 @@ export async function reportRuntimeJobAttempt(runId: string, attempt: JobAttempt
 export async function renewRuntimeJobLease(runId: string, leaseToken: string) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<boolean>("renew_job_lease", { runId, leaseToken });
+    return await invoke<boolean>("renew_job_lease", {
+      runId,
+      leaseToken,
+      ...DEFAULT_DATA_SCOPE
+    });
   } catch {
     return null;
   }
@@ -1072,7 +1117,7 @@ export async function renewRuntimeJobLease(runId: string, leaseToken: string) {
 export async function requeueRuntimeBlockedJobRun(runId: string) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<boolean>("requeue_blocked_job_run", { runId });
+    return await invoke<boolean>("requeue_blocked_job_run", { runId, ...DEFAULT_DATA_SCOPE });
   } catch {
     return null;
   }
@@ -1082,7 +1127,7 @@ export async function requeueRuntimeBlockedJobRun(runId: string) {
 export async function cancelRuntimeJobRun(runId: string) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<boolean>("cancel_job_run", { runId });
+    return await invoke<boolean>("cancel_job_run", { runId, ...DEFAULT_DATA_SCOPE });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1097,6 +1142,8 @@ export async function cancelRuntimeJobRun(runId: string) {
  */
 export async function listenRuntimeSchedulerRunRequest(
   onRun: (event: {
+    workspaceId?: string;
+    projectId?: string;
     jobId: string;
     runId: string;
     scheduledAt: string;
@@ -1107,12 +1154,22 @@ export async function listenRuntimeSchedulerRunRequest(
   if (!hasTauriRuntime()) return null;
   try {
     const unlisten = await listen<{
+      workspaceId?: string;
+      projectId?: string;
       jobId: string;
       runId: string;
       scheduledAt: string;
       leaseToken?: string;
       execution?: ScheduledExecutionRoute;
-    }>("fable://scheduler/run-request", (event) => onRun(event.payload));
+    }>("fable://scheduler/run-request", (event) => {
+      const workspaceId = event.payload.workspaceId ?? "default";
+      if (
+        workspaceId === DEFAULT_DATA_SCOPE.workspaceId &&
+        (event.payload.projectId ?? null) === DEFAULT_DATA_SCOPE.projectId
+      ) {
+        onRun(event.payload);
+      }
+    });
     return unlisten;
   } catch {
     return null;
@@ -1182,7 +1239,10 @@ export async function saveRuntimeWorkflowRun(run: WorkflowRun) {
   if (!hasTauriRuntime()) return null;
   const record = toWorkflowRunWire(run);
   try {
-    return await invoke<WorkflowRunRecordWire>("save_workflow_run", { run: record });
+    return await invoke<WorkflowRunRecordWire>("save_workflow_run", {
+      run: record,
+      ...DEFAULT_DATA_SCOPE
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1191,7 +1251,10 @@ export async function saveRuntimeWorkflowRun(run: WorkflowRun) {
 export async function saveRuntimeWorkflowDefinition(definition: WorkflowDefinition) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<WorkflowDefinition>("save_workflow_definition", { definition });
+    return await invoke<WorkflowDefinition>("save_workflow_definition", {
+      definition,
+      ...DEFAULT_DATA_SCOPE
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1200,7 +1263,7 @@ export async function saveRuntimeWorkflowDefinition(definition: WorkflowDefiniti
 export async function listRuntimeWorkflowDefinitions() {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<WorkflowDefinition[]>("list_workflow_definitions");
+    return await invoke<WorkflowDefinition[]>("list_workflow_definitions", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -1209,7 +1272,7 @@ export async function listRuntimeWorkflowDefinitions() {
 export async function listRuntimeWorkflowRuns() {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs");
+    return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs", DEFAULT_DATA_SCOPE);
   } catch {
     return null;
   }
@@ -1219,7 +1282,8 @@ export async function listRuntimeWorkflowRunsForDefinition(definitionId: string)
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs_for_definition", {
-      definitionId
+      definitionId,
+      ...DEFAULT_DATA_SCOPE
     });
   } catch {
     return null;

@@ -5,16 +5,29 @@ use rusqlite::Connection;
 use serde_json::Value;
 
 use crate::models::MEMORY_KINDS;
+use crate::store::repos::scope::{ensure_record_owner, DataScope};
 use crate::store::repos::{open_json, seal_json};
 use crate::store::{Result, Store, StoreError};
 
 /// Upsert from a legacy `MemoryRecord` JSON value.
 pub fn upsert_from_value(tx: &Connection, store: &Store, value: Value, now: &str) -> Result<()> {
+    upsert_from_value_scoped(tx, store, &DataScope::legacy_default(), value, now)
+}
+
+pub fn upsert_from_value_scoped(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    value: Value,
+    now: &str,
+) -> Result<()> {
+    scope.ensure_exists(tx)?;
     let id = value
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| StoreError::Invalid("Memory record is missing an id.".into()))?
         .to_string();
+    ensure_record_owner(tx, "memory_record", &id, scope)?;
     let kind = value
         .get("kind")
         .and_then(Value::as_str)
@@ -44,15 +57,18 @@ pub fn upsert_from_value(tx: &Connection, store: &Store, value: Value, now: &str
         "source": value.get("source").and_then(Value::as_str).unwrap_or(""),
         "freshness": value.get("freshness").and_then(Value::as_str).unwrap_or(""),
     });
-    let sealed = seal_json(store, &payload, &aad(&id))?;
+    let sealed = seal_json(store, &payload, &aad(scope.workspace_id(), &id))?;
     tx.execute(
-        "INSERT INTO memory_record (id, kind, pinned, approved, created_at, payload, payload_nonce)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO memory_record (
+           id, workspace_id, project_id, kind, pinned, approved, created_at, payload, payload_nonce
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(id) DO UPDATE SET
            kind=excluded.kind, pinned=excluded.pinned, approved=excluded.approved,
            payload=excluded.payload, payload_nonce=excluded.payload_nonce;",
         rusqlite::params![
             id,
+            scope.workspace_id(),
+            scope.project_id(),
             kind,
             pinned as i64,
             approved as i64,
@@ -66,6 +82,8 @@ pub fn upsert_from_value(tx: &Connection, store: &Store, value: Value, now: &str
 
 pub struct MemoryRow {
     pub id: String,
+    pub workspace_id: String,
+    pub project_id: Option<String>,
     pub kind: String,
     pub pinned: bool,
     pub approved: bool,
@@ -74,30 +92,49 @@ pub struct MemoryRow {
 }
 
 pub fn list(tx: &Connection, store: &Store) -> Result<Vec<MemoryRow>> {
+    list_scoped(tx, store, &DataScope::legacy_default())
+}
+
+pub fn list_scoped(tx: &Connection, store: &Store, scope: &DataScope) -> Result<Vec<MemoryRow>> {
+    scope.ensure_exists(tx)?;
     let mut stmt = tx.prepare(
-        "SELECT id, kind, pinned, approved, created_at, payload, payload_nonce
-         FROM memory_record ORDER BY created_at;",
+        "SELECT id, workspace_id, project_id, kind, pinned, approved, created_at, payload, payload_nonce
+         FROM memory_record WHERE workspace_id=?1 AND project_id IS ?2 ORDER BY created_at;",
     )?;
     let partials: Vec<Partial> = stmt
-        .query_map([], |row| {
-            Ok(Partial {
-                id: row.get(0)?,
-                kind: row.get(1)?,
-                pinned: row.get::<_, i64>(2)? != 0,
-                approved: row.get::<_, i64>(3)? != 0,
-                created_at: row.get(4)?,
-                sealed: Sealed {
-                    ciphertext: row.get(5)?,
-                    nonce: row.get(6)?,
-                },
-            })
-        })?
+        .query_map(
+            rusqlite::params![scope.workspace_id(), scope.project_id()],
+            |row| {
+                Ok(Partial {
+                    id: row.get(0)?,
+                    workspace_id: row.get(1)?,
+                    project_id: row.get(2)?,
+                    kind: row.get(3)?,
+                    pinned: row.get::<_, i64>(4)? != 0,
+                    approved: row.get::<_, i64>(5)? != 0,
+                    created_at: row.get(6)?,
+                    sealed: Sealed {
+                        ciphertext: row.get(7)?,
+                        nonce: row.get(8)?,
+                    },
+                })
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut out = Vec::with_capacity(partials.len());
     for p in partials {
-        let payload = open_json(store, &p.sealed, &aad(&p.id))?;
+        let payload =
+            open_json(store, &p.sealed, &aad(&p.workspace_id, &p.id)).or_else(|error| {
+                if p.workspace_id == crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
+                    open_json(store, &p.sealed, &legacy_aad(&p.id))
+                } else {
+                    Err(error)
+                }
+            })?;
         out.push(MemoryRow {
             id: p.id,
+            workspace_id: p.workspace_id,
+            project_id: p.project_id,
             kind: p.kind,
             pinned: p.pinned,
             approved: p.approved,
@@ -110,15 +147,23 @@ pub fn list(tx: &Connection, store: &Store) -> Result<Vec<MemoryRow>> {
 
 /// Delete a memory record by id.
 pub fn delete(tx: &Connection, id: &str) -> Result<()> {
+    delete_scoped(tx, &DataScope::legacy_default(), id)
+}
+
+pub fn delete_scoped(tx: &Connection, scope: &DataScope, id: &str) -> Result<()> {
+    scope.ensure_exists(tx)?;
     tx.execute(
-        "DELETE FROM memory_record WHERE id = ?1;",
-        rusqlite::params![id],
+        "DELETE FROM memory_record
+         WHERE id = ?1 AND workspace_id = ?2 AND project_id IS ?3;",
+        rusqlite::params![id, scope.workspace_id(), scope.project_id()],
     )?;
     Ok(())
 }
 
 struct Partial {
     id: String,
+    workspace_id: String,
+    project_id: Option<String>,
     kind: String,
     pinned: bool,
     approved: bool,
@@ -128,6 +173,10 @@ struct Partial {
 
 use crate::store::vault::Sealed;
 
-fn aad(id: &str) -> String {
+fn aad(workspace_id: &str, id: &str) -> String {
+    format!("memory_record:{workspace_id}:{id}")
+}
+
+fn legacy_aad(id: &str) -> String {
     format!("memory_record:{id}")
 }

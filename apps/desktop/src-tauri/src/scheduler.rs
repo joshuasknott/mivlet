@@ -41,8 +41,22 @@ use crate::models::{
     SCHEDULED_JOB_STATUSES, SCHEDULER_LEASE_MS, SCHEDULER_STORE_VERSION,
 };
 use crate::paths::{normalize_spaces, scheduler_store_path, truncate_characters};
+use crate::store::repos::scope::{normalize_id, DataScope, DEFAULT_WORKSPACE_ID};
 use chrono::{DateTime, SecondsFormat, Utc};
 use tauri::{AppHandle, Emitter, Manager};
+
+fn command_scope(
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<DataScope, String> {
+    let scope = DataScope::new(
+        workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
+        project_id,
+    )
+    .map_err(|error| error.to_string())?;
+    let _ = crate::store::with_store(|store| store.with_conn(|conn| scope.ensure_exists(conn)))?;
+    Ok(scope)
+}
 
 /// Process-global scheduler state held behind Tauri's managed state.
 /// Loaded once at setup; the tick mutates + persists it under the mutex.
@@ -165,6 +179,12 @@ fn ensure_route_allows(route: &ScheduledExecutionRoute, effect: &str) -> Result<
 }
 
 fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
+    job.workspace_id =
+        normalize_id(&job.workspace_id, "Workspace").map_err(|error| error.to_string())?;
+    job.project_id = job
+        .project_id
+        .map(|id| normalize_id(&id, "Project").map_err(|error| error.to_string()))
+        .transpose()?;
     job.id = truncate_characters(&normalize_spaces(&job.id), 160);
     job.name = truncate_characters(&normalize_spaces(&job.name), 200);
     job.description = truncate_characters(&normalize_spaces(&job.description), 500);
@@ -215,7 +235,8 @@ fn normalize_attempt(mut attempt: JobAttempt) -> Result<JobAttempt, String> {
     if let Some(error) = attempt.error.take() {
         // Errors are persisted; cap them and strip nothing else here (no secrets
         // should ever reach this path — adapters classify auth as a code).
-        attempt.error = Some(truncate_characters(&normalize_spaces(&error), 500));
+        let redacted = crate::connectors::redact_connector_text(&error);
+        attempt.error = Some(truncate_characters(&normalize_spaces(&redacted), 500));
     }
     if attempt.run_id.is_empty() || attempt.started_at.is_empty() {
         return Err("Job attempt needs runId and startedAt.".to_string());
@@ -290,6 +311,8 @@ fn emit_run_request(app: &AppHandle, entry: &SchedulerQueueEntry) {
             "runId": entry.run_id,
             "scheduledAt": entry.scheduled_at,
             "leaseToken": entry.lease_token,
+            "workspaceId": entry.workspace_id,
+            "projectId": entry.project_id,
             "execution": execution,
         }),
     );
@@ -305,22 +328,56 @@ fn failed_count(entry: &SchedulerQueueEntry) -> u32 {
 }
 
 #[tauri::command]
-pub fn list_scheduler_jobs(app: AppHandle) -> Result<Vec<ScheduledJob>, String> {
+pub fn list_scheduler_jobs(
+    app: AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<ScheduledJob>, String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let path = scheduler_store_path(&app)?;
-    Ok(read_store(&path)?.jobs)
+    Ok(read_store(&path)?
+        .jobs
+        .into_iter()
+        .filter(|job| {
+            job.workspace_id == scope.workspace_id()
+                && job.project_id.as_deref() == scope.project_id()
+        })
+        .collect())
 }
 
 #[tauri::command]
-pub fn list_scheduler_queue(app: AppHandle) -> Result<Vec<SchedulerQueueEntry>, String> {
+pub fn list_scheduler_queue(
+    app: AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<SchedulerQueueEntry>, String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let path = scheduler_store_path(&app)?;
-    Ok(read_store(&path)?.queue)
+    Ok(read_store(&path)?
+        .queue
+        .into_iter()
+        .filter(|entry| {
+            entry.workspace_id == scope.workspace_id()
+                && entry.project_id.as_deref() == scope.project_id()
+        })
+        .collect())
 }
 
 #[tauri::command]
-pub fn save_scheduled_job(app: AppHandle, job: ScheduledJob) -> Result<ScheduledJob, String> {
+pub fn save_scheduled_job(
+    app: AppHandle,
+    mut job: ScheduledJob,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<ScheduledJob, String> {
+    let scope = command_scope(workspace_id, project_id)?;
+    job.workspace_id = scope.workspace_id().to_string();
+    job.project_id = scope.project_id().map(str::to_string);
     let job = normalize_job(job)?;
     persist(&app, |store| {
-        store.jobs.retain(|j| j.id != job.id);
+        store.jobs.retain(|j| {
+            j.id != job.id || j.workspace_id != job.workspace_id || j.project_id != job.project_id
+        });
         store.jobs.insert(0, job.clone());
         store.jobs.truncate(MAX_SCHEDULED_JOBS);
     })?;
@@ -328,17 +385,38 @@ pub fn save_scheduled_job(app: AppHandle, job: ScheduledJob) -> Result<Scheduled
 }
 
 #[tauri::command]
-pub fn delete_scheduled_job(app: AppHandle, job_id: String) -> Result<(), String> {
+pub fn delete_scheduled_job(
+    app: AppHandle,
+    job_id: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<(), String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let job_id = normalize_spaces(&job_id);
     persist(&app, |store| {
-        store.jobs.retain(|j| j.id != job_id);
+        store.jobs.retain(|j| {
+            j.id != job_id
+                || j.workspace_id != scope.workspace_id()
+                || j.project_id.as_deref() != scope.project_id()
+        });
         // Also drop queued entries for the deleted job so it can no longer fire.
-        store.queue.retain(|e| e.job_id != job_id);
+        store.queue.retain(|e| {
+            e.job_id != job_id
+                || e.workspace_id != scope.workspace_id()
+                || e.project_id.as_deref() != scope.project_id()
+        });
     })
 }
 
 #[tauri::command]
-pub fn set_job_status(app: AppHandle, job_id: String, status: String) -> Result<(), String> {
+pub fn set_job_status(
+    app: AppHandle,
+    job_id: String,
+    status: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<(), String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let status = normalize_spaces(&status);
     if !SCHEDULED_JOB_STATUSES.contains(&status.as_str()) {
         return Err("Unknown job status.".to_string());
@@ -346,13 +424,20 @@ pub fn set_job_status(app: AppHandle, job_id: String, status: String) -> Result<
     let job_id_norm = normalize_spaces(&job_id);
     persist(&app, |store| {
         for job in &mut store.jobs {
-            if job.id == job_id_norm {
+            if job.id == job_id_norm
+                && job.workspace_id == scope.workspace_id()
+                && job.project_id.as_deref() == scope.project_id()
+            {
                 job.status = status.clone();
             }
         }
         // A paused/deleted job drops its queued entries so it stops firing.
         if status != "active" {
-            store.queue.retain(|e| e.job_id != job_id_norm);
+            store.queue.retain(|e| {
+                e.job_id != job_id_norm
+                    || e.workspace_id != scope.workspace_id()
+                    || e.project_id.as_deref() != scope.project_id()
+            });
         }
     })
 }
@@ -365,11 +450,14 @@ pub fn enqueue_job_run(
     job_id: String,
     run_id: String,
     scheduled_at: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<SchedulerQueueEntry, String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let job_id = normalize_spaces(&job_id);
     let run_id = truncate_characters(&normalize_spaces(&run_id), 160);
     let scheduled_at = canonical_timestamp(&scheduled_at)?;
-    let key = format!("{}:{}", job_id, scheduled_at);
+    let key = format!("{}:{}:{}", scope.workspace_id(), job_id, scheduled_at);
     if job_id.is_empty() || run_id.is_empty() || scheduled_at.is_empty() {
         return Err("Enqueue needs jobId, runId, and scheduledAt.".to_string());
     }
@@ -384,7 +472,11 @@ pub fn enqueue_job_run(
         let execution = store
             .jobs
             .iter()
-            .find(|job| job.id == job_id)
+            .find(|job| {
+                job.id == job_id
+                    && job.workspace_id == scope.workspace_id()
+                    && job.project_id.as_deref() == scope.project_id()
+            })
             .and_then(|job| job.execution.clone());
         if let Some(route) = execution.as_ref() {
             if ensure_route_allows(route, "schedule-execution").is_err() {
@@ -392,6 +484,8 @@ pub fn enqueue_job_run(
             }
         }
         let entry = SchedulerQueueEntry {
+            workspace_id: scope.workspace_id().to_string(),
+            project_id: scope.project_id().map(str::to_string),
             job_id: job_id.clone(),
             run_id: run_id.clone(),
             scheduled_at: scheduled_at.clone(),
@@ -436,14 +530,20 @@ pub fn report_job_attempt(
     app: AppHandle,
     run_id: String,
     attempt: JobAttempt,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<(), String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let attempt = normalize_attempt(attempt)?;
     let run_id = normalize_spaces(&run_id);
     let max_retries = crate::models::SCHEDULER_MAX_RETRIES;
     let mut remembered: Option<String> = None;
     persist(&app, |store| {
         for entry in &mut store.queue {
-            if entry.run_id != run_id {
+            if entry.run_id != run_id
+                || entry.workspace_id != scope.workspace_id()
+                || entry.project_id.as_deref() != scope.project_id()
+            {
                 continue;
             }
             // Fencing: a non-empty token on the attempt must match the entry.
@@ -539,13 +639,19 @@ pub fn renew_job_lease(
     app: AppHandle,
     run_id: String,
     lease_token: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
 ) -> Result<bool, String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let run_id = normalize_spaces(&run_id);
     let lease_token = normalize_spaces(&lease_token);
     let mut renewed = false;
     persist(&app, |store| {
         for entry in &mut store.queue {
-            if entry.run_id != run_id {
+            if entry.run_id != run_id
+                || entry.workspace_id != scope.workspace_id()
+                || entry.project_id.as_deref() != scope.project_id()
+            {
                 continue;
             }
             // Fencing: the caller's token must match the entry's current lease.
@@ -565,12 +671,22 @@ pub fn renew_job_lease(
 /// Re-queue a `blocked-auth` entry once its backend is connected again. No-op
 /// (returns false) for entries that are not blocked.
 #[tauri::command]
-pub fn requeue_blocked_job_run(app: AppHandle, run_id: String) -> Result<bool, String> {
+pub fn requeue_blocked_job_run(
+    app: AppHandle,
+    run_id: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<bool, String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let run_id = normalize_spaces(&run_id);
     let mut requeued = false;
     persist(&app, |store| {
         for entry in &mut store.queue {
-            if entry.run_id == run_id && entry.state == "blocked-auth" {
+            if entry.run_id == run_id
+                && entry.workspace_id == scope.workspace_id()
+                && entry.project_id.as_deref() == scope.project_id()
+                && entry.state == "blocked-auth"
+            {
                 entry.state = "queued".to_string();
                 entry.available_at = String::new();
                 entry.last_error = String::new();
@@ -584,14 +700,23 @@ pub fn requeue_blocked_job_run(app: AppHandle, run_id: String) -> Result<bool, S
 /// Cancel a queued/leased/running entry. Records a cancelled attempt and
 /// transitions the entry to `cancelled`. Used by the Schedules UI.
 #[tauri::command]
-pub fn cancel_job_run(app: AppHandle, run_id: String) -> Result<bool, String> {
+pub fn cancel_job_run(
+    app: AppHandle,
+    run_id: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<bool, String> {
+    let scope = command_scope(workspace_id, project_id)?;
     let run_id = normalize_spaces(&run_id);
     let now = now_iso();
     let mut cancelled = false;
     let mut remembered: Option<String> = None;
     persist(&app, |store| {
         for entry in &mut store.queue {
-            if entry.run_id != run_id {
+            if entry.run_id != run_id
+                || entry.workspace_id != scope.workspace_id()
+                || entry.project_id.as_deref() != scope.project_id()
+            {
                 continue;
             }
             if entry.state == "done" || entry.state == "dead" || entry.state == "cancelled" {
@@ -758,6 +883,8 @@ mod tests {
 
     fn sample_job(id: &str, status: &str) -> ScheduledJob {
         ScheduledJob {
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            project_id: None,
             id: id.to_string(),
             schema_version: SCHEDULER_STORE_VERSION,
             name: "Brief".to_string(),
@@ -777,6 +904,8 @@ mod tests {
 
     fn sample_entry(id: &str, state: &str) -> SchedulerQueueEntry {
         SchedulerQueueEntry {
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            project_id: None,
             job_id: id.to_string(),
             run_id: format!("run-{id}"),
             scheduled_at: "1970-01-01T00:00:00.000Z".to_string(),
@@ -840,6 +969,24 @@ mod tests {
         let mut job = sample_job("j", "active");
         job.trigger = serde_json::json!({"kind":"hourly"});
         assert!(normalize_job(job).is_err());
+    }
+
+    #[test]
+    fn normalize_attempt_redacts_secrets_before_plaintext_journal() {
+        let attempt = JobAttempt {
+            run_id: "run-1".to_string(),
+            status: "failed".to_string(),
+            attempt_number: 1,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: None,
+            error: Some("Authorization: Bearer sk-secret-value".to_string()),
+            retryable: Some(false),
+            lease_token: None,
+        };
+        let normalized = normalize_attempt(attempt).unwrap();
+        let error = normalized.error.unwrap();
+        assert!(!error.contains("sk-secret-value"));
+        assert!(error.contains("[redacted"));
     }
 
     #[test]

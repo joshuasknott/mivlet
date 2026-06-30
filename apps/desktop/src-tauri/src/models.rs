@@ -923,6 +923,10 @@ pub struct ScheduledExecutionRoute {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledJob {
+    #[serde(default = "default_workspace_id")]
+    pub workspace_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub id: String,
     pub schema_version: u8,
     pub name: String,
@@ -964,6 +968,10 @@ pub struct JobAttempt {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SchedulerQueueEntry {
+    #[serde(default = "default_workspace_id")]
+    pub workspace_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub job_id: String,
     pub run_id: String,
     pub scheduled_at: String,
@@ -987,6 +995,10 @@ pub struct SchedulerQueueEntry {
     /// self-describing for the run-request event without a job lookup.
     #[serde(default)]
     pub execution: Option<ScheduledExecutionRoute>,
+}
+
+fn default_workspace_id() -> String {
+    crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

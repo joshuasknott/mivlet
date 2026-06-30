@@ -1,4 +1,4 @@
-//! SQL schema for the durable encrypted store (version 2).
+//! SQL schema for the durable encrypted store.
 //!
 //! See `docs/superpowers/specs/2026-06-28-encrypted-storage-design.md`.
 //!
@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS schema_meta (
   value TEXT NOT NULL
 );
 
+-- Durable local ownership root. `default` is created by the v4 migration and
+-- is the compatibility owner for records written before workspaces existed.
+CREATE TABLE IF NOT EXISTS workspace (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- profile + preferences
 CREATE TABLE IF NOT EXISTS profile (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -109,15 +118,18 @@ CREATE TABLE IF NOT EXISTS profile (
 );
 
 CREATE TABLE IF NOT EXISTS preferences (
-  key TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, key)
 );
 
 -- conversation / run graph
 CREATE TABLE IF NOT EXISTS project (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   title_fingerprint TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -134,6 +146,7 @@ CREATE TABLE IF NOT EXISTS thread (
   payload_nonce BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_thread_project ON thread(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_workspace ON project(workspace_id);
 
 CREATE TABLE IF NOT EXISTS message (
   id TEXT PRIMARY KEY,
@@ -230,7 +243,9 @@ CREATE INDEX IF NOT EXISTS idx_artifact_run ON artifact(run_id);
 
 -- connectors (non-secret metadata only)
 CREATE TABLE IF NOT EXISTS connector_account (
-  connector_id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+  connector_id TEXT NOT NULL,
   account_id TEXT,
   status TEXT NOT NULL,
   expires_at INTEGER,
@@ -238,8 +253,10 @@ CREATE TABLE IF NOT EXISTS connector_account (
   connected_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, connector_id)
 );
+CREATE INDEX IF NOT EXISTS idx_connector_account_workspace ON connector_account(workspace_id);
 
 CREATE TABLE IF NOT EXISTS backend_connection (
   provider_id TEXT PRIMARY KEY,
@@ -250,6 +267,8 @@ CREATE TABLE IF NOT EXISTS backend_connection (
 -- knowledge + memory
 CREATE TABLE IF NOT EXISTS knowledge_source (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
   connector_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   trust TEXT NOT NULL,
@@ -263,9 +282,12 @@ CREATE TABLE IF NOT EXISTS knowledge_source (
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_connector ON knowledge_source(connector_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_pinned ON knowledge_source(pinned);
+CREATE INDEX IF NOT EXISTS idx_knowledge_workspace ON knowledge_source(workspace_id, project_id);
 
 CREATE TABLE IF NOT EXISTS memory_record (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,
   approved INTEGER NOT NULL DEFAULT 0,
@@ -275,10 +297,13 @@ CREATE TABLE IF NOT EXISTS memory_record (
 );
 CREATE INDEX IF NOT EXISTS idx_memory_kind ON memory_record(kind);
 CREATE INDEX IF NOT EXISTS idx_memory_pinned ON memory_record(pinned);
+CREATE INDEX IF NOT EXISTS idx_memory_workspace ON memory_record(workspace_id, project_id);
 
 -- scheduler (stable surface for Goal 8)
 CREATE TABLE IF NOT EXISTS schedule (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
   weekday TEXT NOT NULL,
   time TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -287,6 +312,43 @@ CREATE TABLE IF NOT EXISTS schedule (
   payload_nonce BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_enabled ON schedule(enabled);
+CREATE INDEX IF NOT EXISTS idx_schedule_workspace ON schedule(workspace_id, project_id, enabled);
+
+-- Versioned workflow definitions and run journal. Rich user-authored content is
+-- encrypted; only ownership, stable ids, versions, status, and timestamps are
+-- queryable. These tables are the hand-off surface for the schedule-SQLite
+-- branch.
+CREATE TABLE IF NOT EXISTS workflow_definition (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_definition_workspace
+  ON workflow_definition(workspace_id, project_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS workflow_run (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  definition_id TEXT NOT NULL,
+  definition_version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace
+  ON workflow_run(workspace_id, project_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_definition
+  ON workflow_run(workspace_id, definition_id, definition_version);
 
 -- model/provider config (no secrets)
 CREATE TABLE IF NOT EXISTS model_config (
@@ -317,6 +379,7 @@ CREATE TABLE IF NOT EXISTS run_state (
 CREATE TABLE IF NOT EXISTS connector_cache (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
+  project_id TEXT,
   connector_id TEXT NOT NULL,
   provider_item_id TEXT NOT NULL,
   kind TEXT NOT NULL,
