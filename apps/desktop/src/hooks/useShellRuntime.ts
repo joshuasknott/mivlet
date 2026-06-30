@@ -1,5 +1,6 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ActionHistoryEvent,
   ApprovalAuditEntry,
   ApprovalDecision,
   ApprovalGrant,
@@ -94,6 +95,7 @@ import {
   listRuntimeConnectorAccounts,
   listRuntimeBackends,
   listRuntimeBackendModels,
+  loadRuntimeActionHistory,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
@@ -474,6 +476,15 @@ export interface ShellRuntime {
     arguments: string;
     approval: ApprovalRequest;
   }) => void;
+  /**
+   * Inspectable action history (model calls, connector actions, tool/shell
+   * actions, web actions, approvals, schedules, blocked policy decisions).
+   * Audit observes actions and never carries secrets. Surfaced for the
+   * Settings / Privacy / History view.
+   */
+  actionHistory: ActionHistoryEvent[];
+  /** Re-fetch action history from the Rust store (poll on demand). */
+  refreshActionHistory: () => void;
   dismissOnboarding: () => void;
   // shell-level status
   lastAction: string;
@@ -514,6 +525,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [commandOpen, setCommandOpen] = useState(false);
   const [lastAction, setLastAction] = useState("Workspace ready");
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
+  const [actionHistory, setActionHistory] = useState<ActionHistoryEvent[]>([]);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(initialState.dismissedApprovalIds);
   const [approvalRules, setApprovalRules] = useState<ApprovalGrant[]>(initialState.approvalRules);
   const [sessionApprovalGrants, setSessionApprovalGrants] = useState<ApprovalGrant[]>([]);
@@ -910,6 +922,18 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       active = false;
     };
   }, []);
+
+  const refreshActionHistory = useCallback(() => {
+    void loadRuntimeActionHistory().then((events) => {
+      if (events && Array.isArray(events)) {
+        setActionHistory(events.slice(0, 200));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    refreshActionHistory();
+  }, [refreshActionHistory]);
 
   useEffect(() => {
     let active = true;
@@ -2705,6 +2729,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     prepareConnectorAction,
     openApprovals,
     approvalAudit,
+    actionHistory,
+    refreshActionHistory,
     sessionApprovalGrants,
     approvalRules,
     editingApprovalId,

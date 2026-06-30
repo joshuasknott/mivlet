@@ -1,6 +1,7 @@
 import {
   ArrowClockwise,
   CheckCircle,
+  Clock,
   GearSix,
   Key,
   LockKey,
@@ -18,7 +19,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { BackendAuthState, BackendProvider } from "@fable/protocol";
+import type { ActionHistoryEvent, BackendAuthState, BackendProvider } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import {
   connectResultCopy,
@@ -32,13 +33,14 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
 import type { ProfileFixture } from "../../data/workspace";
 
-export type SettingsTab = "profile" | "providers" | "appearance" | "privacy" | "notifications" | "workspace";
+export type SettingsTab = "profile" | "providers" | "appearance" | "privacy" | "history" | "notifications" | "workspace";
 
 export const tabs: { id: SettingsTab; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "providers", label: "Providers" },
   { id: "appearance", label: "Appearance" },
   { id: "privacy", label: "Privacy" },
+  { id: "history", label: "History" },
   { id: "notifications", label: "Notifications" },
   { id: "workspace", label: "Workspace" }
 ];
@@ -107,6 +109,11 @@ export function SettingsPage({
           />
         ) : activeTab === "privacy" ? (
           <PrivacySettingsView
+            runtime={runtime}
+            onStatus={setStatus}
+          />
+        ) : activeTab === "history" ? (
+          <HistorySettingsView
             runtime={runtime}
             onStatus={setStatus}
           />
@@ -801,7 +808,295 @@ function PrivacySettingsView({
   );
 }
 
-function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace" | "privacy"> }) {
+/**
+ * Settings -> History: the inspectable action-history surface.
+ *
+ * Renders the normalized audit events the Rust boundary records at execution
+ * boundaries (model calls, connector actions, tool/shell actions, web actions,
+ * approvals, schedules, blocked policy decisions). Each row shows type,
+ * summary, status, time, actor, and safe (redacted) details. Audit only
+ * observes actions — it never grants execution authority and never carries
+ * secrets (tokens, keys, raw provider secrets, auth codes, full file/email
+ * bodies, or env values are stripped at the Rust storage layer).
+ */
+const HISTORY_CATEGORY_LABELS: Record<string, string> = {
+  "model-call": "Model call",
+  "connector-action": "Connector action",
+  "tool-action": "Tool / shell",
+  "web-action": "Web / browser",
+  approval: "Approval",
+  schedule: "Schedule",
+  "policy-block": "Policy block"
+};
+
+const HISTORY_CATEGORY_FILTERS: Array<{ id: string; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "model-call", label: "Model calls" },
+  { id: "connector-action", label: "Connectors" },
+  { id: "tool-action", label: "Tools / shell" },
+  { id: "web-action", label: "Web" },
+  { id: "approval", label: "Approvals" },
+  { id: "schedule", label: "Schedules" },
+  { id: "policy-block", label: "Policy blocks" }
+];
+
+function HistorySettingsView({
+  runtime,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  onStatus: (message: string) => void;
+}) {
+  const [filter, setFilter] = useState<string>("all");
+  const events = runtime.actionHistory ?? [];
+
+  const visible = useMemo(() => {
+    if (filter === "all") {
+      return events;
+    }
+    return events.filter((event) => event.category === filter);
+  }, [events, filter]);
+
+  const handleRefresh = () => {
+    runtime.refreshActionHistory();
+    onStatus("Refreshed action history.");
+  };
+
+  return (
+    <div className="settings-page__body">
+      <div className="settings-section-heading">
+        <p>
+          Inspectable record of actions Fable took on your behalf. Audit observes
+          actions; it never grants execution authority, and secrets are stripped
+          before anything is stored.
+        </p>
+      </div>
+
+      <article className="profile-clean-card settings-open-section">
+        <div className="profile-clean-card__content">
+          <section className="profile-section" aria-labelledby="action-history-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <Clock size={19} />
+              </span>
+              <span>
+                <strong id="action-history-title">Action History</strong>
+                <small>
+                  Most recent actions first ({visible.length}
+                  {filter === "all" ? "" : ` of ${events.length}`} shown).
+                </small>
+              </span>
+            </div>
+
+            <div
+              role="group"
+              aria-label="Filter action history by category"
+              style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "16px", marginBottom: "12px" }}
+            >
+              {HISTORY_CATEGORY_FILTERS.map((option) => {
+                const active = filter === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className="button button--secondary"
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: "12px",
+                      minHeight: "auto",
+                      borderColor: active ? "var(--accent)" : "var(--line-strong)",
+                      color: active ? "var(--accent)" : "var(--ink-soft)"
+                    }}
+                    aria-pressed={active}
+                    onClick={() => setFilter(option.id)}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="button button--secondary"
+                style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                onClick={handleRefresh}
+                aria-label="Refresh action history"
+              >
+                <ArrowClockwise size={12} />
+                <span>Refresh</span>
+              </button>
+            </div>
+
+            {visible.length === 0 ? (
+              <div className="settings-empty-row" data-testid="action-history-empty">
+                <Clock size={18} />
+                <span>No actions recorded yet.</span>
+              </div>
+            ) : (
+              <ul
+                className="action-history-list"
+                aria-label="Action history entries"
+                style={{ display: "flex", flexDirection: "column", gap: "10px", listStyle: "none", padding: 0, margin: 0 }}
+              >
+                {visible.map((event) => (
+                  <ActionHistoryRow key={event.id} event={event} />
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function statusTone(status: string): string {
+  switch (status) {
+    case "ok":
+    case "approved":
+    case "executed":
+    case "done":
+      return "var(--success)";
+    case "blocked":
+    case "denied":
+    case "failed":
+    case "dead":
+      return "var(--danger)";
+    case "cancelled":
+    case "attempted":
+    case "retried":
+      return "var(--ink-muted)";
+    default:
+      return "var(--ink-soft)";
+  }
+}
+
+function ActionHistoryRow({ event }: { event: ActionHistoryEvent }) {
+  const categoryLabel = HISTORY_CATEGORY_LABELS[event.category] ?? event.category;
+  const detailEntries = useMemo(() => safeDetailEntries(event.detail), [event.detail]);
+
+  return (
+    <li
+      className="action-history-row"
+      data-action-history-id={event.id}
+      data-action-history-category={event.category}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        padding: "12px 16px",
+        background: "var(--surface-raised)",
+        border: "1px solid var(--line-strong)",
+        borderRadius: "var(--radius-2)"
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+          <strong style={{ color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>
+            {categoryLabel}
+            {event.action ? ` · ${event.action}` : ""}
+          </strong>
+          {event.summary ? (
+            <span style={{ color: "var(--ink-soft)", fontSize: "13px", overflowWrap: "anywhere" }}>
+              {event.summary}
+            </span>
+          ) : null}
+        </div>
+        <span
+          className="action-history-row__status"
+          style={{
+            color: statusTone(event.status),
+            fontSize: "12px",
+            fontWeight: 600,
+            textTransform: "capitalize",
+            whiteSpace: "nowrap"
+          }}
+        >
+          {event.status || "—"}
+        </span>
+      </div>
+      <div
+        className="action-history-row__meta"
+        style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", color: "var(--ink-muted)", fontSize: "12px" }}
+      >
+        <span data-action-history-time>{formatHistoryTime(event.createdAt)}</span>
+        <span data-action-history-actor>actor: {event.actor || "system"}</span>
+        {event.service ? <span data-action-history-service>{event.service}</span> : null}
+        {event.mode ? <span>mode: {event.mode}</span> : null}
+        {event.riskLevel ? <span>risk: {event.riskLevel}</span> : null}
+        {event.correlationId ? <span data-action-history-correlation>id: {event.correlationId}</span> : null}
+        {event.errorCode ? <span style={{ color: "var(--danger)" }}>error: {event.errorCode}</span> : null}
+      </div>
+      {detailEntries.length > 0 ? (
+        <dl
+          className="action-history-row__detail"
+          data-testid="action-history-detail"
+          style={{ display: "grid", gridTemplateColumns: "max-content 1fr", columnGap: "10px", rowGap: "2px", margin: 0, fontSize: "12px", color: "var(--ink-soft)" }}
+        >
+          {detailEntries.map(([key, value]) => (
+            <div key={key} style={{ display: "contents" }}>
+              <dt style={{ color: "var(--ink-muted)" }}>{key}</dt>
+              <dd data-testid="action-history-detail-value" style={{ margin: 0, overflowWrap: "anywhere" }}>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </li>
+  );
+}
+
+/** Format an ISO timestamp for compact display; falls back to the raw value. */
+function formatHistoryTime(iso: string): string {
+  if (!iso) {
+    return "unknown time";
+  }
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) {
+    return iso;
+  }
+  return parsed.toLocaleString();
+}
+
+/**
+ * Flatten the redacted `detail` payload into a stable list of [key, value]
+ * pairs for display. Only shallow object/array entries are shown; nested
+ * structures are rendered as a compact JSON preview so the surface never exposes
+ * unbounded depth. Values are already redacted at the Rust boundary.
+ */
+function safeDetailEntries(detail: unknown): Array<[string, string]> {
+  if (detail == null) {
+    return [];
+  }
+  const entries: Array<[string, string]> = [];
+  if (typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    for (const [key, value] of Object.entries(record)) {
+      if (value == null) {
+        continue;
+      }
+      entries.push([key, renderSafeDetailValue(value)]);
+    }
+  } else {
+    entries.push(["detail", String(detail)]);
+  }
+  return entries.slice(0, 12);
+}
+
+function renderSafeDetailValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value.length > 200 ? `${value.slice(0, 200)}…` : value;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  try {
+    const json = JSON.stringify(value);
+    return json.length > 200 ? `${json.slice(0, 200)}…` : json;
+  } catch {
+    return "[unrenderable]";
+  }
+}
+
+function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace" | "privacy" | "history"> }) {
   const copy = {
     notifications: {
       description: "Notification preferences will live here."

@@ -427,6 +427,29 @@ pub async fn stream_backend_completion(
         .map(|mut map| map.remove(&request.request_id));
     let terminal = if cancelled { "[CANCELLED]" } else { "[DONE]" };
     let _ = app.emit(&channel, terminal);
+    // Record the model-call lifecycle into the unified action-history store
+    // (observation only; no payload content is retained).
+    let (status, code) = if cancelled {
+        ("cancelled", "cancelled")
+    } else if completed {
+        ("ok", "")
+    } else {
+        ("failed", "no-terminal-state")
+    };
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::MODEL_CALL,
+        &request.provider_id,
+        &request.model,
+        status,
+    )
+    .actor("system")
+    .correlation(&request.request_id)
+    .error(code)
+    .summary(&format!(
+        "{} model call via {}",
+        request.model, request.provider_id
+    ))
+    .record();
     if !cancelled && !completed {
         return Err("Provider request ended without a terminal state.".to_string());
     }
