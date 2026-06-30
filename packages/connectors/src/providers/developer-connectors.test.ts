@@ -151,6 +151,57 @@ describe("GitHub production adapter", () => {
     await expect(expired.refresh({ ...tokens, refreshToken: "secret-refresh" }))
       .rejects.toMatchObject({ code: "expired-auth", message: "Refresh token was rejected." });
   });
+
+  it("handles unconfigured/expired refresh tokens", async () => {
+    const adapter = createGitHubAdapter(common);
+    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+      code: "expired-auth",
+      message: expect.stringContaining("expired")
+    });
+  });
+
+  it("handles missing broker configuration (HTTP 503 / broker_configuration)", async () => {
+    const fetcher = vi.fn(async () => response({ error: "configuration-required", message: "Broker is not configured" }, 503));
+    const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh" })).rejects.toMatchObject({
+      code: "configuration-required",
+      message: "This connector needs provider configuration before it can run."
+    });
+  });
+
+  it("handles token revocation success (200) and idempotent success (404)", async () => {
+    const fetcher = vi.fn(async () => response(undefined, 200));
+    const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://auth.example/oauth/github/revoke",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          contractVersion: 1,
+          provider: "github",
+          token: "refresh",
+          tokenTypeHint: "refresh_token"
+        })
+      })
+    );
+
+    const fetcher404 = vi.fn(async () => response(undefined, 404));
+    const adapter404 = createGitHubAdapter({ ...common, fetch: fetcher404 });
+    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+  });
+
+  it("ensures errors do not leak sensitive details in user-facing messages", async () => {
+    const fetcher = vi.fn(async () => response({ error: "invalid_grant", message: "token secret-token-abc is invalid" }, 400));
+    const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
+    const errPromise = adapter.read({ capability: "identity.read", input: {} }, tokens);
+    await expect(errPromise).rejects.toMatchObject({
+      code: "invalid-request"
+    });
+    const err = await errPromise.catch(e => e);
+    expect(err.message).not.toContain("secret-token-abc");
+    expect(err.message).toBe("The provider rejected the request.");
+  });
 });
 
 describe("Vercel production adapter", () => {
@@ -271,6 +322,57 @@ describe("Vercel production adapter", () => {
     const runtime = new ConnectorRuntime({ approvals: boundary }); runtime.register(adapter);
     await expect(runtime.write({ connectorId: "vercel", account: { id: "vercel-uid", displayName: "Vercel User" }, tokens }, { capability: "deployments.promote", input: { teamId: "team_1", project: "fable", deploymentId: "dpl_1" }, target: "team_1/fable/dpl_1", preview: "Promote dpl_1", riskLevel: "high" })).rejects.toMatchObject({ code: "approval-required" });
     expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("handles unconfigured/expired refresh tokens", async () => {
+    const adapter = createVercelAdapter(common);
+    await expect(adapter.refresh({ accessToken: "access" })).rejects.toMatchObject({
+      code: "expired-auth",
+      message: expect.stringContaining("expired")
+    });
+  });
+
+  it("handles missing broker configuration (HTTP 503 / broker_configuration)", async () => {
+    const fetcher = vi.fn(async () => response({ error: "configuration-required", message: "Broker is not configured" }, 503));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.refresh({ accessToken: "access", refreshToken: "refresh" })).rejects.toMatchObject({
+      code: "configuration-required",
+      message: "This connector needs provider configuration before it can run."
+    });
+  });
+
+  it("handles token revocation success (200) and idempotent success (404)", async () => {
+    const fetcher = vi.fn(async () => response(undefined, 200));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    await expect(adapter.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://auth.example/oauth/vercel/revoke",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          contractVersion: 1,
+          provider: "vercel",
+          token: "refresh",
+          tokenTypeHint: "refresh_token"
+        })
+      })
+    );
+
+    const fetcher404 = vi.fn(async () => response(undefined, 404));
+    const adapter404 = createVercelAdapter({ ...common, fetch: fetcher404 });
+    await expect(adapter404.revoke({ accessToken: "access", refreshToken: "refresh" })).resolves.toBeUndefined();
+  });
+
+  it("ensures errors do not leak sensitive details in user-facing messages", async () => {
+    const fetcher = vi.fn(async () => response({ error: "invalid_grant", message: "token vercel-token-xyz was revoked" }, 400));
+    const adapter = createVercelAdapter({ ...common, fetch: fetcher });
+    const errPromise = adapter.read({ capability: "identity.read", input: {} }, tokens);
+    await expect(errPromise).rejects.toMatchObject({
+      code: "invalid-request"
+    });
+    const err = await errPromise.catch(e => e);
+    expect(err.message).not.toContain("vercel-token-xyz");
+    expect(err.message).toBe("The provider rejected the request.");
   });
 });
 
