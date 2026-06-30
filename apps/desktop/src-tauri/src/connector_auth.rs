@@ -1309,7 +1309,15 @@ pub(crate) async fn disconnect(
 ) -> Result<(), ConnectorCommandError> {
     let path = connector_connections_path(app)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    let mut connections = read_connections(&path)
+    disconnect_with_store_and_path(connector_id, &NativeConnectorSecretStore, &path).await
+}
+
+async fn disconnect_with_store_and_path(
+    connector_id: &str,
+    store: &dyn ConnectorSecretStore,
+    path: &Path,
+) -> Result<(), ConnectorCommandError> {
+    let mut connections = read_connections(path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     // Multi-account: disconnect only the active account, preserving any other
     // connected accounts for this connector. If others remain, promote one to
@@ -1326,7 +1334,7 @@ pub(crate) async fn disconnect(
     let Some(connection) = active else {
         return Ok(());
     };
-    if let Some(encoded) = NativeConnectorSecretStore
+    if let Some(encoded) = store
         .get(&connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?
     {
@@ -1366,7 +1374,7 @@ pub(crate) async fn disconnect(
             }
         }
     }
-    NativeConnectorSecretStore
+    store
         .remove(&connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     connections.retain(|item| {
@@ -1374,7 +1382,7 @@ pub(crate) async fn disconnect(
     });
     // If any account remains for this connector, make sure exactly one is active.
     promote_single_active(&mut connections, connector_id);
-    write_connections(&path, &connections)
+    write_connections(path, &connections)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     Ok(())
 }
@@ -2413,5 +2421,107 @@ mod tests {
             .expect_err("missing account must not connect");
         assert_eq!(error.code, "provider-unavailable");
         assert!(error.retryable);
+    }
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_provider_config_pkce_missing_env_fails_closed() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        
+        let old_val = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+        std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
+        
+        let result = provider_config("google-drive", "oauth-pkce", vec![]);
+        
+        if let Some(val) = old_val {
+            std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", val);
+        }
+        
+        let err = result.expect_err("should fail when client id is missing");
+        assert_eq!(err.code, "configuration-required");
+        assert_eq!(err.connector_id, "google-drive");
+        assert!(!err.retryable);
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_public_pkce_revocation() {
+        let store = MemoryStore::default();
+        let path = std::env::temp_dir().join(format!(
+            "fable-disconnect-test-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+
+        // Spin up a mock server for the revocation endpoint
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4096];
+            let read = stream.read(&mut request).await.unwrap();
+            request_tx.send(String::from_utf8_lossy(&request[..read]).to_string()).unwrap();
+            
+            let response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let revoke_url = format!("http://{address}/revoke");
+        let token_set = StoredTokenSet {
+            access_token: "google-access-token-123".to_string(),
+            refresh_token: Some("google-refresh-token-456".to_string()),
+            token_type: "Bearer".to_string(),
+            expires_at: None,
+            scopes: vec!["drive.readonly".to_string()],
+            revocation_endpoint: Some(revoke_url),
+            token_endpoint: None,
+            handoff_endpoint: None,
+            client_id: "google-client-id".to_string(),
+            brokered: false, // public PKCE
+        };
+
+        let cred_ref = "oauth-token:google-drive:acc-123";
+        store.set(cred_ref, &serde_json::to_string(&token_set).unwrap()).unwrap();
+
+        let connection = ConnectorConnection {
+            connector_id: "google-drive".to_string(),
+            account: ConnectorAccountSummary {
+                id: "acc-123".to_string(),
+                display_name: "Test User".to_string(),
+                handle: None,
+                email: Some("user@example.com".to_string()),
+                workspace: None,
+                avatar_url: None,
+            },
+            status: "connected".to_string(),
+            scopes: vec!["drive.readonly".to_string()],
+            expires_at: None,
+            credential_ref: cred_ref.to_string(),
+            connected_at: "1".to_string(),
+            updated_at: "1".to_string(),
+            is_active: true,
+        };
+
+        write_connections(&path, &[connection]).unwrap();
+
+        // Disconnect
+        disconnect_with_store_and_path("google-drive", &store, &path).await.unwrap();
+
+        // Check token removed from secret store
+        assert!(store.get(cred_ref).unwrap().is_none());
+
+        // Check connection file is empty/does not contain this account
+        let connections = read_connections(&path).unwrap();
+        assert!(connections.is_empty());
+
+        // Verify the mock server received the expected form POST request
+        let request = request_rx.await.unwrap();
+        assert!(request.starts_with("POST /revoke"));
+        let request_lower = request.to_ascii_lowercase();
+        assert!(request_lower.contains("content-type: application/x-www-form-urlencoded"));
+        assert!(request_lower.contains("token=google-refresh-token-456"));
+
+        let _ = fs::remove_file(path);
     }
 }
