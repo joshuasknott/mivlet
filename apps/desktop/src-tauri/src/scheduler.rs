@@ -409,7 +409,20 @@ pub fn enqueue_job_run(
         store.queue.push(entry);
         store.queue.truncate(MAX_SCHEDULER_QUEUE_ENTRIES);
     })?;
-    created.ok_or_else(|| "A run for this occurrence is already queued.".to_string())
+    let entry = created.ok_or_else(|| "A run for this occurrence is already queued.".to_string())?;
+    // Observe the queue transition in the unified action-history store
+    // (observation only; the scheduler store remains the queue authority).
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "scheduler",
+        &entry.job_id,
+        "queued",
+    )
+    .actor("system")
+    .correlation(&entry.run_id)
+    .summary(&format!("Scheduled job {} queued for run.", entry.job_id))
+    .record();
+    Ok(entry)
 }
 
 /// Report an attempt outcome for a queued/leased run. Updates the attempt
@@ -472,6 +485,24 @@ pub fn report_job_attempt(
                 entry.lease_expires_at = iso_from_ms(now_epoch_ms() + RUNNING_LEASE_MS);
                 continue;
             }
+            // Record the scheduler attempt outcome into the unified action-
+            // history store (observation only; the scheduler store remains the
+            // authority for queue state). Blocked-auth/dead are policy blocks.
+            let job_id = entry.job_id.clone();
+            let final_state = entry.state.clone();
+            let (ah_status, ah_category) = match final_state.as_str() {
+                "done" => ("ok", crate::action_history::categories::SCHEDULE),
+                "cancelled" => ("cancelled", crate::action_history::categories::SCHEDULE),
+                "blocked-auth" => ("blocked", crate::action_history::categories::POLICY_BLOCK),
+                "dead" => ("failed", crate::action_history::categories::POLICY_BLOCK),
+                _ => ("retried", crate::action_history::categories::SCHEDULE),
+            };
+            crate::action_history::Recorder::new(ah_category, "scheduler", &job_id, ah_status)
+                .actor("system")
+                .correlation(&run_id)
+                .error(if status == "failed" { "failed" } else { "" })
+                .summary(&format!("Scheduled job {job_id} attempt: {status}"))
+                .record();
             entry.lease_holder.clear();
             entry.lease_expires_at.clear();
             entry.lease_token.clear();
@@ -585,6 +616,18 @@ pub fn cancel_job_run(app: AppHandle, run_id: String) -> Result<bool, String> {
             entry.lease_token.clear();
             remembered = Some(entry.deduplication_key.clone());
             cancelled = true;
+            // Observe the cancellation in the unified action-history store.
+            let cancelled_job_id = entry.job_id.clone();
+            crate::action_history::Recorder::new(
+                crate::action_history::categories::SCHEDULE,
+                "scheduler",
+                &cancelled_job_id,
+                "cancelled",
+            )
+            .actor("user")
+            .correlation(&run_id)
+            .summary(&format!("Scheduled job {cancelled_job_id} cancelled."))
+            .record();
         }
         if let Some(key) = remembered.take() {
             remember_occurrence(store, &key);

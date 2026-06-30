@@ -6,6 +6,7 @@
 //! handlers, and starts the in-process scheduler tick.
 
 mod acp_process;
+mod action_history;
 mod agent_runs;
 mod approvals;
 mod backends;
@@ -104,6 +105,8 @@ pub fn run() {
             approvals::list_approval_rules,
             approvals::record_approval_decision,
             approvals::resolve_approval_request,
+            action_history::record_action_history,
+            action_history::list_action_history,
             snapshot::list_imported_knowledge_sources,
             snapshot::save_imported_knowledge_sources,
             snapshot::import_local_knowledge_source,
