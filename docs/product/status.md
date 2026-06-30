@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-06-29.
+Last audited: 2026-06-30.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
@@ -60,7 +60,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
 | ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
-| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS code exists, but fails closed as the auth broker and callback URLs are deferred (Missing configuration). |
+| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS code exists and the auth broker targets Cloudflare Workers, but production deployment, provider secrets, and callback URL registration are still missing. |
 | Browser Preview Mode | **Preview/fixture-only** | Purely synthetic fixture responses. Persists via `localStorage` instead of SQLite. |
 | Mobile Remote Control | **Preview/fixture-only** | Sidebar UI button triggers state/accessibility announcement change only; no socket, protocol, or mobile backend. |
 | Schedules & Workflows SQLite migration | **Missing** | Structured database tables defined in schema, but runtime execution still falls back to raw JSON files (`scheduler-store.json`, `workflow-runs.json`). |

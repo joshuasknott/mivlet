@@ -18,7 +18,7 @@ Notion public integrations and Slack apps are confidential clients. Set `FABLE_A
 - `POST /oauth/{notion|slack}/refresh`
 - `POST /oauth/{notion|slack}/revoke`
 
-The desktop starts OAuth with PKCE and an exact HTTPS or loopback callback. Register the broker's provider callback in the Notion integration and Slack app consoles; the broker must return the final code and state to the exact desktop redirect. Local broker URLs may use `http://127.0.0.1` or `http://[::1]`; production must use HTTPS.
+The desktop starts OAuth with PKCE and an exact HTTPS or loopback callback. Register the broker's provider callback in the Notion integration and Slack app consoles; the broker redirects a single-use handoff ticket and state to the exact desktop redirect. Local broker URLs may use `http://127.0.0.1` or `http://[::1]`; production must use HTTPS.
 
 ## Notion
 

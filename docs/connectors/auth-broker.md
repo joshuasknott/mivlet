@@ -2,11 +2,12 @@
 
 ## Status: implemented, not deployed
 
-This repository contains the portable Node/TypeScript auth broker in
-`apps/broker`. It is buildable and tested, but it has not been deployed or
+This repository contains the TypeScript auth broker in `apps/broker`. The
+broker now targets **Cloudflare Workers** for production hosting, with a
+Worker-native `fetch` entrypoint in `apps/broker/src/worker.ts` and a local
+Node.js wrapper in `apps/broker/src/server.ts` for existing desktop development
+workflows. It is buildable and tested, but it has not been deployed or
 independently reviewed for external use.
-
-**Cloudflare Workers** is the chosen production target host environment for the Fable auth broker. The core broker logic is implemented in a platform-agnostic way (`FableBroker` in `apps/broker/src/broker.ts`), allowing it to run within a Cloudflare Workers isolate or be wrapped in a Node.js HTTP server.
 
 Deploying, configuring, and independently reviewing the broker is explicitly a
 separate release task (see [Roadmap](../product/roadmap.md) Milestone 3 and
@@ -81,56 +82,55 @@ vercel, notion, slack, linear**. This set is pinned in code
 
 ## Cloudflare Workers Target Setup
 
-For production, the broker is deployed to Cloudflare Workers. 
+For production, the broker is configured by `apps/broker/wrangler.jsonc` and
+deployed with Wrangler. The Worker entrypoint is `apps/broker/src/worker.ts`;
+the Node HTTP wrapper is not imported by the Worker bundle.
 
-### Worker Entrypoint
-The core logic in `FableBroker` is wrapped in an ES module fetch handler (e.g. using Hono or raw Request/Response routing). The entrypoint instantiates `FableBroker` passing in the Cloudflare `env` bindings:
+The checked-in Worker config currently sets:
 
-```typescript
-export default {
-  async fetch(request, env, ctx) {
-    const publicBaseUrl = env.FABLE_BROKER_PUBLIC_URL;
-    const broker = new FableBroker({ env, publicBaseUrl });
-    // route and dispatch to broker.authorize(), broker.callback(), etc.
-  }
-}
-```
+- `name`: `fable-auth-broker`
+- `main`: `src/worker.ts`
+- `compatibility_date`: `2026-06-30`
+- `observability.enabled`: `true`
+- `FABLE_BROKER_RATE_LIMIT_PER_MINUTE`: `60`
+- required secret binding: `FABLE_BROKER_PUBLIC_URL`
 
-### Wrangler Configuration (`wrangler.toml` / `wrangler.json`)
-The worker is configured and deployed using Wrangler, the Cloudflare Workers CLI. A typical `wrangler.toml` contains:
-
-```toml
-name = "fable-auth-broker"
-main = "src/index.ts"
-compatibility_date = "2026-06-30"
-compatibility_flags = [ "nodejs_compat" ] # Required for Node compatibility if using Node HTTP helpers
-
-[vars]
-FABLE_BROKER_PUBLIC_URL = "https://fable-auth-broker.<your-subdomain>.workers.dev/"
-FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS = ""
-FABLE_BROKER_RATE_LIMIT_PER_MINUTE = "60"
-```
+The Worker intentionally does not enable `nodejs_compat`; shared broker code uses
+Web platform APIs (`fetch`, `Request`, `Response`, Web Crypto) so the Worker path
+does not depend on Node's HTTP server, `Buffer`, or `node:crypto`.
 
 ### Secret Management
-Confidential client secrets from the provider consoles must never be committed to repository files. Register them in the Cloudflare Worker production environment using Wrangler:
+Confidential client configuration from the provider consoles must never be
+committed to repository files. Register production values in the Cloudflare
+Worker environment using Wrangler:
 
 ```bash
-wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET
-wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET
-wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET
-wrangler secret put FABLE_BROKER_NOTION_CLIENT_SECRET
-wrangler secret put FABLE_BROKER_SLACK_CLIENT_SECRET
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_PUBLIC_URL
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_GITHUB_CLIENT_ID
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_CLIENT_ID
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_LINEAR_CLIENT_ID
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_NOTION_CLIENT_ID
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_NOTION_CLIENT_SECRET
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_SLACK_CLIENT_ID
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_SLACK_CLIENT_SECRET
 ```
+
+Provider client IDs are not secret in OAuth terminology, but they are still
+environment-specific broker configuration. Keep them out of committed files; use
+Worker env bindings or secrets.
 
 ## Local Development Steps
 
 ### Option A: Emulated Worker Environment (Wrangler)
 To run a local emulation of the Cloudflare Worker environment:
-1. Copy `.env.example` to `apps/broker/.dev.vars` (Wrangler uses `.dev.vars` to load environment variables locally).
-2. Populate the client IDs and secrets for local testing.
+1. Copy `apps/broker/.dev.vars.example` to `apps/broker/.dev.vars`.
+2. Populate `FABLE_BROKER_PUBLIC_URL` and the client ID/secret pair for each provider you are testing.
 3. Start the Wrangler dev server:
    ```bash
-   pnpm wrangler dev
+   pnpm --filter @fable/broker worker:dev
    ```
    This serves the broker at `http://127.0.0.1:8788`.
 4. Point the desktop app to the local broker:
@@ -140,8 +140,8 @@ To run a local emulation of the Cloudflare Worker environment:
 
 ### Option B: Standalone Node.js Server
 Alternatively, developers can run the bundled Node.js server wrapper locally:
-1. Copy `.env.example` to `apps/broker/.env`.
-2. Populate the client IDs and secrets.
+1. Export the variables from `apps/broker/.env.example` in your shell or load them with your local env tooling.
+2. Populate the client IDs and secrets for each provider you are testing.
 3. Start the dev script:
    ```bash
    pnpm --filter @fable/broker dev
@@ -180,7 +180,22 @@ A fail-closed result means the confidential connector surfaces a clear
 fixtures, never claims a connected state, and never downgrades to a public
 client.
 
-Similarly, if the broker receives a request for a provider whose client credentials (`FABLE_BROKER_<PROVIDER>_CLIENT_ID` or `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET`) are missing from its env environment bindings, the broker **fails closed** by throwing a `configuration-required` error (which returns a HTTP 503 to the desktop), indicating that the provider is not configured.
+Similarly, if the broker receives a request for a provider whose client
+credentials (`FABLE_BROKER_<PROVIDER>_CLIENT_ID` or
+`FABLE_BROKER_<PROVIDER>_CLIENT_SECRET`) are missing from its environment
+bindings, the broker **fails closed** with a `configuration-required` error
+(HTTP 503). The Cloudflare Worker entrypoint also fails closed if
+`FABLE_BROKER_PUBLIC_URL` is missing or malformed, because provider callback URLs
+must be registered against the public Worker origin.
+
+## Current deployment limitation
+
+The implemented foundation keeps pending OAuth exchanges, handoff tickets, and
+rate-limit counters in memory. This is suitable for local development and
+single-process tests, and it preserves the existing desktop expectations. Before
+external production use on Cloudflare, the single-use pending/handoff stores
+should move to a durable, atomic Worker binding such as a Durable Object so a
+callback and handoff redemption remain valid across isolates and restarts.
 
 ### Why the checks are separated
 
