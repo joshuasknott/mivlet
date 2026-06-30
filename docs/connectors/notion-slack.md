@@ -30,7 +30,14 @@ Implemented API operations: search; page metadata; paginated block trees; databa
 
 Create and distribute a Slack app, enable OAuth v2, and install it separately in each workspace. Typical read scopes are `channels:read`, `channels:history`, `groups:read`, `groups:history`, `users:read`, and (when provider policy permits it) `search:read`. Writes require `chat:write`; reactions require `reactions:write`. Slack only returns conversations covered by the installed token and scopes, and private-channel access normally requires the app to be present in that channel.
 
-Implemented API operations: workspace identity; accessible conversation list; supported message search; channel history; threads/replies; users; post/reply/edit/delete messages; and add/remove reactions. Archived or inaccessible channels remain provider errors. Every mutation requires a fresh per-action Fable approval showing account, workspace, channel, message/thread target, and exact text or reaction. Model-generated content is never posted automatically.
+## Sync and cache lifecycle
+
+- **Manual queries only:** Fable does not crawl entire Slack message history or index complete Notion page databases. It queries the Notion and Slack APIs on demand based on specific user composer directives.
+- **Cache limitation:** Fable retains connector configuration, channel names, page metadata titles, and granted permission scopes locally. No message bodies, document content, or confidential conversation histories are stored in persistent local caches. Imported items are session-local.
+- **Data controls:**
+  - **Resync:** Re-evaluates connection health and re-fetches accessible channels or databases to clear stale lists.
+  - **Disconnect:** Removes Notion or Slack tokens from the secure OS credential boundary, revokes Slack tokens remotely if supported, and clears local configuration references.
+- **Stale states:** Expired credentials or revoked integrations (e.g. if the Fable integration is removed from a Notion workspace or the Slack app is uninstalled) place the connector in a stale or unauthenticated state, requiring a fresh reconnection flow via the auth broker callback.
 
 ## Development and tests
 

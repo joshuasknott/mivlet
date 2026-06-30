@@ -174,19 +174,32 @@ is missing, unavailable, expired without refresh, or lacks the required scope,
 live commands return a normalized connector error instead of using fixtures or
 claiming access.
 
-## Local cache, logging, and disconnect
+## Local cache, sync, and data lifecycle
 
-Fable may cache connector id, account summary, scope names, health, normalized
-import metadata, and user-approved previews. Raw provider responses are not
-the cache format. Email bodies, Slack messages, Drive/Notion text, cookies,
-authorization headers, and token-shaped values are excluded from logs and
-runtime errors.
+Fable prioritizes on-device security and local-first execution. This section details how synchronization, caching, and credentials are bound on the local device.
 
-Disconnect should revoke provider authorization where supported, clear access
-and refresh tokens from secure storage, reset account/scopes/health, and keep
-only imported records the user has chosen to retain. Slack tokens can also be
-revoked through `auth.revoke`; provider-side app removal must be handled as an
-expired/unavailable auth state.
+### Synchronization model (Manual / On-Demand Sync)
+- **Manual sync only:** Fable retrieves external connector data on demand. To protect API rate limits and conserve system resources, continuous background synchronization, live streaming, and full-account indexing are not active.
+- **Background task foundation:** While a local background task scheduler queues and leases tasks (e.g. for deferred checks), Fable does not run background crawler threads to download connector accounts or build persistent provider indexes.
+
+### Cache boundaries
+- **Metadata caching:** Fable caches connector ID, account summary, scope names, health check history, normalized import metadata, and user-approved previews locally.
+- **Raw content exclusion:** Raw provider payloads (such as email bodies, Slack message histories, file texts, cookies, and tokens) are never saved in persistent caches or runtime logs.
+- **Session lifetime:** Imported connector records and knowledge sources are session-local and cleared when the application restarts.
+
+### Credential storage and keyring boundaries
+- **Keyring security:** Access and refresh tokens, authorization codes, and PKCE verifiers are kept within the native OS credential keyring (or the native auth boundary).
+- **React state exclusion:** Secure tokens never enter React state, localStorage, local app database files, or git-tracked resources.
+
+### Data controls (Resync, Disable, Delete, Export)
+- **Resync / Refresh:** Re-verify connector health and refresh access tokens. This clears transient errors and updates the connection status.
+- **Disable / Disconnect:** Clear local access and refresh tokens from secure keyring storage, reset the account state and health checks, and set the status to "Not connected".
+- **Delete:** Wipe local connection metadata, remove all credentials from the keyring, and purge session-local knowledge records.
+- **Export:** Export user-approved memory states from the local encrypted SQLite database.
+
+### Stale-token and auth lifecycle states
+- **Stale status:** A connector enters a `stale` (Error) state if required authorization scopes are missing (e.g., if a user did not grant required scopes during the OAuth prompt), or if credentials expire and cannot be refreshed.
+- **Recovery:** Stale-token and expired states require a fresh reconnection (re-authentication) flow to request missing scopes and refresh the OAuth tokens.
 
 ## Known limitations
 

@@ -105,6 +105,11 @@ export function SettingsPage({
             workspaceName={workspaceName}
             onStatus={setStatus}
           />
+        ) : activeTab === "privacy" ? (
+          <PrivacySettingsView
+            runtime={runtime}
+            onStatus={setStatus}
+          />
         ) : (
           <QuietPlaceholder tab={activeTab} />
         )}
@@ -551,11 +556,253 @@ function isMissingKeyMessage(message: string | undefined): boolean {
   return lower.startsWith("add an") && lower.includes("api key to connect");
 }
 
-function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace"> }) {
+function PrivacySettingsView({
+  runtime,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  onStatus: (message: string) => void;
+}) {
+  const [resyncingConnectorId, setResyncingConnectorId] = useState<string | null>(null);
+  const [disconnectingConnectorId, setDisconnectingConnectorId] = useState<string | null>(null);
+  const [isBulkDisconnecting, setIsBulkDisconnecting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  const connectedConnectors = useMemo(() => {
+    return runtime.connectorManifests.filter(
+      (c) => c.id !== "local-files" && c.status === "connected"
+    );
+  }, [runtime.connectorManifests]);
+
+  const handleResync = async (connectorId: string, connectorName: string) => {
+    setResyncingConnectorId(connectorId);
+    try {
+      await runtime.refreshConnector(connectorId);
+      onStatus(`Successfully resynced ${connectorName}.`);
+    } catch (err) {
+      onStatus(`Failed to resync ${connectorName}.`);
+    } finally {
+      setResyncingConnectorId(null);
+    }
+  };
+
+  const handleDisconnect = async (connectorId: string, connectorName: string) => {
+    setDisconnectingConnectorId(connectorId);
+    try {
+      await runtime.disconnectConnector(connectorId);
+      onStatus(`Disconnected ${connectorName} and cleared credentials.`);
+    } catch (err) {
+      onStatus(`Failed to disconnect ${connectorName}.`);
+    } finally {
+      setDisconnectingConnectorId(null);
+    }
+  };
+
+  const handleBulkDisconnect = async () => {
+    if (!confirm("Are you sure you want to disconnect all connectors? This will clear all stored credentials.")) {
+      return;
+    }
+    setIsBulkDisconnecting(true);
+    try {
+      for (const connector of connectedConnectors) {
+        await runtime.disconnectConnector(connector.id);
+      }
+      onStatus("Successfully disconnected all connectors.");
+    } catch (err) {
+      onStatus("Encountered errors disconnecting some connectors.");
+    } finally {
+      setIsBulkDisconnecting(false);
+    }
+  };
+
+  const handleExportMemory = async () => {
+    setIsExporting(true);
+    try {
+      await runtime.exportMemory();
+      onStatus("Memory exported successfully.");
+    } catch (err) {
+      onStatus("Failed to export memory.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  return (
+    <div className="settings-page__body">
+      <div className="settings-section-heading">
+        <p>Manage local data, cache boundaries, and connector synchronization settings.</p>
+      </div>
+
+      <article className="profile-clean-card settings-open-section">
+        <div className="profile-clean-card__content">
+          <section className="profile-section" aria-labelledby="connector-sync-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <ArrowClockwise size={19} />
+              </span>
+              <span>
+                <strong id="connector-sync-title">Connector Synchronization</strong>
+                <small>Fable retrieves external data on demand. Background sync and continuous crawling are disabled.</small>
+              </span>
+            </div>
+            <div style={{ marginTop: "16px" }}>
+              <p style={{ color: "var(--ink-soft)", fontSize: "13px", lineHeight: "1.5", marginBottom: "16px" }}>
+                To protect API rate limits and conserve system resources, Fable does not continuously poll or crawl your connected accounts.
+                While a background scheduler foundation manages local deferred jobs, no remote data is fetched in the background.
+              </p>
+
+              <strong style={{ display: "block", color: "var(--ink)", fontSize: "13px", fontWeight: 600, marginBottom: "8px" }}>
+                Active Connections ({connectedConnectors.length})
+              </strong>
+
+              {connectedConnectors.length > 0 ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {connectedConnectors.map((connector) => (
+                    <div
+                      key={connector.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "12px 16px",
+                        background: "var(--surface-raised)",
+                        border: "1px solid var(--line-strong)",
+                        borderRadius: "var(--radius-2)"
+                      }}
+                      data-connected-connector-id={connector.id}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <strong style={{ color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>{connector.name}</strong>
+                        <span style={{ color: "var(--ink-muted)", fontSize: "12px" }}>
+                          {connector.account
+                            ? `Active: ${connector.account.email ?? connector.account.displayName}`
+                            : "Connected"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          onClick={() => handleResync(connector.id, connector.name)}
+                          disabled={resyncingConnectorId === connector.id}
+                          title="Resync this connector to refresh credentials and scopes"
+                          aria-label={`Resync ${connector.name}`}
+                        >
+                          {resyncingConnectorId === connector.id ? <Spinner size={12} /> : <ArrowClockwise size={12} />}
+                          <span>Resync</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto" }}
+                          onClick={() => handleDisconnect(connector.id, connector.name)}
+                          disabled={disconnectingConnectorId === connector.id}
+                          title="Remove credentials from local secure keyring"
+                          aria-label={`Disconnect ${connector.name}`}
+                        >
+                          {disconnectingConnectorId === connector.id ? <Spinner size={12} /> : null}
+                          <span>Disconnect</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: "var(--ink-muted)", fontSize: "13px", fontStyle: "italic", margin: "8px 0" }}>
+                  No active connector connections. Connect external accounts in the Providers tab or the Connectors page.
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="cache-limits-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <LockKey size={19} />
+              </span>
+              <span>
+                <strong id="cache-limits-title">Local Cache & Keyring Boundaries</strong>
+                <small>Configuration metadata is cached on this device, but sensitive credentials and raw data are isolated.</small>
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px", color: "var(--ink-soft)", fontSize: "13px", lineHeight: "1.5" }}>
+              <p>
+                - <strong>Keyring Protection:</strong> OAuth tokens, credentials, and secrets are stored inside your operating system keyring (or the native auth boundary) and never enter local storage or React state.
+              </p>
+              <p>
+                - <strong>Cache Boundaries:</strong> Fable caches connector configuration, channel names, page metadata titles, and granted permission scopes. No message bodies, email bodies, file contents, or database rows are kept in a persistent local cache.
+              </p>
+              <p>
+                - <strong>Session Lifetime:</strong> Imported files and connector knowledge sources are session-local and reset on app restart.
+              </p>
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="memory-settings-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <LockKey size={19} />
+              </span>
+              <span>
+                <strong id="memory-settings-title">Personal Memory</strong>
+                <small>Local facts and user approvals stored in an encrypted SQLite database on this device.</small>
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "16px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <strong style={{ display: "block", color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>Enable memory</strong>
+                  <span style={{ display: "block", color: "var(--ink-muted)", fontSize: "12px", marginTop: "4px" }}>Allow Fable to save and recall facts locally.</span>
+                </div>
+                <label className="toggle-switch" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={!runtime.memoryDisabled}
+                    onChange={runtime.toggleMemoryDisabled}
+                    style={{ width: "40px", height: "20px", accentColor: "var(--accent-strong)" }}
+                    aria-label="Toggle personal memory"
+                  />
+                </label>
+              </div>
+              
+              <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={handleExportMemory}
+                  disabled={isExporting}
+                >
+                  {isExporting ? <Spinner size={14} /> : null}
+                  <span>Export memory</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        {connectedConnectors.length > 0 ? (
+          <footer className="profile-clean-card__footer">
+            <div className="profile-action-row profile-action-row--end" style={{ width: "100%" }}>
+              <button
+                type="button"
+                className="profile-button button button--destructive"
+                onClick={handleBulkDisconnect}
+                disabled={isBulkDisconnecting}
+              >
+                {isBulkDisconnecting ? <Spinner size={16} /> : <Trash size={16} />}
+                <span>Disconnect all connectors</span>
+              </button>
+            </div>
+          </footer>
+        ) : null}
+      </article>
+    </div>
+  );
+}
+
+function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace" | "privacy"> }) {
   const copy = {
-    privacy: {
-      description: "Local defaults and data controls will live here."
-    },
     notifications: {
       description: "Notification preferences will live here."
     }
