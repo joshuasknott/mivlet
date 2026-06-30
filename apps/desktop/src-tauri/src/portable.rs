@@ -433,7 +433,8 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     // payload document), so read it directly into the `value` field.
     let preferences = {
         let mut stmt = conn.prepare(
-            "SELECT key, updated_at, payload, payload_nonce FROM preferences ORDER BY key;",
+            "SELECT key, updated_at, payload, payload_nonce FROM preferences
+             WHERE workspace_id='default' ORDER BY key;",
         )?;
         let partials: Vec<(String, String, Sealed)> = stmt
             .query_map([], |row| {
@@ -449,7 +450,7 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut out = Vec::with_capacity(partials.len());
         for (key, updated_at, sealed) in partials {
-            let value = open_json_value(store, &sealed, &format!("preferences:{key}"))?;
+            let value = open_json_value(store, &sealed, &format!("preferences:default:{key}"))?;
             out.push(PreferenceRecord {
                 key,
                 updated_at,
@@ -464,7 +465,7 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
         store,
         "project",
         "SELECT id, title_fingerprint, created_at, updated_at, payload, payload_nonce
-         FROM project ORDER BY id;",
+         FROM project WHERE workspace_id='default' ORDER BY id;",
         &[
             (0, "id", Cast::Text),
             (1, "titleFingerprint", Cast::Text),
@@ -627,10 +628,10 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let connector_accounts = read_rows(
         conn,
         store,
-        "connector_account",
+        "connector_account:default",
         "SELECT connector_id, account_id, status, expires_at, connected_at,
                 updated_at, payload, payload_nonce
-         FROM connector_account ORDER BY connector_id;",
+         FROM connector_account WHERE workspace_id='default' ORDER BY connector_id;",
         &[
             (0, "connectorId", Cast::Text),
             (1, "accountId", Cast::NullableText),
@@ -666,10 +667,10 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let knowledge_sources = read_rows(
         conn,
         store,
-        "knowledge_source",
+        "knowledge_source:default",
         "SELECT id, connector_id, kind, trust, pinned, content_fingerprint,
                 size_bytes, imported_at, origin, payload, payload_nonce
-         FROM knowledge_source ORDER BY imported_at, id;",
+         FROM knowledge_source WHERE workspace_id='default' ORDER BY imported_at, id;",
         &[
             (0, "id", Cast::Text),
             (1, "connectorId", Cast::Text),
@@ -689,9 +690,9 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let memory_records = read_rows(
         conn,
         store,
-        "memory_record",
+        "memory_record:default",
         "SELECT id, kind, pinned, approved, created_at, payload, payload_nonce
-         FROM memory_record ORDER BY created_at, id;",
+         FROM memory_record WHERE workspace_id='default' ORDER BY created_at, id;",
         &[
             (0, "id", Cast::Text),
             (1, "kind", Cast::Text),
@@ -707,9 +708,9 @@ fn read_sections(conn: &Connection, store: &Store) -> Result<Sections> {
     let schedules = read_rows(
         conn,
         store,
-        "schedule",
+        "schedule:default",
         "SELECT id, weekday, time, enabled, created_at, payload, payload_nonce
-         FROM schedule ORDER BY created_at, id;",
+         FROM schedule WHERE workspace_id='default' ORDER BY created_at, id;",
         &[
             (0, "id", Cast::Text),
             (1, "weekday", Cast::Text),
@@ -1085,10 +1086,10 @@ fn plan_and_apply(
         "key",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.value, &format!("preferences:{}", r.key))?;
+            let sealed = store.seal_json_owned(&r.value, &format!("preferences:default:{}", r.key))?;
             tx.execute(
-                "INSERT INTO preferences (key, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4);",
+                "INSERT INTO preferences (workspace_id, key, updated_at, payload, payload_nonce)
+                 VALUES ('default', ?1, ?2, ?3, ?4);",
                 rusqlite::params![r.key, r.updated_at, sealed.ciphertext, sealed.nonce],
             )?;
             Ok(())
@@ -1105,8 +1106,8 @@ fn plan_and_apply(
         |tx, store, r| {
             let sealed = store.seal_json_owned(&r.payload, &format!("project:{}", r.id))?;
             tx.execute(
-                "INSERT INTO project (id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+                "INSERT INTO project (id, workspace_id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
+                 VALUES (?1, 'default', ?2, ?3, ?4, ?5, ?6);",
                 rusqlite::params![
                     r.id,
                     r.title_fingerprint,
@@ -1335,11 +1336,11 @@ fn plan_and_apply(
         report,
         |tx, store, r| {
             let sealed =
-                store.seal_json_owned(&r.payload, &format!("connector_account:{}", r.connector_id))?;
+                store.seal_json_owned(&r.payload, &format!("connector_account:default:{}", r.connector_id))?;
             tx.execute(
-                "INSERT INTO connector_account (connector_id, account_id, status, expires_at,
+                "INSERT INTO connector_account (workspace_id, project_id, connector_id, account_id, status, expires_at,
                           credential_ref, connected_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
+                 VALUES ('default', NULL, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
                 rusqlite::params![
                     r.connector_id,
                     r.account_id,
@@ -1387,11 +1388,11 @@ fn plan_and_apply(
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("knowledge_source:{}", r.id))?;
+            let sealed = store.seal_json_owned(&r.payload, &format!("knowledge_source:default:{}", r.id))?;
             tx.execute(
-                "INSERT INTO knowledge_source (id, connector_id, kind, trust, pinned,
+                "INSERT INTO knowledge_source (id, workspace_id, project_id, connector_id, kind, trust, pinned,
                           content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
+                 VALUES (?1, 'default', NULL, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11);",
                 rusqlite::params![
                     r.id,
                     r.connector_id,
@@ -1418,10 +1419,10 @@ fn plan_and_apply(
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("memory_record:{}", r.id))?;
+            let sealed = store.seal_json_owned(&r.payload, &format!("memory_record:default:{}", r.id))?;
             tx.execute(
-                "INSERT INTO memory_record (id, kind, pinned, approved, created_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+                "INSERT INTO memory_record (id, workspace_id, project_id, kind, pinned, approved, created_at, payload, payload_nonce)
+                 VALUES (?1, 'default', NULL, ?2, ?3, ?4, ?5, ?6, ?7);",
                 rusqlite::params![
                     r.id,
                     r.kind,
@@ -1445,10 +1446,10 @@ fn plan_and_apply(
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("schedule:{}", r.id))?;
+            let sealed = store.seal_json_owned(&r.payload, &format!("schedule:default:{}", r.id))?;
             tx.execute(
-                "INSERT INTO schedule (id, weekday, time, enabled, created_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+                "INSERT INTO schedule (id, workspace_id, project_id, weekday, time, enabled, created_at, payload, payload_nonce)
+                 VALUES (?1, 'default', NULL, ?2, ?3, ?4, ?5, ?6, ?7);",
                 rusqlite::params![
                     r.id,
                     r.weekday,
@@ -1691,16 +1692,16 @@ mod tests {
                     rusqlite::params![sealed.ciphertext, sealed.nonce],
                 )?;
                 // preference
-                let p = store.seal_json_owned(&serde_json::json!({"v": 1}), "preferences:shell")?;
+                let p = store.seal_json_owned(&serde_json::json!({"v": 1}), "preferences:default:shell")?;
                 tx.execute(
-                    "INSERT INTO preferences (key, updated_at, payload, payload_nonce) VALUES ('shell','t',?1,?2);",
+                    "INSERT INTO preferences (workspace_id, key, updated_at, payload, payload_nonce) VALUES ('default','shell','t',?1,?2);",
                     rusqlite::params![p.ciphertext, p.nonce],
                 )?;
                 // project
                 let pp = store.seal_json_owned(&serde_json::json!({"title":"P"}), "project:p1")?;
                 tx.execute(
-                    "INSERT INTO project (id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
-                     VALUES ('p1','f','t','t',?1,?2);",
+                    "INSERT INTO project (id, workspace_id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
+                     VALUES ('p1','default','f','t','t',?1,?2);",
                     rusqlite::params![pp.ciphertext, pp.nonce],
                 )?;
                 // thread
@@ -1737,10 +1738,10 @@ mod tests {
                     rusqlite::params![ap.ciphertext, ap.nonce],
                 )?;
                 // connector account WITH credential_ref (must be omitted from export)
-                let cap = store.seal_json_owned(&serde_json::json!({"account":{"id":"u"}}), "connector_account:github")?;
+                let cap = store.seal_json_owned(&serde_json::json!({"account":{"id":"u"}}), "connector_account:default:github")?;
                 tx.execute(
-                    "INSERT INTO connector_account (connector_id, account_id, status, expires_at, credential_ref, connected_at, updated_at, payload, payload_nonce)
-                     VALUES ('github','u','connected',12345,'keyring-opaque-key','t','t',?1,?2);",
+                    "INSERT INTO connector_account (workspace_id, project_id, connector_id, account_id, status, expires_at, credential_ref, connected_at, updated_at, payload, payload_nonce)
+                     VALUES ('default',NULL,'github','u','connected',12345,'keyring-opaque-key','t','t',?1,?2);",
                     rusqlite::params![cap.ciphertext, cap.nonce],
                 )?;
                 // backend connection
@@ -1749,24 +1750,24 @@ mod tests {
                     [],
                 )?;
                 // knowledge source
-                let kp = store.seal_json_owned(&serde_json::json!({"title":"doc"}), "knowledge_source:k1")?;
+                let kp = store.seal_json_owned(&serde_json::json!({"title":"doc"}), "knowledge_source:default:k1")?;
                 tx.execute(
-                    "INSERT INTO knowledge_source (id, connector_id, kind, trust, pinned, content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce)
-                     VALUES ('k1','local-files','document','trusted',1,'cf',100,'t','local',?1,?2);",
+                    "INSERT INTO knowledge_source (id, workspace_id, project_id, connector_id, kind, trust, pinned, content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce)
+                     VALUES ('k1','default',NULL,'local-files','document','trusted',1,'cf',100,'t','local',?1,?2);",
                     rusqlite::params![kp.ciphertext, kp.nonce],
                 )?;
                 // memory record
-                let mem = store.seal_json_owned(&serde_json::json!({"value":"remember"}), "memory_record:mem1")?;
+                let mem = store.seal_json_owned(&serde_json::json!({"value":"remember"}), "memory_record:default:mem1")?;
                 tx.execute(
-                    "INSERT INTO memory_record (id, kind, pinned, approved, created_at, payload, payload_nonce)
-                     VALUES ('mem1','fact',1,1,'t',?1,?2);",
+                    "INSERT INTO memory_record (id, workspace_id, project_id, kind, pinned, approved, created_at, payload, payload_nonce)
+                     VALUES ('mem1','default',NULL,'fact',1,1,'t',?1,?2);",
                     rusqlite::params![mem.ciphertext, mem.nonce],
                 )?;
                 // schedule (enabled)
-                let sp = store.seal_json_owned(&serde_json::json!({"name":"Weekly"}), "schedule:s1")?;
+                let sp = store.seal_json_owned(&serde_json::json!({"name":"Weekly"}), "schedule:default:s1")?;
                 tx.execute(
-                    "INSERT INTO schedule (id, weekday, time, enabled, created_at, payload, payload_nonce)
-                     VALUES ('s1','Mon','09:00',1,'t',?1,?2);",
+                    "INSERT INTO schedule (id, workspace_id, project_id, weekday, time, enabled, created_at, payload, payload_nonce)
+                     VALUES ('s1','default',NULL,'Mon','09:00',1,'t',?1,?2);",
                     rusqlite::params![sp.ciphertext, sp.nonce],
                 )?;
                 // draft
