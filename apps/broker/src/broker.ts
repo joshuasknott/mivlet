@@ -71,6 +71,8 @@ export interface BrokerOptions {
   env: BrokerEnv;
   /** Public HTTPS (or loopback development) base URL registered with providers. */
   publicBaseUrl?: string;
+  /** Worker deployments must provide an explicit registered callback base URL. */
+  requirePublicBaseUrl?: boolean;
   clock?: BrokerClock;
   fetch?: BrokerFetch;
   pending?: PendingExchangeStore;
@@ -92,11 +94,17 @@ export class FableBroker {
   private readonly pending: PendingExchangeStore;
   private readonly handoff: HandoffStore;
   private readonly env: BrokerEnv;
-  private readonly publicBaseUrl: URL;
+  private readonly publicBaseUrl?: URL;
+  private readonly requirePublicBaseUrl: boolean;
 
   constructor(options: BrokerOptions) {
     this.env = options.env;
-    this.publicBaseUrl = new URL(options.publicBaseUrl ?? "http://127.0.0.1:8788/");
+    this.requirePublicBaseUrl = options.requirePublicBaseUrl ?? false;
+    try {
+      this.publicBaseUrl = options.publicBaseUrl ? new URL(options.publicBaseUrl) : undefined;
+    } catch {
+      this.publicBaseUrl = undefined;
+    }
     this.clock = options.clock ?? { nowMs: () => Date.now() };
     this.fetcher = options.fetch;
     const stores = createStores(this.clock);
@@ -122,7 +130,7 @@ export class FableBroker {
     const profile = providerProfile(request.provider);
     const credentials = resolveCredentials(request.provider, this.env);
     validateDesktopRedirect(request.redirectUri, this.env);
-    const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrl).toString();
+    const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
 
     const url = new URL(profile.authorizationEndpoint);
     url.searchParams.set("client_id", credentials.clientId);
@@ -313,6 +321,18 @@ export class FableBroker {
         false
       );
     }
+  }
+
+  private publicBaseUrlOrDefault(): URL {
+    if (this.publicBaseUrl) return this.publicBaseUrl;
+    if (this.requirePublicBaseUrl) {
+      throw new BrokerContractError(
+        "configuration-required",
+        "The broker public URL is not configured.",
+        false
+      );
+    }
+    return new URL("http://127.0.0.1:8788/");
   }
 }
 

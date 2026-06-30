@@ -141,12 +141,12 @@ connected.
 
 ## Credential storage and auth broker
 
-The auth broker is **deferred**: this repo has no deployable broker app yet.
+The auth broker is implemented in `apps/broker` (targeting Cloudflare Workers for production deployment), but it is not yet deployed in production.
 The narrow broker contract, its non-proxying boundary, the fail-closed
 configuration checks, and the local-first guarantees are documented in
 [Auth broker contract](../connectors/auth-broker.md). Confidential-client
 connectors (GitHub, Vercel, Notion, Slack, Linear) fail closed until a broker is
-deployed; the core desktop workspace and Google public-client (PKCE) connectors
+deployed and configured; the core desktop workspace and Google public-client (PKCE) connectors
 do not depend on it.
 
 Google desktop OAuth is a public-client PKCE flow. A loopback listener receives
@@ -162,9 +162,9 @@ The Rust connector credential boundary stores access tokens, refresh tokens,
 PKCE verifier state, and account metadata through the OS credential/keyring
 boundary. The app data files hold non-secret connection state only: connector
 id, account summary, scopes, expiry, status, health, and opaque credential
-references. Auth broker endpoints perform confidential-client exchange,
-refresh, identity lookup, and revocation for GitHub, Vercel, Linear, Notion,
-and Slack.
+references. Auth broker endpoints perform confidential-client authorization,
+one-time handoff redemption, refresh, internal identity resolution, and
+revocation for GitHub, Vercel, Linear, Notion, and Slack.
 The Rust `ConnectorCredentialBoundary` is fail-closed: if a credential or token
 is missing, unavailable, expired without refresh, or lacks the required scope,
 live commands return a normalized connector error instead of using fixtures or

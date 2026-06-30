@@ -28,7 +28,7 @@ import type { BrokerEnv } from "./provider-profiles.js";
  * set via `wrangler secret put` and surface identically here. Only the provider
  * credential vars and broker config vars are read; both satisfy BrokerEnv.
  */
-export interface FableBrokerEnv extends BrokerEnv {
+export interface Env extends BrokerEnv {
   /** Public HTTPS origin registered in every provider console. Required. */
   FABLE_BROKER_PUBLIC_URL?: string;
   /** Requests per minute per route+peer. Default 60. */
@@ -45,12 +45,13 @@ interface BrokerRuntime {
 
 let runtime: BrokerRuntime | undefined;
 
-function runtimeFor(env: FableBrokerEnv): BrokerRuntime {
+function runtimeFor(env: Env): BrokerRuntime {
   if (runtime) return runtime;
   const broker = new FableBroker({
     env,
     // Workers are always HTTPS-fronted; the public URL must be configured.
     publicBaseUrl: env.FABLE_BROKER_PUBLIC_URL,
+    requirePublicBaseUrl: true,
     // Use the Workers runtime fetch for provider calls.
     fetch: fetch.bind(globalThis)
   });
@@ -71,7 +72,7 @@ function runtimeFor(env: FableBrokerEnv): BrokerRuntime {
  * `CF-Connecting-IP` header Workers set for HTTP requests.
  */
 export default {
-  async fetch(request: Request, env: FableBrokerEnv): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const { router } = runtimeFor(env);
     const peer = request.headers.get("cf-connecting-ip") ?? undefined;
     return router.handle(request, peer);

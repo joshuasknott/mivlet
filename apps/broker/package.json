@@ -12,10 +12,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "pnpm build && node ./dist/server.js",
+    "worker:dev": "wrangler dev --config wrangler.jsonc --port 8788",
+    "worker:deploy": "wrangler deploy --config wrangler.jsonc",
+    "worker:deploy:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
+    "worker:types": "wrangler types --config wrangler.jsonc",
     "start": "node ./dist/server.js",
-    "test": "vitest run",
-    "deploy:worker": "pnpm build && wrangler deploy",
-    "dev:worker": "pnpm build && wrangler dev"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fable/connectors": "workspace:*",
@@ -24,6 +26,7 @@
   "devDependencies": {
     "@types/node": "^24.3.0",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.105.0"
   }
 }

@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-06-29.
+Last audited: 2026-06-30.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
@@ -60,7 +60,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
 | ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
-| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS code exists, but fails closed as the auth broker and callback URLs are deferred (Missing configuration). |
+| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS code exists and the auth broker targets Cloudflare Workers, but production deployment, provider secrets, and callback URL registration are still missing. |
 | Browser Preview Mode | **Preview/fixture-only** | Purely synthetic fixture responses. Persists via `localStorage` instead of SQLite. |
 | Mobile Remote Control | **Preview/fixture-only** | Sidebar UI button triggers state/accessibility announcement change only; no socket, protocol, or mobile backend. |
 | Schedules & Workflows SQLite migration | **Missing** | Structured database tables defined in schema, but runtime execution still falls back to raw JSON files (`scheduler-store.json`, `workflow-runs.json`). |
@@ -87,7 +87,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 - No deployed production auth broker or externally validated confidential OAuth session.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
-- No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the deferred auth broker.
+- No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, and raw JSON files for schedules/workflows. Backend and connector credentials remain separately handled by OS secure storage.
 - No local model runtime path. The onboarding UI labels local models as planned and disabled.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
