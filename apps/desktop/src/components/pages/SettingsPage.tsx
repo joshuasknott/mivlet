@@ -765,7 +765,7 @@ function PrivacySettingsView({
                   />
                 </label>
               </div>
-              
+
               <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
                 <button
                   type="button"

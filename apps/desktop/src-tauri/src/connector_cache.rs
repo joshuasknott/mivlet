@@ -211,10 +211,12 @@ mod lifecycle {
                 store,
                 workspace_id,
                 &normalized_connector,
-                enabled,
-                auto_sync,
-                note,
-                now,
+                connector_cache_settings::CacheSettingsUpdate {
+                    enabled,
+                    auto_sync,
+                    note,
+                    updated_at: now,
+                },
             )
         })?;
         let row = store.with_conn(|conn| {

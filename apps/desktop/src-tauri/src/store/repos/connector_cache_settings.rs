@@ -38,6 +38,13 @@ pub struct CacheSettingsRow {
     pub payload: Value,
 }
 
+pub struct CacheSettingsUpdate<'a> {
+    pub enabled: bool,
+    pub auto_sync: bool,
+    pub note: &'a str,
+    pub updated_at: &'a str,
+}
+
 /// Resolve the effective settings for `(workspace_id, connector_id)`: a
 /// connector override wins over the workspace default, which wins over the
 /// built-in default (`enabled = true, auto_sync = false`).
@@ -131,10 +138,7 @@ pub fn upsert(
     store: &Store,
     workspace_id: &str,
     connector_id: &str,
-    enabled: bool,
-    auto_sync: bool,
-    note: &str,
-    now: &str,
+    update: CacheSettingsUpdate<'_>,
 ) -> Result<()> {
     let workspace_id = normalize_workspace(workspace_id);
     let scope = if connector_id == WORKSPACE_SCOPE_CONNECTOR {
@@ -142,7 +146,7 @@ pub fn upsert(
     } else {
         SCOPE_CONNECTOR
     };
-    let payload = serde_json::json!({ "note": redact_note(note) });
+    let payload = serde_json::json!({ "note": redact_note(update.note) });
     let sealed = seal_json(store, &payload, &aad(&workspace_id, connector_id))?;
     tx.execute(
         "INSERT INTO connector_cache_settings
@@ -157,9 +161,9 @@ pub fn upsert(
             workspace_id,
             connector_id,
             scope,
-            enabled as i64,
-            auto_sync as i64,
-            now,
+            update.enabled as i64,
+            update.auto_sync as i64,
+            update.updated_at,
             sealed.ciphertext,
             sealed.nonce,
         ],
@@ -305,10 +309,12 @@ mod tests {
                     &store,
                     "ws-a",
                     WORKSPACE_SCOPE_CONNECTOR,
-                    false,
-                    false,
-                    "workspace off",
-                    "now",
+                    CacheSettingsUpdate {
+                        enabled: false,
+                        auto_sync: false,
+                        note: "workspace off",
+                        updated_at: "now",
+                    },
                 )
             })
             .unwrap();
@@ -320,7 +326,20 @@ mod tests {
 
         // A connector override re-enables github specifically.
         store
-            .transaction(|tx| upsert(tx, &store, "ws-a", "github", true, true, "github on", "now"))
+            .transaction(|tx| {
+                upsert(
+                    tx,
+                    &store,
+                    "ws-a",
+                    "github",
+                    CacheSettingsUpdate {
+                        enabled: true,
+                        auto_sync: true,
+                        note: "github on",
+                        updated_at: "now",
+                    },
+                )
+            })
             .unwrap();
         let eff = store
             .with_conn(|conn| effective(conn, &store, "ws-a", "github"))
@@ -357,12 +376,25 @@ mod tests {
                     &store,
                     "ws-a",
                     WORKSPACE_SCOPE_CONNECTOR,
-                    false,
-                    false,
-                    "",
-                    "now",
+                    CacheSettingsUpdate {
+                        enabled: false,
+                        auto_sync: false,
+                        note: "",
+                        updated_at: "now",
+                    },
                 )?;
-                upsert(tx, &store, "ws-a", "github", true, false, "", "now")
+                upsert(
+                    tx,
+                    &store,
+                    "ws-a",
+                    "github",
+                    CacheSettingsUpdate {
+                        enabled: true,
+                        auto_sync: false,
+                        note: "",
+                        updated_at: "now",
+                    },
+                )
             })
             .unwrap();
         let eff = store
@@ -388,10 +420,12 @@ mod tests {
                     &store,
                     "ws-a",
                     WORKSPACE_SCOPE_CONNECTOR,
-                    false,
-                    false,
-                    "",
-                    "now",
+                    CacheSettingsUpdate {
+                        enabled: false,
+                        auto_sync: false,
+                        note: "",
+                        updated_at: "now",
+                    },
                 )
             })
             .unwrap();
@@ -421,10 +455,12 @@ mod tests {
                     &store,
                     "ws-a",
                     "github",
-                    true,
-                    false,
-                    "Bearer ya29.leaked-token",
-                    "now",
+                    CacheSettingsUpdate {
+                        enabled: true,
+                        auto_sync: false,
+                        note: "Bearer ya29.leaked-token",
+                        updated_at: "now",
+                    },
                 )
             })
             .unwrap();

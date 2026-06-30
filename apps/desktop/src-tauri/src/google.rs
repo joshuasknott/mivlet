@@ -2225,7 +2225,7 @@ mod tests {
         assert_eq!(cancelled.code, "cancelled");
     }
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     #[test]
     fn test_has_any_scope_suffix_matching() {
@@ -2236,7 +2236,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_drive_search_pagination() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock().await;
         let (url, request_rx) =
             mock_response("200 OK", r#"{"files":[],"nextPageToken":"drive-next"}"#, 0).await;
 
@@ -2263,7 +2263,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gmail_search_pagination() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock().await;
         let (url, request_rx) = mock_response(
             "200 OK",
             r#"{"messages":[],"nextPageToken":"gmail-next"}"#,
@@ -2294,7 +2294,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_calendar_search_pagination() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock().await;
         let (url, request_rx) =
             mock_response("200 OK", r#"{"items":[],"nextPageToken":"cal-next"}"#, 0).await;
 
@@ -2316,7 +2316,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_gmail_search_partial_failure() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = ENV_LOCK.lock().await;
         let (url, _request_rx) = mock_response(
             "200 OK",
             r#"{"messages":[{"id":"msg-123","threadId":"thread-123"}],"nextPageToken":"gmail-next"}"#,
