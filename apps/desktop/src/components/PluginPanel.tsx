@@ -158,6 +158,10 @@ function ConnectorDetails({
           <span>Health</span>
           <p>{connector.health?.summary ?? connector.healthSummary}</p>
         </div>
+        <div>
+          <span>Sync</span>
+          <p>{syncLabel(connector)}</p>
+        </div>
       </div>
 
       {connector.status === "connected" && accounts.length > 1 ? (
@@ -186,9 +190,15 @@ function ConnectorDetails({
             Use in composer
           </button>
         ) : null}
-        <button type="button" onClick={() => onRefresh(connector.id)}>
-          Refresh
-        </button>
+        {connector.status === "connected" ? (
+          <button
+            type="button"
+            disabled={connector.sync?.phase === "syncing"}
+            onClick={() => onRefresh(connector.id)}
+          >
+            {connector.sync?.phase === "syncing" ? "Syncing…" : "Sync now"}
+          </button>
+        ) : null}
         {firstAction ? (
           <button
             type="button"
@@ -209,6 +219,16 @@ function ConnectorDetails({
       </div>
     </article>
   );
+}
+
+function syncLabel(connector: ConnectorManifest) {
+  const sync = connector.sync;
+  if (!sync || sync.phase === "idle") return "Not synced";
+  if (sync.phase === "succeeded") return `Last synced ${sync.completedAt ?? "recently"}`;
+  if (sync.phase === "partial") return `Partial: ${sync.failure?.message ?? "some items were skipped"}`;
+  if (sync.phase === "failed") return sync.failure?.message ?? "Sync failed";
+  if (sync.phase === "cancelled") return "Cancelled";
+  return "Syncing";
 }
 
 function statusLabel(connector: ConnectorManifest) {
