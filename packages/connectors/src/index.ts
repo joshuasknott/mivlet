@@ -54,6 +54,7 @@ export * from "./providers/vercel";
 export * from "./providers/linear";
 export * from "./providers/linear-actions";
 export * from "./providers/google-drive";
+export * from "./providers/google-shared";
 export * from "./providers/notion";
 export * from "./providers/gmail";
 export * from "./providers/slack";

@@ -82,34 +82,36 @@ const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("deployment:read", "Deployments", "read", true),
     ("deployment:write", "Promote or rollback", "write", false),
 ];
-const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
-    (
-        "drive.metadata.readonly",
-        "Search Drive metadata",
-        "read",
-        true,
-    ),
-    (
-        "drive.readonly",
-        "Read and export Drive content",
-        "read",
-        false,
-    ),
-    (
-        "drive.file",
-        "Create and update Fable-authorized files",
-        "write",
-        false,
-    ),
-];
+const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[(
+    "https://www.googleapis.com/auth/drive.file",
+    "Selected Drive files",
+    "read",
+    true,
+)];
 const NOTION_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read_content", "Read selected content", "read", true),
     ("insert_content", "Create content", "write", false),
     ("update_content", "Update content", "write", false),
 ];
 const GMAIL_SCOPES: &[(&str, &str, &str, bool)] = &[
-    ("gmail.readonly", "Read mail", "read", true),
-    ("gmail.compose", "Create drafts", "write", false),
+    (
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "Read mail",
+        "read",
+        true,
+    ),
+    (
+        "https://www.googleapis.com/auth/gmail.compose",
+        "Create drafts",
+        "write",
+        false,
+    ),
+    (
+        "https://www.googleapis.com/auth/gmail.send",
+        "Send approved mail",
+        "write",
+        false,
+    ),
 ];
 const SLACK_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("channels:read", "Channel list", "read", true),
@@ -133,13 +135,23 @@ const SLACK_SCOPES: &[(&str, &str, &str, bool)] = &[
 ];
 const CALENDAR_SCOPES: &[(&str, &str, &str, bool)] = &[
     (
-        "calendar.calendarlist.readonly",
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
         "Calendar list",
         "read",
         true,
     ),
-    ("calendar.events.readonly", "Calendar events", "read", true),
-    ("calendar.events", "Create or update events", "write", false),
+    (
+        "https://www.googleapis.com/auth/calendar.events.readonly",
+        "Calendar events",
+        "read",
+        true,
+    ),
+    (
+        "https://www.googleapis.com/auth/calendar.events",
+        "Create or update events",
+        "write",
+        false,
+    ),
 ];
 const LINEAR_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read", "Workspace data", "read", true),
@@ -193,14 +205,14 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "google-drive",
         name: "Google Drive",
-        auth_mode: "oauth-pkce",
+        auth_mode: "oauth-broker",
         permissions: &[
             "search accessible file metadata",
             "read or export content only when the matching scope is granted",
             "prepare approval-gated file changes",
         ],
         scopes: DRIVE_SCOPES,
-        setup_message: "Enable Drive API and create a desktop OAuth client.",
+        setup_message: "Configure the Drive API, OAuth consent, and Google client credentials on the Fable auth broker.",
         actions: &[
             "google-drive.create-file",
             "google-drive.update-file",
@@ -233,14 +245,14 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "gmail",
         name: "Gmail",
-        auth_mode: "oauth-pkce",
+        auth_mode: "oauth-broker",
         permissions: &[
             "read selected search results",
             "prepare email drafts; never send by default",
         ],
         scopes: GMAIL_SCOPES,
         setup_message:
-            "Enable Gmail API, create a desktop OAuth client, and complete Google verification.",
+            "Configure the Gmail API, OAuth consent, Google verification, and client credentials on the Fable auth broker.",
         actions: &["gmail.create-draft", "gmail.send"],
     },
     ConnectorCatalogEntry {
@@ -266,13 +278,13 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "google-calendar",
         name: "Google Calendar",
-        auth_mode: "oauth-pkce",
+        auth_mode: "oauth-broker",
         permissions: &[
             "read calendars and events",
             "prepare event create or update requests",
         ],
         scopes: CALENDAR_SCOPES,
-        setup_message: "Enable Calendar API and create a desktop OAuth client.",
+        setup_message: "Configure the Calendar API, OAuth consent, and Google client credentials on the Fable auth broker.",
         actions: &[
             "google-calendar.create-draft",
             "google-calendar.update-draft",
@@ -308,13 +320,9 @@ fn require_connector(
         .ok_or_else(|| command_error("invalid-request", &normalized, "Unknown connector.", false))
 }
 
-/// The auth boundary a connector sits behind. `Public` connectors (Google
-/// desktop OAuth) use loopback PKCE and never need the auth broker.
-/// `Confidential` connectors (GitHub, Notion, Slack, Linear, Vercel) require
-/// server-side secrets and therefore route through the configured HTTPS auth
-/// broker; they fail closed until it is deployed. The local workspace itself is
-/// `LocalOnly` and has no external auth at all. This classification codifies the
-/// local-first boundary: the broker is only ever required by `Confidential`.
+/// The auth boundary a connector sits behind. OAuth connectors route through
+/// the configured HTTPS auth broker; they fail closed until it is deployed.
+/// The local workspace itself remains local-first and has no external auth.
 #[cfg(test)]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ConnectorAuthBoundary {
@@ -333,12 +341,18 @@ pub(crate) fn connector_auth_boundary(connector_id: &str) -> Option<ConnectorAut
     }
 }
 
-/// Connector ids that require the deployed auth broker (confidential clients).
-/// Exposed for tests so the broker-independence boundary is pinned: only these
-/// ids ever depend on `FABLE_AUTH_BROKER_URL`.
+/// Connector ids that require the deployed auth broker.
 #[cfg(test)]
-pub(crate) const BROKER_REQUIRED_CONNECTOR_IDS: &[&str] =
-    &["github", "vercel", "notion", "slack", "linear"];
+pub(crate) const BROKER_REQUIRED_CONNECTOR_IDS: &[&str] = &[
+    "github",
+    "vercel",
+    "google-drive",
+    "notion",
+    "gmail",
+    "slack",
+    "google-calendar",
+    "linear",
+];
 
 fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
     let policy = match action {

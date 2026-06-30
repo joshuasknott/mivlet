@@ -36,7 +36,9 @@ const ENV: NodeJS.ProcessEnv = {
   FABLE_BROKER_NOTION_CLIENT_ID: "nt-id",
   FABLE_BROKER_NOTION_CLIENT_SECRET: "nt-secret",
   FABLE_BROKER_SLACK_CLIENT_ID: "sl-id",
-  FABLE_BROKER_SLACK_CLIENT_SECRET: "sl-secret"
+  FABLE_BROKER_SLACK_CLIENT_SECRET: "sl-secret",
+  FABLE_BROKER_GOOGLE_CLIENT_ID: "google-id",
+  FABLE_BROKER_GOOGLE_CLIENT_SECRET: "google-secret"
 };
 
 const REDIRECT = "http://127.0.0.1:43123/callback";
@@ -97,6 +99,10 @@ function identityFor(provider: BrokerProviderId): unknown {
     case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "a@linear.app" } } };
     case "notion": return { id: "notion-bot", bot: { workspace_id: "ws-1", workspace_name: "Fable Notion" } };
     case "slack": return { ok: true, user_id: "U1", user: "Slack User", team: "Fable Slack", url: "https://x.slack.com" };
+    case "google-drive":
+    case "gmail":
+    case "google-calendar":
+      return { sub: "google-sub", name: "Google User", email: "google-user@example.invalid", picture: "https://example.invalid/a.png" };
   }
 }
 
@@ -108,7 +114,16 @@ function makeBroker(provider: BrokerProviderId, fetch?: BrokerFetch, clock = fix
 
 describe("broker provider profiles", () => {
   it("lists only configured providers and never their secrets", () => {
-    expect(configuredProviders(ENV).sort()).toEqual(["github", "linear", "notion", "slack", "vercel"]);
+    expect(configuredProviders(ENV).sort()).toEqual([
+      "github",
+      "gmail",
+      "google-calendar",
+      "google-drive",
+      "linear",
+      "notion",
+      "slack",
+      "vercel"
+    ]);
     expect(configuredProviders({})).toEqual([]);
   });
 
@@ -161,6 +176,65 @@ describe("broker authorize", () => {
       .toThrow(/not allowed/);
     expect(() => broker.authorize({ ...authorizeRequest("github"), redirectUri: "http://127.0.0.1:9/other" }))
       .toThrow(/not allowed/);
+  });
+});
+
+describe("broker shared Google provider foundation", () => {
+  for (const provider of ["google-drive", "gmail", "google-calendar"] as BrokerProviderId[]) {
+    it(`${provider} uses the shared Google confidential OAuth lifecycle`, async () => {
+      const fetch = providerFetch(provider);
+      const { broker } = makeBroker(provider, fetch);
+      const { response } = broker.authorize(authorizeRequest(provider, `google-${provider}`));
+      const url = new URL(response.authorizationUrl);
+      expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+      expect(url.searchParams.get("client_id")).toBe("google-id");
+      expect(url.searchParams.get("redirect_uri")).toBe(`http://127.0.0.1:8788/oauth/${provider}/callback`);
+      expect(url.searchParams.get("access_type")).toBe("offline");
+      expect(url.searchParams.get("include_granted_scopes")).toBe("true");
+      expect(url.searchParams.get("prompt")).toBe("consent");
+      expect(url.searchParams.get("scope")).toContain("openid");
+      expect(url.searchParams.get("scope")).toContain("https://www.googleapis.com/auth/");
+      expect(response.authorizationUrl).not.toContain("google-secret");
+
+      const { redirect } = await broker.callback(provider, new URLSearchParams({ code: "google-code", state: `google-${provider}` }));
+      const redeemed = await broker.redeem({
+        contractVersion: BROKER_CONTRACT_VERSION,
+        provider,
+        handoff: redirect.searchParams.get("handoff")!,
+        state: `google-${provider}`
+      });
+      expect(redeemed.account).toMatchObject({
+        id: "google-sub",
+        displayName: "Google User",
+        email: "google-user@example.invalid"
+      });
+      expect(redeemed.tokens.scopes).toContain("openid");
+
+      const refreshed = await broker.refresh({
+        contractVersion: BROKER_CONTRACT_VERSION,
+        provider,
+        refreshToken: "google-refresh-token"
+      });
+      expect(refreshed.tokens.refreshToken).toBe("provider-refresh-token");
+
+      await expect(broker.revoke({
+        contractVersion: BROKER_CONTRACT_VERSION,
+        provider,
+        token: "provider-refresh-token",
+        tokenTypeHint: "refresh_token"
+      })).resolves.toEqual({ contractVersion: BROKER_CONTRACT_VERSION, revoked: true });
+    });
+  }
+
+  it("fails closed when Google broker credentials are missing", () => {
+    const broker = new FableBroker({
+      env: {
+        FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
+        FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
+      }
+    });
+    expect(() => broker.authorize(authorizeRequest("gmail", "missing-google")))
+      .toThrow(/Gmail is not configured/);
   });
 });
 
@@ -323,7 +397,7 @@ describe("broker token redaction invariant", () => {
 });
 
 describe("broker provider coverage", () => {
-  for (const provider of ["github", "vercel", "linear", "notion", "slack"] as BrokerProviderId[]) {
+  for (const provider of ["github", "vercel", "linear", "notion", "slack", "google-drive", "gmail", "google-calendar"] as BrokerProviderId[]) {
     it(`${provider} completes the full confidential flow + handoff`, async () => {
       const { broker } = makeBroker(provider, providerFetch(provider));
       broker.authorize(authorizeRequest(provider, `state-${provider}`));

@@ -2016,12 +2016,10 @@ fn web_fetch_outcome_fails_closed_on_a_transport_error() {
 }
 
 // ---------------------------------------------------------------------------
-// Auth broker independence: the Cloudflare broker is deferred and required only
-// for confidential-client OAuth (GitHub, Vercel, Notion, Slack, Linear). The
+// Auth broker boundary: the Cloudflare broker is required for OAuth connectors. The
 // local-first invariants pinned here are:
-//   1. Only confidential connectors depend on the broker env var.
-//   2. Public desktop OAuth (Google PKCE) and local API-key backends never read
-//      the broker URL.
+//   1. Only OAuth connectors depend on the broker env var.
+//   2. Local API-key backends never read the broker URL.
 //   3. The broker URL is never a proxy for model calls, connector searches,
 //      imports, or actions — those reference only provider APIs directly.
 // ---------------------------------------------------------------------------
@@ -2032,7 +2030,7 @@ use crate::connectors::{
 };
 
 #[test]
-fn only_confidential_connectors_require_the_auth_broker() {
+fn only_oauth_connectors_require_the_auth_broker() {
     // Every broker-required id is classified Confidential, and every
     // Confidential id is broker-required — the two sets must agree exactly.
     for id in FIRST_WAVE_CONNECTOR_IDS {
@@ -2052,15 +2050,18 @@ fn only_confidential_connectors_require_the_auth_broker() {
 }
 
 #[test]
-fn google_connectors_are_public_pkce_and_broker_free() {
-    // Google Drive, Gmail, and Google Calendar run loopback PKCE directly to
-    // Google; the auth broker is irrelevant to them. This is the structural
-    // guarantee that the local workspace stays usable without a hosted broker.
+fn google_connectors_are_broker_gated() {
+    // Google Drive, Gmail, and Google Calendar share the broker lifecycle so
+    // Google client secrets never live in the desktop binary or frontend state.
     for id in ["google-drive", "gmail", "google-calendar"] {
         assert_eq!(
             connector_auth_boundary(id),
-            Some(ConnectorAuthBoundary::Public),
-            "{id} must be a public PKCE connector"
+            Some(ConnectorAuthBoundary::Confidential),
+            "{id} must be a broker-gated OAuth connector"
+        );
+        assert!(
+            BROKER_REQUIRED_CONNECTOR_IDS.contains(&id),
+            "{id} must fail closed without the auth broker"
         );
     }
 }
@@ -2068,18 +2069,16 @@ fn google_connectors_are_public_pkce_and_broker_free() {
 #[test]
 fn broker_resolver_fail_closed_keeps_core_workspace_usable() {
     // With no broker configured, confidential connectors fail closed — but the
-    // resolver itself never touches the public PKCE or API-key paths. This test
+    // resolver leaves non-OAuth runtime paths alone. This test
     // pins that the fail-closed error is scoped to the *requesting* confidential
     // connector and does not abort the broader runtime.
     let err = resolve_broker_endpoints("github", None).expect_err("must fail closed");
     assert_eq!(err.code, "configuration-required");
     assert_eq!(err.connector_id, "github");
-    // A Google connector, classified Public, has no dependency on the broker
-    // resolver at all — it never calls resolve_broker_endpoints.
-    assert_eq!(
-        connector_auth_boundary("google-drive"),
-        Some(ConnectorAuthBoundary::Public),
-    );
+    // Google also fails closed through the same broker resolver.
+    let google = resolve_broker_endpoints("google-drive", None).expect_err("must fail closed");
+    assert_eq!(google.code, "configuration-required");
+    assert_eq!(google.connector_id, "google-drive");
 }
 
 // Suppress unused-import lint when ApprovalModification is not referenced by the

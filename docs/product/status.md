@@ -43,7 +43,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   before Rust re-validates an exact, fresh, single-use execution permit.
 - First-wave connector catalog: GitHub, Vercel, Google Drive, Notion, Gmail, Slack, and Google Calendar are modeled with scopes, auth mode, health/status metadata, search/import/action protocol shapes, and fixture adapters.
 - Connector writes: fixture-side connector write preparation creates approval requests for GitHub, Vercel, Gmail, Slack, and Calendar actions instead of directly executing them.
-- Tauri connector runtime: external connector commands expose status/auth/health/search/import/action boundaries. Google public-client connectors use loopback PKCE and OS secure storage; confidential-client connectors (GitHub, Vercel, Notion, Slack, Linear) are broker-gated and fail closed with `configuration-required` until the auth broker and provider configuration exist.
+- Tauri connector runtime: external connector commands expose status/auth/health/search/import/action boundaries. OAuth connectors, including Google Drive, Gmail, and Calendar, are broker-gated and fail closed with `configuration-required` until the auth broker and provider configuration exist.
 - Google connectors: Drive, Gmail, and Calendar expose authenticated reads and approval-gated writes, incremental scopes, refresh-token preservation, explicit active-account selection, bounded responses, cancellation, and normalized provider errors. External use still requires Google Cloud configuration and applicable verification.
 - Schedules page: users can create, pause/resume, and delete local schedule records. Records persist locally; the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the provider-neutral `AgentBackend` path when a runnable backend is connected.
 - CI file: `.github/workflows/ci.yml` exists and uses pnpm for typecheck, tests, build, Tauri check, Rust tests, clippy, and fmt on Windows.
@@ -55,8 +55,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | --- | --- |
 | Local files, approvals, memory controls, knowledge search, runtime snapshots | Live local runtime paths. |
 | Native API-key backends | Live when the user supplies a provider API key; keys stay in the local credential boundary. |
-| Google Drive, Gmail, Google Calendar | Live provider egress exists, but only after Google desktop OAuth configuration and a connected test account. |
-| GitHub, Vercel, Notion, Slack, Linear | Provider egress code exists behind the credential boundary, but auth is broker-gated and fails closed until the deferred auth broker and provider-console callbacks exist. |
+| Google Drive, Gmail, Google Calendar | Live provider egress exists, but only after Google Cloud broker configuration and a connected test account. |
+| GitHub, Vercel, Notion, Slack, Linear | Provider egress code exists behind the credential boundary, but auth is broker-gated and fails closed until the auth broker and provider-console callbacks exist. |
 | Browser preview connectors | Explicit synthetic fixture behavior only; never proof of a live provider connection. |
 | Encrypted SQLite | Active in the Tauri production path with keyring-backed AES-GCM payloads and legacy migration. |
 | Schedules | Local scheduler, queue, and headless prompt execution are implemented; execution depends on a connected runnable backend. |
@@ -78,9 +78,9 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Not Implemented Yet
 
-- No deployed production auth broker or externally validated confidential OAuth session.
+- No deployed production auth broker or externally validated OAuth session.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
-- No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the deferred auth broker.
+- No externally validated live connector sessions in this checkout. Google connectors and confidential-client connectors still require the auth broker, provider configuration, and test accounts.
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite. Backend and connector credentials remain separately handled by OS secure storage.
 - No local model runtime path. The onboarding UI labels local models as planned and disabled.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.

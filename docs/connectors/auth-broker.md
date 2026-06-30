@@ -21,19 +21,22 @@ runtime already enforces this by failing closed — see the "Fail-closed
 configuration" section.
 
 The core desktop workspace does **not** require the broker. Local files, memory,
-approvals, the runtime snapshot, the native API-key agent loop, and Google
-public-client (PKCE) connectors remain fully usable without any hosted service.
+approvals, the runtime snapshot, and the native API-key agent loop remain fully
+usable without any hosted service. Google Drive, Gmail, and Calendar now use the
+same hosted broker lifecycle as the other OAuth connectors and fail closed when
+the broker or Google Cloud client configuration is missing.
 
 ## Purpose and scope
 
 The broker exists for exactly one reason: confidential-client OAuth. Some
-providers (GitHub App, Vercel, Notion, Slack, Linear) require a client secret or
-signing material that must never live in a desktop binary, React assets, logs,
-snapshots, or local JSON state. The broker holds those secrets server-side and
-performs the OAuth operations that need them.
+providers (GitHub App, Vercel, Notion, Slack, Linear, Google Drive, Gmail, and
+Google Calendar) require a client secret or signing material that must never
+live in a desktop binary, React assets, logs, snapshots, or local JSON state.
+The broker holds those secrets server-side and performs the OAuth operations
+that need them.
 
 The broker is **not** a general connector gateway, API proxy, or aggregator. It
-is deliberately limited to four OAuth operations and nothing else.
+is deliberately limited to OAuth lifecycle operations and nothing else.
 
 ### The broker MAY do (confidential OAuth only)
 
@@ -41,20 +44,19 @@ is deliberately limited to four OAuth operations and nothing else.
   authorization-code flow using the provider's confidential client, returning an
   authorization URL (or redirecting) with Fable-supplied PKCE challenge, state,
   and the exact desktop redirect URI.
-- **Token exchange** — `POST /oauth/{provider}/token`: exchange the provider
-  authorization code for access/refresh tokens using the confidential client
-  secret. The broker returns tokens and account identity to the desktop, which
-  stores them in OS secure storage.
-- **Token refresh** — `POST /oauth/{provider}/token` (grant_type=refresh_token):
-  rotate an expiring access token using the refresh token and confidential
-  credentials.
-- **Identity** — `GET /oauth/{provider}/identity`: resolve the connected
-  account's stable id, display name, handle, email, workspace, and avatar from
-  the provider's userinfo/identity endpoint.
+- **Callback exchange and handoff** — `GET /oauth/{provider}/callback`:
+  exchange the provider authorization code for access/refresh tokens using the
+  confidential client secret, resolve account identity, and redirect only an
+  opaque one-time handoff ticket to the desktop.
+- **Handoff redemption** — `POST /oauth/{provider}/handoff`: redeem the
+  single-use ticket over a direct call. This is the only broker response that
+  returns tokens and account identity to the desktop credential boundary.
+- **Token refresh** — `POST /oauth/{provider}/refresh`: rotate an expiring
+  access token using the refresh token and confidential credentials.
 - **Revocation** — `POST /oauth/{provider}/revoke`: revoke the access/refresh
   token at the provider during a desktop disconnect.
 
-The desktop resolves exactly these four routes from the broker base URL via
+The desktop resolves exactly these OAuth routes from the broker base URL via
 `resolve_broker_endpoints` in `connector_auth.rs`. No other route is derivable.
 
 ### The broker MUST NOT do
@@ -87,14 +89,11 @@ These guarantees hold whether or not a broker is deployed:
 - **API-key agent providers** (openai, anthropic, gemini, xai, openrouter) store
   their key in OS secure storage and call the provider directly. No broker
   dependency.
-- **Google connectors** (Drive, Gmail, Calendar) are public PKCE clients. The
-  desktop binds a loopback redirect, performs the code exchange directly with
-  Google, and stores tokens in OS secure storage. No broker dependency.
 - **Local Files, memory, approvals, and the runtime snapshot** are entirely
   local and have no external auth.
 
-The broker is required only by the confidential-client connectors: **github,
-vercel, notion, slack, linear**. This set is pinned in code
+The broker is required only by OAuth connectors: **github, vercel, notion,
+slack, linear, google-drive, gmail, google-calendar**. This set is pinned in code
 (`BROKER_REQUIRED_CONNECTOR_IDS`) and verified by tests.
 
 ## Fail-closed configuration
@@ -114,11 +113,11 @@ A fail-closed result means the confidential connector surfaces a clear
 fixtures, never claims a connected state, and never downgrades to a public
 client.
 
-The desktop uses the same exact loopback receiver for public and confidential
-OAuth. For confidential providers, the authorization URL points at the broker,
-which owns the provider callback and returns the final code/state to the exact
-desktop loopback redirect. The desktop then completes exchange through the
-broker token endpoint without exposing tokens to JavaScript.
+The desktop uses the same exact loopback receiver for OAuth. The authorization
+URL points at the broker, which owns the provider callback and redirects only an
+opaque handoff ticket plus state to the exact desktop loopback redirect. The
+desktop then redeems that handoff through the broker without exposing tokens to
+JavaScript.
 
 ### Why the checks are separated
 
@@ -152,8 +151,8 @@ The fail-closed and non-proxying boundaries are covered by tests in
 - `broker_resolver_accepts_https_and_derives_only_oauth_paths`
 - `broker_resolver_accepts_a_loopback_url_for_local_development`
 - `broker_resolver_derives_no_model_search_import_or_action_endpoint`
-- `only_confidential_connectors_require_the_auth_broker`
-- `google_connectors_are_public_pkce_and_broker_free`
+- `only_oauth_connectors_require_the_auth_broker`
+- `google_connectors_are_broker_gated`
 - `broker_resolver_fail_closed_keeps_core_workspace_usable`
 
 ## Deployment prerequisites (future)
@@ -164,14 +163,13 @@ When the broker is built, it must, at minimum:
    provider's confidential-client flow.
 2. Store client secrets and signing material in its own server-side secret store
    (never in repo config, never shipped to the desktop).
-3. Return the final authorization code and state to the exact desktop redirect
-   URI it was given — it must not mint its own tokens or hold long-lived
-   desktop-scoped sessions.
+3. Return only a short-lived handoff ticket and state to the exact desktop
+   redirect URI it was given. Long-lived desktop-scoped sessions are forbidden.
 4. Be deployed behind HTTPS with registered callback URLs in each provider
    console.
 5. Undergo independent security review before confidential-client providers are
    enabled for external users.
 
 Provider console creation, consent screens, distribution review, and Google
-restricted-scope verification remain external setup tasks independent of the
-broker.
+restricted-scope verification remain external setup tasks for the broker
+deployment.

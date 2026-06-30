@@ -5,6 +5,12 @@ import {
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
+import {
+  googleConfigurationMessage,
+  googleConnectorPermissions,
+  googleScopeDescriptions,
+  googleScopeIds
+} from "./google-shared";
 
 export const GOOGLE_DRIVE_CAPABILITIES = [
   { id: "drive.search", kind: "read", consequential: false, description: "Search accessible Drive metadata." },
@@ -16,6 +22,11 @@ export const GOOGLE_DRIVE_CAPABILITIES = [
     description: `${action.replaceAll("-", " ")} after explicit approval.`
   }))
 ] satisfies ConnectorCapability[];
+
+export const GOOGLE_DRIVE_OAUTH_SCOPES = googleScopeIds("google-drive");
+export const GOOGLE_DRIVE_SCOPE_DESCRIPTIONS = googleScopeDescriptions("google-drive");
+export const GOOGLE_DRIVE_PERMISSIONS = googleConnectorPermissions("google-drive");
+export const GOOGLE_DRIVE_SETUP_MESSAGE = googleConfigurationMessage("google-drive");
 
 export interface GoogleDrivePayload {
   id: string;
