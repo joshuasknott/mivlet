@@ -45,6 +45,8 @@ export function PluginPanel({
         {manifests.map((connector) => {
           const connected = connector.status === "connected";
           const selected = selectedConnector?.id === connector.id;
+          const cardDetail = resolveDetailedStatus(connector);
+          const needsReconnect = cardDetail.className === "expired" || cardDetail.className === "revoked" || cardDetail.className === "failed";
 
           return (
             <article
@@ -85,7 +87,7 @@ export function PluginPanel({
                     onConnect(connector);
                   }}
                 >
-                  Connect
+                  {needsReconnect ? "Reconnect" : "Connect"}
                 </button>
               ) : (
                 <span className="connector-card__connected">Available</span>
@@ -104,6 +106,7 @@ export function PluginPanel({
           accounts={accounts[selectedConnector.id] ?? []}
           onSwitchAccount={onSwitchAccount}
           onPrepareAction={onPrepareAction}
+          onConnect={onConnect}
         />
       ) : null}
     </section>
@@ -117,7 +120,8 @@ function ConnectorDetails({
   onRefresh,
   accounts,
   onSwitchAccount,
-  onPrepareAction
+  onPrepareAction,
+  onConnect
 }: {
   connector: ConnectorManifest;
   onUseConnector: (connector: ConnectorManifest) => void;
@@ -126,9 +130,11 @@ function ConnectorDetails({
   accounts: ConnectorAccountOption[];
   onSwitchAccount: (connectorId: string, accountId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
+  onConnect: (connector: ConnectorManifest) => void;
 }) {
   const firstAction = connector.supportedActions?.[0];
   const permissions = connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
+  const detail = resolveDetailedStatus(connector);
 
   return (
     <article className="connector-detail" aria-label={`${connector.name} details`}>
@@ -138,10 +144,10 @@ function ConnectorDetails({
         </span>
         <div>
           <h2>{connector.name}</h2>
-          <p>{connector.setupMessage ?? connector.healthSummary}</p>
+          <p>{connector.setupMessage ?? detail.summary}</p>
         </div>
-        <span className={`connector-detail__status connector-detail__status--${connector.status}`}>
-          {statusLabel(connector)}
+        <span className={`connector-detail__status connector-detail__status--${detail.className}`}>
+          {detail.label}
         </span>
       </div>
 
@@ -156,7 +162,7 @@ function ConnectorDetails({
         </div>
         <div>
           <span>Health</span>
-          <p>{connector.health?.summary ?? connector.healthSummary}</p>
+          <p>{detail.summary}</p>
         </div>
       </div>
 
@@ -186,6 +192,17 @@ function ConnectorDetails({
             Use in composer
           </button>
         ) : null}
+        {connector.status !== "connected" && connector.status !== "fixture" && connector.authMode !== "none" ? (
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => onConnect(connector)}
+          >
+            {detail.className === "expired" || detail.className === "revoked" || detail.className === "failed"
+              ? "Reconnect"
+              : "Connect"}
+          </button>
+        ) : null}
         <button type="button" onClick={() => onRefresh(connector.id)}>
           Refresh
         </button>
@@ -211,14 +228,117 @@ function ConnectorDetails({
   );
 }
 
-function statusLabel(connector: ConnectorManifest) {
-  if (connector.status === "connected") {
-    return "Connected";
+export function resolveDetailedStatus(connector: ConnectorManifest): {
+  label: string;
+  className: string;
+  summary: string;
+} {
+  const status = connector.status;
+  const healthState = connector.health?.state;
+  const healthSummary = connector.health?.summary ?? connector.healthSummary;
+  const setupMessage = connector.setupMessage;
+
+  // 1. Syncing
+  if (status === "connected" && healthState === "unknown") {
+    return {
+      label: "Syncing",
+      className: "syncing",
+      summary: `Verifying connection with ${connector.name}...`
+    };
   }
-  if (connector.status === "fixture") {
-    return "Preview";
+
+  // 2. Permission Limited (missing required scopes)
+  const hasMissingRequiredScopes = connector.scopes?.some((scope) => scope.required && !scope.granted) ?? false;
+  const isStale = healthSummary.toLowerCase().includes("missing required") || healthSummary.toLowerCase().includes("stale");
+  if (status === "connected" && (hasMissingRequiredScopes || isStale)) {
+    return {
+      label: "Permission Limited",
+      className: "permission-limited",
+      summary: `${connector.name} is missing required scopes or permissions.`
+    };
   }
-  return "Not connected";
+
+  // 3. Connected
+  if (status === "connected") {
+    let summary = healthSummary;
+    if (healthState === "healthy" || !healthState) {
+      const name = connector.account?.displayName ?? connector.account?.email;
+      const accountInfo = name ? ` as ${name}` : "";
+      summary = `${connector.name} account connected${accountInfo}.`;
+    }
+    return {
+      label: "Connected",
+      className: "connected",
+      summary
+    };
+  }
+
+  // 4. Expired
+  if (status === "expired" || healthSummary.toLowerCase().includes("expired")) {
+    return {
+      label: "Expired",
+      className: "expired",
+      summary: `${connector.name} authorization expired; reconnect or refresh is required.`
+    };
+  }
+
+  // 5. Revoked
+  if (healthSummary.toLowerCase().includes("revoked") || healthSummary.toLowerCase().includes("disconnected")) {
+    return {
+      label: "Revoked",
+      className: "revoked",
+      summary: `${connector.name} was disconnected or revoked.`
+    };
+  }
+
+  // 6. Configuration Required / Unconfigured
+  const isUnconfigured = status === "unavailable" || status === "needs-auth";
+  const hasConfigMsg = setupMessage?.toLowerCase().includes("broker") ||
+    setupMessage?.toLowerCase().includes("config") ||
+    setupMessage?.toLowerCase().includes("client_id") ||
+    healthSummary.toLowerCase().includes("configuration");
+
+  if (isUnconfigured && hasConfigMsg) {
+    return {
+      label: "Configuration Required",
+      className: "configuration-required",
+      summary: `${connector.name} is not configured on the Fable auth broker.`
+    };
+  }
+
+  // 7. Unavailable
+  if (status === "unavailable") {
+    return {
+      label: "Unavailable",
+      className: "unavailable",
+      summary: `${connector.name} service is temporarily unavailable.`
+    };
+  }
+
+  // 8. Failed
+  if (status === "error" || healthState === "error" || healthState === "degraded") {
+    return {
+      label: "Failed",
+      className: "failed",
+      summary: healthSummary || `Connection to ${connector.name} failed.`
+    };
+  }
+
+  // 9. Fixture / Preview
+  if (status === "fixture") {
+    return {
+      label: "Preview",
+      className: "fixture",
+      summary: healthSummary || "Preview mode active."
+    };
+  }
+
+  // Default: unconfigured / Needs Authorization
+  return {
+    label: "Needs Authorization",
+    className: "needs-auth",
+    summary: setupMessage ?? healthSummary ?? `Connect your ${connector.name} account.`
+  };
 }
 
 function actionLabel(action: ConnectorActionKind) {
