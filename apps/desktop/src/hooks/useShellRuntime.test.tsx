@@ -180,7 +180,7 @@ describe("useShellRuntime — high-risk confirmation gating", () => {
     vi.clearAllMocks();
   });
 
-  it("gates high-risk approvals behind a pending confirmation instead of resolving immediately", () => {
+  it("gates high-risk approvals behind a pending confirmation instead of resolving immediately", async () => {
     const { result } = renderHook(() => useShellRuntime());
     const approval = highRiskApproval();
 
@@ -193,6 +193,7 @@ describe("useShellRuntime — high-risk confirmation gating", () => {
     expect(result.current.pendingApprovalConfirmation).not.toBeNull();
     expect(result.current.pendingApprovalConfirmation?.decision).toBe("once");
     expect(result.current.approvalAudit.length).toBe(0);
+    await awaitMountEffects();
   });
 
   it("refuses to resolve a high-risk approval until the confirmation phrase matches", async () => {
@@ -257,7 +258,7 @@ describe("useShellRuntime — modify drafting", () => {
     vi.clearAllMocks();
   });
 
-  it("opens a modify draft seeded from the approval's current scope", () => {
+  it("opens a modify draft seeded from the approval's current scope", async () => {
     const { result } = renderHook(() => useShellRuntime());
     const approval = lowRiskApproval();
 
@@ -272,9 +273,10 @@ describe("useShellRuntime — modify drafting", () => {
       approval.dataUsed.join(", ")
     );
     expect(result.current.approvalModificationDraft.consequence).toBe(approval.consequence);
+    await awaitMountEffects();
   });
 
-  it("rejects a save when allowed data or consequence is empty", () => {
+  it("rejects a save when allowed data or consequence is empty", async () => {
     const { result } = renderHook(() => useShellRuntime());
     const approval = lowRiskApproval();
 
@@ -291,6 +293,7 @@ describe("useShellRuntime — modify drafting", () => {
     expect(result.current.lastAction).toMatch(/allowed data and a consequence/i);
     // Nothing recorded — the modify was not committed.
     expect(result.current.approvalAudit.length).toBe(0);
+    await awaitMountEffects();
   });
 
   it("commits a narrowed modify as a `modify` audit entry", async () => {
