@@ -474,9 +474,11 @@ export function ingestFolder(
     }
 
     // When the path was sanitized (e.g. backslashes normalized), use the
-    // sanitized form so downstream metadata is boundary-relative.
+    // sanitized form so downstream metadata is boundary-relative. The
+    // path-escape guard above already `continue`d when safePath was null, so
+    // here safePath is a normalized string (or undefined when no sourcePath).
     const candidateInput: LocalFileCandidateInput = { ...file };
-    if (file.sourcePath && safePath !== undefined) {
+    if (file.sourcePath && typeof safePath === "string") {
       candidateInput.sourcePath = safePath;
     }
     const candidate = localFilesCandidate(candidateInput);
