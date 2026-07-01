@@ -76,3 +76,48 @@ describe("knowledge search", () => {
     expect(result.citations).toEqual([]);
   });
 });
+
+describe("knowledge search: lifecycle exclusion + integrity", () => {
+  it("excludes disabled sources", () => {
+    const disabled = sources.map((s) =>
+      s.id === "security-model" ? { ...s, disabled: true } : s
+    );
+    const result = searchKnowledgeSources("security", disabled);
+    expect(result.citations.map((c) => c.sourceId)).not.toContain("security-model");
+  });
+
+  it("excludes error/stale/indexing sources", () => {
+    const stale = sources.map((s) =>
+      s.id === "launch-plan" ? { ...s, status: "stale" as const } : s
+    );
+    const result = searchKnowledgeSources("connector recovery", stale);
+    expect(result.citations.map((c) => c.sourceId)).not.toContain("launch-plan");
+  });
+
+  it("deduplicates sources with the same id in the input", () => {
+    const duped = [...sources, sources[0]];
+    const result = searchKnowledgeSources("launch", duped);
+    const ids = result.citations.map((c) => c.sourceId);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("includes chunkId and ranking in every citation", () => {
+    const result = searchKnowledgeSources("connector recovery", sources);
+    for (const c of result.citations) {
+      expect(c.chunkId).toMatch(/#0$/);
+      expect(c.ranking).toBeDefined();
+      expect(c.ranking?.relevance).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("honors a character budget across snippets", () => {
+    const result = searchKnowledgeSources("launch security meeting", sources, {
+      limit: 5,
+      budgetChars: 50
+    });
+    // Budget caps the total snippet chars (after keeping the top citation).
+    const total = result.citations.reduce((sum, c) => sum + c.snippet.length, 0);
+    expect(total).toBeLessThanOrEqual(50 + 240); // top citation may exceed before budget applies
+    expect(result.citations.length).toBeGreaterThanOrEqual(1);
+  });
+});

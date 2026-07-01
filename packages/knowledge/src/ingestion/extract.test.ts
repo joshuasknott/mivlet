@@ -164,3 +164,87 @@ describe("extract: classifyCandidate", () => {
     ).not.toThrow();
   });
 });
+
+describe("extract: malformed structured files (CSV/YAML)", () => {
+  it("rejects grossly ragged CSV (every row's column count differs from header)", () => {
+    const ragged = "a,b,c\n1\n1,2\n1,2,3,4";
+    const result = classifyCandidate(
+      candidate({
+        mimeType: "text/csv",
+        title: "ragged.csv",
+        content: ragged,
+        sizeBytes: ragged.length
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("malformed");
+  });
+
+  it("rejects prose masquerading as CSV (header with no delimiter, many rows)", () => {
+    const prose = "this is a sentence\nwith no delimiters\nat all anywhere\nmore lines here";
+    const result = classifyCandidate(
+      candidate({
+        mimeType: "text/csv",
+        title: "prose.csv",
+        content: prose,
+        sizeBytes: prose.length
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("malformed");
+  });
+
+  it("accepts well-formed CSV", () => {
+    const csv = "name,kind\nalpha,doc\nbeta,doc";
+    const result = classifyCandidate(
+      candidate({
+        mimeType: "text/csv",
+        title: "ok.csv",
+        content: csv,
+        sizeBytes: csv.length
+      })
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects tab-indented YAML", () => {
+    const yaml = "name: Fable\n\tdetails: x\n";
+    const result = classifyCandidate(
+      candidate({
+        mimeType: "application/yaml",
+        title: "bad.yaml",
+        content: yaml,
+        sizeBytes: yaml.length
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("malformed");
+  });
+
+  it("rejects YAML that is only comments/whitespace", () => {
+    const yaml = "# just a comment\n\n   # another\n";
+    const result = classifyCandidate(
+      candidate({
+        mimeType: "application/yaml",
+        title: "empty.yaml",
+        content: yaml,
+        sizeBytes: yaml.length
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("malformed");
+  });
+
+  it("accepts well-formed YAML", () => {
+    const yaml = "name: Fable\nkind: app\n";
+    const result = classifyCandidate(
+      candidate({
+        mimeType: "application/yaml",
+        title: "ok.yaml",
+        content: yaml,
+        sizeBytes: yaml.length
+      })
+    );
+    expect(result.ok).toBe(true);
+  });
+});

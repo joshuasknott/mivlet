@@ -16,6 +16,9 @@ export {
   classifyCandidate,
   extensionFor,
   extensionToType,
+  malformedCsvDetail,
+  malformedJsonDetail,
+  malformedYamlDetail,
   mimeTypeForExtension,
   resolveType,
   type Classification,
@@ -36,9 +39,19 @@ export {
   ingestFolder,
   localFilesCandidate,
   reindexIndex,
+  sanitizeSourcePath,
   sourceIdFor,
   type IngestCandidateOptions,
   type IngestFolderOptions,
   type LocalFileCandidateInput,
+  type ReindexOptions,
   type ReindexResult
 } from "./ingest";
+
+export {
+  disableSource,
+  enableSource,
+  markFailed,
+  markHealthy,
+  markIndexing
+} from "./lifecycle";
