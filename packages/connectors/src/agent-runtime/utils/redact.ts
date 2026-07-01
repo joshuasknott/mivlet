@@ -53,7 +53,10 @@ export function redactSecretsFromObject<T>(obj: T): T {
   if (typeof obj === "object") {
     const redactedObj: Record<string, any> = {};
     for (const [key, value] of Object.entries(obj)) {
-      const isSensitiveKey = /^(api[-_]?key|token|password|cookie|authorization|secret|credential|session[-_]?token)$/i.test(key);
+      const isSensitiveKey =
+        /^(api[-_]?key|token|password|passwd|cookie|authorization|secret|credential|session[-_]?token|access[-_]?token|refresh[-_]?token|secret[-_]?token|client[-_]?secret|private[-_]?key)$/i.test(
+          key
+        );
       if (isSensitiveKey) {
         redactedObj[key] = "[REDACTED]";
       } else {
