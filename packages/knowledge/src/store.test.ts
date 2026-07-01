@@ -56,7 +56,7 @@ function makeChunk(sourceId: string, ordinal: number): SourceChunk {
 
 describe("knowledge store", () => {
   it("upserts sources and chunks and reads them back", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertSource({ source: makeSource(), chunks: [makeChunk("s1", 0), makeChunk("s1", 1)] });
 
     expect(store.sources()).toHaveLength(1);
@@ -65,7 +65,7 @@ describe("knowledge store", () => {
   });
 
   it("removing a source drops its chunks and pinned entries", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertSource({ source: makeSource(), chunks: [makeChunk("s1", 0)] });
     const pinned: PinnedContextEntry = {
       id: "p1",
@@ -83,7 +83,7 @@ describe("knowledge store", () => {
   });
 
   it("excludes disabled sources from the live read path", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertSource({ source: makeSource({ disabled: true }) });
 
     expect(store.sources()).toHaveLength(0);
@@ -93,7 +93,7 @@ describe("knowledge store", () => {
   });
 
   it("excludes forgotten memories from the live read path", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertMemory(makeMemory({ forgottenAt: "2026-06-28T00:00:00.000Z" }));
 
     expect(store.memories()).toHaveLength(0);
@@ -102,7 +102,7 @@ describe("knowledge store", () => {
   });
 
   it("removing a memory drops its pinned entries", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertMemory(makeMemory());
     store.pin({
       id: "p1",
@@ -118,7 +118,7 @@ describe("knowledge store", () => {
   });
 
   it("pins and unpins context within a scope", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     const entry: PinnedContextEntry = {
       id: "p1",
       scope: { level: "project", projectId: "proj" },
@@ -135,7 +135,7 @@ describe("knowledge store", () => {
   });
 
   it("export returns live sources and live memories only", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertSource({ source: makeSource() });
     store.upsertSource({ source: makeSource({ id: "s2", disabled: true }) });
     store.upsertMemory(makeMemory());
@@ -147,27 +147,38 @@ describe("knowledge store", () => {
   });
 
   it("snapshot round-trips through a fresh store", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertSource({ source: makeSource(), chunks: [makeChunk("s1", 0)] });
     store.upsertMemory(makeMemory());
 
     const snap = store.snapshot();
-    const restored = createKnowledgeStore(snap);
+    const restored = createKnowledgeStore("ws-a", snap);
 
     expect(restored.sources()).toHaveLength(1);
     expect(restored.chunks("s1")).toHaveLength(1);
     expect(restored.memories()).toHaveLength(1);
   });
 
+  it("accepts legacy snapshots without a top-level workspace id", () => {
+    const legacy = emptyKnowledgeStoreState("legacy");
+    delete legacy.workspaceId;
+    legacy.sources.push(makeSource({ id: "s1" }));
+
+    const restored = createKnowledgeStore("ws-a", legacy);
+
+    expect(restored.snapshot().workspaceId).toBe("ws-a");
+    expect(restored.source("s1")?.workspaceId).toBe("ws-a");
+  });
+
   it("emptyKnowledgeStoreState is a clean baseline", () => {
-    const snap = emptyKnowledgeStoreState();
+    const snap = emptyKnowledgeStoreState("ws-a");
     expect(snap.sources).toEqual([]);
     expect(snap.memories).toEqual([]);
     expect(snap.pinned).toEqual([]);
   });
 
   it("can disable and re-enable sources to hide/reveal them", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     const source = makeSource();
     store.upsertSource({ source });
     expect(store.sources()).toHaveLength(1);
@@ -184,17 +195,53 @@ describe("knowledge store", () => {
   });
 
   it("handles deleted cache by initializing and restoring from an empty snapshot", () => {
-    const store = createKnowledgeStore();
+    const store = createKnowledgeStore("ws-a");
     store.upsertSource({ source: makeSource(), chunks: [makeChunk("s1", 0)] });
     store.upsertMemory(makeMemory());
     expect(store.sources()).toHaveLength(1);
 
     // Delete cache / empty snap
-    const emptySnap = emptyKnowledgeStoreState();
-    const restored = createKnowledgeStore(emptySnap);
+    const emptySnap = emptyKnowledgeStoreState("ws-a");
+    const restored = createKnowledgeStore("ws-a", emptySnap);
     expect(restored.sources()).toHaveLength(0);
     expect(restored.memories()).toHaveLength(0);
     expect(restored.pinned(GLOBAL_SCOPE)).toHaveLength(0);
+  });
+
+  it("isolates identical ids in different workspaces and rejects cross-workspace snapshots", () => {
+    const alpha = createKnowledgeStore("alpha");
+    const beta = createKnowledgeStore("beta");
+    alpha.upsertSource({ source: makeSource({ id: "shared", title: "Alpha" }) });
+    beta.upsertSource({ source: makeSource({ id: "shared", title: "Beta" }) });
+
+    expect(alpha.source("shared")?.title).toBe("Alpha");
+    expect(beta.source("shared")?.title).toBe("Beta");
+    expect(() => createKnowledgeStore("beta", alpha.snapshot())).toThrow(/another workspace/);
+    expect(() =>
+      alpha.upsertMemory(makeMemory({ id: "foreign", workspaceId: "beta" }))
+    ).toThrow(/another workspace/);
+  });
+
+  it("persists deletion and forget guards across snapshot round trips", () => {
+    const store = createKnowledgeStore("alpha");
+    store.upsertSource({ source: makeSource({ id: "deleted" }) });
+    store.removeSource("deleted");
+    store.upsertMemory(makeMemory({ id: "forgotten", forgottenAt: "2026-07-01T00:00:00Z" }));
+
+    const restored = createKnowledgeStore("alpha", store.snapshot());
+    expect(() => restored.upsertSource({ source: makeSource({ id: "deleted" }) })).toThrow(
+      /cannot be restored/
+    );
+    expect(() => restored.upsertMemory(makeMemory({ id: "forgotten" }))).toThrow(
+      /cannot be restored/
+    );
+    expect(restored.export()).toMatchObject({
+      workspaceId: "alpha",
+      disabledRecordsIncluded: false,
+      forgottenRecordsIncluded: false,
+      sources: [],
+      memories: []
+    });
   });
 });
 

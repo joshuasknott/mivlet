@@ -243,13 +243,27 @@ fn test_workspace_isolation_crud_operations() {
     assert_eq!(alpha_run[0]["progress"], 10);
     assert_eq!(beta_run[0]["progress"], 100);
 
-    // Verify same ID ownership conflict is rejected across workspaces for global primary key tables
-    let ownership_err = store.transaction(|tx| {
+    // Knowledge identities are workspace-composite: the same domain id may
+    // exist independently without widening either workspace's reads.
+    store.transaction(|tx| {
         knowledge_source::upsert_from_value_scoped(tx, &store, &beta_scope, json!({
             "id": "k1_alpha", "connectorId": "local", "kind": "doc", "trust": "untrusted", "pinned": 1, "sizeBytes": 20
         }), "now")
-    }).unwrap_err();
-    assert!(matches!(ownership_err, StoreError::Invalid(_)));
+    }).unwrap();
+    assert_eq!(
+        store
+            .with_conn(|conn| knowledge_source::list_scoped(conn, &store, &alpha_scope))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        store
+            .with_conn(|conn| knowledge_source::list_scoped(conn, &store, &beta_scope))
+            .unwrap()
+            .len(),
+        2
+    );
 
     // 5. Cross-workspace delete is isolated
     store
@@ -262,7 +276,11 @@ fn test_workspace_isolation_crud_operations() {
         .with_conn(|conn| knowledge_source::list_scoped(conn, &store, &beta_scope))
         .unwrap_or_default();
     assert_eq!(alpha_k_post.len(), 1, "Alpha row should remain intact");
-    assert_eq!(beta_k_post.len(), 0, "Beta row should be deleted");
+    assert_eq!(
+        beta_k_post.len(),
+        1,
+        "Only Beta's selected row should be deleted"
+    );
 
     // 6. Context validation (missing, stale, invalid)
     // Non-existent workspace check

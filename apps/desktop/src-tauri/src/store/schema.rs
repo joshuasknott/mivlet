@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS connector_cache (
 CREATE INDEX IF NOT EXISTS idx_connector_cache_workspace ON connector_cache(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_connector_cache_connector ON connector_cache(connector_id);
 CREATE INDEX IF NOT EXISTS idx_connector_cache_search ON connector_cache(workspace_id, connector_id, disabled);
+
+CREATE TABLE IF NOT EXISTS connector_cache_tombstone (
+  workspace_id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  provider_item_id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, connector_id, provider_item_id)
+);
 
 -- Per-workspace and per-connector cache settings. `scope` is either
 -- "workspace" (a workspace-wide default) or "connector" (a per-connector
@@ -369,38 +377,97 @@ CREATE TABLE IF NOT EXISTS backend_connection (
 
 -- knowledge + memory
 CREATE TABLE IF NOT EXISTS knowledge_source (
-  id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
   project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
   connector_id TEXT NOT NULL,
+  connector_account_id TEXT NOT NULL DEFAULT '',
+  external_id TEXT NOT NULL DEFAULT '',
   kind TEXT NOT NULL,
   trust TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0,
   content_fingerprint TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
   imported_at TEXT NOT NULL,
   origin TEXT NOT NULL,
   payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_connector ON knowledge_source(connector_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_pinned ON knowledge_source(pinned);
 CREATE INDEX IF NOT EXISTS idx_knowledge_workspace ON knowledge_source(workspace_id, project_id);
 
 CREATE TABLE IF NOT EXISTS memory_record (
-  id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
   project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   pinned INTEGER NOT NULL DEFAULT 0,
   approved INTEGER NOT NULL DEFAULT 0,
+  disabled INTEGER NOT NULL DEFAULT 0,
+  forgotten_at TEXT,
   created_at TEXT NOT NULL,
   payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_memory_kind ON memory_record(kind);
 CREATE INDEX IF NOT EXISTS idx_memory_pinned ON memory_record(pinned);
 CREATE INDEX IF NOT EXISTS idx_memory_workspace ON memory_record(workspace_id, project_id);
+
+-- Durable retrieval dependencies. Composite foreign keys guarantee that a
+-- source/memory id can never resolve through another workspace.
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+  workspace_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  ordinal INTEGER NOT NULL,
+  content_fingerprint TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, id),
+  FOREIGN KEY (workspace_id, source_id)
+    REFERENCES knowledge_source(workspace_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_source
+  ON knowledge_chunk(workspace_id, source_id, ordinal);
+
+CREATE TABLE IF NOT EXISTS pinned_context (
+  workspace_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  source_id TEXT,
+  memory_id TEXT,
+  scope_level TEXT NOT NULL,
+  project_id TEXT,
+  thread_id TEXT,
+  pinned_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id),
+  CHECK ((source_id IS NOT NULL) != (memory_id IS NOT NULL)),
+  FOREIGN KEY (workspace_id, source_id)
+    REFERENCES knowledge_source(workspace_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (workspace_id, memory_id)
+    REFERENCES memory_record(workspace_id, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_pinned_context_scope
+  ON pinned_context(workspace_id, scope_level, project_id, thread_id);
+
+-- Minimal deletion/forget guards. They contain no user content and prevent a
+-- routine re-import or sync from silently resurrecting an explicitly removed
+-- record.
+CREATE TABLE IF NOT EXISTS knowledge_tombstone (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
+CREATE TABLE IF NOT EXISTS memory_tombstone (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  forgotten_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
 
 -- scheduler (stable surface for Goal 8)
 CREATE TABLE IF NOT EXISTS schedule (

@@ -54,7 +54,7 @@ pub fn effective(
     workspace_id: &str,
     connector_id: &str,
 ) -> Result<CacheSettingsRow> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     if let Some(row) = get(tx, store, &workspace_id, connector_id)? {
         return Ok(row);
     }
@@ -88,7 +88,7 @@ pub fn get(
     workspace_id: &str,
     connector_id: &str,
 ) -> Result<Option<CacheSettingsRow>> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let partial = tx
         .query_row(
             "SELECT workspace_id, connector_id, scope, enabled, auto_sync, updated_at,
@@ -140,7 +140,7 @@ pub fn upsert(
     connector_id: &str,
     update: CacheSettingsUpdate<'_>,
 ) -> Result<()> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let scope = if connector_id == WORKSPACE_SCOPE_CONNECTOR {
         SCOPE_WORKSPACE
     } else {
@@ -174,7 +174,7 @@ pub fn upsert(
 /// Delete settings for `(workspace_id, connector_id)`. Deleting a connector
 /// override makes the workspace default (or built-in default) take effect.
 pub fn delete(tx: &Connection, workspace_id: &str, connector_id: &str) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let deleted = tx.execute(
         "DELETE FROM connector_cache_settings
          WHERE workspace_id = ?1 AND connector_id = ?2;",
@@ -185,7 +185,7 @@ pub fn delete(tx: &Connection, workspace_id: &str, connector_id: &str) -> Result
 
 /// Delete all settings rows for a workspace (used on full cache clear).
 pub fn clear_for_workspace(tx: &Connection, workspace_id: &str) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let deleted = tx.execute(
         "DELETE FROM connector_cache_settings WHERE workspace_id = ?1;",
         rusqlite::params![workspace_id],
@@ -199,7 +199,7 @@ pub fn list_for_workspace(
     store: &Store,
     workspace_id: &str,
 ) -> Result<Vec<CacheSettingsRow>> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let mut stmt = tx.prepare(
         "SELECT workspace_id, connector_id, scope, enabled, auto_sync, updated_at,
                 payload, payload_nonce

@@ -43,6 +43,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // the workflow hand-off tables, then add the durable scheduler
             // tables from the schedule-SQLite integration.
             3 => apply_v3_to_v4(conn)?,
+            // 4 → 5: make knowledge/memory identities workspace-composite,
+            // add durable lifecycle columns and workspace-bound dependencies.
+            4 => apply_v4_to_v5(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -53,6 +56,153 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
     }
     let _ = (conn, to); // schema step closures land here in future versions
     Ok(())
+}
+
+fn apply_v4_to_v5(conn: &Connection) -> super::Result<()> {
+    // Some migration unit fixtures intentionally model only the table touched
+    // by an earlier step. Production schemas always have both parents; leave
+    // partial fixtures untouched instead of creating dangling foreign keys.
+    if !table_exists(conn, "knowledge_source")? || !table_exists(conn, "memory_record")? {
+        return Ok(());
+    }
+    let rebuild_knowledge = table_exists(conn, "knowledge_source")?
+        && !table_has_composite_primary_key(conn, "knowledge_source", "workspace_id", "id")?;
+    let rebuild_memory = table_exists(conn, "memory_record")?
+        && !table_has_composite_primary_key(conn, "memory_record", "workspace_id", "id")?;
+    // SCHEMA_V1 runs before migrations and may have created these empty tables
+    // against a legacy parent shape. Recreate them after the parent rebuild.
+    if rebuild_knowledge || rebuild_memory {
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS pinned_context; DROP TABLE IF EXISTS knowledge_chunk;",
+        )?;
+    }
+
+    if rebuild_knowledge {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE knowledge_source RENAME TO knowledge_source_v4;
+            CREATE TABLE knowledge_source (
+              workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+              id TEXT NOT NULL,
+              project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+              connector_id TEXT NOT NULL,
+              connector_account_id TEXT NOT NULL DEFAULT '',
+              external_id TEXT NOT NULL DEFAULT '',
+              kind TEXT NOT NULL,
+              trust TEXT NOT NULL,
+              pinned INTEGER NOT NULL DEFAULT 0,
+              disabled INTEGER NOT NULL DEFAULT 0,
+              content_fingerprint TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL,
+              imported_at TEXT NOT NULL,
+              origin TEXT NOT NULL,
+              payload BLOB NOT NULL,
+              payload_nonce BLOB NOT NULL,
+              PRIMARY KEY (workspace_id, id)
+            );
+            INSERT INTO knowledge_source (
+              workspace_id, id, project_id, connector_id, kind, trust, pinned,
+              content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce
+            ) SELECT workspace_id, id, project_id, connector_id, kind, trust, pinned,
+                     content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce
+              FROM knowledge_source_v4;
+            DROP TABLE knowledge_source_v4;
+            "#,
+        )?;
+    }
+
+    if rebuild_memory {
+        conn.execute_batch(
+            r#"
+            ALTER TABLE memory_record RENAME TO memory_record_v4;
+            CREATE TABLE memory_record (
+              workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+              id TEXT NOT NULL,
+              project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+              kind TEXT NOT NULL,
+              pinned INTEGER NOT NULL DEFAULT 0,
+              approved INTEGER NOT NULL DEFAULT 0,
+              disabled INTEGER NOT NULL DEFAULT 0,
+              forgotten_at TEXT,
+              created_at TEXT NOT NULL,
+              payload BLOB NOT NULL,
+              payload_nonce BLOB NOT NULL,
+              PRIMARY KEY (workspace_id, id)
+            );
+            INSERT INTO memory_record (
+              workspace_id, id, project_id, kind, pinned, approved, created_at, payload, payload_nonce
+            ) SELECT workspace_id, id, project_id, kind, pinned, approved, created_at, payload, payload_nonce
+              FROM memory_record_v4;
+            DROP TABLE memory_record_v4;
+            "#,
+        )?;
+    }
+
+    conn.execute_batch(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_knowledge_connector ON knowledge_source(connector_id);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_pinned ON knowledge_source(pinned);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_workspace ON knowledge_source(workspace_id, project_id);
+        CREATE INDEX IF NOT EXISTS idx_memory_kind ON memory_record(kind);
+        CREATE INDEX IF NOT EXISTS idx_memory_pinned ON memory_record(pinned);
+        CREATE INDEX IF NOT EXISTS idx_memory_workspace ON memory_record(workspace_id, project_id);
+        CREATE TABLE IF NOT EXISTS knowledge_chunk (
+          workspace_id TEXT NOT NULL, source_id TEXT NOT NULL, id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL, content_fingerprint TEXT NOT NULL,
+          payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY (workspace_id, id),
+          FOREIGN KEY (workspace_id, source_id)
+            REFERENCES knowledge_source(workspace_id, id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_source
+          ON knowledge_chunk(workspace_id, source_id, ordinal);
+        CREATE TABLE IF NOT EXISTS pinned_context (
+          workspace_id TEXT NOT NULL, id TEXT NOT NULL, source_id TEXT, memory_id TEXT,
+          scope_level TEXT NOT NULL, project_id TEXT, thread_id TEXT, pinned_at TEXT NOT NULL,
+          PRIMARY KEY (workspace_id, id),
+          CHECK ((source_id IS NOT NULL) != (memory_id IS NOT NULL)),
+          FOREIGN KEY (workspace_id, source_id)
+            REFERENCES knowledge_source(workspace_id, id) ON DELETE CASCADE,
+          FOREIGN KEY (workspace_id, memory_id)
+            REFERENCES memory_record(workspace_id, id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_pinned_context_scope
+          ON pinned_context(workspace_id, scope_level, project_id, thread_id);
+        CREATE TABLE IF NOT EXISTS knowledge_tombstone (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          id TEXT NOT NULL, deleted_at TEXT NOT NULL, PRIMARY KEY (workspace_id, id)
+        );
+        CREATE TABLE IF NOT EXISTS memory_tombstone (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          id TEXT NOT NULL, forgotten_at TEXT NOT NULL, PRIMARY KEY (workspace_id, id)
+        );
+        CREATE TABLE IF NOT EXISTS connector_cache_tombstone (
+          workspace_id TEXT NOT NULL, connector_id TEXT NOT NULL,
+          provider_item_id TEXT NOT NULL, deleted_at TEXT NOT NULL,
+          PRIMARY KEY (workspace_id, connector_id, provider_item_id)
+        );
+        "#,
+    )?;
+    Ok(())
+}
+
+fn table_has_composite_primary_key(
+    conn: &Connection,
+    table: &str,
+    first: &str,
+    second: &str,
+) -> super::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table});"))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+    })?;
+    let mut keys = rows
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|(_, position)| *position > 0)
+        .collect::<Vec<_>>();
+    keys.sort_by_key(|(_, position)| *position);
+    Ok(keys == [(first.to_string(), 1), (second.to_string(), 2)])
 }
 
 fn apply_v3_to_v4(conn: &Connection) -> super::Result<()> {
@@ -550,5 +700,76 @@ mod tests {
         assert_eq!(preference_owner, "default");
         assert_eq!(project_owner, "default");
         assert_eq!(knowledge_owner, "default");
+    }
+
+    #[test]
+    fn v4_to_v5_preserves_rows_and_makes_ids_workspace_composite() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE workspace (
+              id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            INSERT INTO workspace VALUES ('default','Default','now','now'), ('beta','Beta','now','now');
+            CREATE TABLE project (
+              id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title_fingerprint TEXT NOT NULL,
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            CREATE TABLE knowledge_source (
+              id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, project_id TEXT,
+              connector_id TEXT NOT NULL, kind TEXT NOT NULL, trust TEXT NOT NULL,
+              pinned INTEGER NOT NULL, content_fingerprint TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+              imported_at TEXT NOT NULL, origin TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            CREATE TABLE memory_record (
+              id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, project_id TEXT,
+              kind TEXT NOT NULL, pinned INTEGER NOT NULL, approved INTEGER NOT NULL,
+              created_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            INSERT INTO knowledge_source VALUES
+              ('shared','default',NULL,'local-files','document','untrusted',0,'fp',1,'now','local-import',x'01',x'02');
+            INSERT INTO memory_record VALUES
+              ('memory','default',NULL,'fact',0,1,'now',x'03',x'04');
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 4, 5).unwrap();
+        conn.execute(
+            "INSERT INTO knowledge_source
+               (workspace_id,id,project_id,connector_id,kind,trust,pinned,disabled,
+                content_fingerprint,size_bytes,imported_at,origin,payload,payload_nonce)
+             VALUES ('beta','shared',NULL,'local-files','document','untrusted',0,0,'fp2',2,'now','local-import',x'05',x'06');",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM knowledge_source WHERE id='shared'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM memory_record WHERE id='memory' AND workspace_id='default'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+
+        // Reapplying is non-destructive once the composite shape is present.
+        apply(&conn, 4, 5).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM knowledge_source", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
     }
 }

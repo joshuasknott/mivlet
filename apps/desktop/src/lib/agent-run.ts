@@ -84,9 +84,20 @@ export interface BuildContextPrefixForRunInput {
 export function buildContextPrefixForRun(input: BuildContextPrefixForRunInput): string {
   // Memory pinning flips record.pinned; source pinning is tracked solely by the
   // pinnedSourceIds set (the shell never mutates source.pinned on merged sources).
-  const memory = input.memoryDisabled ? [] : input.memoryRecords.filter((record) => record.pinned);
+  const memory = input.memoryDisabled
+    ? []
+    : input.memoryRecords.filter(
+        (record) => record.pinned && !record.disabled && !record.forgottenAt
+      );
   const pinnedIdSet = new Set(input.pinnedSourceIds);
-  const sources = input.knowledgeSources.filter((source) => pinnedIdSet.has(source.id));
+  const sources = input.knowledgeSources.filter(
+    (source) =>
+      pinnedIdSet.has(source.id) &&
+      !source.disabled &&
+      !source.deletedAt &&
+      source.status !== "stale" &&
+      source.status !== "error"
+  );
   return buildContextPrefix(memory, sources);
 }
 

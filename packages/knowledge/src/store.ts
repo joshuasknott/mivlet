@@ -31,7 +31,7 @@ export function isLiveMemory(record: MemoryRecord): boolean {
 
 /** True when a source is live (not disabled and not in an error-excluded state). */
 export function isLiveSource(source: KnowledgeSource): boolean {
-  return !source.disabled;
+  return !source.disabled && !source.deletedAt;
 }
 
 /** Two scopes are the same effective scope. */
@@ -63,6 +63,7 @@ export function scopeSatisfies(entry: KnowledgeScope, run: KnowledgeScope): bool
  * single chokepoint for that exclusion — callers do not re-filter.
  */
 export interface KnowledgeStore {
+  readonly workspaceId: string;
   // -- sources -------------------------------------------------------------
   /** Live sources only (disabled sources excluded). */
   sources(): KnowledgeSource[];
@@ -96,25 +97,33 @@ export interface KnowledgeStore {
 
   // -- export --------------------------------------------------------------
   /** Full export (sources + live memories) for the export action. */
-  export(): { sources: KnowledgeSource[]; memories: MemoryRecord[] };
+  export(): { workspaceId: string; disabledRecordsIncluded: false; forgottenRecordsIncluded: false; sources: KnowledgeSource[]; memories: MemoryRecord[] };
 }
 
 /** Serializable shape of the default store, for snapshot round-trips. */
 export interface KnowledgeStoreState {
+  /** Missing in legacy snapshots; normalized to the active workspace on load. */
+  workspaceId?: string;
   sources: KnowledgeSource[];
   chunksBySource: Record<string, SourceChunk[]>;
   memories: MemoryRecord[];
   pinned: PinnedContextEntry[];
   artifacts: Artifact[];
+  deletedSourceIds: string[];
+  forgottenMemoryIds: string[];
 }
 
-export function emptyKnowledgeStoreState(): KnowledgeStoreState {
+export function emptyKnowledgeStoreState(workspaceId: string): KnowledgeStoreState {
+  assertWorkspaceId(workspaceId);
   return {
+    workspaceId,
     sources: [],
     chunksBySource: {},
     memories: [],
     pinned: [],
-    artifacts: []
+    artifacts: [],
+    deletedSourceIds: [],
+    forgottenMemoryIds: []
   };
 }
 
@@ -124,17 +133,41 @@ export function emptyKnowledgeStoreState(): KnowledgeStoreState {
  * round-trips; Goal 5 swaps in an encrypted SQLite impl of `KnowledgeStore`.
  */
 export function createKnowledgeStore(
-  initial: KnowledgeStoreState = emptyKnowledgeStoreState()
+  workspaceId: string,
+  initial: KnowledgeStoreState = emptyKnowledgeStoreState(workspaceId)
 ): KnowledgeStore & { snapshot(): KnowledgeStoreState } {
+  assertWorkspaceId(workspaceId);
+  if (initial.workspaceId && initial.workspaceId !== workspaceId) {
+    throw new Error("Knowledge snapshot belongs to another workspace.");
+  }
+  const owns = (owner?: string) => !owner || owner === workspaceId;
+  if (
+    !initial.sources.every((source) => owns(source.workspaceId)) ||
+    !initial.memories.every((memory) => owns(memory.workspaceId)) ||
+    !initial.pinned.every((entry) => owns(entry.workspaceId)) ||
+    !initial.artifacts.every((artifact) => owns(artifact.workspaceId)) ||
+    !Object.values(initial.chunksBySource).flat().every((chunk) => owns(chunk.workspaceId))
+  ) {
+    throw new Error("Knowledge snapshot contains cross-workspace records.");
+  }
   const state: KnowledgeStoreState = {
-    sources: [...initial.sources],
-    chunksBySource: { ...initial.chunksBySource },
-    memories: [...initial.memories],
-    pinned: [...initial.pinned],
-    artifacts: [...initial.artifacts]
+    workspaceId,
+    sources: initial.sources.map((source) => ({ ...source, workspaceId })),
+    chunksBySource: Object.fromEntries(
+      Object.entries(initial.chunksBySource).map(([id, chunks]) => [
+        id,
+        chunks.map((chunk) => ({ ...chunk, workspaceId }))
+      ])
+    ),
+    memories: initial.memories.map((memory) => ({ ...memory, workspaceId })),
+    pinned: initial.pinned.map((entry) => ({ ...entry, workspaceId })),
+    artifacts: initial.artifacts.map((artifact) => ({ ...artifact, workspaceId })),
+    deletedSourceIds: [...(initial.deletedSourceIds ?? [])],
+    forgottenMemoryIds: [...(initial.forgottenMemoryIds ?? [])]
   };
 
   return {
+    workspaceId,
     sources() {
       return state.sources.filter(isLiveSource);
     },
@@ -146,13 +179,21 @@ export function createKnowledgeStore(
     },
     upsertSource(record) {
       const { source, chunks = [] } = record;
+      if (!owns(source.workspaceId) || chunks.some((chunk) => !owns(chunk.workspaceId))) {
+        throw new Error("Knowledge source belongs to another workspace.");
+      }
+      if (state.deletedSourceIds.includes(source.id)) {
+        throw new Error("Deleted knowledge cannot be restored by routine import.");
+      }
+      const ownedSource = { ...source, workspaceId };
+      const ownedChunks = chunks.map((chunk) => ({ ...chunk, workspaceId }));
       const index = state.sources.findIndex((existing) => existing.id === source.id);
       if (index >= 0) {
-        state.sources[index] = source;
+        state.sources[index] = ownedSource;
       } else {
-        state.sources.push(source);
+        state.sources.push(ownedSource);
       }
-      state.chunksBySource[source.id] = chunks;
+      state.chunksBySource[source.id] = ownedChunks;
     },
     removeSource(id) {
       state.sources = state.sources.filter((source) => source.id !== id);
@@ -160,6 +201,7 @@ export function createKnowledgeStore(
       state.pinned = state.pinned.filter(
         (entry) => entry.sourceId !== id
       );
+      if (!state.deletedSourceIds.includes(id)) state.deletedSourceIds.push(id);
     },
     memories() {
       return state.memories.filter(isLiveMemory);
@@ -168,11 +210,19 @@ export function createKnowledgeStore(
       return state.memories.find((memory) => memory.id === id);
     },
     upsertMemory(record) {
+      if (!owns(record.workspaceId)) throw new Error("Memory belongs to another workspace.");
+      if (state.forgottenMemoryIds.includes(record.id) && !record.forgottenAt) {
+        throw new Error("Forgotten memory cannot be restored by a routine write.");
+      }
+      if (record.forgottenAt && !state.forgottenMemoryIds.includes(record.id)) {
+        state.forgottenMemoryIds.push(record.id);
+      }
+      const ownedRecord = { ...record, workspaceId };
       const index = state.memories.findIndex((existing) => existing.id === record.id);
       if (index >= 0) {
-        state.memories[index] = record;
+        state.memories[index] = ownedRecord;
       } else {
-        state.memories.push(record);
+        state.memories.push(ownedRecord);
       }
     },
     removeMemory(id) {
@@ -180,6 +230,7 @@ export function createKnowledgeStore(
       state.pinned = state.pinned.filter(
         (entry) => entry.memoryId !== id
       );
+      if (!state.forgottenMemoryIds.includes(id)) state.forgottenMemoryIds.push(id);
     },
     pinned(scope) {
       if (scope.level === "global") {
@@ -188,6 +239,8 @@ export function createKnowledgeStore(
       return state.pinned.filter((entry) => scopeSatisfies(entry.scope, scope));
     },
     pin(entry) {
+      if (!owns(entry.workspaceId)) throw new Error("Pinned context belongs to another workspace.");
+      entry = { ...entry, workspaceId };
       const exists = state.pinned.some((existing) => existing.id === entry.id);
       if (!exists) state.pinned.push(entry);
     },
@@ -198,6 +251,8 @@ export function createKnowledgeStore(
       return state.artifacts;
     },
     upsertArtifact(artifact) {
+      if (!owns(artifact.workspaceId)) throw new Error("Artifact belongs to another workspace.");
+      artifact = { ...artifact, workspaceId };
       const index = state.artifacts.findIndex((existing) => existing.id === artifact.id);
       if (index >= 0) {
         state.artifacts[index] = artifact;
@@ -206,16 +261,31 @@ export function createKnowledgeStore(
       }
     },
     export() {
-      return { sources: state.sources.filter(isLiveSource), memories: state.memories.filter(isLiveMemory) };
+      return {
+        workspaceId,
+        disabledRecordsIncluded: false,
+        forgottenRecordsIncluded: false,
+        sources: state.sources.filter(isLiveSource).sort((a, b) => a.id.localeCompare(b.id)),
+        memories: state.memories.filter(isLiveMemory).sort((a, b) => a.id.localeCompare(b.id))
+      };
     },
     snapshot() {
       return {
+        workspaceId,
         sources: [...state.sources],
         chunksBySource: { ...state.chunksBySource },
         memories: [...state.memories],
         pinned: [...state.pinned],
-        artifacts: [...state.artifacts]
+        artifacts: [...state.artifacts],
+        deletedSourceIds: [...state.deletedSourceIds],
+        forgottenMemoryIds: [...state.forgottenMemoryIds]
       };
     }
   };
+}
+
+function assertWorkspaceId(workspaceId: string): void {
+  if (!/^[A-Za-z0-9._:-]{1,128}$/.test(workspaceId)) {
+    throw new Error("A valid workspace id is required.");
+  }
 }

@@ -29,17 +29,14 @@ use crate::models::{
 use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
 };
-use crate::store::repos::scope::{DataScope, DEFAULT_WORKSPACE_ID};
+use crate::store::repos::scope::DataScope;
 
 fn data_scope(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<DataScope, String> {
-    DataScope::new(
-        workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
-        project_id,
-    )
-    .map_err(|error| error.to_string())
+    let workspace_id = workspace_id.ok_or_else(|| "Workspace id is required.".to_string())?;
+    DataScope::new(workspace_id, project_id).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -126,6 +123,12 @@ fn normalize_imported_knowledge_source(source: LocalFileImport) -> Result<LocalF
         size_bytes: source.size_bytes,
         imported_at,
         origin: "local-import".to_string(),
+        scope: source.scope,
+        account: source.account,
+        disabled: source.disabled,
+        deleted_at: source.deleted_at,
+        status: source.status,
+        status_message: source.status_message,
     })
 }
 
@@ -151,11 +154,48 @@ pub(crate) fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFi
 fn append_imported_knowledge_source(
     mut sources: Vec<LocalFileImport>,
     source: LocalFileImport,
-) -> Vec<LocalFileImport> {
+) -> Result<Vec<LocalFileImport>, String> {
+    if sources
+        .iter()
+        .any(|existing| existing.id == source.id && existing.deleted_at.is_some())
+    {
+        return Err("Deleted knowledge cannot be restored by routine import.".to_string());
+    }
     sources.retain(|existing| existing.id != source.id);
     sources.insert(0, source);
     sources.truncate(MAX_IMPORTED_KNOWLEDGE_SOURCES);
-    sources
+    Ok(sources)
+}
+
+fn merge_deleted_imported_tombstones(
+    mut sources: Vec<LocalFileImport>,
+    existing: Vec<LocalFileImport>,
+) -> Result<Vec<LocalFileImport>, String> {
+    for tombstone in existing
+        .into_iter()
+        .filter(|source| source.deleted_at.is_some())
+    {
+        if let Some(incoming) = sources.iter().find(|source| source.id == tombstone.id) {
+            if incoming.deleted_at.is_none() {
+                return Err("Deleted knowledge cannot be restored by routine import.".to_string());
+            }
+            continue;
+        }
+        sources.push(tombstone);
+    }
+
+    while sources.len() > MAX_IMPORTED_KNOWLEDGE_SOURCES {
+        if let Some(index) = sources
+            .iter()
+            .rposition(|source| source.deleted_at.is_none())
+        {
+            sources.remove(index);
+        } else {
+            sources.truncate(MAX_IMPORTED_KNOWLEDGE_SOURCES);
+        }
+    }
+
+    Ok(sources)
 }
 
 fn write_imported_knowledge_sources(
@@ -191,6 +231,9 @@ pub fn save_imported_knowledge_sources(
     }
     let path = imported_knowledge_path(&app)?;
     let scope = data_scope(workspace_id, project_id)?;
+    let existing: Vec<LocalFileImport> =
+        crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();
+    let normalized = merge_deleted_imported_tombstones(normalized, existing)?;
     if !crate::store::write_workspace_document(&path, &scope, &normalized)? {
         write_imported_knowledge_sources(&path, &normalized)?;
     }
@@ -203,7 +246,7 @@ pub(crate) fn persist_imported_knowledge_source(
 ) -> Result<LocalFileImport, String> {
     let source = normalize_imported_knowledge_source(source)?;
     let sources = read_imported_knowledge_sources(path)?;
-    let sources = append_imported_knowledge_source(sources, source.clone());
+    let sources = append_imported_knowledge_source(sources, source.clone())?;
     write_imported_knowledge_sources(path, &sources)?;
 
     Ok(source)
@@ -639,7 +682,7 @@ pub fn import_local_knowledge_source(
     if crate::store::try_global().is_some() {
         let mut sources: Vec<LocalFileImport> =
             crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();
-        sources = append_imported_knowledge_source(sources, imported.clone());
+        sources = append_imported_knowledge_source(sources, imported.clone())?;
         crate::store::write_workspace_document(&path, &scope, &sources)?;
         return Ok(imported);
     }
@@ -706,6 +749,47 @@ mod tests {
             permission_mode: "read-only".to_string(),
             saved_at: "2026-06-29T12:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn deleted_local_source_cannot_be_resurrected_by_reimport() {
+        let candidate = LocalTextFileCandidate {
+            name: "deleted.md".to_string(),
+            content: "same content".to_string(),
+            size_bytes: "same content".len(),
+            imported_at: Some("2026-07-01T00:00:00Z".to_string()),
+        };
+        let incoming = import_local_text_file(candidate).unwrap();
+        let mut tombstone = incoming.clone();
+        tombstone.deleted_at = Some("2026-07-01T01:00:00Z".to_string());
+        assert!(append_imported_knowledge_source(vec![tombstone], incoming).is_err());
+    }
+
+    #[test]
+    fn save_merge_preserves_deleted_source_tombstones() {
+        let deleted = import_local_text_file(LocalTextFileCandidate {
+            name: "deleted.md".to_string(),
+            content: "deleted content".to_string(),
+            size_bytes: "deleted content".len(),
+            imported_at: Some("2026-07-01T00:00:00Z".to_string()),
+        })
+        .unwrap();
+        let active = import_local_text_file(LocalTextFileCandidate {
+            name: "active.md".to_string(),
+            content: "active content".to_string(),
+            size_bytes: "active content".len(),
+            imported_at: Some("2026-07-01T00:00:00Z".to_string()),
+        })
+        .unwrap();
+        let mut tombstone = deleted.clone();
+        tombstone.deleted_at = Some("2026-07-01T01:00:00Z".to_string());
+
+        let merged =
+            merge_deleted_imported_tombstones(vec![active], vec![tombstone.clone()]).unwrap();
+        assert!(merged
+            .iter()
+            .any(|source| source.id == tombstone.id && source.deleted_at.is_some()));
+        assert!(merge_deleted_imported_tombstones(vec![deleted], vec![tombstone]).is_err());
     }
 
     #[test]

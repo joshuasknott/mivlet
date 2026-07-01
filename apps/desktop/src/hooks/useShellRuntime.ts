@@ -645,7 +645,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       mergeKnowledgeSources(hasTauriRuntime() ? [] : knowledgeSources, [
         ...connectorImportedSources,
         ...importedKnowledgeSources
-      ]),
+      ]).filter((source) => !source.deletedAt),
     [connectorImportedSources, importedKnowledgeSources]
   );
   // The connected agent backend that drives the run: connected + streaming AND
@@ -890,7 +890,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setPinnedSourceIds(recovered.pinnedSourceIds);
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
-        setManagedMemoryRecords(recovered.memoryRecords);
+        setManagedMemoryRecords(recovered.memoryRecords.filter((record) => !record.forgottenAt));
         setConnectedBackendIds(recovered.connectedBackendIds);
         setSelectedModelId(recovered.selectedModelId);
         setPermissionMode(recovered.permissionMode);
@@ -1174,6 +1174,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       const imported =
         (await importRuntimeLocalKnowledgeSource(candidate)) ?? importLocalTextFile(candidate);
 
+      if (importedKnowledgeSources.some((source) => source.id === imported.id && source.deletedAt)) {
+        throw new Error("Deleted knowledge cannot be restored by routine import.");
+      }
+
       addImportedKnowledgeSource(imported);
       setImportStatus(`Imported ${imported.title}. It is pinned as untrusted knowledge.`);
       setLastAction(`Imported source: ${imported.title}`);
@@ -1252,11 +1256,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
   };
 
-  const sourceIsAuthorized = (source: KnowledgeSource) =>
-    source.connectorId === "local-files" ||
-    connectorManifests.some(
-      (connector) => connector.id === source.connectorId && connector.status === "connected"
+  const sourceIsAuthorized = (source: KnowledgeSource) => {
+    if (source.disabled || source.deletedAt || source.status === "stale" || source.status === "error") return false;
+    if (source.connectorId === "local-files") return true;
+    return connectorManifests.some(
+      (connector) =>
+        connector.id === source.connectorId &&
+        connector.status === "connected" &&
+        connector.health?.state !== "error" &&
+        (!source.account || connector.account?.id === source.account)
     );
+  };
 
   const knowledgeRetrievalSources = () =>
     workspaceKnowledgeSources
@@ -1285,10 +1295,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memory: memoryDisabled ? [] : managedMemoryRecords,
       citations: result.citations,
       authorization: {
-        isSourceAuthorized: (connectorId: string) =>
+        isSourceAuthorized: (connectorId: string, account?: string) =>
           connectorId === "local-files" ||
           connectorManifests.some(
-            (connector) => connector.id === connectorId && connector.status === "connected"
+            (connector) =>
+              connector.id === connectorId &&
+              connector.status === "connected" &&
+              connector.health?.state !== "error" &&
+              (!account || connector.account?.id === account)
           )
       }
     }).systemPrefix;
@@ -1335,11 +1349,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const deleteKnowledgeSource = (sourceId: string) => {
+    const deletedAt = new Date().toISOString();
     persistLocalKnowledgeSources(
-      importedKnowledgeSources.filter((source) => source.id !== sourceId)
+      importedKnowledgeSources.map((source) =>
+        source.id === sourceId
+          ? { ...source, pinned: false, disabled: true, deletedAt }
+          : source
+      )
     );
     setConnectorImportedSources((current) =>
-      current.filter((source) => source.id !== sourceId)
+      current.map((source) =>
+        source.id === sourceId
+          ? { ...source, pinned: false, disabled: true, deletedAt }
+          : source
+      )
     );
     setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
     setLastAction("Knowledge source deleted");
@@ -1347,7 +1370,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const commitMemoryState = (state: MemoryControlState, status: string) => {
     setMemoryDisabled(state.disabled);
-    setManagedMemoryRecords(state.records);
+    setManagedMemoryRecords(state.records.filter((record) => !record.forgottenAt));
     setMemoryStatus(status);
 
     void saveRuntimeMemoryState(state)
@@ -1406,7 +1429,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const forgetMemory = (recordId: string) => {
-    const nextRecords = managedMemoryRecords.filter((record) => record.id !== recordId);
+    const forgottenAt = new Date().toISOString();
+    const nextRecords = managedMemoryRecords.map((record) =>
+      record.id === recordId
+        ? { ...record, pinned: false, forgottenAt, updatedAt: forgottenAt }
+        : record
+    );
     const removed = managedMemoryRecords.find((record) => record.id === recordId);
     setEditingMemoryId((current) => (current === recordId ? null : current));
     commitMemoryState(
