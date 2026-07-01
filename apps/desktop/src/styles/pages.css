@@ -499,6 +499,41 @@
   color: var(--destructive);
 }
 
+/* Lifecycle status line for disabled / indexing / failed / stale sources and memories. */
+.knowledge-item__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 12px 6px 53px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
+.knowledge-item__status svg {
+  color: var(--destructive);
+  flex: none;
+}
+
+/* Provenance meta shown when a source row is expanded. */
+.knowledge-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  list-style: none;
+}
+
+/* Two-step confirm pair for destructive actions (delete source, forget memory). */
+.knowledge-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .knowledge-empty {
   display: grid;
   min-height: 260px;

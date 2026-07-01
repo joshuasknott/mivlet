@@ -14,9 +14,10 @@ import {
   Plus,
   PushPin,
   Sparkle,
-  Trash
+  Trash,
+  Warning
 } from "@phosphor-icons/react";
-import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
+import type { KnowledgeSource, MemoryRecord, SourceStatus } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
 type KnowledgeSection = "sources" | "memories" | "artifacts";
@@ -33,6 +34,22 @@ const sectionDetails: Array<{
   { id: "artifacts", label: "Artifacts", description: "Work Fable has made" }
 ];
 
+/** Human label for a source lifecycle/health status. */
+function statusLabel(status: SourceStatus | undefined): string | null {
+  switch (status) {
+    case "indexing":
+      return "Indexing";
+    case "stale":
+      return "Stale";
+    case "error":
+      return "Failed";
+    case "ok":
+      return null;
+    default:
+      return null;
+  }
+}
+
 export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
   const [section, setSection] = useState<KnowledgeSection>("sources");
   const [scope, setScope] = useState<SearchScope>("everything");
@@ -43,8 +60,18 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
   const [expandedMemoryId, setExpandedMemoryId] = useState<string | null>(null);
 
   const normalizedQuery = query.trim().toLowerCase();
+
+  // Management lists: sources show disabled rows (with a badge + re-enable) so
+  // the user can manage them, but disabled/forgotten material is excluded from
+  // the global search results below.
+  const managementSources = useMemo(() => runtime.workspaceKnowledgeSources, [runtime]);
+  const managementMemories = useMemo(
+    () => runtime.managedMemoryRecords.filter((memory) => !memory.forgottenAt),
+    [runtime.managedMemoryRecords]
+  );
+
   const filteredSources = useMemo(() => {
-    const matches = runtime.workspaceKnowledgeSources.filter((source) => {
+    const matches = managementSources.filter((source) => {
       const matchesQuery =
         !normalizedQuery ||
         `${source.title} ${source.provenance} ${source.contentPreview ?? ""}`
@@ -58,12 +85,12 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
     normalizedQuery,
     pinnedOnly,
     runtime.pinnedSourceIds,
-    runtime.workspaceKnowledgeSources,
+    managementSources,
     sortOrder
   ]);
 
   const filteredMemories = useMemo(() => {
-    const matches = runtime.managedMemoryRecords.filter((memory) => {
+    const matches = managementMemories.filter((memory) => {
       const matchesQuery =
         !normalizedQuery ||
         `${memory.title} ${memory.value} ${memory.source}`
@@ -72,7 +99,7 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
       return matchesQuery && (!pinnedOnly || memory.pinned);
     });
     return sortMemories(matches, sortOrder);
-  }, [normalizedQuery, pinnedOnly, runtime.managedMemoryRecords, sortOrder]);
+  }, [normalizedQuery, pinnedOnly, managementMemories, sortOrder]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -92,6 +119,18 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
   };
 
   const showingGlobalResults = scope === "everything" && normalizedQuery.length > 0;
+
+  // Global search results exclude disabled sources and disabled memories so
+  // excluded material never appears in retrieval/citation views. (Forgotten
+  // memories are already absent from the management list.)
+  const searchSources = useMemo(
+    () => filteredSources.filter((source) => !source.disabled),
+    [filteredSources]
+  );
+  const searchMemories = useMemo(
+    () => filteredMemories.filter((memory) => !memory.disabled),
+    [filteredMemories]
+  );
 
   return (
     <section className="knowledge-page" aria-label="Knowledge workspace">
@@ -128,9 +167,9 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
         {sectionDetails.map((item) => {
           const count =
             item.id === "sources"
-              ? runtime.workspaceKnowledgeSources.length
+              ? managementSources.filter((source) => !source.disabled).length
               : item.id === "memories"
-                ? runtime.managedMemoryRecords.length
+                ? managementMemories.filter((memory) => !memory.disabled).length
                 : 0;
           return (
             <button
@@ -179,12 +218,16 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
         ) : null}
         {section === "memories" && !showingGlobalResults ? (
           <div className="knowledge-memory-actions">
+            <button type="button" onClick={() => void runtime.exportKnowledge()}>
+              <DownloadSimple size={17} />
+              Export knowledge
+            </button>
             <button type="button" onClick={() => void runtime.exportMemory()}>
               <DownloadSimple size={17} />
-              Export
+              Export memories
             </button>
             <button type="button" onClick={runtime.toggleMemoryDisabled}>
-              {runtime.memoryDisabled ? "Turn on" : "Turn off"}
+              {runtime.memoryDisabled ? "Turn memory on" : "Turn memory off"}
             </button>
           </div>
         ) : null}
@@ -198,8 +241,8 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
 
       {showingGlobalResults ? (
         <GlobalResults
-          sources={filteredSources}
-          memories={filteredMemories}
+          sources={searchSources}
+          memories={searchMemories}
           runtime={runtime}
           expandedSourceId={expandedSourceId}
           expandedMemoryId={expandedMemoryId}
@@ -239,6 +282,14 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
           readOnly
           aria-label="Memory export"
           value={runtime.memoryExportText}
+        />
+      ) : null}
+      {section === "memories" && !showingGlobalResults && runtime.knowledgeExportText ? (
+        <textarea
+          className="memory-export"
+          readOnly
+          aria-label="Knowledge export"
+          value={runtime.knowledgeExportText}
         />
       ) : null}
     </section>
@@ -375,6 +426,7 @@ function SourceList({
       {sources.map((source) => {
         const expanded = expandedId === source.id;
         const pinned = runtime.pinnedSourceIds.includes(source.id);
+        const status = statusLabel(source.status);
         return (
           <article className={`knowledge-item${expanded ? " is-expanded" : ""}`} key={source.id}>
             <div className="knowledge-item__row">
@@ -408,9 +460,39 @@ function SourceList({
                 {expanded ? <CaretDown size={18} /> : <CaretRight size={18} />}
               </button>
             </div>
+            {source.disabled || status ? (
+              <p className="knowledge-item__status" role="note">
+                {source.disabled ? (
+                  <>
+                    <Warning size={14} aria-hidden="true" /> Disabled — excluded from search and agent context.
+                  </>
+                ) : null}
+                {!source.disabled && status ? (
+                  <>
+                    <Warning size={14} aria-hidden="true" /> {status}
+                    {source.statusMessage ? ` — ${source.statusMessage}` : ""}
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             {expanded ? (
               <div className="knowledge-item__details">
                 <p>{source.contentPreview || "No preview is available for this source."}</p>
+                <ul className="knowledge-item__meta">
+                  <li>Connector: {source.connectorId}</li>
+                  {source.account ? <li>Account: {source.account}</li> : null}
+                  <li>Trust: {source.trust ?? "untrusted"}</li>
+                  {source.connectorId !== "local-files" ? (
+                    <li>
+                      {runtime.connectorManifests.some(
+                        (connector) =>
+                          connector.id === source.connectorId && connector.status === "connected"
+                      )
+                        ? "Connected"
+                        : "Disconnected"}
+                    </li>
+                  ) : null}
+                </ul>
                 <div className="knowledge-item__actions">
                   <button
                     type="button"
@@ -427,14 +509,14 @@ function SourceList({
                   <button type="button" onClick={() => runtime.toggleKnowledgeSourceDisabled(source.id)}>
                     {source.disabled ? "Use source" : "Stop using"}
                   </button>
-                  <button
-                    type="button"
-                    className="is-danger"
-                    onClick={() => runtime.deleteKnowledgeSource(source.id)}
-                  >
-                    <Trash size={16} />
-                    Delete
-                  </button>
+                  <ConfirmButton
+                    variant="danger"
+                    icon={<Trash size={16} />}
+                    label="Delete"
+                    confirmLabel={`Confirm delete ${source.title}`}
+                    confirmText="Delete"
+                    onConfirm={() => runtime.deleteKnowledgeSource(source.id)}
+                  />
                 </div>
               </div>
             ) : null}
@@ -503,6 +585,11 @@ function MemoryList({
                 {expanded ? <CaretDown size={18} /> : <CaretRight size={18} />}
               </button>
             </div>
+            {memory.disabled ? (
+              <p className="knowledge-item__status" role="note">
+                <Warning size={14} aria-hidden="true" /> Disabled — excluded from search, context, and export.
+              </p>
+            ) : null}
             {expanded ? (
               <div className="knowledge-item__details">
                 {runtime.editingMemoryId === memory.id ? (
@@ -549,12 +636,18 @@ function MemoryList({
                       </button>
                       <button
                         type="button"
-                        className="is-danger"
-                        onClick={() => runtime.forgetMemory(memory.id)}
+                        onClick={() => runtime.toggleMemoryRecordDisabled(memory.id)}
                       >
-                        <Trash size={16} />
-                        Forget
+                        {memory.disabled ? "Re-enable" : "Disable"}
                       </button>
+                      <ConfirmButton
+                        variant="danger"
+                        icon={<Trash size={16} />}
+                        label="Forget"
+                        confirmLabel={`Confirm forget ${memory.title}`}
+                        confirmText="Forget"
+                        onConfirm={() => runtime.forgetMemory(memory.id)}
+                      />
                     </div>
                   </>
                 )}
@@ -564,6 +657,61 @@ function MemoryList({
         );
       })}
     </div>
+  );
+}
+
+/**
+ * A two-step confirmation button for destructive actions (delete source,
+ * forget memory). The first click arms the action and reveals a confirm/cancel
+ * pair with an explicit accessible name; the second click performs it. Cancelling
+ * disarms it. This mirrors the established confirmation semantics used for
+ * high-risk approvals without a modal dialog.
+ */
+function ConfirmButton({
+  variant,
+  icon,
+  label,
+  confirmLabel,
+  confirmText,
+  onConfirm
+}: {
+  variant: "danger";
+  icon: React.ReactNode;
+  label: string;
+  confirmLabel: string;
+  confirmText: string;
+  onConfirm: () => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  if (!armed) {
+    return (
+      <button
+        type="button"
+        className={variant === "danger" ? "is-danger" : ""}
+        aria-label={confirmLabel}
+        onClick={() => setArmed(true)}
+      >
+        {icon}
+        {label}
+      </button>
+    );
+  }
+  return (
+    <span className="knowledge-confirm" role="group" aria-label={confirmLabel}>
+      <button
+        type="button"
+        className={variant === "danger" ? "is-danger" : ""}
+        onClick={() => {
+          setArmed(false);
+          onConfirm();
+        }}
+      >
+        {confirmText}
+      </button>
+      <button type="button" onClick={() => setArmed(false)}>
+        Cancel
+      </button>
+    </span>
   );
 }
 
