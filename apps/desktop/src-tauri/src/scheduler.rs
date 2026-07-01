@@ -510,17 +510,37 @@ fn set_job_status_in_store(
         return false;
     }
     if status != "active" {
+        let now = now_iso();
+        let mut remembered = Vec::new();
         for entry in &mut store.queue {
             if entry.job_id == job_id
                 && entry.workspace_id == workspace_id
                 && entry.project_id.as_deref() == project_id
                 && !matches!(entry.state.as_str(), "done" | "dead" | "cancelled")
             {
+                entry.attempts.push(JobAttempt {
+                    run_id: entry.run_id.clone(),
+                    status: "cancelled".to_string(),
+                    attempt_number: entry.attempts.len() as u32 + 1,
+                    started_at: now.clone(),
+                    finished_at: Some(now.clone()),
+                    error: None,
+                    retryable: Some(false),
+                    lease_token: None,
+                });
+                if entry.attempts.len() > MAX_JOB_ATTEMPTS {
+                    let drop = entry.attempts.len() - MAX_JOB_ATTEMPTS;
+                    entry.attempts.drain(0..drop);
+                }
                 entry.state = "cancelled".to_string();
                 entry.lease_holder.clear();
                 entry.lease_expires_at.clear();
                 entry.lease_token.clear();
+                remembered.push(entry.deduplication_key.clone());
             }
+        }
+        for key in remembered {
+            remember_occurrence(store, &key);
         }
     }
     true
@@ -533,6 +553,16 @@ fn failed_count(entry: &SchedulerQueueEntry) -> u32 {
         .iter()
         .filter(|a| a.status == "failed")
         .count() as u32
+}
+
+fn accepts_attempt(entry: &SchedulerQueueEntry, attempt: &JobAttempt) -> bool {
+    if matches!(entry.state.as_str(), "done" | "dead" | "cancelled") {
+        return false;
+    }
+    match attempt.lease_token.as_deref() {
+        Some(token) if !token.is_empty() => token == entry.lease_token,
+        _ => true,
+    }
 }
 
 #[tauri::command]
@@ -664,7 +694,21 @@ pub fn set_job_status(
     }
     let job_id_norm = normalize_spaces(&job_id);
     let mut updated = false;
+    let mut cancelled_run_ids = Vec::new();
     persist(&app, scope.workspace_id(), |store| {
+        if status != "active" {
+            cancelled_run_ids = store
+                .queue
+                .iter()
+                .filter(|entry| {
+                    entry.job_id == job_id_norm
+                        && entry.workspace_id == scope.workspace_id()
+                        && entry.project_id.as_deref() == scope.project_id()
+                        && !matches!(entry.state.as_str(), "done" | "dead" | "cancelled")
+                })
+                .map(|entry| entry.run_id.clone())
+                .collect();
+        }
         updated = set_job_status_in_store(
             store,
             scope.workspace_id(),
@@ -675,6 +719,16 @@ pub fn set_job_status(
     })?;
     if !updated {
         return Err("Scheduled job was not found.".to_string());
+    }
+    for run_id in cancelled_run_ids {
+        let _ = app.emit(
+            "fable://scheduler/cancel-request",
+            serde_json::json!({
+                "runId": run_id,
+                "workspaceId": scope.workspace_id(),
+                "projectId": scope.project_id(),
+            }),
+        );
     }
     crate::action_history::Recorder::new(
         crate::action_history::categories::SCHEDULE,
@@ -796,14 +850,11 @@ pub fn report_job_attempt(
             {
                 continue;
             }
-            // Fencing: a non-empty token on the attempt must match the entry.
-            if let Some(token) = attempt.lease_token.as_ref() {
-                if !token.is_empty() && !entry.lease_token.is_empty() && token != &entry.lease_token
-                {
-                    // Stale report from a superseded run: ignore it rather than
-                    // mutating the freshly re-leased occurrence.
-                    continue;
-                }
+            // Terminal states are immutable, and a token-bearing report must
+            // match the current lease. This prevents a late success from a
+            // cancelled or superseded run from reviving the occurrence.
+            if !accepts_attempt(entry, &attempt) {
+                continue;
             }
             let status = attempt.status.clone();
             entry.attempts.push(attempt.clone());
@@ -1432,6 +1483,30 @@ mod tests {
     }
 
     #[test]
+    fn terminal_and_stale_attempt_reports_are_rejected() {
+        let attempt = JobAttempt {
+            run_id: "run-a".to_string(),
+            status: "succeeded".to_string(),
+            attempt_number: 1,
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: Some("2026-01-01T00:00:01Z".to_string()),
+            error: None,
+            retryable: Some(false),
+            lease_token: Some("lease-old".to_string()),
+        };
+        let mut cancelled = sample_entry("a", "cancelled");
+        cancelled.lease_token.clear();
+        assert!(!accepts_attempt(&cancelled, &attempt));
+
+        let mut re_leased = sample_entry("a", "leased");
+        re_leased.lease_token = "lease-new".to_string();
+        assert!(!accepts_attempt(&re_leased, &attempt));
+
+        re_leased.lease_token = "lease-old".to_string();
+        assert!(accepts_attempt(&re_leased, &attempt));
+    }
+
+    #[test]
     fn schedule_mutations_require_an_exact_job_id() {
         let mut store = empty_store("inst");
         store.jobs.push(sample_job("known", "active"));
@@ -1470,6 +1545,9 @@ mod tests {
         assert_eq!(store.jobs[0].status, "paused");
         assert_eq!(store.queue.len(), 1);
         assert_eq!(store.queue[0].state, "cancelled");
+        assert_eq!(store.queue[0].attempts.len(), 1);
+        assert_eq!(store.queue[0].attempts[0].status, "cancelled");
+        assert_eq!(store.occurrence_ledger.len(), 1);
         assert!(delete_job_from_store(
             &mut store,
             DEFAULT_WORKSPACE_ID,

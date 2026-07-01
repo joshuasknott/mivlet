@@ -25,7 +25,7 @@ describe("Workflow + Connector Integration", () => {
     read: async (req: any) => {
       if (req.capability === "search") {
         return {
-          items: [{ id: "issue-1", accessToken: "supersecret-ghp-token" }]
+          items: [{ id: "issue-1", secretToken: "supersecret-ghp-token" }]
         } as any;
       }
       throw new Error("not supported");
@@ -118,7 +118,7 @@ describe("Workflow + Connector Integration", () => {
       connectorId: "github",
       capability: "search",
       response: {
-        items: [{ id: "issue-1", accessToken: "[REDACTED]" }]
+        items: [{ id: "issue-1", secretToken: "[REDACTED]" }]
       }
     });
 
@@ -135,7 +135,7 @@ describe("Workflow + Connector Integration", () => {
 
     // Input state is also sanitized
     expect(completed.input.read_res).toEqual({
-      items: [{ id: "issue-1", accessToken: "[REDACTED]" }]
+      items: [{ id: "issue-1", secretToken: "[REDACTED]" }]
     });
     expect(completed.input.write_res).toEqual({
       id: "created-1",

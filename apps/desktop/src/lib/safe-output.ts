@@ -24,7 +24,7 @@ export const TRUNCATION_MARKER = "…[truncated]";
  * Key names whose values are always redacted, regardless of content. Matches
  * common credential field names across connector payloads.
  */
-const SENSITIVE_KEY = /^(api[-_]?key|token|password|passwd|secret|credential|authorization|cookie|session[-_]?token|access[-_]?token|refresh[-_]?token|client[-_]?secret|private[-_]?key)$/i;
+const SENSITIVE_KEY = /^(api[-_]?key|token|password|passwd|secret|credential|authorization|cookie|session[-_]?token|access[-_]?token|refresh[-_]?token|secret[-_]?token|client[-_]?secret|private[-_]?key)$/i;
 
 /** Substring patterns that look like inline credentials inside larger strings. */
 const SENSITIVE_STRING_PATTERNS: RegExp[] = [

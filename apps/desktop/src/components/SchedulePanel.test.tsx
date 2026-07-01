@@ -191,7 +191,8 @@ describe("SchedulePanel — connector selection", () => {
       permissions: ["Read repositories and files"],
       healthSummary: "Connected",
       lastCheckedAt: "2026-06-27T09:00:00.000Z",
-      supportedActions: ["github.repository.read"]
+      supportsSearch: true,
+      supportedActions: ["github.comment"]
     },
     {
       id: "vercel",
@@ -200,11 +201,12 @@ describe("SchedulePanel — connector selection", () => {
       permissions: ["Read deployments"],
       healthSummary: "Connected",
       lastCheckedAt: "2026-06-27T09:00:00.000Z",
-      supportedActions: ["vercel.deployment.read"]
+      supportsSearch: true,
+      supportedActions: ["vercel.promote"]
     }
   ] as unknown as import("@fable/protocol").ConnectorManifest[];
 
-  it("offers connected connectors with read capabilities as data-source chips", () => {
+  it("offers connected searchable connectors as data-source chips", () => {
     renderPanel({ connectors: connectedManifests });
     expect(screen.getByRole("button", { name: "GitHub" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Vercel" })).toBeInTheDocument();
@@ -243,5 +245,23 @@ describe("SchedulePanel — connector selection", () => {
     ] as unknown as import("@fable/protocol").ConnectorManifest[];
     renderPanel({ connectors: manifests });
     expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
+  });
+
+  it("excludes connected connectors without the search contract", () => {
+    const manifests = [
+      ...connectedManifests,
+      {
+        id: "local-files",
+        name: "Local Files",
+        status: "connected",
+        permissions: ["Read selected files"],
+        healthSummary: "Ready",
+        lastCheckedAt: "2026-06-27T09:00:00.000Z",
+        supportsSearch: false,
+        supportedActions: []
+      }
+    ] as import("@fable/protocol").ConnectorManifest[];
+    renderPanel({ connectors: manifests });
+    expect(screen.queryByRole("button", { name: "Local Files" })).not.toBeInTheDocument();
   });
 });

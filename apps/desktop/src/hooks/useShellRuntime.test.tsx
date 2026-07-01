@@ -19,53 +19,57 @@ import type { PersistedShellState } from "../lib/types";
  * depend on it.
  */
 
-vi.mock("../runtime", () => ({
-  clearRuntimeBackend: vi.fn(async () => null),
-  clearRuntimeConnectorAuth: vi.fn(async () => null),
-  connectRuntimeBackend: vi.fn(async () => null),
-  exportRuntimeMemoryState: vi.fn(async () => null),
-  importRuntimeConnectorItem: vi.fn(async () => null),
-  importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
-  listRuntimeBackends: vi.fn(async () => null),
-  listRuntimeBackendModels: vi.fn(async () => null),
-  listRuntimeConnectorStatuses: vi.fn(async () => null),
-  listRuntimeSchedulerJobs: vi.fn(async () => null),
-  listRuntimeSchedulerQueue: vi.fn(async () => null),
-  listRuntimeWorkflowDefinitions: vi.fn(async () => null),
-  listRuntimeWorkflowRuns: vi.fn(async () => null),
-  listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
-  loadRuntimeActionHistory: vi.fn(async () => null),
-  loadRuntimeApprovalAudit: vi.fn(async () => null),
-  loadRuntimeApprovalRules: vi.fn(async () => null),
-  loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
-  loadRuntimeMemoryState: vi.fn(async () => null),
-  loadRuntimeSnapshot: vi.fn(async () => null),
-  prepareRuntimeConnectorAction: vi.fn(async () => null),
-  promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
-  recordRuntimeBackendEvent: vi.fn(async () => null),
-  refreshRuntimeConnectorHealth: vi.fn(async () => null),
-  listRuntimeConnectorSyncStates: vi.fn(async () => null),
-  syncRuntimeConnector: vi.fn(async () => null),
-  resolveRuntimeApprovalRequest: vi.fn(async () => null),
-  saveRuntimeMemoryState: vi.fn(async () => null),
-  saveRuntimeImportedKnowledgeSources: vi.fn(async () => null),
-  saveRuntimeScheduledJob: vi.fn(async () => null),
-  saveRuntimeWorkflowDefinition: vi.fn(async () => null),
-  saveRuntimeWorkflowRun: vi.fn(async () => null),
-  enqueueRuntimeJobRun: vi.fn(async () => null),
-  reportRuntimeJobAttempt: vi.fn(async () => null),
-  renewRuntimeJobLease: vi.fn(async () => null),
-  requeueRuntimeBlockedJobRun: vi.fn(async () => null),
-  cancelRuntimeJobRun: vi.fn(async () => null),
-  setRuntimeJobStatus: vi.fn(async () => null),
-  deleteRuntimeScheduledJob: vi.fn(async () => null),
-  deliverRuntimeNotification: vi.fn(async () => null),
-  executeRuntimeConnectorAction: vi.fn(async () => null),
-  saveRuntimeSnapshot: vi.fn(async () => null),
-  searchRuntimeConnector: vi.fn(async () => null),
-  searchRuntimeKnowledgeSources: vi.fn(async () => null),
-  startRuntimeConnectorAuth: vi.fn(async () => null)
-}));
+vi.mock("../runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../runtime")>();
+  return {
+    wireToWorkflowRun: actual.wireToWorkflowRun,
+    clearRuntimeBackend: vi.fn(async () => null),
+    clearRuntimeConnectorAuth: vi.fn(async () => null),
+    connectRuntimeBackend: vi.fn(async () => null),
+    exportRuntimeMemoryState: vi.fn(async () => null),
+    importRuntimeConnectorItem: vi.fn(async () => null),
+    importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
+    listRuntimeBackends: vi.fn(async () => null),
+    listRuntimeBackendModels: vi.fn(async () => null),
+    listRuntimeConnectorStatuses: vi.fn(async () => null),
+    listRuntimeSchedulerJobs: vi.fn(async () => null),
+    listRuntimeSchedulerQueue: vi.fn(async () => null),
+    listRuntimeWorkflowDefinitions: vi.fn(async () => null),
+    listRuntimeWorkflowRuns: vi.fn(async () => null),
+    listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
+    loadRuntimeActionHistory: vi.fn(async () => null),
+    loadRuntimeApprovalAudit: vi.fn(async () => null),
+    loadRuntimeApprovalRules: vi.fn(async () => null),
+    loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
+    loadRuntimeMemoryState: vi.fn(async () => null),
+    loadRuntimeSnapshot: vi.fn(async () => null),
+    prepareRuntimeConnectorAction: vi.fn(async () => null),
+    promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
+    recordRuntimeBackendEvent: vi.fn(async () => null),
+    refreshRuntimeConnectorHealth: vi.fn(async () => null),
+    listRuntimeConnectorSyncStates: vi.fn(async () => null),
+    syncRuntimeConnector: vi.fn(async () => null),
+    resolveRuntimeApprovalRequest: vi.fn(async () => null),
+    saveRuntimeMemoryState: vi.fn(async () => null),
+    saveRuntimeImportedKnowledgeSources: vi.fn(async () => null),
+    saveRuntimeScheduledJob: vi.fn(async () => null),
+    saveRuntimeWorkflowDefinition: vi.fn(async () => null),
+    saveRuntimeWorkflowRun: vi.fn(async () => null),
+    enqueueRuntimeJobRun: vi.fn(async () => null),
+    reportRuntimeJobAttempt: vi.fn(async () => null),
+    renewRuntimeJobLease: vi.fn(async () => null),
+    requeueRuntimeBlockedJobRun: vi.fn(async () => null),
+    cancelRuntimeJobRun: vi.fn(async () => null),
+    setRuntimeJobStatus: vi.fn(async () => null),
+    deleteRuntimeScheduledJob: vi.fn(async () => null),
+    deliverRuntimeNotification: vi.fn(async () => null),
+    executeRuntimeConnectorAction: vi.fn(async () => null),
+    saveRuntimeSnapshot: vi.fn(async () => null),
+    searchRuntimeConnector: vi.fn(async () => null),
+    searchRuntimeKnowledgeSources: vi.fn(async () => null),
+    startRuntimeConnectorAuth: vi.fn(async () => null)
+  };
+});
 
 /** A low-risk read-only approval — resolves without confirmation. */
 function lowRiskApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
@@ -503,6 +507,143 @@ describe("useShellRuntime — localStorage persistence round-trip", () => {
 
     expect(second.result.current.schedules.length).toBe(1);
     expect(second.result.current.schedules[0].name).toBe("Weekly digest");
+  });
+});
+
+describe("useShellRuntime — durable schedule contracts", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+    vi.mocked(runtime.listRuntimeConnectorStatuses).mockResolvedValue(null);
+    vi.mocked(runtime.listRuntimeSchedulerJobs).mockResolvedValue(null);
+    vi.mocked(runtime.listRuntimeSchedulerQueue).mockResolvedValue(null);
+    vi.mocked(runtime.listRuntimeWorkflowDefinitions).mockResolvedValue(null);
+    vi.mocked(runtime.listRuntimeWorkflowRuns).mockResolvedValue(null);
+    vi.mocked(runtime.cancelRuntimeJobRun).mockResolvedValue(null);
+  });
+
+  it("composes connector-first schedules through the searchable connector boundary", async () => {
+    vi.mocked(runtime.listRuntimeConnectorStatuses).mockResolvedValue([
+      {
+        id: "github",
+        name: "GitHub",
+        status: "connected",
+        permissions: ["Read repositories"],
+        healthSummary: "Connected",
+        lastCheckedAt: "2026-07-01T00:00:00.000Z",
+        supportsSearch: true,
+        supportedActions: ["github.comment"]
+      }
+    ]);
+    const { result } = renderHook(() => useShellRuntime());
+    await waitFor(() =>
+      expect(result.current.connectorManifests.find((entry) => entry.id === "github")?.status)
+        .toBe("connected")
+    );
+
+    act(() => {
+      result.current.createScheduleFromTrigger({
+        name: "Issue digest",
+        description: "Summarize open issues",
+        trigger: {
+          kind: "recurring",
+          rule: {
+            frequency: "daily",
+            interval: 1,
+            hour: 9,
+            minute: 0,
+            timezone: "UTC"
+          }
+        },
+        connectorIds: ["github"]
+      });
+    });
+
+    const definition = result.current.workflowDefinitions[0];
+    expect(definition.steps).toEqual([
+      {
+        kind: "connector-read",
+        id: "read-github",
+        connectorId: "github",
+        capability: "search",
+        input: { query: "Summarize open issues" },
+        outputVar: "github"
+      },
+      { kind: "prompt", id: "prompt", prompt: "Summarize open issues" }
+    ]);
+    await waitFor(() => expect(runtime.saveRuntimeScheduledJob).toHaveBeenCalledOnce());
+    expect(vi.mocked(runtime.saveRuntimeWorkflowDefinition).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(runtime.saveRuntimeScheduledJob).mock.invocationCallOrder[0]);
+  });
+
+  it("persists a cancelled workflow run with terminal timestamps", async () => {
+    const startedAt = "2026-07-01T09:00:00.000Z";
+    vi.mocked(runtime.listRuntimeSchedulerJobs).mockResolvedValue([
+      {
+        id: "job-1",
+        schemaVersion: 1,
+        name: "Issue digest",
+        description: "Summarize issues",
+        workflowDefinitionId: "definition-1",
+        trigger: { kind: "once", at: "2026-07-01T09:00:00.000Z" },
+        missedRunPolicy: "skip",
+        status: "active",
+        nextRunAt: "",
+        lastRunAt: "",
+        lastRunId: "",
+        createdAt: startedAt,
+        updatedAt: startedAt
+      }
+    ]);
+    vi.mocked(runtime.listRuntimeWorkflowDefinitions).mockResolvedValue([
+      {
+        schemaVersion: 1,
+        id: "definition-1",
+        version: 1,
+        name: "Issue digest",
+        description: "Summarize issues",
+        steps: [{ kind: "prompt", id: "prompt", prompt: "Summarize issues" }],
+        createdAt: startedAt,
+        updatedAt: startedAt
+      }
+    ]);
+    vi.mocked(runtime.listRuntimeWorkflowRuns).mockResolvedValue([
+      {
+        id: "run-1",
+        definitionId: "definition-1",
+        definitionVersion: 1,
+        status: "running",
+        trigger: "schedule",
+        scheduledJobId: "job-1",
+        permissionProfile: "trusted",
+        input: {},
+        steps: [],
+        attemptNumber: 1,
+        startedAt,
+        updatedAt: startedAt
+      }
+    ]);
+    vi.mocked(runtime.cancelRuntimeJobRun).mockResolvedValue(true);
+    const { result } = renderHook(() => useShellRuntime());
+    await waitFor(() => expect(result.current.workflowRuns).toHaveLength(1));
+    expect(result.current.workflowRuns[0]).toMatchObject({
+      permissionProfile: "trusted",
+      attemptNumber: 1
+    });
+
+    act(() => result.current.cancelScheduledRun("run-1"));
+
+    await waitFor(() =>
+      expect(runtime.saveRuntimeWorkflowRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "run-1",
+          status: "cancelled",
+          failureReason: "Cancelled.",
+          updatedAt: expect.any(String),
+          finishedAt: expect.any(String)
+        })
+      )
+    );
   });
 });
 

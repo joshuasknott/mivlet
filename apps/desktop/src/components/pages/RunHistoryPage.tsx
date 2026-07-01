@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   NotificationRecord,
   ScheduledJob,
@@ -67,15 +67,17 @@ export function RunHistoryPage({ runtime, initialRunId }: RunHistoryPageProps) {
   // clear the one-shot so a later manual visit isn't pre-filtered.
   const [jobFilter, setJobFilter] = useState<string>(runtime.runHistoryJobId ?? "all");
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(runs.length === 0);
+  const mountRuntime = useRef(runtime);
 
   // Pull durable history from the Rust authority on mount so the list reflects
   // runs from prior sessions, not just the current one. In preview this is a
   // no-op resolve. Also consume + clear the one-shot deep-link filter.
   useEffect(() => {
-    runtime.clearRunHistoryJobId();
+    const initialRuntime = mountRuntime.current;
+    initialRuntime.clearRunHistoryJobId();
     let active = true;
-    runtime
+    initialRuntime
       .refreshWorkflowRuns()
       .then(() => {
         if (active) {
@@ -92,7 +94,7 @@ export function RunHistoryPage({ runtime, initialRunId }: RunHistoryPageProps) {
     return () => {
       active = false;
     };
-  }, [runtime]);
+  }, []);
 
   const resolvedRuns = useMemo(
     () =>

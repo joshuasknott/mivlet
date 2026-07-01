@@ -18,13 +18,13 @@ describe("redactSecrets", () => {
     const input = {
       ok: true,
       apiKey: "sk-live-1234567890",
-      nested: { token: "abc123", safe: "keep" },
+      nested: { token: "abc123", secretToken: "def456", safe: "keep" },
       list: [{ password: "hunter2" }]
     };
     expect(redactSecrets(input)).toEqual({
       ok: true,
       apiKey: "[REDACTED]",
-      nested: { token: "[REDACTED]", safe: "keep" },
+      nested: { token: "[REDACTED]", secretToken: "[REDACTED]", safe: "keep" },
       list: [{ password: "[REDACTED]" }]
     });
   });

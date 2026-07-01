@@ -1,208 +1,182 @@
-# Recurring Connector Tasks & Schedules Guide
+# Recurring Connector Tasks and Schedules
 
-This guide details how to create, configure, run, and manage recurring connector tasks and scheduled workflows in Fable.
+Fable schedules durable workflow definitions in the desktop runtime. The local
+runtime owns persistence, queue leases, retries, permissions, cancellation, and
+history; there is no hosted runner.
 
----
+## Create a schedule
 
-## 1. Creating a Recurring Connector Task
+Open **Schedules**, enter a name and prompt, then choose one of:
 
-A recurring connector task is a scheduled job that automatically interacts with one or more external services (such as GitHub, Vercel, Slack, or Google Calendar) on a recurring basis.
+- `Daily`, with a local time.
+- `Weekly`, with one or more weekdays and a local time.
+- `Monthly`, with a day of month and a local time.
+- `Once`, with a local date and time.
 
-To create a recurring schedule:
-1. Navigate to the **Schedules** page via the left sidebar.
-2. Click **Create Schedule** (or use the `/schedule` slash command in the composer).
-3. Fill in the required configuration:
-   - **Name**: A descriptive name for the task (e.g., `GitHub Issue Digest`).
-   - **Description**: Explanatory text for what the scheduled task achieves.
-   - **Trigger**: Select `Recurring` and define:
-     - **Frequency**: `Daily`, `Weekly`, or `Monthly`.
-     - **Recurrence Time**: Specify the target hour and minute (in the selected timezone).
-     - **Day selection**: Days of the week (for weekly) or day of the month (for monthly).
-     - **Timezone**: The timezone context under which the wall-clock times are evaluated.
-   - **Data Sources**: Toggle which connected connectors are granted read-only or read/write access to this execution loop.
+Recurring rules use the device's IANA timezone. The `/schedule` command creates
+the same durable job through the same runtime boundary.
 
----
+The optional **Data sources** list contains connected connectors that implement
+Fable's search contract. Selecting one adds a `connector-read` step before the
+prompt. It does not grant write access or reuse a write-oriented connector
+action as a read.
 
-## 2. Combining a Schedule with a Multi-Step Workflow
-
-Schedules are mapped 1-to-1 to a **Workflow Definition**. By combining a schedule trigger with a multi-step workflow, you can choreograph sophisticated data pipelines:
-
-```mermaid
-graph TD
-    Trigger[Schedule Trigger: Mon 9:00 AM] --> Step1[1. connector-read: GitHub Open Issues]
-    Step1 --> Step2[2. prompt: Summarize Issues & Action Items]
-    Step2 --> Step3[3. approval: Await Human Sign-Off]
-    Step3 --> Step4[4. connector-write: Post Digest to Slack]
-```
-
-### Example Workflow Definition Structure
+The Schedule page creates a versioned workflow definition and a scheduled job.
+A simplified persisted definition looks like this:
 
 ```json
 {
   "schemaVersion": 1,
-  "id": "github-slack-digest",
-  "version: 1,
-  "name": "Weekly Slack Digest",
-  "description": "Reads open GitHub issues and posts a summary to Slack.",
+  "id": "workflow-daily-issue-digest",
+  "version": 1,
+  "name": "Daily issue digest",
+  "description": "Summarize open issues",
   "steps": [
     {
       "kind": "connector-read",
-      "id": "fetch-issues",
+      "id": "read-github",
       "connectorId": "github",
-      "capability": "github.issues.list",
-      "input": { "state": "open", "labels": ["bug"] },
-      "outputVar": "raw_issues"
+      "capability": "search",
+      "input": { "query": "Summarize open issues" },
+      "outputVar": "github"
     },
     {
       "kind": "prompt",
-      "id": "summarize-issues",
-      "prompt": "Using the issues list in {{raw_issues}}, summarize the top 3 items."
-    },
-    {
-      "kind": "approval",
-      "id": "verify-digest",
-      "description": "Verify the generated digest before posting it."
-    },
-    {
-      "kind": "connector-write",
-      "id": "post-digest",
-      "connectorId": "slack",
-      "capability": "slack.post-message",
-      "input": { "channel": "#product-alerts", "text": "{{summarize-issues.output}}" },
-      "target": "#product-alerts",
-      "preview": "Post digest summary",
-      "riskLevel": "medium"
+      "id": "prompt",
+      "prompt": "Summarize open issues"
     }
-  ]
+  ],
+  "createdAt": "2026-07-01T08:00:00.000Z",
+  "updatedAt": "2026-07-01T08:00:00.000Z"
 }
 ```
 
----
+The connector search executes through the existing desktop connector
+infrastructure. Connector sessions and credentials remain behind the native
+boundary; workflow records contain only redacted results.
 
-## 3. Assigning a Permission Profile
+## Permission profiles
 
-Every schedule trigger runs with a captured **Permission Profile**. Fable supports three standard levels:
+Every job captures an execution route containing a permission mode and its
+matching profile.
 
-| Profile | Mode | Permitted Effects |
-| :--- | :--- | :--- |
-| **Read Only** | `read-only` | Safe local reads, connector reads, and web fetch. Blocks all writes. |
-| **Trusted** | `trusted-scope` | Read/write capabilities, state mutation. Blocks shell execution. |
-| **Full Access** | `full-access` | Unrestricted local/external writes and powerful shell execution. |
+| Profile ID | Mode | Schedule behavior |
+| --- | --- | --- |
+| `read-only` | `read-only` | Blocks schedule configuration and execution. |
+| `trusted` | `trusted-scope` | Allows schedules and connector reads; consequential effects still require approval. Blocks shell execution and cache mutation. |
+| `full-with-approvals` | `full-access` | Allows the full effect set, but consequential effects still pass through approval and audit boundaries. |
 
-### Re-checking Boundaries
-1. **Design Time**: The UI validates that the user possesses the authority to assign a given profile.
-2. **Start of Execution**: When a tick fires and leases an occurrence, the Rust queue **re-checks** the profile permissions. If the user's active profile has degraded (e.g. key revoked, workspace permissions downgraded), the run transitions immediately to `dead` with a `permission-denied` status.
-3. **Task Boundaries**: Immediately before a step of type `connector-write` or `tool` executes, the runner evaluates the step-level `permissionProfile` to ensure a step cannot escalate the run's permission profile.
+Permissions are enforced at multiple boundaries:
 
----
+1. The Schedule UI checks `schedule-mutation` before changing configuration.
+2. Native job normalization validates that the captured mode/profile pair may
+   configure a schedule.
+3. The native queue revalidates `schedule-execution` when an occurrence is
+   leased.
+4. The workflow runner revalidates the captured profile at run start and before
+   every step. A step-level profile cannot elevate the run profile.
 
-## 4. Task Lifecycle: Pausing, Resuming, Retrying, and Cancelling
+A blocked native lease becomes `dead` with a redacted permission error and an
+action-history event.
 
-```
-     [Active] ──(Pause command)──> [Paused]
-        │                             │
-    (Tick fires)              (Tick ignores)
-        │                             │
-   [Leased/Queued] <──(Resume)────────┘
-```
+## Queue and occurrence semantics
 
-### Pausing
-- Setting a schedule status to `paused` immediately cancels any active in-queue run (transitioning them to `cancelled`).
-- The scheduler tick will no longer calculate or enqueue new occurrences.
+Each occurrence has a durable key:
 
-### Resuming
-- Setting the status back to `active` schedules the next future occurrence.
-- **Missed Run Policies** evaluate any occurrences missed while the schedule was paused:
-  - `skip`: (Default) Ignores all missed wall-clock occurrences; waits for the next scheduled tick.
-  - `run-once`: Immediately enqueues exactly one run representing the most recent missed occurrence.
-  - `run-all` (where supported): Enqueues a run for every missed occurrence sequentially.
-
-### Retrying
-- If a scheduled run fails due to transient reasons (e.g. rate-limiting, temporary network timeouts), the queue entry backoff policy retries the run.
-- If it exceeds `maxAttempts` (defaulting to 3 attempts total), the queue entry transitions to `dead`.
-- Users can trigger manual retries on dead/failed runs from the UI by clicking **Retry Run** and verifying the confirmation.
-
-### Cancelling
-- Users can abort active running executions by clicking **Cancel Run**.
-- Fable marks the queue entry state as `cancelled` and triggers the active runner's cooperative cancellation path via an `AbortSignal`, stopping any downstream tasks from executing.
-
----
-
-## 5. Inspecting Run History & Task Output
-
-The **Run History** page lists all historical runs, showing their status, execution time, duration, and attempts.
-- **Auditing**: Every task start, success, and failure is recorded in the immutable action history ledger.
-- **Inspection**: Click on a run to inspect:
-  - Complete transcript.
-  - Task outcomes and individual step execution times.
-  - Redacted outputs of connector read/write actions.
-
----
-
-## 6. Example Connector-First Recurring Tasks
-
-These example configurations demonstrate typical scheduling patterns using safe placeholders.
-
-### Scenario A: GitHub Issue & PR Sync (Daily)
-* **Goal**: Collect open PR details daily and notify developers.
-* **Trigger**: Daily at 08:00 AM UTC.
-* **Permission Profile**: `read-only` (safe).
-
-```yaml
-id: daily-pr-check
-name: Daily PR Sync
-description: Fetch open PRs and list dependencies
-trigger:
-  kind: recurring
-  rule:
-    frequency: daily
-    interval: 1
-    hour: 8
-    minute: 0
-    timezone: UTC
-missedRunPolicy: skip
-permissionProfile: read-only
+```text
+<job-id>:<scheduled-at-ISO-timestamp>
 ```
 
-### Scenario B: Database Backup & Status Alert (Weekly)
-* **Goal**: Run backup script, check size, and alert on failure.
-* **Trigger**: Weekly on Sundays at 02:00 AM UTC.
-* **Permission Profile**: `trusted` (write access for notification channel).
+The native queue rejects a second entry with the same key. A lease includes a
+fencing token, so a stale worker cannot report over a newer lease. Terminal
+`done`, `dead`, and `cancelled` entries ignore later reports.
 
-```yaml
-id: weekly-backup-alert
-name: Weekly Backup Status
-description: Runs backup validation check
-trigger:
-  kind: recurring
-  rule:
-    frequency: weekly
-    interval: 1
-    byWeekday: [Sun]
-    hour: 2
-    minute: 0
-    timezone: UTC
-missedRunPolicy: run-once
-permissionProfile: trusted
+At startup, active schedules apply their missed-run policy:
+
+- `skip` ignores missed occurrences.
+- `run-once` enqueues only the most recent missed occurrence.
+- `run-all` enqueues missed occurrences up to the engine's safety bound.
+
+The same occurrence-key boundary makes repeated startup delivery idempotent.
+
+## Pause, resume, retry, and cancel
+
+### Pause and resume
+
+Pausing sets the job to `paused`, clears its next-run timestamp, and transitions
+non-terminal queued work for that job to `cancelled`. The scheduler will not
+create future work for the paused job.
+
+Resuming sets the job to `active`, calculates the next future occurrence, and
+enqueues it through the same deduplication boundary. Startup catch-up, rather
+than the resume button, is where missed-run policies are applied.
+
+### Retry
+
+Each occurrence snapshots a bounded retry policy:
+
+```json
+{
+  "maxAttempts": 3,
+  "initialBackoffMs": 30000,
+  "backoffMultiplier": 2,
+  "maxBackoffMs": 900000
+}
 ```
 
----
+`maxAttempts` includes the initial attempt. Transient failures use capped
+exponential backoff. The queue exposes `availableAt`, attempt numbers, errors,
+and the terminal `dead` state. Run History offers a confirmed manual retry only
+for unhealthy terminal runs whose job is still active.
 
-## 7. Operational & Architectural Notes
+### Cancel
 
-### Timezones & DST (Daylight Saving Time)
-- The recurrence engine walks instants in UTC, projecting candidate ticks against the selected IANA Timezone.
-- Wall-clock minutes in DST gaps are safely skipped; repeated wall-clock minutes during DST fallbacks fire exactly once to prevent double execution.
+Queued, leased, and running entries can be cancelled. Cancellation is persisted
+before the runtime emits a cooperative cancel request. Active execution receives
+an `AbortSignal`, downstream workflow steps stop, and late reports cannot revive
+the cancelled entry.
 
-### Retry Backoff & Jitter
-- Retries use exponential backoff math: `initialBackoffMs * backoffMultiplier^(attempts - 1)`.
-- Base backoff starts at 30 seconds; a lease fencing token protects each attempt to prevent stale reports.
+## Run History and audit
 
-### Idempotency Key Invariant
-- Every workflow mutation and external write step generates a stable idempotency key derived from the `runId`, `stepId`, `capability`, and step `input` hash.
-- This ensures that if a step is retried, the connector receiver (such as Linear or GitHub) is fenced from executing duplicate actions.
+**Run History** lists persisted workflow runs and resolves their display state
+with the durable queue:
 
-### Credential Redaction Invariant
-- Fable strictly enforces secret redaction.
-- Before a task outcome is persisted in the database, logged to audit trails, or surfaced to the UI, the output and inputs are recursively sanitized.
-- Strings matching typical API keys (`sk-...`, `AIzaSy...`, `Bearer ...`) and JSON objects containing sensitive keys (`token`, `api_key`, `secret`, `password`) are automatically masked with `[REDACTED]`.
+- `queued`
+- `running`
+- `retrying`
+- `succeeded`
+- `failed`
+- `cancelled`
+- `interrupted`
+
+Run details include start/update/finish timestamps, duration, workflow version,
+attempt history, per-step output or error, and related notifications. Retry and
+cancel controls are shown only for supported states.
+
+Schedule configuration changes, workflow definition changes, lease policy
+blocks, attempt outcomes, and cancellations are recorded in the unified action
+history. Workflow runs and queue attempts are persisted separately so execution
+history remains inspectable after restart.
+
+## Recovery and one-time schedules
+
+On startup, native scheduler entries left `leased` or `running` are requeued.
+Workflow journals left `running` are changed to `queued` with an interruption
+reason. The occurrence lease can then be acquired again with a new fencing
+token.
+
+A `once` trigger uses the same persistence and queue path. After its single
+occurrence completes, no next occurrence is calculated.
+
+## Secret handling and idempotency
+
+Workflow inputs, step outputs, errors, audit details, and the Run History
+inspection view are redacted. Known credential keys such as `token`,
+`accessToken`, `secretToken`, `clientSecret`, `api_key`, `password`, and
+`authorization`, plus common credential-shaped strings, are replaced with
+`[REDACTED]`. Inspection output is also size-bounded.
+
+Connector writes supported by the workflow runner receive an idempotency key
+derived from the run ID, step ID, capability, and a stable serialization of the
+step input. A host must still supply the connector-write boundary and its fresh
+approval flow; the current Schedule form composes connector reads and a prompt.

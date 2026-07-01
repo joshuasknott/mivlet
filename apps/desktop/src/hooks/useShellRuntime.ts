@@ -149,7 +149,8 @@ import {
   searchRuntimeKnowledgeSources,
   switchRuntimeConnectorAccount,
   syncRuntimeConnector,
-  verifyRuntimeBackend
+  verifyRuntimeBackend,
+  wireToWorkflowRun
 } from "../runtime";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
@@ -441,9 +442,8 @@ export interface ShellRuntime {
   // schedules
   schedules: Schedule[];
   createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;
-  editSchedule: (schedule: Schedule) => void;
-  toggleSchedule: (schedule: Schedule) => void;
-  deleteSchedule: (schedule: Schedule) => void;
+  toggleSchedule: (job: ScheduledJob) => void;
+  deleteSchedule: (job: ScheduledJob) => void;
   /**
    * Create a durable scheduled job from a fully-formed trigger (daily/weekly/
    * monthly/once). The Schedules UI uses this so the form can express every
@@ -943,26 +943,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
       if (definitions) setWorkflowDefinitions(definitions);
       if (runs) {
-        setWorkflowRuns(
-          runs.map((record) => ({
-            id: record.id,
-            definitionId: record.definitionId,
-            definitionVersion: record.definitionVersion,
-            status: record.status,
-            trigger: record.trigger,
-            scheduledJobId: record.scheduledJobId,
-            permissionProfile: record.permissionProfile,
-            input: (record.input as Record<string, unknown>) ?? {},
-            steps: (record.steps as WorkflowRun["steps"]) ?? [],
-            failureReason: record.failureReason,
-            idempotencyKey: record.idempotencyKey,
-            attemptNumber: record.attemptNumber,
-            nextRetryAt: record.nextRetryAt,
-            startedAt: record.startedAt,
-            updatedAt: record.updatedAt,
-            finishedAt: record.finishedAt
-          }))
-        );
+        setWorkflowRuns(runs.map(wireToWorkflowRun));
       }
       setSchedulesReady(true);
     });
@@ -2528,29 +2509,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
     };
     createScheduleFromTrigger({ name, description, trigger, id });
-    // Mirror the legacy ScheduleEntry (weekday + time) so the Schedules page,
-    // which still renders that shape, stays paired with the durable job by id.
-    setSchedules((current) => {
-      const schedule: Schedule = {
-        id,
-        name,
-        description,
-        day,
-        time,
-        enabled: true,
-        createdAt: now.toISOString()
-      };
-      if (current.some((entry) => entry.id === id)) return current;
-      return [schedule, ...current];
-    });
   };
 
   /**
-   * Derive the legacy {day, time} pair a `ScheduleEntry` needs from a trigger.
-   * Used so command-created schedules appear on the Schedules page alongside
-   * form-created ones. Weekly triggers carry their weekday; other frequencies
-   * fall back to Mon. Time comes from the rule's hour/minute, or the one-time
-   * occurrence's local time.
+   * Derive the legacy {day, time} pair retained in the runtime snapshot for
+   * composer-menu and downgrade compatibility. The Schedules management page
+   * uses `ScheduledJob` directly.
    */
   function deriveLegacyScheduleEntry(job: ScheduledJob): { day: Weekday; time: string } {
     const pad = (value: number) => value.toString().padStart(2, "0");
@@ -2568,25 +2532,23 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   /**
    * Compose a workflow's steps from a prompt and the selected connector ids.
-   * Each connected connector contributes a `connector-read` step (using its
-   * manifest's first supported action as the read capability) so the scheduled
-   * agent turn runs against fresh connector data; the prompt step runs last.
-   * Connectors that have no manifest or no read capability are skipped rather
-   * than producing an unsafe/empty step. This is the only place the Schedules
-   * UI composes workflows, and it stays within the existing step vocabulary.
+   * Each connected, searchable connector contributes a `connector-read` step
+   * through the desktop connector search contract, so the scheduled agent turn
+   * runs against fresh connector data; the prompt step runs last. Connectors
+   * that are not connected or searchable are skipped rather than treating
+   * write-oriented `supportedActions` as reads.
    */
   function buildWorkflowSteps(prompt: string, connectorIds: string[]): WorkflowStep[] {
     const steps: WorkflowStep[] = [];
     for (const connectorId of connectorIds) {
       const manifest = connectorManifests.find((entry) => entry.id === connectorId);
-      const capability = manifest?.supportedActions?.[0];
-      if (!manifest || !capability) continue;
+      if (!manifest || manifest.status !== "connected" || !manifest.supportsSearch) continue;
       steps.push({
         kind: "connector-read",
         id: `read-${connectorId}`,
         connectorId,
-        capability,
-        input: {},
+        capability: "search",
+        input: { query: prompt },
         outputVar: connectorId
       });
     }
@@ -2669,26 +2631,26 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setScheduledJobs((current) =>
       current.some((entry) => entry.id === job.id) ? current : [job, ...current]
     );
-    // Derive a best-effort legacy ScheduleEntry so the Schedules page (which
-    // renders that shape, pairing it with the job by id) shows command-created
-    // schedules too. Recurring triggers contribute weekday/time; one-time
-    // triggers fall back to the first weekday at their occurrence time.
+    // Retain the compact legacy entry for the composer menu and downgrade-safe
+    // runtime snapshots. Management and execution use the durable job above.
     setSchedules((current) => {
       if (current.some((entry) => entry.id === id)) return current;
       const derived = deriveLegacyScheduleEntry(job);
       return [{ ...derived, id, name, description, enabled: true, createdAt: now.toISOString() }, ...current];
     });
-    void saveRuntimeWorkflowDefinition(definition);
-    void saveRuntimeScheduledJob(job);
-    if (job.nextRunAt) {
-      void enqueueRuntimeJobRun(
-        job.id,
-        `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
-        job.nextRunAt
-      ).catch((error) => {
-        setLastAction(error instanceof Error ? error.message : "Fable could not queue the schedule.");
-      });
-    }
+    void (async () => {
+      await saveRuntimeWorkflowDefinition(definition);
+      await saveRuntimeScheduledJob(job);
+      if (job.nextRunAt) {
+        await enqueueRuntimeJobRun(
+          job.id,
+          `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
+          job.nextRunAt
+        );
+      }
+    })().catch((error) => {
+      setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule.");
+    });
     setLastAction(`Schedule created: ${name}`);
     return job;
   };
@@ -2813,7 +2775,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return result;
   };
 
-  const toggleSchedule = (schedule: Schedule) => {
+  const toggleSchedule = (job: ScheduledJob) => {
     const schedulePolicy = evaluatePermissionPolicy({
       mode: permissionMode,
       effect: "schedule-mutation",
@@ -2825,11 +2787,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
     setSchedules((current) =>
       current.map((entry) =>
-        entry.id === schedule.id ? { ...entry, enabled: !entry.enabled } : entry
+        entry.id === job.id ? { ...entry, enabled: job.status !== "active" } : entry
       )
     );
-    const status: ScheduledJob["status"] = schedule.enabled ? "paused" : "active";
-    const currentJob = scheduledJobs.find((job) => job.id === schedule.id);
+    const status: ScheduledJob["status"] = job.status === "active" ? "paused" : "active";
+    const currentJob = scheduledJobs.find((candidate) => candidate.id === job.id);
     const updatedJob = currentJob
       ? {
           ...currentJob,
@@ -2843,95 +2805,30 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       : null;
     if (updatedJob) {
       setScheduledJobs((current) =>
-        current.map((job) => (job.id === schedule.id ? updatedJob : job))
+        current.map((candidate) => (candidate.id === job.id ? updatedJob : candidate))
       );
-      void saveRuntimeScheduledJob(updatedJob);
-      if (status === "active" && updatedJob.nextRunAt) {
-        void enqueueRuntimeJobRun(
-          updatedJob.id,
-          `workflow-run-${toSlug(updatedJob.id)}-${toSlug(updatedJob.nextRunAt)}`,
-          updatedJob.nextRunAt
-        ).catch(() => undefined);
-      }
+      void (async () => {
+        await setRuntimeJobStatus(job.id, status);
+        await saveRuntimeScheduledJob(updatedJob);
+        if (status === "active" && updatedJob.nextRunAt) {
+          await enqueueRuntimeJobRun(
+            updatedJob.id,
+            `workflow-run-${toSlug(updatedJob.id)}-${toSlug(updatedJob.nextRunAt)}`,
+            updatedJob.nextRunAt
+          );
+        }
+      })().catch((error) => {
+        setLastAction(error instanceof Error ? error.message : "Fable could not update the schedule.");
+      });
     }
-    void setRuntimeJobStatus(schedule.id, status);
-    setLastAction(`${schedule.name} ${schedule.enabled ? "paused" : "resumed"}`);
-  };
-
-  const editSchedule = (schedule: Schedule) => {
-    const schedulePolicy = evaluatePermissionPolicy({
-      mode: permissionMode,
-      effect: "schedule-mutation",
-      riskLevel: "medium"
-    });
-    if (!schedulePolicy.allowed) {
-      setLastAction(`Schedule not updated: ${schedulePolicy.reason}`);
-      return;
-    }
-    const now = new Date();
-    setSchedules((current) =>
-      current.map((entry) => (entry.id === schedule.id ? schedule : entry))
-    );
-    const currentJob = scheduledJobs.find((job) => job.id === schedule.id);
-    const currentDefinition = workflowDefinitions.find(
-      (definition) => definition.id === currentJob?.workflowDefinitionId
-    );
-    if (!currentJob || !currentDefinition) return;
-    const [hour, minute] = schedule.time.split(":").map(Number);
-    const trigger = {
-      kind: "recurring" as const,
-      rule: {
-        frequency: "weekly" as const,
-        interval: 1,
-        byWeekday: [schedule.day],
-        hour,
-        minute,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-      }
-    };
-    const definition: WorkflowDefinition = {
-      ...currentDefinition,
-      version: currentDefinition.version + 1,
-      name: schedule.name,
-      description: schedule.description,
-      steps: [{ kind: "prompt", id: "prompt", prompt: schedule.description }],
-      updatedAt: now.toISOString()
-    };
-    const job: ScheduledJob = {
-      ...currentJob,
-      name: schedule.name,
-      description: schedule.description,
-      trigger,
-      nextRunAt:
-        currentJob.status === "active"
-          ? nextOccurrence(trigger, now)?.toISOString() ?? ""
-          : "",
-      updatedAt: now.toISOString()
-    };
-    setWorkflowDefinitions((current) => [
-      definition,
-      ...current.filter((entry) => entry.id !== definition.id)
-    ]);
-    setScheduledJobs((current) =>
-      current.map((entry) => (entry.id === job.id ? job : entry))
-    );
-    void saveRuntimeWorkflowDefinition(definition);
-    void saveRuntimeScheduledJob(job);
-    if (job.nextRunAt) {
-      void enqueueRuntimeJobRun(
-        job.id,
-        `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
-        job.nextRunAt
-      ).catch(() => undefined);
-    }
-    setLastAction(`Schedule updated: ${schedule.name}`);
+    setLastAction(`${job.name} ${job.status === "active" ? "paused" : "resumed"}`);
   };
 
   /**
    * Edit an existing job's name/prompt/trigger in place via the durable store
-   * path. Unlike `editSchedule` (weekly-only), this honors any trigger
-   * frequency so the Schedules UI can change a schedule from weekly to daily,
-   * monthly, or one-time. Re-enqueues the next occurrence.
+   * path. This honors any trigger frequency so the Schedules UI can change a
+   * schedule from weekly to daily, monthly, or one-time. Re-enqueues the next
+   * occurrence.
    */
   const editScheduleFromTrigger = ({
     jobId,
@@ -2995,19 +2892,23 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setScheduledJobs((current) =>
       current.map((entry) => (entry.id === jobId ? job : entry))
     );
-    void saveRuntimeWorkflowDefinition(definition);
-    void saveRuntimeScheduledJob(job);
-    if (job.nextRunAt) {
-      void enqueueRuntimeJobRun(
-        job.id,
-        `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
-        job.nextRunAt
-      ).catch(() => undefined);
-    }
+    void (async () => {
+      await saveRuntimeWorkflowDefinition(definition);
+      await saveRuntimeScheduledJob(job);
+      if (job.nextRunAt) {
+        await enqueueRuntimeJobRun(
+          job.id,
+          `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
+          job.nextRunAt
+        );
+      }
+    })().catch((error) => {
+      setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule update.");
+    });
     setLastAction(`Schedule updated: ${name}`);
   };
 
-  const deleteSchedule = (schedule: Schedule) => {
+  const deleteSchedule = (job: ScheduledJob) => {
     const schedulePolicy = evaluatePermissionPolicy({
       mode: permissionMode,
       effect: "schedule-mutation",
@@ -3017,10 +2918,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setLastAction(`Schedule not deleted: ${schedulePolicy.reason}`);
       return;
     }
-    setSchedules((current) => current.filter((entry) => entry.id !== schedule.id));
-    setScheduledJobs((current) => current.filter((entry) => entry.id !== schedule.id));
-    void deleteRuntimeScheduledJob(schedule.id);
-    setLastAction(`Schedule deleted: ${schedule.name}`);
+    setSchedules((current) => current.filter((entry) => entry.id !== job.id));
+    setScheduledJobs((current) => current.filter((entry) => entry.id !== job.id));
+    void deleteRuntimeScheduledJob(job.id);
+    setLastAction(`Schedule deleted: ${job.name}`);
   };
 
   function queueWorkflowRun(
@@ -3096,7 +2997,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       runId,
       status: "running",
       attemptNumber: options.attemptNumber ?? 1,
-      startedAt: now
+      startedAt: now,
+      leaseToken: options.leaseToken
     });
   }
 
@@ -3130,6 +3032,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const finishedAt = new Date().toISOString();
     const existing = workflowRuns.find((run) => run.id === runId);
     if (!existing) return;
+    const leaseToken = pendingWorkflowRuns.find((run) => run.runId === runId)?.leaseToken;
     const completed: WorkflowRun = authoritativeRun ?? {
       ...existing,
       status: ok ? "completed" : "failed",
@@ -3194,7 +3097,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       attemptNumber: existing.attemptNumber ?? 1,
       startedAt: existing.startedAt,
       finishedAt,
-      error: ok ? undefined : completed.failureReason
+      error: ok ? undefined : completed.failureReason,
+      leaseToken
     });
     const definition = workflowDefinitions.find(
       (candidate) => candidate.id === completed.definitionId
@@ -3215,9 +3119,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   /** Cancel a scheduled run from the Schedules UI (queued/leased/running). */
   const cancelScheduledRun = (runId: string) => {
+    const existingRun = workflowRuns.find((run) => run.id === runId);
     void cancelRuntimeJobRun(runId)
       .then((cancelled) => {
         if (cancelled) {
+          const finishedAt = new Date().toISOString();
+          const cancelledRun: WorkflowRun | undefined = existingRun
+            ? {
+                ...existingRun,
+                status: "cancelled",
+                failureReason: "Cancelled.",
+                updatedAt: finishedAt,
+                finishedAt
+              }
+            : undefined;
           setSchedulerQueue((current) =>
             current.map((entry) =>
               entry.runId === runId ? { ...entry, state: "cancelled" as const } : entry
@@ -3226,16 +3141,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           setPendingWorkflowRuns((current) => current.filter((run) => run.runId !== runId));
           setWorkflowRuns((current) =>
             current.map((run) =>
-              run.id === runId
-                ? {
-                    ...run,
-                    status: "cancelled",
-                    failureReason: "Cancelled.",
-                    finishedAt: new Date().toISOString()
-                  }
-                : run
+              run.id === runId && cancelledRun ? cancelledRun : run
             )
           );
+          if (cancelledRun) void saveRuntimeWorkflowRun(cancelledRun);
         }
       })
       .catch((error) => {
@@ -3261,21 +3170,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const refreshWorkflowRuns = async () => {
     const records = await listRuntimeWorkflowRuns();
     if (!records) return;
-    const loaded = records.map((record) => ({
-      id: record.id,
-      definitionId: record.definitionId,
-      definitionVersion: record.definitionVersion,
-      status: record.status,
-      trigger: record.trigger,
-      scheduledJobId: record.scheduledJobId,
-      input: (record.input as Record<string, unknown>) ?? {},
-      steps: (record.steps as WorkflowRun["steps"]) ?? [],
-      failureReason: record.failureReason,
-      idempotencyKey: record.idempotencyKey,
-      startedAt: record.startedAt,
-      updatedAt: record.updatedAt,
-      finishedAt: record.finishedAt
-    }));
+    const loaded = records.map(wireToWorkflowRun);
     setWorkflowRuns((current) => {
       const byId = new Map(current.map((run) => [run.id, run]));
       for (const run of loaded) byId.set(run.id, run);
@@ -3329,20 +3224,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       .then((queued) => {
         if (!queued) queueWorkflowRun(job.id, retryRunId);
         setLastAction(`Retrying ${job.name}.`);
-        // Flip the retried run's record back to a queued/retrying posture so the
-        // list reflects that a fresh attempt is in flight.
-        setWorkflowRuns((current) =>
-          current.map((existing) =>
-            existing.id === runId
-              ? {
-                  ...existing,
-                  status: "queued",
-                  failureReason: undefined,
-                  updatedAt: scheduledAt
-                }
-              : existing
-          )
-        );
       })
       .catch((error) => {
         setLastAction(
@@ -3461,7 +3342,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     schedules,
     createSchedule,
     createScheduleFromTrigger,
-    editSchedule,
     editScheduleFromTrigger,
     toggleSchedule,
     deleteSchedule,

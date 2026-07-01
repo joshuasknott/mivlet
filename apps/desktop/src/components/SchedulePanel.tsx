@@ -403,7 +403,7 @@ function ConnectorControls({
   connectors: ConnectorManifest[];
 }) {
   const selectable = connectors.filter(
-    (connector) => connector.status === "connected" && connector.supportedActions?.length
+    (connector) => connector.status === "connected" && connector.supportsSearch === true
   );
   if (selectable.length === 0) return null;
   const toggle = (connectorId: string) =>
