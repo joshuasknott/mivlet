@@ -28,6 +28,7 @@ export {
   filterRetrievable,
   retrieve,
   type RetrievalFeedback,
+  type RetrievalFilterOptions,
   type RetrievalRankingWeights,
   type RetrievalSource,
   type RetrieveOptions
