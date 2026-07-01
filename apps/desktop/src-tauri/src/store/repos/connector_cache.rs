@@ -22,11 +22,6 @@ use crate::store::repos::{open_json, seal_json};
 use crate::store::vault::Sealed;
 use crate::store::{Result, Store, StoreError};
 
-/// The default workspace id used when a caller does not specify one. The
-/// desktop shell is single-profile, so the cache keeps a stable default scope
-/// while still enforcing isolation between explicit workspace ids.
-pub const DEFAULT_WORKSPACE_ID: &str = "default";
-
 /// Trust vocabulary mirrored from knowledge sources.
 pub const TRUST_VALUES: &[&str] = &["trusted", "untrusted", "verified"];
 
@@ -119,7 +114,7 @@ pub fn upsert_from_value(
     value: Value,
     now: &str,
 ) -> Result<()> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let connector_id = value
         .get("connectorId")
         .and_then(Value::as_str)
@@ -172,6 +167,17 @@ pub fn upsert_from_value(
         .and_then(Value::as_str)
         .unwrap_or("connector-cache")
         .to_string();
+    let tombstoned: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM connector_cache_tombstone
+         WHERE workspace_id=?1 AND connector_id=?2 AND provider_item_id=?3);",
+        rusqlite::params![workspace_id, connector_id, provider_item_id],
+        |row| row.get(0),
+    )?;
+    if tombstoned {
+        return Err(StoreError::Invalid(
+            "Deleted connector knowledge cannot be restored by synchronization.".into(),
+        ));
+    }
 
     // Build the normalized payload from provider-shaped fields, then redact.
     let mut payload = serde_json::json!({
@@ -246,7 +252,7 @@ pub fn count(
     connector_id: Option<&str>,
     include_disabled: bool,
 ) -> Result<i64> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let mut sql = String::from("SELECT COUNT(*) FROM connector_cache WHERE workspace_id = ?1");
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(workspace_id.clone())];
     if let Some(connector_id) = connector_id {
@@ -291,7 +297,7 @@ fn list_where(
     connector_id: Option<&str>,
     exclude_disabled: bool,
 ) -> Result<Vec<ConnectorCacheRow>> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let mut sql = String::from(
         "SELECT id, workspace_id, connector_id, provider_item_id, kind, trust, pinned,
                 disabled, content_fingerprint, cached_at, origin, payload, payload_nonce
@@ -305,7 +311,7 @@ fn list_where(
     if exclude_disabled {
         sql.push_str(" AND disabled = 0");
     }
-    sql.push_str(" ORDER BY cached_at DESC;");
+    sql.push_str(" ORDER BY cached_at DESC, connector_id, provider_item_id;");
     let mut stmt = tx.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let partials: Vec<Partial> = stmt
@@ -392,7 +398,7 @@ pub fn get(
     workspace_id: &str,
     id: &str,
 ) -> Result<Option<ConnectorCacheRow>> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let partial = tx
         .query_row(
             "SELECT id, workspace_id, connector_id, provider_item_id, kind, trust, pinned,
@@ -450,7 +456,7 @@ pub fn set_disabled(
     id: &str,
     disabled: bool,
 ) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let updated = tx.execute(
         "UPDATE connector_cache SET disabled = ?1 WHERE id = ?2 AND workspace_id = ?3;",
         rusqlite::params![disabled as i64, id, workspace_id],
@@ -460,7 +466,7 @@ pub fn set_disabled(
 
 /// Set the `pinned` flag on a cache row, scoped to `workspace_id`.
 pub fn set_pinned(tx: &Connection, workspace_id: &str, id: &str, pinned: bool) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let updated = tx.execute(
         "UPDATE connector_cache SET pinned = ?1 WHERE id = ?2 AND workspace_id = ?3;",
         rusqlite::params![pinned as i64, id, workspace_id],
@@ -470,7 +476,14 @@ pub fn set_pinned(tx: &Connection, workspace_id: &str, id: &str, pinned: bool) -
 
 /// Delete a single cache row, scoped to `workspace_id`. Returns rows affected.
 pub fn delete(tx: &Connection, workspace_id: &str, id: &str) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
+    tx.execute(
+        "INSERT OR REPLACE INTO connector_cache_tombstone
+           (workspace_id, connector_id, provider_item_id, deleted_at)
+         SELECT workspace_id, connector_id, provider_item_id, ?1
+         FROM connector_cache WHERE id=?2 AND workspace_id=?3;",
+        rusqlite::params![unix_timestamp(), id, workspace_id],
+    )?;
     let deleted = tx.execute(
         "DELETE FROM connector_cache WHERE id = ?1 AND workspace_id = ?2;",
         rusqlite::params![id, workspace_id],
@@ -482,7 +495,27 @@ pub fn delete(tx: &Connection, workspace_id: &str, id: &str) -> Result<usize> {
 /// that connector's rows are cleared. Returns rows deleted. Workspace isolation:
 /// rows from other workspaces are never touched.
 pub fn clear(tx: &Connection, workspace_id: &str, connector_id: Option<&str>) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
+    match connector_id {
+        Some(connector_id) => {
+            tx.execute(
+                "INSERT OR REPLACE INTO connector_cache_tombstone
+                   (workspace_id, connector_id, provider_item_id, deleted_at)
+                 SELECT workspace_id, connector_id, provider_item_id, ?1 FROM connector_cache
+                 WHERE workspace_id=?2 AND connector_id=?3;",
+                rusqlite::params![unix_timestamp(), workspace_id, connector_id],
+            )?;
+        }
+        None => {
+            tx.execute(
+                "INSERT OR REPLACE INTO connector_cache_tombstone
+                   (workspace_id, connector_id, provider_item_id, deleted_at)
+                 SELECT workspace_id, connector_id, provider_item_id, ?1 FROM connector_cache
+                 WHERE workspace_id=?2;",
+                rusqlite::params![unix_timestamp(), workspace_id],
+            )?;
+        }
+    }
     let deleted = match connector_id {
         Some(connector_id) => tx.execute(
             "DELETE FROM connector_cache WHERE workspace_id = ?1 AND connector_id = ?2;",
@@ -498,7 +531,7 @@ pub fn clear(tx: &Connection, workspace_id: &str, connector_id: Option<&str>) ->
 
 /// List the distinct connector ids that have cached rows for a workspace.
 pub fn connectors_with_cache(tx: &Connection, workspace_id: &str) -> Result<Vec<String>> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let mut stmt = tx.prepare(
         "SELECT DISTINCT connector_id FROM connector_cache WHERE workspace_id = ?1
          ORDER BY connector_id;",
@@ -522,7 +555,7 @@ pub fn mark_resynced(
     connector_id: Option<&str>,
     now: &str,
 ) -> Result<usize> {
-    let workspace_id = normalize_workspace(workspace_id);
+    let workspace_id = normalize_workspace(workspace_id)?;
     let touched = match connector_id {
         Some(connector_id) => tx.execute(
             "UPDATE connector_cache SET cached_at = ?1
@@ -554,13 +587,8 @@ struct Partial {
 
 /// Normalize a workspace id, defaulting empty input to the single-profile
 /// default so cache reads/writes always carry a non-empty scope.
-pub(crate) fn normalize_workspace(workspace_id: &str) -> String {
-    let trimmed = workspace_id.trim();
-    if trimmed.is_empty() {
-        DEFAULT_WORKSPACE_ID.to_string()
-    } else {
-        trimmed.to_string()
-    }
+pub(crate) fn normalize_workspace(workspace_id: &str) -> Result<String> {
+    crate::store::repos::scope::normalize_id(workspace_id, "Workspace")
 }
 
 /// Stable cache row id: deterministic per `(workspace, connector, provider_item)`
@@ -571,6 +599,13 @@ fn cache_id(workspace_id: &str, connector_id: &str, provider_item_id: &str) -> S
 
 fn aad(id: &str) -> String {
     format!("connector_cache:{id}")
+}
+
+fn unix_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs().to_string())
+        .unwrap_or_else(|_| "0".to_string())
 }
 
 #[cfg(test)]
@@ -822,16 +857,11 @@ mod tests {
     }
 
     #[test]
-    fn empty_workspace_defaults_to_default_scope() {
+    fn empty_workspace_fails_closed() {
         let store = store();
-        store
+        assert!(store
             .transaction(|tx| upsert_from_value(tx, &store, "  ", item("github", "i1", "T"), "now"))
-            .unwrap();
-        let rows = store
-            .with_conn(|conn| list(conn, &store, DEFAULT_WORKSPACE_ID, None))
-            .unwrap();
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].workspace_id, DEFAULT_WORKSPACE_ID);
+            .is_err());
     }
 
     #[test]

@@ -650,6 +650,18 @@ pub struct LocalFileImport {
     pub size_bytes: usize,
     pub imported_at: String,
     pub origin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -662,6 +674,12 @@ pub struct KnowledgeSource {
     pub pinned: bool,
     pub trust: Option<String>,
     pub content_preview: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -675,6 +693,8 @@ pub struct KnowledgeCitation {
     pub trust: String,
     pub pinned: bool,
     pub score: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -759,7 +779,7 @@ pub struct ApprovalResolutionResponse {
     pub grant: Option<ApprovalGrant>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRecord {
     pub id: String,
@@ -770,9 +790,27 @@ pub struct MemoryRecord {
     pub freshness: String,
     pub approved: bool,
     pub pinned: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forgotten_at: Option<String>,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryControlState {
     pub disabled: bool,
@@ -783,7 +821,10 @@ pub struct MemoryControlState {
 #[serde(rename_all = "camelCase")]
 pub struct MemoryExportEnvelope {
     pub format: &'static str,
+    pub workspace_id: String,
     pub disabled: bool,
+    pub disabled_records_included: bool,
+    pub forgotten_records_included: bool,
     pub records: Vec<MemoryRecord>,
 }
 
@@ -857,7 +898,7 @@ pub struct WorkspacePlan {
     pub updated_at: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
     pub version: u8,

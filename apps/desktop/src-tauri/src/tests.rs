@@ -347,6 +347,9 @@ fn knowledge_search_requires_actual_matches_before_boosts() {
             pinned: true,
             trust: Some("trusted".to_string()),
             content_preview: Some("Connector recovery and approval audit".to_string()),
+            disabled: false,
+            deleted_at: None,
+            account: None,
         },
         KnowledgeSource {
             id: "design".to_string(),
@@ -356,6 +359,9 @@ fn knowledge_search_requires_actual_matches_before_boosts() {
             pinned: true,
             trust: Some("trusted".to_string()),
             content_preview: Some("Sidebar hierarchy and composer suggestions".to_string()),
+            disabled: false,
+            deleted_at: None,
+            account: None,
         },
     ];
 
@@ -642,6 +648,15 @@ fn memory_record(id: &str, value: &str) -> MemoryRecord {
         freshness: "Updated now".to_string(),
         approved: true,
         pinned: true,
+        scope: None,
+        confidence: Some(1.0),
+        provenance: None,
+        approval_state: Some("approved".to_string()),
+        run_id: None,
+        created_at: None,
+        updated_at: None,
+        forgotten_at: None,
+        disabled: false,
     }
 }
 
@@ -654,6 +669,9 @@ fn knowledge_source(id: &str, trust: &str, preview: Option<&str>) -> KnowledgeSo
         pinned: true,
         trust: Some(trust.to_string()),
         content_preview: preview.map(str::to_string),
+        disabled: false,
+        deleted_at: None,
+        account: None,
     }
 }
 
@@ -750,6 +768,29 @@ fn exports_memory_state_with_stable_format() {
     assert!(encoded.contains("arden.memory.export.v1"));
     assert!(encoded.contains("Exported value"));
     assert!(encoded.contains("\"disabled\": false"));
+    assert!(encoded.contains("\"workspaceId\": \"default\""));
+    assert!(encoded.contains("\"disabledRecordsIncluded\": false"));
+    assert!(encoded.contains("\"forgottenRecordsIncluded\": false"));
+}
+
+#[test]
+fn memory_export_excludes_lifecycle_hidden_records_and_redacts_tokens() {
+    let mut forgotten = memory_record("forgotten", "must not export");
+    forgotten.forgotten_at = Some("2026-07-01T00:00:00Z".to_string());
+    let mut disabled = memory_record("disabled", "must not export either");
+    disabled.disabled = true;
+    let encoded = encode_memory_export(MemoryControlState {
+        disabled: false,
+        records: vec![
+            forgotten,
+            disabled,
+            memory_record("live", "Bearer top-secret-token"),
+        ],
+    })
+    .expect("memory export should encode");
+    assert!(!encoded.contains("must not export"));
+    assert!(!encoded.contains("top-secret-token"));
+    assert!(encoded.contains("redacted secret-bearing memory data"));
 }
 
 #[test]

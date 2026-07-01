@@ -93,15 +93,25 @@ pub(crate) fn ensure_record_owner(
     scope: &DataScope,
 ) -> Result<()> {
     let sql = match table {
-        "knowledge_source" => "SELECT workspace_id, project_id FROM knowledge_source WHERE id=?1;",
-        "memory_record" => "SELECT workspace_id, project_id FROM memory_record WHERE id=?1;",
+        "knowledge_source" => {
+            "SELECT workspace_id, project_id FROM knowledge_source WHERE id=?1 AND workspace_id=?2;"
+        }
+        "memory_record" => {
+            "SELECT workspace_id, project_id FROM memory_record WHERE id=?1 AND workspace_id=?2;"
+        }
         "schedule" => "SELECT workspace_id, project_id FROM schedule WHERE id=?1;",
         _ => return Err(StoreError::Invalid("Unknown ownership table.".into())),
     };
     let owner = conn
-        .query_row(sql, [id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-        })
+        .query_row(
+            sql,
+            rusqlite::params_from_iter(if table == "schedule" {
+                vec![id]
+            } else {
+                vec![id, scope.workspace_id()]
+            }),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
         .optional()?;
     if owner.as_ref().is_some_and(|(workspace, project)| {
         workspace != scope.workspace_id() || project.as_deref() != scope.project_id()
@@ -243,6 +253,20 @@ mod tests {
                     "now",
                     "now",
                     &serde_json::json!({"id":"wf1","secret":"encrypted"}),
+                )?;
+                knowledge_source::upsert_from_value_scoped(
+                    tx,
+                    &store,
+                    &beta,
+                    serde_json::json!({"id":"k1","title":"Beta","connectorId":"local-files"}),
+                    "now",
+                )?;
+                memory_record::upsert_from_value_scoped(
+                    tx,
+                    &store,
+                    &beta,
+                    serde_json::json!({"id":"m1","kind":"fact","title":"Beta","value":"separate"}),
+                    "now",
                 )
             })
             .unwrap();
@@ -254,14 +278,20 @@ mod tests {
                 .len(),
             1
         );
-        assert!(store
-            .with_conn(|tx| knowledge_source::list_scoped(tx, &store, &beta))
-            .unwrap()
-            .is_empty());
-        assert!(store
-            .with_conn(|tx| memory_record::list_scoped(tx, &store, &beta))
-            .unwrap()
-            .is_empty());
+        assert_eq!(
+            store
+                .with_conn(|tx| knowledge_source::list_scoped(tx, &store, &beta))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .with_conn(|tx| memory_record::list_scoped(tx, &store, &beta))
+                .unwrap()
+                .len(),
+            1
+        );
         assert!(store
             .with_conn(|tx| schedule::list_scoped(tx, &store, &beta))
             .unwrap()
@@ -282,6 +312,101 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn deletion_cascades_chunks_and_pins_and_blocks_resurrection() {
+        let store = store();
+        add_workspace(&store, "alpha");
+        let scope = DataScope::workspace("alpha").unwrap();
+        store
+            .transaction(|tx| {
+                knowledge_source::upsert_from_value_scoped(
+                    tx,
+                    &store,
+                    &scope,
+                    serde_json::json!({"id":"source","title":"Alpha","connectorId":"local-files"}),
+                    "now",
+                )?;
+                tx.execute(
+                    "INSERT INTO knowledge_chunk
+                       (workspace_id, source_id, id, ordinal, content_fingerprint, payload, payload_nonce)
+                     VALUES ('alpha', 'source', 'chunk', 0, 'fp', x'01', x'02');",
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT INTO pinned_context
+                       (workspace_id, id, source_id, scope_level, pinned_at)
+                     VALUES ('alpha', 'pin', 'source', 'global', 'now');",
+                    [],
+                )?;
+                knowledge_source::delete_scoped(tx, &scope, "source")
+            })
+            .unwrap();
+
+        store
+            .with_conn(|tx| {
+                let chunks: i64 =
+                    tx.query_row("SELECT COUNT(*) FROM knowledge_chunk", [], |r| r.get(0))?;
+                let pins: i64 =
+                    tx.query_row("SELECT COUNT(*) FROM pinned_context", [], |r| r.get(0))?;
+                assert_eq!((chunks, pins), (0, 0));
+                Ok(())
+            })
+            .unwrap();
+        assert!(store
+            .transaction(|tx| knowledge_source::upsert_from_value_scoped(
+                tx,
+                &store,
+                &scope,
+                serde_json::json!({"id":"source","title":"Resurrected"}),
+                "later",
+            ))
+            .is_err());
+    }
+
+    #[test]
+    fn disabled_and_forgotten_records_never_enter_live_reads() {
+        let store = store();
+        add_workspace(&store, "alpha");
+        let scope = DataScope::workspace("alpha").unwrap();
+        store
+            .transaction(|tx| {
+                knowledge_source::upsert_from_value_scoped(
+                    tx,
+                    &store,
+                    &scope,
+                    serde_json::json!({"id":"disabled","title":"Hidden","disabled":true}),
+                    "now",
+                )?;
+                memory_record::upsert_from_value_scoped(
+                    tx,
+                    &store,
+                    &scope,
+                    serde_json::json!({"id":"memory","kind":"fact","title":"Hidden","value":"secret"}),
+                    "now",
+                )?;
+                memory_record::forget_scoped(tx, &scope, "memory", "2026-07-01T00:00:00Z")?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(store
+            .with_conn(|tx| knowledge_source::list_scoped(tx, &store, &scope))
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .with_conn(|tx| memory_record::list_scoped(tx, &store, &scope))
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .transaction(|tx| memory_record::upsert_from_value_scoped(
+                tx,
+                &store,
+                &scope,
+                serde_json::json!({"id":"memory","kind":"fact","title":"Again","value":"again"}),
+                "later",
+            ))
+            .is_err());
     }
 
     #[test]

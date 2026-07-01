@@ -258,14 +258,14 @@ export async function saveRuntimeMemoryState(state: MemoryControlState) {
   }
 }
 
-export async function exportRuntimeMemoryState(state: MemoryControlState) {
+export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   if (!hasTauriRuntime()) {
     return null;
   }
 
   try {
     return await invoke<string>("export_memory_state", {
-      state
+      ...DEFAULT_DATA_SCOPE
     });
   } catch (error) {
     throw toRuntimeError(error);

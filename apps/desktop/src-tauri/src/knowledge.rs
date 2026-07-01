@@ -126,6 +126,12 @@ pub fn import_local_text_file(
             .imported_at
             .unwrap_or_else(|| "runtime-generated".to_string()),
         origin: "local-import".to_string(),
+        scope: None,
+        account: None,
+        disabled: false,
+        deleted_at: None,
+        status: None,
+        status_message: None,
     })
 }
 
@@ -222,6 +228,7 @@ fn to_citation(source: KnowledgeSource, score: f64) -> KnowledgeCitation {
         trust: source.trust.unwrap_or_else(|| "untrusted".to_string()),
         pinned: source.pinned,
         score: (score * 100.0).round() / 100.0,
+        account: source.account,
     }
 }
 
@@ -235,6 +242,7 @@ pub fn search_knowledge_sources(
     let tokens = tokenize(&normalized_query);
     let mut scored_sources = sources
         .into_iter()
+        .filter(|source| !source.disabled && source.deleted_at.is_none())
         .filter_map(|source| {
             let score = source_score(&source, &tokens);
             (score > 0.0).then_some((source, score))

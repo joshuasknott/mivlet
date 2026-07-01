@@ -77,6 +77,8 @@ export interface MemoryProvenance {
 }
 
 export interface MemoryRecord {
+  /** Explicit durable owner; legacy snapshots are assigned during migration. */
+  workspaceId?: WorkspaceId;
   id: string;
   kind: MemoryKind;
   title: string;
@@ -584,7 +586,7 @@ export interface ConnectorApprovalRecord {
 /** The trust vocabulary mirrored from knowledge sources for cached items. */
 export type ConnectorCacheTrust = "trusted" | "untrusted" | "verified";
 
-/** The default workspace scope used when a caller omits `workspaceId`. */
+/** Compatibility workspace id; command callers must still pass it explicitly. */
 export const CONNECTOR_CACHE_DEFAULT_WORKSPACE_ID = "default";
 
 /**
@@ -633,21 +635,21 @@ export interface ConnectorCacheSettings {
 
 /** Input for writing/refreshing a single cached connector item. */
 export interface CacheConnectorItemRequest {
-  workspaceId?: string;
+  workspaceId: string;
   /** A provider-shaped item (search result / import) to cache. */
   item: Record<string, unknown>;
 }
 
 /** Input for toggling a cached item's disabled flag. */
 export interface SetConnectorCacheItemDisabledRequest {
-  workspaceId?: string;
+  workspaceId: string;
   id: string;
   disabled: boolean;
 }
 
 /** Input for clearing a workspace's cache (optionally one connector). */
 export interface ClearConnectorCacheRequest {
-  workspaceId?: string;
+  workspaceId: string;
   /** When set, only this connector's cached rows are cleared. */
   connectorId?: ConnectorId;
   /** When true, also drop the per-workspace/per-connector settings rows. */
@@ -656,19 +658,19 @@ export interface ClearConnectorCacheRequest {
 
 /** Input for marking a workspace/connector's cache freshly resynced. */
 export interface ResyncConnectorCacheRequest {
-  workspaceId?: string;
+  workspaceId: string;
   connectorId?: ConnectorId;
 }
 
 /** Input for reading effective cache settings. */
 export interface GetConnectorCacheSettingsRequest {
-  workspaceId?: string;
+  workspaceId: string;
   connectorId: ConnectorId;
 }
 
 /** Input for upserting cache settings. Empty `connectorId` sets the workspace default. */
 export interface SetConnectorCacheSettingsRequest {
-  workspaceId?: string;
+  workspaceId: string;
   connectorId: ConnectorId;
   enabled: boolean;
   autoSync?: boolean;
@@ -677,7 +679,7 @@ export interface SetConnectorCacheSettingsRequest {
 
 /** Input for deleting a cache settings row (restores the lower-precedence default). */
 export interface DeleteConnectorCacheSettingsRequest {
-  workspaceId?: string;
+  workspaceId: string;
   connectorId: ConnectorId;
 }
 
@@ -686,6 +688,7 @@ export interface ConnectorCacheExport {
   workspaceId: string;
   connectorId?: ConnectorId;
   credentialsIncluded: false;
+  disabledItemsIncluded: true;
   items: CachedConnectorItem[];
   settings: ConnectorCacheSettings[];
 }
@@ -1058,6 +1061,8 @@ export const GLOBAL_SCOPE: KnowledgeScope = { level: "global" };
 export type SourceStatus = "ok" | "indexing" | "stale" | "error";
 
 export interface KnowledgeSource {
+  /** Explicit durable owner; legacy snapshots are assigned during migration. */
+  workspaceId?: WorkspaceId;
   id: string;
   title: string;
   kind: KnowledgeSourceKind;
@@ -1085,6 +1090,8 @@ export interface KnowledgeSource {
   authority?: number;
   /** Soft-disable / exclusion flag. Disabled sources never enter a run. */
   disabled?: boolean;
+  /** Minimal deletion tombstone retained to prevent routine resurrection. */
+  deletedAt?: string;
   /** Lifecycle/health state surfaced in the Knowledge page. */
   status?: SourceStatus;
   /** Optional message describing a failed/stale state for the UI. */
@@ -1155,6 +1162,7 @@ export interface KnowledgeSearchResponse {
  * each chunk carries its own content hash for dedup across reindex.
  */
 export interface SourceChunk {
+  workspaceId?: WorkspaceId;
   id: string;
   sourceId: string;
   ordinal: number;
@@ -1227,6 +1235,7 @@ export interface MemoryRetentionResult {
  * pinned item enters a run deterministically even when it would not rank.
  */
 export interface PinnedContextEntry {
+  workspaceId?: WorkspaceId;
   id: string;
   scope: KnowledgeScope;
   sourceId?: string;
@@ -1254,6 +1263,7 @@ export interface WorkingContext {
  * that can be promoted into memory.
  */
 export interface Artifact {
+  workspaceId?: WorkspaceId;
   id: string;
   title: string;
   kind: "document" | "code" | "summary" | "other";

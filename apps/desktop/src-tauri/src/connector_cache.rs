@@ -19,7 +19,7 @@
 //! token-shaped values and fails closed when a secret marker survives. Provider
 //! credentials live in OS secure storage under a separate lifecycle.
 
-use crate::store::repos::connector_cache::{self, ConnectorCacheRow, DEFAULT_WORKSPACE_ID};
+use crate::store::repos::connector_cache::{self, ConnectorCacheRow};
 use crate::store::repos::connector_cache_settings::{
     self, CacheSettingsRow, SCOPE_CONNECTOR, SCOPE_WORKSPACE, WORKSPACE_SCOPE_CONNECTOR,
 };
@@ -39,8 +39,10 @@ mod lifecycle {
         workspace_id: &str,
         connector_id: Option<&str>,
     ) -> StoreResult<Vec<CachedConnectorItem>> {
-        let rows = store
-            .with_conn(|conn| connector_cache::list(conn, store, workspace_id, connector_id))?;
+        let rows = store.with_conn(|conn| {
+            let rows = connector_cache::list(conn, store, workspace_id, connector_id)?;
+            filter_authorized_rows(conn, store, workspace_id, rows)
+        })?;
         Ok(rows.into_iter().map(CachedConnectorItem::from).collect())
     }
 
@@ -57,9 +59,54 @@ mod lifecycle {
             ));
         }
         let rows = store.with_conn(|conn| {
-            connector_cache::search(conn, store, workspace_id, connector_id, query)
+            let rows = connector_cache::search(conn, store, workspace_id, connector_id, query)?;
+            filter_authorized_rows(conn, store, workspace_id, rows)
         })?;
         Ok(rows.into_iter().map(CachedConnectorItem::from).collect())
+    }
+
+    fn filter_authorized_rows(
+        conn: &rusqlite::Connection,
+        store: &Store,
+        workspace_id: &str,
+        rows: Vec<ConnectorCacheRow>,
+    ) -> StoreResult<Vec<ConnectorCacheRow>> {
+        let mut statement = conn.prepare(
+            "SELECT connector_id, account_id, status FROM connector_account WHERE workspace_id=?1;",
+        )?;
+        let accounts = statement
+            .query_map([workspace_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut authorized = Vec::new();
+        for row in rows {
+            let settings =
+                connector_cache_settings::effective(conn, store, workspace_id, &row.connector_id)?;
+            if !settings.enabled {
+                continue;
+            }
+            let item_account = row
+                .payload
+                .get("account")
+                .and_then(serde_json::Value::as_str);
+            if let Some(item_account) = item_account.filter(|value| !value.is_empty()) {
+                let account_ok = accounts.iter().any(|account| {
+                    account.0 == row.connector_id
+                        && account.2 == "connected"
+                        && account.1.as_deref() == Some(item_account)
+                });
+                if !account_ok {
+                    continue;
+                }
+            }
+            authorized.push(row);
+        }
+        Ok(authorized)
     }
 
     /// Write/refresh one normalized item. Honors the effective setting (a
@@ -166,6 +213,7 @@ mod lifecycle {
             "workspaceId": workspace_id,
             "connectorId": connector_id,
             "credentialsIncluded": false,
+            "disabledItemsIncluded": true,
             "items": items,
             "settings": settings_views,
         }))
@@ -260,6 +308,12 @@ fn now_iso() -> String {
 
 fn unavailable() -> String {
     "Fable's encrypted store is not initialized.".to_string()
+}
+
+fn required_workspace(workspace_id: &str) -> Result<&str, String> {
+    crate::store::repos::scope::normalize_id(workspace_id, "Workspace")
+        .map(|_| workspace_id.trim())
+        .map_err(|error| error.to_string())
 }
 
 /// A single cached connector item, shaped for the Tauri wire boundary. Carries
@@ -361,7 +415,7 @@ impl From<CacheSettingsRow> for ConnectorCacheSettingsView {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CacheConnectorItemRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub item: serde_json::Value,
 }
 
@@ -369,7 +423,7 @@ pub struct CacheConnectorItemRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetCacheItemDisabledRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub id: String,
     pub disabled: bool,
 }
@@ -378,7 +432,7 @@ pub struct SetCacheItemDisabledRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearConnectorCacheRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     /// When set, only this connector's cached rows are cleared.
     pub connector_id: Option<String>,
     /// When true, also drop the per-workspace/per-connector settings rows.
@@ -390,7 +444,7 @@ pub struct ClearConnectorCacheRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResyncConnectorCacheRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub connector_id: Option<String>,
 }
 
@@ -398,7 +452,7 @@ pub struct ResyncConnectorCacheRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetCacheSettingsRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub connector_id: String,
 }
 
@@ -407,7 +461,7 @@ pub struct GetCacheSettingsRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetCacheSettingsRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub connector_id: String,
     pub enabled: bool,
     #[serde(default)]
@@ -420,7 +474,7 @@ pub struct SetCacheSettingsRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteCacheSettingsRequest {
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub connector_id: String,
 }
 
@@ -428,10 +482,10 @@ pub struct DeleteCacheSettingsRequest {
 /// are excluded; use `export_connector_cache` to inspect them.
 #[tauri::command]
 pub fn list_connector_cache(
-    workspace_id: Option<String>,
+    workspace_id: String,
     connector_id: Option<String>,
 ) -> Result<Vec<CachedConnectorItem>, String> {
-    let ws = workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&workspace_id)?;
     with_store(|store| lifecycle::list(store, ws, connector_id.as_deref()))?.ok_or_else(unavailable)
 }
 
@@ -439,11 +493,11 @@ pub fn list_connector_cache(
 /// Disabled rows are excluded.
 #[tauri::command]
 pub fn search_connector_cache(
-    workspace_id: Option<String>,
+    workspace_id: String,
     connector_id: Option<String>,
     query: String,
 ) -> Result<Vec<CachedConnectorItem>, String> {
-    let ws = workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&workspace_id)?;
     with_store(|store| lifecycle::search(store, ws, connector_id.as_deref(), &query))?
         .ok_or_else(unavailable)
 }
@@ -455,10 +509,7 @@ pub fn search_connector_cache(
 /// is a no-op and returns `cached: false`.
 #[tauri::command]
 pub fn cache_connector_item(request: CacheConnectorItemRequest) -> Result<bool, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     let now = now_iso();
     with_store(|store| lifecycle::cache_item(store, ws, &request.item, &now))?
         .ok_or_else(unavailable)
@@ -470,10 +521,7 @@ pub fn cache_connector_item(request: CacheConnectorItemRequest) -> Result<bool, 
 pub fn set_connector_cache_item_disabled(
     request: SetCacheItemDisabledRequest,
 ) -> Result<bool, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     with_store(|store| lifecycle::set_disabled(store, ws, &request.id, request.disabled))?
         .ok_or_else(unavailable)
 }
@@ -481,11 +529,8 @@ pub fn set_connector_cache_item_disabled(
 /// Delete a single cached item, scoped to the requesting workspace. Returns
 /// whether a row was deleted.
 #[tauri::command]
-pub fn delete_connector_cache_item(
-    workspace_id: Option<String>,
-    id: String,
-) -> Result<bool, String> {
-    let ws = workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID);
+pub fn delete_connector_cache_item(workspace_id: String, id: String) -> Result<bool, String> {
+    let ws = required_workspace(&workspace_id)?;
     with_store(|store| lifecycle::delete(store, ws, &id))?.ok_or_else(unavailable)
 }
 
@@ -495,10 +540,7 @@ pub fn delete_connector_cache_item(
 /// are dropped too.
 #[tauri::command]
 pub fn clear_connector_cache(request: ClearConnectorCacheRequest) -> Result<u64, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     with_store(|store| {
         let cleared = lifecycle::clear(
             store,
@@ -518,10 +560,7 @@ pub fn clear_connector_cache(request: ClearConnectorCacheRequest) -> Result<u64,
 /// Returns the number of rows touched.
 #[tauri::command]
 pub fn resync_connector_cache(request: ResyncConnectorCacheRequest) -> Result<u64, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     let now = now_iso();
     with_store(|store| {
         let touched = lifecycle::resync(store, ws, request.connector_id.as_deref(), &now)?;
@@ -535,10 +574,10 @@ pub fn resync_connector_cache(request: ResyncConnectorCacheRequest) -> Result<u6
 /// the export is safe to surface/download by construction.
 #[tauri::command]
 pub fn export_connector_cache(
-    workspace_id: Option<String>,
+    workspace_id: String,
     connector_id: Option<String>,
 ) -> Result<String, String> {
-    let ws = workspace_id.as_deref().unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&workspace_id)?;
     with_store(|store| lifecycle::export(store, ws, connector_id.as_deref()))?
         .ok_or_else(unavailable)
 }
@@ -550,10 +589,7 @@ pub fn export_connector_cache(
 pub fn get_connector_cache_settings(
     request: GetCacheSettingsRequest,
 ) -> Result<ConnectorCacheSettingsView, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     with_store(|store| lifecycle::get_settings(store, ws, &request.connector_id))?
         .ok_or_else(unavailable)
 }
@@ -564,10 +600,7 @@ pub fn get_connector_cache_settings(
 pub fn set_connector_cache_settings(
     request: SetCacheSettingsRequest,
 ) -> Result<ConnectorCacheSettingsView, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     let now = now_iso();
     with_store(|store| {
         lifecycle::set_settings(
@@ -589,10 +622,7 @@ pub fn set_connector_cache_settings(
 pub fn delete_connector_cache_settings(
     request: DeleteCacheSettingsRequest,
 ) -> Result<bool, String> {
-    let ws = request
-        .workspace_id
-        .as_deref()
-        .unwrap_or(DEFAULT_WORKSPACE_ID);
+    let ws = required_workspace(&request.workspace_id)?;
     with_store(|store| lifecycle::delete_settings(store, ws, &request.connector_id))?
         .ok_or_else(unavailable)
 }
@@ -653,6 +683,9 @@ mod tests {
         // Deleting from the owning workspace removes it.
         assert!(lifecycle::delete(&store, "ws-a", "cache:ws-a:github:1").unwrap());
         assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
+        assert!(
+            lifecycle::cache_item(&store, "ws-a", &item("github", "1", "Again"), "later").is_err()
+        );
     }
 
     #[test]
@@ -665,6 +698,7 @@ mod tests {
         let exported = lifecycle::export(&store, "ws-a", None).unwrap();
         let json: serde_json::Value = serde_json::from_str(&exported).unwrap();
         assert_eq!(json["credentialsIncluded"], serde_json::Value::Bool(false));
+        assert_eq!(json["disabledItemsIncluded"], serde_json::Value::Bool(true));
         // Both rows (including the disabled one) are present.
         assert_eq!(json["items"].as_array().unwrap().len(), 2);
         // The title is the safe plaintext, not a secret.
@@ -755,6 +789,61 @@ mod tests {
         lifecycle::set_settings(&store, "ws-a", "", true, false, "", "t").unwrap();
         let cached = lifecycle::cache_item(&store, "ws-a", &item("github", "1", "X"), "t").unwrap();
         assert!(cached);
+        assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 1);
+        lifecycle::set_settings(&store, "ws-a", "", false, false, "", "later").unwrap();
+        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn connector_account_mismatch_and_revocation_exclude_cached_rows() {
+        let store = store();
+        let mut account_item = item("github", "1", "Account-bound");
+        account_item["account"] = serde_json::json!("acct-a");
+        lifecycle::cache_item(&store, "ws-a", &account_item, "t").unwrap();
+
+        // Account-bound rows fail closed when there is no matching connected account.
+        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace (id, name, created_at, updated_at)
+                     VALUES ('ws-a', 'A', 'now', 'now');",
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT INTO connector_account
+                       (workspace_id, project_id, connector_id, account_id, status, expires_at,
+                        credential_ref, connected_at, updated_at, payload, payload_nonce)
+                     VALUES ('ws-a', NULL, 'github', 'acct-b', 'connected', NULL,
+                             'ref', 'now', 'now', x'01', x'02');",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
+
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE connector_account SET account_id='acct-a', status='revoked'
+                     WHERE workspace_id='ws-a' AND connector_id='github';",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE connector_account SET status='connected'
+                     WHERE workspace_id='ws-a' AND connector_id='github';",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 1);
     }
 
