@@ -1,8 +1,6 @@
 # Knowledge & Adaptive Memory — Design
 
-Status: **Reconciled design (lead agent)**. Single coherent minimal system the
-subagents build against. Branch `codex/knowledge-memory`, worktree
-`fable-worktrees/knowledge-memory`.
+Status: **Implemented**. Fully implemented in Batch 10 (branches `codex/batch-10-knowledge-foundation`, `codex/batch-10-local-retrieval`, `codex/batch-10-lifecycle-quality`). Refer to the runtime reference: [Knowledge & Memory Lifecycle Reference](../../../product/knowledge-lifecycle.md).
 
 ## 1. Objective recap
 

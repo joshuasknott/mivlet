@@ -18,14 +18,10 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Composer: supports text entry, slash command insertion, local file import trigger, voice toggle UI, model selection, permission selection, and native-agent submit path when a connected native backend exists.
 - Protocol package: defines approvals, memory, connectors, backend providers, runtime snapshots, native agent events, native tool specs, and tool-call request shapes.
 - Local file import: supports `txt`, `md`, `markdown`, `json`, `csv`, `yaml`, and `yml`; rejects empty files, unsupported extensions, changed file sizes, and files over 2 MB; imported files are untrusted local knowledge with a 6,000-character preview.
-- Knowledge and retrieval: local files and recursive folders can be imported,
-  chunked, fingerprinted, scoped, searched, inspected, refreshed, disabled, and
-  deleted. Lexical retrieval returns cited snippets, scores, provenance,
-  freshness, trust, and pin state; stale, failed, disabled, disconnected, and
-  out-of-scope sources are excluded.
+- Knowledge and retrieval: local files and recursive folders can be imported (with path-escape guards), structurally chunked (for Markdown, JSON, CSV, YAML), fingerprinted, scoped, searched, refreshed, disabled, and deleted. Retrieval uses reciprocal-rank fusion (RRF, k=60) for hybrid lexical/semantic ranking. Sources and memory records are subject to workspace-scoped composite key isolation (SQLite schema v5) with deletion/forget tombstones.
 - Approvals: Rust commands and shell UI support once/session/rule/modify/deny decisions, audit entries, approval rules, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
-- Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage. Schedules and workflows are persisted inside the encrypted SQLite database under schema v4.
+- Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage. Schedules, workflows, and knowledge structures are persisted inside the encrypted SQLite database under schema v5.
 - Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Native API-key providers connect through the Rust credential boundary. Codex can run through `codex app-server`; Cursor and Grok can run through ACP CLI processes when the corresponding CLI is installed and signed in. GitHub Copilot remains cataloged but not runnable until its SDK adapter lands.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
 - Native API agent loop: TypeScript owns provider request shaping and a bounded
@@ -59,7 +55,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
  
 | Area | Category | Details / Location |
 | --- | --- | --- |
-| Local files, approvals, memory controls, knowledge search, runtime snapshots | **Finished** | Live local runtime paths in Tauri. Monolithic JSON documents intercept-routed to SQLite `preferences` table. |
+| Local files, approvals, memory controls, knowledge search, runtime snapshots | **Finished** | Live local runtime paths in Tauri. Pinned context, sources, and memory records are persisted in dedicated SQLite tables (schema v5) with composite primary key isolation. |
 | Encrypted SQLite Core | **Finished** | Active in production Tauri path (keyring-backed AES-256-GCM vault). |
 | Native API-key Backends (BYOK) | **Finished** | Live OpenAI, Anthropic, Gemini, xAI, OpenRouter model execution when keys are supplied to local keyring. (See [Native Agent Runtime](native-runtime.md) for the capability matrix). |
 | Schedules Core | **Finished** | Local scheduler tick, leasing, queueing, and headless prompt execution are fully functional (depends on connected runnable backend). |
@@ -86,7 +82,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   status, scope, account, freshness, local file/folder import, connector entry,
   refresh, pin, disable/delete, explicit memory promotion, edit, export,
   disable, and forget controls.
-- Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back. The schedules are backed by raw JSON file storage.
+- Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back. The schedules are backed by encrypted SQLite tables.
 - Voice is a toggle and status affordance; no dictation, audio capture, realtime voice provider, or transcript pipeline was found.
 - Convex is optional via `VITE_CONVEX_URL`, but no Convex schema or collaboration implementation was found in this repo.
 
@@ -97,7 +93,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   durable atomic storage before production use.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
-- Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, and raw JSON files for schedules/workflows. Backend and connector credentials remain separately handled by OS secure storage.
+- Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, schedules, workflows, and knowledge structures. Backend and connector credentials remain separately handled by OS secure storage.
 - No local model runtime path. The onboarding UI labels local models as planned and disabled.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
 - No product website, legal pages, downloads page, or public release pipeline in the audited files.

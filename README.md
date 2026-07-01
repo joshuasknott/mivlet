@@ -11,7 +11,7 @@ Local-first and private by default, Fable is built for people who want powerful 
 - Contextual directive cards that fill the composer instead of behaving like task cards.
 - Knowledge view with sources, memory provenance, and source pinning.
 - Connectors view with auth state, permissions, health, search/import, and approval-gated actions.
-- Schedules view and local scheduler engine for managing and executing recurring tasks automatically (using JSON-based persistence; SQLite migration is planned).
+- Schedules view and local scheduler engine for managing and executing recurring tasks automatically (using encrypted SQLite persistence).
 - Approval flow with once/session/rule/modify/deny decisions and audit history.
 - Local recovery for composer drafts, pinned sources, schedule definitions, and approval audit.
 - Protocol types for approvals, memory, connector health, directives, and runtime snapshots.
@@ -23,9 +23,9 @@ Local-first and private by default, Fable is built for people who want powerful 
 | Component | Status | Details / Storage |
 | :--- | :--- | :--- |
 | **Local Workspace & Chat** | **Implemented (Live)** | Multi-turn chat thread navigation, draft recovery, and settings |
-| **Local Knowledge Ingestion** | **Implemented (Live)** | Text, MD, CSV, JSON, YAML import, chunking, lexical retrieval with citations |
-| **Local Approvals & Memory** | **Implemented (Live)** | Once/session/rule grants, high-risk confirm, memory editing & promotion; persisted in encrypted SQLite |
-| **Schedules & Automations** | **Implemented (Live)** | Local scheduler tick loop, leases, queueing, and headless prompt execution (uses raw JSON storage) |
+| **Local Knowledge Ingestion** | **Implemented (Live)** | Text, MD, CSV, JSON, YAML import with path-escape safety, structure-aware chunking, hybrid RRF k=60 retrieval |
+| **Local Approvals & Memory** | **Implemented (Live)** | Once/session/rule grants, high-risk confirm, memory editing & promotion, lifecycle disables/deletes/forgets, SQLite composite key isolation (schema v5) |
+| **Schedules & Automations** | **Implemented (Live)** | Local scheduler tick loop, leases, queueing, and headless prompt execution (persisted in encrypted SQLite) |
 | **BYOK Native APIs** | **Implemented (Live)** | OpenAI, Anthropic, Gemini, xAI, and OpenRouter backend model execution using local keyring credentials |
 | **Google Connectors** | **Functional (Gated)** | Google Drive, Gmail, and Calendar read/write via loopback PKCE; requires user Google Cloud Console config |
 | **ACP/Codex Providers** | **Functional (Gated)** | Cursor, Grok, and Codex run via local stdio JSON-RPC or CLI app-server if installed and authenticated |

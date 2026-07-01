@@ -29,8 +29,9 @@ Schema changes are applied transactionally on startup. The schema version is rec
 - **v2**: Adds search tables `connector_cache` and `connector_cache_settings` for workspace-isolated, secret-free synced connector data.
 - **v3**: Adds non-secret audit columns to `audit_event` to enable action history filtering without decrypting payloads.
 - **v4 (Batch 9)**: Migrates schedules and workflows from legacy JSON files into SQLite tables.
+- **v5 (Batch 10)**: Upgrades `knowledge_source` and `memory_record` tables to use composite primary keys `(workspace_id, id)` for strict workspace isolation. Adds dedicated tables `knowledge_chunk`, `pinned_context`, and deletion/forget tombstones (`knowledge_tombstone`, `memory_tombstone`, `connector_cache_tombstone`).
 
-### v4 Schedules & Workflows Persistence
+### Schedules & Workflows SQLite Persistence
 The automation engine persists across four workspace-isolated tables:
 1. `scheduled_job`: Active automation definitions.
 2. `scheduler_queue_entry`: The queue containing pending, running, or leased job occurrences.
