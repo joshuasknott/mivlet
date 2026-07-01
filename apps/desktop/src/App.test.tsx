@@ -18,7 +18,10 @@ const runtimeMocks = vi.hoisted(() => ({
   onLine: null as ((line: string) => void) | null,
   cancelCalls: [] as string[],
   connectorOAuthCalls: [] as string[],
-  agentRuns: [] as PersistedAgentRun[]
+  agentRuns: [] as PersistedAgentRun[],
+  // In-memory durable scheduler store so cross-session recovery tests exercise
+  // the same Rust-store round-trip the shell uses in production.
+  savedScheduledJobs: [] as unknown[]
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -50,7 +53,9 @@ vi.mock("./runtime", () => ({
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
   listRuntimeConnectorSyncStates: vi.fn(async () => null),
-  listRuntimeSchedulerJobs: vi.fn(async () => null),
+  listRuntimeSchedulerJobs: vi.fn(async () =>
+    runtimeMocks.savedScheduledJobs.length ? [...runtimeMocks.savedScheduledJobs] : null
+  ),
   listRuntimeSchedulerQueue: vi.fn(async () => null),
   listRuntimeWorkflowDefinitions: vi.fn(async () => null),
   listRuntimeWorkflowRuns: vi.fn(async () => null),
@@ -83,7 +88,14 @@ vi.mock("./runtime", () => ({
   resolveRuntimeApprovalRequest: vi.fn(async () => null),
   saveRuntimeMemoryState: vi.fn(async () => null),
   saveRuntimeImportedKnowledgeSources: vi.fn(async () => null),
-  saveRuntimeScheduledJob: vi.fn(async () => null),
+  saveRuntimeScheduledJob: vi.fn(async (job: unknown) => {
+    const record = job as { id: string };
+    runtimeMocks.savedScheduledJobs = [
+      ...runtimeMocks.savedScheduledJobs.filter((existing) => (existing as { id: string }).id !== record.id),
+      job
+    ];
+    return null;
+  }),
   saveRuntimeWorkflowDefinition: vi.fn(async () => null),
   saveRuntimeWorkflowRun: vi.fn(async () => null),
   enqueueRuntimeJobRun: vi.fn(async () => null),
@@ -201,6 +213,7 @@ describe("Fable home", () => {
     runtimeMocks.cancelCalls = [];
     runtimeMocks.connectorOAuthCalls = [];
     runtimeMocks.agentRuns = [];
+    runtimeMocks.savedScheduledJobs = [];
     connectRuntimeBackendSpy.mockClear();
     vi.mocked(listRuntimeConnectorStatuses).mockReset();
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
@@ -402,24 +415,24 @@ describe("Fable home", () => {
     expect(screen.getAllByText("knowledge-page.md").length).toBeGreaterThan(0);
   });
 
-  it("creates a schedule from name, description, day, and time", async () => {
+  it("creates a schedule from name, description, and weekly recurrence", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
 
     expect(screen.getByRole("heading", { name: "Schedules" })).toBeInTheDocument();
-    // Starts empty with no draft/active labels.
-    expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
+    // The hydration gate clears and the empty state is shown.
+    expect(await screen.findByText(/no schedules yet/i)).toBeInTheDocument();
 
     await user.type(screen.getByLabelText(/schedule task name/i), "Weekly digest");
     await user.type(
       screen.getByLabelText(/schedule description/i),
       "Summarize active projects and approvals."
     );
-    // Defaults: Friday at 09:00.
+    // Defaults: weekly, Monday at 09:00.
     await user.click(screen.getByRole("button", { name: /create schedule/i }));
 
     expect(await screen.findByText("Weekly digest")).toBeInTheDocument();
-    expect(screen.getByText(/Fridays at 9:00 AM/i)).toBeInTheDocument();
+    expect(screen.getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
     expect(screen.getByText("Summarize active projects and approvals.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
     const editName = screen.getByLabelText(/edit schedule task name/i);
@@ -428,7 +441,7 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /run now/i }));
+    await user.click(screen.getByRole("button", { name: /run friday briefing now/i }));
     // Scheduled runs now execute through the dedicated headless runner
     // (useScheduledAgent), not the composer. In the test environment no live
     // AgentBackend is resolvable, so the run surfaces its real state rather than
@@ -450,7 +463,10 @@ describe("Fable home", () => {
     expect(await screen.findByText("Daily check")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
 
+    // Pause requires a confirmation step so an enabled schedule is not paused
+    // by accident.
     await user.click(screen.getByRole("button", { name: /pause/i }));
+    await user.click(screen.getByRole("button", { name: /confirm pause/i }));
     expect(screen.getByRole("button", { name: /resume/i })).toBeInTheDocument();
     expect(screen.getByText(/daily check paused/i)).toBeInTheDocument();
   }, 15000);
@@ -467,6 +483,105 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /delete schedule throwaway/i }));
     expect(screen.queryByText("Throwaway")).not.toBeInTheDocument();
     expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
+  }, 15000);
+
+  it("creates a daily schedule from the frequency selector", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Daily standup");
+    await user.type(screen.getByLabelText(/schedule description/i), "Morning summary.");
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "daily");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Daily standup")).toBeInTheDocument();
+    expect(screen.getByText(/Daily at 9:00 AM/i)).toBeInTheDocument();
+  }, 15000);
+
+  it("creates a monthly schedule with a day-of-month", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Month-end review");
+    await user.type(screen.getByLabelText(/schedule description/i), "Close the month.");
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "monthly");
+    // The day-of-month defaults to 1; append "5" to make it the 15th.
+    await user.type(screen.getByLabelText(/day of month/i), "5");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Month-end review")).toBeInTheDocument();
+    expect(screen.getByText(/Monthly on day 15 at 9:00 AM/i)).toBeInTheDocument();
+  }, 15000);
+
+  it("creates a one-time schedule", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Launch day");
+    await user.type(screen.getByLabelText(/schedule description/i), "Ship the release.");
+    await user.selectOptions(screen.getByLabelText(/repeat/i), "once");
+    await user.type(screen.getByLabelText(/run at/i), "2026-12-01T09:00");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Launch day")).toBeInTheDocument();
+    expect(screen.getByText(/Once ·/i)).toBeInTheDocument();
+  }, 15000);
+
+  it("toggles weekly weekdays into the recurrence summary", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Multi-day");
+    await user.type(screen.getByLabelText(/schedule description/i), "Selected days.");
+    // Add Wednesday and Friday to the default Monday.
+    await user.click(screen.getByRole("button", { name: /^Wed$/ }));
+    await user.click(screen.getByRole("button", { name: /^Fri$/ }));
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+
+    expect(await screen.findByText("Multi-day")).toBeInTheDocument();
+    expect(screen.getByText(/Weekly on Mon, Wed, Fri at 9:00 AM/i)).toBeInTheDocument();
+  }, 15000);
+
+  it("surfaces inline validation feedback when required fields are empty", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
+
+    // Submit with an empty name and prompt: the form shows inline errors and
+    // does not create a schedule.
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
+    expect(screen.queryByText(/no schedules yet/i)).toBeInTheDocument();
+  }, 15000);
+
+  it("requires confirming before pausing but resumes immediately", async () => {
+    const user = await renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
+
+    await user.type(screen.getByLabelText(/schedule task name/i), "Confirm guard");
+    await user.type(screen.getByLabelText(/schedule description/i), "Needs a click.");
+    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    expect(await screen.findByText("Confirm guard")).toBeInTheDocument();
+
+    // Pause shows a confirm step, not an immediate pause.
+    await user.click(screen.getByRole("button", { name: /^pause$/i }));
+    expect(screen.getByRole("button", { name: /confirm pause/i })).toBeInTheDocument();
+    // Cancelling the confirmation disarms it.
+    await user.click(screen.getByRole("button", { name: /^cancel$/i }));
+    expect(screen.queryByRole("button", { name: /confirm pause/i })).not.toBeInTheDocument();
+
+    // Confirming performs the pause.
+    await user.click(screen.getByRole("button", { name: /^pause$/i }));
+    await user.click(screen.getByRole("button", { name: /confirm pause/i }));
+    expect(screen.getByText(/confirm guard paused/i)).toBeInTheDocument();
+    // Resuming is immediate (no confirmation needed).
+    await user.click(screen.getByRole("button", { name: /resume/i }));
+    expect(screen.getByRole("button", { name: /^pause$/i })).toBeInTheDocument();
   }, 15000);
 
   it("opens profile from the settings menu and edits local profile details", async () => {
@@ -777,7 +892,7 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     // The command-created schedule appears on the Schedules page (the command
     // derives a legacy entry paired with the durable job by id) and can run now.
-    expect(await screen.findByRole("button", { name: /run now/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /run daily at 09:00 now/i })).toBeInTheDocument();
   });
 
   it("treats an unknown slash command as an ordinary prompt (passthrough reservation)", async () => {
@@ -871,18 +986,21 @@ describe("Fable home", () => {
     const first = render(<App />);
     await screen.findByLabelText(/universal composer/i);
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    await screen.findByText(/no schedules yet/i);
     await user.type(screen.getByLabelText(/schedule task name/i), "Persisted digest");
     await user.type(screen.getByLabelText(/schedule description/i), "Survives reload.");
     await user.click(screen.getByRole("button", { name: /create schedule/i }));
     expect(await screen.findByText("Persisted digest")).toBeInTheDocument();
     first.unmount();
 
-    // Second session: the schedule is recovered from localStorage.
+    // Second session: the schedule is recovered from the durable store.
     render(<App />);
     await user.click(await screen.findByRole("button", { name: /^schedules$/i }));
     expect(await screen.findByText("Persisted digest")).toBeInTheDocument();
     expect(screen.getByText("Survives reload.")).toBeInTheDocument();
-  });
+    // This test runs two full mount/form cycles, so it needs more headroom
+    // than the single-session schedule tests under concurrent suite load.
+  }, 25000);
 
   it("recovers composer drafts from a runtime snapshot", async () => {
     const user = userEvent.setup();
