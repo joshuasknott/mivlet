@@ -1,4 +1,10 @@
-import { GitBranch, Lightning, PuzzlePiece, Stack } from "@phosphor-icons/react";
+import {
+  ClockCounterClockwise,
+  GitBranch,
+  Lightning,
+  PuzzlePiece,
+  Stack
+} from "@phosphor-icons/react";
 import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors";
 
 /**
@@ -31,5 +37,6 @@ export const utilityItems = [
   { label: "Departments", icon: GitBranch },
   { label: "Connectors", icon: PuzzlePiece },
   { label: "Knowledge", icon: Stack },
-  { label: "Schedules", icon: Lightning }
+  { label: "Schedules", icon: Lightning },
+  { label: "Run History", icon: ClockCounterClockwise }
 ] as const;

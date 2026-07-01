@@ -27,6 +27,7 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         queue={runtime.schedulerQueue}
         onRunNow={runtime.runScheduleNow}
         onCancelRun={runtime.cancelScheduledRun}
+        onViewRuns={(job) => runtime.openRunHistoryForJob(job.id)}
       />
       {runtime.notificationHistory.length > 0 ? (
         <details className="notification-history">

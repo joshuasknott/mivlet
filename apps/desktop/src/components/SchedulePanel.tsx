@@ -25,7 +25,8 @@ export function SchedulePanel({
   runs = [],
   queue = [],
   onRunNow,
-  onCancelRun
+  onCancelRun,
+  onViewRuns
 }: {
   schedules: Schedule[];
   onCreate: (input: { name: string; description: string; day: Weekday; time: string }) => void;
@@ -37,6 +38,8 @@ export function SchedulePanel({
   queue?: SchedulerQueueEntry[];
   onRunNow?: (job: ScheduledJob) => void;
   onCancelRun?: (runId: string) => void;
+  /** Open Run History pre-filtered to this schedule's executions. */
+  onViewRuns?: (job: ScheduledJob) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -254,6 +257,9 @@ export function SchedulePanel({
                 </button>
                 {job && onRunNow ? (
                   <button type="button" onClick={() => onRunNow(job)}>Run now</button>
+                ) : null}
+                {job && onViewRuns ? (
+                  <button type="button" onClick={() => onViewRuns(job)}>View runs</button>
                 ) : null}
                 <button
                   type="button"
