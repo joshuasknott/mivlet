@@ -36,9 +36,12 @@ import type {
   ScheduledExecutionRoute,
   ScheduledJob,
   SchedulerQueueEntry,
+  MissedRunPolicy,
+  ScheduleTrigger,
   ThreadSummary,
   WorkflowDefinition,
   WorkflowRun,
+  WorkflowStep,
   NotificationRecord,
   WorkspaceDirective,
   WorkspaceGoal,
@@ -431,6 +434,34 @@ export interface ShellRuntime {
   editSchedule: (schedule: Schedule) => void;
   toggleSchedule: (schedule: Schedule) => void;
   deleteSchedule: (schedule: Schedule) => void;
+  /**
+   * Create a durable scheduled job from a fully-formed trigger (daily/weekly/
+   * monthly/once). The Schedules UI uses this so the form can express every
+   * recurrence the /schedule command supports. Returns the created job, or
+   * throws when the captured permission profile blocks the mutation.
+   */
+  createScheduleFromTrigger: (input: {
+    name: string;
+    description: string;
+    trigger: ScheduleTrigger;
+    missedRunPolicy?: MissedRunPolicy;
+    /** Connected connector ids whose data the workflow should read first. */
+    connectorIds?: string[];
+  }) => ScheduledJob;
+  /**
+   * Edit an existing job's name/prompt/trigger in place. Reuses the durable
+   * store path and re-enqueues the next occurrence. The Schedules UI uses this
+   * so edits can change the recurrence frequency, not just the weekday.
+   */
+  editScheduleFromTrigger: (input: {
+    jobId: string;
+    name: string;
+    description: string;
+    trigger: ScheduleTrigger;
+    missedRunPolicy?: MissedRunPolicy;
+    /** Connected connector ids whose data the workflow should read first. */
+    connectorIds?: string[];
+  }) => void;
   // goals + plans (structured Fable state created by /goal and /plan)
   goals: WorkspaceGoal[];
   plans: WorkspacePlan[];
@@ -467,6 +498,8 @@ export interface ShellRuntime {
   schedulerQueue: SchedulerQueueEntry[];
   /** Re-fetch the scheduler queue from Rust (poll on demand). */
   refreshSchedulerQueue: () => void;
+  /** True once persisted scheduled jobs have been hydrated from the Rust store. */
+  schedulesReady: boolean;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -602,6 +635,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [goals, setGoals] = useState<WorkspaceGoal[]>(initialState.goals);
   const [plans, setPlans] = useState<WorkspacePlan[]>(initialState.plans);
   const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
+  /** True once the initial scheduler-job hydration from the Rust store completes. */
+  const [schedulesReady, setSchedulesReady] = useState(false);
   const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([]);
   const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
   const [pendingWorkflowRuns, setPendingWorkflowRuns] = useState<
@@ -895,6 +930,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           }))
         );
       }
+      setSchedulesReady(true);
     });
     return () => {
       active = false;
@@ -2497,21 +2533,53 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }
 
   /**
+   * Compose a workflow's steps from a prompt and the selected connector ids.
+   * Each connected connector contributes a `connector-read` step (using its
+   * manifest's first supported action as the read capability) so the scheduled
+   * agent turn runs against fresh connector data; the prompt step runs last.
+   * Connectors that have no manifest or no read capability are skipped rather
+   * than producing an unsafe/empty step. This is the only place the Schedules
+   * UI composes workflows, and it stays within the existing step vocabulary.
+   */
+  function buildWorkflowSteps(prompt: string, connectorIds: string[]): WorkflowStep[] {
+    const steps: WorkflowStep[] = [];
+    for (const connectorId of connectorIds) {
+      const manifest = connectorManifests.find((entry) => entry.id === connectorId);
+      const capability = manifest?.supportedActions?.[0];
+      if (!manifest || !capability) continue;
+      steps.push({
+        kind: "connector-read",
+        id: `read-${connectorId}`,
+        connectorId,
+        capability,
+        input: {},
+        outputVar: connectorId
+      });
+    }
+    steps.push({ kind: "prompt", id: "prompt", prompt });
+    return steps;
+  }
+
+  /**
    * Create a durable scheduled job from a fully-formed, validated trigger.
-   * Shared by the form-bound `createSchedule` (weekly trigger) and the
-   * `/schedule` command (daily/weekly/monthly/once triggers). Routes through
-   * the same durable scheduler-store path the form uses.
+   * Shared by the form-bound `createSchedule` (weekly trigger), the Schedules
+   * UI (daily/weekly/monthly/once triggers), and the `/schedule` command.
+   * Routes through the same durable scheduler-store path the form uses.
    */
   const createScheduleFromTrigger = ({
     name,
     description,
     trigger,
-    id: providedId
+    id: providedId,
+    missedRunPolicy = "run-once",
+    connectorIds = []
   }: {
     name: string;
     description: string;
-    trigger: import("@fable/protocol").ScheduleTrigger;
+    trigger: ScheduleTrigger;
     id?: string;
+    missedRunPolicy?: MissedRunPolicy;
+    connectorIds?: string[];
   }): ScheduledJob => {
     const schedulePolicy = evaluatePermissionPolicy({
       mode: permissionMode,
@@ -2529,7 +2597,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       version: 1,
       name,
       description,
-      steps: [{ kind: "prompt", id: "prompt", prompt: description }],
+      steps: buildWorkflowSteps(description, connectorIds),
       notificationPrefs: {
         disableOs: false,
         enabledKinds: ["run-completed", "run-failed", "approval-needed"]
@@ -2552,7 +2620,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       description,
       workflowDefinitionId: definition.id,
       trigger,
-      missedRunPolicy: "run-once",
+      missedRunPolicy,
       status: "active",
       nextRunAt: nextOccurrence(trigger, now)?.toISOString() ?? "",
       lastRunAt: "",
@@ -2823,6 +2891,86 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ).catch(() => undefined);
     }
     setLastAction(`Schedule updated: ${schedule.name}`);
+  };
+
+  /**
+   * Edit an existing job's name/prompt/trigger in place via the durable store
+   * path. Unlike `editSchedule` (weekly-only), this honors any trigger
+   * frequency so the Schedules UI can change a schedule from weekly to daily,
+   * monthly, or one-time. Re-enqueues the next occurrence.
+   */
+  const editScheduleFromTrigger = ({
+    jobId,
+    name,
+    description,
+    trigger,
+    missedRunPolicy = "run-once",
+    connectorIds = []
+  }: {
+    jobId: string;
+    name: string;
+    description: string;
+    trigger: ScheduleTrigger;
+    missedRunPolicy?: MissedRunPolicy;
+    connectorIds?: string[];
+  }) => {
+    const schedulePolicy = evaluatePermissionPolicy({
+      mode: permissionMode,
+      effect: "schedule-mutation",
+      riskLevel: "medium"
+    });
+    if (!schedulePolicy.allowed) {
+      setLastAction(`Schedule not updated: ${schedulePolicy.reason}`);
+      return;
+    }
+    const now = new Date();
+    const currentJob = scheduledJobs.find((job) => job.id === jobId);
+    const currentDefinition = workflowDefinitions.find(
+      (definition) => definition.id === currentJob?.workflowDefinitionId
+    );
+    if (!currentJob || !currentDefinition) return;
+    const definition: WorkflowDefinition = {
+      ...currentDefinition,
+      version: currentDefinition.version + 1,
+      name,
+      description,
+      steps: buildWorkflowSteps(description, connectorIds),
+      updatedAt: now.toISOString()
+    };
+    const job: ScheduledJob = {
+      ...currentJob,
+      name,
+      description,
+      trigger,
+      missedRunPolicy,
+      nextRunAt:
+        currentJob.status === "active"
+          ? nextOccurrence(trigger, now)?.toISOString() ?? ""
+          : "",
+      updatedAt: now.toISOString()
+    };
+    setSchedules((current) =>
+      current.map((entry) =>
+        entry.id === jobId ? { ...entry, name, description } : entry
+      )
+    );
+    setWorkflowDefinitions((current) => [
+      definition,
+      ...current.filter((entry) => entry.id !== definition.id)
+    ]);
+    setScheduledJobs((current) =>
+      current.map((entry) => (entry.id === jobId ? job : entry))
+    );
+    void saveRuntimeWorkflowDefinition(definition);
+    void saveRuntimeScheduledJob(job);
+    if (job.nextRunAt) {
+      void enqueueRuntimeJobRun(
+        job.id,
+        `workflow-run-${toSlug(job.id)}-${toSlug(job.nextRunAt)}`,
+        job.nextRunAt
+      ).catch(() => undefined);
+    }
+    setLastAction(`Schedule updated: ${name}`);
   };
 
   const deleteSchedule = (schedule: Schedule) => {
@@ -3162,7 +3310,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     assembleKnowledgeContext,
     schedules,
     createSchedule,
+    createScheduleFromTrigger,
     editSchedule,
+    editScheduleFromTrigger,
     toggleSchedule,
     deleteSchedule,
     goals,
@@ -3179,6 +3329,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     completeWorkflowRun,
     cancelScheduledRun,
     refreshSchedulerQueue,
+    schedulesReady,
     backendProviders,
     connectedBackendIds,
     backendStatus,
