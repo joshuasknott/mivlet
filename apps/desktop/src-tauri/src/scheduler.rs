@@ -36,9 +36,9 @@ use std::{
 use std::path::PathBuf;
 
 use crate::models::{
-    JobAttempt, ScheduledExecutionRoute, ScheduledJob, SchedulerQueueEntry, SchedulerStore,
-    JOB_ATTEMPT_STATUSES, MAX_JOB_ATTEMPTS, MAX_OCCURRENCE_LEDGER, MAX_SCHEDULED_JOBS,
-    MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES, RETRY_BASE_MS, RUNNING_LEASE_MS,
+    JobAttempt, RetryPolicy, ScheduledExecutionRoute, ScheduledJob, SchedulerQueueEntry,
+    SchedulerStore, JOB_ATTEMPT_STATUSES, MAX_JOB_ATTEMPTS, MAX_OCCURRENCE_LEDGER,
+    MAX_SCHEDULED_JOBS, MAX_SCHEDULER_QUEUE_ENTRIES, MISSED_RUN_POLICIES, RUNNING_LEASE_MS,
     SCHEDULED_JOB_STATUSES, SCHEDULER_LEASE_MS, SCHEDULER_STORE_VERSION,
 };
 use crate::paths::{normalize_spaces, scheduler_store_path, truncate_characters};
@@ -172,6 +172,23 @@ fn normalize_route(route: ScheduledExecutionRoute) -> Result<ScheduledExecutionR
     })
 }
 
+fn normalize_retry_policy(mut policy: RetryPolicy) -> RetryPolicy {
+    policy.max_attempts = policy.max_attempts.clamp(1, MAX_JOB_ATTEMPTS as u32);
+    policy.initial_backoff_ms = policy.initial_backoff_ms.clamp(1_000, 86_400_000);
+    policy.backoff_multiplier = policy.backoff_multiplier.clamp(1.0, 10.0);
+    policy.max_backoff_ms = policy
+        .max_backoff_ms
+        .clamp(policy.initial_backoff_ms, 7 * 86_400_000);
+    policy
+}
+
+fn retry_backoff_ms(policy: &RetryPolicy, failed_attempts: u32) -> i64 {
+    let multiplier = policy
+        .backoff_multiplier
+        .powi(failed_attempts.saturating_sub(1) as i32);
+    ((policy.initial_backoff_ms as f64 * multiplier) as i64).min(policy.max_backoff_ms)
+}
+
 fn ensure_route_allows(route: &ScheduledExecutionRoute, effect: &str) -> Result<(), String> {
     crate::permission_policy::ensure_permission_allowed(
         &route.permission_mode,
@@ -204,6 +221,7 @@ fn normalize_job(mut job: ScheduledJob) -> Result<ScheduledJob, String> {
         ensure_route_allows(&route, "schedule-mutation")?;
         job.execution = Some(route);
     }
+    job.retry_policy = normalize_retry_policy(job.retry_policy);
 
     if job.id.is_empty() || job.name.is_empty() || job.workflow_definition_id.is_empty() {
         return Err("Scheduled job needs id, name, and workflow id.".to_string());
@@ -237,9 +255,12 @@ fn normalize_attempt(mut attempt: JobAttempt) -> Result<JobAttempt, String> {
         attempt.lease_token = Some(normalize_spaces(&token));
     }
     if let Some(error) = attempt.error.take() {
-        // Errors are persisted; cap them and strip nothing else here (no secrets
-        // should ever reach this path — adapters classify auth as a code).
-        let redacted = crate::connectors::redact_connector_text(&error);
+        // Redact again at the native storage boundary.
+        let redacted =
+            crate::store::repos::connector_cache::redact_value(&serde_json::Value::String(error))
+                .as_str()
+                .unwrap_or("[redacted connector data]")
+                .to_string();
         attempt.error = Some(truncate_characters(&normalize_spaces(&redacted), 500));
     }
     if attempt.run_id.is_empty() || attempt.started_at.is_empty() {
@@ -433,6 +454,7 @@ fn emit_run_request(app: &AppHandle, entry: &SchedulerQueueEntry) {
             "runId": entry.run_id,
             "scheduledAt": entry.scheduled_at,
             "leaseToken": entry.lease_token,
+            "attemptNumber": failed_count(entry) + 1,
             "workspaceId": entry.workspace_id,
             "projectId": entry.project_id,
             "execution": execution,
@@ -488,11 +510,18 @@ fn set_job_status_in_store(
         return false;
     }
     if status != "active" {
-        store.queue.retain(|entry| {
-            entry.job_id != job_id
-                || entry.workspace_id != workspace_id
-                || entry.project_id.as_deref() != project_id
-        });
+        for entry in &mut store.queue {
+            if entry.job_id == job_id
+                && entry.workspace_id == workspace_id
+                && entry.project_id.as_deref() == project_id
+                && !matches!(entry.state.as_str(), "done" | "dead" | "cancelled")
+            {
+                entry.state = "cancelled".to_string();
+                entry.lease_holder.clear();
+                entry.lease_expires_at.clear();
+                entry.lease_token.clear();
+            }
+        }
     }
     true
 }
@@ -574,6 +603,21 @@ pub fn save_scheduled_job(
         store.jobs.insert(0, job.clone());
         store.jobs.truncate(MAX_SCHEDULED_JOBS);
     })?;
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "scheduler",
+        &job.id,
+        "configured",
+    )
+    .actor("user")
+    .mode(
+        &job.execution
+            .as_ref()
+            .map(|route| route.permission_mode.as_str())
+            .unwrap_or(""),
+    )
+    .summary(&format!("Scheduled job {} saved.", job.id))
+    .record();
     Ok(job)
 }
 
@@ -593,6 +637,15 @@ pub fn delete_scheduled_job(
     if !deleted {
         return Err("Scheduled job was not found.".to_string());
     }
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "scheduler",
+        &job_id,
+        "deleted",
+    )
+    .actor("user")
+    .summary(&format!("Scheduled job {job_id} deleted."))
+    .record();
     Ok(())
 }
 
@@ -623,6 +676,15 @@ pub fn set_job_status(
     if !updated {
         return Err("Scheduled job was not found.".to_string());
     }
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "scheduler",
+        &job_id_norm,
+        &status,
+    )
+    .actor("user")
+    .summary(&format!("Scheduled job {job_id_norm} changed to {status}."))
+    .record();
     Ok(())
 }
 
@@ -653,15 +715,19 @@ pub fn enqueue_job_run(
         if store.occurrence_ledger.iter().any(|seen| seen == &key) {
             return;
         }
-        let execution = store
-            .jobs
-            .iter()
-            .find(|job| {
-                job.id == job_id
-                    && job.workspace_id == scope.workspace_id()
-                    && job.project_id.as_deref() == scope.project_id()
-            })
-            .and_then(|job| job.execution.clone());
+        let job = store.jobs.iter().find(|job| {
+            job.id == job_id
+                && job.workspace_id == scope.workspace_id()
+                && job.project_id.as_deref() == scope.project_id()
+        });
+        let Some(job) = job else {
+            return;
+        };
+        if job.status != "active" {
+            return;
+        }
+        let execution = job.execution.clone();
+        let retry_policy = job.retry_policy.clone();
         if let Some(route) = execution.as_ref() {
             if ensure_route_allows(route, "schedule-execution").is_err() {
                 return;
@@ -682,6 +748,7 @@ pub fn enqueue_job_run(
             available_at: String::new(),
             last_error: String::new(),
             execution,
+            retry_policy,
         };
         created = Some(entry.clone());
         store.queue.push(entry);
@@ -720,7 +787,6 @@ pub fn report_job_attempt(
     let scope = command_scope(workspace_id, project_id)?;
     let attempt = normalize_attempt(attempt)?;
     let run_id = normalize_spaces(&run_id);
-    let max_retries = crate::models::SCHEDULER_MAX_RETRIES;
     let mut remembered: Option<String> = None;
     persist(&app, scope.workspace_id(), |store| {
         for entry in &mut store.queue {
@@ -754,12 +820,12 @@ pub fn report_job_attempt(
                 entry.state = "blocked-auth".to_string();
             } else if status == "failed" {
                 let fails = failed_count(entry);
-                if fails > max_retries {
+                if fails >= entry.retry_policy.max_attempts {
                     entry.state = "dead".to_string();
                 } else {
                     // Transient: re-queue with exponential backoff.
                     entry.state = "queued".to_string();
-                    let backoff = RETRY_BASE_MS.saturating_mul(1_i64 << (fails.saturating_sub(1)));
+                    let backoff = retry_backoff_ms(&entry.retry_policy, fails);
                     entry.available_at = iso_from_ms(now_epoch_ms() + backoff);
                 }
             } else if status == "running" {
@@ -943,6 +1009,19 @@ pub fn cancel_job_run(
             remember_occurrence(store, &key);
         }
     })?;
+    if cancelled {
+        // The durable state change is authoritative; this event asks the
+        // active headless backend to use its established cooperative
+        // cancellation path. Queued runs simply have no listener to notify.
+        let _ = app.emit(
+            "fable://scheduler/cancel-request",
+            serde_json::json!({
+                "runId": run_id,
+                "workspaceId": scope.workspace_id(),
+                "projectId": scope.project_id(),
+            }),
+        );
+    }
     Ok(cancelled)
 }
 
@@ -1038,6 +1117,28 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
             if !entry.available_at.is_empty() && parse_ms(&entry.available_at) > now_ms {
                 continue;
             }
+            // Revalidate the captured profile at the actual run boundary.
+            // Configuration-time authorization is intentionally insufficient.
+            if entry
+                .execution
+                .as_ref()
+                .is_some_and(|route| ensure_route_allows(route, "schedule-execution").is_err())
+            {
+                entry.state = "dead".to_string();
+                entry.last_error =
+                    "Permission profile no longer allows scheduled execution.".to_string();
+                crate::action_history::Recorder::new(
+                    crate::action_history::categories::POLICY_BLOCK,
+                    "scheduler",
+                    &entry.job_id,
+                    "blocked",
+                )
+                .correlation(&entry.run_id)
+                .error("permission-denied")
+                .summary("Scheduled execution blocked by its captured permission profile.")
+                .record();
+                continue;
+            }
             entry.state = "leased".to_string();
             entry.lease_holder = instance.clone();
             entry.lease_expires_at = iso_from_ms(now_ms + SCHEDULER_LEASE_MS);
@@ -1091,6 +1192,7 @@ mod tests {
             created_at: "0".to_string(),
             updated_at: "0".to_string(),
             execution: None,
+            retry_policy: RetryPolicy::default(),
         }
     }
 
@@ -1110,6 +1212,7 @@ mod tests {
             available_at: String::new(),
             last_error: String::new(),
             execution: None,
+            retry_policy: RetryPolicy::default(),
         }
     }
 
@@ -1365,7 +1468,8 @@ mod tests {
             "paused"
         ));
         assert_eq!(store.jobs[0].status, "paused");
-        assert!(store.queue.is_empty());
+        assert_eq!(store.queue.len(), 1);
+        assert_eq!(store.queue[0].state, "cancelled");
         assert!(delete_job_from_store(
             &mut store,
             DEFAULT_WORKSPACE_ID,
@@ -1373,6 +1477,21 @@ mod tests {
             "known"
         ));
         assert!(store.jobs.is_empty());
+    }
+
+    #[test]
+    fn retry_policy_is_bounded_and_caps_exponential_backoff() {
+        let policy = normalize_retry_policy(RetryPolicy {
+            max_attempts: 100,
+            initial_backoff_ms: 100,
+            backoff_multiplier: 20.0,
+            max_backoff_ms: 2_000,
+        });
+        assert_eq!(policy.max_attempts, MAX_JOB_ATTEMPTS as u32);
+        assert_eq!(policy.initial_backoff_ms, 1_000);
+        assert_eq!(policy.backoff_multiplier, 10.0);
+        assert_eq!(policy.max_backoff_ms, 2_000);
+        assert_eq!(retry_backoff_ms(&policy, 3), 2_000);
     }
 
     #[test]

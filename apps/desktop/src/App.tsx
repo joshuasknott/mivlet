@@ -98,12 +98,16 @@ export function App() {
   // touches the active thread or interactive agent state.
   const scheduledAgent = useScheduledAgent(runtime.pendingWorkflowRuns, {
     providers: runtime.backendProviders,
+    connectedConnectorIds: runtime.connectorManifests
+      .filter((connector) => connector.status === "connected")
+      .map((connector) => connector.id),
     execute: executor,
-    onComplete: (runId, result) => {
+    onComplete: (runId, result, workflowRun) => {
       runtime.completeWorkflowRun(
         runId,
         result.ok,
-        result.ok ? result.transcript : result.error
+        result.ok ? result.transcript : result.error,
+        workflowRun
       );
     }
   });

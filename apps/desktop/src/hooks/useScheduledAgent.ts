@@ -1,7 +1,7 @@
 /**
- * The dedicated headless runner for scheduled prompts.
+ * The dedicated headless runner for scheduled workflows.
  *
- * Scheduled runs execute through `AgentBackend` exactly like interactive runs,
+ * Prompt/agent tasks execute through `AgentBackend` exactly like interactive runs,
  * but in complete isolation: this hook owns its own backend resolution,
  * cancellation flag, approval routing, and lease-renewal heartbeat. It never
  * touches the composer or the active thread — fixing the bug where the previous
@@ -14,7 +14,7 @@
  *      recovered on startup).
  *   2. This hook drains the queue one run at a time, resolving the backend from
  *      the run's frozen `execution` route + the current connection state.
- *   3. It runs `executeScheduledPrompt`, renewing the lease on a heartbeat so a
+ *   3. It runs the persisted workflow, renewing the lease on a heartbeat so a
  *      long run is not re-queued by the five-second tick.
  *   4. The typed result is reported back via `onComplete`, which advances the
  *      Rust queue entry (done / dead / blocked-auth / cancelled).
@@ -24,10 +24,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { BackendProvider, ScheduledExecutionRoute } from "@fable/protocol";
+import type {
+  ApprovalRequest,
+  BackendProvider,
+  FirstWaveConnectorId,
+  ScheduledExecutionRoute,
+  WorkflowDefinition,
+  WorkflowRun
+} from "@fable/protocol";
 import {
   resolveAgentBackend,
   executeScheduledPrompt,
+  runWorkflow,
   type AgentBackend,
   type BackendDeps,
   type ToolExecutor
@@ -35,8 +43,12 @@ import {
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
+  cancelRuntimeCompletion,
+  listenRuntimeSchedulerCancelRequest,
   listRuntimeBackendModels,
-  renewRuntimeJobLease
+  renewRuntimeJobLease,
+  saveRuntimeWorkflowRun,
+  searchRuntimeConnector
 } from "../runtime";
 
 /** A scheduled run staged for headless execution. */
@@ -44,8 +56,11 @@ export interface PendingScheduledRun {
   runId: string;
   jobId: string;
   prompt: string;
+  definition: WorkflowDefinition;
+  previous?: WorkflowRun;
   /** Fencing token from the lease; threaded through reports so stale calls are rejected. */
   leaseToken?: string;
+  attemptNumber?: number;
   /** Frozen execution route (backend/model/permission). */
   execution?: ScheduledExecutionRoute;
 }
@@ -55,12 +70,15 @@ export interface UseScheduledAgentOptions {
   providers: BackendProvider[];
   /** The shared approval-gate-bound tool executor (same one the composer uses). */
   execute: ToolExecutor;
+  /** Connected connector ids used by workflow prerequisite checks. */
+  connectedConnectorIds?: string[];
   /** Callback when a run finishes; the shell reports the outcome to the Rust queue. */
   onComplete: (
     runId: string,
     result:
       | { ok: true; transcript: string }
-      | { ok: false; status: "failed" | "blocked-auth" | "cancelled"; error: string }
+      | { ok: false; status: "failed" | "blocked-auth" | "cancelled"; error: string },
+    run: WorkflowRun
   ) => void;
 }
 
@@ -97,6 +115,23 @@ export function useScheduledAgent(
 
   const activeRef = useRef<PendingScheduledRun | null>(null);
   const cancelRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let dispose: (() => void) | null = null;
+    void listenRuntimeSchedulerCancelRequest(({ runId }) => {
+      if (activeRef.current?.runId === runId) {
+        cancelRef.current = true;
+        abortRef.current?.abort();
+        void cancelRuntimeCompletion(runId);
+      }
+    }).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => {
+      void dispose?.();
+    };
+  }, []);
 
   const runOne = useCallback(
     async (run: PendingScheduledRun) => {
@@ -108,6 +143,8 @@ export function useScheduledAgent(
           ? options.providers.find((p) => p.id === run.execution!.backendId)
           : connectedProvider;
       const backend: AgentBackend | null = resolveAgentBackend(routeProvider, deps);
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       // Lease-renewal heartbeat: keep the entry leased for the run's duration.
       let renewalTimer: ReturnType<typeof setInterval> | null = null;
@@ -118,40 +155,127 @@ export function useScheduledAgent(
       }
 
       try {
-        const result = await executeScheduledPrompt({
-          runId: run.runId,
-          route: run.execution,
-          provider: routeProvider,
-          backend,
-          prompt: run.prompt,
-          maxTokens: 1024,
-          execute: options.execute,
-          shouldCancel: () => cancelRef.current,
-          onToolCall: () => {
-            // Tool calls are executed via `options.execute` (the shared approval
-            // gate); no extra wiring is needed here.
+        const executePrompt = async (prompt: string) => {
+          const result = await executeScheduledPrompt({
+            runId: run.runId,
+            route: run.execution,
+            provider: routeProvider,
+            backend,
+            prompt,
+            maxTokens: 1024,
+            execute: options.execute,
+            shouldCancel: () => cancelRef.current,
+            onToolCall: () => {
+              // Agent tool calls use the shared approval gate.
+            }
+          });
+          if (result.status === "completed") return result.transcript;
+          if (result.status === "cancelled") {
+            controller.abort();
+            throw new DOMException(result.error ?? "Cancelled.", "AbortError");
           }
-        });
+          throw Object.assign(new Error(result.error), {
+            code: result.status === "blocked-auth" ? "authentication" : result.code
+          });
+        };
 
-        if (result.status === "completed") {
-          options.onComplete(run.runId, { ok: true, transcript: result.transcript });
-        } else if (result.status === "blocked-auth") {
-          options.onComplete(run.runId, {
-            ok: false,
-            status: "blocked-auth",
-            error: result.error
-          });
-        } else if (result.status === "cancelled") {
-          options.onComplete(run.runId, {
-            ok: false,
-            status: "cancelled",
-            error: result.error ?? "Cancelled."
-          });
+        const workflowRun = await runWorkflow(
+          run.definition,
+          {
+            runId: run.runId,
+            trigger: "schedule",
+            scheduledJobId: run.jobId,
+            permissionProfile: run.execution?.permissionProfile,
+            attemptNumber: run.attemptNumber,
+            previous: run.previous,
+            signal: controller.signal
+          },
+          {
+            now: () => new Date(),
+            persist: async (value) => {
+              await saveRuntimeWorkflowRun(value);
+            },
+            connected: (connectorId) =>
+              options.connectedConnectorIds?.includes(connectorId) ?? false,
+            prompt: (text) => executePrompt(text),
+            agent: (step) => executePrompt(step.prompt),
+            connectorRead: async (step) => {
+              if (step.capability !== "search") {
+                throw Object.assign(
+                  new Error(`Connector capability "${step.capability}" is not available to scheduled workflows.`),
+                  { code: "connector-capability-unavailable" }
+                );
+              }
+              const result = await searchRuntimeConnector({
+                connectorId: step.connectorId as FirstWaveConnectorId,
+                query: String(step.input.query ?? ""),
+                limit:
+                  typeof step.input.limit === "number"
+                    ? step.input.limit
+                    : undefined
+              });
+              if (!result) {
+                throw Object.assign(new Error("Connector reads require the desktop runtime."), {
+                  code: "connector-runtime-unavailable"
+                });
+              }
+              return result;
+            },
+            tool: async (step, _idempotencyKey) => {
+              const requestedAt = new Date().toISOString();
+              const approval: ApprovalRequest = {
+                id: `workflow:${run.runId}:${step.id}`,
+                service: "workflow",
+                action: step.tool,
+                mode: run.execution?.permissionMode ?? "read-only",
+                permissionProfile: run.execution?.permissionProfile,
+                riskLevel: step.consequential ? "high" : "low",
+                dataUsed: Object.keys(step.arguments),
+                consequence: `Execute workflow task ${step.id}.`,
+                requestedAt,
+                decisions: ["once", "modify", "deny"]
+              };
+              return options.execute(approval, JSON.stringify(step.arguments));
+            }
+          }
+        );
+
+        const transcript = workflowRun.steps
+          .map((step) => (typeof step.output === "string" ? step.output : ""))
+          .filter(Boolean)
+          .join("\n");
+        if (workflowRun.status === "completed") {
+          options.onComplete(run.runId, { ok: true, transcript }, workflowRun);
+        } else if (workflowRun.status === "blocked-auth") {
+          options.onComplete(
+            run.runId,
+            {
+              ok: false,
+              status: "blocked-auth",
+              error: workflowRun.failureReason ?? "Connector authentication is required."
+            },
+            workflowRun
+          );
+        } else if (workflowRun.status === "cancelled") {
+          options.onComplete(
+            run.runId,
+            { ok: false, status: "cancelled", error: "Cancelled." },
+            workflowRun
+          );
         } else {
-          options.onComplete(run.runId, { ok: false, status: "failed", error: result.error });
+          options.onComplete(
+            run.runId,
+            {
+              ok: false,
+              status: "failed",
+              error: workflowRun.failureReason ?? "Workflow failed."
+            },
+            workflowRun
+          );
         }
       } finally {
         if (renewalTimer) clearInterval(renewalTimer);
+        if (abortRef.current === controller) abortRef.current = null;
       }
     },
     [connectedProvider, deps, options]
@@ -172,6 +296,7 @@ export function useScheduledAgent(
   useEffect(() => {
     return () => {
       cancelRef.current = true;
+      abortRef.current?.abort();
     };
   }, []);
 

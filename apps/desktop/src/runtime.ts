@@ -1201,6 +1201,7 @@ export async function listenRuntimeSchedulerRunRequest(
     runId: string;
     scheduledAt: string;
     leaseToken?: string;
+    attemptNumber?: number;
     execution?: ScheduledExecutionRoute;
   }) => void
 ) {
@@ -1213,6 +1214,7 @@ export async function listenRuntimeSchedulerRunRequest(
       runId: string;
       scheduledAt: string;
       leaseToken?: string;
+      attemptNumber?: number;
       execution?: ScheduledExecutionRoute;
     }>("fable://scheduler/run-request", (event) => {
       const workspaceId = event.payload.workspaceId ?? "default";
@@ -1224,6 +1226,25 @@ export async function listenRuntimeSchedulerRunRequest(
       }
     });
     return unlisten;
+  } catch {
+    return null;
+  }
+}
+
+/** Listen for durable run cancellation and forward it to the active backend. */
+export async function listenRuntimeSchedulerCancelRequest(
+  onCancel: (event: { runId: string }) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await listen<{ runId: string; workspaceId?: string; projectId?: string }>(
+      "fable://scheduler/cancel-request",
+      (event) => {
+        if ((event.payload.workspaceId ?? "default") === DEFAULT_DATA_SCOPE.workspaceId) {
+          onCancel({ runId: event.payload.runId });
+        }
+      }
+    );
   } catch {
     return null;
   }
@@ -1242,10 +1263,13 @@ export interface WorkflowRunRecordWire {
   status: WorkflowRunStatus;
   trigger: WorkflowRun["trigger"];
   scheduledJobId?: string;
+  permissionProfile?: WorkflowRun["permissionProfile"];
   input: unknown;
   steps: unknown;
   failureReason?: string;
   idempotencyKey?: string;
+  attemptNumber?: number;
+  nextRetryAt?: string;
   startedAt: string;
   updatedAt: string;
   finishedAt?: string;
@@ -1259,10 +1283,13 @@ function toWorkflowRunWire(run: WorkflowRun): WorkflowRunRecordWire {
     status: run.status,
     trigger: run.trigger,
     scheduledJobId: run.scheduledJobId,
+    permissionProfile: run.permissionProfile,
     input: run.input,
     steps: run.steps,
     failureReason: run.failureReason,
     idempotencyKey: run.idempotencyKey,
+    attemptNumber: run.attemptNumber,
+    nextRetryAt: run.nextRetryAt,
     startedAt: run.startedAt,
     updatedAt: run.updatedAt,
     finishedAt: run.finishedAt
@@ -1278,10 +1305,13 @@ export function wireToWorkflowRun(record: WorkflowRunRecordWire): WorkflowRun {
     status: record.status,
     trigger: record.trigger,
     scheduledJobId: record.scheduledJobId,
+    permissionProfile: record.permissionProfile,
     input: (record.input as Record<string, unknown>) ?? {},
     steps: (record.steps as WorkflowRun["steps"]) ?? [],
     failureReason: record.failureReason,
     idempotencyKey: record.idempotencyKey,
+    attemptNumber: record.attemptNumber,
+    nextRetryAt: record.nextRetryAt,
     startedAt: record.startedAt,
     updatedAt: record.updatedAt,
     finishedAt: record.finishedAt

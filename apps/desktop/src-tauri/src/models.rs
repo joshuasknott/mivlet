@@ -204,6 +204,7 @@ pub const RUNNING_LEASE_MS: i64 = 15 * 60 * 1_000;
 pub const SCHEDULER_MAX_RETRIES: u32 = 2;
 /// Base backoff for transient retry. Each retry waits RETRY_BASE_MS * 2^(n-1).
 pub const RETRY_BASE_MS: i64 = 30_000;
+pub const RETRY_MAX_BACKOFF_MS: i64 = 15 * 60 * 1_000;
 /// Bounded ledger of seen occurrence dedup keys, supplementing the in-queue
 /// check so a completed-then-removed occurrence can never be re-queued.
 pub const MAX_OCCURRENCE_LEDGER: usize = 200;
@@ -978,6 +979,26 @@ pub struct ScheduledExecutionRoute {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RetryPolicy {
+    pub max_attempts: u32,
+    pub initial_backoff_ms: i64,
+    pub backoff_multiplier: f64,
+    pub max_backoff_ms: i64,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: SCHEDULER_MAX_RETRIES + 1,
+            initial_backoff_ms: RETRY_BASE_MS,
+            backoff_multiplier: 2.0,
+            max_backoff_ms: RETRY_MAX_BACKOFF_MS,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScheduledJob {
     #[serde(default = "default_workspace_id")]
     pub workspace_id: String,
@@ -1002,6 +1023,8 @@ pub struct ScheduledJob {
     /// compatibility with jobs created before this field existed.
     #[serde(default)]
     pub execution: Option<ScheduledExecutionRoute>,
+    #[serde(default)]
+    pub retry_policy: RetryPolicy,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1051,6 +1074,8 @@ pub struct SchedulerQueueEntry {
     /// self-describing for the run-request event without a job lookup.
     #[serde(default)]
     pub execution: Option<ScheduledExecutionRoute>,
+    #[serde(default)]
+    pub retry_policy: RetryPolicy,
 }
 
 fn default_workspace_id() -> String {
@@ -1088,11 +1113,17 @@ pub struct WorkflowRunRecord {
     pub status: String,
     pub trigger: String,
     pub scheduled_job_id: Option<String>,
+    #[serde(default)]
+    pub permission_profile: Option<String>,
     pub input: serde_json::Value,
     /// Vec<WorkflowStepRecord> stored as JSON (the step shape is the TS layer's).
     pub steps: serde_json::Value,
     pub failure_reason: Option<String>,
     pub idempotency_key: Option<String>,
+    #[serde(default)]
+    pub attempt_number: Option<u32>,
+    #[serde(default)]
+    pub next_retry_at: Option<String>,
     pub started_at: String,
     pub updated_at: String,
     pub finished_at: Option<String>,
@@ -1106,6 +1137,10 @@ pub struct WorkflowDefinitionRecord {
     pub version: u32,
     pub name: String,
     pub description: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub permission_profile: Option<String>,
     pub steps: serde_json::Value,
     pub notification_prefs: Option<serde_json::Value>,
     pub created_at: String,

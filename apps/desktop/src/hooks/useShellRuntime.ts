@@ -448,11 +448,19 @@ export interface ShellRuntime {
     runId: string;
     jobId: string;
     prompt: string;
+    definition: WorkflowDefinition;
+    previous?: WorkflowRun;
     leaseToken?: string;
+    attemptNumber?: number;
     execution?: ScheduledExecutionRoute;
   }>;
   runScheduleNow: (job: ScheduledJob) => void;
-  completeWorkflowRun: (runId: string, ok: boolean, result?: string) => void;
+  completeWorkflowRun: (
+    runId: string,
+    ok: boolean,
+    result?: string,
+    authoritativeRun?: WorkflowRun
+  ) => void;
   /** Cancel a queued/leased/running scheduled run. */
   cancelScheduledRun: (runId: string) => void;
   /** The durable scheduler queue (Rust authority), surfaced for the Schedules UI. */
@@ -601,7 +609,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       runId: string;
       jobId: string;
       prompt: string;
+      definition: WorkflowDefinition;
+      previous?: WorkflowRun;
       leaseToken?: string;
+      attemptNumber?: number;
       execution?: ScheduledExecutionRoute;
     }>
   >([]);
@@ -871,10 +882,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
             status: record.status,
             trigger: record.trigger,
             scheduledJobId: record.scheduledJobId,
+            permissionProfile: record.permissionProfile,
             input: (record.input as Record<string, unknown>) ?? {},
             steps: (record.steps as WorkflowRun["steps"]) ?? [],
             failureReason: record.failureReason,
             idempotencyKey: record.idempotencyKey,
+            attemptNumber: record.attemptNumber,
+            nextRetryAt: record.nextRetryAt,
             startedAt: record.startedAt,
             updatedAt: record.updatedAt,
             finishedAt: record.finishedAt
@@ -894,6 +908,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       if (active)
         queueWorkflowRun(event.jobId, event.runId, {
           leaseToken: event.leaseToken,
+          attemptNumber: event.attemptNumber,
           execution: event.execution
         });
     }).then((dispose) => {
@@ -2829,46 +2844,76 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   function queueWorkflowRun(
     jobId: string,
     runId: string,
-    options: { leaseToken?: string; execution?: ScheduledExecutionRoute } = {}
+    options: {
+      leaseToken?: string;
+      attemptNumber?: number;
+      execution?: ScheduledExecutionRoute;
+    } = {}
   ) {
     const job = scheduledJobs.find((candidate) => candidate.id === jobId);
     if (!job || job.status !== "active") return;
     const definition = workflowDefinitions.find(
       (candidate) => candidate.id === job.workflowDefinitionId
     );
+    if (!definition || (definition.status ?? "active") !== "active") return;
     const prompt =
       definition?.steps.find(
         (step): step is Extract<typeof step, { kind: "prompt" | "agent" }> =>
           step.kind === "prompt" || step.kind === "agent"
       )?.prompt ?? job.description;
     const now = new Date().toISOString();
-    const run: WorkflowRun = {
+    // Prefer the lease-time execution route from the event; fall back to the
+    // job's captured route so the headless runner always has a route to resolve.
+    const execution = options.execution ?? job.execution;
+    const previous = workflowRuns.find((candidate) => candidate.id === runId);
+    const run: WorkflowRun = previous
+      ? {
+          ...previous,
+          status: "running",
+          attemptNumber: options.attemptNumber ?? previous.attemptNumber ?? 1,
+          updatedAt: now,
+          finishedAt: undefined,
+          nextRetryAt: undefined
+        }
+      : {
       id: runId,
       definitionId: job.workflowDefinitionId,
-      definitionVersion: definition?.version ?? 1,
+      definitionVersion: definition.version,
       status: "running",
       trigger: "schedule",
       scheduledJobId: jobId,
+      permissionProfile:
+        execution?.permissionProfile ?? definition.permissionProfile ?? "trusted",
       input: {},
       steps: [{ stepId: "prompt", status: "running", input: { prompt }, startedAt: now }],
       idempotencyKey: `schedule:${jobId}:${runId}`,
+      attemptNumber: options.attemptNumber ?? 1,
       startedAt: now,
       updatedAt: now
     };
     setWorkflowRuns((current) => [run, ...current.filter((entry) => entry.id !== runId)]);
-    // Prefer the lease-time execution route from the event; fall back to the
-    // job's captured route so the headless runner always has a route to resolve.
-    const execution = options.execution ?? job.execution;
     setPendingWorkflowRuns((current) =>
       current.some((entry) => entry.runId === runId)
         ? current
-        : [...current, { runId, jobId, prompt, leaseToken: options.leaseToken, execution }]
+        : [
+            ...current,
+            {
+              runId,
+              jobId,
+              prompt,
+              definition,
+              previous,
+              leaseToken: options.leaseToken,
+              attemptNumber: options.attemptNumber,
+              execution
+            }
+          ]
     );
     void saveRuntimeWorkflowRun(run);
     void reportRuntimeJobAttempt(runId, {
       runId,
       status: "running",
-      attemptNumber: 1,
+      attemptNumber: options.attemptNumber ?? 1,
       startedAt: now
     });
   }
@@ -2894,11 +2939,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setLastAction(`Queued ${job.name} to run now`);
   };
 
-  const completeWorkflowRun = (runId: string, ok: boolean, result = "") => {
+  const completeWorkflowRun = (
+    runId: string,
+    ok: boolean,
+    result = "",
+    authoritativeRun?: WorkflowRun
+  ) => {
     const finishedAt = new Date().toISOString();
     const existing = workflowRuns.find((run) => run.id === runId);
     if (!existing) return;
-    const completed: WorkflowRun = {
+    const completed: WorkflowRun = authoritativeRun ?? {
       ...existing,
       status: ok ? "completed" : "failed",
       steps: existing.steps.map((step) =>
@@ -2948,10 +2998,18 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
     }
     void saveRuntimeWorkflowRun(completed);
+    const attemptStatus =
+      completed.status === "completed"
+        ? "succeeded"
+        : completed.status === "blocked-auth"
+          ? "blocked-auth"
+          : completed.status === "cancelled"
+            ? "cancelled"
+            : "failed";
     void reportRuntimeJobAttempt(runId, {
       runId,
-      status: ok ? "succeeded" : "failed",
-      attemptNumber: 1,
+      status: attemptStatus,
+      attemptNumber: existing.attemptNumber ?? 1,
       startedAt: existing.startedAt,
       finishedAt,
       error: ok ? undefined : completed.failureReason

@@ -55,6 +55,7 @@ vi.mock("./runtime", () => ({
   listRuntimeWorkflowDefinitions: vi.fn(async () => null),
   listRuntimeWorkflowRuns: vi.fn(async () => null),
   listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
+  listenRuntimeSchedulerCancelRequest: vi.fn(async () => null),
   listRuntimeBackends: vi.fn(
     () =>
       new Promise<BackendProvider[] | null>((resolve) => {

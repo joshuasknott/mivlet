@@ -1577,6 +1577,18 @@ export interface ScheduledExecutionRoute {
   permissionProfile?: PermissionProfileId;
 }
 
+/** Bounded retry policy captured with a scheduled occurrence. */
+export interface RetryPolicy {
+  /** Total attempts, including the initial attempt. */
+  maxAttempts: number;
+  /** Delay before the first retry. */
+  initialBackoffMs: number;
+  /** Multiplier applied after each failed attempt. */
+  backoffMultiplier: number;
+  /** Upper bound for any individual retry delay. */
+  maxBackoffMs: number;
+}
+
 /**
  * A durable scheduled job. Supersedes the bare ScheduleEntry for execution.
  * ScheduleEntry remains for the legacy snapshot; this is the engine's record.
@@ -1599,6 +1611,8 @@ export interface ScheduledJob {
   status: ScheduledJobStatus;
   /** Frozen execution route (backend/model/permission). Resolved at run time. */
   execution?: ScheduledExecutionRoute;
+  /** Retry policy snapshotted onto each occurrence when it is queued. */
+  retryPolicy?: RetryPolicy;
   /** ISO timestamp of the next calculated occurrence (empty when paused/none). */
   nextRunAt: string;
   /** ISO timestamp of the last completed run (empty when never run). */
@@ -1674,6 +1688,8 @@ export interface SchedulerQueueEntry {
   availableAt?: string;
   /** Last error message (truncated, no secrets) for failed/blocked entries. */
   lastError?: string;
+  /** Frozen retry policy for this occurrence. */
+  retryPolicy?: RetryPolicy;
 }
 
 // ---------------------------------------------------------------------------
@@ -1683,6 +1699,7 @@ export interface SchedulerQueueEntry {
 export type WorkflowStepKind =
   | "prompt" // run an agent turn with a prompt
   | "connector-read" // read from a connector capability
+  | "connector-write" // write through ConnectorRuntime + fresh approval
   | "agent" // multi-turn agent step (tool calls gated)
   | "tool" // a single Fable-owned tool call
   | "approval"; // pause for fresh explicit approval
@@ -1693,6 +1710,8 @@ export interface WorkflowPromptStep {
   prompt: string;
   /** Connector ids this step depends on (for honest degradation). */
   requiresConnectors?: string[];
+  /** Optional task-level override, revalidated immediately before execution. */
+  permissionProfile?: PermissionProfileId;
 }
 
 export interface WorkflowConnectorReadStep {
@@ -1703,6 +1722,21 @@ export interface WorkflowConnectorReadStep {
   input: Record<string, unknown>;
   /** Output variable name to store the read result. */
   outputVar: string;
+  /** Optional task-level override, revalidated immediately before execution. */
+  permissionProfile?: PermissionProfileId;
+}
+
+export interface WorkflowConnectorWriteStep {
+  kind: "connector-write";
+  id: string;
+  connectorId: string;
+  capability: string;
+  input: Record<string, unknown>;
+  target: string;
+  preview: string;
+  riskLevel: ApprovalRiskLevel;
+  outputVar?: string;
+  permissionProfile?: PermissionProfileId;
 }
 
 export interface WorkflowAgentStep {
@@ -1712,6 +1746,8 @@ export interface WorkflowAgentStep {
   /** Max agent turns for this step. */
   maxTurns?: number;
   requiresConnectors?: string[];
+  /** Optional task-level override, revalidated immediately before execution. */
+  permissionProfile?: PermissionProfileId;
 }
 
 export interface WorkflowToolStep {
@@ -1721,6 +1757,8 @@ export interface WorkflowToolStep {
   arguments: Record<string, unknown>;
   /** True for consequential writes (forces approval pause). */
   consequential: boolean;
+  /** Optional task-level override, revalidated immediately before execution. */
+  permissionProfile?: PermissionProfileId;
 }
 
 export interface WorkflowApprovalStep {
@@ -1728,11 +1766,13 @@ export interface WorkflowApprovalStep {
   id: string;
   /** Human description of what is being approved. */
   description: string;
+  permissionProfile?: PermissionProfileId;
 }
 
 export type WorkflowStep =
   | WorkflowPromptStep
   | WorkflowConnectorReadStep
+  | WorkflowConnectorWriteStep
   | WorkflowAgentStep
   | WorkflowToolStep
   | WorkflowApprovalStep;
@@ -1749,6 +1789,10 @@ export interface WorkflowDefinition {
   version: number;
   name: string;
   description: string;
+  /** A paused definition cannot start new runs; existing history remains readable. */
+  status?: "active" | "paused";
+  /** Default permission profile for every task and run. */
+  permissionProfile?: PermissionProfileId;
   steps: WorkflowStep[];
   /** Per-workflow notification preferences. */
   notificationPrefs?: NotificationPrefs;
@@ -1849,6 +1893,8 @@ export interface WorkflowStepRecord {
   startedAt?: string;
   finishedAt?: string;
   error?: string;
+  /** Stable machine-readable failure classification. */
+  errorCode?: string;
 }
 
 /** What triggered a workflow run. */
@@ -1864,6 +1910,8 @@ export interface WorkflowRun {
   trigger: WorkflowRunTrigger;
   /** Job id when trigger === "schedule". */
   scheduledJobId?: string;
+  /** Permission profile captured when the run starts. */
+  permissionProfile?: PermissionProfileId;
   /** Inputs supplied to the run. */
   input: Record<string, unknown>;
   /** Per-step records, in execution order. */
@@ -1872,6 +1920,10 @@ export interface WorkflowRun {
   failureReason?: string;
   /** Idempotency key for external mutations. */
   idempotencyKey?: string;
+  /** Scheduler attempt number represented by this run snapshot. */
+  attemptNumber?: number;
+  /** Earliest time the scheduler may retry this run. */
+  nextRetryAt?: string;
   startedAt: string;
   updatedAt: string;
   finishedAt?: string;

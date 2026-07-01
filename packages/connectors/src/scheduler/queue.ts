@@ -1,4 +1,4 @@
-import type { JobAttempt, SchedulerQueueEntry } from "@fable/protocol";
+import type { JobAttempt, RetryPolicy, SchedulerQueueEntry } from "@fable/protocol";
 
 export const DEFAULT_LEASE_MS = 30_000;
 /** Running-run acknowledgement lease extension (mirrors Rust RUNNING_LEASE_MS). */
@@ -7,6 +7,34 @@ export const RUNNING_LEASE_MS = 15 * 60 * 1_000;
 export const RETRY_BASE_MS = 30_000;
 /** Mirrors Rust SCHEDULER_MAX_RETRIES (fails > N => dead). */
 export const MAX_JOB_RETRIES = 2;
+export const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  maxAttempts: MAX_JOB_RETRIES + 1,
+  initialBackoffMs: RETRY_BASE_MS,
+  backoffMultiplier: 2,
+  maxBackoffMs: 15 * 60_000
+};
+
+export function normalizeRetryPolicy(policy?: Partial<RetryPolicy>): RetryPolicy {
+  return {
+    maxAttempts: Math.min(20, Math.max(1, Math.floor(policy?.maxAttempts ?? DEFAULT_RETRY_POLICY.maxAttempts))),
+    initialBackoffMs: Math.min(
+      24 * 60 * 60_000,
+      Math.max(1_000, Math.floor(policy?.initialBackoffMs ?? DEFAULT_RETRY_POLICY.initialBackoffMs))
+    ),
+    backoffMultiplier: Math.min(10, Math.max(1, policy?.backoffMultiplier ?? DEFAULT_RETRY_POLICY.backoffMultiplier)),
+    maxBackoffMs: Math.min(
+      7 * 24 * 60 * 60_000,
+      Math.max(1_000, Math.floor(policy?.maxBackoffMs ?? DEFAULT_RETRY_POLICY.maxBackoffMs))
+    )
+  };
+}
+
+export function retryBackoffMs(policy: RetryPolicy, failedAttempts: number): number {
+  return Math.min(
+    policy.maxBackoffMs,
+    Math.floor(policy.initialBackoffMs * policy.backoffMultiplier ** Math.max(0, failedAttempts - 1))
+  );
+}
 
 export function occurrenceKey(jobId: string, scheduledAt: string): string {
   return `${jobId}:${new Date(scheduledAt).toISOString()}`;
@@ -14,7 +42,7 @@ export function occurrenceKey(jobId: string, scheduledAt: string): string {
 
 export function enqueueOccurrence(
   queue: SchedulerQueueEntry[],
-  input: { jobId: string; runId: string; scheduledAt: string }
+  input: { jobId: string; runId: string; scheduledAt: string; retryPolicy?: RetryPolicy }
 ): SchedulerQueueEntry[] {
   const scheduledAt = new Date(input.scheduledAt).toISOString();
   const deduplicationKey = occurrenceKey(input.jobId, scheduledAt);
@@ -31,7 +59,8 @@ export function enqueueOccurrence(
       deduplicationKey,
       leaseToken: "",
       availableAt: "",
-      lastError: ""
+      lastError: "",
+      retryPolicy: normalizeRetryPolicy(input.retryPolicy)
     }
   ];
 }
@@ -95,12 +124,13 @@ export function acknowledgeAttempt(
     }
     const attempts = [...entry.attempts, attempt];
     const failures = attempts.filter((candidate) => candidate.status === "failed").length;
+    const retryPolicy = normalizeRetryPolicy(entry.retryPolicy);
     const state =
       attempt.status === "succeeded" || attempt.status === "cancelled"
         ? (attempt.status === "succeeded" ? "done" : "cancelled")
         : attempt.status === "blocked-auth"
           ? "blocked-auth"
-          : attempt.status === "failed" && failures > MAX_JOB_RETRIES
+          : attempt.status === "failed" && failures >= retryPolicy.maxAttempts
             ? "dead"
             : attempt.status === "failed"
               ? "queued"
@@ -109,7 +139,7 @@ export function acknowledgeAttempt(
     // Transient failure sets exponential backoff (RETRY_BASE_MS * 2^(fails-1)).
     const availableAt =
       attempt.status === "failed" && state === "queued"
-        ? new Date(Date.parse(attempt.startedAt) + RETRY_BASE_MS * 2 ** (failures - 1)).toISOString()
+        ? new Date(Date.parse(attempt.startedAt) + retryBackoffMs(retryPolicy, failures)).toISOString()
         : entry.availableAt;
     return {
       ...entry,
@@ -119,7 +149,8 @@ export function acknowledgeAttempt(
       leaseHolder: finished ? entry.leaseHolder : "",
       leaseExpiresAt: finished ? entry.leaseExpiresAt : "",
       leaseToken: finished ? entry.leaseToken : "",
-      availableAt: state === "queued" ? availableAt : ""
+      availableAt: state === "queued" ? availableAt : "",
+      retryPolicy
     };
   });
 }

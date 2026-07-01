@@ -35,6 +35,26 @@ fn normalize_definition(
     definition.description = truncate_characters(&normalize_spaces(&definition.description), 2_000);
     definition.created_at = normalize_spaces(&definition.created_at);
     definition.updated_at = normalize_spaces(&definition.updated_at);
+    let status = definition
+        .status
+        .take()
+        .unwrap_or_else(|| "active".to_string());
+    let status = normalize_spaces(&status).to_ascii_lowercase();
+    if !matches!(status.as_str(), "active" | "paused") {
+        return Err("Workflow status is not recognized.".to_string());
+    }
+    definition.status = Some(status);
+    if let Some(profile) = definition.permission_profile.take() {
+        let profile = normalize_spaces(&profile).to_ascii_lowercase();
+        if !matches!(
+            profile.as_str(),
+            "read-only" | "trusted" | "full-with-approvals"
+        ) {
+            return Err("Workflow permission profile is not recognized.".to_string());
+        }
+        definition.permission_profile = Some(profile);
+    }
+    definition.steps = crate::store::repos::connector_cache::redact_value(&definition.steps);
     let step_count = definition.steps.as_array().map(Vec::len).unwrap_or(0);
     if definition.schema_version != WORKFLOW_RUN_STORE_VERSION
         || definition.id.is_empty()
@@ -97,6 +117,7 @@ pub fn save_workflow_definition(
     })?
     .is_some()
     {
+        record_definition_change(&definition);
         return Ok(definition);
     }
     let path = workflow_definitions_path(&app)?;
@@ -106,7 +127,24 @@ pub fn save_workflow_definition(
     definitions.insert(0, definition.clone());
     definitions.truncate(500);
     write_definitions(&path, &definitions)?;
+    record_definition_change(&definition);
     Ok(definition)
+}
+
+fn record_definition_change(definition: &WorkflowDefinitionRecord) {
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "workflow",
+        &definition.id,
+        definition.status.as_deref().unwrap_or("active"),
+    )
+    .actor("user")
+    .mode(definition.permission_profile.as_deref().unwrap_or(""))
+    .summary(&format!(
+        "Workflow {} version {} saved.",
+        definition.id, definition.version
+    ))
+    .record();
 }
 
 #[tauri::command]
@@ -137,6 +175,34 @@ fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String
     run.trigger = normalize_spaces(&run.trigger).to_ascii_lowercase();
     run.started_at = normalize_spaces(&run.started_at);
     run.updated_at = normalize_spaces(&run.updated_at);
+    run.input = crate::store::repos::connector_cache::redact_value(&run.input);
+    run.steps = crate::store::repos::connector_cache::redact_value(&run.steps);
+    run.failure_reason = run.failure_reason.take().map(|message| {
+        crate::store::repos::connector_cache::redact_value(&serde_json::Value::String(message))
+            .as_str()
+            .unwrap_or("[redacted connector data]")
+            .to_string()
+    });
+    if let Some(profile) = run.permission_profile.take() {
+        let profile = normalize_spaces(&profile).to_ascii_lowercase();
+        let mode = match profile.as_str() {
+            "read-only" => "read-only",
+            "trusted" => "trusted-scope",
+            "full-with-approvals" => "full-access",
+            _ => return Err("Workflow run permission profile is not recognized.".to_string()),
+        };
+        if run.status == "running" && run.trigger == "schedule" {
+            crate::permission_policy::ensure_permission_allowed(
+                mode,
+                Some(&profile),
+                "schedule-execution",
+                "medium",
+            )?;
+        }
+        run.permission_profile = Some(profile);
+    } else if run.status == "running" && run.trigger == "schedule" {
+        return Err("Scheduled workflow runs require a captured permission profile.".to_string());
+    }
 
     if run.id.is_empty() || run.definition_id.is_empty() || run.started_at.is_empty() {
         return Err("Workflow run is incomplete.".to_string());
@@ -212,9 +278,63 @@ pub fn save_workflow_run(
     })?
     .is_some()
     {
+        record_run_change(&run);
         return Ok(run);
     }
-    persist_run(&workflow_runs_path(&app)?, run)
+    let persisted = persist_run(&workflow_runs_path(&app)?, run)?;
+    record_run_change(&persisted);
+    Ok(persisted)
+}
+
+fn record_run_change(run: &WorkflowRunRecord) {
+    crate::action_history::Recorder::new(
+        crate::action_history::categories::SCHEDULE,
+        "workflow",
+        &run.definition_id,
+        &run.status,
+    )
+    .correlation(&run.id)
+    .mode(run.permission_profile.as_deref().unwrap_or(""))
+    .error(if run.status == "failed" {
+        "workflow-failed"
+    } else {
+        ""
+    })
+    .summary(&format!(
+        "Workflow run {} changed to {}.",
+        run.id, run.status
+    ))
+    .record();
+}
+
+/// Reconcile workflow journal state after an unclean shutdown. The scheduler
+/// queue remains the execution authority and will re-lease the same occurrence;
+/// the journal is moved back to `queued` so the UI never presents a stale run
+/// as actively executing.
+pub fn recover_stale_runs(app: &tauri::AppHandle) -> Result<usize, String> {
+    let mut runs = list_workflow_runs(
+        app.clone(),
+        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+        None,
+    )?;
+    let recovered_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let mut recovered = 0;
+    for run in &mut runs {
+        if run.status != "running" {
+            continue;
+        }
+        run.status = "queued".to_string();
+        run.updated_at = recovered_at.clone();
+        run.failure_reason = Some("Interrupted; queued for recovery.".to_string());
+        save_workflow_run(
+            app.clone(),
+            run.clone(),
+            Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+            None,
+        )?;
+        recovered += 1;
+    }
+    Ok(recovered)
 }
 
 #[tauri::command]
@@ -294,10 +414,13 @@ mod tests {
             status: status.to_string(),
             trigger: "manual".to_string(),
             scheduled_job_id: None,
+            permission_profile: None,
             input: serde_json::json!({}),
             steps: serde_json::json!([]),
             failure_reason: None,
             idempotency_key: None,
+            attempt_number: None,
+            next_retry_at: None,
             started_at: "0".to_string(),
             updated_at: "0".to_string(),
             finished_at: None,
@@ -311,6 +434,8 @@ mod tests {
             version: 1,
             name: "Brief".to_string(),
             description: "A transparent brief.".to_string(),
+            status: Some("active".to_string()),
+            permission_profile: None,
             steps: serde_json::json!([{"kind":"prompt","id":"prompt","prompt":"Summarize"}]),
             notification_prefs: None,
             created_at: "2026-06-28T10:00:00Z".to_string(),
