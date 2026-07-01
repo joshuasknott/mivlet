@@ -11,8 +11,10 @@ All user-owned database records must be associated with a workspace:
 - **Workspace-scoped records** carry a valid `workspace_id` and have a `null` `project_id`. They are useful across the entire workspace (e.g., connector accounts, workspace-wide preferences, or shared knowledge sources).
 - **Project-scoped records** carry both a `workspace_id` and a `project_id`. The project ID must resolve to a project that belongs to the same workspace.
 
+Under SQLite Schema v5, primary tables like `knowledge_source` and `memory_record` use composite primary keys `(workspace_id, id)` instead of simple unique IDs. This ensures absolute workspace data segmentation at the database level.
+
 ### The `default` Workspace
-The `default` workspace is Fable's stable compatibility workspace. During the v4 schema migration, any pre-workspace records (written before multi-workspace isolation was introduced) are automatically assigned to `default` without deleting or rewriting encrypted payloads. Legacy payloads are decrypted using their original AAD (Additional Authenticated Data) on first read, and subsequently resealed using workspace-bound AAD on write.
+The `default` workspace is Fable's stable compatibility workspace. During the v4/v5 schema migrations, any pre-workspace records (written before multi-workspace isolation was introduced) are automatically assigned to `default` without deleting or rewriting encrypted payloads. Legacy payloads are decrypted using their original AAD (Additional Authenticated Data) on first read, and subsequently resealed using workspace-bound AAD on write.
 
 ---
 
@@ -96,8 +98,15 @@ pub fn ensure_record_owner(
     scope: &DataScope,
 ) -> Result<()> {
     let sql = match table {
-        "knowledge_source" => "SELECT workspace_id, project_id FROM knowledge_source WHERE id=?1;",
-        "my_new_table" => "SELECT workspace_id, project_id FROM my_new_table WHERE id=?1;",
+        "knowledge_source" => {
+            "SELECT workspace_id, project_id FROM knowledge_source WHERE id=?1 AND workspace_id=?2;"
+        }
+        "memory_record" => {
+            "SELECT workspace_id, project_id FROM memory_record WHERE id=?1 AND workspace_id=?2;"
+        }
+        "my_new_table" => {
+            "SELECT workspace_id, project_id FROM my_new_table WHERE id=?1 AND workspace_id=?2;"
+        }
         // ...
     };
     // ...

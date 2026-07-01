@@ -16,7 +16,10 @@
 - Done: memory can be edited, pinned, forgotten, disabled, and exported through Rust-backed state controls.
 - Done: runtime snapshots recover drafts, active view, pinned sources, automations, dismissed approvals, imported sources, and memory through Rust-backed state.
 - Done: knowledge sources can be approved into pinned durable memory with provenance and approval audit history through a Rust-backed promotion command.
-- Next: richer provenance controls backed by encrypted local state.
+- Done: richer provenance controls backed by encrypted local state (composite primary key isolation under SQLite schema v5).
+- Done: path-escape safety validation, boundary sanitation, and structure-aware chunking (Markdown, JSON, CSV, YAML) for local file imports.
+- Done: hybrid retrieval using reciprocal-rank fusion (RRF, k=60) combining lexical and semantic query scores.
+- Done: full knowledge & memory lifecycle action surfaces (disabling, deleting, forgetting, promotion, pinning) in shell runtime hooks with optimistic state rollback.
 
 ## Milestone 3: Real Connectors
 
@@ -35,8 +38,8 @@
 - Dictation and push-to-talk.
 - Realtime conversation provider boundary.
 - Captions, transcripts, interruption, retention controls, and fallback.
-- Done: Schedules, recurring automations, notifications, and audit trails (persistence uses raw JSON files).
-- Next: Migrate schedules and workflows from raw JSON to structured encrypted SQLite tables.
+- Done: Schedules, recurring automations, notifications, and audit trails.
+- Done: Migrate schedules and workflows from raw JSON to structured encrypted SQLite tables.
 
 ## Milestone 5: Site, Release, And CI
 

@@ -6,7 +6,7 @@
 - Rust for runtime commands, permissions, jobs, local context, and connector execution.
 - React, TypeScript, and Vite for the interface.
 - Convex for optional realtime shared state and collaboration state when configured.
-- Encrypted SQLite for offline/private local state (schedules and workflows are temporarily excluded and use raw JSON file persistence).
+- Encrypted SQLite for offline/private local state (including schedules, workflows, and knowledge structures).
 - OS secure storage for credentials.
 
 ## Runtime Boundaries
@@ -39,18 +39,20 @@ For privacy and security, all credentials, API keys, private tokens, auth codes,
 `@fable/knowledge` is the pure domain layer for ingestion, chunking, retrieval,
 memory proposals, context assembly, and store contracts. The desktop shell owns
 the user interaction and delegates retrieval/context construction to that
-  package; the Rust snapshot boundary persists imported local sources and durable
-  memory through the encrypted SQLite store (via preferences document interception
-  in the production path), while browser fallback uses localStorage. Workflows
-  and schedules continue to use direct JSON files.
+package; the Rust snapshot boundary persists imported local sources and durable
+memory through the encrypted SQLite store (via composite-key SQLite tables in schema v5),
+while browser fallback uses localStorage. Workflows, schedules, chunks, and tombstones
+are also fully persisted in the SQLite vault.
 
 - Local file and recursive folder imports are bounded, typed, fingerprinted,
-  chunked, and classified as untrusted knowledge. Provider imports retain their
+  structurally chunked (for Markdown, JSON, CSV, YAML), sanitized with path-escape guards,
+  and classified as untrusted knowledge. Provider imports retain their
   connector/account provenance and remain authorized only while that connector
   is connected.
-- Retrieval is scoped to global, project, or thread context. Deleted, disabled,
-  stale, failed, disconnected, or out-of-scope sources are excluded before
-  context assembly.
+- Retrieval is scoped to global, project, or thread context. Deleted (tombstoned), disabled,
+  stale, error, indexing, disconnected, or out-of-scope sources are excluded before
+  context assembly. Hybrid retrieval uses Reciprocal-Rank Fusion (RRF, k=60) to combine
+  lexical and semantic scores.
 - Citations identify the exact source and excerpt used. Pinned context is
   deliberate, not a trust upgrade.
 - Imported content never becomes durable memory implicitly. “Remember” uses the
@@ -58,7 +60,7 @@ the user interaction and delegates retrieval/context construction to that
   exportable, disableable, and forgettable.
 - Agent submissions assemble the same bounded, cited context used by Knowledge
   search. Durable memory is omitted when memory is disabled or a record has
-  been forgotten.
+  been forgotten (tombstoned).
 
 The `KnowledgeStore` contract is snapshot-shaped and independent of a storage
 engine. Goal 5's encrypted SQLite repository can implement the same boundary;
@@ -106,7 +108,7 @@ to a different backend for a due run.
 
 The Tauri scheduler leases due occurrences, writes queue records, and exposes
 pending workflow runs to a headless scheduled-agent hook. Jobs and queue records
-persist in the encrypted SQLite database under schema v4. Scheduled prompts use
+persist in the encrypted SQLite database under schema v5. Scheduled prompts use
 the same adapter contract as interactive prompts, so native API, Codex
 app-server, and ACP runs share cancellation, blocked-auth handling, and approval
 boundaries. Schedules do not require Convex or a hosted Fable account.
@@ -158,9 +160,8 @@ See [Connectors](connectors.md) for scopes, callbacks, credential ownership, and
 The desktop runtime persists non-secret approval, run, connector-account, and snapshot metadata in the Tauri app data folder. Credentials and OAuth tokens use OS secure storage. Session approval grants remain ephemeral, while high-risk full-access approvals fail closed unless the required confirmation phrase is provided.
 
 The Tauri runtime initializes encrypted SQLite before commands, migrates legacy
-JSON idempotently, and routes production documents (except schedules and
-workflows) through the native store. Schedules and workflows still use raw
-JSON files. Credentials remain in OS secure storage. See
+JSON idempotently, and routes production documents (including schedules, workflows,
+and knowledge structures) through the native store. Credentials remain in OS secure storage. See
 [Encrypted local storage](../architecture/encrypted-storage.md).
 
 A paired mobile device is designed as a second approval, observation, and schedule-control
