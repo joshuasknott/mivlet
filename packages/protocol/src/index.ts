@@ -1073,6 +1073,17 @@ export interface KnowledgeSource {
   origin?: "fixture" | "local-import" | "connector-import";
   providerMetadata?: Record<string, string>;
   /**
+   * Original filesystem path (sanitized, boundary-relative) the source was
+   * imported from. Preserved across reindex so renames/moves are detectable
+   * without relying solely on content hashing. Optional — legacy/fixture
+   * sources omit it.
+   */
+  sourcePath?: string;
+  /** Resolved media/MIME type of the imported content (e.g. text/markdown). */
+  mediaType?: string;
+  /** Last-modified timestamp of the originating file/content (ISO). */
+  modifiedAt?: string;
+  /**
    * Scope the source belongs to. Defaults to global when absent (the
    * pre-scope behavior). Drives retrieval + pinned-context bounding.
    */
@@ -1120,6 +1131,12 @@ export interface KnowledgeCitation {
   account?: string;
   /** The basis for the citation's score — never hidden from the user. */
   ranking?: CitationRanking;
+  /** Original path of the cited source, when known (provenance metadata). */
+  sourcePath?: string;
+  /** Media type of the cited source, when known (provenance metadata). */
+  mediaType?: string;
+  /** Effective scope of the cited source at retrieval time. */
+  scope?: KnowledgeScope;
 }
 
 /**
@@ -1197,7 +1214,8 @@ export type SkipReason =
   | "malformed"
   | "binary"
   | "inaccessible"
-  | "too-many-files";
+  | "too-many-files"
+  | "path-escape";
 
 /**
  * A memory the system thinks is worth keeping, surfaced for explicit approval.
@@ -1286,6 +1304,15 @@ export interface ConnectorSourceCandidate {
   fetchedAt: string;
   account?: string;
   providerMetadata?: Record<string, string>;
+  /**
+   * Boundary-relative path within the connector/import root. Local-files sets
+   * this to the sanitized relative path so renames/moves are tracked. Optional.
+   */
+  sourcePath?: string;
+  /** Last-modified timestamp of the originating content (ISO), when known. */
+  modifiedAt?: string;
+  /** Scope the candidate should be ingested into. Defaults to global. */
+  scope?: KnowledgeScope;
 }
 
 /**

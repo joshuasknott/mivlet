@@ -165,3 +165,101 @@ describe("chunk: plain text fixed window with overlap", () => {
     }
   });
 });
+
+describe("chunk: YAML structural boundaries", () => {
+  it("splits a top-level mapping into one chunk per key, preserving offsets", () => {
+    const yaml = "name: Fable\nkind: app\nversion: 1\n";
+    const chunks = chunkSourceText(yaml, { sourceId: "s", type: "yaml" });
+    expect(chunks.length).toBe(3);
+    // Each chunk references the original text by offset.
+    for (const c of chunks) {
+      expect(c.charStart).toBeGreaterThanOrEqual(0);
+      expect(c.charEnd).toBeLessThanOrEqual(yaml.length);
+      expect(yaml.slice(c.charStart, c.charEnd).trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("falls back to plain-text windows for non-mapping YAML", () => {
+    const seq = "- one\n- two\n- three\n";
+    const chunks = chunkSourceText(seq, { sourceId: "s", type: "yaml" });
+    expect(chunks.length).toBeGreaterThan(0);
+  });
+
+  it("returns [] for empty/whitespace YAML", () => {
+    expect(chunkSourceText("   \n  ", { sourceId: "s", type: "yaml" })).toEqual([]);
+  });
+
+  it("routes application/yaml via mimeToType to yaml chunking", () => {
+    expect(mimeToType("application/yaml")).toBe("yaml");
+    expect(mimeToType("text/x-yaml")).toBe("yaml");
+  });
+
+  it("keeps each YAML chunk within the maxChars cap", () => {
+    const longVal = `notes: ${"x".repeat(2000)}\nother: short\n`;
+    const chunks = chunkSourceText(longVal, { sourceId: "s", type: "yaml", maxChars: 300 });
+    for (const c of chunks) {
+      expect(c.text.length).toBeLessThanOrEqual(300 + 5);
+    }
+  });
+});
+
+describe("chunk: JSON offsets", () => {
+  it("array element chunks carry real charStart/charEnd into the source text", () => {
+    const text = '[{"a":1},{"b":2}]';
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
+    expect(chunks.length).toBe(2);
+    for (const c of chunks) {
+      // Each span must point at the element's substring in the original text.
+      expect(c.charStart).toBeGreaterThanOrEqual(0);
+      expect(c.charEnd).toBeLessThanOrEqual(text.length);
+      expect(c.charEnd).toBeGreaterThan(c.charStart);
+    }
+  });
+
+  it("object entry chunks carry real charStart/charEnd into the source text", () => {
+    const text = '{"name":"Fable","kind":"app"}';
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
+    expect(chunks.length).toBe(2);
+    for (const c of chunks) {
+      expect(c.charEnd).toBeGreaterThan(c.charStart);
+      expect(c.charEnd).toBeLessThanOrEqual(text.length);
+    }
+  });
+});
+
+describe("chunk: invariants", () => {
+  it("CSV header-only input produces no chunks", () => {
+    expect(chunkSourceText("name,kind,size\n", { sourceId: "s", type: "csv" })).toEqual([]);
+    expect(chunkSourceText("name,kind,size", { sourceId: "s", type: "csv" })).toEqual([]);
+  });
+
+  it("never emits empty or whitespace-only chunks across types", () => {
+    const inputs = [
+      { type: "text" as const, text: "  \n\n  para.\n\n\n  " },
+      { type: "markdown" as const, text: "# H1\n\n\n# H2\n\n  \n" },
+      { type: "csv" as const, text: "h1,h2\na,b\n\nc,d\n" }
+    ];
+    for (const { type, text } of inputs) {
+      const chunks = chunkSourceText(text, { sourceId: "s", type, maxChars: 80 });
+      for (const c of chunks) {
+        expect(c.text.trim().length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("is deterministic: identical normalized input yields identical chunks", () => {
+    const text = "alpha beta gamma. delta epsilon zeta. eta theta iota.";
+    const a = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 30 });
+    const b = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 30 });
+    expect(a.map((c) => ({ id: c.id, text: c.text, h: c.contentHash }))).toEqual(
+      b.map((c) => ({ id: c.id, text: c.text, h: c.contentHash }))
+    );
+  });
+
+  it("ordinals are contiguous 0..n-1 after normalization", () => {
+    const text = "# A\n\nx\n\n# B\n\ny\n\n# C\n\nz\n";
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "markdown", maxChars: 12 });
+    expect(chunks.map((c) => c.ordinal)).toEqual(chunks.map((_, i) => i));
+    expect(chunks.map((c) => c.id)).toEqual(chunks.map((_, i) => `s#${i}`));
+  });
+});
