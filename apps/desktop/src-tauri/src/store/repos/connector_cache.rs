@@ -57,7 +57,7 @@ fn looks_secret(value: &str) -> bool {
 /// Recursively walk a JSON value, replacing any string that looks secret with
 /// the redaction sentinel. Non-string scalars, arrays, and objects are walked
 /// in place. The returned value is what gets sealed into the cache payload.
-fn redact_value(value: &Value) -> Value {
+pub(crate) fn redact_value(value: &Value) -> Value {
     match value {
         Value::String(s) => {
             if looks_secret(s) {
@@ -76,7 +76,17 @@ fn redact_value(value: &Value) -> Value {
                 if SECRET_MARKERS.iter().any(|m| lower_key.contains(m))
                     || matches!(
                         lower_key.as_str(),
-                        "token" | "secret" | "password" | "accesstoken" | "refreshtoken" | "apikey"
+                        "token"
+                            | "secret"
+                            | "password"
+                            | "accesstoken"
+                            | "refreshtoken"
+                            | "apikey"
+                            | "api_key"
+                            | "authorization"
+                            | "cookie"
+                            | "credential"
+                            | "credentials"
                     )
                 {
                     out.insert(key.clone(), Value::String(REDACTED.to_string()));

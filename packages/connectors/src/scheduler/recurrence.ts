@@ -1,6 +1,7 @@
 import type {
   MissedRunPolicy,
   RecurrenceRule,
+  ScheduledJob,
   ScheduleTrigger,
   ScheduleWeekday
 } from "@fable/protocol";
@@ -124,4 +125,25 @@ export function missedOccurrences(
     cursor = next;
   }
   return policy === "run-once" ? occurrences.slice(-1) : occurrences;
+}
+
+export interface DueRunPlan {
+  occurrences: string[];
+  nextRunAt: string;
+}
+
+/**
+ * Calculate due occurrences and the next future fire time without mutating
+ * persistence. Callers must still insert occurrences through the durable
+ * queue's unique deduplication boundary.
+ */
+export function calculateDueRuns(job: ScheduledJob, now: Date): DueRunPlan {
+  if (job.status !== "active") return { occurrences: [], nextRunAt: "" };
+  const previous = new Date(job.lastRunAt || job.createdAt);
+  const occurrences = missedOccurrences(job.trigger, previous, now, job.missedRunPolicy);
+  const nextRunAt = nextOccurrence(job.trigger, now)?.toISOString() ?? "";
+  return {
+    occurrences: occurrences.map((occurrence) => occurrence.toISOString()),
+    nextRunAt
+  };
 }

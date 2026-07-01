@@ -90,6 +90,9 @@ pub fn run() {
                     scheduler::SchedulerState::empty(),
                 );
             }
+            if let Err(error) = workflows::recover_stale_runs(&handle) {
+                eprintln!("workflow recovery failed: {error}");
+            }
 
             // In-process scheduler tick. Stops when the app exits. An
             // interrupted tick only ever leaves entries leased until their short

@@ -154,13 +154,14 @@ impl Recorder {
     /// replay of the same boundary does not create duplicates (upsert by id).
     fn synthesize_id(&self) -> String {
         let basis = format!(
-            "{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}",
             self.category,
             self.service,
             self.action,
             self.status,
             self.correlation_id,
-            self.created_at
+            self.created_at,
+            self.summary
         );
         let digest = sha256_hex(basis.as_bytes());
         // 16 hex chars is plenty for collision safety within a local store and

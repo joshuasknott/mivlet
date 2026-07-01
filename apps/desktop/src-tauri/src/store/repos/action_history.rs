@@ -87,7 +87,8 @@ pub(crate) struct Record {
     pub detail: Value,
 }
 
-/// Insert (or replace, by id) an action-history event. The detail is redacted
+/// Append an action-history event. Existing ids are immutable: a replay is
+/// ignored rather than updating prior history. The detail is redacted
 /// through [`redact_safe_detail`] (defense in depth: secrets are stripped at the
 /// storage layer regardless of caller) and then sealed with AAD bound to the row
 /// identity (`audit_event:<id>`); query columns are stored in plaintext. Never
@@ -111,13 +112,7 @@ pub fn record(tx: &Connection, store: &Store, event: Record) -> Result<()> {
            correlation_id, error_code, summary
          )
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-         ON CONFLICT(id) DO UPDATE SET
-           kind=excluded.kind, actor=excluded.actor, created_at=excluded.created_at,
-           payload=excluded.payload, payload_nonce=excluded.payload_nonce,
-           category=excluded.category, service=excluded.service, action=excluded.action,
-           status=excluded.status, risk_level=excluded.risk_level, mode=excluded.mode,
-           correlation_id=excluded.correlation_id, error_code=excluded.error_code,
-           summary=excluded.summary;",
+         ON CONFLICT(id) DO NOTHING;",
         rusqlite::params![
             id,
             // `kind` is the legacy column; mirror category so legacy listings
@@ -648,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn upsert_by_id_replaces_existing_event() {
+    fn duplicate_id_cannot_mutate_existing_event() {
         let store = store();
         record_event(
             &store,
@@ -662,7 +657,7 @@ mod tests {
                 detail: serde_json::json!({"phase": "attempt"}),
             },
         );
-        // Same id, updated status + detail → upsert, not a duplicate.
+        // Same id is a replay: immutable history keeps the original event.
         record_event(
             &store,
             TestEvent {
@@ -677,8 +672,8 @@ mod tests {
         );
         let events = store.with_conn(|conn| list(conn, &store, 10)).unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].status, "ok");
-        assert_eq!(events[0].detail.as_ref().unwrap()["phase"], "done");
+        assert_eq!(events[0].status, "attempted");
+        assert_eq!(events[0].detail.as_ref().unwrap()["phase"], "attempt");
     }
 
     #[test]

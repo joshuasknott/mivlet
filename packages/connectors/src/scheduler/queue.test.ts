@@ -154,4 +154,39 @@ describe("scheduler queue", () => {
     }
     expect(queue[0].state).toBe("dead");
   });
+
+  it("honors a bounded per-occurrence retry policy and exposes backoff metadata", () => {
+    let queue = enqueueOccurrence([], {
+      jobId: "job-policy",
+      runId: "run-policy",
+      scheduledAt: "2026-06-28T09:00:00Z",
+      retryPolicy: {
+        maxAttempts: 2,
+        initialBackoffMs: 5_000,
+        backoffMultiplier: 3,
+        maxBackoffMs: 10_000
+      }
+    });
+
+    const first = leaseDue(queue, new Date("2026-06-28T09:00:01Z"), "window");
+    queue = acknowledgeAttempt(first.queue, "run-policy", {
+      runId: "run-policy",
+      status: "failed",
+      attemptNumber: 1,
+      startedAt: "2026-06-28T09:00:01Z",
+      leaseToken: first.leased[0].leaseToken
+    });
+    expect(queue[0].state).toBe("queued");
+    expect(queue[0].availableAt).toBe("2026-06-28T09:00:06.000Z");
+
+    const second = leaseDue(queue, new Date("2026-06-28T09:00:07Z"), "window");
+    queue = acknowledgeAttempt(second.queue, "run-policy", {
+      runId: "run-policy",
+      status: "failed",
+      attemptNumber: 2,
+      startedAt: "2026-06-28T09:00:07Z",
+      leaseToken: second.leased[0].leaseToken
+    });
+    expect(queue[0].state).toBe("dead");
+  });
 });
