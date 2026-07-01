@@ -362,7 +362,7 @@ export function App() {
     });
     cancelRequestedRef.current = false;
     void runtime.assembleKnowledgeContext(prompt).then((contextPrefix) =>
-      agent.run(request, contextPrefix || undefined, runtime.permissionLabel)
+      agent.run(request, contextPrefix || undefined, runtime.permissionMode)
     );
   }
 
@@ -486,7 +486,10 @@ export function App() {
           runtime.setLastAction(sidebarCollapsed ? "Navigation opened" : "Navigation closed");
         }}
         onOpenMobileConnection={() => {
-          runtime.setLastAction("Mobile connection selected");
+          setActiveSettingsTab("approvals");
+          runtime.setActiveItem("Settings");
+          runtime.setMobileNavOpen(false);
+          runtime.setLastAction("Mobile approvals opened");
         }}
         onSelectThread={(thread) => runtime.openThread(thread, "chat")}
         onAccountMenu={(item) => {

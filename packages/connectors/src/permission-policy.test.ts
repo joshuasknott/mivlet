@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CUSTOM_APPROVAL_SETTINGS,
+  effectForConnectorAction,
   effectForTool,
   evaluatePermissionPolicy,
+  isHighSeverityEffect,
+  normalizeCustomApprovalSettings,
   normalizePermissionProfile,
   permissionModeForProfile,
-  permissionProfileForMode
+  permissionProfileForMode,
+  resolvePermissionModeFromCustom
 } from "./permission-policy";
 
 describe("permission profile policy", () => {
@@ -53,5 +58,91 @@ describe("permission profile policy", () => {
     expect(effectForTool("write-file")).toBe("local-write");
     expect(effectForTool("run-shell")).toBe("shell-execution");
     expect(effectForTool("gmail-read")).toBe("connector-read");
+  });
+});
+
+describe("plain approval choices map to one strict policy", () => {
+  it("classifies connector deletes and external sends conservatively", () => {
+    expect(effectForConnectorAction("google-drive.delete-file")).toBe("delete");
+    expect(effectForConnectorAction("gmail.send")).toBe("publish-external");
+    expect(effectForConnectorAction("unknown.write")).toBe("connector-write");
+  });
+
+  it("marks every consequential external category as high severity", () => {
+    for (const effect of [
+      "delete",
+      "shell-execution",
+      "connector-write",
+      "publish-external",
+      "cache-mutation",
+      "schedule-mutation",
+      "schedule-execution",
+      "memory-promotion",
+      "remote-approval-decision"
+    ] as const) {
+      expect(isHighSeverityEffect(effect)).toBe(true);
+    }
+  });
+
+  it("Ask Me permits bounded changes only through approval and blocks shell", () => {
+    const local = evaluatePermissionPolicy({
+      mode: "trusted-scope",
+      effect: "local-write"
+    });
+    const connector = evaluatePermissionPolicy({
+      mode: "trusted-scope",
+      effect: "connector-write"
+    });
+    expect(local).toMatchObject({ allowed: true, approvalRequired: true });
+    expect(connector).toMatchObject({ allowed: true, approvalRequired: true });
+    expect(
+      evaluatePermissionPolicy({ mode: "trusted-scope", effect: "shell-execution" }).allowed
+    ).toBe(false);
+  });
+
+  it("Work Freely still requires approval for every high-severity effect", () => {
+    for (const effect of [
+      "delete",
+      "shell-execution",
+      "connector-write",
+      "publish-external",
+      "cache-mutation",
+      "schedule-mutation",
+      "schedule-execution",
+      "memory-promotion",
+      "remote-approval-decision"
+    ] as const) {
+      expect(
+        evaluatePermissionPolicy({ mode: "full-access", effect })
+      ).toMatchObject({ allowed: true, approvalRequired: true });
+    }
+  });
+});
+
+describe("Custom settings resolve to the existing modes", () => {
+  it("defaults to the narrowest mode", () => {
+    expect(resolvePermissionModeFromCustom(DEFAULT_CUSTOM_APPROVAL_SETTINGS)).toBe("read-only");
+  });
+
+  it("widens only through the two explicit toggles", () => {
+    expect(
+      resolvePermissionModeFromCustom({
+        allowSmallLocalEdits: true,
+        allowPowerfulCommands: false
+      })
+    ).toBe("trusted-scope");
+    expect(
+      resolvePermissionModeFromCustom({
+        allowSmallLocalEdits: false,
+        allowPowerfulCommands: true
+      })
+    ).toBe("full-access");
+  });
+
+  it("fills missing persisted values with safe defaults", () => {
+    expect(normalizeCustomApprovalSettings({ allowSmallLocalEdits: true })).toEqual({
+      allowSmallLocalEdits: true,
+      allowPowerfulCommands: false
+    });
   });
 });

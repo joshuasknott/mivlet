@@ -19,6 +19,7 @@ import type {
   ConnectorSearchItem,
   ConnectorSearchRequest,
   ConnectorSearchResult,
+  CustomApprovalSettings,
   FirstWaveConnectorId,
   FableCommandRequest,
   FableCommandResult,
@@ -72,6 +73,9 @@ import {
   shapeWorkflowNotification,
   executeCommand,
   evaluatePermissionPolicy,
+  DEFAULT_CUSTOM_APPROVAL_SETTINGS,
+  normalizeCustomApprovalSettings,
+  resolvePermissionModeFromCustom,
   type CommandRuntime,
   type ToolApprovalGate,
   type ModelDiscoveryResult,
@@ -79,6 +83,7 @@ import {
 } from "@fable/connectors";
 import {
   DEFAULT_PERMISSION_LABEL,
+  isApprovalPresetLabel,
   permissionLabelFor,
   permissionModeFor,
   resolveSelectedModel
@@ -128,6 +133,7 @@ import {
   setRuntimeJobStatus,
   deleteRuntimeScheduledJob,
   deliverRuntimeNotification,
+  executeRuntimeConnectorAction,
   prepareRuntimeConnectorAction,
   promoteRuntimeKnowledgeSourceToMemory,
   recordRuntimeBackendEvent,
@@ -199,11 +205,30 @@ const defaultShellState: PersistedShellState = {
   memoryDisabled: false,
   memoryRecords,
   connectedBackendIds: [],
-  // "" lets Fable pick the first available model; full-access mirrors the
-  // composer's pre-existing default so behavior is unchanged until selected.
+  // "" lets Fable pick the first available model. Ask Me is the default
+  // approval preset.
   selectedModelId: "",
-  permissionMode: "full-access"
+  permissionMode: "trusted-scope",
+  permissionLabel: DEFAULT_PERMISSION_LABEL,
+  customApprovalSettings: DEFAULT_CUSTOM_APPROVAL_SETTINGS
 };
+
+const ALLOW_PREVIEW_FALLBACKS =
+  import.meta.env.DEV || import.meta.env.MODE === "test";
+
+function runtimeOrPreview<T>(
+  runtimeValue: T | null,
+  previewValue: () => T,
+  unavailableMessage: string
+): T {
+  if (runtimeValue !== null) {
+    return runtimeValue;
+  }
+  if (ALLOW_PREVIEW_FALLBACKS) {
+    return previewValue();
+  }
+  throw new Error(unavailableMessage);
+}
 
 /**
  * Map a Rust ACP CLI probe outcome to a truthful {@link BackendAuthState} +
@@ -484,9 +509,17 @@ export interface ShellRuntime {
   /** Persisted model selection (raw; prefer resolvedSelectedModelId at run time). */
   selectedModelId: string;
   selectModel: (modelId: string) => void;
-  /** The current permission-level label shown in the composer. */
+  /** Resolved internal approval mode used by the agent loop. */
+  permissionMode: PermissionMode;
+  /** The current approval preset label shown in the composer. */
   permissionLabel: string;
   selectPermissionLabel: (label: string) => void;
+  /** Plain-language Custom approval preferences. */
+  customApprovalSettings: CustomApprovalSettings;
+  updateCustomApprovalSetting: (
+    key: keyof CustomApprovalSettings,
+    value: boolean
+  ) => void;
   /**
    * Record a native-API model tool call as an approval audit entry. Model tool
    * calls never auto-execute — they surface here so the existing approval UI
@@ -640,6 +673,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // available models before each run (see resolveSelectedModel).
   const [selectedModelId, setSelectedModelId] = useState(initialState.selectedModelId);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(initialState.permissionMode);
+  const [permissionLabel, setPermissionLabel] = useState(
+    isApprovalPresetLabel(initialState.permissionLabel)
+      ? initialState.permissionLabel
+      : permissionLabelFor(initialState.permissionMode)
+  );
+  const [customApprovalSettings, setCustomApprovalSettings] =
+    useState<CustomApprovalSettings>(
+      normalizeCustomApprovalSettings(initialState.customApprovalSettings)
+    );
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -744,7 +786,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memoryRecords: managedMemoryRecords,
       connectedBackendIds,
       selectedModelId,
-      permissionMode
+      permissionMode,
+      permissionLabel,
+      customApprovalSettings
     }),
     [
       activeItem,
@@ -755,11 +799,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       plans,
       composerValue,
       connectedBackendIds,
+      customApprovalSettings,
       dismissedApprovalIds,
       importedKnowledgeSources,
       managedMemoryRecords,
       memoryDisabled,
       permissionMode,
+      permissionLabel,
       pinnedSourceIds,
       selectedModelId,
       voiceEnabled
@@ -917,6 +963,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setConnectedBackendIds(recovered.connectedBackendIds);
         setSelectedModelId(recovered.selectedModelId);
         setPermissionMode(recovered.permissionMode);
+        setPermissionLabel(
+          isApprovalPresetLabel(recovered.permissionLabel)
+            ? recovered.permissionLabel
+            : permissionLabelFor(recovered.permissionMode)
+        );
+        setCustomApprovalSettings(
+          normalizeCustomApprovalSettings(recovered.customApprovalSettings)
+        );
         setLastAction("Recovered workspace from local runtime");
       })
       .finally(() => {
@@ -1654,8 +1708,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
 
     try {
-      const response =
-        (await promoteRuntimeKnowledgeSourceToMemory(request)) ?? promoteKnowledgeSourceFallback(request);
+      const response = runtimeOrPreview(
+        await promoteRuntimeKnowledgeSourceToMemory(request),
+        () => promoteKnowledgeSourceFallback(request),
+        "Memory changes require the desktop runtime."
+      );
       setApprovalAudit((current) => prependAuditEntry(current, response.auditEntry));
       commitMemoryState(response.state, `Approved memory: ${response.record.title}`);
       setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
@@ -1847,8 +1904,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     );
     setConnectorStatus(`Searching ${connector?.name ?? request.connectorId}...`);
     try {
-      const result =
-        (await searchRuntimeConnector(request)) ?? searchFixtureConnector(request);
+      const result = runtimeOrPreview(
+        await searchRuntimeConnector(request),
+        () => searchFixtureConnector(request),
+        "Connected app search requires the desktop runtime."
+      );
       setConnectorSearchResult(result);
       setConnectorStatus(
         result.items.length > 0
@@ -1877,8 +1937,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
 
     try {
-      const imported =
-        (await importRuntimeConnectorItem(request)) ?? importFixtureConnectorItem(request);
+      const imported = runtimeOrPreview(
+        await importRuntimeConnectorItem(request),
+        () => importFixtureConnectorItem(request),
+        "Connected app imports require the desktop runtime."
+      );
       setConnectorImportedSources((current) => [
         imported.source,
         ...current.filter((source) => source.id !== imported.source.id)
@@ -1903,8 +1966,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         ...prepareFixtureConnectorAction(action, payload),
         permissionMode
       };
-      const prepared =
-        (await prepareRuntimeConnectorAction(fixtureRequest)) ?? fixtureRequest;
+      const prepared = runtimeOrPreview(
+        await prepareRuntimeConnectorAction(fixtureRequest),
+        () => fixtureRequest,
+        "Connected app actions require the desktop runtime."
+      );
       setPreparedConnectorActions((current) => [
         prepared,
         ...current.filter((request) => request.id !== prepared.id)
@@ -2116,8 +2182,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   // Composer picker bindings: the model picker drives request.model on the next
-  // agent run; the permission-level picker maps its label onto a PermissionMode
-  // that gates tool execution in the agent loop.
+  // agent run; the approval preset maps its label onto a PermissionMode that
+  // gates tool execution in the agent loop.
   const selectModel = (modelId: string) => {
     setSelectedModelId(modelId);
     const chosen = selectableModels.find((model) => model.id === modelId);
@@ -2125,8 +2191,29 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const selectPermissionLabel = (label: string) => {
-    setPermissionMode(permissionModeFor(label));
-    setLastAction(`Permission level set to ${label}`);
+    if (!isApprovalPresetLabel(label)) {
+      return;
+    }
+    setPermissionLabel(label);
+    setPermissionMode(
+      label === "Custom"
+        ? resolvePermissionModeFromCustom(customApprovalSettings)
+        : permissionModeFor(label)
+    );
+    setLastAction(`Approval preset set to ${label}`);
+  };
+
+  const updateCustomApprovalSetting = (
+    key: keyof CustomApprovalSettings,
+    value: boolean
+  ) => {
+    setCustomApprovalSettings((current) => {
+      const next = normalizeCustomApprovalSettings({ ...current, [key]: value });
+      setPermissionLabel("Custom");
+      setPermissionMode(resolvePermissionModeFromCustom(next));
+      return next;
+    });
+    setLastAction("Custom approvals updated");
   };
 
   const approvalNeedsConfirmation = (
@@ -2154,6 +2241,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     modification?: ApprovalModification,
     confirmationText?: string
   ) => {
+    const connectorAction = preparedConnectorActions.find(
+      (candidate) => candidate.approval.id === approval.id
+    );
+    if (connectorAction && (decision === "session" || decision === "rule")) {
+      setLastAction("Connected app changes need a fresh approval each time.");
+      return;
+    }
+
     const request = {
       request: approval,
       decision,
@@ -2163,8 +2258,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
 
     try {
-      const response =
-        (await resolveRuntimeApprovalRequest(request)) ?? resolveApprovalFallback(request);
+      const response = runtimeOrPreview(
+        await resolveRuntimeApprovalRequest(request),
+        () => resolveApprovalFallback(request),
+        "Approvals require the desktop runtime."
+      );
 
       setApprovalAudit((current) => prependAuditEntry(current, response.auditEntry));
       if (response.dismissed) {
@@ -2183,6 +2281,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           response.grant as ApprovalGrant,
           ...current.filter((grant) => grant.id !== response.grant?.id)
         ]);
+      }
+
+      if (connectorAction) {
+        const connectorResult = await executeRuntimeConnectorAction({
+          action: connectorAction,
+          approval: request
+        });
+        if (connectorResult === null) {
+          throw new Error("Connected app changes require the desktop runtime.");
+        }
+        setPreparedConnectorActions((current) =>
+          current.filter((candidate) => candidate.id !== connectorAction.id)
+        );
+        setConnectorStatus(connectorResult.message);
       }
 
       // Grant -> execute bridge: drive the matching pending tool call on the
@@ -3023,8 +3135,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     resolvedSelectedModelId,
     selectedModelId,
     selectModel,
-    permissionLabel: permissionLabelFor(permissionMode) || DEFAULT_PERMISSION_LABEL,
+    permissionMode,
+    permissionLabel,
     selectPermissionLabel,
+    customApprovalSettings,
+    updateCustomApprovalSetting,
     recordBackendToolCall,
     dismissOnboarding,
     lastAction,

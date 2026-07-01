@@ -72,9 +72,9 @@ export function Composer({
   /** Label to show on the model chip when a model is selected. */
   selectedModelLabel: string;
   onSelectModel: (modelId: string) => void;
-  /** Label of the active permission profile (drives the chip text). */
+  /** Label of the active approval preset (drives the chip text). */
   permissionLabel: string;
-  /** Permission profiles available in the picker. */
+  /** Approval presets available in the picker. */
   permissionProfiles: readonly PermissionProfile[];
   onSelectPermissionLabel: (label: string) => void;
   inThread?: boolean;
@@ -425,21 +425,22 @@ export function Composer({
                   onTogglePermissions();
                 }}
                 aria-expanded={permissionsOpen}
-                aria-label="Select permissions"
+                aria-label="Approval preset"
               >
                 <ShieldCheck size={16} weight="bold" />
                 <span>{permissionLabel}</span>
                 <CaretDown size={13} weight="bold" />
               </button>
               {permissionsOpen ? (
-                <div className="composer-menu composer-permissions" role="menu" aria-label="Permission level">
-                  <span className="composer-menu__heading">Permission level</span>
+                <div className="composer-menu composer-permissions" role="menu" aria-label="Approval preset">
+                  <span className="composer-menu__heading">How Fable should work</span>
                   {permissionProfiles.map((profile) => (
                     <button
                       key={profile.label}
                       type="button"
                       role="menuitemradio"
                       aria-checked={permissionLabel === profile.label}
+                      className={profile.custom ? "composer-permissions__custom" : undefined}
                       onClick={() => {
                         onSelectPermissionLabel(profile.label);
                         onTogglePermissions();

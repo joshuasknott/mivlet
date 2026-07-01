@@ -3,6 +3,7 @@ import type {
   ApprovalGrant,
   ApprovalRequest,
   ApprovalRiskLevel,
+  CustomApprovalSettings,
   PermissionMode
 } from "@fable/protocol";
 import {
@@ -202,3 +203,36 @@ export function highRiskExplanation(
 
 /** Convenience re-export so callers can list profiles without a second import. */
 export const APPROVAL_PROFILES = PERMISSION_PROFILES;
+
+export const CUSTOM_APPROVAL_SECTION = {
+  heading: "Choose what Fable can help with",
+  intro: "Turn on only the kinds of work you want Fable to prepare.",
+  reassurance: "Fable still asks before risky actions and before any change is applied."
+} as const;
+
+export const CUSTOM_APPROVAL_TOGGLES: Record<
+  keyof CustomApprovalSettings,
+  { label: string; helper: string }
+> = {
+  allowSmallLocalEdits: {
+    label: "Let Fable prepare small local edits",
+    helper: "You still approve each change before it is applied."
+  },
+  allowPowerfulCommands: {
+    label: "Let Fable use powerful commands",
+    helper: "Risky or hard-to-undo actions always ask first."
+  }
+};
+
+export const CUSTOM_APPROVAL_TOGGLE_ORDER: (keyof CustomApprovalSettings)[] = [
+  "allowSmallLocalEdits",
+  "allowPowerfulCommands"
+];
+
+export function customApprovalToggleLabel(key: keyof CustomApprovalSettings): string {
+  return CUSTOM_APPROVAL_TOGGLES[key].label;
+}
+
+export function customApprovalToggleHelper(key: keyof CustomApprovalSettings): string {
+  return CUSTOM_APPROVAL_TOGGLES[key].helper;
+}

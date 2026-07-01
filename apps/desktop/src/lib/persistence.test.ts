@@ -28,7 +28,12 @@ const defaultState: PersistedShellState = {
   memoryRecords: [],
   connectedBackendIds: [],
   selectedModelId: "",
-  permissionMode: "full-access"
+  permissionMode: "full-access",
+  permissionLabel: "Work Freely",
+  customApprovalSettings: {
+    allowSmallLocalEdits: false,
+    allowPowerfulCommands: false
+  }
 };
 
 describe("Fable persistence migration", () => {
@@ -108,6 +113,42 @@ describe("Fable schedules round-trip through the runtime snapshot", () => {
   });
 });
 
+describe("Fable approval choices round-trip through the runtime snapshot", () => {
+  it("preserves Custom as the visible choice and saves both toggles", () => {
+    const state: PersistedShellState = {
+      ...defaultState,
+      permissionMode: "full-access",
+      permissionLabel: "Custom",
+      customApprovalSettings: {
+        allowSmallLocalEdits: true,
+        allowPowerfulCommands: true
+      }
+    };
+
+    const snapshot = shellStateToRuntimeSnapshot(state);
+    expect(snapshot.permissionLabel).toBe("Custom");
+    expect(snapshot.customApprovalSettings).toEqual(state.customApprovalSettings);
+    expect(shellStateFromRuntimeSnapshot(snapshot, defaultState)).toMatchObject({
+      permissionMode: "full-access",
+      permissionLabel: "Custom",
+      customApprovalSettings: state.customApprovalSettings
+    });
+  });
+
+  it("maps an old trusted-scope snapshot to Ask Me", () => {
+    const snapshot = shellStateToRuntimeSnapshot(defaultState);
+    delete snapshot.permissionLabel;
+    delete snapshot.customApprovalSettings;
+    snapshot.permissionMode = "trusted-scope";
+
+    expect(shellStateFromRuntimeSnapshot(snapshot, defaultState)).toMatchObject({
+      permissionMode: "trusted-scope",
+      permissionLabel: "Ask Me",
+      customApprovalSettings: defaultState.customApprovalSettings
+    });
+  });
+});
+
 describe("Fable persistence secret boundary", () => {
   beforeEach(() => window.localStorage.clear());
 
@@ -161,7 +202,9 @@ describe("Fable persistence secret boundary", () => {
         "memoryRecords",
         "connectedBackendIds",
         "selectedModelId",
-        "permissionMode"
+        "permissionMode",
+        "permissionLabel",
+        "customApprovalSettings"
       ].sort()
     );
     // No secret-shaped key names leak in.

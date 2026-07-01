@@ -1,17 +1,26 @@
-import type { ApprovalRiskLevel, PermissionMode, PermissionProfileId } from "@fable/protocol";
+import type {
+  ApprovalRiskLevel,
+  CustomApprovalSettings,
+  PermissionMode,
+  PermissionProfileId
+} from "@fable/protocol";
 
 export type PermissionEffect =
   | "local-read"
   | "local-write"
+  | "delete"
   | "shell-execution"
   | "web-fetch"
   | "connector-read"
   | "connector-write"
+  | "publish-external"
   | "cache-read"
   | "cache-mutation"
   | "app-state-mutation"
   | "schedule-mutation"
-  | "schedule-execution";
+  | "schedule-execution"
+  | "memory-promotion"
+  | "remote-approval-decision";
 
 export interface PermissionPolicyInput {
   mode?: PermissionMode;
@@ -54,17 +63,29 @@ const TRUSTED_ALLOWED = new Set<PermissionEffect>([
   "connector-write",
   "app-state-mutation",
   "schedule-mutation",
-  "schedule-execution"
+  "schedule-execution",
+  "delete",
+  "publish-external",
+  "memory-promotion",
+  "remote-approval-decision"
+]);
+
+const HIGH_SEVERITY_EFFECTS = new Set<PermissionEffect>([
+  "delete",
+  "shell-execution",
+  "connector-write",
+  "publish-external",
+  "cache-mutation",
+  "schedule-mutation",
+  "schedule-execution",
+  "memory-promotion",
+  "remote-approval-decision"
 ]);
 
 const CONSEQUENTIAL_EFFECTS = new Set<PermissionEffect>([
   "local-write",
-  "shell-execution",
-  "connector-write",
-  "cache-mutation",
   "app-state-mutation",
-  "schedule-mutation",
-  "schedule-execution"
+  ...HIGH_SEVERITY_EFFECTS
 ]);
 
 const HIGH_RISKS = new Set<ApprovalRiskLevel>(["high", "critical"]);
@@ -118,6 +139,43 @@ export function effectForTool(toolName: string): PermissionEffect | null {
   }
 }
 
+const CONNECTOR_DELETE_ACTIONS = new Set<string>([
+  "google-drive.delete-file",
+  "notion.delete-block",
+  "slack.delete",
+  "google-calendar.delete-event",
+  "vercel.delete-domain"
+]);
+
+const CONNECTOR_PUBLISH_ACTIONS = new Set<string>([
+  "gmail.send",
+  "slack.post",
+  "slack.reply",
+  "slack.edit",
+  "notion.create-comment",
+  "github.comment",
+  "github.create-review",
+  "github.create-issue",
+  "github.update-issue",
+  "github.update-file",
+  "github.create-branch",
+  "github.dispatch-workflow",
+  "google-drive.share-file",
+  "vercel.promote",
+  "vercel.rollback",
+  "google-calendar.cancel-event"
+]);
+
+export function effectForConnectorAction(action: string): PermissionEffect {
+  if (CONNECTOR_DELETE_ACTIONS.has(action)) return "delete";
+  if (CONNECTOR_PUBLISH_ACTIONS.has(action)) return "publish-external";
+  return "connector-write";
+}
+
+export function isHighSeverityEffect(effect: PermissionEffect): boolean {
+  return HIGH_SEVERITY_EFFECTS.has(effect);
+}
+
 export function evaluatePermissionPolicy(input: PermissionPolicyInput): PermissionPolicyDecision {
   const { mode, profile } = normalizePermissionProfile(input);
   const riskLevel = input.riskLevel ?? "low";
@@ -158,4 +216,27 @@ export function evaluatePermissionPolicy(input: PermissionPolicyInput): Permissi
       ? "This action is allowed only through the approval and audit boundary."
       : "This read-like action is allowed by the active permission profile."
   };
+}
+
+export const DEFAULT_CUSTOM_APPROVAL_SETTINGS: CustomApprovalSettings = {
+  allowSmallLocalEdits: false,
+  allowPowerfulCommands: false
+};
+
+export function normalizeCustomApprovalSettings(
+  input: Partial<CustomApprovalSettings> | undefined | null
+): CustomApprovalSettings {
+  return { ...DEFAULT_CUSTOM_APPROVAL_SETTINGS, ...(input ?? {}) };
+}
+
+export function resolvePermissionModeFromCustom(
+  settings: CustomApprovalSettings
+): PermissionMode {
+  if (settings.allowPowerfulCommands) {
+    return "full-access";
+  }
+  if (settings.allowSmallLocalEdits) {
+    return "trusted-scope";
+  }
+  return "read-only";
 }

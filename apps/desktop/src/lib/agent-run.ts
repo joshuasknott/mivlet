@@ -9,6 +9,7 @@
 
 import type {
   AgentRunRequest,
+  ApprovalPresetLabel,
   BackendModel,
   KnowledgeSource,
   MemoryRecord,
@@ -17,52 +18,81 @@ import type {
 import { buildContextPrefix, MAX_TOKENS_DEFAULT, validateModelForRun } from "@fable/connectors";
 
 /**
- * The composer's permission-level picker uses user-facing labels; this maps each
- * to the protocol's PermissionMode vocabulary so the agent run can constrain
- * tool approvals. The protocol also uses these modes in approval requests.
+ * The composer's approval picker uses simple user-facing labels. These map
+ * onto the protocol's internal PermissionMode vocabulary so the agent run can
+ * constrain tool approvals without exposing implementation terms.
  */
 export interface PermissionProfile {
-  label: string;
+  label: ApprovalPresetLabel;
   description: string;
   mode: PermissionMode;
+  custom?: boolean;
 }
 
 export const PERMISSION_PROFILES: readonly PermissionProfile[] = [
   {
-    label: "Full with approvals",
-    description: "Propose broad actions; approve consequential work",
-    mode: "full-access"
+    label: "Read Only",
+    description: "Fable can look, summarize, search, and review, but cannot change anything.",
+    mode: "read-only"
   },
   {
-    label: "Trusted",
-    description: "Allow trusted work; approve sensitive or external actions",
+    label: "Ask Me",
+    description: "Fable asks before making changes or taking external actions.",
     mode: "trusted-scope"
   },
   {
-    label: "Read-only",
-    description: "Read local and connected sources only",
-    mode: "read-only"
+    label: "Work Freely",
+    description: "Fable handles everyday work, but asks before risky actions.",
+    mode: "full-access"
+  },
+  {
+    label: "Custom",
+    description: "Choose simple approval preferences.",
+    mode: "trusted-scope",
+    custom: true
   }
 ];
 
-export const DEFAULT_PERMISSION_LABEL = PERMISSION_PROFILES[0].label;
+export const DEFAULT_PERMISSION_LABEL: ApprovalPresetLabel = "Ask Me";
 
-/** The PermissionMode for a composer permission-level label (default = full-access). */
+/** The PermissionMode for a composer approval label. Default = Ask Me. */
 export function permissionModeFor(label: string): PermissionMode {
-  return PERMISSION_PROFILES.find((profile) => profile.label === label)?.mode ?? "full-access";
+  return PERMISSION_PROFILES.find((profile) => profile.label === label)?.mode ?? "trusted-scope";
 }
 
-/** The composer label for a PermissionMode (default = full with approvals). */
-export function permissionLabelFor(mode: PermissionMode): string {
-  return PERMISSION_PROFILES.find((profile) => profile.mode === mode)?.label ?? DEFAULT_PERMISSION_LABEL;
+/** The primary composer label for a PermissionMode. Custom is preserved separately. */
+export function permissionLabelFor(mode: PermissionMode): ApprovalPresetLabel {
+  return (
+    PERMISSION_PROFILES.find((profile) => profile.mode === mode && !profile.custom)?.label ??
+    DEFAULT_PERMISSION_LABEL
+  );
 }
 
 /** The plain description for a PermissionMode, surfaced wherever a profile is shown. */
 export function permissionDescriptionFor(mode: PermissionMode): string {
   return (
-    PERMISSION_PROFILES.find((profile) => profile.mode === mode)?.description ??
-    PERMISSION_PROFILES[0].description
+    PERMISSION_PROFILES.find((profile) => profile.mode === mode && !profile.custom)?.description ??
+    PERMISSION_PROFILES.find((profile) => profile.label === DEFAULT_PERMISSION_LABEL)!.description
   );
+}
+
+export function isApprovalPresetLabel(value: string): value is ApprovalPresetLabel {
+  return PERMISSION_PROFILES.some((profile) => profile.label === value);
+}
+
+export const APPROVAL_BANNED_JARGON = [
+  "sandbox",
+  "egress",
+  "mcp",
+  "execution policy",
+  "permission graph",
+  "token",
+  "credential"
+] as const;
+
+export function findApprovalJargon(copy: string): string[] {
+  const lower = copy.toLowerCase();
+  return APPROVAL_BANNED_JARGON.filter((term) => lower.includes(term));
 }
 
 export interface BuildContextPrefixForRunInput {

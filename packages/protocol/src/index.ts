@@ -1,5 +1,17 @@
 export type PermissionMode = "read-only" | "trusted-scope" | "full-access";
 export type PermissionProfileId = "read-only" | "trusted" | "full-with-approvals";
+export type ApprovalPresetLabel = "Read Only" | "Ask Me" | "Work Freely" | "Custom";
+
+/**
+ * Plain-language custom approval preferences. These are a view onto the same
+ * PermissionMode levels, not a second approval engine. The shell resolves the
+ * toggles down to one mode before a run, and the native execution boundary
+ * remains the only side-effect authority.
+ */
+export interface CustomApprovalSettings {
+  allowSmallLocalEdits: boolean;
+  allowPowerfulCommands: boolean;
+}
 
 export type ApprovalDecision = "once" | "session" | "rule" | "modify" | "deny";
 export type ApprovalRiskLevel = "low" | "medium" | "high" | "critical";
@@ -1482,6 +1494,17 @@ export interface RuntimeSnapshot {
    */
   permissionMode: PermissionMode;
   permissionProfile?: PermissionProfileId;
+  /**
+   * Selected approval preset label. Optional so older snapshots round-trip;
+   * tracked separately so Custom can stay visible even when it resolves to the
+   * same internal mode as another preset.
+   */
+  permissionLabel?: ApprovalPresetLabel;
+  /**
+   * Plain-language custom approval preferences. These carry only user
+   * preferences and resolve to an existing PermissionMode before execution.
+   */
+  customApprovalSettings?: CustomApprovalSettings;
   savedAt: string;
 }
 
@@ -2118,6 +2141,34 @@ export interface RemoteSession {
   lastActivityAt: string;
 }
 
+/** Local remote-control lifecycle. `unavailable` means no live LAN transport is bound. */
+export type RemoteControlLifecycleStatus = "disabled" | "unavailable" | "pairing" | "active" | "error";
+
+/** The transport family for v1. Deliberately LAN-local, not a hosted relay. */
+export type RemoteControlTransport = "lan-local";
+
+/** Desktop-owned remote-control status snapshot. Non-secret metadata only. */
+export interface RemoteControlStatusSnapshot {
+  status: RemoteControlLifecycleStatus;
+  requestedEnabled: boolean;
+  enabled: boolean;
+  transport: RemoteControlTransport;
+  transportReady: boolean;
+  pairingReady: boolean;
+  serverName: string;
+  deviceCount: number;
+  trustedDeviceCount: number;
+  revokedDeviceCount: number;
+  activeSessionCount: number;
+  message: string;
+  updatedAt: string;
+}
+
+/** Enable/disable request. `ephemeral` means process-only preference. */
+export interface RemoteControlPreferenceRequest {
+  ephemeral?: boolean;
+}
+
 /**
  * Desktop-issued pairing challenge. `confirmCode` is the short numeric code
  * the user types to prove physical presence — it is never the PSK. The PSK
@@ -2134,15 +2185,32 @@ export interface RemotePairingChallenge {
   expiresAt: string;
 }
 
-/**
- * Mobile response to a pairing challenge. `proofToken` is PSK-derived material
- * the Rust boundary verifies; it is opaque to JavaScript and is NOT the PSK.
- */
-export interface RemotePairingProof {
-  challengeNonce: string;
-  confirmCode: string;
-  /** PSK-derived proof material. Opaque to JS; verified behind the Rust boundary. */
-  proofToken: string;
+/** Start a short-lived local pairing artifact. */
+export interface RemotePairingStartRequest {
+  manualCode?: boolean;
+}
+
+/** Outcome of starting pairing. Fails closed until LAN transport/crypto exists. */
+export type RemotePairingStartResult =
+  | { ok: true; challenge: RemotePairingChallenge; status: RemoteControlStatusSnapshot }
+  | { ok: false; code: RemoteErrorCode; message: string; status: RemoteControlStatusSnapshot };
+
+/** Poll a pairing artifact. Exactly one id/code is used by future transport. */
+export interface RemotePairingStatusRequest {
+  challengeNonce?: string;
+  manualCode?: string;
+}
+
+/** Current state of a pairing artifact. */
+export type RemotePairingPollStatus = "pending" | "claimed" | "expired" | "unavailable";
+
+/** Outcome of reading pairing status. */
+export interface RemotePairingStatusResult {
+  ok: boolean;
+  status: RemotePairingPollStatus;
+  claimed: boolean;
+  code?: RemoteErrorCode;
+  message: string;
 }
 
 /** Outcome of a pairing attempt. */
@@ -2216,12 +2284,14 @@ export type RemoteCommand =
 /** Machine-readable failure codes for remote operations (all fail-closed). */
 export type RemoteErrorCode =
   | "device-unpaired"
+  | "device-revoked"
   | "session-expired"
   | "approval-not-found"
   | "approval-already-resolved"
   | "schedule-not-found"
   | "invalid-command"
   | "protocol-version-unsupported"
+  | "transport-unavailable"
   | "unauthorized";
 
 /** Result of applying (or refusing) a remote command. */

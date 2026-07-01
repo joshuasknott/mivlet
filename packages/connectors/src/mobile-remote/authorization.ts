@@ -3,15 +3,16 @@
  *
  * This is the load-bearing safety module for mobile remote control. A mobile
  * `RemoteCommand` only authorizes when ALL of the following hold:
+ *   - the session is bound to a currently trusted local device
  *   - the session is live (active + within lifetime + within idle window)
  *   - for approve/deny: the approval id matches a pending desktop approval that
  *     still exists and has NOT been resolved yet
  *   - for schedule commands: the job id matches an existing scheduled job
  *
  * Every other case fails closed: replayed approval ids, non-existent approvals,
- * already-resolved approvals, expired/revoked/pairing sessions, unknown job
- * ids, and unrecognized command types all return `{ ok: false }` and authorize
- * nothing.
+ * already-resolved approvals, unpaired/revoked devices,
+ * expired/revoked/pairing sessions, unknown job ids, and unrecognized command
+ * types all return `{ ok: false }` and authorize nothing.
  *
  * IMPORTANT: authorization only says a command is ELIGIBLE to be applied. It
  * does NOT issue an execution permit. The actual permit issuance stays in the
@@ -24,6 +25,7 @@
 
 import type {
   ApprovalRequest,
+  RemoteDevice,
   RemoteCommand,
   RemoteCommandResult,
   RemoteErrorCode,
@@ -39,6 +41,11 @@ export interface PendingApprovalIndex {
   has(id: string): boolean;
   /** The pending approval by id, or undefined when missing/resolved. */
   get(id: string): ApprovalRequest | undefined;
+}
+
+/** The set of locally paired devices trusted by the desktop. */
+export interface RemoteDeviceIndex {
+  get(id: string): RemoteDevice | undefined;
 }
 
 /** The set of scheduled jobs a mobile device may pause/resume/delete. */
@@ -63,13 +70,26 @@ function denied(code: RemoteErrorCode, message: string): RemoteCommandResult {
 export function authorizeCommand(input: {
   command: RemoteCommand;
   session: RemoteSession;
+  devices: RemoteDeviceIndex;
   pendingApprovals: PendingApprovalIndex;
   scheduledJobs: ScheduledJobIndex;
   now: Now;
 }): RemoteCommandResult {
-  const { command, session, pendingApprovals, scheduledJobs, now } = input;
+  const { command, session, devices, pendingApprovals, scheduledJobs, now } = input;
 
-  // 1. Session must be live. Non-live sessions (pairing/expired/idle/revoked)
+  // 1. The session must bind to a currently trusted device.
+  const device = devices.get(session.deviceId);
+  if (!device) {
+    return denied("device-unpaired", "Remote device is not paired with this desktop.");
+  }
+  if (device.trustState === "revoked") {
+    return denied("device-revoked", "Remote device has been revoked.");
+  }
+  if (device.trustState !== "trusted") {
+    return denied("device-unpaired", "Remote device is not trusted by this desktop.");
+  }
+
+  // 2. Session must be live. Non-live sessions (pairing/expired/idle/revoked)
   //    fail closed and authorize nothing.
   if (!isSessionLive(session, now)) {
     return denied("session-expired", "Remote session is not live.");

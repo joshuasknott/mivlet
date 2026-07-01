@@ -8,13 +8,13 @@
  *      types the short confirm code shown on the desktop.
  *   3. The confirm code proves physical presence — a remote attacker who only
  *      captured the QR (e.g. via a screenshot) cannot pair without it.
- *   4. Rust verifies the PSK-derived `proofToken`; JS never sees the PSK.
+ *   4. The future Rust transport verifies PSK-derived proof internally.
  *
  * This module owns only the confirm-code window/match validation — the part
  * that is pure and free of secret material. PSK proof verification is Rust-side.
  *
- * SECRET INVARIANT: this module holds no PSK, no long-lived device key. The
- * `proofToken` is opaque to JS and is not inspected here.
+ * SECRET INVARIANT: this module holds no PSK, no proof material, and no
+ * long-lived device key.
  */
 
 import type { RemoteErrorCode } from "@fable/protocol";

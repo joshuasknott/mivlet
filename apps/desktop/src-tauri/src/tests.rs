@@ -891,6 +891,8 @@ fn runtime_snapshot() -> RuntimeSnapshot {
         connected_backend_ids: vec!["codex".to_string()],
         selected_model_id: "gpt-5".to_string(),
         permission_mode: "read-only".to_string(),
+        permission_label: Some("Read Only".to_string()),
+        custom_approval_settings: None,
         saved_at: "2026-06-26T10:30:00.000Z".to_string(),
     }
 }

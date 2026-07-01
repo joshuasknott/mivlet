@@ -24,11 +24,16 @@ export type { LocalFileValidation, LocalTextFileCandidate } from "./local-files"
 export { searchKnowledgeSources } from "./knowledge-search";
 export type { KnowledgeSearchOptions } from "./knowledge-search";
 export {
+  DEFAULT_CUSTOM_APPROVAL_SETTINGS,
+  effectForConnectorAction,
   effectForTool,
   evaluatePermissionPolicy,
+  isHighSeverityEffect,
   normalizePermissionProfile,
+  normalizeCustomApprovalSettings,
   permissionModeForProfile,
   permissionProfileForMode,
+  resolvePermissionModeFromCustom,
   type PermissionEffect,
   type PermissionPolicyDecision,
   type PermissionPolicyInput

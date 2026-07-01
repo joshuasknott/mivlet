@@ -2,6 +2,8 @@ import type {
   ApprovalModification,
   ApprovalRequest,
   ApprovalDecision,
+  ApprovalPresetLabel,
+  CustomApprovalSettings,
   LocalFileImport,
   MemoryRecord,
   PermissionMode,
@@ -68,6 +70,10 @@ export interface PersistedShellState {
   selectedModelId: string;
   /** Composer permission level driving agent-run tool gating. */
   permissionMode: PermissionMode;
+  /** User-facing approval preset label shown in the composer. */
+  permissionLabel: ApprovalPresetLabel;
+  /** Plain-language Custom approval preferences; no secrets. */
+  customApprovalSettings: CustomApprovalSettings;
 }
 
 export const EMPTY_APPROVAL_MODIFICATION: ApprovalModificationDraft = {

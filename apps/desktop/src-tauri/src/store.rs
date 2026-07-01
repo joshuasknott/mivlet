@@ -97,8 +97,7 @@ impl Store {
         Self::configure_pragmas(&conn)?;
         // Fail closed on structural corruption before any data access.
         Self::verify_integrity(&conn)?;
-        Self::apply_schema(&conn)?;
-        Self::run_migrations(&conn)?;
+        Self::initialize_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
             vault,
@@ -110,8 +109,7 @@ impl Store {
     pub fn open_in_memory(vault: Vault) -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         Self::configure_pragmas(&conn)?;
-        Self::apply_schema(&conn)?;
-        Self::run_migrations(&conn)?;
+        Self::initialize_schema(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
             vault,
@@ -140,6 +138,36 @@ impl Store {
                 "Fable's local database failed its integrity check: {ok}."
             )))
         }
+    }
+
+    fn initialize_schema(conn: &Connection) -> Result<()> {
+        let has_existing_tables: bool = conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM sqlite_master
+               WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+             );",
+            [],
+            |row| row.get(0),
+        )?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS schema_meta (
+               key TEXT PRIMARY KEY,
+               value TEXT NOT NULL
+             );",
+        )?;
+
+        if has_existing_tables {
+            // Older tables must gain their migration columns before the full
+            // current schema creates indices over those columns.
+            Self::run_migrations(conn)?;
+            Self::apply_schema(conn)?;
+        } else {
+            // Fresh databases use the complete schema so every table starts
+            // with its current shape; the migration runner records the version.
+            Self::apply_schema(conn)?;
+            Self::run_migrations(conn)?;
+        }
+        Ok(())
     }
 
     fn apply_schema(conn: &Connection) -> Result<()> {
@@ -682,6 +710,47 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn migrates_existing_tables_before_applying_current_indices() {
+        let dir = TempDir::new().unwrap();
+        let db = dir.path().join(DB_FILENAME);
+        {
+            let conn = Connection::open(&db).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE schema_meta (
+                  key TEXT PRIMARY KEY,
+                  value TEXT NOT NULL
+                );
+                INSERT INTO schema_meta (key, value) VALUES ('schema_version', '3');
+                CREATE TABLE project (
+                  id TEXT PRIMARY KEY,
+                  title_fingerprint TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  payload BLOB NOT NULL,
+                  payload_nonce BLOB NOT NULL
+                );
+                INSERT INTO project VALUES ('legacy', 'fp', 'now', 'now', x'01', x'02');
+                "#,
+            )
+            .unwrap();
+        }
+
+        let store = Store::open(&db, vault()).unwrap();
+        let owner: String = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT workspace_id FROM project WHERE id = 'legacy';",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(owner, repos::scope::DEFAULT_WORKSPACE_ID);
     }
 
     #[test]

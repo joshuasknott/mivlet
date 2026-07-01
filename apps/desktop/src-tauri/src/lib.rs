@@ -195,9 +195,12 @@ pub fn run() {
             workflows::list_workflow_runs,
             workflows::list_workflow_runs_for_definition,
             notifications::deliver_notification,
+            remote_control::remote_control_disable,
+            remote_control::remote_control_enable,
+            remote_control::remote_control_status,
             remote_control::remote_list_devices,
             remote_control::remote_pairing_start,
-            remote_control::remote_pairing_complete,
+            remote_control::remote_pairing_status,
             remote_control::remote_revoke_device,
             remote_control::remote_handle_command
         ])

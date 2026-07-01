@@ -121,18 +121,18 @@ export function ApprovalPanel({
                     <dd>{approval.action}</dd>
                   </div>
                   <div>
-                    <dt>Permission</dt>
+                    <dt>Fable can</dt>
                     <dd>
                       <span className="approval-profile">{profileLabel(approval.mode)}</span>
                       <small>{profileDescription(approval.mode)}</small>
                     </dd>
                   </div>
                   <div>
-                    <dt>Data used</dt>
+                    <dt>Information used</dt>
                     <dd>{approval.dataUsed.join(", ")}</dd>
                   </div>
                   <div>
-                    <dt>Consequence</dt>
+                    <dt>What will happen</dt>
                     <dd>{approval.consequence}</dd>
                   </div>
                   <div>
@@ -160,8 +160,13 @@ export function ApprovalPanel({
                   />
                 ) : (
                   <div className="approval-actions">
-                    {DECISION_ORDER.filter((decision) =>
-                      approval.decisions.includes(decision)
+                    {DECISION_ORDER.filter(
+                      (decision) =>
+                        approval.decisions.includes(decision) &&
+                        !(
+                          isHighRisk(approval.mode, approval.riskLevel) &&
+                          (decision === "session" || decision === "rule")
+                        )
                     ).map((decision) => (
                       <button
                         key={decision}
@@ -244,10 +249,10 @@ function ApprovalModifyForm({
         })}
       </p>
       <label>
-        <span>Permission mode</span>
+        <span>How Fable should work</span>
         <div
           className="permission-segments"
-          aria-label={`Permission mode for ${approval.action}`}
+          aria-label={`How Fable should work for ${approval.action}`}
           role="group"
         >
           {(["read-only", "trusted-scope", "full-access"] as const).map((mode) => (
@@ -263,9 +268,9 @@ function ApprovalModifyForm({
         </div>
       </label>
       <label>
-        <span>Allowed data</span>
+        <span>Information Fable can use</span>
         <textarea
-          aria-label={`Allowed data for ${approval.action}`}
+          aria-label={`Information Fable can use for ${approval.action}`}
           value={draft.dataUsed}
           onChange={(event) =>
             onUpdateModification({ ...draft, dataUsed: event.target.value })
@@ -273,9 +278,9 @@ function ApprovalModifyForm({
         />
       </label>
       <label>
-        <span>Consequence</span>
+        <span>What will happen</span>
         <textarea
-          aria-label={`Consequence for ${approval.action}`}
+          aria-label={`What will happen for ${approval.action}`}
           value={draft.consequence}
           onChange={(event) =>
             onUpdateModification({ ...draft, consequence: event.target.value })

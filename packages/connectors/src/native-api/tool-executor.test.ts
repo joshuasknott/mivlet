@@ -346,6 +346,28 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
     expect(resolved).toBe(true);
   });
 
+  it("a standing grant never auto-satisfies a high-risk call", async () => {
+    const gate = createApprovalGate();
+    const approval = approvalFor("c1", "write-file");
+    gate.addStandingGrant({
+      ...grant("g-high"),
+      action: approval.action,
+      mode: approval.mode,
+      dataUsed: approval.dataUsed
+    });
+
+    let resolved = false;
+    const pending = gate.waitForDecision(approval).then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    gate.resolveGrant("c1");
+    await pending;
+    expect(resolved).toBe(true);
+  });
+
   it("resolveDeny drives a pending call to denied", async () => {
     const gate = createApprovalGate();
     let resolved: DecisionResult | undefined;

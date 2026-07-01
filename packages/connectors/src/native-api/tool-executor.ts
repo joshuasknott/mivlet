@@ -96,8 +96,8 @@ export function createApprovalGate(): ProductionApprovalGate {
 
 /**
  * The production gate: tracks standing (session/rule) grants and pending calls.
- * Standing grants auto-satisfy matching calls (same service + action + mode) so
- * a session/rule grant does not re-prompt for an equivalent future tool call.
+ * Legacy standing grants may auto-satisfy matching low-risk calls. High-risk
+ * calls always wait for a fresh decision.
  *
  * Concurrency model: a pending call is a deferred — an { resolve } pair held in
  * the pending map keyed by approval id. `register` pre-creates the entry (so a
@@ -172,7 +172,7 @@ export class ProductionApprovalGate implements ApprovalGate {
   }
 
   async waitForDecision(approval: ApprovalRequest): Promise<DecisionResult> {
-    // A standing grant (same service + action + mode) auto-satisfies the call.
+    // A legacy standing grant can cover only an exact low-risk request.
     if (this.standingGrants.some((grant) => grantMatches(grant, approval))) {
       return "granted";
     }
@@ -223,15 +223,21 @@ interface PendingEntry {
 }
 
 /**
- * Does a standing grant cover this approval? Grants match when the service,
- * action, and mode all agree — a stricter-mode grant never covers a looser call
- * (so a full-access write grant does not auto-satisfy a read-only read call).
+ * Does a legacy standing grant cover this approval? High/critical risk never
+ * auto-matches. Every remaining field represented by ApprovalGrant must agree
+ * exactly so argument substitution and mode changes fail closed.
  */
 function grantMatches(grant: ApprovalGrant, approval: ApprovalRequest): boolean {
+  if (approval.riskLevel === "high" || approval.riskLevel === "critical") {
+    return false;
+  }
   return (
     grant.service === approval.service &&
     grant.action === approval.action &&
-    grant.mode === approval.mode
+    grant.mode === approval.mode &&
+    grant.permissionProfile === approval.permissionProfile &&
+    grant.dataUsed.length === approval.dataUsed.length &&
+    grant.dataUsed.every((value, index) => value === approval.dataUsed[index])
   );
 }
 

@@ -33,8 +33,8 @@
 
 ## Controls
 
-- User-facing read-only, trusted, and full with approvals profiles mapped onto
-  the stable `read-only`, `trusted-scope`, and `full-access` protocol modes.
+- User-facing Read Only, Ask Me, Work Freely, and Custom choices mapped onto the
+  stable `read-only`, `trusted-scope`, and `full-access` protocol modes.
 - Consequence summaries before consequential actions.
 - Approve once, allow for this session, save as rule, modify, and deny outcomes.
 - Stronger confirmation (typing a phrase) for high-risk or critical actions (e.g., destructive, public, or financial tasks).
@@ -54,7 +54,7 @@
 - Connector logs/errors redact authorization headers, cookies, tokens, raw payloads, email bodies, Slack messages, and imported Drive/Notion content.
 - OAuth uses high-entropy state and PKCE S256. Pending verifiers are stored in the OS credential store, callbacks require exact state, and plain HTTP redirects are restricted to literal loopback IP addresses.
 - The auth broker is required only for confidential-client or provider-installation flows. It has no model endpoint and no authority to execute connector actions.
-- General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, unconsumed permit. Saved rules only automate the UI approval step and do not bypass execution-boundary rechecks or permit validation.
+- General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, fresh, unconsumed permit. Argument substitution, risk or mode downgrade, stale permits, and replay fail closed. High-risk tool calls and all connector writes require a fresh per-action decision.
 - Native tools recheck the registered permission/risk policy, active profile,
   and exact argument preview. File operations remain workspace-confined.
 - Connector writes always require a fresh per-action record containing connector, account, proposed action, target, human-readable preview, risk, result, timestamps, actor, request/run correlation, and normalized failure code. Preparation and execution fail closed when the captured profile is read-only or otherwise does not allow connector writes.

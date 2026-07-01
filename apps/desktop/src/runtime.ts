@@ -37,6 +37,9 @@ import type {
   NotificationRecord,
   PersistedAgentRun,
   RecordActionHistoryRequest,
+  RemoteControlPreferenceRequest,
+  RemoteControlStatusSnapshot,
+  RemoteDevice,
   RuntimeSnapshot,
   ScheduledExecutionRoute,
   ScheduledJob,
@@ -351,6 +354,56 @@ export async function recordRuntimeActionHistory(
   } catch {
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Mobile remote control.
+//
+// Rust owns status and trust metadata. Browser preview returns null, so the UI
+// never implies that a live connection exists outside the desktop runtime.
+// ---------------------------------------------------------------------------
+
+export async function getRuntimeRemoteControlStatus() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RemoteControlStatusSnapshot>("remote_control_status");
+  } catch {
+    return null;
+  }
+}
+
+export async function enableRuntimeRemoteControl(request?: RemoteControlPreferenceRequest) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RemoteControlStatusSnapshot>("remote_control_enable", {
+    request: request ?? null
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
+}
+
+export async function disableRuntimeRemoteControl(request?: RemoteControlPreferenceRequest) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RemoteControlStatusSnapshot>("remote_control_disable", {
+    request: request ?? null
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
+}
+
+export async function listRuntimeRemoteDevices() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RemoteDevice[]>("remote_list_devices");
+  } catch {
+    return null;
+  }
+}
+
+export async function revokeRuntimeRemoteDevice(deviceId: string) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RemoteDevice>("remote_revoke_device", { deviceId }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 // ---------------------------------------------------------------------------

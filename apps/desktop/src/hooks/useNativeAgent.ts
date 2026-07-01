@@ -32,7 +32,6 @@ import {
   type BackendDeps,
   type ToolExecutor
 } from "@fable/connectors";
-import { permissionModeFor } from "../lib/agent-run";
 import { describeBackendError } from "../lib/backend-errors";
 import { createDesktopAcpTransport } from "../lib/acp-transport";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
@@ -176,7 +175,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     async (
       request: AgentRunRequest,
       contextPrefix?: string,
-      permissionLabel?: string,
+      requestedPermissionMode?: PermissionMode,
       parentRunId?: string
     ) => {
       let persisted: PersistedAgentRun | null = null;
@@ -235,11 +234,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       let lastPersistedTranscriptLength = 0;
       let lastPersistedAt = Date.now();
       const pendingApprovalByCall = new Map<string, string>();
-      // Map the composer's permission-level label to a PermissionMode that gates
-      // tool execution in the loop (read-only suppresses write/shell, etc.).
-      const permissionMode: PermissionMode = permissionLabel
-        ? permissionModeFor(permissionLabel)
-        : "full-access";
+      // The shell resolves the visible approval preset (including Custom) down
+      // to one PermissionMode before the run reaches this hook.
+      const permissionMode: PermissionMode = requestedPermissionMode ?? "trusted-scope";
       // Resolve the run through the provider-neutral backend. The adapter
       // (native-API today) builds its egress transport from deps and returns null
       // when no transport is available (browser preview). The event handling below
@@ -475,7 +472,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           maxTokens: 2_048
         },
         undefined,
-        "Read-only",
+        "read-only",
         runToRetry.id
       );
     },

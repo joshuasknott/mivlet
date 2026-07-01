@@ -16,7 +16,7 @@ The UI talks to the runtime through typed protocol objects in `packages/protocol
 Core domains:
 
 - `Directive`: workspace-aware prompt starters that write into the universal composer.
-- `ApprovalRequest`: consequence-aware approval prompts with approve once, allow for this session, save as rule, modify, and deny outcomes.
+- `ApprovalRequest`: consequence-aware approval prompts. Tool and connector writes use fresh per-action decisions; lower-risk legacy flows can still represent session or saved grants.
 - `ApprovalGrant`: scoped approval grants, either temporary for the current session or saved as rules.
 - `ApprovalAuditEntry`: local audit history for user decisions and resumable follow-up.
 - `MemoryRecord`: facts, inferences, provenance, freshness, permissions, and user controls.
@@ -26,7 +26,7 @@ Core domains:
 - `AutomationRule`: scheduled or event-driven workflow metadata with approval requirements.
 - `RuntimeSnapshot`: resumable app state after restart, including active view, draft text, approvals, pinned sources, imported knowledge, automation status, and memory controls.
 
-Implemented runtime commands cover approval resolution, one-time execution permits, standing approval rules, approval audit persistence, native agent-run journaling and restart recovery, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Browser preview keeps matching fallbacks so the UI remains testable outside Tauri.
+Implemented runtime commands cover approval resolution, one-time execution permits, approval audit persistence, native agent-run journaling and restart recovery, local text-file import, imported knowledge persistence, memory control state, approval-gated memory promotion, memory export formatting, runtime snapshot recovery, and lexical cited retrieval over workspace sources. Development and test builds may use explicitly labelled preview adapters; production never silently substitutes fixtures for an unavailable native runtime.
 
 ### Action History (Audit)
 
@@ -77,11 +77,8 @@ Fable owns the native API agent loop while preserving provider-specific wire for
   include the active thread plus bounded user, assistant, and tool exchanges.
   Interrupted runs surface in chat and can be explicitly retried from the
   durable user prompt without replaying prior tool side effects.
-- Model tool calls are untrusted proposals. The shell obtains a user decision; Rust issues a request-fingerprinted, one-time execution permit and rechecks the tool policy, exact argument preview, workspace path confinement, and permit immediately before dispatch. Saved rules automate the UI approval step but never bypass these native execution-boundary checks, which are re-verified for every action before execution.
-- Workspace permission profiles are explicit policy, not UI-only state. The public protocol maps `read-only`, `trusted-scope`, and `full-access` modes to plain user-facing profiles:
-  - **read-only**: Read local and connected sources only.
-  - **trusted**: Allow trusted work; ask for permission on sensitive or external actions.
-  - **full with approvals**: Propose broad actions, but ask for permission before running consequential work.
+- Model tool calls are untrusted proposals. The shell obtains a user decision; Rust issues a request-fingerprinted, one-time execution permit and rechecks the tool policy, exact argument preview, workspace path confinement, and permit immediately before dispatch. High-risk calls require a fresh decision and never auto-match a standing grant.
+- Approval presets are explicit policy, not UI-only state. The UI uses **Read Only**, **Ask Me** (default), **Work Freely**, and **Custom**. Internally these resolve to the existing `read-only`, `trusted-scope`, and `full-access` modes; Custom never creates a second policy engine.
 - Consequential actions are categorized by risk level:
   - **Low / Medium risk**: Actions that query services or read data. Fable asks before running to keep you in control.
   - **High risk**: Actions that make local modifications or configuration changes. Fable checks with you before these run.
@@ -165,11 +162,12 @@ JSON idempotently, and routes production documents (including schedules, workflo
 and knowledge structures) through the native store. Credentials remain in OS secure storage. See
 [Encrypted local storage](../architecture/encrypted-storage.md).
 
-A paired mobile device is designed as a second approval, observation, and schedule-control
-surface (currently planned/deferred; only a UI stub exists on the desktop shell and no active socket or remote protocol is implemented). When implemented, pairing is pairwise and
-LAN-local (no hosted account), mobile decisions are inputs to the existing
-approval queue rather than execution authority, and no secret crosses the remote
-channel. See [Mobile remote control](../architecture/mobile-remote.md).
+A future paired mobile device is a second approval, observation, and schedule-control
+surface. The current build exposes honest local status and fail-closed command
+boundaries, but no live LAN transport or pairing. There is no hosted account
+requirement; mobile decisions can only feed the existing approval queue, and
+secret-derived pairing material must stay inside the native transport. See
+[Mobile remote control](../architecture/mobile-remote.md).
 
 ## Selective TokenMaxxer Reuse
 

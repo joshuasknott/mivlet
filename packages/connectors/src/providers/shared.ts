@@ -229,7 +229,8 @@ export function prepareConnectorAction(
       dataUsed: Object.keys(payload),
       consequence,
       requestedAt,
-      decisions: ["once", "session", "rule", "modify", "deny"],
+      // External writes always need a fresh decision for the exact action.
+      decisions: ["once", "modify", "deny"],
       ...(highRisk ? { confirmationPhrase: confirmationPhrase(action) } : {})
     }
   };

@@ -2,11 +2,13 @@ import {
   ArrowClockwise,
   CheckCircle,
   Clock,
+  DeviceMobile,
   GearSix,
   Key,
   LockKey,
   Moon,
   Plugs,
+  ShieldCheck,
   Spinner,
   Sparkle,
   SquaresFour,
@@ -19,7 +21,13 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { ActionHistoryEvent, BackendAuthState, BackendProvider } from "@fable/protocol";
+import type {
+  ActionHistoryEvent,
+  BackendAuthState,
+  BackendProvider,
+  CustomApprovalSettings,
+  RemoteControlStatusSnapshot
+} from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import {
   connectResultCopy,
@@ -28,12 +36,28 @@ import {
   stateViewFor
 } from "../../lib/backend-state";
 import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
+import {
+  CUSTOM_APPROVAL_SECTION,
+  CUSTOM_APPROVAL_TOGGLE_ORDER,
+  customApprovalToggleHelper,
+  customApprovalToggleLabel
+} from "../../lib/approval-copy";
+import { PERMISSION_PROFILES } from "../../lib/agent-run";
+import { getRuntimeRemoteControlStatus } from "../../runtime";
 import { ProviderIcon } from "../ProviderIcon";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
 import type { ProfileFixture } from "../../data/workspace";
 
-export type SettingsTab = "profile" | "providers" | "appearance" | "privacy" | "history" | "notifications" | "workspace";
+export type SettingsTab =
+  | "profile"
+  | "providers"
+  | "appearance"
+  | "privacy"
+  | "history"
+  | "approvals"
+  | "notifications"
+  | "workspace";
 
 export const tabs: { id: SettingsTab; label: string }[] = [
   { id: "profile", label: "Profile" },
@@ -41,6 +65,7 @@ export const tabs: { id: SettingsTab; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "privacy", label: "Privacy" },
   { id: "history", label: "History" },
+  { id: "approvals", label: "Approvals" },
   { id: "notifications", label: "Notifications" },
   { id: "workspace", label: "Workspace" }
 ];
@@ -112,6 +137,8 @@ export function SettingsPage({
             runtime={runtime}
             onStatus={setStatus}
           />
+        ) : activeTab === "approvals" ? (
+          <ApprovalsSettingsView runtime={runtime} onStatus={setStatus} />
         ) : activeTab === "history" ? (
           <HistorySettingsView
             runtime={runtime}
@@ -1094,7 +1121,133 @@ function renderSafeDetailValue(value: unknown): string {
   }
 }
 
-function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace" | "privacy" | "history"> }) {
+function ApprovalsSettingsView({
+  runtime,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  onStatus: (message: string) => void;
+}) {
+  const [remoteStatus, setRemoteStatus] = useState<RemoteControlStatusSnapshot | null>();
+
+  useEffect(() => {
+    let active = true;
+    void getRuntimeRemoteControlStatus().then((status) => {
+      if (active) setRemoteStatus(status);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleToggle = (key: keyof CustomApprovalSettings, value: boolean) => {
+    runtime.updateCustomApprovalSetting(key, value);
+    onStatus(`${customApprovalToggleLabel(key)} ${value ? "on" : "off"}.`);
+  };
+
+  return (
+    <div className="settings-page__body approvals-settings">
+      <div className="settings-section-heading">
+        <p>Choose how often Fable should stop and ask before it acts.</p>
+      </div>
+
+      <section className="approvals-settings__section" aria-labelledby="approval-choice-title">
+        <div className="profile-section__heading">
+          <span className="settings-panel__icon" aria-hidden="true">
+            <ShieldCheck size={19} />
+          </span>
+          <span>
+            <strong id="approval-choice-title">How Fable should work</strong>
+            <small>Ask Me is the recommended starting point.</small>
+          </span>
+        </div>
+        <div className="approval-preset-grid" role="radiogroup" aria-labelledby="approval-choice-title">
+          {PERMISSION_PROFILES.map((profile) => (
+            <button
+              key={profile.label}
+              type="button"
+              className="approval-preset-option"
+              role="radio"
+              aria-checked={runtime.permissionLabel === profile.label}
+              data-selected={runtime.permissionLabel === profile.label || undefined}
+              onClick={() => {
+                runtime.selectPermissionLabel(profile.label);
+                onStatus(`${profile.label} selected.`);
+              }}
+            >
+              <strong>{profile.label}</strong>
+              <span>{profile.description}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="approvals-settings__section" aria-labelledby="custom-approvals-title">
+        <div className="profile-section__heading">
+          <span className="settings-panel__icon" aria-hidden="true">
+            <GearSix size={19} />
+          </span>
+          <span>
+            <strong id="custom-approvals-title">{CUSTOM_APPROVAL_SECTION.heading}</strong>
+            <small>{CUSTOM_APPROVAL_SECTION.intro}</small>
+          </span>
+        </div>
+        <div className="custom-approvals-list" role="group" aria-labelledby="custom-approvals-title">
+          {CUSTOM_APPROVAL_TOGGLE_ORDER.map((key) => {
+            const checked = runtime.customApprovalSettings[key];
+            return (
+              <button
+                key={key}
+                type="button"
+                className="toggle-row custom-approval-toggle"
+                aria-pressed={checked}
+                onClick={() => handleToggle(key, !checked)}
+              >
+                <span>
+                  <strong>{customApprovalToggleLabel(key)}</strong>
+                  <small>{customApprovalToggleHelper(key)}</small>
+                </span>
+                <span className="toggle-switch" aria-hidden="true">
+                  <span />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <p className="approvals-settings__note">{CUSTOM_APPROVAL_SECTION.reassurance}</p>
+      </section>
+
+      <section className="approvals-settings__section" aria-labelledby="mobile-approvals-title">
+        <div className="profile-section__heading">
+          <span className="settings-panel__icon" aria-hidden="true">
+            <DeviceMobile size={19} />
+          </span>
+          <span>
+            <strong id="mobile-approvals-title">Mobile approvals</strong>
+            <small>A phone can answer a request, but only this computer can run the action.</small>
+          </span>
+        </div>
+        <div className="remote-approval-status" role="status">
+          <strong>
+            {remoteStatus === undefined
+              ? "Checking..."
+              : remoteStatus?.enabled
+                ? "Connected"
+                : "Not connected"}
+          </strong>
+          <span>
+            {remoteStatus === undefined
+              ? "Reading the local connection status."
+              : remoteStatus?.message ??
+                "Live mobile approvals are not available outside the desktop runtime."}
+          </span>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace" | "privacy" | "history" | "approvals"> }) {
   const copy = {
     notifications: {
       description: "Notification preferences will live here."

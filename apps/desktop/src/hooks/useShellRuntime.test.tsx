@@ -60,6 +60,7 @@ vi.mock("../runtime", () => ({
   setRuntimeJobStatus: vi.fn(async () => null),
   deleteRuntimeScheduledJob: vi.fn(async () => null),
   deliverRuntimeNotification: vi.fn(async () => null),
+  executeRuntimeConnectorAction: vi.fn(async () => null),
   saveRuntimeSnapshot: vi.fn(async () => null),
   searchRuntimeConnector: vi.fn(async () => null),
   searchRuntimeKnowledgeSources: vi.fn(async () => null),
@@ -105,6 +106,63 @@ async function awaitMountEffects() {
   // unmount cleanly flushes persistence. waitFor throws if it never resolves.
   await waitFor(() => expect(true).toBe(true));
 }
+
+describe("useShellRuntime - approval defaults and Custom mapping", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("starts in Ask Me", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+    expect(result.current.permissionLabel).toBe("Ask Me");
+    expect(result.current.permissionMode).toBe("trusted-scope");
+  });
+
+  it("updates Custom through the existing policy levels", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    act(() => result.current.updateCustomApprovalSetting("allowSmallLocalEdits", true));
+    expect(result.current.permissionLabel).toBe("Custom");
+    expect(result.current.permissionMode).toBe("trusted-scope");
+
+    act(() => result.current.updateCustomApprovalSetting("allowPowerfulCommands", true));
+    expect(result.current.permissionMode).toBe("full-access");
+  });
+});
+
+describe("useShellRuntime - connector approval execution", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("executes a prepared connector write only after a fresh once decision", async () => {
+    vi.mocked(runtime.executeRuntimeConnectorAction).mockResolvedValue({
+      requestId: "slack-slack-create-draft-channel-1",
+      connectorId: "slack",
+      action: "slack.create-draft",
+      status: "executed",
+      message: "Draft created."
+    });
+    const { result } = renderHook(() => useShellRuntime());
+
+    await act(async () => {
+      await result.current.prepareConnectorAction("slack.create-draft", {
+        channelId: "channel-1",
+        text: "Draft"
+      });
+    });
+    const approval = result.current.openApprovals[0];
+    expect(approval.decisions).toEqual(["once", "modify", "deny"]);
+
+    act(() => result.current.requestApprovalDecision(approval, "once"));
+    await waitFor(() => expect(runtime.executeRuntimeConnectorAction).toHaveBeenCalledOnce());
+    expect(result.current.openApprovals).toHaveLength(0);
+  });
+});
 
 describe("useShellRuntime — approval decision flow", () => {
   beforeEach(() => {
@@ -717,7 +775,12 @@ function seedShellState(state: Partial<PersistedShellState>) {
     memoryRecords: [],
     connectedBackendIds: [],
     selectedModelId: "",
-    permissionMode: "full-access"
+    permissionMode: "full-access",
+    permissionLabel: "Work Freely",
+    customApprovalSettings: {
+      allowSmallLocalEdits: false,
+      allowPowerfulCommands: false
+    }
   };
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, ...state }));
 }

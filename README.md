@@ -31,7 +31,7 @@ Local-first and private by default, Fable is built for people who want powerful 
 | **ACP/Codex Providers** | **Functional (Gated)** | Cursor, Grok, and Codex run via local stdio JSON-RPC or CLI app-server if installed and authenticated |
 | **Confidential Connectors** | **Functional (Gated)** | Brokered adapters and fail-closed lifecycle states are implemented for GitHub, Vercel, Notion, Slack, and Linear; deployment, provider configuration, and live OAuth validation remain external |
 | **Browser Preview Mode** | **Preview/Stub** | Purely synthetic fixture responses using `localStorage` instead of SQLite |
-| **Mobile Remote Control** | **Preview/Stub** | Sidebar device button triggers state/accessibility announcement change only; no socket or remote protocol |
+| **Mobile Remote Control** | **Local status surface; transport deferred** | Settings reports the native local status honestly. No socket, live pairing, mobile app, or remote execution path is enabled. |
 | **Voice Dictation** | **Preview/Stub** | Composer voice toggle changes UI status; no audio capture or transcription pipeline |
 | **GitHub Copilot Execution** | **Planned (Missing)** | Cataloged in provider list, but execution adapter/runner is not implemented |
 | **Local Model Execution** | **Planned (Missing)** | Onboarding UI labels local models as planned and disabled |

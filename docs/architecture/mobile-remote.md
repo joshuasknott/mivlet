@@ -1,9 +1,12 @@
 # Mobile remote control
 
 > [!WARNING]
-> **Status: Planned Design / UI Stub Only**
-> This document describes the planned architecture and specification for mobile remote control.
-> In the current codebase, this feature is not implemented. There is no active socket, mDNS advertising, or remote protocol. The remote control is represented solely as a UI preview/stub on the desktop shell.
+> **Status: Local status surface; transport deferred**
+> The codebase includes secret-free protocol metadata, pure authorization logic,
+> trusted-device checks, and native status/trust commands. There is no active
+> socket, mDNS advertising, live pairing, mobile app, or remote protocol
+> listener. Operations that need transport fail closed and Settings says they
+> are unavailable.
 
 The mobile device is designed to be a **second approval, observation, and control surface** for
 the desktop. It does not become a cloud backend, a hosted account, or an
@@ -40,8 +43,8 @@ Pairing establishes pairwise local trust. The flow:
 3. The confirmation code proves physical presence. A remote attacker who only
    captured the QR — for example via a screenshot — cannot pair, because they
    never see the code displayed on the desktop screen.
-4. The Rust boundary verifies a PSK-derived proof token. The PSK itself never
-   crosses into JavaScript and is never written to a protocol type.
+4. The future Rust transport verifies PSK-derived proof internally. Neither the
+   PSK nor proof material crosses into JavaScript or a protocol type.
 5. On success the ephemeral PSK rotates to a long-lived per-device key. The
    device is added to the trust list and a bounded session begins.
 
@@ -67,6 +70,20 @@ cloud hop in v1.
 > `remote_control.rs` exposes the surface the transport will call, and fails
 > closed until that transport binds sessions to devices.
 
+## Current desktop surface
+
+- `remote_control_status`, `remote_control_enable`, and
+  `remote_control_disable` return native, non-secret local status. Requesting
+  enablement cannot make `enabled` true while transport is unavailable.
+- `remote_list_devices` and `remote_revoke_device` expose non-secret trust
+  metadata and exact-id revocation.
+- `remote_pairing_start` and `remote_pairing_status` return
+  `transport-unavailable`; they do not mint a challenge or claim a pairing.
+- `remote_handle_command` rejects every command until a live Rust transport
+  binds a currently trusted device to an active session.
+- Pairing completion is not exposed to JavaScript. Future proof verification
+  belongs inside the Rust transport.
+
 ## Threat model
 
 This model extends the existing threat model in `docs/security/threat-model.md`
@@ -84,8 +101,9 @@ with a new trust boundary: *mobile device to desktop runtime*.
   arguments or an execution permit. It resolves an existing approval through the
   same path the desktop uses, which still rechecks the exact argument preview,
   workspace confinement, and permit freshness before any tool fires.
-- **Offline / unpaired device.** Off-LAN or unpaired devices cannot reach the
-  desktop and fail closed. No remote command is queued for later execution.
+- **Offline / unpaired device.** Off-LAN, unpaired, pending, or revoked devices
+  fail closed. Authorization checks the current trust record before session and
+  approval lookup. No remote command is queued for later execution.
 - **Credential exfiltration via the remote channel.** Nothing secret crosses the
   wire. The protocol types carry no key, token, PSK, or credential; the
   `HARD SECRET INVARIANT` on the mobile-remote types mirrors the native-API
@@ -113,7 +131,7 @@ according to the existing approval rules, exactly as without a paired device.
 
 ## Approval flow
 
-A pending approval surfaced to the mobile device is the same `ApprovalRequest`
+A future pending approval surfaced to the mobile device is the same `ApprovalRequest`
 shape the desktop queue already uses. The desktop streams an
 `approval-requested` event; the mobile device returns `approve` (with a grant
 decision of `once`, `session`, or `rule`) or `deny`. The desktop's fail-closed
@@ -139,8 +157,9 @@ and queue recovery are unchanged.
 - **No relay.** v1 is LAN-direct only. An optional thin relay for roaming is
   documented as a future seam, not built here, and would relay packets only —
   never storing session data or secrets.
-- **No session data leaves the LAN.** Observation events and control commands
-  stay on the local network between the paired device and the desktop.
+- **No session data leaves the LAN.** No live transport exists today. The
+  planned transport keeps observation events and control commands on the local
+  network between the paired device and the desktop.
 - **No mobile-originated auto-execution.** Mobile decisions are inputs to the
   existing approval queue; they never bypass the desktop's permit system.
 - **No secrets in any mobile-visible type.** The protocol, the trust list, and

@@ -440,6 +440,63 @@ fn emit_run_request(app: &AppHandle, entry: &SchedulerQueueEntry) {
     );
 }
 
+fn delete_job_from_store(
+    store: &mut SchedulerStore,
+    workspace_id: &str,
+    project_id: Option<&str>,
+    job_id: &str,
+) -> bool {
+    let deleted = store.jobs.iter().any(|job| {
+        job.id == job_id
+            && job.workspace_id == workspace_id
+            && job.project_id.as_deref() == project_id
+    });
+    if !deleted {
+        return false;
+    }
+    store.jobs.retain(|job| {
+        job.id != job_id
+            || job.workspace_id != workspace_id
+            || job.project_id.as_deref() != project_id
+    });
+    store.queue.retain(|entry| {
+        entry.job_id != job_id
+            || entry.workspace_id != workspace_id
+            || entry.project_id.as_deref() != project_id
+    });
+    true
+}
+
+fn set_job_status_in_store(
+    store: &mut SchedulerStore,
+    workspace_id: &str,
+    project_id: Option<&str>,
+    job_id: &str,
+    status: &str,
+) -> bool {
+    let mut updated = false;
+    for job in &mut store.jobs {
+        if job.id == job_id
+            && job.workspace_id == workspace_id
+            && job.project_id.as_deref() == project_id
+        {
+            job.status = status.to_string();
+            updated = true;
+        }
+    }
+    if !updated {
+        return false;
+    }
+    if status != "active" {
+        store.queue.retain(|entry| {
+            entry.job_id != job_id
+                || entry.workspace_id != workspace_id
+                || entry.project_id.as_deref() != project_id
+        });
+    }
+    true
+}
+
 /// The number of failed attempts (excluding the in-flight one) for an entry.
 fn failed_count(entry: &SchedulerQueueEntry) -> u32 {
     entry
@@ -529,19 +586,14 @@ pub fn delete_scheduled_job(
 ) -> Result<(), String> {
     let scope = command_scope(workspace_id, project_id)?;
     let job_id = normalize_spaces(&job_id);
+    let mut deleted = false;
     persist(&app, scope.workspace_id(), |store| {
-        store.jobs.retain(|j| {
-            j.id != job_id
-                || j.workspace_id != scope.workspace_id()
-                || j.project_id.as_deref() != scope.project_id()
-        });
-        // Also drop queued entries for the deleted job so it can no longer fire.
-        store.queue.retain(|e| {
-            e.job_id != job_id
-                || e.workspace_id != scope.workspace_id()
-                || e.project_id.as_deref() != scope.project_id()
-        });
-    })
+        deleted = delete_job_from_store(store, scope.workspace_id(), scope.project_id(), &job_id);
+    })?;
+    if !deleted {
+        return Err("Scheduled job was not found.".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -558,24 +610,20 @@ pub fn set_job_status(
         return Err("Unknown job status.".to_string());
     }
     let job_id_norm = normalize_spaces(&job_id);
+    let mut updated = false;
     persist(&app, scope.workspace_id(), |store| {
-        for job in &mut store.jobs {
-            if job.id == job_id_norm
-                && job.workspace_id == scope.workspace_id()
-                && job.project_id.as_deref() == scope.project_id()
-            {
-                job.status = status.clone();
-            }
-        }
-        // A paused/deleted job drops its queued entries so it stops firing.
-        if status != "active" {
-            store.queue.retain(|e| {
-                e.job_id != job_id_norm
-                    || e.workspace_id != scope.workspace_id()
-                    || e.project_id.as_deref() != scope.project_id()
-            });
-        }
-    })
+        updated = set_job_status_in_store(
+            store,
+            scope.workspace_id(),
+            scope.project_id(),
+            &job_id_norm,
+            &status,
+        );
+    })?;
+    if !updated {
+        return Err("Scheduled job was not found.".to_string());
+    }
+    Ok(())
 }
 
 /// Enqueue a run for a job occurrence. Deduplicates by (jobId, scheduledAt); a
@@ -1278,6 +1326,53 @@ mod tests {
         let mut entry = sample_entry("a", "leased");
         apply_attempt(&mut entry, "cancelled");
         assert_eq!(entry.state, "cancelled");
+    }
+
+    #[test]
+    fn schedule_mutations_require_an_exact_job_id() {
+        let mut store = empty_store("inst");
+        store.jobs.push(sample_job("known", "active"));
+        store.queue.push(sample_entry("known", "queued"));
+
+        assert!(!set_job_status_in_store(
+            &mut store,
+            DEFAULT_WORKSPACE_ID,
+            None,
+            "missing",
+            "paused"
+        ));
+        assert!(!delete_job_from_store(
+            &mut store,
+            DEFAULT_WORKSPACE_ID,
+            None,
+            "missing"
+        ));
+        assert_eq!(store.jobs[0].status, "active");
+        assert_eq!(store.queue.len(), 1);
+    }
+
+    #[test]
+    fn schedule_mutations_update_only_the_matching_job() {
+        let mut store = empty_store("inst");
+        store.jobs.push(sample_job("known", "active"));
+        store.queue.push(sample_entry("known", "queued"));
+
+        assert!(set_job_status_in_store(
+            &mut store,
+            DEFAULT_WORKSPACE_ID,
+            None,
+            "known",
+            "paused"
+        ));
+        assert_eq!(store.jobs[0].status, "paused");
+        assert!(store.queue.is_empty());
+        assert!(delete_job_from_store(
+            &mut store,
+            DEFAULT_WORKSPACE_ID,
+            None,
+            "known"
+        ));
+        assert!(store.jobs.is_empty());
     }
 
     #[test]

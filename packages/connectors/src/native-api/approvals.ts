@@ -56,7 +56,9 @@ export function buildToolApproval(
     dataUsed,
     consequence,
     requestedAt: new Date(0).toISOString(),
-    decisions: ["once", "session", "rule", "modify", "deny"],
+    // Tool execution permits are one-time. Saved/session grants are not offered
+    // until the native boundary can mint a fresh exact permit from them.
+    decisions: ["once", "modify", "deny"],
     // High/critical full-access risk requires exact confirmation (existing system).
     confirmationPhrase:
       mode === "full-access" && (risk === "high" || risk === "critical")

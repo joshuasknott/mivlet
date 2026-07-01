@@ -29,8 +29,19 @@ const baseApproval: ApprovalRequest = {
   dataUsed: ["file: launch-plan.md"],
   consequence: "Permanently deletes a Google Drive file.",
   requestedAt: "2026-06-30T00:00:00.000Z",
-  decisions: ["once", "session", "rule", "modify", "deny"],
+  decisions: ["once", "modify", "deny"],
   confirmationPhrase: "approve delete file launch-plan.md"
+};
+
+const lowRiskApproval: ApprovalRequest = {
+  ...baseApproval,
+  id: "approval-low",
+  action: "Read file launch-plan.md",
+  mode: "read-only",
+  riskLevel: "low",
+  consequence: "Reads one Google Drive file.",
+  decisions: ["once", "session", "rule", "modify", "deny"],
+  confirmationPhrase: undefined
 };
 
 const baseDraft: ApprovalModificationDraft = {
@@ -124,16 +135,15 @@ describe("ApprovalPanel — required card fields", () => {
     expect(cardText).toMatch(/why/i); // why approval is needed label
   });
 
-  it("renders the permission profile label (not just the raw mode)", () => {
+  it("renders the plain approval choice (not the raw mode)", () => {
     renderPanel();
-    // full-access -> "Full with approvals" profile label.
-    expect(screen.getByText("Full with approvals")).toBeInTheDocument();
+    expect(screen.getByText("Work Freely")).toBeInTheDocument();
   });
 });
 
 describe("ApprovalPanel — plain decision labels", () => {
   it("renders the exact plain decision labels", () => {
-    renderPanel();
+    renderPanel({ approvals: [lowRiskApproval] });
     expect(screen.getByRole("button", { name: "Approve once" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Allow for this session" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save as rule" })).toBeInTheDocument();
@@ -143,13 +153,26 @@ describe("ApprovalPanel — plain decision labels", () => {
 
   it("fires onDecision with the chosen decision when an approve/session/rule/deny button is clicked", async () => {
     const user = userEvent.setup();
-    const { handlers } = renderPanel();
+    const { handlers } = renderPanel({ approvals: [lowRiskApproval] });
 
     await user.click(screen.getByRole("button", { name: "Approve once" }));
-    expect(handlers.onDecision).toHaveBeenCalledWith(baseApproval, "once");
+    expect(handlers.onDecision).toHaveBeenCalledWith(lowRiskApproval, "once");
 
     await user.click(screen.getByRole("button", { name: "Save as rule" }));
-    expect(handlers.onDecision).toHaveBeenCalledWith(baseApproval, "rule");
+    expect(handlers.onDecision).toHaveBeenCalledWith(lowRiskApproval, "rule");
+  });
+
+  it("never offers session or saved-rule shortcuts for high-risk work", () => {
+    renderPanel({
+      approvals: [
+        {
+          ...baseApproval,
+          decisions: ["once", "session", "rule", "modify", "deny"]
+        }
+      ]
+    });
+    expect(screen.queryByRole("button", { name: "Allow for this session" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save as rule" })).toBeNull();
   });
 });
 
@@ -234,7 +257,7 @@ describe("ApprovalPanel — modify flow", () => {
       modificationDraft: editingDraft
     });
 
-    const dataField = screen.getByLabelText(/allowed data for/i) as HTMLTextAreaElement;
+    const dataField = screen.getByLabelText(/information fable can use for/i) as HTMLTextAreaElement;
     // The component is controlled: each change reports the next draft to the
     // parent handler (here a stub), so assert the handler is called with the
     // narrowed data value.
@@ -242,8 +265,8 @@ describe("ApprovalPanel — modify flow", () => {
     expect(handlers.onUpdateModification).toHaveBeenCalled();
     expect(handlers.onUpdateModification.mock.calls.at(-1)?.[0].dataUsed).toBe("file: safer.md");
 
-    // The permission mode segments also report changes.
-    fireEvent.click(screen.getByRole("button", { name: "Full with approvals" }));
+    // The plain choice segments also report changes.
+    fireEvent.click(screen.getByRole("button", { name: "Work Freely" }));
     expect(handlers.onUpdateModification.mock.calls.at(-1)?.[0].mode).toBe("full-access");
   });
 

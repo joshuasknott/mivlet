@@ -55,7 +55,7 @@ All additive, secret-free, closed-vocabulary, mirroring the existing style in `p
 
 ### Pairing handshake
 - `RemotePairingChallenge` — desktop-issued: `{ challengeNonce, confirmCode }`. `confirmCode` is the short numeric code; never the PSK.
-- `RemotePairingProof` — mobile response: `{ challengeNonce, confirmCode, proofToken }`. `proofToken` is derived from the PSK + nonce behind the Rust boundary.
+- Pairing proof is verified entirely inside the future Rust transport. No PSK-derived proof value crosses the JavaScript/protocol boundary.
 - `RemotePairingResult` — `{ ok: true; device: RemoteDevice; session: RemoteSession } | { ok: false; code: RemoteErrorCode; message }`.
 
 ### Versioned envelope
@@ -78,7 +78,7 @@ All additive, secret-free, closed-vocabulary, mirroring the existing style in `p
 - `{ type: "delete-schedule"; jobId }`
 
 ### Errors + fail-closed
-- `RemoteErrorCode` — `"device-unpaired" | "session-expired" | "approval-not-found" | "approval-already-resolved" | "schedule-not-found" | "invalid-command" | "protocol-version-unsupported" | "unauthorized"`.
+- `RemoteErrorCode` — `"device-unpaired" | "device-revoked" | "session-expired" | "approval-not-found" | "approval-already-resolved" | "schedule-not-found" | "invalid-command" | "protocol-version-unsupported" | "transport-unavailable" | "unauthorized"`.
 - `RemoteCommandResult` — `{ ok: true; appliedAt } | { ok: false; code: RemoteErrorCode; message }`.
 
 ## Pure Logic — `packages/connectors/src/mobile-remote/`
@@ -99,7 +99,7 @@ Pure, fixture-testable logic. No network, no filesystem, no timers except inject
 
 ### `authorization.ts` (the fail-closed gate)
 The load-bearing module. A mobile command only resolves a pending desktop approval that **exists and is unconsumed**; everything else is a rejected no-op.
-- `authorizeCommand(command, session, pendingApprovals, now)` → `RemoteCommandResult`. For `approve`/`deny`: requires live session + an approval whose id matches and is not already resolved. For schedule commands: requires live session + an exact matching job id.
+- `authorizeCommand(command, session, devices, pendingApprovals, now)` → `RemoteCommandResult`. Every command requires a session bound to a currently trusted device. Approval decisions also require a live session and an exact pending approval id; schedule commands require an exact job id.
 - Approval commands do **not** produce an execution permit. They return whether the command is *eligible to be applied*; the actual permit issuance stays in the existing Rust `approvals`/`execution_approvals` path, unchanged.
 - `RemoteCommand` types that aren't recognized → `{ ok: false; code: "invalid-command" }`.
 
@@ -109,16 +109,17 @@ Maps a `RemoteCommand` validated by `authorization.ts` onto the existing runtime
 ### Tests
 - `session.test.ts` — live/expired/idle-timeout/revoked transitions; every non-live session fails closed.
 - `pairing.test.ts` — confirm-code window, mismatched code, expired deadline.
-- `authorization.test.ts` — **fail-closed is the core assertion**: replayed approval ids, non-existent approvals, already-resolved approvals, expired/revoked sessions, unknown job ids, and unknown command types all return `{ ok: false }` and apply nothing. Only a live session + exact matching unconsumed approval/job returns `{ ok: true }`.
+- `authorization.test.ts` — **fail-closed is the core assertion**: replayed approval ids, non-existent approvals, already-resolved approvals, unpaired/revoked devices, expired/revoked sessions, unknown job ids, and unknown command types all return `{ ok: false }` and apply nothing.
 - `dispatcher.test.ts` — validated commands map onto the correct runtime seams; nothing dispatches without authorization.
 
 ## Rust Command Boundary — `apps/desktop/src-tauri/src/remote_control.rs`
 
 A thin module registered in `lib.rs` `invoke_handler`. **No WebSocket listener in this pass** — that is the documented next layer. The module exposes the command surface the (future) WS transport will call:
 
+- `remote_control_status()` / `remote_control_enable()` / `remote_control_disable()` → honest non-secret local status. Enablement remains unavailable until a transport exists.
 - `remote_list_devices()` → `Vec<RemoteDevice>` (trust list; non-secret metadata).
-- `remote_pairing_start()` → `RemotePairingChallenge` (issues nonce + confirm code; PSK proof material computed and held in Rust).
-- `remote_pairing_complete(proof)` → `RemotePairingResult` (verifies proof, rotates PSK to a long-lived device key, creates a trusted device + session).
+- `remote_pairing_start()` / `remote_pairing_status()` → fail closed with `transport-unavailable` until the Rust transport and crypto exist.
+- Pairing completion is not a JavaScript command; future proof verification and key rotation stay inside Rust.
 - `remote_revoke_device(deviceId)` → removes device from trust list, rekeys, marks any session revoked. Subsequent frames from that device are rejected.
 - `remote_handle_command(envelope)` → validates the inbound envelope against the trust list + a live session via the pure `authorization` logic, then delegates `approve`/`deny` to the existing `approvals`/`execution_approvals` modules and schedule commands to the existing `scheduler` module. Returns `RemoteCommandResult`. Never issues an execution permit on mobile authority alone — it feeds the existing approval-resolution path, which still requires its own fresh permit for any tool to fire.
 

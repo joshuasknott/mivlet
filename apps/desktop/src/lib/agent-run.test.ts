@@ -3,6 +3,9 @@ import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
 import {
   buildAgentRequest,
   buildContextPrefixForRun,
+  DEFAULT_PERMISSION_LABEL,
+  findApprovalJargon,
+  PERMISSION_PROFILES,
   permissionLabelFor,
   permissionModeFor,
   resolveSelectedModel
@@ -122,17 +125,30 @@ describe("buildAgentRequest", () => {
   });
 });
 
-describe("permission profile mapping", () => {
-  it("maps each UI label to its PermissionMode", () => {
-    expect(permissionModeFor("Full with approvals")).toBe("full-access");
-    expect(permissionModeFor("Trusted")).toBe("trusted-scope");
-    expect(permissionModeFor("Read-only")).toBe("read-only");
+describe("approval preset mapping", () => {
+  it("exposes three primary choices plus Custom and defaults to Ask Me", () => {
+    expect(PERMISSION_PROFILES.map((profile) => profile.label)).toEqual([
+      "Read Only",
+      "Ask Me",
+      "Work Freely",
+      "Custom"
+    ]);
+    expect(DEFAULT_PERMISSION_LABEL).toBe("Ask Me");
   });
 
-  it("round-trips the default label back from a PermissionMode", () => {
-    expect(permissionLabelFor("full-access")).toBe("Full with approvals");
-    expect(permissionLabelFor("trusted-scope")).toBe("Trusted");
-    expect(permissionLabelFor("read-only")).toBe("Read-only");
+  it("maps the plain labels to the existing modes", () => {
+    expect(permissionModeFor("Read Only")).toBe("read-only");
+    expect(permissionModeFor("Ask Me")).toBe("trusted-scope");
+    expect(permissionModeFor("Work Freely")).toBe("full-access");
+    expect(permissionLabelFor("full-access")).toBe("Work Freely");
+    expect(permissionLabelFor("trusted-scope")).toBe("Ask Me");
+    expect(permissionLabelFor("read-only")).toBe("Read Only");
+  });
+
+  it("keeps visible preset copy free of internal jargon", () => {
+    for (const profile of PERMISSION_PROFILES) {
+      expect(findApprovalJargon(`${profile.label} ${profile.description}`)).toEqual([]);
+    }
   });
 });
 

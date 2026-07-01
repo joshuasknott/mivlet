@@ -45,6 +45,7 @@ vi.mock("./runtime", () => ({
   connectRuntimeBackend: vi.fn(async () => "codex"),
   detectRuntimeAcpCli: vi.fn(async () => null),
   exportRuntimeMemoryState: vi.fn(async () => null),
+  getRuntimeRemoteControlStatus: vi.fn(async () => null),
   importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
@@ -93,6 +94,7 @@ vi.mock("./runtime", () => ({
   setRuntimeJobStatus: vi.fn(async () => null),
   deleteRuntimeScheduledJob: vi.fn(async () => null),
   deliverRuntimeNotification: vi.fn(async () => null),
+  executeRuntimeConnectorAction: vi.fn(async () => null),
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => run),
   recoverRuntimeAgentRuns: vi.fn(async () => runtimeMocks.agentRuns),
   saveRuntimeSnapshot: vi.fn(async (snapshot: RuntimeSnapshot) => {
@@ -329,7 +331,7 @@ describe("Fable home", () => {
     expect(screen.getByText(/does not send the email/i)).toBeInTheDocument();
   });
 
-  it("closes the sidebar and keeps mobile separate from the settings menu", async () => {
+  it("opens the honest mobile approval status from the sidebar", async () => {
     const user = await renderWorkspace();
 
     const mobileConnection = screen.getByRole("button", { name: /^mobile connection$/i });
@@ -339,7 +341,8 @@ describe("Fable home", () => {
     expect(settings).toBeInTheDocument();
 
     await user.click(mobileConnection);
-    expect(screen.getByText(/mobile connection selected/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /approvals/i })).toBeInTheDocument();
+    expect(screen.getByText(/only this computer can run the action/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /close sidebar/i }));
     expect(screen.getByRole("main")).toHaveClass("desktop-frame--sidebar-collapsed");
@@ -364,10 +367,10 @@ describe("Fable home", () => {
       screen.getByRole("heading", { name: /what are we building today in josh's fable/i })
     ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /select permissions/i }));
-    await user.click(screen.getByRole("menuitemradio", { name: /trusted/i }));
-    expect(screen.getByRole("button", { name: /select permissions/i })).toHaveTextContent(
-      "Trusted"
+    await user.click(screen.getByRole("button", { name: /approval preset/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: /work freely/i }));
+    expect(screen.getByRole("button", { name: /approval preset/i })).toHaveTextContent(
+      "Work Freely"
     );
   });
 

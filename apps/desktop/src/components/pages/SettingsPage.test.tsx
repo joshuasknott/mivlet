@@ -27,6 +27,13 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     refreshConnector: vi.fn(),
     disconnectConnector: vi.fn(),
     exportMemory: vi.fn(),
+    permissionLabel: "Ask Me",
+    selectPermissionLabel: vi.fn(),
+    customApprovalSettings: {
+      allowSmallLocalEdits: false,
+      allowPowerfulCommands: false
+    },
+    updateCustomApprovalSetting: vi.fn(),
     ...over
   } as unknown as ShellRuntime;
 }
@@ -40,6 +47,61 @@ const nativeProvider = (over: Partial<BackendProvider> = {}): BackendProvider =>
   capabilities: [],
   models: [],
   ...over
+});
+
+describe("Settings -> Approvals", () => {
+  function renderApprovals(runtime = stubRuntime()) {
+    return render(
+      <SettingsPage
+        runtime={runtime}
+        theme="dark"
+        onThemeChange={() => {}}
+        activeTab="approvals"
+        workspaceName="Fable"
+      />
+    );
+  }
+
+  it("shows four plain choices with Ask Me selected", async () => {
+    renderApprovals();
+    await screen.findByText(/not available outside the desktop runtime/i);
+    expect(screen.getByRole("radio", { name: /Read Only/ })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Ask Me/ }).getAttribute("aria-checked")).toBe(
+      "true"
+    );
+    expect(screen.getByRole("radio", { name: /Work Freely/ })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Custom/ })).toBeTruthy();
+  });
+
+  it("uses two meaningful plain-language Custom toggles", async () => {
+    const update = vi.fn();
+    renderApprovals(stubRuntime({ updateCustomApprovalSetting: update }));
+    await screen.findByText(/not available outside the desktop runtime/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /prepare small local edits/i }));
+    expect(update).toHaveBeenCalledWith("allowSmallLocalEdits", true);
+
+    fireEvent.click(screen.getByRole("button", { name: /use powerful commands/i }));
+    expect(update).toHaveBeenCalledWith("allowPowerfulCommands", true);
+  });
+
+  it("does not expose internal approval jargon", async () => {
+    const { container } = renderApprovals();
+    await screen.findByText(/not available outside the desktop runtime/i);
+    expect(container.textContent?.toLowerCase()).not.toMatch(
+      /trusted-scope|full-access|permission profile|execution policy|mcp|egress/
+    );
+  });
+
+  it("states that mobile approval cannot run an action", async () => {
+    renderApprovals();
+    expect(
+      screen.getByText(/only this computer can run the action/i)
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByText(/not available outside the desktop runtime/i)).toBeTruthy()
+    );
+  });
 });
 
 function renderProviders(runtime: ShellRuntime) {

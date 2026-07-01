@@ -16,7 +16,7 @@ Missing credentials, missing provider setup, unsupported actions, unknown tools,
 
 ## 4. Approvals Are Product Infrastructure
 
-Every consequential action goes through the approval system: writes, shell commands, publishing, sending, deleting, spending, external posts, and private-data sharing. Users can choose to approve once, allow for this session, save as rule, modify, or deny the action. Saved rules only automate the UI approval step; they never bypass native execution-boundary checks. Approval metadata must include service, action, permission mode, risk, data used, consequence, and audit output.
+Every consequential action goes through the approval system: writes, shell commands, publishing, sending, deleting, spending, external posts, and private-data sharing. The main UI uses Read Only, Ask Me, Work Freely, and Custom rather than internal policy vocabulary. High-risk tool calls and connector writes require a fresh decision for the exact action. Native execution checks still bind the service, action, mode, risk, data preview, freshness, and one-time permit immediately before the side effect.
 
 ## 5. Fixtures Must Look Like Fixtures
 

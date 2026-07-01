@@ -15,7 +15,7 @@ The following matrix documents the exact features implemented in the codebase fo
 
 | Feature / Capability | OpenAI | Anthropic | Gemini | xAI | OpenRouter | Notes |
 | :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Chat / Completion** | Yes | Yes | Yes | Yes | Yes | The agent loop is hosted and owned by Fable. |
+| **Chat / Completion** | Yes | Yes | Yes | Yes | Yes | The agent loop is run and owned by Fable; model inference uses the selected provider. |
 | **Streaming** | Yes | Yes | Yes | Yes | Yes | Enabled via Server-Sent Events (SSE) or JSON-per-line. |
 | **Model Listing / Discovery** | Yes | Yes | Yes | Yes | Yes | Dynamic query of provider models. Bounded to 1,000 models, 4MB, 10 pages. |
 | **Tool / Function Support** | Yes | Yes | Yes | Yes | Yes | Maps Fable tools into provider formats. Approval-gated execution. |

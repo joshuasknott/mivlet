@@ -587,6 +587,23 @@ pub(crate) fn normalize_runtime_snapshot(
     let goals = normalize_runtime_goals(snapshot.goals)?;
     let plans = normalize_runtime_plans(snapshot.plans)?;
 
+    let permission_mode = if APPROVAL_MODES.contains(&snapshot.permission_mode.as_str()) {
+        snapshot.permission_mode
+    } else {
+        "trusted-scope".to_string()
+    };
+    let permission_label = match snapshot.permission_label.as_deref() {
+        Some("Read Only" | "Ask Me" | "Work Freely" | "Custom") => snapshot.permission_label,
+        _ => Some(
+            match permission_mode.as_str() {
+                "read-only" => "Read Only",
+                "full-access" => "Work Freely",
+                _ => "Ask Me",
+            }
+            .to_string(),
+        ),
+    };
+
     Ok(RuntimeSnapshot {
         version: RUNTIME_SNAPSHOT_VERSION,
         active_item,
@@ -609,11 +626,9 @@ pub(crate) fn normalize_runtime_snapshot(
             &normalize_spaces(&snapshot.selected_model_id),
             MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
         ),
-        permission_mode: if APPROVAL_MODES.contains(&snapshot.permission_mode.as_str()) {
-            snapshot.permission_mode
-        } else {
-            "read-only".to_string()
-        },
+        permission_mode,
+        permission_label,
+        custom_approval_settings: snapshot.custom_approval_settings,
         saved_at,
     })
 }
@@ -747,6 +762,8 @@ mod tests {
             connected_backend_ids: Vec::new(),
             selected_model_id: String::new(),
             permission_mode: "read-only".to_string(),
+            permission_label: Some("Read Only".to_string()),
+            custom_approval_settings: None,
             saved_at: "2026-06-29T12:00:00Z".to_string(),
         }
     }

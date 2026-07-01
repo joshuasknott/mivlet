@@ -13,9 +13,9 @@
 //! DELIBERATELY DEFERRED (see docs/architecture/mobile-remote.md):
 //!   - The live WebSocket listener + mDNS advertiser. This skeleton exposes the
 //!     command surface; binding it to a real transport is the next layer.
-//!   - Real PSK / long-lived device-key crypto. `RemotePairingChallenge` and
-//!     `RemotePairingProof` carry opaque tokens; verification wiring lands with
-//!     the transport. Until then pairing commands fail closed.
+//!   - Real PSK / long-lived device-key crypto. Secret-derived pairing proof
+//!     stays inside the future Rust transport and never crosses into JavaScript.
+//!     Until then pairing commands fail closed.
 //!
 //! SECRET INVARIANT: PSK material, long-lived device keys, and pairing nonces
 //! live behind this boundary (like backend credentials) and are never read back
@@ -66,19 +66,75 @@ pub struct RemotePairingChallenge {
     pub expires_at: String,
 }
 
-/// Mobile response to a pairing challenge. `proof_token` is PSK-derived
-/// material this boundary verifies; opaque to JavaScript and NOT the PSK.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RemotePairingProof {
-    pub challenge_nonce: String,
-    pub confirm_code: String,
-    pub proof_token: String,
+pub struct RemoteControlPreferenceRequest {
+    #[serde(default)]
+    pub ephemeral: bool,
 }
 
-/// Outcome of a pairing attempt.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RemotePairingStartRequest {
+    #[serde(default)]
+    pub manual_code: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePairingStatusRequest {
+    pub challenge_nonce: Option<String>,
+    pub manual_code: Option<String>,
+}
+
+/// Desktop-owned, non-secret remote-control status.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteControlStatusSnapshot {
+    pub status: String,
+    pub requested_enabled: bool,
+    pub enabled: bool,
+    pub transport: String,
+    pub transport_ready: bool,
+    pub pairing_ready: bool,
+    pub server_name: String,
+    pub device_count: usize,
+    pub trusted_device_count: usize,
+    pub revoked_device_count: usize,
+    pub active_session_count: usize,
+    pub message: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePairingStartResult {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub challenge: Option<RemotePairingChallenge>,
+    pub status: RemoteControlStatusSnapshot,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePairingStatusResult {
+    pub ok: bool,
+    pub status: String,
+    pub claimed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub message: String,
+}
+
+/// Outcome of a pairing attempt. Kept for the future Rust transport; it is not
+/// exposed as a JavaScript command while proof verification is unavailable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct RemotePairingResult {
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,12 +150,14 @@ pub struct RemotePairingResult {
 #[serde(rename_all = "kebab-case")]
 pub enum RemoteErrorCode {
     DeviceUnpaired,
+    DeviceRevoked,
     SessionExpired,
     ApprovalNotFound,
     ApprovalAlreadyResolved,
     ScheduleNotFound,
     InvalidCommand,
     ProtocolVersionUnsupported,
+    TransportUnavailable,
     Unauthorized,
 }
 
@@ -116,16 +174,68 @@ pub struct RemoteCommandResult {
     pub message: Option<String>,
 }
 
-/// In-process trust list. Held as Tauri state. The real store (encrypted
-/// SQLite, like the rest of the durable non-secret metadata) lands with the
-/// transport layer; this skeleton keeps an in-memory list so the command
-/// surface compiles and is testable.
 #[derive(Default)]
-pub struct RemoteTrustState(pub Mutex<Vec<RemoteDevice>>);
+pub struct RemoteControlStore {
+    pub devices: Vec<RemoteDevice>,
+    pub requested_enabled: bool,
+}
+
+/// In-process control state. Held as Tauri state. The real store (encrypted
+/// SQLite, like the rest of the durable non-secret metadata) lands with the
+/// transport layer; this skeleton keeps only non-secret state.
+#[derive(Default)]
+pub struct RemoteTrustState(pub Mutex<RemoteControlStore>);
 
 /// Initialize the remote-control trust state. Called once from `setup`.
 pub fn initialize_state() -> RemoteTrustState {
     RemoteTrustState::default()
+}
+
+fn unavailable_message() -> String {
+    "Mobile remote control is local to this network, but the live connection is not available in this build. Remote actions are disabled.".to_string()
+}
+
+fn server_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Fable desktop".to_string())
+}
+
+fn status_snapshot(store: &RemoteControlStore) -> RemoteControlStatusSnapshot {
+    let trusted_device_count = store
+        .devices
+        .iter()
+        .filter(|device| device.trust_state == RemoteDeviceTrustState::Trusted)
+        .count();
+    let revoked_device_count = store
+        .devices
+        .iter()
+        .filter(|device| device.trust_state == RemoteDeviceTrustState::Revoked)
+        .count();
+
+    RemoteControlStatusSnapshot {
+        status: if store.requested_enabled {
+            "unavailable".to_string()
+        } else {
+            "disabled".to_string()
+        },
+        requested_enabled: store.requested_enabled,
+        enabled: false,
+        transport: "lan-local".to_string(),
+        transport_ready: false,
+        pairing_ready: false,
+        server_name: server_name(),
+        device_count: store.devices.len(),
+        trusted_device_count,
+        revoked_device_count,
+        active_session_count: 0,
+        message: if store.requested_enabled {
+            unavailable_message()
+        } else {
+            "Live mobile approvals are not available in this build.".to_string()
+        },
+        updated_at: now_iso(),
+    }
 }
 
 /// List paired devices in the trust list. Non-secret metadata only.
@@ -137,7 +247,44 @@ pub fn remote_list_devices(
         .0
         .lock()
         .map_err(|_| "Remote trust list is unavailable.".to_string())?;
-    Ok(guard.clone())
+    Ok(guard.devices.clone())
+}
+
+#[tauri::command]
+pub fn remote_control_status(
+    state: State<'_, RemoteTrustState>,
+) -> Result<RemoteControlStatusSnapshot, String> {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "Remote control status is unavailable.".to_string())?;
+    Ok(status_snapshot(&guard))
+}
+
+#[tauri::command]
+pub fn remote_control_enable(
+    state: State<'_, RemoteTrustState>,
+    _request: Option<RemoteControlPreferenceRequest>,
+) -> Result<RemoteControlStatusSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "Remote control status is unavailable.".to_string())?;
+    guard.requested_enabled = true;
+    Ok(status_snapshot(&guard))
+}
+
+#[tauri::command]
+pub fn remote_control_disable(
+    state: State<'_, RemoteTrustState>,
+    _request: Option<RemoteControlPreferenceRequest>,
+) -> Result<RemoteControlStatusSnapshot, String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "Remote control status is unavailable.".to_string())?;
+    guard.requested_enabled = false;
+    Ok(status_snapshot(&guard))
 }
 
 /// Begin a pairing attempt: issue a challenge with a fresh confirm code. The
@@ -145,26 +292,36 @@ pub fn remote_list_devices(
 /// crosses the boundary. Until the crypto wiring lands, this returns a
 /// fail-closed placeholder so callers never observe a half-built pairing.
 #[tauri::command]
-pub fn remote_pairing_start() -> Result<RemotePairingResult, String> {
+pub fn remote_pairing_start(
+    state: State<'_, RemoteTrustState>,
+    _request: Option<RemotePairingStartRequest>,
+) -> Result<RemotePairingStartResult, String> {
     // The transport + PSK generation is the next layer. Fail closed rather than
     // mint a real pairing that the skeleton cannot yet secure.
-    Ok(RemotePairingResult {
+    let guard = state
+        .0
+        .lock()
+        .map_err(|_| "Remote control status is unavailable.".to_string())?;
+    Ok(RemotePairingStartResult {
         ok: false,
-        device: None,
-        code: Some("unauthorized".to_string()),
-        message: Some("Remote pairing transport is not yet available on this build.".to_string()),
+        challenge: None,
+        status: status_snapshot(&guard),
+        code: Some("transport-unavailable".to_string()),
+        message: Some(unavailable_message()),
     })
 }
 
-/// Complete a pairing attempt by verifying the proof. Fail closed until the
-/// PSK verification + long-lived device-key rotation wiring lands.
 #[tauri::command]
-pub fn remote_pairing_complete(_proof: RemotePairingProof) -> Result<RemotePairingResult, String> {
-    Ok(RemotePairingResult {
+pub fn remote_pairing_status(
+    _state: State<'_, RemoteTrustState>,
+    _request: RemotePairingStatusRequest,
+) -> Result<RemotePairingStatusResult, String> {
+    Ok(RemotePairingStatusResult {
         ok: false,
-        device: None,
-        code: Some("unauthorized".to_string()),
-        message: Some("Remote pairing transport is not yet available on this build.".to_string()),
+        status: "unavailable".to_string(),
+        claimed: false,
+        code: Some("transport-unavailable".to_string()),
+        message: unavailable_message(),
     })
 }
 
@@ -181,6 +338,7 @@ pub fn remote_revoke_device(
         .lock()
         .map_err(|_| "Remote trust list is unavailable.".to_string())?;
     let device = guard
+        .devices
         .iter_mut()
         .find(|device| device.id == device_id)
         .ok_or_else(|| "Device is not in the remote trust list.".to_string())?;
@@ -208,19 +366,75 @@ pub fn remote_handle_command(
     Ok(RemoteCommandResult {
         ok: false,
         applied_at: None,
-        code: Some(RemoteErrorCode::SessionExpired),
-        message: Some("No live remote session is available on this build.".to_string()),
+        code: Some(RemoteErrorCode::TransportUnavailable),
+        message: Some(unavailable_message()),
     })
 }
 
 /// Current ISO timestamp. Centralized so the skeleton stays deterministic-ish
 /// and the future transport reuses it.
 fn now_iso() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Minimal ISO-8601 placeholder; chrono replaces this when wired in.
-    format!("unix:{secs}")
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(id: &str, trust_state: RemoteDeviceTrustState) -> RemoteDevice {
+        RemoteDevice {
+            id: id.to_string(),
+            label: id.to_string(),
+            trust_state,
+            first_paired_at: "2026-01-01T00:00:00Z".to_string(),
+            last_seen_at: "2026-01-01T00:00:00Z".to_string(),
+            revoked_at: None,
+        }
+    }
+
+    #[test]
+    fn status_is_disabled_by_default_and_secret_free() {
+        let status = status_snapshot(&RemoteControlStore::default());
+
+        assert_eq!(status.status, "disabled");
+        assert!(!status.requested_enabled);
+        assert!(!status.enabled);
+        assert_eq!(status.transport, "lan-local");
+        assert!(!status.transport_ready);
+        assert!(!status.pairing_ready);
+    }
+
+    #[test]
+    fn requested_status_stays_unavailable_without_transport() {
+        let store = RemoteControlStore {
+            devices: vec![
+                device("trusted", RemoteDeviceTrustState::Trusted),
+                device("revoked", RemoteDeviceTrustState::Revoked),
+            ],
+            requested_enabled: true,
+        };
+        let status = status_snapshot(&store);
+
+        assert_eq!(status.status, "unavailable");
+        assert!(status.requested_enabled);
+        assert!(!status.enabled);
+        assert_eq!(status.trusted_device_count, 1);
+        assert_eq!(status.revoked_device_count, 1);
+    }
+
+    #[test]
+    fn unavailable_command_result_fails_closed() {
+        let result = RemoteCommandResult {
+            ok: false,
+            applied_at: None,
+            code: Some(RemoteErrorCode::TransportUnavailable),
+            message: Some(unavailable_message()),
+        };
+
+        assert!(!result.ok);
+        assert!(matches!(
+            result.code,
+            Some(RemoteErrorCode::TransportUnavailable)
+        ));
+    }
 }

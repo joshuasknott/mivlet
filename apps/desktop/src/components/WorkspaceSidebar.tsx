@@ -14,6 +14,7 @@ import {
   Plugs,
   Moon,
   LockKey,
+  ShieldCheck,
   WarningCircle,
   SignOut
 } from "@phosphor-icons/react";
@@ -36,6 +37,7 @@ const userSettingsTabs = [
   { id: "appearance" as const, label: "Appearance", icon: Moon },
   { id: "privacy" as const, label: "Privacy", icon: LockKey },
   { id: "history" as const, label: "History", icon: Clock },
+  { id: "approvals" as const, label: "Approvals", icon: ShieldCheck },
   { id: "notifications" as const, label: "Notifications", icon: WarningCircle }
 ];
 

@@ -898,6 +898,15 @@ pub struct WorkspacePlan {
     pub updated_at: String,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomApprovalSettings {
+    #[serde(default)]
+    pub allow_small_local_edits: bool,
+    #[serde(default)]
+    pub allow_powerful_commands: bool,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
@@ -934,11 +943,15 @@ pub struct RuntimeSnapshot {
     pub selected_model_id: String,
     #[serde(default = "default_permission_mode")]
     pub permission_mode: String,
+    #[serde(default)]
+    pub permission_label: Option<String>,
+    #[serde(default)]
+    pub custom_approval_settings: Option<CustomApprovalSettings>,
     pub saved_at: String,
 }
 
 fn default_permission_mode() -> String {
-    "read-only".to_string()
+    "trusted-scope".to_string()
 }
 
 // ---------------------------------------------------------------------------

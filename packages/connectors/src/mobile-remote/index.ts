@@ -30,6 +30,7 @@ export {
 export {
   authorizeCommand,
   type PendingApprovalIndex,
+  type RemoteDeviceIndex,
   type ScheduledJobIndex
 } from "./authorization";
 export {

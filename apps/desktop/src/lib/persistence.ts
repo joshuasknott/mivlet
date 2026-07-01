@@ -7,12 +7,19 @@ import type {
   RuntimeSnapshot,
   ScheduleEntry
 } from "@fable/protocol";
+import { normalizeCustomApprovalSettings } from "@fable/connectors";
 import {
   LEGACY_STORAGE_KEYS,
   LEGACY_IMPORT_SENTINEL,
   STORAGE_KEY,
   RUNTIME_SNAPSHOT_VERSION
 } from "./constants";
+import {
+  DEFAULT_PERMISSION_LABEL,
+  isApprovalPresetLabel,
+  permissionLabelFor,
+  permissionModeFor
+} from "./agent-run";
 import { normalizeActiveItem } from "./helpers";
 import type { PersistedShellState } from "./types";
 
@@ -156,6 +163,8 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     connectedBackendIds: state.connectedBackendIds,
     selectedModelId: state.selectedModelId,
     permissionMode: state.permissionMode,
+    permissionLabel: state.permissionLabel,
+    customApprovalSettings: state.customApprovalSettings,
     savedAt: new Date().toISOString()
   };
 }
@@ -185,15 +194,39 @@ export function shellStateFromRuntimeSnapshot(
     memoryRecords: snapshot.memoryRecords,
     connectedBackendIds: snapshot.connectedBackendIds,
     selectedModelId: snapshot.selectedModelId ?? defaultShellState.selectedModelId,
-    permissionMode: snapshot.permissionMode ?? defaultShellState.permissionMode
+    permissionMode: snapshot.permissionMode ?? defaultShellState.permissionMode,
+    permissionLabel: normalizeApprovalPresetLabel(
+      snapshot.permissionLabel,
+      snapshot.permissionMode ?? defaultShellState.permissionMode
+    ),
+    customApprovalSettings: normalizeCustomApprovalSettings(
+      snapshot.customApprovalSettings ?? defaultShellState.customApprovalSettings
+    )
   };
 }
 
 function normalizePersistedShellState(state: PersistedShellState): PersistedShellState {
+  const permissionMode = normalizePermissionMode(state.permissionMode);
   return {
     ...state,
-    activeItem: normalizeActiveItem(state.activeItem)
+    activeItem: normalizeActiveItem(state.activeItem),
+    permissionMode,
+    permissionLabel: normalizeApprovalPresetLabel(state.permissionLabel, permissionMode),
+    customApprovalSettings: normalizeCustomApprovalSettings(state.customApprovalSettings)
   };
+}
+
+function normalizePermissionMode(mode: PermissionMode | undefined): PermissionMode {
+  return mode === "read-only" || mode === "trusted-scope" || mode === "full-access"
+    ? mode
+    : permissionModeFor(DEFAULT_PERMISSION_LABEL);
+}
+
+function normalizeApprovalPresetLabel(
+  label: string | undefined,
+  mode: PermissionMode
+) {
+  return label && isApprovalPresetLabel(label) ? label : permissionLabelFor(mode);
 }
 
 // re-export protocol array types referenced by callers

@@ -1714,6 +1714,99 @@
   transform: translateX(17px);
 }
 
+.approvals-settings {
+  display: grid;
+  gap: 20px;
+}
+
+.approvals-settings__section {
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+
+.approvals-settings__section:first-of-type {
+  border-top: 0;
+}
+
+.approval-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.approval-preset-option {
+  display: grid;
+  gap: 5px;
+  min-height: 82px;
+  padding: 13px 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  text-align: left;
+}
+
+.approval-preset-option:hover,
+.approval-preset-option:focus-visible {
+  border-color: var(--ink-muted);
+}
+
+.approval-preset-option[data-selected] {
+  background: var(--surface-raised);
+  border-color: var(--ink);
+  box-shadow: inset 3px 0 0 var(--ink);
+}
+
+.approval-preset-option strong,
+.custom-approval-toggle strong,
+.remote-approval-status strong {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.approval-preset-option span,
+.custom-approval-toggle small,
+.remote-approval-status span {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.custom-approvals-list {
+  display: grid;
+  margin-top: 14px;
+}
+
+.custom-approval-toggle > span:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.approvals-settings__note {
+  margin: 12px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.remote-approval-status {
+  display: grid;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 13px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+}
+
+@media (max-width: 680px) {
+  .approval-preset-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------------------------------------------------------------------------
  * Onboarding gate shell (two-path AI backend) — visually mirrors the main
  * workspace: warm radial-gradient canvas, large centered hero, and

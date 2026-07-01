@@ -1,9 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { ApprovalRequest, RemoteCommand, ScheduledJob } from "@fable/protocol";
+import type {
+  ApprovalRequest,
+  RemoteCommand,
+  RemoteDevice,
+  RemoteDeviceTrustState,
+  ScheduledJob
+} from "@fable/protocol";
 import { activateSession, createSession, revokeSession, SESSION_IDLE_TIMEOUT_MS, type Now } from "./session";
 import {
-  authorizeCommand,
+  authorizeCommand as authorizeCommandWithDevice,
   type PendingApprovalIndex,
+  type RemoteDeviceIndex,
   type ScheduledJobIndex
 } from "./authorization";
 
@@ -46,6 +53,17 @@ function scheduledJob(id: string): ScheduledJob {
   };
 }
 
+function remoteDevice(id: string, trustState: RemoteDeviceTrustState): RemoteDevice {
+  return {
+    id,
+    label: id,
+    trustState,
+    firstPairedAt: T0,
+    lastSeenAt: T0,
+    revokedAt: trustState === "revoked" ? T0 : undefined
+  };
+}
+
 /** Build an index from an explicit set of pending approvals. */
 function pendingIndex(approvals: ApprovalRequest[]): PendingApprovalIndex {
   const map = new Map(approvals.map((a) => [a.id, a]));
@@ -53,6 +71,28 @@ function pendingIndex(approvals: ApprovalRequest[]): PendingApprovalIndex {
     has: (id) => map.has(id),
     get: (id) => map.get(id)
   };
+}
+
+function deviceIndex(devices: RemoteDevice[]): RemoteDeviceIndex {
+  const map = new Map(devices.map((device) => [device.id, device]));
+  return {
+    get: (id) => map.get(id)
+  };
+}
+
+function trustedDevices(): RemoteDeviceIndex {
+  return deviceIndex([remoteDevice("device-1", "trusted")]);
+}
+
+function authorizeCommand(
+  input: Omit<Parameters<typeof authorizeCommandWithDevice>[0], "devices"> & {
+    devices?: RemoteDeviceIndex;
+  }
+) {
+  return authorizeCommandWithDevice({
+    ...input,
+    devices: input.devices ?? trustedDevices()
+  });
 }
 
 /** Build an index from an explicit set of scheduled jobs. */
@@ -137,6 +177,32 @@ describe("authorizeCommand — happy path", () => {
 describe("authorizeCommand — fail-closed on session state", () => {
   const command: RemoteCommand = { type: "deny", approvalId: "appr-1" };
   const approvals = pendingIndex([pendingApproval("appr-1")]);
+
+  it("fails closed for an unpaired device", () => {
+    const result = authorizeCommand({
+      command,
+      session: liveSession(),
+      devices: deviceIndex([]),
+      pendingApprovals: approvals,
+      scheduledJobs: jobIndex([]),
+      now: clockAt(1_000)
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("device-unpaired");
+  });
+
+  it("fails closed for a revoked device", () => {
+    const result = authorizeCommand({
+      command,
+      session: liveSession(),
+      devices: deviceIndex([remoteDevice("device-1", "revoked")]),
+      pendingApprovals: approvals,
+      scheduledJobs: jobIndex([]),
+      now: clockAt(1_000)
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("device-revoked");
+  });
 
   it("fails closed for a pairing session", () => {
     const pairing = createSession("device-1", clockAt(0), "s");
