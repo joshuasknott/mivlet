@@ -130,6 +130,6 @@ Imported records are kept inactive to ensure local-first safety:
 
 ---
 
-## 7. Goal 8 Contract
+## 7. Repository Contract
 
-Later integration should use the repository modules under `src/store/repos/` or the typed native command boundary. React must not access SQLite directly. Knowledge sources, memory, workflows, schedules, artifacts, agent runs, and the connector cache already have stable encrypted repository surfaces; Goal 8 should reconcile overlapping schemas rather than create a second database.
+New production persistence work should use the repository modules under `src/store/repos/` or the typed native command boundary. React must not access SQLite directly. Knowledge sources, memory, workflows, schedules, artifacts, agent runs, and the connector cache already have stable encrypted repository surfaces; future features should extend those surfaces instead of creating a second database.

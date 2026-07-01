@@ -44,10 +44,9 @@ lexical search but imports the `ConnectorSourceProvider` contract from protocol
 depends on all three.
 
 **Persistence rule:** storage is defined **behind interfaces** in the knowledge
-package. The default implementation is the existing JSON/localStorage pattern
-(reused via a `KnowledgeStore` interface). Goal 5 will supply an encrypted
-SQLite implementation of the same interface during integration. No competing
-database architecture is introduced.
+package. Browser preview uses JSON/localStorage-compatible state, while the
+production Tauri path uses encrypted SQLite repositories through the same
+runtime boundary. No competing database architecture is introduced.
 
 ## 3. Domain types (protocol additions)
 
@@ -204,10 +203,12 @@ export interface Artifact {
 }
 ```
 
-## 4. Storage seam (Goal 5 swap point)
+## 4. Storage seam
 
 A repository interface in the knowledge package. The default impl is the
-existing JSON/localStorage pattern wrapped in a thin adapter.
+existing JSON/localStorage pattern wrapped in a thin adapter for preview; the
+production Tauri path persists through encrypted SQLite repositories behind the
+native command boundary.
 
 ```ts
 export interface KnowledgeStore {
@@ -233,10 +234,10 @@ export interface KnowledgeStore {
 }
 ```
 
-The default store is `createJsonKnowledgeStore` (in-memory map, snapshot-ready).
-Desktop wraps it so it round-trips through the runtime snapshot (Tauri) /
-localStorage (preview), reusing the existing persistence module's source-of-
-truth rules. **No new database.**
+The preview store remains `createJsonKnowledgeStore` (in-memory map,
+snapshot-ready) and round-trips through localStorage. Production desktop state
+uses the encrypted SQLite repository layer and typed runtime commands. **No new
+database.**
 
 ## 5. Connector-source contract
 
@@ -421,9 +422,12 @@ Rebuild `KnowledgePage.tsx` only. **Do not redesign other screens.**
 - UI states: empty, loading, indexing, failed, populated, deleted — via the
   existing `useShellRuntime.test.tsx` test harness.
 
-## 13. Schema + migration (Goal 8 doc)
+## 13. Schema + migration
 
-Add a `docs/knowledge/schema-and-migration.md` capturing:
+The integrated Batch 10 schema is documented in
+`docs/product/knowledge-lifecycle.md`,
+`docs/architecture/encrypted-storage.md`, and
+`docs/architecture/workspace-data-model.md`. Those documents capture:
 
 - The logical schema (sources, chunks, memories, pinned, artifacts, working
   context) and their additive optional fields.
@@ -431,9 +435,9 @@ Add a `docs/knowledge/schema-and-migration.md` capturing:
   (`importedKnowledgeSources`, `pinnedSourceIds`, `memoryRecords`,
   `memoryDisabled`) into the store-backed snapshot fields. All new fields are
   additive/optional, so a v1 snapshot loads unchanged.
-- The storage-interface swap point for Goal 5 (encrypted SQLite implements
-  `KnowledgeStore`).
-- The connector-source contract so Goal 8 connector branches implement
+- The storage-interface swap point: encrypted SQLite implements the production
+  `KnowledgeStore` boundary, while browser preview remains local fixture state.
+- The connector-source contract for future connector branches implementing
   `ConnectorSourceProvider`.
 
 ## 14. Definition of done (mapped)

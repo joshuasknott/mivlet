@@ -63,8 +63,9 @@ are also fully persisted in the SQLite vault.
   been forgotten (tombstoned).
 
 The `KnowledgeStore` contract is snapshot-shaped and independent of a storage
-engine. Goal 5's encrypted SQLite repository can implement the same boundary;
-this branch does not introduce a competing database or secret store.
+engine. In the production Tauri path, encrypted SQLite repositories implement
+that boundary; browser preview keeps using local fixture/localStorage behavior
+and does not introduce a competing production database or secret store.
 
 ## Native AI Runtime
 
