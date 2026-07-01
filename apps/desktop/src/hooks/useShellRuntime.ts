@@ -327,6 +327,16 @@ export interface ShellRuntime {
   setActiveItem: (value: string) => void;
   activeUtility: string | undefined;
   activePage: WorkspacePage | null;
+  /**
+   * A pending Run History job filter, set when navigating from a schedule's
+   * "View runs" link. Run History consumes then clears it on mount so the link
+   * is one-shot — the recurring definition → executions navigation target.
+   */
+  runHistoryJobId: string | null;
+  /** Open Run History pre-filtered to a schedule's executions. */
+  openRunHistoryForJob: (jobId: string) => void;
+  /** Clear the one-shot Run History job filter (consumed on mount). */
+  clearRunHistoryJobId: () => void;
   isChatView: boolean;
   activeThread: ThreadSummary | undefined;
   allThreads: ThreadSummary[];
@@ -500,6 +510,23 @@ export interface ShellRuntime {
   refreshSchedulerQueue: () => void;
   /** True once persisted scheduled jobs have been hydrated from the Rust store. */
   schedulesReady: boolean;
+  /** Versioned workflow definitions, for linking runs to their source workflow. */
+  workflowDefinitions: WorkflowDefinition[];
+  /**
+   * Re-fetch persisted workflow runs from the Rust authority and merge them into
+   * the in-memory run list. Used by Run History so the list reflects durable
+   * history rather than only the runs created this session.
+   */
+  refreshWorkflowRuns: () => Promise<void>;
+  /** Run ids currently being retried; UI shows a pending state per id. */
+  retryingRunIds: string[];
+  /**
+   * Retry a failed/blocked/cancelled run by re-queuing its job occurrence.
+   * Guards: only runs with a scheduled job that is still active can be retried.
+   * Reports success/failure through `lastAction` and tracks pending state in
+   * `retryingRunIds` until the queue acknowledges.
+   */
+  retryWorkflowRun: (runId: string) => void;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -615,6 +642,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     []
   );
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
+  // One-shot Run History job filter, set by a schedule's "View runs" link.
+  const [runHistoryJobId, setRunHistoryJobId] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState(initialState.composerValue);
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
@@ -654,6 +683,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // The durable scheduler queue (Rust authority). Loaded on mount so the
   // Schedules UI can surface queued/running/blocked-auth/cancelled states.
   const [schedulerQueue, setSchedulerQueue] = useState<SchedulerQueueEntry[]>([]);
+  // Run ids awaiting a queue acknowledgement after a retry. Tracked separately
+  // from workflowRuns so the detail view can show a pending control without
+  // mutating the authoritative run record before the queue confirms.
+  const [retryingRunIds, setRetryingRunIds] = useState<string[]>([]);
   const [notificationHistory, setNotificationHistory] = useState<NotificationRecord[]>(() => {
     try {
       return JSON.parse(window.localStorage.getItem("fable.notification-history.v1") ?? "[]");
@@ -744,7 +777,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     activeUtility === "Departments" ||
     activeUtility === "Knowledge" ||
     activeUtility === "Schedules" ||
-    activeUtility === "Connectors"
+    activeUtility === "Connectors" ||
+    activeUtility === "Run History"
       ? (activeUtility as WorkspacePage)
       : activeItem === "Profile" || activeItem === "Settings"
         ? activeItem
@@ -3219,11 +3253,127 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     });
   };
 
+  /**
+   * Re-fetch persisted workflow runs from the Rust authority and merge them into
+   * the in-memory run list (deduplicating by id). In preview (no Tauri runtime)
+   * this is a no-op; the in-memory list is already the whole history.
+   */
+  const refreshWorkflowRuns = async () => {
+    const records = await listRuntimeWorkflowRuns();
+    if (!records) return;
+    const loaded = records.map((record) => ({
+      id: record.id,
+      definitionId: record.definitionId,
+      definitionVersion: record.definitionVersion,
+      status: record.status,
+      trigger: record.trigger,
+      scheduledJobId: record.scheduledJobId,
+      input: (record.input as Record<string, unknown>) ?? {},
+      steps: (record.steps as WorkflowRun["steps"]) ?? [],
+      failureReason: record.failureReason,
+      idempotencyKey: record.idempotencyKey,
+      startedAt: record.startedAt,
+      updatedAt: record.updatedAt,
+      finishedAt: record.finishedAt
+    }));
+    setWorkflowRuns((current) => {
+      const byId = new Map(current.map((run) => [run.id, run]));
+      for (const run of loaded) byId.set(run.id, run);
+      // Newest started first; runs without a timestamp sort last.
+      return [...byId.values()].sort((a, b) =>
+        (b.startedAt || "").localeCompare(a.startedAt || "")
+      );
+    });
+  };
+
+  /**
+   * Retry a finished run by re-queueing its scheduled job occurrence. Only runs
+   * that belong to an active scheduled job can be retried — manual/voice runs
+   * and runs on paused/deleted jobs are not eligible. The pending state is
+   * tracked in `retryingRunIds` until the queue acknowledges (or rejects), and
+   * the outcome is reported through `lastAction`.
+   */
+  const retryWorkflowRun = (runId: string) => {
+    const run = workflowRuns.find((candidate) => candidate.id === runId);
+    if (!run) {
+      setLastAction("Fable could not find that run to retry.");
+      return;
+    }
+    // Only terminal/unhealthy runs make sense to retry.
+    const retryable: WorkflowRun["status"][] = [
+      "failed",
+      "blocked-auth",
+      "cancelled"
+    ];
+    if (!retryable.includes(run.status)) {
+      setLastAction("Only failed, blocked, or cancelled runs can be retried.");
+      return;
+    }
+    const job = run.scheduledJobId
+      ? scheduledJobs.find((candidate) => candidate.id === run.scheduledJobId)
+      : undefined;
+    if (!job) {
+      setLastAction("Manual and voice runs cannot be retried from history.");
+      return;
+    }
+    if (job.status !== "active") {
+      setLastAction(`Cannot retry — ${job.name} is ${job.status}.`);
+      return;
+    }
+    setRetryingRunIds((current) =>
+      current.includes(runId) ? current : [...current, runId]
+    );
+    const scheduledAt = new Date().toISOString();
+    const retryRunId = `workflow-run-${toSlug(job.id)}-${Date.now()}`;
+    void enqueueRuntimeJobRun(job.id, retryRunId, scheduledAt)
+      .then((queued) => {
+        if (!queued) queueWorkflowRun(job.id, retryRunId);
+        setLastAction(`Retrying ${job.name}.`);
+        // Flip the retried run's record back to a queued/retrying posture so the
+        // list reflects that a fresh attempt is in flight.
+        setWorkflowRuns((current) =>
+          current.map((existing) =>
+            existing.id === runId
+              ? {
+                  ...existing,
+                  status: "queued",
+                  failureReason: undefined,
+                  updatedAt: scheduledAt
+                }
+              : existing
+          )
+        );
+      })
+      .catch((error) => {
+        setLastAction(
+          error instanceof Error ? error.message : "Fable could not retry that run."
+        );
+      })
+      .finally(() => {
+        setRetryingRunIds((current) => current.filter((id) => id !== runId));
+      });
+  };
+
+  /**
+   * Navigate to Run History pre-filtered to a schedule's executions. Sets the
+   * one-shot filter then switches the active page; Run History consumes the
+   * filter on mount.
+   */
+  const openRunHistoryForJob = (jobId: string) => {
+    setRunHistoryJobId(jobId);
+    setActiveItem("Run History");
+  };
+
+  const clearRunHistoryJobId = () => setRunHistoryJobId(null);
+
   return {
     activeItem,
     setActiveItem,
     activeUtility,
     activePage,
+    runHistoryJobId,
+    openRunHistoryForJob,
+    clearRunHistoryJobId,
     isChatView,
     activeThread,
     allThreads,
@@ -3330,6 +3480,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     cancelScheduledRun,
     refreshSchedulerQueue,
     schedulesReady,
+    workflowDefinitions,
+    refreshWorkflowRuns,
+    retryingRunIds,
+    retryWorkflowRun,
     backendProviders,
     connectedBackendIds,
     backendStatus,

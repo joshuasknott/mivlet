@@ -59,7 +59,8 @@ export function SchedulePanel({
   onToggle,
   onDelete,
   onRunNow,
-  onCancelRun
+  onCancelRun,
+  onViewRuns
 }: {
   jobs?: ScheduledJob[];
   runs?: WorkflowRun[];
@@ -87,6 +88,8 @@ export function SchedulePanel({
   onDelete: (job: ScheduledJob) => void;
   onRunNow?: (job: ScheduledJob) => void;
   onCancelRun?: (runId: string) => void;
+  /** Open Run History pre-filtered to this schedule's executions. */
+  onViewRuns?: (job: ScheduledJob) => void;
 }) {
   const [form, setForm] = useState<ScheduleFormValue>(DEFAULT_FORM_VALUE);
   const [submitted, setSubmitted] = useState(false);
@@ -162,6 +165,7 @@ export function SchedulePanel({
               onDelete={onDelete}
               onRunNow={onRunNow}
               onCancelRun={onCancelRun}
+              onViewRuns={onViewRuns}
             />
           ))}
         </ul>
@@ -453,7 +457,8 @@ function ScheduleRow({
   onToggle,
   onDelete,
   onRunNow,
-  onCancelRun
+  onCancelRun,
+  onViewRuns
 }: {
   job: ScheduledJob;
   runs: WorkflowRun[];
@@ -471,6 +476,7 @@ function ScheduleRow({
   onDelete: (job: ScheduledJob) => void;
   onRunNow?: (job: ScheduledJob) => void;
   onCancelRun?: (runId: string) => void;
+  onViewRuns?: (job: ScheduledJob) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [confirmingPause, setConfirmingPause] = useState(false);
@@ -577,6 +583,11 @@ function ScheduleRow({
           {onRunNow && job.status === "active" ? (
             <button type="button" onClick={() => onRunNow(job)} aria-label={`Run ${job.name} now`}>
               <Play size={15} />
+            </button>
+          ) : null}
+          {onViewRuns ? (
+            <button type="button" onClick={() => onViewRuns(job)}>
+              View runs
             </button>
           ) : null}
           {confirmingPause ? (

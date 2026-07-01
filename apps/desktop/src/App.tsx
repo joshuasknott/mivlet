@@ -21,6 +21,7 @@ import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
 import { SchedulesPage } from "./components/pages/SchedulesPage";
+import { RunHistoryPage } from "./components/pages/RunHistoryPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
 import { DepartmentsPage } from "./components/pages/DepartmentsPage";
@@ -175,6 +176,8 @@ export function App() {
         return <KnowledgePage runtime={runtime} />;
       case "Schedules":
         return <SchedulesPage runtime={runtime} />;
+      case "Run History":
+        return <RunHistoryPage runtime={runtime} />;
       case "Profile":
       case "Settings":
         return (
