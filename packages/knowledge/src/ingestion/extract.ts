@@ -191,19 +191,132 @@ export function classifyCandidate(candidate: ConnectorSourceCandidate): Classifi
   }
 
   if (type === "json") {
-    try {
-      // Parse to validate structure; we don't keep the value here (the chunker
-      // re-parses). A thrown SyntaxError becomes a bounded `malformed` skip.
-      JSON.parse(candidate.content);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "parse error";
+    const jsonError = malformedJsonDetail(candidate.content);
+    if (jsonError) {
       return {
         ok: false,
         reason: "malformed",
-        detail: `JSON parse failed: ${message}`
+        detail: `JSON parse failed: ${jsonError}`
       };
+    }
+  } else if (type === "csv") {
+    const csvError = malformedCsvDetail(candidate.content);
+    if (csvError) {
+      return { ok: false, reason: "malformed", detail: csvError };
+    }
+  } else if (type === "yaml") {
+    const yamlError = malformedYamlDetail(candidate.content);
+    if (yamlError) {
+      return { ok: false, reason: "malformed", detail: yamlError };
     }
   }
 
   return { ok: true, text: candidate.content, type };
+}
+
+/**
+ * Validate JSON structure. Returns an error message when malformed, or `null`
+ * when well-formed. Used by `classifyCandidate` so malformed JSON becomes a
+ * bounded `malformed` skip instead of a later chunker failure.
+ */
+export function malformedJsonDetail(content: string): string | null {
+  try {
+    JSON.parse(content);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : "parse error";
+  }
+}
+
+/**
+ * Conservative CSV sanity check. Rejects content that is clearly not CSV:
+ *   - a header line with no delimiter AND multiple non-empty data lines
+ *     (looks like prose, not tabular data);
+ *   - grossly ragged rows (every data row has a different column count that
+ *     differs from the header) when the delimiter is consistent.
+ *
+ * Tab characters are treated as an alternative delimiter. Empty/single-row
+ * content is not flagged here (the chunker handles it). Conservative: only
+ * clearly broken structure is rejected.
+ */
+export function malformedCsvDetail(content: string): string | null {
+  const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (lines.length < 2) return null;
+
+  const header = lines[0];
+  const candidateDelims = [",", "\t", ";", "|"];
+  let delim = ",";
+  for (const d of candidateDelims) {
+    if (header.includes(d)) {
+      delim = d;
+      break;
+    }
+  }
+
+  // Header with no delimiter and more than one data line → likely prose.
+  if (!header.includes(delim) && lines.length > 2) {
+    return "Header line has no delimiter and multiple data rows; not tabular.";
+  }
+
+  const headerCols = countCsvFields(header, delim);
+  if (headerCols <= 1) return null;
+
+  // Reject when EVERY data row's column count differs from the header
+  // (a consistently ragged table is broken; one or two ragged rows are tolerated).
+  let mismatched = 0;
+  for (let i = 1; i < lines.length; i++) {
+    if (countCsvFields(lines[i], delim) !== headerCols) mismatched++;
+  }
+  if (mismatched === lines.length - 1 && lines.length > 2) {
+    return `All ${mismatched} data rows have a column count differing from the header (${headerCols}).`;
+  }
+  return null;
+}
+
+/** Count CSV fields in a line, honoring quoted fields containing the delimiter. */
+function countCsvFields(line: string, delim: string): number {
+  if (!line.includes(delim)) return 1;
+  let count = 1;
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        i++; // escaped quote
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (ch === delim && !inQuotes) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Conservative YAML structure check. Rejects clearly broken YAML:
+ *   - tabs used for indentation (YAML forbids tab indentation);
+ *   - a document that has no recognizable structure at all (no mapping keys,
+ *     no sequence entries, no scalars) beyond whitespace/comments.
+ *
+ * Does NOT require a full YAML parser — only flags unambiguous breakage so
+ * ordinary YAML passes through. Bounded by line count.
+ */
+export function malformedYamlDetail(content: string): string | null {
+  const lines = content.split(/\r?\n/);
+  let hasContent = false;
+  for (const line of lines) {
+    // Tab indentation (a leading tab before non-comment content) is invalid.
+    if (/^\t+\S/.test(line)) {
+      return "YAML forbids tab indentation; found a tab-indented line.";
+    }
+    // Any non-comment, non-whitespace line counts as content.
+    if (line.trim().length > 0 && !line.trim().startsWith("#")) {
+      hasContent = true;
+    }
+  }
+  if (!hasContent) {
+    return "YAML document has no content beyond comments/whitespace.";
+  }
+  return null;
 }

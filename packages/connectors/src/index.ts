@@ -15,12 +15,14 @@
 export {
   importLocalTextFile,
   localFileFingerprint,
+  validateLocalFileCandidate,
   MAX_LOCAL_FILE_BYTES,
   MAX_LOCAL_FILE_PREVIEW_CHARACTERS,
   SUPPORTED_LOCAL_FILE_EXTENSIONS
 } from "./local-files";
-export type { LocalTextFileCandidate } from "./local-files";
+export type { LocalFileValidation, LocalTextFileCandidate } from "./local-files";
 export { searchKnowledgeSources } from "./knowledge-search";
+export type { KnowledgeSearchOptions } from "./knowledge-search";
 export {
   effectForTool,
   evaluatePermissionPolicy,

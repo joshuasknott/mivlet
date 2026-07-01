@@ -179,7 +179,7 @@ function chunkPlainText(
     if (slice.length === 0) continue;
     chunks.push(makeChunk(sourceId, ordinal++, slice, window.start, end));
   }
-  return chunks;
+  return normalizeChunkList(chunks, sourceId, maxChars, overlapChars, true);
 }
 
 /**
@@ -229,9 +229,11 @@ function chunkMarkdown(
  * JSON: array -> one chunk per element (serialized); object -> one chunk per
  * top-level key/value; primitive/empty -> fixed window over the raw text.
  *
- * Element offsets cannot be cheaply mapped back into the original source
- * string, so per-element chunks record the full-document span; the stable
- * chunk id remains the durable locator and citations resolve by id.
+ * Per-element/per-key chunks record real `charStart`/`charEnd` offsets into
+ * the original text (located via `locateJsonSpans`), so citations resolve to
+ * an exact source location. When positional location fails for any element,
+ * that element falls back to a full-document span (the stable chunk id
+ * remains the durable locator either way).
  */
 function chunkJson(
   text: string,
@@ -249,27 +251,218 @@ function chunkJson(
 
   if (Array.isArray(value)) {
     if (value.length === 0) return [];
+    const spans = locateJsonSpans(text, value, "array");
     const chunks: SourceChunk[] = [];
     for (let i = 0; i < value.length; i++) {
       const serialized = JSON.stringify(value[i]);
-      chunks.push(makeChunk(sourceId, i, serialized, 0, text.length));
+      if (serialized.length === 0) continue;
+      const span = spans[i] ?? { start: 0, end: text.length };
+      chunks.push(makeChunk(sourceId, chunks.length, serialized, span.start, span.end));
     }
-    return chunks;
+    return normalizeChunkList(chunks, sourceId, maxChars, overlapChars);
   }
 
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length === 0) return [];
+    const spans = locateJsonSpans(text, value, "object");
     const chunks: SourceChunk[] = [];
-    let ordinal = 0;
-    for (const [key, val] of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const [key, val] = entries[i];
       const serialized = JSON.stringify({ [key]: val });
-      chunks.push(makeChunk(sourceId, ordinal++, serialized, 0, text.length));
+      if (serialized.length === 0) continue;
+      const span = spans[i] ?? { start: 0, end: text.length };
+      chunks.push(makeChunk(sourceId, chunks.length, serialized, span.start, span.end));
     }
-    return chunks;
+    return normalizeChunkList(chunks, sourceId, maxChars, overlapChars);
   }
 
   return chunkPlainText(text, sourceId, maxChars, overlapChars);
+}
+
+/**
+ * Locate the `[start,end)` char spans of each top-level array element or
+ * object entry within the raw JSON `text`. Returns spans in entry order.
+ *
+ * Approach: a single forward scan that tracks depth (`[`/`{` vs `]`/`}`),
+ * string state (with escapes), and records the span of each depth-1 item
+ * (and each top-level object key's value). Bounded by `text.length`.
+ */
+function locateJsonSpans(
+  text: string,
+  value: unknown,
+  shape: "array" | "object"
+): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  let depth = 0;
+  let itemStart = -1;
+  let inString = false;
+  let escape = false;
+  let topLevelEnd = -1;
+
+  // For object entries: track the key position so a span covers key:value.
+  let awaitingKey = shape === "object";
+  let keyStart = -1;
+  let keyEnd = -1;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+        if (shape === "object" && awaitingKey && depth === 1 && keyStart >= 0) {
+          keyEnd = i;
+        }
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      if (shape === "object" && awaitingKey && depth === 1 && keyStart < 0) {
+        keyStart = i;
+      }
+      continue;
+    }
+
+    if (ch === "[" || ch === "{") {
+      if (depth === 0) {
+        // entering the container
+      } else if (depth === 1 && itemStart < 0) {
+        // first nested token of a new item
+        itemStart = shape === "object" && keyStart >= 0 ? keyStart : i;
+      }
+      depth++;
+      continue;
+    }
+
+    if (ch === "]" || ch === "}") {
+      depth--;
+      if (depth === 0) {
+        topLevelEnd = i;
+      } else if (depth === 1 && itemStart >= 0) {
+        spans.push({ start: itemStart, end: i + 1 });
+        itemStart = -1;
+        if (shape === "object") {
+          awaitingKey = true;
+          keyStart = -1;
+          keyEnd = -1;
+        }
+      }
+      continue;
+    }
+
+    // At depth 1, a scalar/colon/comma. For arrays, capture scalar items.
+    if (depth === 1) {
+      if (shape === "array") {
+        if (itemStart < 0 && !/\s|,/.test(ch)) {
+          itemStart = i;
+        }
+        if (itemStart >= 0 && ch === ",") {
+          spans.push({ start: itemStart, end: i });
+          itemStart = -1;
+        }
+      } else {
+        // object: after a key string and a colon, the value follows.
+        if (keyEnd >= 0 && ch === ":" && itemStart < 0) {
+          // value begins after this colon at the next non-space char.
+          itemStart = keyStart;
+        } else if (itemStart >= 0 && ch === ",") {
+          spans.push({ start: itemStart, end: i });
+          itemStart = -1;
+          awaitingKey = true;
+          keyStart = -1;
+          keyEnd = -1;
+        }
+      }
+    }
+  }
+
+  // Flush a trailing item (no comma after the last element).
+  if (depth === 1 && itemStart >= 0) {
+    // Find the end: last non-whitespace before the closing brace/bracket.
+    let end = topLevelEnd >= 0 ? topLevelEnd : text.length;
+    while (end > itemStart && /\s/.test(text[end - 1])) end--;
+    spans.push({ start: itemStart, end });
+  }
+
+  // Guard: span count must match the value's entry count, else discard
+  // (caller falls back to full-document span per element).
+  const expected = shape === "array" ? (value as unknown[]).length : Object.keys(value as object).length;
+  if (spans.length !== expected) return [];
+  return spans;
+}
+
+/**
+ * Post-process a raw chunk list: drop empty/whitespace-only chunks, split any
+ * chunk exceeding `maxChars` into bounded windows, and re-assign stable
+ * ordinals/ids so the result is deterministic for identical input.
+ *
+ * `mergeTiny` (default false) additionally merges a trailing tiny chunk
+ * (< 25% of maxChars) into the previous chunk. Only used for windowed
+ * (plain-text) chunking, NOT for structurally-delimited chunks (JSON
+ * elements / YAML keys are intentional units and must not be merged away).
+ */
+function normalizeChunkList(
+  chunks: SourceChunk[],
+  sourceId: string,
+  maxChars: number,
+  overlapChars: number,
+  mergeTiny = false
+): SourceChunk[] {
+  const tinyThreshold = Math.max(1, Math.floor(maxChars * 0.25));
+
+  // Pass 1: drop empty/whitespace-only.
+  let cleaned = chunks.filter((c) => c.text.trim().length > 0);
+
+  // Pass 2: split oversized chunks into bounded windows over their own text.
+  const expanded: SourceChunk[] = [];
+  for (const chunk of cleaned) {
+    if (chunk.text.length <= maxChars) {
+      expanded.push(chunk);
+      continue;
+    }
+    const base = chunk.charStart;
+    const windows = fixedWindowOffsets(chunk.text, maxChars, overlapChars);
+    for (const w of windows) {
+      const end = adjustToBoundary(chunk.text, w.start, w.end);
+      const slice = chunk.text.slice(w.start, end).trim();
+      if (slice.length === 0) continue;
+      expanded.push(
+        makeChunk(sourceId, expanded.length, slice, base + w.start, base + end, chunk.heading)
+      );
+    }
+  }
+
+  // Pass 3: merge a trailing tiny chunk into the previous chunk (windowed only).
+  cleaned = expanded;
+  if (mergeTiny && cleaned.length >= 2) {
+    const last = cleaned[cleaned.length - 1];
+    const prev = cleaned[cleaned.length - 2];
+    if (last.text.length <= tinyThreshold && prev.text.length + last.text.length <= maxChars) {
+      const merged = makeChunk(
+        sourceId,
+        prev.ordinal,
+        `${prev.text} ${last.text}`.trim(),
+        Math.min(prev.charStart, last.charStart),
+        Math.max(prev.charEnd, last.charEnd),
+        prev.heading
+      );
+      cleaned = [...cleaned.slice(0, -2), merged];
+    }
+  }
+
+  // Pass 4: re-assign deterministic ordinals/ids.
+  return cleaned.map((chunk, ordinal) => ({
+    ...chunk,
+    ordinal,
+    id: `${sourceId}#${ordinal}`
+  }));
 }
 
 /**
@@ -289,7 +482,9 @@ function chunkCsv(
   const header = lines[0];
   const dataLines = lines.slice(1).filter((line) => line.length > 0);
   if (dataLines.length === 0) {
-    return [makeChunk(sourceId, 0, header, 0, text.length)];
+    // Header-only CSV produces no useful retrieval chunk — return empty
+    // rather than a header-only chunk with no data context.
+    return [];
   }
 
   const chunks: SourceChunk[] = [];
@@ -317,6 +512,74 @@ function chunkCsv(
   flushGroup(cursor);
 
   return chunks;
+}
+
+/**
+ * YAML: chunk on document boundaries (`---`) and top-level mapping keys. Each
+ * top-level mapping entry (`key:`) becomes one segment spanning from its key
+ * line to the next top-level key (or document end), preserving offsets into
+ * the original text. Multi-document streams split on `---` separators first.
+ *
+ * Non-mapping YAML (scalar or sequence root) falls back to plain-text windows.
+ * No external dependency — line/regex based and conservative.
+ */
+function chunkYaml(
+  text: string,
+  sourceId: string,
+  maxChars: number,
+  overlapChars: number
+): SourceChunk[] {
+  if (text.trim().length === 0) return [];
+
+  // Split into documents on leading `---` separators. Each `---` (at column 0)
+  // starts a new document; `...` ends one. We track document boundaries by
+  // line index so offsets stay accurate against the original text.
+  const lines = text.split(/\r?\n/);
+  // Cumulative char offset of the start of each line (including its newline).
+  const lineOffsets: number[] = [0];
+  for (let i = 0; i < lines.length; i++) {
+    lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
+  }
+
+  // A top-level mapping key: a line at column 0 (no leading whitespace) whose
+  // first token is `key:` or `"key":`. Matches inline values too
+  // (`name: Fable`). Indented keys (nested mappings) are excluded by the `^`
+  // anchor requiring col 0.
+  const topLevelKey = /^(?:[A-Za-z0-9_.\-]+|"[^"]*"|'[^']*'):(?:\s.*)?$/;
+
+  // Collect segment spans: [startOffset, endOffset] for each top-level entry.
+  const segments: { start: number; end: number }[] = [];
+  let keyLineIdx: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    // Skip document separators / end markers.
+    if (/^---\s*$/.test(raw) || /^\.\.\.\s*$/.test(raw)) continue;
+    if (topLevelKey.test(raw)) {
+      keyLineIdx.push(i);
+    }
+  }
+
+  if (keyLineIdx.length === 0) {
+    // Not a top-level mapping — fall back to plain text.
+    return chunkPlainText(text, sourceId, maxChars, overlapChars);
+  }
+
+  for (let k = 0; k < keyLineIdx.length; k++) {
+    const startLine = keyLineIdx[k];
+    const endLine = k + 1 < keyLineIdx.length ? keyLineIdx[k + 1] : lines.length;
+    const start = lineOffsets[startLine];
+    // End = start of the line AFTER the segment (exclusive), clamped.
+    const end = Math.min(text.length, lineOffsets[endLine]);
+    if (end > start) segments.push({ start, end });
+  }
+
+  // Build chunks from segments (handles oversized segments via windows).
+  const segObjects = segments.map((s) => ({
+    text: text.slice(s.start, s.end),
+    start: s.start,
+    end: s.end
+  }));
+  return buildChunksFromSegments(sourceId, segObjects, maxChars, overlapChars);
 }
 
 /** Map a MIME type to the canonical extracted type (unknown -> text). */
@@ -364,6 +627,8 @@ export function chunkSourceText(text: string, options: ChunkOptions): SourceChun
       return chunkJson(text, options.sourceId, maxChars, overlapChars);
     case "csv":
       return chunkCsv(text, options.sourceId, maxChars);
+    case "yaml":
+      return chunkYaml(text, options.sourceId, maxChars, overlapChars);
     default:
       return chunkPlainText(text, options.sourceId, maxChars, overlapChars);
   }

@@ -332,3 +332,159 @@ describe("cosineSimilarity", () => {
     expect(cosineSimilarity([], [1])).toBe(0);
   });
 });
+
+describe("retrieve — filters", () => {
+  it("filters by connectorId", async () => {
+    const sources = [
+      src(
+        makeSource({ id: "local", title: "alpha match", connectorId: "local-files" }),
+        [makeChunk("local", 0, "alpha match")]
+      ),
+      src(
+        makeSource({ id: "remote", title: "alpha match", connectorId: "github" }),
+        [makeChunk("remote", 0, "alpha match")]
+      )
+    ];
+    const result = await retrieve(sources, { query: "alpha", connectorId: "github" });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["remote"]);
+  });
+
+  it("filters by account", async () => {
+    const sources = [
+      src(makeSource({ id: "a1", title: "alpha", account: "acct-a" }), [
+        makeChunk("a1", 0, "alpha")
+      ]),
+      src(makeSource({ id: "a2", title: "alpha", account: "acct-b" }), [
+        makeChunk("a2", 0, "alpha")
+      ])
+    ];
+    const result = await retrieve(sources, { query: "alpha", account: "acct-a" });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["a1"]);
+  });
+
+  it("filters by sourceIds allowlist", async () => {
+    const sources = [
+      src(makeSource({ id: "s1", title: "alpha" }), [makeChunk("s1", 0, "alpha")]),
+      src(makeSource({ id: "s2", title: "alpha" }), [makeChunk("s2", 0, "alpha")])
+    ];
+    const result = await retrieve(sources, { query: "alpha", sourceIds: ["s2"] });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["s2"]);
+  });
+
+  it("restricts to userSelectedSourceIds when present", async () => {
+    const sources = [
+      src(makeSource({ id: "s1", title: "alpha" }), [makeChunk("s1", 0, "alpha")]),
+      src(makeSource({ id: "s2", title: "alpha" }), [makeChunk("s2", 0, "alpha")]),
+      src(makeSource({ id: "s3", title: "alpha" }), [makeChunk("s3", 0, "alpha")])
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      userSelectedSourceIds: ["s1", "s3"]
+    });
+    const ids = result.citations.map((c) => c.sourceId).sort();
+    expect(ids).toEqual(["s1", "s3"]);
+  });
+
+  it("excludes sources failing the authorization predicate", async () => {
+    const sources = [
+      src(makeSource({ id: "ok", title: "alpha", connectorId: "local-files" }), [
+        makeChunk("ok", 0, "alpha")
+      ]),
+      src(makeSource({ id: "revoked", title: "alpha", connectorId: "disconnected" }), [
+        makeChunk("revoked", 0, "alpha")
+      ])
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      isAuthorized: (s) => s.connectorId === "local-files"
+    });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["ok"]);
+  });
+});
+
+describe("retrieve — lifecycle exclusion", () => {
+  it("excludes indexing-status sources from retrieval", async () => {
+    const sources = [
+      src(makeSource({ id: "indexing", title: "alpha", status: "indexing" }), [
+        makeChunk("indexing", 0, "alpha")
+      ]),
+      src(makeSource({ id: "ok", title: "alpha" }), [makeChunk("ok", 0, "alpha")])
+    ];
+    const result = await retrieve(sources, { query: "alpha" });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["ok"]);
+  });
+});
+
+describe("retrieve — deterministic tie-breaking", () => {
+  it("breaks ties by title, then chunk ordinal, then chunkId", async () => {
+    const sources = [
+      src(makeSource({ id: "b", title: "Beta" }), [
+        makeChunk("b", 0, "alpha"),
+        makeChunk("b", 1, "alpha")
+      ]),
+      src(makeSource({ id: "a", title: "Alpha" }), [makeChunk("a", 0, "alpha")])
+    ];
+    const result = await retrieve(sources, { query: "alpha" });
+    // All have identical lexical scores; Alpha (title) sorts before Beta.
+    expect(result.citations[0].sourceId).toBe("a");
+    expect(result.citations[0].chunkId).toBe("a#0");
+  });
+});
+
+describe("retrieve — content-hash dedup", () => {
+  it("drops same-source chunks with identical content hashes", async () => {
+    const sources = [
+      src(makeSource({ id: "s1", title: "alpha" }), [
+        makeChunk("s1", 0, "alpha content", { contentHash: "dup" }),
+        makeChunk("s1", 1, "alpha content", { contentHash: "dup", charStart: 500, charEnd: 513 })
+      ])
+    ];
+    const result = await retrieve(sources, { query: "alpha" });
+    expect(result.citations).toHaveLength(1);
+  });
+});
+
+describe("retrieve — citation enrichment", () => {
+  it("carries sourcePath, mediaType, and scope on citations", async () => {
+    const sources = [
+      src(
+        makeSource({
+          id: "s1",
+          title: "alpha",
+          sourcePath: "docs/alpha.md",
+          mediaType: "text/markdown",
+          scope: { level: "project", projectId: "p1" }
+        }),
+        [makeChunk("s1", 0, "alpha")]
+      )
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      scope: { level: "project", projectId: "p1" }
+    });
+    expect(result.citations[0].sourcePath).toBe("docs/alpha.md");
+    expect(result.citations[0].mediaType).toBe("text/markdown");
+    expect(result.citations[0].scope).toEqual({ level: "project", projectId: "p1" });
+  });
+});
+
+describe("retrieve — lexical fallback after embedding failure", () => {
+  it("degrades to lexical-fallback when the embedding provider throws", async () => {
+    const failingProvider: EmbeddingProvider = {
+      async embedTexts() {
+        throw new Error("provider down");
+      }
+    };
+    const sources = [
+      src(makeSource({ id: "s1", title: "alpha" }), [
+        makeChunk("s1", 0, "alpha content", { embedding: [1, 0] })
+      ])
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      embeddingProvider: failingProvider
+    });
+    expect(result.mode).toBe("lexical-fallback");
+    expect(result.citations.length).toBeGreaterThan(0);
+  });
+});

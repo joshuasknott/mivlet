@@ -5,6 +5,7 @@ import {
   ingestFolder,
   localFilesCandidate,
   reindexIndex,
+  sanitizeSourcePath,
   sourceIdFor,
   DEFAULT_FOLDER_MAX_FILES
 } from "./ingest";
@@ -382,9 +383,11 @@ describe("ingestFolder", () => {
     ];
     const outcomes = ingestFolder(files, { connectorId: "local-files" });
     expect(outcomes).toHaveLength(3);
-    expect(outcomes[0].kind).toBe("created");
-    expect(outcomes[1]).toMatchObject({ kind: "skipped", reason: "empty" });
-    expect(outcomes[2]).toMatchObject({ kind: "skipped", reason: "binary" });
+    // Deterministic ordering is by name, so assert by kind/reason not position.
+    const kinds = outcomes.map((o) => (o.kind === "skipped" ? o.reason : o.kind));
+    expect(kinds).toContain("created");
+    expect(kinds).toContain("empty");
+    expect(kinds).toContain("binary");
   });
 
   it("default maxFiles is 500", () => {
@@ -410,5 +413,142 @@ describe("ingestFolder", () => {
     expect(localFilesCandidate({ name: "a.txt", content: "x", sizeBytes: 1 }).mimeType).toBe(
       "text/plain"
     );
+  });
+});
+
+describe("ingest: metadata preservation", () => {
+  it("preserves sourcePath, mediaType, modifiedAt, and scope on a created source", () => {
+    const c = candidate({
+      title: "docs/notes.md",
+      mimeType: "text/markdown",
+      sourcePath: "docs/notes.md",
+      modifiedAt: "2026-06-01T00:00:00.000Z",
+      scope: { level: "project", projectId: "p1" }
+    });
+    const outcome = ingestCandidate(c, { connectorId: "local-files" });
+    expect(outcome.kind).toBe("created");
+    if (outcome.kind !== "created") return;
+    expect(outcome.source.sourcePath).toBe("docs/notes.md");
+    expect(outcome.source.mediaType).toBe("text/markdown");
+    expect(outcome.source.modifiedAt).toBe("2026-06-01T00:00:00.000Z");
+    expect(outcome.source.scope).toEqual({ level: "project", projectId: "p1" });
+  });
+
+  it("defaults scope to global when unset", () => {
+    const outcome = ingestCandidate(candidate(), { connectorId: "local-files" });
+    if (outcome.kind !== "created") throw new Error("expected created");
+    expect(outcome.source.scope).toEqual({ level: "global" });
+  });
+
+  it("derives freshness from modifiedAt timestamp (relative)", () => {
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+    const outcome = ingestCandidate(
+      candidate({ modifiedAt: recent }),
+      { connectorId: "local-files" }
+    );
+    if (outcome.kind !== "created") throw new Error("expected created");
+    expect(outcome.source.freshness).toContain("Imported");
+    expect(outcome.source.freshness).not.toBe("Imported now");
+  });
+});
+
+describe("ingest: folder ordering + path safety", () => {
+  it("orders outcomes deterministically by name regardless of input order", () => {
+    const files = [
+      { name: "zeta.txt", content: "z", sizeBytes: 1 },
+      { name: "alpha.txt", content: "a", sizeBytes: 1 },
+      { name: "mid.txt", content: "m", sizeBytes: 1 }
+    ];
+    const outcomes = ingestFolder(files);
+    expect(outcomes.map((o) => (o.kind === "created" ? o.source.title : ""))).toEqual([
+      "alpha.txt",
+      "mid.txt",
+      "zeta.txt"
+    ]);
+  });
+
+  it("skips files whose sourcePath escapes the import boundary", () => {
+    const files = [
+      { name: "escape.txt", content: "ok", sizeBytes: 2, sourcePath: "../outside/secret.txt" }
+    ];
+    const outcomes = ingestFolder(files, { importRoot: "docs" });
+    expect(outcomes[0]).toMatchObject({ kind: "skipped", reason: "path-escape" });
+  });
+
+  it("normalizes absolute paths to boundary-relative", () => {
+    expect(sanitizeSourcePath("C:\\docs\\a.txt")).toBe("docs/a.txt");
+    expect(sanitizeSourcePath("/var/data/b.txt")).toBe("var/data/b.txt");
+    expect(sanitizeSourcePath("docs/./a/../b.txt")).toBe("docs/b.txt");
+    expect(sanitizeSourcePath("../../etc/passwd")).toBeNull();
+  });
+
+  it("respects the file-count cap deterministically", () => {
+    const files = Array.from({ length: 5 }, (_, i) => ({
+      name: `f${i}.txt`,
+      content: String(i),
+      sizeBytes: 1
+    }));
+    const outcomes = ingestFolder(files, { maxFiles: 2 });
+    expect(outcomes.filter((o) => o.kind === "created")).toHaveLength(2);
+    expect(outcomes.filter((o) => o.kind === "skipped")).toHaveLength(3);
+  });
+});
+
+describe("ingest: incremental reindex + lifecycle", () => {
+  it("repaths an unchanged content match whose path changed (move/rename)", () => {
+    const original = ingestCandidate(candidate(), { connectorId: "local-files" });
+    if (original.kind !== "created") throw new Error("expected created");
+    const moved = candidate({
+      title: "moved/notes.md",
+      sourcePath: "moved/notes.md",
+      content: "# Notes\n\nSome content here." // identical content
+    });
+    const result = reindexIndex([original.source], [moved], "local-files");
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes[0].kind).toBe("unchanged");
+    if (result.outcomes[0].kind === "unchanged") {
+      expect(result.outcomes[0].source.title).toBe("moved/notes.md");
+      expect(result.outcomes[0].source.sourcePath).toBe("moved/notes.md");
+    }
+    expect(result.removedSourceIds).toHaveLength(0);
+  });
+
+  it("carries pin state forward across a content edit", () => {
+    const created = ingestCandidate(candidate(), { connectorId: "local-files" });
+    if (created.kind !== "created") throw new Error("expected created");
+    const pinned: KnowledgeSource = { ...created.source, pinned: true };
+    const edited = candidate({ content: "# Notes\n\nEdited content." });
+    const result = reindexIndex([pinned], [edited], "local-files");
+    const updated = result.outcomes.find((o) => o.kind === "updated");
+    expect(updated).toBeDefined();
+    if (updated && updated.kind === "updated") {
+      expect(updated.source.pinned).toBe(true);
+      expect(updated.source.id).toBe(pinned.id);
+    }
+  });
+
+  it("does not restore a deliberately deleted (tombstoned) source on refresh", () => {
+    const created = ingestCandidate(candidate(), { connectorId: "local-files" });
+    if (created.kind !== "created") throw new Error("expected created");
+    const tomb = new Set([created.source.id]);
+    // Re-import the same content with the tombstone in place.
+    const result = reindexIndex([], [candidate()], "local-files", { deletedSourceIds: tomb });
+    expect(result.outcomes[0].kind).toBe("skipped");
+    expect(result.removedSourceIds).toHaveLength(0);
+  });
+
+  it("reports an unmatched existing source as removed", () => {
+    const created = ingestCandidate(candidate(), { connectorId: "local-files" });
+    if (created.kind !== "created") throw new Error("expected created");
+    const result = reindexIndex([created.source], [], "local-files");
+    expect(result.removedSourceIds).toEqual([created.source.id]);
+  });
+
+  it("never removes sources from another connector", () => {
+    const created = ingestCandidate(candidate(), { connectorId: "local-files" });
+    if (created.kind !== "created") throw new Error("expected created");
+    const other: KnowledgeSource = { ...created.source, connectorId: "github" };
+    const result = reindexIndex([other], [], "local-files");
+    expect(result.removedSourceIds).toHaveLength(0);
   });
 });
