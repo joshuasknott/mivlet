@@ -43,7 +43,18 @@ import type {
   WorkspaceGoal,
   WorkspacePlan
 } from "@fable/protocol";
-import { assembleContext, chunkSourceText, promoteToMemory, retrieve } from "@fable/knowledge";
+import {
+  assembleContext,
+  chunkSourceText,
+  disableMemory as disableMemoryRecord,
+  editMemory,
+  exportMemories,
+  forgetMemory as forgetMemoryRecord,
+  isLiveMemory,
+  isLiveSource,
+  promoteToMemory,
+  retrieve
+} from "@fable/knowledge";
 import {
   FIRST_WAVE_CONNECTOR_IDS,
   captureExecutionRoute,
@@ -370,12 +381,23 @@ export interface ShellRuntime {
   saveMemoryEdit: (recordId: string) => void;
   toggleMemoryPin: (recordId: string) => void;
   forgetMemory: (recordId: string) => void;
+  /** Soft-disable a single memory: excluded from retrieval/context/export, but stays in management views. */
+  toggleMemoryRecordDisabled: (recordId: string) => void;
   toggleMemoryDisabled: () => void;
   exportMemory: () => Promise<void>;
+  /**
+   * Export all current-workspace knowledge (live sources + live memories) as
+   * plain text. Excludes disabled sources, forgotten/disabled memories,
+   * secrets, connector tokens, and raw audit payloads. Resolves to the export
+   * text and surfaces it through `knowledgeExportText`.
+   */
+  exportKnowledge: () => Promise<void>;
+  knowledgeExportText: string;
   cancelMemoryEdit: () => void;
   searchKnowledge: (query: string) => Promise<void>;
   refreshKnowledgeSource: (sourceId: string) => Promise<void>;
   toggleKnowledgeSourceDisabled: (sourceId: string) => void;
+  /** Permanently remove a source from search, citations, pins, and context. */
   deleteKnowledgeSource: (sourceId: string) => void;
   assembleKnowledgeContext: (query: string) => Promise<string>;
   // schedules
@@ -590,6 +612,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   });
   const [memoryExportText, setMemoryExportText] = useState("");
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
+  const [knowledgeExportText, setKnowledgeExportText] = useState("");
   const [runtimeSnapshotReady, setRuntimeSnapshotReady] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Agent-runtime backends. The Rust credential boundary resolves auth state
@@ -1171,19 +1194,33 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         sizeBytes: file.size,
         importedAt: new Date().toISOString()
       };
-      const imported =
-        (await importRuntimeLocalKnowledgeSource(candidate)) ?? importLocalTextFile(candidate);
+      // Surface the indexing state before the (async) native import resolves so
+      // the user sees the source move reading -> indexing -> indexed.
+      setImportStatus(`Indexing ${sourceName}...`);
+      const nativeImported = await importRuntimeLocalKnowledgeSource(candidate);
+      const imported = nativeImported ?? importLocalTextFile(candidate);
+      // The imported source is indexed and healthy. Unchanged re-imports (same
+      // content fingerprint) replace the existing row in place via
+      // addImportedKnowledgeSource's dedupe-by-id, so no phantom duplicate rows
+      // appear for unchanged imports.
+      const indexed: LocalFileImport = {
+        ...imported,
+        status: "ok",
+        statusMessage: undefined
+      };
 
       if (importedKnowledgeSources.some((source) => source.id === imported.id && source.deletedAt)) {
         throw new Error("Deleted knowledge cannot be restored by routine import.");
       }
 
-      addImportedKnowledgeSource(imported);
-      setImportStatus(`Imported ${imported.title}. It is pinned as untrusted knowledge.`);
-      setLastAction(`Imported source: ${imported.title}`);
+      addImportedKnowledgeSource(indexed);
+      setImportStatus(`Imported ${indexed.title}. It is pinned as untrusted knowledge.`);
+      setLastAction(`Imported source: ${indexed.title}`);
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Fable could not import that file.";
+      // Import failure must not leave a phantom source or stale optimistic
+      // state: nothing was added, so we surface the failure and clear indexing.
       setImportStatus(message);
       setLastAction(message);
       return false;
@@ -1270,7 +1307,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const knowledgeRetrievalSources = () =>
     workspaceKnowledgeSources
-      .filter(sourceIsAuthorized)
+      // Only live (non-disabled), authorized, connected-connector sources can
+      // enter retrieval. Stale/error statuses are additionally excluded by the
+      // retrieve pipeline's filterRetrievable; we re-check live here so a
+      // disabled source is never even chunked.
+      .filter((source) => isLiveSource(source) && sourceIsAuthorized(source))
       .map((source) => ({
         source,
         chunks: chunkSourceText(source.contentPreview ?? "", {
@@ -1292,7 +1333,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return assembleContext({
       runId: `run-${Date.now()}`,
       scope: currentKnowledgeScope(),
-      memory: memoryDisabled ? [] : managedMemoryRecords,
+      // Only live memories enter context: forgotten/disabled records are
+      // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
+      // switch) excludes everything.
+      memory: memoryDisabled ? [] : managedMemoryRecords.filter(isLiveMemory),
       citations: result.citations,
       authorization: {
         isSourceAuthorized: (connectorId: string, account?: string) =>
@@ -1308,9 +1352,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }).systemPrefix;
   };
 
+  /**
+   * Persist local knowledge sources optimistically, rolling back to the prior
+   * authoritative state if the native save fails so the UI never shows a source
+   * change (delete/disable/refresh) that was never persisted. Connector-imported
+   * sources are mirrored in parallel since they share the same workspace view.
+   */
   const persistLocalKnowledgeSources = (sources: LocalFileImport[]) => {
+    const previous = importedKnowledgeSources;
     setImportedKnowledgeSources(sources);
     void saveRuntimeImportedKnowledgeSources(sources).catch((error) => {
+      setImportedKnowledgeSources(previous);
       setImportStatus(
         error instanceof Error ? error.message : "Fable could not save source changes."
       );
@@ -1338,18 +1390,27 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const toggleKnowledgeSourceDisabled = (sourceId: string) => {
+    const target = workspaceKnowledgeSources.find((source) => source.id === sourceId);
+    const becomingDisabled = target ? !target.disabled : true;
     const toggle = <T extends KnowledgeSource>(sources: T[]) =>
       sources.map((source) =>
         source.id === sourceId ? { ...source, disabled: !source.disabled } : source
       );
     persistLocalKnowledgeSources(toggle(importedKnowledgeSources));
     setConnectorImportedSources((current) => toggle(current));
-    setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
-    setLastAction("Knowledge source visibility updated");
+    // A disabled source cannot remain pinned: drop the pin so disabled material
+    // can never enter a run via the pinned-context path.
+    if (becomingDisabled) {
+      setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
+    }
+    setLastAction(becomingDisabled ? "Knowledge source disabled" : "Knowledge source re-enabled");
   };
 
   const deleteKnowledgeSource = (sourceId: string) => {
     const deletedAt = new Date().toISOString();
+    // Permanently remove the source from search, citations, pins, and context.
+    // Pins for the deleted source are cleared so they cannot resolve to a
+    // missing source or bypass the removal via pinned context.
     persistLocalKnowledgeSources(
       importedKnowledgeSources.map((source) =>
         source.id === sourceId
@@ -1369,6 +1430,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const commitMemoryState = (state: MemoryControlState, status: string) => {
+    // Capture the pre-change state so a native save failure rolls back the
+    // optimistic update instead of leaving a phantom record in the UI.
+    const previousDisabled = memoryDisabled;
+    const previousRecords = managedMemoryRecords;
     setMemoryDisabled(state.disabled);
     setManagedMemoryRecords(state.records.filter((record) => !record.forgottenAt));
     setMemoryStatus(status);
@@ -1383,7 +1448,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setManagedMemoryRecords(runtimeState.records);
       })
       .catch((error) => {
-        setMemoryStatus(error instanceof Error ? error.message : "Fable could not save memory state.");
+        // The native save failed: roll back to the prior authoritative state so
+        // the UI does not falsely show a change that was never persisted.
+        setMemoryDisabled(previousDisabled);
+        setManagedMemoryRecords(previousRecords);
+        setMemoryStatus(
+          error instanceof Error ? error.message : "Fable could not save memory state."
+        );
       });
   };
 
@@ -1405,15 +1476,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       return;
     }
 
+    const now = new Date().toISOString();
     const nextRecords = managedMemoryRecords.map((record) =>
       record.id === recordId
-        ? {
-            ...record,
-            title,
-            value,
-            freshness: "Updated now",
-            source: "Edited by Josh"
-          }
+        ? { ...editMemory(record, { title, value }, now), freshness: "Updated now" }
         : record
     );
 
@@ -1429,21 +1495,71 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const forgetMemory = (recordId: string) => {
-    const forgottenAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    const target = managedMemoryRecords.find((record) => record.id === recordId);
+    // Forget is the durable exclusion signal: the record is tombstoned with
+    // `forgottenAt` so it disappears from every retrieval / context / export /
+    // management read path while remaining auditable. Distinct from a temporary
+    // disable (which keeps the record visible in management views).
+    const nextRecords = managedMemoryRecords.map((record) =>
+      record.id === recordId ? forgetMemoryRecord(record, now) : record
+    );
+    setEditingMemoryId((current) => (current === recordId ? null : current));
+    // A forgotten memory can no longer be pinned; drop the pin so it cannot
+    // bypass exclusion via the pinned-context path.
+    setManagedMemoryRecords(nextRecords);
+    setMemoryDisabled(memoryDisabled);
+    setMemoryStatus(target ? `Forgot memory: ${target.title}` : "Memory forgotten.");
+    void saveRuntimeMemoryState({ disabled: memoryDisabled, records: nextRecords })
+      .then((runtimeState) => {
+        if (runtimeState) {
+          setMemoryDisabled(runtimeState.disabled);
+          setManagedMemoryRecords(runtimeState.records);
+        }
+      })
+      .catch((error) => {
+        setMemoryStatus(
+          error instanceof Error ? error.message : "Fable could not forget that memory."
+        );
+      });
+    setLastAction(target ? `Forgot memory: ${target.title}` : "Memory forgotten.");
+  };
+
+  /**
+   * Toggle a single memory's disabled state. A disabled memory is excluded from
+   * retrieval, context, and export (like a forgotten one) but stays visible in
+   * the management view and can be re-enabled — no record duplication. Pinning
+   * is dropped while disabled so it cannot bypass the exclusion via pinned
+   * context.
+   */
+  const toggleMemoryRecordDisabled = (recordId: string) => {
+    const now = new Date().toISOString();
+    const target = managedMemoryRecords.find((record) => record.id === recordId);
+    if (!target) return;
+    const becomingDisabled = !target.disabled;
     const nextRecords = managedMemoryRecords.map((record) =>
       record.id === recordId
-        ? { ...record, pinned: false, forgottenAt, updatedAt: forgottenAt }
+        ? becomingDisabled
+          ? disableMemoryRecord(record, now)
+          : { ...record, disabled: false, updatedAt: now }
         : record
     );
-    const removed = managedMemoryRecords.find((record) => record.id === recordId);
-    setEditingMemoryId((current) => (current === recordId ? null : current));
     commitMemoryState(
       { disabled: memoryDisabled, records: nextRecords },
-      removed ? `Forgot memory: ${removed.title}` : "Memory forgotten."
+      becomingDisabled ? `Disabled memory: ${target.title}` : `Re-enabled memory: ${target.title}`
     );
   };
 
   const toggleMemoryPin = (recordId: string) => {
+    const target = managedMemoryRecords.find((record) => record.id === recordId);
+    if (!target) return;
+    // Pinning must not bypass exclusion: a disabled or forgotten memory cannot
+    // be pinned. Unpinning a currently-pinned record is always allowed so a
+    // stale pin can be cleared.
+    if (!target.pinned && !isLiveMemory(target)) {
+      setMemoryStatus("Disabled or forgotten memories cannot be pinned.");
+      return;
+    }
     const nextRecords = managedMemoryRecords.map((record) =>
       record.id === recordId ? { ...record, pinned: !record.pinned } : record
     );
@@ -1463,7 +1579,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const exportMemory = async () => {
     try {
-      const exported = (await exportRuntimeMemoryState(memoryState)) ?? encodeMemoryExportFallback(memoryState);
+      // Live memories only: forgotten/disabled records are excluded by
+      // `exportMemories`. The native export is authoritative when present; the
+      // fallback re-applies the same live-only filter so secrets never ride
+      // along on a forgotten record's payload and disabled records never leak.
+      const liveFallback = exportMemories(memoryState.records);
+      const exported = (await exportRuntimeMemoryState(memoryState)) ?? liveFallback;
       setMemoryExportText(exported);
       setMemoryStatus("Memory export ready.");
     } catch (error) {
@@ -1471,7 +1592,60 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
   };
 
+  /**
+   * Export the current workspace's knowledge (live sources + live memories) as
+   * plain text. Disabled sources and forgotten/disabled memories are excluded;
+   * secrets, connector tokens, and raw audit payloads are never part of a
+   * source or memory record, so they cannot appear. Source content is capped to
+   * a readable preview to avoid dumping full provider cache payloads.
+   */
+  const exportKnowledge = async () => {
+    try {
+      const liveSources = workspaceKnowledgeSources.filter(isLiveSource);
+      const liveMemories = managedMemoryRecords.filter(isLiveMemory);
+      const lines: string[] = ["# Knowledge export", ""];
+
+      lines.push("## Sources", "");
+      if (liveSources.length === 0) {
+        lines.push("(no live sources)");
+      } else {
+        for (const source of liveSources) {
+          lines.push(`- ${source.title}`);
+          const meta = [
+            `provenance: ${source.provenance}`,
+            `freshness: ${source.freshness}`,
+            `connector: ${source.connectorId}`,
+            source.account ? `account: ${source.account}` : "",
+            source.trust ? `trust: ${source.trust}` : ""
+          ].filter(Boolean);
+          lines.push(`  _(${meta.join(" | ")})_`);
+        }
+      }
+      lines.push("");
+      lines.push(exportMemories(liveMemories));
+
+      setKnowledgeExportText(lines.join("\n").trimEnd());
+      setLastAction("Knowledge export ready.");
+    } catch (error) {
+      setKnowledgeExportText("");
+      setLastAction(
+        error instanceof Error ? error.message : "Fable could not export knowledge."
+      );
+    }
+  };
+
   const promoteSourceToMemory = async (source: KnowledgeSource) => {
+    // Promotion must respect the same exclusion rules as retrieval: a disabled
+    // source, or one from a disconnected/unauthorized connector, cannot be
+    // promoted into memory (it would bypass the disable/authorization gate).
+    if (!isLiveSource(source)) {
+      setMemoryStatus("Disabled sources cannot be promoted to memory.");
+      return;
+    }
+    if (!sourceIsAuthorized(source)) {
+      setMemoryStatus("Connect the source's service before promoting it to memory.");
+      return;
+    }
     const request: MemoryPromotionRequest = {
       source,
       decision: "once",
@@ -2100,6 +2274,22 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       if (current.includes(sourceId)) {
         setLastAction("Source removed from pinned context");
         return current.filter((id) => id !== sourceId);
+      }
+      // Pinning must not bypass exclusion: a disabled source cannot be pinned,
+      // and the source must belong to the current workspace + an authorized
+      // (connected) connector. Unpinning is always allowed.
+      const source = workspaceKnowledgeSources.find((entry) => entry.id === sourceId);
+      if (!source) {
+        setLastAction("That source is no longer available.");
+        return current;
+      }
+      if (!isLiveSource(source)) {
+        setLastAction("Disabled sources cannot be pinned.");
+        return current;
+      }
+      if (!sourceIsAuthorized(source)) {
+        setLastAction("Connect the source's service before pinning it.");
+        return current;
       }
       setLastAction("Source pinned to workspace context");
       return [...current, sourceId];
@@ -2789,8 +2979,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     saveMemoryEdit,
     toggleMemoryPin,
     forgetMemory,
+    toggleMemoryRecordDisabled,
     toggleMemoryDisabled,
     exportMemory,
+    exportKnowledge,
+    knowledgeExportText,
     cancelMemoryEdit,
     searchKnowledge: runKnowledgeSearch,
     refreshKnowledgeSource,

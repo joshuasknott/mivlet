@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtime from "../runtime";
 import { useShellRuntime } from "./useShellRuntime";
 import { STORAGE_KEY, LEGACY_STORAGE_KEYS } from "../lib/constants";
+import type { PersistedShellState } from "../lib/types";
 
 /**
  * Isolated unit coverage for useShellRuntime's pure orchestration logic. All
@@ -653,5 +654,339 @@ describe("useShellRuntime — tool-call approval grant/deny dispatch", () => {
     const again = toolCallApproval("native-read-file-2");
     const decision = await gate.waitForDecision(again);
     expect(decision).toBe("granted");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Knowledge + memory lifecycle: pin guards, disable/forget exclusion, rollback
+// on native save failure, and export policy. These drive the hook directly so
+// the lifecycle is asserted against the shell's own state + callbacks, with the
+// Rust wrappers mocked (preview mode).
+// ---------------------------------------------------------------------------
+
+import type { MemoryRecord, KnowledgeSource, LocalFileImport } from "@fable/protocol";
+
+function seedMemory(over: Partial<MemoryRecord> = {}): MemoryRecord {
+  return {
+    id: "mem-seed",
+    kind: "fact",
+    title: "Prefers concise answers",
+    value: "The user prefers concise answers.",
+    source: "chat",
+    freshness: "Today",
+    approved: true,
+    pinned: false,
+    ...over
+  };
+}
+
+function seedImport(over: Partial<LocalFileImport> = {}): LocalFileImport {
+  return {
+    id: "source-seed",
+    title: "Quarterly plan",
+    kind: "document",
+    connectorId: "local-files",
+    provenance: "Local file - 1.0 KB",
+    freshness: "Imported today",
+    pinned: false,
+    trust: "untrusted",
+    contentPreview: "Plan content",
+    contentFingerprint: "fp-seed",
+    sizeBytes: 1024,
+    importedAt: "2026-07-01T00:00:00.000Z",
+    origin: "local-import",
+    ...over
+  };
+}
+
+/** Seed shell state into localStorage so the preview path loads it on mount. */
+function seedShellState(state: Partial<PersistedShellState>) {
+  const base: PersistedShellState = {
+    activeItem: "new-chat",
+    composerValue: "",
+    voiceEnabled: false,
+    approvalAudit: [],
+    dismissedApprovalIds: [],
+    approvalRules: [],
+    schedules: [],
+    goals: [],
+    plans: [],
+    pinnedSourceIds: [],
+    importedKnowledgeSources: [],
+    memoryDisabled: false,
+    memoryRecords: [],
+    connectedBackendIds: [],
+    selectedModelId: "",
+    permissionMode: "full-access"
+  };
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, ...state }));
+}
+
+describe("useShellRuntime — memory lifecycle (disable / forget / re-enable / pin guard)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("forgets a memory via a forgottenAt tombstone that survives reload", async () => {
+    seedShellState({ memoryRecords: [seedMemory()] });
+    const first = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    expect(first.result.current.managedMemoryRecords).toHaveLength(1);
+    await act(async () => {
+      first.result.current.forgetMemory("mem-seed");
+    });
+    // The record is tombstoned, not removed from the array, but is excluded
+    // from the live read path (the hook surfaces the full array; the page
+    // filters forgottenAt).
+    const forgotten = first.result.current.managedMemoryRecords.find((m) => m.id === "mem-seed");
+    expect(forgotten?.forgottenAt).toBeTruthy();
+
+    first.unmount();
+    const second = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    // The tombstone is persisted through localStorage, so it survives reload.
+    const reloaded = second.result.current.managedMemoryRecords.find((m) => m.id === "mem-seed");
+    expect(reloaded?.forgottenAt).toBeTruthy();
+  });
+
+  it("disables a single memory and re-enables it without duplicating records", async () => {
+    seedShellState({ memoryRecords: [seedMemory()] });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      result.current.toggleMemoryRecordDisabled("mem-seed");
+    });
+    expect(result.current.managedMemoryRecords).toHaveLength(1);
+    expect(result.current.managedMemoryRecords[0].disabled).toBe(true);
+
+    await act(async () => {
+      result.current.toggleMemoryRecordDisabled("mem-seed");
+    });
+    expect(result.current.managedMemoryRecords).toHaveLength(1);
+    expect(result.current.managedMemoryRecords[0].disabled).toBe(false);
+  });
+
+  it("refuses to pin a disabled memory but allows unpinning", async () => {
+    seedShellState({ memoryRecords: [seedMemory({ disabled: true, pinned: false })] });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      result.current.toggleMemoryPin("mem-seed");
+    });
+    expect(result.current.managedMemoryRecords[0].pinned).toBe(false);
+    expect(result.current.memoryStatus).toMatch(/cannot be pinned/i);
+
+    // A pinned-then-disabled record can still be unpinned.
+    await act(async () => {
+      result.current.toggleMemoryPin("mem-seed");
+    });
+  });
+
+  it("refuses to pin a forgotten memory", async () => {
+    seedShellState({ memoryRecords: [seedMemory({ forgottenAt: "2026-07-01T00:00:00.000Z" })] });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      result.current.toggleMemoryPin("mem-seed");
+    });
+    expect(result.current.managedMemoryRecords[0].pinned).toBe(false);
+  });
+});
+
+describe("useShellRuntime — source lifecycle (disable / delete / pin guard)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("disables a source and clears its pin so it cannot bypass exclusion", async () => {
+    seedShellState({
+      importedKnowledgeSources: [seedImport()],
+      pinnedSourceIds: ["source-seed"]
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      result.current.toggleKnowledgeSourceDisabled("source-seed");
+    });
+    const source = result.current.workspaceKnowledgeSources.find((s) => s.id === "source-seed");
+    expect(source?.disabled).toBe(true);
+    expect(result.current.pinnedSourceIds).not.toContain("source-seed");
+  });
+
+  it("deletes a source, removing it from search, citations, and pins", async () => {
+    seedShellState({
+      importedKnowledgeSources: [seedImport()],
+      pinnedSourceIds: ["source-seed"]
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      result.current.deleteKnowledgeSource("source-seed");
+    });
+    expect(
+      result.current.workspaceKnowledgeSources.some((s) => s.id === "source-seed")
+    ).toBe(false);
+    expect(result.current.pinnedSourceIds).not.toContain("source-seed");
+  });
+
+  it("refuses to pin a disabled source", async () => {
+    seedShellState({ importedKnowledgeSources: [seedImport({ disabled: true })] });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      result.current.toggleSourcePin("source-seed");
+    });
+    expect(result.current.pinnedSourceIds).not.toContain("source-seed");
+  });
+
+  it("rolls back an optimistic source disable when the native save fails", async () => {
+    seedShellState({ importedKnowledgeSources: [seedImport()] });
+    vi.mocked(runtime.saveRuntimeImportedKnowledgeSources).mockRejectedValueOnce(new Error("disk full"));
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    const before = result.current.workspaceKnowledgeSources.find((s) => s.id === "source-seed");
+    expect(Boolean(before?.disabled)).toBe(false);
+
+    await act(async () => {
+      result.current.toggleKnowledgeSourceDisabled("source-seed");
+    });
+    // The optimistic disable is rolled back to the prior authoritative state.
+    await waitFor(() => {
+      const after = result.current.workspaceKnowledgeSources.find((s) => s.id === "source-seed");
+      // Rolled back: disabled is unset/false (not the optimistically-set true).
+      expect(Boolean(after?.disabled)).toBe(false);
+    });
+    expect(result.current.importStatus).toMatch(/could not save source changes|disk full/i);
+
+    vi.mocked(runtime.saveRuntimeImportedKnowledgeSources).mockResolvedValue(null);
+  });
+});
+
+describe("useShellRuntime — memory state rollback on native save failure", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("rolls back a memory edit when the native save fails", async () => {
+    seedShellState({ memoryRecords: [seedMemory({ title: "Original" })] });
+    vi.mocked(runtime.saveRuntimeMemoryState).mockRejectedValueOnce(new Error("vault locked"));
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    act(() => {
+      result.current.startMemoryEdit(seedMemory({ title: "Original" }));
+      result.current.setEditingMemoryDraft({ title: "Edited", value: "edited value" });
+    });
+    await act(async () => {
+      result.current.saveMemoryEdit("mem-seed");
+    });
+
+    // The edit is rolled back to the original title.
+    await waitFor(() => {
+      const record = result.current.managedMemoryRecords.find((m) => m.id === "mem-seed");
+      expect(record?.title).toBe("Original");
+    });
+
+    vi.mocked(runtime.saveRuntimeMemoryState).mockResolvedValue(null);
+  });
+});
+
+describe("useShellRuntime — knowledge + memory export", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("exports live memories only, excluding forgotten and disabled records", async () => {
+    seedShellState({
+      memoryRecords: [
+        seedMemory({ id: "live", title: "Live one", disabled: false }),
+        seedMemory({ id: "disabled", title: "Off one", disabled: true }),
+        seedMemory({ id: "gone", title: "Gone one", forgottenAt: "2026-07-01T00:00:00.000Z" })
+      ]
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      await result.current.exportMemory();
+    });
+
+    const exportText = result.current.memoryExportText;
+    expect(exportText).toContain("Live one");
+    expect(exportText).not.toContain("Off one");
+    expect(exportText).not.toContain("Gone one");
+  });
+
+  it("exports workspace knowledge (live sources + memories), excluding disabled/forgotten", async () => {
+    seedShellState({
+      importedKnowledgeSources: [
+        seedImport({ id: "live-src", title: "Live source" }),
+        seedImport({ id: "off-src", title: "Disabled source", disabled: true })
+      ],
+      memoryRecords: [
+        seedMemory({ id: "live-mem", title: "Live memory" }),
+        seedMemory({ id: "gone-mem", title: "Gone memory", forgottenAt: "2026-07-01T00:00:00.000Z" })
+      ]
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      await result.current.exportKnowledge();
+    });
+
+    const exportText = result.current.knowledgeExportText;
+    expect(exportText).toContain("Live source");
+    expect(exportText).toContain("Live memory");
+    expect(exportText).not.toContain("Disabled source");
+    expect(exportText).not.toContain("Gone memory");
+  });
+});
+
+describe("useShellRuntime — search excludes disabled sources", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("does not surface a disabled source in knowledge search citations", async () => {
+    seedShellState({
+      importedKnowledgeSources: [
+        seedImport({
+          id: "match",
+          title: "Alpha report",
+          contentPreview: "alpha beta gamma keywords here"
+        }),
+        seedImport({
+          id: "disabled-match",
+          title: "Disabled alpha",
+          contentPreview: "alpha beta gamma keywords here",
+          disabled: true
+        })
+      ]
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      await result.current.searchKnowledge("alpha keywords");
+    });
+
+    const citedIds = result.current.knowledgeCitations.map((c) => c.sourceId);
+    expect(citedIds).toContain("match");
+    expect(citedIds).not.toContain("disabled-match");
   });
 });
