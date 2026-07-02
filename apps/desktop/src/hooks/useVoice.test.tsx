@@ -1,78 +1,177 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { SpeechToTextProvider } from "@fable/connectors";
+import {
+  SpeechToTextError,
+  type SpeechToTextProvider,
+  type SpeechToTextSession
+} from "@fable/connectors";
 import { useVoice } from "./useVoice";
 
-function provider(start?: SpeechToTextProvider["start"]): {
-  provider: SpeechToTextProvider;
-  dispose: ReturnType<typeof vi.fn>;
-  cancel: ReturnType<typeof vi.fn>;
-} {
-  const dispose = vi.fn(async () => {});
-  const cancel = vi.fn(async () => {});
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function sessionFixture() {
+  const result = deferred<string>();
+  const session: SpeechToTextSession = {
+    completion: result.promise,
+    stop: vi.fn(),
+    cancel: vi.fn(),
+    dispose: vi.fn()
+  };
+  return { result, session };
+}
+
+function providerFixture(
+  start: SpeechToTextProvider["start"],
+  availability: ReturnType<SpeechToTextProvider["availability"]> = {
+    status: "available"
+  }
+): SpeechToTextProvider {
   return {
-    dispose,
-    cancel,
-    provider: {
-      descriptor: {
-        id: "test",
-        kind: "local",
-        label: "Test local",
-        retainsAudio: false
-      },
-      processingDisclosure: "Processed locally.",
-      start:
-        start ??
-        vi.fn(async () => ({
-          stop: async () => "reviewed transcript",
-          cancel,
-          dispose
-        }))
-    }
+    descriptor: {
+      id: "test",
+      kind: "local",
+      label: "Test speech",
+      retainsAudio: false
+    },
+    processingDisclosure: "Processed by the test platform.",
+    availability: () => availability,
+    start
   };
 }
 
 describe("useVoice", () => {
-  it("records deliberately, processes, reviews, edits, and submits", async () => {
-    const fixture = provider();
-    const submit = vi.fn();
-    const { result } = renderHook(() => useVoice(fixture.provider, submit));
+  it("gates listening on confirmed start, stops, and inserts one transcript", async () => {
+    const fixture = sessionFixture();
+    const started = deferred<SpeechToTextSession>();
+    const onTranscript = vi.fn();
+    const provider = providerFixture(vi.fn(() => started.promise));
+    const { result } = renderHook(() => useVoice(provider, onTranscript));
 
-    await act(result.current.start);
-    expect(result.current.state.status).toBe("recording");
-    await act(result.current.stop);
-    expect(result.current.state.status).toBe("review");
-    expect(fixture.dispose).toHaveBeenCalledOnce();
-    act(() => result.current.updateTranscript("edited transcript"));
-    act(result.current.submit);
-    expect(submit).toHaveBeenCalledWith("edited transcript");
-    expect(result.current.state.status).toBe("idle");
+    let starting!: Promise<void>;
+    act(() => {
+      starting = result.current.start();
+    });
+    expect(result.current.state.status).toBe("starting");
+    await act(async () => {
+      started.resolve(fixture.session);
+      await starting;
+    });
+    expect(result.current.state.status).toBe("listening");
+
+    act(result.current.stop);
+    expect(result.current.state.status).toBe("stopping");
+    expect(fixture.session.stop).toHaveBeenCalledOnce();
+    await act(async () => fixture.result.resolve(" dictated once "));
+    expect(onTranscript).toHaveBeenCalledOnce();
+    expect(onTranscript).toHaveBeenCalledWith("dictated once");
+    expect(result.current.state.status).toBe("success");
+    expect(fixture.session.dispose).toHaveBeenCalledOnce();
   });
 
-  it("disposes temporary audio/session state after cancellation and STT failure", async () => {
-    const fixture = provider();
-    const { result } = renderHook(() => useVoice(fixture.provider, vi.fn()));
-    await act(result.current.start);
-    await act(result.current.cancel);
-    expect(fixture.cancel).toHaveBeenCalledOnce();
-    expect(fixture.dispose).toHaveBeenCalledOnce();
+  it("blocks double activation while startup is pending", async () => {
+    const fixture = sessionFixture();
+    const started = deferred<SpeechToTextSession>();
+    const start = vi.fn(() => started.promise);
+    const { result } = renderHook(() =>
+      useVoice(providerFixture(start), vi.fn())
+    );
 
-    const failedDispose = vi.fn(async () => {});
-    const failed: SpeechToTextProvider = {
-      ...fixture.provider,
-      start: async () => ({
-        stop: async () => {
-          throw new Error("STT unavailable");
-        },
-        cancel: async () => {},
-        dispose: failedDispose
+    let first!: Promise<void>;
+    await act(async () => {
+      first = result.current.start();
+      void result.current.start();
+    });
+    expect(start).toHaveBeenCalledOnce();
+    await act(async () => {
+      started.resolve(fixture.session);
+      await first;
+    });
+    act(result.current.cancel);
+  });
+
+  it("cancels pending startup and disposes a stale late session", async () => {
+    const fixture = sessionFixture();
+    const started = deferred<SpeechToTextSession>();
+    const cancelled = vi.fn();
+    const provider = providerFixture(() => started.promise);
+    const { result } = renderHook(() =>
+      useVoice(provider, vi.fn(), {
+        onCancel: cancelled
       })
-    };
-    const second = renderHook(() => useVoice(failed, vi.fn()));
-    await act(second.result.current.start);
-    await act(second.result.current.stop);
-    expect(second.result.current.state.status).toBe("error");
-    expect(second.result.current.state.error).toContain("STT unavailable");
-    expect(failedDispose).toHaveBeenCalledOnce();
+    );
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.start();
+    });
+    act(result.current.cancel);
+    expect(result.current.state.status).toBe("cancelled");
+    expect(cancelled).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      started.resolve(fixture.session);
+      await pending;
+    });
+    expect(fixture.session.cancel).toHaveBeenCalledOnce();
+    expect(fixture.session.dispose).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["permission-denied", "permission-denied"],
+    ["unavailable", "unavailable"],
+    ["startup-failure", "error"],
+    ["runtime-failure", "error"],
+    ["empty-result", "error"]
+  ] as const)("surfaces %s without inserting text", async (code, status) => {
+    const onTranscript = vi.fn();
+    const provider = providerFixture(() =>
+      Promise.reject(new SpeechToTextError(code, `Failure: ${code}`))
+    );
+    const { result } = renderHook(() => useVoice(provider, onTranscript));
+
+    await act(result.current.start);
+    expect(result.current.state.status).toBe(status);
+    expect(result.current.state.errorCode).toBe(code);
+    expect(onTranscript).not.toHaveBeenCalled();
+  });
+
+  it("represents disabled and unsupported states honestly", () => {
+    const unsupported = providerFixture(
+      vi.fn(),
+      { status: "unsupported", message: "Not supported here." }
+    );
+    const first = renderHook(() => useVoice(unsupported, vi.fn()));
+    expect(first.result.current.state.status).toBe("unsupported");
+    expect(first.result.current.canStart).toBe(false);
+
+    const available = providerFixture(vi.fn());
+    const second = renderHook(() =>
+      useVoice(available, vi.fn(), { disabled: true })
+    );
+    expect(second.result.current.state.status).toBe("disabled");
+    expect(second.result.current.canStart).toBe(false);
+  });
+
+  it("cancels and disposes without updating after teardown", async () => {
+    const fixture = sessionFixture();
+    const provider = providerFixture(async () => fixture.session);
+    const onTranscript = vi.fn();
+    const rendered = renderHook(() => useVoice(provider, onTranscript));
+    await act(rendered.result.current.start);
+    rendered.unmount();
+    expect(fixture.session.cancel).toHaveBeenCalledOnce();
+    expect(fixture.session.dispose).toHaveBeenCalledOnce();
+
+    fixture.result.resolve("too late");
+    await Promise.resolve();
+    expect(onTranscript).not.toHaveBeenCalled();
   });
 });
