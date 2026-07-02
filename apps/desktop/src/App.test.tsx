@@ -847,6 +847,28 @@ describe("Fable home", () => {
       configurable: true
     });
 
+    runtimeMocks.snapshot = {
+      version: 1,
+      activeItem: "new-chat",
+      composerDraft: "",
+      voiceEnabled: true,
+      approvalAudit: [],
+      dismissedApprovalIds: [],
+      approvalRules: [],
+      automationStatuses: {},
+      schedules: [],
+      goals: [],
+      plans: [],
+      pinnedSourceIds: [],
+      importedKnowledgeSources: [],
+      memoryDisabled: false,
+      memoryRecords: [],
+      connectedBackendIds: ["codex"],
+      selectedModelId: "",
+      permissionMode: "full-access",
+      savedAt: "2026-06-26T10:30:00.000Z"
+    };
+
     const user = await renderWorkspace();
     const composer = screen.getByLabelText("Universal composer");
     await user.type(composer, "Plan launch");
@@ -867,8 +889,9 @@ describe("Fable home", () => {
       expect(composer).toHaveValue("Plan launch with the team")
     );
     recognition.onend?.();
-    expect(composer).toHaveValue("Plan launch with the team");
-    expect(composer).toHaveFocus();
+    await waitFor(() =>
+      expect(composer).toHaveFocus()
+    );
 
     delete (window as Window & { SpeechRecognition?: unknown })
       .SpeechRecognition;

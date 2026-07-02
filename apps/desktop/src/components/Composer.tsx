@@ -517,6 +517,7 @@ export function Composer({
                   aria-pressed={voiceListening}
                   aria-busy={voiceTransitioning}
                   aria-disabled={voiceUnavailable || voiceTransitioning}
+                  disabled={voiceUnavailable}
                   aria-describedby="dictation-status dictation-disclosure"
                 >
                   {voiceListening ? (

@@ -45,7 +45,7 @@ function stateForProvider(
   if (disabled) {
     return {
       status: "disabled",
-      message: "Dictation is disabled. You can continue typing.",
+      message: "Voice input unavailable: Enable dictation in Privacy settings",
       errorCode: null
     };
   }
