@@ -437,4 +437,24 @@ mod tests {
             Some(RemoteErrorCode::TransportUnavailable)
         ));
     }
+
+    #[test]
+    fn status_snapshot_contains_no_secrets() {
+        let store = RemoteControlStore {
+            devices: vec![
+                device("device-1", RemoteDeviceTrustState::Trusted),
+            ],
+            requested_enabled: true,
+        };
+        let status = status_snapshot(&store);
+
+        // Verify that string fields in the status snapshot are clean metadata only
+        // and do not contain secret-shaped patterns like keys or tokens.
+        assert!(!status.server_name.contains("bearer"));
+        assert!(!status.server_name.contains("token"));
+        assert!(!status.message.contains("bearer"));
+        assert!(!status.message.contains("token"));
+        assert!(!status.message.contains("key"));
+        assert_eq!(status.transport, "lan-local");
+    }
 }
