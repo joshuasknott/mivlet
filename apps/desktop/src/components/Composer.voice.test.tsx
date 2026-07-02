@@ -75,6 +75,19 @@ describe("Composer dictation controls", () => {
     ).toBeVisible();
   });
 
+  it.each(["stopping", "processing"] as const)(
+    "marks %s as busy and keeps the draft editable",
+    (status) => {
+      render(<Composer {...propsFor(status)} />);
+
+      expect(
+        screen.getByRole("button", { name: "Processing dictation" })
+      ).toHaveAttribute("aria-busy", "true");
+      expect(screen.getByLabelText("Universal composer")).toBeEnabled();
+      expect(screen.getByText(`State: ${status}`)).toBeInTheDocument();
+    }
+  );
+
   it.each(["disabled", "unsupported"] as const)(
     "keeps the %s explanation keyboard discoverable",
     (status) => {

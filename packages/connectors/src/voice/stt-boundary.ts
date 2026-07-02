@@ -373,6 +373,13 @@ export function createBrowserSpeechProvider(
       }
 
       return startPromise.catch((error) => {
+        if (!ended) {
+          try {
+            recognition.abort();
+          } catch {
+            // Best-effort cleanup after startup rejection.
+          }
+        }
         detach();
         throw error;
       });

@@ -174,4 +174,43 @@ describe("useVoice", () => {
     await Promise.resolve();
     expect(onTranscript).not.toHaveBeenCalled();
   });
+
+  it("ignores stale completion after cancellation and a new start", async () => {
+    const first = sessionFixture();
+    const second = sessionFixture();
+    const start = vi
+      .fn<SpeechToTextProvider["start"]>()
+      .mockResolvedValueOnce(first.session)
+      .mockResolvedValueOnce(second.session);
+    const onTranscript = vi.fn();
+    const provider = providerFixture(start);
+    const { result } = renderHook(() => useVoice(provider, onTranscript));
+
+    await act(result.current.start);
+    act(result.current.cancel);
+    await act(result.current.start);
+    await act(async () => {
+      first.result.resolve("stale");
+      second.result.resolve("current");
+    });
+
+    expect(onTranscript).toHaveBeenCalledOnce();
+    expect(onTranscript).toHaveBeenCalledWith("current");
+  });
+
+  it("tears down active recognition when dictation becomes disabled", async () => {
+    const fixture = sessionFixture();
+    const provider = providerFixture(async () => fixture.session);
+    const rendered = renderHook(
+      ({ disabled }) => useVoice(provider, vi.fn(), { disabled }),
+      { initialProps: { disabled: false } }
+    );
+
+    await act(rendered.result.current.start);
+    rendered.rerender({ disabled: true });
+
+    expect(rendered.result.current.state.status).toBe("disabled");
+    expect(fixture.session.cancel).toHaveBeenCalledOnce();
+    expect(fixture.session.dispose).toHaveBeenCalledOnce();
+  });
 });

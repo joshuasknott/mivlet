@@ -274,9 +274,20 @@ export function useVoice(
   }, [disabled, provider]);
 
   useEffect(() => {
+    if (disabled) {
+      generationRef.current += 1;
+      busyRef.current = false;
+      handledGenerationRef.current = null;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      sessionRef.current?.cancel();
+      disposeSession();
+      setState(stateForProvider(provider, true));
+      return;
+    }
     if (busyRef.current) return;
-    setState(stateForProvider(provider, disabled));
-  }, [disabled, provider]);
+    setState(stateForProvider(provider, false));
+  }, [disabled, disposeSession, provider]);
 
   useEffect(
     () => () => {

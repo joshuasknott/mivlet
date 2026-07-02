@@ -525,7 +525,7 @@ export function Composer({
                     <Microphone size={17} weight="fill" />
                   )}
                 </button>
-                <span className="voice-tooltip" role="tooltip">
+                <span className="voice-tooltip" role="tooltip" aria-hidden="true">
                   {voiceActionLabel}
                 </span>
               </div>
