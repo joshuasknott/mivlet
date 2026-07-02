@@ -29,7 +29,7 @@ import type {
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { isLiveSource, scopeSatisfies } from "../store";
-import { buildLexicalCorpus, scoreChunkLexical, tokenize } from "./lexical";
+import { buildLexicalCorpus, scoreChunkLexical, tokenize, tokenSet } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
 
 /** Sources/chunks that must never enter a run, regardless of score. */
@@ -224,7 +224,10 @@ export async function retrieve(
 
   const now = Date.now();
 
-  // Pass 1: compute raw lexical and semantic scores per chunk.
+  // Pass 1: compute raw lexical and semantic scores per chunk. The per-source
+  // title token set is immutable across a query, so it is cached once per
+  // source; each chunk's heading token set is precomputed once (it is read
+  // again inside scoring for the heading boost).
   const raw: Array<{
     source: KnowledgeSource;
     chunk: SourceChunk;
@@ -232,8 +235,13 @@ export async function retrieve(
     semanticScore: number;
   }> = [];
   for (const { source, chunks } of retrievable) {
+    const titleTokens = tokenSet(source.title);
     for (const chunk of chunks) {
-      const lexicalScore = scoreChunkLexical(chunk, queryTokens, corpus, source.title);
+      const headingTokens = chunk.heading ? tokenSet(chunk.heading) : undefined;
+      const lexicalScore = scoreChunkLexical(chunk, queryTokens, corpus, source.title, {
+        titleTokens,
+        headingTokens
+      });
       if (lexicalScore <= 0 && !source.pinned && queryTokens.length > 0) {
         // No lexical signal and not pinned: only relevant when semantic can help.
         if (!useSemantic || !hasEmbedding(chunk.embedding)) continue;
@@ -337,12 +345,16 @@ export async function retrieve(
  * Drop near-duplicate chunks from the SAME source: those that overlap heavily
  * in the source text (>=50% char range AND same heading), OR that share an
  * identical content hash (exact duplicate text). Keeps the higher-ranked one.
+ *
+ * Groups kept chunks by source id in a Map for O(1) same-source lookup instead
+ * of re-scanning the whole kept list per candidate.
  */
 function deduplicateOverlapping(scored: ScoredChunk[]): ScoredChunk[] {
   const kept: ScoredChunk[] = [];
+  const keptBySource = new Map<string, ScoredChunk[]>();
   for (const candidate of scored) {
-    const sameSource = kept.filter((k) => k.source.id === candidate.source.id);
-    const redundant = sameSource.some((k) => {
+    const sameSource = keptBySource.get(candidate.source.id);
+    const redundant = sameSource?.some((k) => {
       // Exact content-hash duplicate (identical chunk text).
       if (k.chunk.contentHash === candidate.chunk.contentHash) return true;
       // Char-range overlap.
@@ -356,7 +368,12 @@ function deduplicateOverlapping(scored: ScoredChunk[]): ScoredChunk[] {
       const sameHeading = (k.chunk.heading ?? "") === (candidate.chunk.heading ?? "");
       return overlap / minLen >= 0.5 && sameHeading;
     });
-    if (!redundant) kept.push(candidate);
+    if (!redundant) {
+      kept.push(candidate);
+      const list = keptBySource.get(candidate.source.id);
+      if (list) list.push(candidate);
+      else keptBySource.set(candidate.source.id, [candidate]);
+    }
   }
   return kept;
 }

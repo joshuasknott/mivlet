@@ -58,14 +58,32 @@ function levenshteinRatio(a: string, b: string): number {
   return 1 - levenshtein(a, b) / max;
 }
 
-function isNearIdentical(candidate: Candidate, existing: MemoryRecord): boolean {
-  const cv = normalize(candidate.value);
-  const ev = normalize(existing.value);
+/**
+ * Core near-identical test over PRE-normalized values + pre-tokenized sets, so
+ * batch callers (e.g. retention) can normalize each value once and reuse it
+ * across many comparisons instead of re-normalizing per pairwise check. The
+ * matching math is identical to {@link isNearIdentical}.
+ */
+function isNearIdenticalValues(
+  cv: string,
+  ev: string,
+  cTokens: Set<string>,
+  eTokens: Set<string>
+): boolean {
   if (cv.length > 0 && cv === ev) return true;
   if (cv.length > 0 && ev.length > 0 && (cv.includes(ev) || ev.includes(cv))) return true;
-  if (jaccard(tokens(candidate.value), tokens(existing.value)) >= 0.8) return true;
+  if (jaccard(cTokens, eTokens) >= 0.8) return true;
   if (cv.length > 0 && ev.length > 0 && levenshteinRatio(cv, ev) >= 0.9) return true;
   return false;
+}
+
+function isNearIdentical(candidate: Candidate, existing: MemoryRecord): boolean {
+  return isNearIdenticalValues(
+    normalize(candidate.value),
+    normalize(existing.value),
+    tokens(candidate.value),
+    tokens(existing.value)
+  );
 }
 
 const NEGATORS = [
@@ -98,6 +116,31 @@ export function detectDuplicate(
     }
   }
   return null;
+}
+
+/**
+ * A pre-normalized view of a memory's value, built once so batch operations
+ * (e.g. retention) avoid re-normalizing the same value on every pairwise check.
+ */
+export interface NormalizedMemoryValue {
+  value: string;
+  tokens: Set<string>;
+}
+
+/** Normalize a value's text + token set once for repeated near-identical checks. */
+export function normalizeMemoryValue(value: string): NormalizedMemoryValue {
+  return { value: normalize(value), tokens: tokens(value) };
+}
+
+/**
+ * Core near-identical predicate over pre-normalized views — the single source of
+ * truth for the matching math used by {@link detectDuplicate} and retention.
+ */
+export function isNearIdenticalNormalized(
+  candidate: NormalizedMemoryValue,
+  existing: NormalizedMemoryValue
+): boolean {
+  return isNearIdenticalValues(candidate.value, existing.value, candidate.tokens, existing.tokens);
 }
 
 /**

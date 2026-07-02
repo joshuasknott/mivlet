@@ -8,7 +8,7 @@
 
 import type { MemoryRecord, MemoryRetentionResult } from "@fable/protocol";
 import { isLiveMemory } from "../store";
-import { detectDuplicate } from "./duplicate";
+import { isNearIdenticalNormalized, normalizeMemoryValue } from "./duplicate";
 
 export interface MemoryRetentionPolicy {
   /** Max age in days for non-pinned, low-confidence memories before they're stale. */
@@ -48,11 +48,20 @@ export function applyRetention(
   const prunedIds: string[] = [];
   const reasons: Record<string, "stale" | "superseded" | "low-confidence"> = {};
 
-  const byRecencyDesc = [...memory].sort((a, b) => {
+  // Hoist the live filter once and sort newest-first. Each live record's value
+  // is normalized once into a parallel map so the duplicate scan does not
+  // re-normalize on every pairwise check (the original code normalized inside
+  // isNearIdentical per comparison). Matching math is unchanged.
+  const live = memory.filter(isLiveMemory);
+  const byRecencyDesc = [...live].sort((a, b) => {
     const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
     const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
     return tb - ta;
   });
+  const normalizedValue = new Map<string, ReturnType<typeof normalizeMemoryValue>>();
+  for (const record of live) {
+    normalizedValue.set(record.id, normalizeMemoryValue(record.value));
+  }
 
   for (const record of memory) {
     if (!isLiveMemory(record)) continue;
@@ -62,13 +71,19 @@ export function applyRetention(
     const stale = isStale(record, now, policy.staleAfterDays);
     const lowConf = (record.confidence ?? 1) < policy.pruneBelowConfidence;
 
-    const supersededBy = byRecencyDesc.find(
-      (other) =>
-        other.id !== record.id &&
-        isLiveMemory(other) &&
-        (other.createdAt ?? "") > (record.createdAt ?? "") &&
-        detectDuplicate({ title: record.title, value: record.value }, [other]) !== null
-    );
+    // A record is superseded when any NEWER live memory is near-identical.
+    // byRecencyDesc is newest-first, so the first qualifying entry is the
+    // newest duplicate — same result as the original `byRecencyDesc.find`.
+    const candidateNorm = normalizedValue.get(record.id)!;
+    let supersededBy: MemoryRecord | undefined;
+    for (const other of byRecencyDesc) {
+      if (other.id === record.id) continue;
+      if ((other.createdAt ?? "") <= (record.createdAt ?? "")) continue;
+      if (isNearIdenticalNormalized(candidateNorm, normalizedValue.get(other.id)!)) {
+        supersededBy = other;
+        break;
+      }
+    }
 
     if (supersededBy) {
       reasons[record.id] = "superseded";

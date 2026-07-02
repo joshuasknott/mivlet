@@ -128,7 +128,7 @@ export async function* runAgentLoop(
   const maxTurns = options.maxTurns ?? 8;
   const permissionMode = options.permissionMode ?? "full-access";
   const execute = permissionGatedExecutor(options.execute, permissionMode);
-  let messages: NativeMessage[] = options.contextPrefix
+  const messages: NativeMessage[] = options.contextPrefix
     ? [{ role: "system", content: options.contextPrefix }, ...request.messages]
     : [...request.messages];
   const seenCallIds = new Set<string>();
@@ -243,37 +243,30 @@ export async function* runAgentLoop(
       return;
     }
 
-    // Append the assistant turn (with tool calls) + execute each tool.
-    messages = [
-      ...messages,
-      {
-        role: "assistant",
-        content: "",
-        toolCalls: pendingToolCalls.map((call) => ({
-          callId: call.callId,
-          tool: call.tool,
-          arguments: call.arguments
-        }))
-      }
-    ];
+    // Append the assistant turn (with tool calls) + execute each tool. We mutate
+    // the running message list in place (push) rather than spread-copying it on
+    // every turn/tool-result, which was O(n) per append => O(n^2) over a run.
+    messages.push({
+      role: "assistant",
+      content: "",
+      toolCalls: pendingToolCalls.map((call) => ({
+        callId: call.callId,
+        tool: call.tool,
+        arguments: call.arguments
+      }))
+    });
 
     for (const call of pendingToolCalls) {
       try {
         const result = boundedToolOutput(await execute(call.approval, call.arguments));
         yield { type: "tool-result", callId: call.callId, ok: true, output: result };
-        messages = [
-          ...messages,
-          { role: "tool", content: result, toolCallId: call.callId, toolName: call.tool }
-        ];
+        messages.push({ role: "tool", content: result, toolCallId: call.callId, toolName: call.tool });
       } catch (error) {
         const message = boundedToolOutput(
           error instanceof Error ? error.message : "Tool execution failed."
         );
         yield { type: "tool-result", callId: call.callId, ok: false, output: message };
-        messages = [
-          ...messages,
-          { role: "tool", content: message, toolCallId: call.callId, toolName: call.tool }
-        ];
+        messages.push({ role: "tool", content: message, toolCallId: call.callId, toolName: call.tool });
       }
     }
   }

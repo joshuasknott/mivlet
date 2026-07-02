@@ -490,6 +490,10 @@ function chunkCsv(
   const chunks: SourceChunk[] = [];
   let ordinal = 0;
   let group: string[] = [];
+  // Running length of `group.join("\n")` (sum of line lengths + one separator
+  // between each pair), so the projected group length can be measured
+  // numerically instead of re-joining the whole accumulating group per line.
+  let groupByteLength = 0;
   let groupStart = header.length + 1;
   let cursor = header.length + 1;
 
@@ -498,15 +502,19 @@ function chunkCsv(
     const body = `${header}\n${group.join("\n")}`;
     chunks.push(makeChunk(sourceId, ordinal++, body, groupStart, groupEnd));
     group = [];
+    groupByteLength = 0;
   };
 
   for (const line of dataLines) {
-    const projectedLength = `${header}\n${[...group, line].join("\n")}`.length;
+    // projectedLength == header.length + 1 (header/body sep) + groupByteLength + 1
+    // (line sep) + line.length — exactly what `${header}\n${[...group,line].join("\n")}`.length was.
+    const projectedLength = header.length + 1 + groupByteLength + 1 + line.length;
     if (group.length >= CSV_GROUP_ROWS || (group.length > 0 && projectedLength > maxChars)) {
       flushGroup(cursor);
       groupStart = cursor;
     }
     group.push(line);
+    groupByteLength = group.length === 1 ? line.length : groupByteLength + 1 + line.length;
     cursor += line.length + 1;
   }
   flushGroup(cursor);

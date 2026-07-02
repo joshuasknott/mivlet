@@ -169,7 +169,12 @@ export function searchKnowledgeSources(
       const freshnessContribution = /now|today|current|just|min|h ago|d ago/i.test(source.freshness)
         ? 0.25
         : 0;
-      return { source, score: sourceScore(source, tokens, pinContribution, freshnessContribution) };
+      return {
+        source,
+        pinContribution,
+        freshnessContribution,
+        score: sourceScore(source, tokens, pinContribution, freshnessContribution)
+      };
     })
     .filter(({ score }) => score > 0)
     .sort((left, right) => {
@@ -186,14 +191,8 @@ export function searchKnowledgeSources(
   // Apply the character budget across snippets (always keep the top citation).
   const citations: KnowledgeCitation[] = [];
   let used = 0;
-  for (const { source, score } of ranked) {
-    const citation = toCitation(
-      source,
-      tokens,
-      score,
-      source.pinned ? 0.75 : 0,
-      /now|today|current|just|min|h ago|d ago/i.test(source.freshness) ? 0.25 : 0
-    );
+  for (const { source, score, pinContribution, freshnessContribution } of ranked) {
+    const citation = toCitation(source, tokens, score, pinContribution, freshnessContribution);
     if (used + citation.snippet.length > options.budgetChars && citations.length > 0) break;
     citations.push(citation);
     used += citation.snippet.length;
