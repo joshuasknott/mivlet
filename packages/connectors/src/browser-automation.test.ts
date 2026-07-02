@@ -164,6 +164,72 @@ describe("BrowserAutomationBoundary", () => {
     });
   });
 
+  it("rejects resolveApproval and complete for stale, cross-session, or cross-run actions", () => {
+    const guard = new BrowserAutomationBoundary(session, {
+      transportAvailable: true,
+      now: new Date("2026-07-02T10:02:00.000Z")
+    });
+
+    // Prepare a valid action first
+    guard.prepare(request({ id: "stale-test" }));
+
+    // resolveApproval rejects stale/cross-session/cross-run
+    expect(
+      guard.resolveApproval(request({ id: "stale-test", requestedAt: "2026-07-02T09:59:59.000Z" }), "once").decision
+    ).toMatchObject({ status: "denied", failureCode: "stale-action" });
+
+    expect(
+      guard.resolveApproval(request({ id: "stale-test", sessionId: "other" }), "once").decision
+    ).toMatchObject({ status: "denied", failureCode: "cross-session" });
+
+    expect(
+      guard.resolveApproval(request({ id: "stale-test", runId: "other" }), "once").decision
+    ).toMatchObject({ status: "denied", failureCode: "cross-run" });
+
+    // complete rejects stale/cross-session/cross-run
+    expect(
+      guard.complete(request({ id: "stale-test", requestedAt: "2026-07-02T09:59:59.000Z" }), { ok: true }).decision
+    ).toMatchObject({ status: "denied", failureCode: "stale-action" });
+
+    expect(
+      guard.complete(request({ id: "stale-test", sessionId: "other" }), { ok: true }).decision
+    ).toMatchObject({ status: "denied", failureCode: "cross-session" });
+
+    expect(
+      guard.complete(request({ id: "stale-test", runId: "other" }), { ok: true }).decision
+    ).toMatchObject({ status: "denied", failureCode: "cross-run" });
+  });
+
+  it("fails closed on resolveApproval and complete when approval is missing, replayed, or never prepared", () => {
+    const guard = new BrowserAutomationBoundary(session, {
+      transportAvailable: true,
+      now: new Date("2026-07-02T10:02:00.000Z")
+    });
+
+    // Never prepared
+    expect(
+      guard.resolveApproval(request({ id: "never-prepared" }), "once").decision
+    ).toMatchObject({ status: "denied", failureCode: "approval-missing" });
+
+    expect(
+      guard.complete(request({ id: "never-prepared" }), { ok: true }).decision
+    ).toMatchObject({ status: "denied", failureCode: "approval-missing" });
+
+    // Prepared but not approved yet when completing
+    guard.prepare(request({ id: "prepared-only" }));
+    expect(
+      guard.complete(request({ id: "prepared-only" }), { ok: true }).decision
+    ).toMatchObject({ status: "denied", failureCode: "approval-missing" });
+
+    // Replayed complete
+    guard.prepare(request({ id: "replay-complete" }));
+    guard.resolveApproval(request({ id: "replay-complete" }), "once");
+    guard.complete(request({ id: "replay-complete" }), { ok: true });
+    expect(
+      guard.complete(request({ id: "replay-complete" }), { ok: true }).decision
+    ).toMatchObject({ status: "denied", failureCode: "replayed-action" });
+  });
+
   it("redacts audit records and never persists browser contents or argument values", () => {
     const guard = new BrowserAutomationBoundary(session, {
       transportAvailable: true,
