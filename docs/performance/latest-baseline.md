@@ -1,6 +1,6 @@
 # Fable Performance Baseline
 
-Generated: 2026-07-02T22:34:35.179Z
+Generated: 2026-07-02T22:55:10.433Z
 
 ## Environment
 
@@ -12,7 +12,7 @@ Generated: 2026-07-02T22:34:35.179Z
 
 | Command | Exit | Duration |
 | --- | ---: | ---: |
-| `pnpm build` | 0 | 48280 ms |
+| `pnpm build` | 0 | 41327 ms |
 
 ## Desktop Bundle
 
