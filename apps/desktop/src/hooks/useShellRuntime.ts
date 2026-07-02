@@ -839,8 +839,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     ].slice(0, 4),
     [importedKnowledgeSources]
   );
-  const openApprovals = [...preparedConnectorActions.map((request) => request.approval), ...pendingApprovals]
-    .filter((approval) => !dismissedApprovalIds.includes(approval.id));
+  const openApprovals = useMemo(
+    () =>
+      [...preparedConnectorActions.map((request) => request.approval), ...pendingApprovals].filter(
+        (approval) => !dismissedApprovalIds.includes(approval.id)
+      ),
+    [preparedConnectorActions, pendingApprovals, dismissedApprovalIds]
+  );
   const memoryState = useMemo<MemoryControlState>(
     () => ({
       disabled: memoryDisabled,
@@ -891,9 +896,42 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     ]
   );
 
+  // Keep the latest persisted snapshot in a ref so the debounced persistence
+  // effects below always write the most recent state. Composer typing flips
+  // `composerValue` (a shellState dependency) on every keystroke; without
+  // debouncing that triggered a synchronous localStorage write AND a Rust
+  // snapshot save per key. Coalescing into a single trailing write keeps the
+  // draft-restoration behavior identical while removing per-keystroke I/O from
+  // the render path.
+  const shellStateRef = useRef(shellState);
+  shellStateRef.current = shellState;
+  // Track whether a debounced localStorage write is still pending so an unmount
+  // flush can guarantee the final state lands in storage (tests and real
+  // teardowns rely on the draft being persisted). Rapid changes simply reset
+  // the timer; only the trailing write fires.
+  const persistTimerRef = useRef<number | null>(null);
+  const snapshotTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
-    persistShellState(shellState);
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+    }
+    persistTimerRef.current = window.setTimeout(() => {
+      persistTimerRef.current = null;
+      persistShellState(shellStateRef.current);
+    }, 300);
   }, [shellState]);
+
+  // Flush any pending localStorage write on unmount so the final state persists.
+  useEffect(() => {
+    return () => {
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current);
+        persistTimerRef.current = null;
+        persistShellState(shellStateRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -997,10 +1035,30 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       return;
     }
 
-    void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellState)).catch((error) => {
-      setLastAction(error instanceof Error ? error.message : "Fable could not save runtime snapshot.");
-    });
+    // Debounced to coalesce rapid shellState changes (notably composer typing)
+    // into a single trailing snapshot save through the Rust boundary, reading
+    // the latest state from the ref so no keystroke's draft is lost.
+    if (snapshotTimerRef.current !== null) {
+      window.clearTimeout(snapshotTimerRef.current);
+    }
+    snapshotTimerRef.current = window.setTimeout(() => {
+      snapshotTimerRef.current = null;
+      void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current)).catch((error) => {
+        setLastAction(error instanceof Error ? error.message : "Fable could not save runtime snapshot.");
+      });
+    }, 300);
   }, [runtimeSnapshotReady, shellState]);
+
+  // Flush any pending snapshot save on unmount so the final state is captured.
+  useEffect(() => {
+    return () => {
+      if (snapshotTimerRef.current !== null) {
+        window.clearTimeout(snapshotTimerRef.current);
+        snapshotTimerRef.current = null;
+        void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current)).catch(() => undefined);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;

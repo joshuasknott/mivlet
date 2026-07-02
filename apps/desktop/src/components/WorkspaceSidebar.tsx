@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -116,16 +116,24 @@ export function WorkspaceSidebar({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const chatFlyoutRef = useRef<HTMLDivElement>(null);
   const normalizedSettingsSearch = settingsSearch.trim().toLocaleLowerCase();
-  const visibleSettingsTabs = userSettingsTabs.filter((tab) =>
-    tab.label.toLocaleLowerCase().includes(normalizedSettingsSearch)
+  const visibleSettingsTabs = useMemo(
+    () =>
+      userSettingsTabs.filter((tab) =>
+        tab.label.toLocaleLowerCase().includes(normalizedSettingsSearch)
+      ),
+    [normalizedSettingsSearch]
   );
   const hasProjects = projects.length > 0;
   const hasChats = chatThreads.length > 0;
   const normalizedChatSearch = chatHistorySearch.trim().toLocaleLowerCase();
-  const filteredChatThreads = chatThreads.filter((thread) =>
-    thread.title.toLocaleLowerCase().includes(normalizedChatSearch)
+  const filteredChatThreads = useMemo(
+    () =>
+      chatThreads.filter((thread) =>
+        thread.title.toLocaleLowerCase().includes(normalizedChatSearch)
+      ),
+    [chatThreads, normalizedChatSearch]
   );
-  const recentChatThreads = chatThreads.slice(0, 6);
+  const recentChatThreads = useMemo(() => chatThreads.slice(0, 6), [chatThreads]);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

@@ -64,7 +64,10 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
   // Management lists: sources show disabled rows (with a badge + re-enable) so
   // the user can manage them, but disabled/forgotten material is excluded from
   // the global search results below.
-  const managementSources = useMemo(() => runtime.workspaceKnowledgeSources, [runtime]);
+  const managementSources = useMemo(
+    () => runtime.workspaceKnowledgeSources,
+    [runtime.workspaceKnowledgeSources]
+  );
   const managementMemories = useMemo(
     () => runtime.managedMemoryRecords.filter((memory) => !memory.forgottenAt),
     [runtime.managedMemoryRecords]

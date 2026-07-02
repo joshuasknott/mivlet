@@ -141,6 +141,28 @@ export function SettingsPage({
   );
 }
 
+// Display order for providers in the Settings -> Providers list. Hoisted to
+// module scope so the comparator and the lists derived from it don't get
+// reallocated on every render.
+const PROVIDER_PRIORITY = [
+  "codex",
+  "cursor",
+  "copilot",
+  "grok",
+  "openai",
+  "anthropic",
+  "gemini",
+  "xiai",
+  "openrouter"
+];
+
+function byProviderPriority(a: BackendProvider, b: BackendProvider) {
+  const aPriority = PROVIDER_PRIORITY.indexOf(a.id);
+  const bPriority = PROVIDER_PRIORITY.indexOf(b.id);
+  return (aPriority === -1 ? Number.MAX_SAFE_INTEGER : aPriority) -
+    (bPriority === -1 ? Number.MAX_SAFE_INTEGER : bPriority);
+}
+
 function ProviderAccessView({
   runtime,
   onStatus
@@ -156,29 +178,20 @@ function ProviderAccessView({
 
   // Native-API (key) providers are connectable here. Subscription/CLI providers
   // (codex/cursor/copilot/grok) report provider-owned runtime state.
-  const providerPriority = [
-    "codex",
-    "cursor",
-    "copilot",
-    "grok",
-    "openai",
-    "anthropic",
-    "gemini",
-    "xai",
-    "openrouter"
-  ];
-  const byPriority = (a: BackendProvider, b: BackendProvider) => {
-    const aPriority = providerPriority.indexOf(a.id);
-    const bPriority = providerPriority.indexOf(b.id);
-    return (aPriority === -1 ? Number.MAX_SAFE_INTEGER : aPriority) -
-      (bPriority === -1 ? Number.MAX_SAFE_INTEGER : bPriority);
-  };
-  const nativeProviders = providers
-    .filter((provider) => provider.backendType === "native-api")
-    .sort(byPriority);
-  const subscriptionProviders = providers
-    .filter((provider) => provider.backendType !== "native-api")
-    .sort(byPriority);
+  const nativeProviders = useMemo(
+    () =>
+      providers
+        .filter((provider) => provider.backendType === "native-api")
+        .sort(byProviderPriority),
+    [providers]
+  );
+  const subscriptionProviders = useMemo(
+    () =>
+      providers
+        .filter((provider) => provider.backendType !== "native-api")
+        .sort(byProviderPriority),
+    [providers]
+  );
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
   const selectedConnected = selectedProvider
     ? runtime.connectedBackendIds.includes(selectedProvider.id)

@@ -113,15 +113,25 @@ export function App() {
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
   const voice = useVoice(voiceProvider, (transcript) => void submitComposerText(transcript));
 
+  // Connected connector ids the scheduled runner is allowed to read from.
+  // Memoized so the options object passed to useScheduledAgent keeps a stable
+  // array reference unless the connector manifests actually change (otherwise
+  // every render produced a fresh array and churned the runner's effect deps).
+  const connectedConnectorIds = useMemo(
+    () =>
+      runtime.connectorManifests
+        .filter((connector) => connector.status === "connected")
+        .map((connector) => connector.id),
+    [runtime.connectorManifests]
+  );
+
   // Scheduled prompts run through a dedicated headless runner that drives the
   // same AgentBackend contract as the composer — but in complete isolation: it
   // owns its own backend resolution, cancellation, and lease renewal, and never
   // touches the active thread or interactive agent state.
   const scheduledAgent = useScheduledAgent(runtime.pendingWorkflowRuns, {
     providers: runtime.backendProviders,
-    connectedConnectorIds: runtime.connectorManifests
-      .filter((connector) => connector.status === "connected")
-      .map((connector) => connector.id),
+    connectedConnectorIds,
     execute: executor,
     onComplete: (runId, result, workflowRun) => {
       runtime.completeWorkflowRun(
@@ -195,9 +205,34 @@ export function App() {
 
   // Connected connectors shown on the home rail. Real provider marks only;
   // local-files is always available so it is not surfaced as a connector. If
-  // nothing is connected, the rail renders nothing.
-  const connectedConnectorCards = runtime.connectorManifests.filter(
-    (connector) => connector.status === "connected" && connector.id !== "local-files"
+  // nothing is connected, the rail renders nothing. Memoized so the rail and
+  // the composer prop keep a stable reference across unrelated re-renders.
+  const connectedConnectorCards = useMemo(
+    () =>
+      runtime.connectorManifests.filter(
+        (connector) => connector.status === "connected" && connector.id !== "local-files"
+      ),
+    [runtime.connectorManifests]
+  );
+
+  // Recoverable runs scoped to the active thread. Hoisted + memoized so the
+  // agent panel does not re-filter the full recoverable list on every render
+  // (agent text deltas re-render App frequently).
+  const activeThreadId = runtime.activeThread?.id ?? runtime.activeItem;
+  const visibleRecoverableRuns = useMemo(
+    () =>
+      agent.state.recoverableRuns.filter(
+        (run) => !run.threadId || run.threadId === activeThreadId
+      ),
+    [agent.state.recoverableRuns, activeThreadId]
+  );
+
+  // The sidebar highlights the active item's spinner while an agent run is in
+  // flight. Memoized so the prop keeps a stable array reference (the previous
+  // inline ternary allocated a fresh array every render).
+  const loadingItemIds = useMemo(
+    () => (agent.state.running && runtime.activeItem ? [runtime.activeItem] : []),
+    [agent.state.running, runtime.activeItem]
   );
 
   const renderPage = () => {
@@ -220,10 +255,6 @@ export function App() {
 
   const renderChatContext = () => {
     const visibleAgentError = agent.state.noTransport ? null : agent.state.lastError;
-    const activeThreadId = runtime.activeThread?.id ?? runtime.activeItem;
-    const visibleRecoverableRuns = agent.state.recoverableRuns.filter(
-      (run) => !run.threadId || run.threadId === activeThreadId
-    );
 
     return (
       <>
@@ -339,9 +370,23 @@ export function App() {
     : `${runtime.lastAction}.`;
   // Label for the model chip: the selected model's friendly label, or a
   // placeholder when no model is selected/available on the connected backend.
-  const modelChipLabel =
-    runtime.selectableModels.find((model) => model.id === runtime.resolvedSelectedModelId)?.label ??
-    "Select model";
+  // Memoized so the composer's chip prop keeps a stable primitive unless the
+  // model selection actually changes.
+  const modelChipLabel = useMemo(
+    () =>
+      runtime.selectableModels.find((model) => model.id === runtime.resolvedSelectedModelId)?.label ??
+      "Select model",
+    [runtime.selectableModels, runtime.resolvedSelectedModelId]
+  );
+
+  // Settings nav search filter. Memoized (and kept above the onboarding early
+  // return so the Rules of Hooks hold) so typing in the settings search box
+  // does not refilter the static tab list on every unrelated render.
+  const visibleSettingsTabs = useMemo(() => {
+    const query = settingsModalSearch.trim().toLocaleLowerCase();
+    if (!query) return settingsTabs;
+    return settingsTabs.filter((tab) => tab.label.toLocaleLowerCase().includes(query));
+  }, [settingsModalSearch]);
 
   /**
    * Submit raw composer text. Fable-owned slash commands (/goal, /plan,
@@ -395,6 +440,13 @@ export function App() {
     );
   }
 
+  // Subscribe the global shortcut listener once. The runtime object is not
+  // referentially stable (it is rebuilt each render), so depending on it here
+  // would tear down and re-add the keydown listener on every render. A ref
+  // always points at the latest runtime, keeping the handlers current without
+  // resubscribing.
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) {
@@ -402,21 +454,22 @@ export function App() {
       }
 
       const key = event.key.toLowerCase();
+      const current = runtimeRef.current;
       if (key === "k") {
         event.preventDefault();
-        runtime.setLastAction("Search ready");
-        runtime.focusComposer("Search ");
+        current.setLastAction("Search ready");
+        current.focusComposer("Search ");
       }
 
       if (key === "n") {
         event.preventDefault();
-        runtime.startNewChat();
+        current.startNewChat();
       }
     };
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [runtime]);
+  }, []);
 
   // Onboarding gate: until one AI backend is connected (or the user skips in
   // preview), render the three-path onboarding shell instead of the workspace.
@@ -468,12 +521,6 @@ export function App() {
     }
   };
 
-  const visibleSettingsTabs = settingsTabs.filter((tab) => {
-    const query = settingsModalSearch.trim().toLocaleLowerCase();
-    if (!query) return true;
-    return tab.label.toLocaleLowerCase().includes(query);
-  });
-
   const navigateHistory = (offset: -1 | 1) => {
     const nextIndex = navigationIndex + offset;
     const target = navigationHistory.current[nextIndex];
@@ -501,7 +548,7 @@ export function App() {
         chatThreads={chatThreads}
         mobileNavOpen={runtime.mobileNavOpen}
         collapsed={sidebarCollapsed}
-        loadingItemIds={agent.state.running && runtime.activeItem ? [runtime.activeItem] : []}
+        loadingItemIds={loadingItemIds}
         isSettingsActive={false}
         activeSettingsTab={activeSettingsTab}
         onSelectSettingsTab={handleSelectSettingsTab}

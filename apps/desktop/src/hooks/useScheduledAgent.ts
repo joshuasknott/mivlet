@@ -116,6 +116,14 @@ export function useScheduledAgent(
   const activeRef = useRef<PendingScheduledRun | null>(null);
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
+  // The options object is rebuilt on every App render (its callbacks and the
+  // connectedConnectorIds array change identity frequently). Holding the latest
+  // one in a ref lets `runOne` read current providers/connectors/execute/onComplete
+  // without depending on the object's identity, so the drain effect does not
+  // re-evaluate on every unrelated render. Mirrors the ref pattern already used
+  // in useNativeAgent for the same unstable-options reason.
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
     let dispose: (() => void) | null = null;
@@ -140,7 +148,7 @@ export function useScheduledAgent(
       // here we resolve the live AgentBackend the same way the factory does.
       const routeProvider =
         run.execution?.policy === "pinned" && run.execution.backendId
-          ? options.providers.find((p) => p.id === run.execution!.backendId)
+          ? optionsRef.current.providers.find((p) => p.id === run.execution!.backendId)
           : connectedProvider;
       const backend: AgentBackend | null = resolveAgentBackend(routeProvider, deps);
       const controller = new AbortController();
@@ -163,7 +171,7 @@ export function useScheduledAgent(
             backend,
             prompt,
             maxTokens: 1024,
-            execute: options.execute,
+            execute: optionsRef.current.execute,
             shouldCancel: () => cancelRef.current,
             onToolCall: () => {
               // Agent tool calls use the shared approval gate.
@@ -196,7 +204,7 @@ export function useScheduledAgent(
               await saveRuntimeWorkflowRun(value);
             },
             connected: (connectorId) =>
-              options.connectedConnectorIds?.includes(connectorId) ?? false,
+              optionsRef.current.connectedConnectorIds?.includes(connectorId) ?? false,
             prompt: (text) => executePrompt(text),
             agent: (step) => executePrompt(step.prompt),
             connectorRead: async (step) => {
@@ -235,7 +243,7 @@ export function useScheduledAgent(
                 requestedAt,
                 decisions: ["once", "modify", "deny"]
               };
-              return options.execute(approval, JSON.stringify(step.arguments));
+              return optionsRef.current.execute(approval, JSON.stringify(step.arguments));
             }
           }
         );
@@ -245,9 +253,9 @@ export function useScheduledAgent(
           .filter(Boolean)
           .join("\n");
         if (workflowRun.status === "completed") {
-          options.onComplete(run.runId, { ok: true, transcript }, workflowRun);
+          optionsRef.current.onComplete(run.runId, { ok: true, transcript }, workflowRun);
         } else if (workflowRun.status === "blocked-auth") {
-          options.onComplete(
+          optionsRef.current.onComplete(
             run.runId,
             {
               ok: false,
@@ -257,13 +265,13 @@ export function useScheduledAgent(
             workflowRun
           );
         } else if (workflowRun.status === "cancelled") {
-          options.onComplete(
+          optionsRef.current.onComplete(
             run.runId,
             { ok: false, status: "cancelled", error: "Cancelled." },
             workflowRun
           );
         } else {
-          options.onComplete(
+          optionsRef.current.onComplete(
             run.runId,
             {
               ok: false,
@@ -278,7 +286,7 @@ export function useScheduledAgent(
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [connectedProvider, deps, options]
+    [connectedProvider, deps]
   );
 
   useEffect(() => {
