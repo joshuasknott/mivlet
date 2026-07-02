@@ -1,22 +1,20 @@
 import { FormEvent, useMemo, useState } from "react";
-import {
-  ArrowClockwise,
-  CaretDown,
-  CaretRight,
-  Database,
-  DownloadSimple,
-  File,
-  FilePlus,
-  FolderOpen,
-  Lightbulb,
-  MagnifyingGlass,
-  PlugsConnected,
-  Plus,
-  PushPin,
-  Sparkle,
-  Trash,
-  Warning
-} from "@phosphor-icons/react";
+import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { Database } from "@phosphor-icons/react/dist/csr/Database";
+import { DownloadSimple } from "@phosphor-icons/react/dist/csr/DownloadSimple";
+import { File } from "@phosphor-icons/react/dist/csr/File";
+import { FilePlus } from "@phosphor-icons/react/dist/csr/FilePlus";
+import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { Lightbulb } from "@phosphor-icons/react/dist/csr/Lightbulb";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { PushPin } from "@phosphor-icons/react/dist/csr/PushPin";
+import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
+import { Warning } from "@phosphor-icons/react/dist/csr/Warning";
 import type { KnowledgeSource, MemoryRecord, SourceStatus } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 

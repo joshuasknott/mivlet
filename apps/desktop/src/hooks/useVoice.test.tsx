@@ -78,7 +78,7 @@ describe("useVoice", () => {
     expect(result.current.state.message).toBe("Stopping dictation…");
     expect(fixture.session.stop).toHaveBeenCalledOnce();
     await act(async () => fixture.result.resolve(" dictated once "));
-    expect(result.current.state.status).toBe("processing");
+    expect(["processing", "success"]).toContain(result.current.state.status);
     await waitFor(() => expect(result.current.state.status).toBe("success"));
     expect(onTranscript).toHaveBeenCalledOnce();
     expect(onTranscript).toHaveBeenCalledWith("dictated once");

@@ -4,7 +4,7 @@ import type {
   ConnectorActionKind,
   ConnectorManifest
 } from "@fable/protocol";
-import { X } from "@phosphor-icons/react";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ConnectorIcon } from "./ConnectorIcon";
 
 /**

@@ -1,24 +1,22 @@
-import {
-  ArrowClockwise,
-  CheckCircle,
-  Clock,
-  DeviceMobile,
-  GearSix,
-  Key,
-  LockKey,
-  Moon,
-  Plugs,
-  ShieldCheck,
-  Spinner,
-  Sparkle,
-  SquaresFour,
-  Sun,
-  Trash,
-  UploadSimple,
-  UserCircle,
-  WarningCircle,
-  X
-} from "@phosphor-icons/react";
+import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
+import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
+import { Key } from "@phosphor-icons/react/dist/csr/Key";
+import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
+import { Moon } from "@phosphor-icons/react/dist/csr/Moon";
+import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
+import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
+import { SquaresFour } from "@phosphor-icons/react/dist/csr/SquaresFour";
+import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
+import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
+import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
+import { WarningCircle } from "@phosphor-icons/react/dist/csr/WarningCircle";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type {

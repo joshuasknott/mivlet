@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowsClockwise, ShieldCheck, X } from "@phosphor-icons/react";
+import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { ArrowsClockwise } from "@phosphor-icons/react/dist/csr/ArrowsClockwise";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import type {
   JobAttempt,
   NotificationRecord,
