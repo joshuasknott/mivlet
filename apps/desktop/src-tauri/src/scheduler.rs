@@ -88,6 +88,7 @@ fn empty_store(instance_id: &str) -> SchedulerStore {
         instance_id: instance_id.to_string(),
         updated_at: now_iso(),
         occurrence_ledger: Vec::new(),
+        occurrence_index: std::collections::HashSet::new(),
     }
 }
 
@@ -289,6 +290,8 @@ pub fn read_store(path: &Path) -> Result<SchedulerStore, String> {
     if store.instance_id.is_empty() {
         store.instance_id = "unset".to_string();
     }
+    // The transient index is not persisted; rebuild it from the ledger Vec.
+    index_occurrences(&mut store);
     Ok(store)
 }
 
@@ -338,6 +341,7 @@ fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, 
         instance_id: workspace_id.to_string(),
         updated_at: now_iso(),
         occurrence_ledger: Vec::new(),
+        occurrence_index: std::collections::HashSet::new(),
     }))
 }
 
@@ -397,7 +401,7 @@ fn write_store_to_sqlite(workspace_id: &str, store_value: &SchedulerStore) -> Re
 /// data migration at startup) and is otherwise a write-only mirror so a
 /// downgrade/rollback remains possible — it is never deleted by this path. In
 /// the unit-test path (no global store) the JSON file remains the sole store.
-fn persist<F: FnOnce(&mut SchedulerStore)>(
+fn persist<F: FnOnce(&mut SchedulerStore) -> bool>(
     app: &AppHandle,
     workspace_id: &str,
     mutate: F,
@@ -412,7 +416,14 @@ fn persist<F: FnOnce(&mut SchedulerStore)>(
             guard.insert(workspace_id.to_string(), loaded);
         }
         let store = guard.get_mut(workspace_id).expect("store loaded");
-        mutate(store);
+        let changed = mutate(store);
+        // Skip the write entirely when the mutate closure reports no state
+        // change (e.g. a read-only tick that found nothing due/expire). This
+        // avoids re-encrypting and rewriting every job + queue row on every
+        // idle tick. Only a genuinely-changed store is flushed.
+        if !changed {
+            return Ok(());
+        }
         store.updated_at = now_iso();
         // SQLite is the authority in production; fall back to JSON in tests.
         match write_store_to_sqlite(workspace_id, store)? {
@@ -632,6 +643,7 @@ pub fn save_scheduled_job(
         });
         store.jobs.insert(0, job.clone());
         store.jobs.truncate(MAX_SCHEDULED_JOBS);
+        true
     })?;
     crate::action_history::Recorder::new(
         crate::action_history::categories::SCHEDULE,
@@ -663,6 +675,7 @@ pub fn delete_scheduled_job(
     let mut deleted = false;
     persist(&app, scope.workspace_id(), |store| {
         deleted = delete_job_from_store(store, scope.workspace_id(), scope.project_id(), &job_id);
+        deleted
     })?;
     if !deleted {
         return Err("Scheduled job was not found.".to_string());
@@ -716,6 +729,7 @@ pub fn set_job_status(
             &job_id_norm,
             &status,
         );
+        updated
     })?;
     if !updated {
         return Err("Scheduled job was not found.".to_string());
@@ -764,10 +778,10 @@ pub fn enqueue_job_run(
     let mut created: Option<SchedulerQueueEntry> = None;
     persist(&app, scope.workspace_id(), |store| {
         if store.queue.iter().any(|e| e.deduplication_key == key) {
-            return;
+            return false;
         }
-        if store.occurrence_ledger.iter().any(|seen| seen == &key) {
-            return;
+        if store.occurrence_index.contains(&key) {
+            return false;
         }
         let job = store.jobs.iter().find(|job| {
             job.id == job_id
@@ -775,16 +789,16 @@ pub fn enqueue_job_run(
                 && job.project_id.as_deref() == scope.project_id()
         });
         let Some(job) = job else {
-            return;
+            return false;
         };
         if job.status != "active" {
-            return;
+            return false;
         }
         let execution = job.execution.clone();
         let retry_policy = job.retry_policy.clone();
         if let Some(route) = execution.as_ref() {
             if ensure_route_allows(route, "schedule-execution").is_err() {
-                return;
+                return false;
             }
         }
         let entry = SchedulerQueueEntry {
@@ -807,6 +821,7 @@ pub fn enqueue_job_run(
         created = Some(entry.clone());
         store.queue.push(entry);
         store.queue.truncate(MAX_SCHEDULER_QUEUE_ENTRIES);
+        true
     })?;
     let entry =
         created.ok_or_else(|| "A run for this occurrence is already queued.".to_string())?;
@@ -915,20 +930,40 @@ pub fn report_job_attempt(
         if let Some(key) = remembered.take() {
             remember_occurrence(store, &key);
         }
+        true
     })
+}
+
+/// Rebuild the transient O(1) occurrence index from the persisted ledger Vec.
+/// Called after deserializing a store from SQLite/JSON (the index is `serde(skip)`).
+fn index_occurrences(store: &mut SchedulerStore) {
+    store.occurrence_index.clear();
+    store.occurrence_index.reserve(store.occurrence_ledger.len());
+    for key in &store.occurrence_ledger {
+        store.occurrence_index.insert(key.clone());
+    }
 }
 
 /// Record an occurrence in the bounded ledger so it can never be re-queued.
 fn remember_occurrence(store: &mut SchedulerStore, key: &str) {
-    if store.occurrence_ledger.iter().any(|seen| seen == key) {
+    if store.occurrence_index.contains(key) {
         return;
     }
+    store.occurrence_index.insert(key.to_string());
     store.occurrence_ledger.insert(0, key.to_string());
     if store.occurrence_ledger.len() > MAX_OCCURRENCE_LEDGER {
         let drop = store.occurrence_ledger.len() - MAX_OCCURRENCE_LEDGER;
+        // Evict the oldest entries (the tail of the Vec) and drop them from the
+        // index too so the index never retains a key the ledger no longer holds.
+        let evicted: Vec<String> = store.occurrence_ledger
+            [store.occurrence_ledger.len() - drop..]
+            .to_vec();
         store
             .occurrence_ledger
             .truncate(store.occurrence_ledger.len() - drop);
+        for key in evicted {
+            store.occurrence_index.remove(&key);
+        }
     }
 }
 
@@ -965,6 +1000,7 @@ pub fn renew_job_lease(
             entry.lease_expires_at = iso_from_ms(now_epoch_ms() + RUNNING_LEASE_MS);
             renewed = true;
         }
+        renewed
     })?;
     Ok(renewed)
 }
@@ -994,6 +1030,7 @@ pub fn requeue_blocked_job_run(
                 requeued = true;
             }
         }
+        requeued
     })?;
     Ok(requeued)
 }
@@ -1059,6 +1096,7 @@ pub fn cancel_job_run(
         if let Some(key) = remembered.take() {
             remember_occurrence(store, &key);
         }
+        cancelled
     })?;
     if cancelled {
         // The durable state change is authoritative; this event asks the
@@ -1143,7 +1181,8 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     })?;
 
     let mut newly_leased = Vec::new();
-    persist(app, DEFAULT_WORKSPACE_ID, |store| {
+    let leased_this_tick = persist(app, DEFAULT_WORKSPACE_ID, |store| {
+        let mut changed = false;
         // 1. Expire leases whose deadline has passed.
         for entry in &mut store.queue {
             if !entry.lease_holder.is_empty() && parse_ms(&entry.lease_expires_at) <= now_ms {
@@ -1153,6 +1192,7 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
                 if entry.state == "leased" || entry.state == "running" {
                     entry.state = "queued".to_string();
                 }
+                changed = true;
             }
         }
         // 2. Lease due queued entries (scheduled-at <= now AND backoff elapsed),
@@ -1188,6 +1228,7 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
                 .error("permission-denied")
                 .summary("Scheduled execution blocked by its captured permission profile.")
                 .record();
+                changed = true;
                 continue;
             }
             entry.state = "leased".to_string();
@@ -1195,8 +1236,11 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
             entry.lease_expires_at = iso_from_ms(now_ms + SCHEDULER_LEASE_MS);
             entry.lease_token = fresh_lease_token();
             newly_leased.push(entry.clone());
+            changed = true;
         }
+        changed
     })?;
+    let _ = leased_this_tick;
 
     // 3. Emit only entries leased by this tick. Previously every leased entry
     // was re-emitted every five seconds until acknowledgement.
@@ -1414,10 +1458,53 @@ mod tests {
             remember_occurrence(&mut store, "k");
         }
         assert_eq!(store.occurrence_ledger.len(), 1);
+        // The transient index mirrors the ledger: a single key is present in both.
+        assert!(store.occurrence_index.contains("k"));
         for i in 0..(MAX_OCCURRENCE_LEDGER + 10) {
             remember_occurrence(&mut store, &format!("k{i}"));
         }
         assert!(store.occurrence_ledger.len() <= MAX_OCCURRENCE_LEDGER);
+        // After overflowing the ledger, the index must not retain evicted keys:
+        // every key in the index must still be in the ledger Vec, and vice versa.
+        assert_eq!(
+            store.occurrence_index.len(),
+            store.occurrence_ledger.len(),
+            "index and ledger must stay in sync after eviction"
+        );
+        for key in &store.occurrence_ledger {
+            assert!(store.occurrence_index.contains(key));
+        }
+        // The first few inserted keys were evicted (FIFO); they must be re-admittable.
+        assert!(!store.occurrence_index.contains("k0"));
+    }
+
+    /// The transient occurrence index is rebuilt from the ledger Vec after a
+    /// store is loaded from SQLite/JSON (it is serde-skipped). This proves
+    /// dedup works immediately after a round-trip without re-adding a key.
+    #[test]
+    fn occurrence_index_is_rebuilt_on_load_and_blocks_duplicates() {
+        let mut store = empty_store("inst");
+        remember_occurrence(&mut store, "occ-1");
+        // Simulate persistence: serialize then deserialize (index is skipped).
+        let json = serde_json::to_string(&store).unwrap();
+        let mut loaded = serde_json::from_str::<SchedulerStore>(&json).unwrap();
+        assert!(
+            loaded.occurrence_index.is_empty(),
+            "deserialized store starts with an empty index"
+        );
+        index_occurrences(&mut loaded);
+        // The rebuilt index blocks re-adding the persisted occurrence.
+        assert!(loaded.occurrence_index.contains("occ-1"));
+        let before = loaded.occurrence_ledger.len();
+        remember_occurrence(&mut loaded, "occ-1");
+        assert_eq!(
+            loaded.occurrence_ledger.len(),
+            before,
+            "rebuilt index prevents a duplicate occurrence"
+        );
+        // A fresh occurrence is admitted.
+        remember_occurrence(&mut loaded, "occ-2");
+        assert!(loaded.occurrence_index.contains("occ-2"));
     }
 
     /// Pure helper: apply a normalized attempt to an entry, mirroring the

@@ -46,6 +46,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 4 → 5: make knowledge/memory identities workspace-composite,
             // add durable lifecycle columns and workspace-bound dependencies.
             4 => apply_v4_to_v5(conn)?,
+            // 5 → 6: add a plaintext `search_text` column to connector_cache so
+            // lexical search filters via SQL LIKE without decrypting payloads.
+            // Existing rows are backfilled lazily by the store on first read.
+            5 => apply_v5_to_v6(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -182,6 +186,32 @@ fn apply_v4_to_v5(conn: &Connection) -> super::Result<()> {
           PRIMARY KEY (workspace_id, connector_id, provider_item_id)
         );
         "#,
+    )?;
+    Ok(())
+}
+
+/// Apply the v5→v6 connector_cache `search_text` column, idempotently. The
+/// presence of the `search_text` column is the probe: if it already exists
+/// (fresh SCHEMA_V1 database, or a re-run after a partial apply) the step only
+/// backfills the covering index. If the `connector_cache` table is absent
+/// altogether (an artificial minimal schema in tests), the step is a no-op.
+///
+/// Existing rows are NOT backfilled here: the migration runs with only a
+/// `&Connection` (no vault), so the payload-derived plaintext cannot be derived.
+/// Backfill is performed lazily by the store on first read after upgrade (see
+/// `repos::connector_cache::backfill_search_text`), which has the vault.
+fn apply_v5_to_v6(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "connector_cache")? {
+        return Ok(());
+    }
+    if !table_has_column(conn, "connector_cache", "search_text")? {
+        conn.execute_batch(crate::store::schema::SCHEMA_V5_TO_V6)?;
+        return Ok(());
+    }
+    // Column already present; just backfill the index idempotently.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text
+         ON connector_cache(workspace_id, disabled, search_text);",
     )?;
     Ok(())
 }
@@ -479,7 +509,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        let err = apply(&conn, 5, 6).unwrap_err();
+        // 6 is the current registered version; 7 is one step beyond it.
+        let err = apply(&conn, 6, 7).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -536,7 +567,7 @@ mod tests {
 
         apply(&conn, 1, CURRENT_SCHEMA_VERSION).unwrap();
 
-        // After: both tables and the three connector-cache indices exist.
+        // After: both tables and the connector-cache indices exist.
         let tables: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('connector_cache','connector_cache_settings');",
@@ -552,7 +583,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(indices, 3);
+        assert_eq!(indices, 4);
     }
 
     /// The v1→v2 DDL is a strict subset of the current full schema: applying
@@ -768,8 +799,97 @@ mod tests {
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM knowledge_source", [], |r| r
                 .get::<_, i64>(0))
-                .unwrap(),
+            .unwrap(),
             2
         );
+    }
+
+    /// The v5→v6 step adds the plaintext `search_text` column to
+    /// `connector_cache` and the covering search index. It is idempotent
+    /// (re-applying to an already-upgraded database is a no-op) and a no-op when
+    /// the table is absent (minimal test schemas).
+    #[test]
+    fn v5_to_v6_step_adds_search_text_column_and_index() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        // A pre-v6 connector_cache table without the search_text column.
+        conn.execute_batch(
+            r#"
+            CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE connector_cache (
+              id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL,
+              connector_id TEXT NOT NULL, provider_item_id TEXT NOT NULL,
+              kind TEXT NOT NULL, trust TEXT NOT NULL DEFAULT 'untrusted',
+              pinned INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0,
+              content_fingerprint TEXT NOT NULL DEFAULT '', cached_at TEXT NOT NULL,
+              origin TEXT NOT NULL DEFAULT 'connector-cache',
+              payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+            );
+            "#,
+        )
+        .unwrap();
+        assert!(!table_has_column(&conn, "connector_cache", "search_text").unwrap());
+
+        apply(&conn, 5, CURRENT_SCHEMA_VERSION).unwrap();
+
+        assert!(table_has_column(&conn, "connector_cache", "search_text").unwrap());
+        // Existing rows backfill to the default empty string (the store
+        // backfills lazily with the vault; the migration itself does not).
+        conn.execute(
+            "INSERT INTO connector_cache
+               (id, workspace_id, connector_id, provider_item_id, kind, cached_at,
+                payload, payload_nonce)
+             VALUES ('r1','ws','github','i1','document','t', x'00', x'00');",
+            [],
+        )
+        .unwrap();
+        let search_text: String = conn
+            .query_row(
+                "SELECT search_text FROM connector_cache WHERE id='r1';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(search_text, "");
+        // The covering index exists.
+        let idx: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index'
+                 AND name='idx_connector_cache_search_text';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 1);
+
+        // Idempotent: re-applying does not error or duplicate.
+        apply(&conn, 5, CURRENT_SCHEMA_VERSION).unwrap();
+        let idx2: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index'
+                 AND name='idx_connector_cache_search_text';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx2, 1);
+    }
+
+    /// When the connector_cache table is absent, the v5→v6 step is a no-op
+    /// (does not error on minimal test schemas).
+    #[test]
+    fn v5_to_v6_step_is_noop_without_connector_cache_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .unwrap();
+        apply(&conn, 5, CURRENT_SCHEMA_VERSION).unwrap();
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='connector_cache';",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0);
     }
 }

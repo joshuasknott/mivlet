@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 5;
+pub const CURRENT_SCHEMA_VERSION: u32 = 6;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -195,6 +195,27 @@ CREATE TABLE IF NOT EXISTS workflow_run (
 CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace ON workflow_run(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_run_definition ON workflow_run(workspace_id, definition_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_run_status ON workflow_run(status);
+"#;
+
+/// Forward schema step `v5 → v6`: adds a plaintext, non-secret `search_text`
+/// column to `connector_cache` so lexical search can filter rows via SQL `LIKE`
+/// without decrypting every payload. Fresh databases already get the column
+/// through [`SCHEMA_V1`]; existing v5 databases receive it here. SQLite lacks
+/// `ADD COLUMN IF NOT EXISTS`, so the step is guarded by a column probe.
+///
+/// The column is added empty (default `''`). Existing rows are backfilled
+/// lazily by the store (which holds the vault) on first read after upgrade —
+/// see `repos::connector_cache::backfill_search_text`. A new covering index
+/// `idx_connector_cache_search_text` supports the workspace + disabled + search
+/// filter.
+pub const SCHEMA_V5_TO_V6: &str = r#"
+PRAGMA foreign_keys = ON;
+-- Plaintext lowercased title/provenance/contentPreview concatenation for
+-- lexical filtering without decryption. Non-secret: derived only from the
+-- already-redacted payload.
+ALTER TABLE connector_cache ADD COLUMN search_text TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text
+  ON connector_cache(workspace_id, disabled, search_text);
 "#;
 
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
@@ -559,12 +580,20 @@ CREATE TABLE IF NOT EXISTS connector_cache (
   content_fingerprint TEXT NOT NULL DEFAULT '',
   cached_at TEXT NOT NULL,
   origin TEXT NOT NULL DEFAULT 'connector-cache',
+  -- Lowercased, concatenated title/provenance/contentPreview drawn from the
+  -- (already-redacted) payload. Plaintext, non-secret, so lexical search can
+  -- filter rows via LIKE without decrypting the payload. Backfilled lazily by
+  -- the store (which holds the vault) the first time it is read after upgrade.
+  search_text TEXT NOT NULL DEFAULT '',
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_connector_cache_workspace ON connector_cache(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_connector_cache_connector ON connector_cache(connector_id);
 CREATE INDEX IF NOT EXISTS idx_connector_cache_search ON connector_cache(workspace_id, connector_id, disabled);
+-- Covering index for lexical search filtering: workspace + disabled gate +
+-- the plaintext search column so a LIKE scan touches only plaintext rows.
+CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text ON connector_cache(workspace_id, disabled, search_text);
 
 -- connector cache settings (per-workspace + per-connector)
 CREATE TABLE IF NOT EXISTS connector_cache_settings (

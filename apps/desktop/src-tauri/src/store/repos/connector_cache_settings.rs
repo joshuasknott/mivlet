@@ -64,6 +64,94 @@ pub fn effective(
     Ok(default_settings(&workspace_id, connector_id))
 }
 
+/// The effective `enabled` flag for a single `(workspace_id, connector_id)`,
+/// resolved from **plaintext columns only** (no payload decryption). Same
+/// precedence as [`effective`]: connector override wins over the workspace
+/// default, which wins over the built-in default (`enabled = true`).
+///
+/// Use this on hot read paths (cache list/search authorization) where only the
+/// boolean is needed and decrypting the settings `note` would be pure waste.
+pub fn effective_enabled(tx: &Connection, workspace_id: &str, connector_id: &str) -> Result<bool> {
+    let workspace_id = normalize_workspace(workspace_id)?;
+    let enabled: Option<i64> = tx
+        .query_row(
+            "SELECT enabled FROM connector_cache_settings
+             WHERE workspace_id = ?1 AND connector_id = ?2;",
+            rusqlite::params![workspace_id, connector_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(value) = enabled {
+        return Ok(value != 0);
+    }
+    // Fall back to the workspace default row (plaintext enabled column only).
+    let ws_enabled: Option<i64> = tx
+        .query_row(
+            "SELECT enabled FROM connector_cache_settings
+             WHERE workspace_id = ?1 AND connector_id = ?2;",
+            rusqlite::params![workspace_id, WORKSPACE_SCOPE_CONNECTOR],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(ws_enabled.map(|value| value != 0).unwrap_or(true))
+}
+
+/// Resolve the effective `enabled` flag for **every** connector that has cached
+/// rows in a workspace, in a single plaintext query (no per-row lookups, no
+/// payload decryption). Returns a map keyed by `connector_id`.
+///
+/// A connector's effective flag is its own override if present, else the
+/// workspace-default row's flag, else the built-in default (`true`). Unknown
+/// connectors (no settings row at all) resolve to the built-in default.
+pub fn effective_enabled_for_workspace(
+    tx: &Connection,
+    workspace_id: &str,
+) -> Result<std::collections::HashMap<String, bool>> {
+    let workspace_id = normalize_workspace(workspace_id)?;
+    // One plaintext scan of this workspace's settings rows: (connector_id, enabled).
+    let mut stmt = tx.prepare(
+        "SELECT connector_id, enabled FROM connector_cache_settings
+         WHERE workspace_id = ?1;",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![workspace_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+    })?;
+    let mut explicit = std::collections::HashMap::<String, bool>::new();
+    let mut workspace_default = None;
+    for row in rows {
+        let (connector_id, enabled) = row?;
+        if connector_id == WORKSPACE_SCOPE_CONNECTOR {
+            workspace_default = Some(enabled);
+        } else {
+            explicit.insert(connector_id, enabled);
+        }
+    }
+    // Resolve every connector that appears in the explicit map; connectors with
+    // no row inherit the workspace default (or built-in true). Callers pass the
+    // distinct connector ids from the cache rows so unknown ids resolve here.
+    let fallback = workspace_default.unwrap_or(true);
+    let mut out = std::collections::HashMap::new();
+    for (connector_id, enabled) in explicit {
+        out.insert(connector_id, enabled);
+    }
+    out.insert(WORKSPACE_SCOPE_CONNECTOR.to_string(), fallback);
+    Ok(out)
+}
+
+/// Look up an already-resolved effective-enabled map (from
+/// [`effective_enabled_for_workspace`]) for a single connector id, applying the
+/// same precedence: connector override → workspace default → built-in `true`.
+pub fn resolve_enabled(
+    resolved: &std::collections::HashMap<String, bool>,
+    connector_id: &str,
+) -> bool {
+    resolved
+        .get(connector_id)
+        .copied()
+        .or_else(|| resolved.get(WORKSPACE_SCOPE_CONNECTOR).copied())
+        .unwrap_or(true)
+}
+
 /// Built-in default settings (cache enabled, no background auto-sync).
 pub fn default_settings(workspace_id: &str, connector_id: &str) -> CacheSettingsRow {
     CacheSettingsRow {

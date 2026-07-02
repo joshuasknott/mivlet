@@ -98,10 +98,14 @@ impl Store {
         // Fail closed on structural corruption before any data access.
         Self::verify_integrity(&conn)?;
         Self::initialize_schema(&conn)?;
-        Ok(Self {
+        let store = Self {
             conn: Mutex::new(conn),
             vault,
-        })
+        };
+        // The v6 connector-cache `search_text` column is backfilled lazily here
+        // (the migration runs without the vault and cannot decrypt payloads).
+        store.backfill_connector_cache_search_text()?;
+        Ok(store)
     }
 
     /// Open an in-memory store (tests + repository unit tests). No file.
@@ -110,10 +114,46 @@ impl Store {
         let conn = Connection::open_in_memory()?;
         Self::configure_pragmas(&conn)?;
         Self::initialize_schema(&conn)?;
-        Ok(Self {
+        let store = Self {
             conn: Mutex::new(conn),
             vault,
-        })
+        };
+        store.backfill_connector_cache_search_text()?;
+        Ok(store)
+    }
+
+    /// Backfill the plaintext `connector_cache.search_text` column for any rows
+    /// written before the v6 schema upgrade. Runs once on open and is a no-op on
+    /// fresh/already-backfilled databases (no rows with empty `search_text`).
+    /// Failures are best-effort and logged-only: a row left with empty
+    /// `search_text` is simply invisible to the SQL LIKE prefilter but is still
+    /// listed/exported normally; its next upsert repopulates the column.
+    fn backfill_connector_cache_search_text(&self) -> Result<()> {
+        // Determine which workspaces have rows pending backfill, then backfill
+        // each in its own short transaction so the global lock is held briefly.
+        let workspaces: Vec<String> = {
+            let conn = self.conn.lock().unwrap();
+            let mut stmt = conn.prepare(
+                "SELECT DISTINCT workspace_id FROM connector_cache WHERE search_text = '';",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row?);
+            }
+            out
+        };
+        for workspace_id in workspaces {
+            // Best-effort: never block store open on a backfill failure.
+            let _ = self.transaction(|tx| {
+                crate::store::repos::connector_cache::backfill_search_text(
+                    tx,
+                    self,
+                    &workspace_id,
+                )
+            });
+        }
+        Ok(())
     }
 
     fn configure_pragmas(conn: &Connection) -> Result<()> {

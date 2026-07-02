@@ -71,23 +71,35 @@ mod lifecycle {
         workspace_id: &str,
         rows: Vec<ConnectorCacheRow>,
     ) -> StoreResult<Vec<ConnectorCacheRow>> {
+        use std::collections::HashSet;
+        // Resolve the effective cache `enabled` flag for every connector in this
+        // workspace ONCE, from plaintext columns only (no per-row payload
+        // decryption). The previous path called `effective(...)` per row, which
+        // issued up to two SELECTs and decrypted the settings `note` blob each
+        // time just to read the boolean.
+        let enabled_by_connector =
+            connector_cache_settings::effective_enabled_for_workspace(conn, workspace_id)?;
+        // Load the connected accounts once into a HashSet for O(1) membership
+        // instead of re-scanning the full account list per cache row.
         let mut statement = conn.prepare(
-            "SELECT connector_id, account_id, status FROM connector_account WHERE workspace_id=?1;",
+            "SELECT connector_id, account_id FROM connector_account
+             WHERE workspace_id=?1 AND status='connected'
+               AND account_id IS NOT NULL AND account_id <> '';",
         )?;
-        let accounts = statement
+        let connected: HashSet<(String, String)> = statement
             .query_map([workspace_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, Option<String>>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(1)?,
                 ))
             })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut authorized = Vec::new();
+            .filter_map(|r| r.ok())
+            .collect();
+        let _ = store; // settings are read from plaintext columns; no payload decryption here.
+        let mut authorized = Vec::with_capacity(rows.len());
         for row in rows {
-            let settings =
-                connector_cache_settings::effective(conn, store, workspace_id, &row.connector_id)?;
-            if !settings.enabled {
+            if !connector_cache_settings::resolve_enabled(&enabled_by_connector, &row.connector_id)
+            {
                 continue;
             }
             let item_account = row
@@ -95,11 +107,10 @@ mod lifecycle {
                 .get("account")
                 .and_then(serde_json::Value::as_str);
             if let Some(item_account) = item_account.filter(|value| !value.is_empty()) {
-                let account_ok = accounts.iter().any(|account| {
-                    account.0 == row.connector_id
-                        && account.2 == "connected"
-                        && account.1.as_deref() == Some(item_account)
-                });
+                // Authorization gate: an account-bound row is only authorized if
+                // a matching connected account exists for its connector. The
+                // predicate is unchanged; only the lookup is now O(1).
+                let account_ok = connected.contains(&(row.connector_id.clone(), item_account.to_string()));
                 if !account_ok {
                     continue;
                 }
@@ -893,6 +904,28 @@ mod tests {
         assert!(eff_b.enabled);
         let eff_a = lifecycle::get_settings(&store, "ws-a", "github").unwrap();
         assert!(!eff_a.enabled, "ws-a inherits its disabled default");
+    }
+
+    #[test]
+    fn list_excludes_rows_for_connectors_disabled_via_workspace_default() {
+        // Exercises the batched plaintext settings resolution path: a workspace
+        // default of disabled must exclude every cached row of every connector
+        // from list/search, even with no per-connector rows materialized.
+        let store = store();
+        lifecycle::cache_item(&store, "ws-a", &item("github", "1", "G"), "t").unwrap();
+        lifecycle::cache_item(&store, "ws-a", &item("notion", "1", "N"), "t").unwrap();
+        assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 2);
+        // Disable workspace-wide.
+        lifecycle::set_settings(&store, "ws-a", "", false, false, "", "t").unwrap();
+        assert!(
+            lifecycle::list(&store, "ws-a", None).unwrap().is_empty(),
+            "disabled workspace default excludes all rows"
+        );
+        // A connector override re-enables just that connector.
+        lifecycle::set_settings(&store, "ws-a", "notion", true, false, "", "t").unwrap();
+        let rows = lifecycle::list(&store, "ws-a", None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].connector_id, "notion");
     }
 
     #[test]

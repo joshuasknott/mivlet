@@ -1094,6 +1094,12 @@ pub struct SchedulerStore {
     /// check so a completed-then-removed occurrence can never be re-queued.
     #[serde(default)]
     pub occurrence_ledger: Vec<String>,
+    /// Transient O(1) index over [`occurrence_ledger`], rebuilt whenever the
+    /// store is loaded from SQLite/JSON. Lets enqueue dedup be O(1) instead of
+    /// a linear scan of the (bounded) ledger on every enqueue. Not persisted:
+    /// the Vec is the source of truth and re-derives this on load.
+    #[serde(skip)]
+    pub occurrence_index: std::collections::HashSet<String>,
 }
 
 // ---------------------------------------------------------------------------

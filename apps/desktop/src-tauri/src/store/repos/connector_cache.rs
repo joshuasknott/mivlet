@@ -209,15 +209,22 @@ pub fn upsert_from_value(
 
     let row_id = cache_id(&workspace_id, &connector_id, &provider_item_id);
     let sealed = seal_json(store, &payload, &aad(&row_id))?;
+    // Derive a plaintext, non-secret search corpus from the *already-redacted*
+    // payload so lexical search can filter via LIKE without decrypting the blob.
+    // Only title/provenance/contentPreview participate — exactly the fields the
+    // in-memory `search` filter matched — and only after redaction has scrubbed
+    // any token-shaped value to the sentinel.
+    let search_text = build_search_text(&payload);
     tx.execute(
         "INSERT INTO connector_cache
             (id, workspace_id, connector_id, provider_item_id, kind, trust, pinned,
-             disabled, content_fingerprint, cached_at, origin, payload, payload_nonce)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             disabled, content_fingerprint, cached_at, origin, search_text,
+             payload, payload_nonce)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
            kind=excluded.kind, trust=excluded.trust, pinned=excluded.pinned,
            content_fingerprint=excluded.content_fingerprint, cached_at=excluded.cached_at,
-           origin=excluded.origin,
+           origin=excluded.origin, search_text=excluded.search_text,
            payload=excluded.payload, payload_nonce=excluded.payload_nonce;",
         rusqlite::params![
             row_id,
@@ -231,11 +238,74 @@ pub fn upsert_from_value(
             fingerprint,
             cached_at,
             origin,
+            search_text,
             sealed.ciphertext,
             sealed.nonce,
         ],
     )?;
     Ok(())
+}
+
+/// Build the lowercase, space-joined plaintext search corpus from a
+/// *redacted* payload's title/provenance/contentPreview. The result is non-secret
+/// (redaction has already replaced token-shaped values with the sentinel) and is
+/// the exact text the `search` SQL filter matches against. The leading/trailing
+/// space padding makes substring `LIKE` matches behave the same as the previous
+/// `contains` semantics for field boundaries.
+pub fn build_search_text(payload: &Value) -> String {
+    let str_field = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    format!(
+        " {} {} {} ",
+        str_field("title"),
+        str_field("provenance"),
+        str_field("contentPreview")
+    )
+}
+
+/// Backfill the plaintext `search_text` column for any rows that still carry the
+/// default empty value (legacy rows written before the v6 schema upgrade). The
+/// store calls this lazily on first read after upgrade because the migration
+/// itself runs without the vault and cannot decrypt payloads. Returns the number
+/// of rows backfilled. Safe to call repeatedly: only empty-`search_text` rows are
+/// touched, and each is recomputed from its (already-redacted) payload.
+pub fn backfill_search_text(
+    tx: &Connection,
+    store: &Store,
+    workspace_id: &str,
+) -> Result<usize> {
+    let workspace_id = normalize_workspace(workspace_id)?;
+    let mut stmt = tx.prepare(
+        "SELECT id, payload, payload_nonce FROM connector_cache
+         WHERE workspace_id = ?1 AND search_text = '';",
+    )?;
+    let pending: Vec<(String, Sealed)> = stmt
+        .query_map(rusqlite::params![workspace_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                Sealed {
+                    ciphertext: row.get(1)?,
+                    nonce: row.get(2)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut updated = 0;
+    for (id, sealed) in pending {
+        let payload = open_json(store, &sealed, &aad(&id))?;
+        let search_text = build_search_text(&payload);
+        tx.execute(
+            "UPDATE connector_cache SET search_text = ?1 WHERE id = ?2;",
+            rusqlite::params![search_text, id],
+        )?;
+        updated += 1;
+    }
+    Ok(updated)
 }
 
 /// A decrypted connector-cache row.
@@ -368,6 +438,12 @@ fn list_where(
 
 /// Lexical search over a workspace's cache. Matches titles/provenance/previews
 /// that contain the (lowercased) query. Disabled rows are excluded.
+///
+/// Two-stage filter for performance: a plaintext `LIKE` over the indexed
+/// `search_text` column narrows to candidate rows (no payload decryption), then
+/// the exact in-memory match check runs only on those candidates. This preserves
+/// the precise substring semantics (per-field `contains`) while avoiding the
+/// previous path of decrypting every cache row in the workspace.
 pub fn search(
     tx: &Connection,
     store: &Store,
@@ -375,29 +451,107 @@ pub fn search(
     connector_id: Option<&str>,
     query: &str,
 ) -> Result<Vec<ConnectorCacheRow>> {
-    let rows = list(tx, store, workspace_id, connector_id)?;
     let needle = query.trim().to_ascii_lowercase();
     if needle.is_empty() {
-        return Ok(rows);
+        return list(tx, store, workspace_id, connector_id);
     }
-    Ok(rows
-        .into_iter()
-        .filter(|row| {
-            let title = row.payload["title"]
-                .as_str()
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            let provenance = row.payload["provenance"]
-                .as_str()
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            let preview = row.payload["contentPreview"]
-                .as_str()
-                .unwrap_or("")
-                .to_ascii_lowercase();
-            title.contains(&needle) || provenance.contains(&needle) || preview.contains(&needle)
-        })
-        .collect())
+    let workspace_id = normalize_workspace(workspace_id)?;
+    // Stage 1: plaintext candidate selection via LIKE on search_text. The
+    // `disabled = 0` gate mirrors `list`'s default exclusion. Use ESCAPE so a
+    // needle containing LIKE metacharacters is matched literally.
+    let like_pattern = format!("%{}%", escape_like(&needle));
+    let mut sql = String::from(
+        "SELECT id, workspace_id, connector_id, provider_item_id, kind, trust, pinned,
+                disabled, content_fingerprint, cached_at, origin, payload, payload_nonce
+         FROM connector_cache
+         WHERE workspace_id = ?1 AND disabled = 0 AND search_text LIKE ?2 ESCAPE '\\'",
+    );
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+        vec![Box::new(workspace_id.clone()), Box::new(like_pattern)];
+    if let Some(connector_id) = connector_id {
+        sql.push_str(" AND connector_id = ?");
+        params.push(Box::new(connector_id.to_string()));
+    }
+    sql.push_str(" ORDER BY cached_at DESC, connector_id, provider_item_id;");
+    let mut stmt = tx.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let partials: Vec<Partial> = stmt
+        .query_map(param_refs.as_slice(), |row| {
+            Ok(Partial {
+                id: row.get(0)?,
+                workspace_id: row.get(1)?,
+                connector_id: row.get(2)?,
+                provider_item_id: row.get(3)?,
+                kind: row.get(4)?,
+                trust: row.get(5)?,
+                pinned: row.get::<_, i64>(6)? != 0,
+                disabled: row.get::<_, i64>(7)? != 0,
+                content_fingerprint: row.get(8)?,
+                cached_at: row.get(9)?,
+                origin: row.get(10)?,
+                sealed: Sealed {
+                    ciphertext: row.get(11)?,
+                    nonce: row.get(12)?,
+                },
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    // Stage 2: decrypt only the candidates and keep exact per-field matches.
+    let mut out = Vec::with_capacity(partials.len());
+    for p in partials {
+        let payload = open_json(store, &p.sealed, &aad(&p.id))?;
+        if !row_matches(&payload, &needle) {
+            continue;
+        }
+        out.push(ConnectorCacheRow {
+            id: p.id,
+            workspace_id: p.workspace_id,
+            connector_id: p.connector_id,
+            provider_item_id: p.provider_item_id,
+            kind: p.kind,
+            trust: p.trust,
+            pinned: p.pinned,
+            disabled: p.disabled,
+            content_fingerprint: p.content_fingerprint,
+            cached_at: p.cached_at,
+            origin: p.origin,
+            payload,
+        });
+    }
+    Ok(out)
+}
+
+/// Exact per-field substring match against the (lowercased) needle, mirroring
+/// the original `search` semantics. Used as stage 2 after the plaintext LIKE
+/// prefilter so cross-field boundary matches introduced by the concatenation
+/// never produce a false positive.
+fn row_matches(payload: &Value, needle: &str) -> bool {
+    let str_field = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    str_field("title").contains(needle)
+        || str_field("provenance").contains(needle)
+        || str_field("contentPreview").contains(needle)
+}
+
+/// Escape SQLite LIKE metacharacters (`%`, `_`) and the escape char itself so a
+/// user query is matched literally.
+fn escape_like(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '%' | '_' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Get a single cache row by id, enforcing that it belongs to `workspace_id`
@@ -888,5 +1042,129 @@ mod tests {
             .with_conn(|conn| connectors_with_cache(conn, "ws-a"))
             .unwrap();
         assert_eq!(conns, vec!["github".to_string(), "notion".to_string()]);
+    }
+
+    #[test]
+    fn search_text_is_populated_on_upsert_and_matches_title_provenance_preview() {
+        let store = store();
+        let mut value = item("github", "i1", "Deploy Script");
+        value["provenance"] = serde_json::json!("github://fable/release");
+        value["contentPreview"] = serde_json::json!("kubernetes rollout status");
+        store
+            .transaction(|tx| upsert_from_value(tx, &store, "ws-a", value, "now"))
+            .unwrap();
+        // Each searchable field should match independently.
+        for q in ["deploy", "release", "kubernetes", "DEPLOY"] {
+            let rows = store
+                .with_conn(|conn| search(conn, &store, "ws-a", None, q))
+                .unwrap();
+            assert_eq!(rows.len(), 1, "query '{q}' should match the cached row");
+        }
+        // A query that does not appear in any field matches nothing.
+        let none = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "nonexistent-term-xyz"))
+            .unwrap();
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn search_text_prefilter_rejects_cross_field_false_positives() {
+        // The plaintext search_text concatenates fields with space padding. A
+        // query spanning a field boundary (e.g. tail of title + head of
+        // provenance) must NOT match, because stage 2 re-checks each field
+        // individually on the decrypted payload.
+        let store = store();
+        let mut value = item("github", "i1", "Alpha");
+        value["provenance"] = serde_json::json!("Beta");
+        store
+            .transaction(|tx| upsert_from_value(tx, &store, "ws-a", value, "now"))
+            .unwrap();
+        // "pha bet" spans the title->provenance boundary in the concatenated
+        // search_text, but no single field contains it.
+        let rows = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "pha bet"))
+            .unwrap();
+        assert!(
+            rows.is_empty(),
+            "cross-field boundary query must not produce a false positive"
+        );
+    }
+
+    #[test]
+    fn search_text_handles_like_metacharacters_literally() {
+        let store = store();
+        let mut value = item("github", "i1", "50%_off");
+        value["contentPreview"] = serde_json::json!("sale");
+        store
+            .transaction(|tx| upsert_from_value(tx, &store, "ws-a", value, "now"))
+            .unwrap();
+        // A literal search for the metacharacter substring must match, and the
+        // unescaped LIKE wildcards must not broaden the result unexpectedly.
+        let rows = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "50%_off"))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn backfill_search_text_populates_legacy_rows_and_is_idempotent() {
+        let store = store();
+        store
+            .transaction(|tx| {
+                upsert_from_value(tx, &store, "ws-a", item("github", "i1", "Legacy"), "old")
+            })
+            .unwrap();
+        // Simulate a pre-v6 row by blanking its search_text.
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE connector_cache SET search_text = '' WHERE workspace_id = 'ws-a';",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        // Before backfill, search returns nothing (LIKE prefilter finds no rows).
+        let before = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "legacy"))
+            .unwrap();
+        assert!(before.is_empty());
+        // Backfill (as Store::open would on upgrade).
+        let n = store
+            .transaction(|tx| backfill_search_text(tx, &store, "ws-a"))
+            .unwrap();
+        assert_eq!(n, 1);
+        // After backfill, search finds the legacy row again.
+        let after = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "legacy"))
+            .unwrap();
+        assert_eq!(after.len(), 1);
+        // Idempotent: a second backfill touches zero rows.
+        let again = store
+            .transaction(|tx| backfill_search_text(tx, &store, "ws-a"))
+            .unwrap();
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn search_excludes_disabled_rows_via_plaintext_filter() {
+        let store = store();
+        store
+            .transaction(|tx| {
+                upsert_from_value(tx, &store, "ws-a", item("github", "i1", "Visible"), "now")?;
+                upsert_from_value(tx, &store, "ws-a", item("github", "i2", "Hidden"), "now")
+            })
+            .unwrap();
+        store
+            .transaction(|tx| set_disabled(tx, "ws-a", "cache:ws-a:github:i2", true))
+            .unwrap();
+        let rows = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "hidden"))
+            .unwrap();
+        assert!(rows.is_empty(), "disabled row excluded from search");
+        let rows = store
+            .with_conn(|conn| search(conn, &store, "ws-a", None, "visible"))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
     }
 }
