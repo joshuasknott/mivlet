@@ -147,6 +147,9 @@ limits, and tool-safety contracts.
 
 See [Connectors](connectors.md) for scopes, callbacks, credential ownership, and external provider-console work.
 
+See [Browser Automation Architecture](../architecture/browser-automation.md) for the permission policy architecture, session derivation boundaries, risk-level mapping, and audit redaction rules.
+
+
 ## Offline Behavior
 
 - Composer drafts, selected context, imported knowledge, durable memory, approval audit history, and connector health cache stay local.

@@ -355,4 +355,27 @@ describe("Mobile Remote Control Foundation Integration Tests", () => {
     expect(normalResult.refused).toBe(false);
     expect(normalResult.safe).toBe(normalPayload);
   });
+
+  // 7. Remote-control browser/action rejection when session/device/permission is invalid
+  it("rejects remote control actions when the command decision is invalid", () => {
+    const commandInvalidDecision: RemoteCommand = {
+      type: "approve",
+      approvalId: "appr-1",
+      decision: "always" as any // invalid decision
+    };
+
+    const authResult = authorizeCommand({
+      command: commandInvalidDecision,
+      session: liveSession(),
+      devices: deviceIndex([remoteDevice("device-1", "trusted")]),
+      pendingApprovals: pendingIndex([pendingApproval("appr-1")]),
+      scheduledJobs: jobIndex([]),
+      now: clockAt(1_000)
+    });
+
+    expect(authResult.ok).toBe(false);
+    if (!authResult.ok) {
+      expect(authResult.code).toBe("invalid-command");
+    }
+  });
 });
