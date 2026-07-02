@@ -89,16 +89,6 @@ pub fn upsert_entry(
             "Queue entry job was not found in the requested workspace.".into(),
         ));
     }
-    // Already queued for this workspace+occurrence → reject (no duplicate).
-    let exists: i64 = tx.query_row(
-        "SELECT COUNT(*) FROM scheduler_queue_entry
-         WHERE workspace_id = ?1 AND deduplication_key = ?2;",
-        rusqlite::params![workspace_id, deduplication_key],
-        |row| row.get(0),
-    )?;
-    if exists > 0 {
-        return Ok(None);
-    }
     let id = queue_id(&workspace_id, &run_id);
     let scheduled_at = value
         .get("scheduledAt")
@@ -141,12 +131,16 @@ pub fn upsert_entry(
         "present"
     };
     let sealed = seal_json(store, value, &aad(&workspace_id, &id))?;
-    tx.execute(
+    // Let SQLite's unique indexes do the duplicate detection inside the write
+    // statement. That keeps the common enqueue path to one indexed operation
+    // instead of a COUNT probe followed by the insert/upsert.
+    let touched = tx.execute(
         "INSERT INTO scheduler_queue_entry
            (id, workspace_id, job_id, state, lease_holder, lease_expires_at,
             lease_token, deduplication_key, available_at, last_error, scheduled_at,
             updated_at, payload, payload_nonce)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(workspace_id, deduplication_key) DO NOTHING
          ON CONFLICT(id) DO UPDATE SET
            state=excluded.state, lease_holder=excluded.lease_holder,
            lease_expires_at=excluded.lease_expires_at, lease_token=excluded.lease_token,
@@ -170,6 +164,9 @@ pub fn upsert_entry(
             sealed.nonce
         ],
     )?;
+    if touched == 0 {
+        return Ok(None);
+    }
     Ok(Some(QueueRow {
         id,
         workspace_id,
@@ -382,6 +379,32 @@ mod tests {
             .unwrap();
         let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
         assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn same_queue_id_reupserts_in_place() {
+        let store = store();
+        seed_job(&store, "default", "j");
+        store
+            .transaction(|tx| {
+                assert!(upsert_entry(tx, &store, "", &entry("j", "r1"), "now")?.is_some());
+                let mut replacement = entry("j", "r1");
+                replacement["state"] = serde_json::json!("leased");
+                replacement["leaseHolder"] = serde_json::json!("instance-a");
+                replacement["scheduledAt"] = serde_json::json!("2026-07-01T10:00:00.000Z");
+                replacement["deduplicationKey"] = serde_json::json!("j:2026-07-01T10:00:00.000Z");
+                assert!(upsert_entry(tx, &store, "", &replacement, "later")?.is_some());
+                Ok(())
+            })
+            .unwrap();
+        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].value["state"], "leased");
+        assert_eq!(rows[0].value["leaseHolder"], "instance-a");
+        assert_eq!(
+            rows[0].value["deduplicationKey"],
+            "j:2026-07-01T10:00:00.000Z"
+        );
     }
 
     #[test]
