@@ -809,6 +809,71 @@ describe("Fable home", () => {
     expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
   });
 
+  it("inserts real dictation into the existing draft exactly once", async () => {
+    let recognition!: {
+      onstart: (() => void) | null;
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: ArrayLike<{
+              0: { transcript: string };
+              isFinal: boolean;
+            }>;
+          }) => void)
+        | null;
+      onend: (() => void) | null;
+    };
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      onstart: (() => void) | null = null;
+      onresult = null as typeof recognition.onresult;
+      onerror = null;
+      onend: (() => void) | null = null;
+      constructor() {
+        recognition = this;
+      }
+      start() {
+        this.onstart?.();
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {}
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      value: FakeSpeechRecognition,
+      configurable: true
+    });
+
+    const user = await renderWorkspace();
+    const composer = screen.getByLabelText("Universal composer");
+    await user.type(composer, "Plan launch");
+    await user.click(screen.getByRole("button", { name: "Start dictation" }));
+    expect(
+      await screen.findByRole("button", { name: "Stop dictation" })
+    ).toHaveAttribute("aria-pressed", "true");
+
+    recognition.onresult?.({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: "with the team" }, isFinal: true }
+      ]
+    });
+    await user.click(screen.getByRole("button", { name: "Stop dictation" }));
+
+    await waitFor(() =>
+      expect(composer).toHaveValue("Plan launch with the team")
+    );
+    recognition.onend?.();
+    expect(composer).toHaveValue("Plan launch with the team");
+    expect(composer).toHaveFocus();
+
+    delete (window as Window & { SpeechRecognition?: unknown })
+      .SpeechRecognition;
+  });
+
   it("recovers created schedules from local persistence", async () => {
     const user = userEvent.setup();
     // First session: create a schedule.

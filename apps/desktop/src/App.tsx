@@ -9,6 +9,7 @@ import {
   validateModelSelection
 } from "./lib/agent-run";
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
+import { insertDictation } from "./lib/insert-dictation";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
 import { useScheduledAgent } from "./hooks/useScheduledAgent";
@@ -25,7 +26,6 @@ import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import type { SettingsTab } from "./components/pages/SettingsPage";
-import { VoiceReview } from "./components/VoiceReview";
 
 /**
  * Root composition for the Fable desktop shell.
@@ -89,15 +89,36 @@ export function App() {
     }
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
-  const voice = useVoice(voiceProvider, runtime.voiceEnabled, (transcript) => {
-    // Dictation never bypasses the normal composer review/send path.
-    runtime.setComposerValue(transcript);
-    runtime.focusComposer(transcript);
+
+  function focusComposerAfterVoice() {
+    window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+  }
+
+  function addDictationToComposer(transcript: string) {
+    const composer = runtime.composerRef.current;
+    const insertion = insertDictation(
+      runtime.composerValue,
+      transcript,
+      composer?.selectionStart ?? runtime.composerValue.length,
+      composer?.selectionEnd ?? runtime.composerValue.length
+    );
+    runtime.setComposerValue(insertion.value);
+    window.requestAnimationFrame(() => {
+      const currentComposer = runtime.composerRef.current;
+      currentComposer?.focus();
+      currentComposer?.setSelectionRange(insertion.caret, insertion.caret);
+    });
+  }
+
+  const voice = useVoice(voiceProvider, addDictationToComposer, {
+    disabled: !runtime.voiceEnabled,
+    onCancel: focusComposerAfterVoice
   });
+
   useEffect(() => {
     // Do not leave a hidden recording alive when the composer is no longer visible.
-    if (!runtime.isChatView) voice.reset();
-  }, [runtime.isChatView, voice.reset]);
+    if (!runtime.isChatView) voice.cancel();
+  }, [runtime.isChatView, voice.cancel]);
 
   // Scheduled prompts run through a dedicated headless runner that drives the
   // same AgentBackend contract as the composer — but in complete isolation: it
@@ -341,6 +362,26 @@ export function App() {
     runPrompt(rawText);
   }
 
+  function focusComposerAfterVoice() {
+    window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+  }
+
+  function addDictationToComposer(transcript: string) {
+    const composer = runtime.composerRef.current;
+    const insertion = insertDictation(
+      runtime.composerValue,
+      transcript,
+      composer?.selectionStart ?? runtime.composerValue.length,
+      composer?.selectionEnd ?? runtime.composerValue.length
+    );
+    runtime.setComposerValue(insertion.value);
+    window.requestAnimationFrame(() => {
+      const currentComposer = runtime.composerRef.current;
+      currentComposer?.focus();
+      currentComposer?.setSelectionRange(insertion.caret, insertion.caret);
+    });
+  }
+
   function runPrompt(rawPrompt: string) {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
@@ -527,25 +568,14 @@ export function App() {
                 if (!text.trim()) return;
                 void submitComposerText(text);
               }}
-              voiceEnabled={voice.state.status === "active"}
-              voiceControlDisabled={
-                voice.state.status === "disabled" ||
-                voice.state.status === "unavailable" ||
-                voice.state.status === "processing"
-              }
-              voiceDisabledReason={
-                voice.state.status === "disabled"
-                  ? "Enable dictation in Privacy settings"
-                  : voice.state.status === "unavailable"
-                    ? voice.state.reason
-                    : voice.state.status === "processing"
-                      ? "Speech is being processed"
-                      : undefined
-              }
-              onToggleVoice={() => {
-                if (voice.state.status === "active") void voice.stop();
-                else if (voice.state.status !== "processing") void voice.start();
-              }}
+              voiceStatus={voice.state.status}
+              voiceMessage={voice.state.message}
+              voiceCanStart={voice.canStart}
+              voiceDisclosure={voice.processingDisclosure}
+              onStartVoice={() => void voice.start()}
+              onStopVoice={voice.stop}
+              onCancelVoice={voice.cancel}
+              onDismissVoice={voice.dismiss}
               onAttach={runtime.triggerAttach}
               addMenuOpen={addMenuOpen}
               permissionsOpen={toolPickerOpen}
@@ -566,13 +596,7 @@ export function App() {
               }}
               onRunCommand={runtime.runCommand}
               onFileChange={runtime.handleLocalKnowledgeFileChange}
-              voiceState={
-                voice.state.status === "active"
-                  ? "Recording only after your explicit click."
-                  : voice.state.status === "processing"
-                    ? "Processing speech…"
-                    : undefined
-              }
+
               importStatus={runtime.importStatus}
               models={runtime.selectableModels}
               selectedModelId={runtime.resolvedSelectedModelId}
@@ -585,10 +609,6 @@ export function App() {
               connectedConnectors={connectedConnectorCards}
               knowledgeSources={runtime.workspaceKnowledgeSources}
               schedules={runtime.schedules}
-            />
-            <VoiceReview
-              voice={voice}
-              onReturnToText={() => runtime.focusComposer(runtime.composerValue)}
             />
 
             {renderChatContext()}

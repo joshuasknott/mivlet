@@ -5,42 +5,84 @@ import {
   SpeechToTextError
 } from "./stt-boundary";
 
-describe("speech-to-text boundary", () => {
-  it("reports processing honestly and disposes transcript state after success", async () => {
-    let recognition: {
-      onresult: ((event: never) => void) | null;
-      onend: (() => void) | null;
-      stop: ReturnType<typeof vi.fn>;
-      abort: ReturnType<typeof vi.fn>;
-    };
-    class FakeRecognition {
-      continuous = false;
-      interimResults = false;
-      lang = "";
-      onresult: ((event: never) => void) | null = null;
-      onerror = null;
-      onend: (() => void) | null = null;
-      stop = vi.fn(() => this.onend?.());
-      abort = vi.fn();
-      start = vi.fn(() => {
-        recognition = this;
-        this.onresult?.({ results: [{ 0: { transcript: "review me" }, isFinal: true }] } as never);
-      });
-      constructor() {
-        recognition = this;
-      }
+function recognitionFixture() {
+  let current!: FakeRecognition;
+
+  class FakeRecognition {
+    continuous = false;
+    interimResults = false;
+    lang = "";
+    onstart: (() => void) | null = null;
+    onresult:
+      | ((event: {
+          resultIndex: number;
+          results: ArrayLike<{
+            0: { transcript: string };
+            isFinal: boolean;
+          }>;
+        }) => void)
+      | null = null;
+    onerror: ((event: { error: string; message?: string }) => void) | null =
+      null;
+    onend: (() => void) | null = null;
+    start = vi.fn();
+    stop = vi.fn();
+    abort = vi.fn();
+
+    constructor() {
+      current = this;
     }
+
+    emitStart() {
+      this.onstart?.();
+    }
+
+    emitResult(
+      results: Array<{
+        transcript: string;
+        final: boolean;
+      }>,
+      resultIndex = 0
+    ) {
+      this.onresult?.({
+        resultIndex,
+        results: results.map(({ transcript, final }) => ({
+          0: { transcript },
+          isFinal: final
+        }))
+      });
+    }
+
+    emitError(error: string) {
+      this.onerror?.({ error });
+    }
+
+    emitEnd() {
+      this.onend?.();
+    }
+  }
+
+  const provider = createBrowserSpeechProvider({
+    SpeechRecognition: FakeRecognition,
+    navigator: { language: "en-GB" }
+  } as never);
+
+  return {
+    provider,
+    recognition: () => current
+  };
+}
+
+describe("browser speech-to-text boundary", () => {
+  it("reports unsupported runtimes without pretending to start", async () => {
     const provider = createBrowserSpeechProvider({
-      SpeechRecognition: FakeRecognition,
       navigator: { language: "en-GB" }
     } as never);
-    expect(provider.descriptor.kind).toBe("remote");
-    expect(provider.descriptor.retainsAudio).toBe(false);
-    const session = await provider.start();
-    await session.stop();
-    expect(await session.result).toBe("review me");
-    await session.dispose();
-    expect(recognition!.onresult).toBeNull();
+
+    expect(provider.availability().status).toBe("unsupported");
+    await expect(provider.start()).rejects.toMatchObject({
+      code: "unsupported"
+    });
   });
 
   it("detects support without constructing recognition or requesting permission", () => {
@@ -60,33 +102,106 @@ describe("speech-to-text boundary", () => {
     } as never).status).toBe("unavailable");
   });
 
-  it("maps browser permission denial to a typed, retryable failure", async () => {
-    const abort = vi.fn();
-    class FakeRecognition {
-      continuous = false;
-      interimResults = false;
-      lang = "";
-      onresult = null;
-      onerror: ((event: { error: string }) => void) | null = null;
-      onend = null;
-      start() {
-        queueMicrotask(() => this.onerror?.({ error: "not-allowed" }));
-      }
-      stop() {}
-      abort() {
-        abort();
-      }
-    }
-    const session = await createBrowserSpeechProvider({
-      SpeechRecognition: FakeRecognition,
-      navigator: { language: "en-GB" }
-    } as never).start();
-    await expect(session.result).rejects.toMatchObject({
-      name: "SpeechToTextError",
+  it("does not resolve start until the platform confirms listening", async () => {
+    const fixture = recognitionFixture();
+    let resolved = false;
+    const pending = fixture.provider.start().then((session) => {
+      resolved = true;
+      return session;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    fixture.recognition().emitStart();
+    const session = await pending;
+    expect(resolved).toBe(true);
+    session.cancel();
+    session.dispose();
+  });
+
+  it("commits ordered final results once and ignores interim or repeated finals", async () => {
+    const fixture = recognitionFixture();
+    const pending = fixture.provider.start();
+    fixture.recognition().emitStart();
+    const session = await pending;
+
+    fixture.recognition().emitResult([
+      { transcript: "interim", final: false }
+    ]);
+    fixture.recognition().emitResult([
+      { transcript: "hello", final: true },
+      { transcript: "world", final: true }
+    ]);
+    fixture.recognition().emitResult(
+      [
+        { transcript: "duplicate", final: true },
+        { transcript: "world", final: true }
+      ],
+      0
+    );
+    session.stop();
+    session.stop();
+    fixture.recognition().emitEnd();
+    fixture.recognition().emitEnd();
+
+    await expect(session.completion).resolves.toBe("hello world");
+    expect(fixture.recognition().stop).toHaveBeenCalledOnce();
+    session.dispose();
+    expect(fixture.recognition().onresult).toBeNull();
+  });
+
+  it("maps permission denial before start and runtime failures after start", async () => {
+    const denied = recognitionFixture();
+    const deniedStart = denied.provider.start();
+    denied.recognition().emitError("not-allowed");
+    await expect(deniedStart).rejects.toMatchObject({
       code: "permission-denied"
     });
-    await session.dispose();
-    expect(abort).toHaveBeenCalledOnce();
+
+    const failed = recognitionFixture();
+    const failedStart = failed.provider.start();
+    failed.recognition().emitStart();
+    const session = await failedStart;
+    failed.recognition().emitError("network");
+    await expect(session.completion).rejects.toMatchObject({
+      code: "runtime-failure"
+    });
+    session.dispose();
+  });
+
+  it("treats natural end without final speech as an empty result", async () => {
+    const fixture = recognitionFixture();
+    const pending = fixture.provider.start();
+    fixture.recognition().emitStart();
+    const session = await pending;
+    fixture.recognition().emitResult([
+      { transcript: "not final", final: false }
+    ]);
+    fixture.recognition().emitEnd();
+
+    await expect(session.completion).rejects.toEqual(
+      expect.objectContaining<Partial<SpeechToTextError>>({
+        code: "empty-result"
+      })
+    );
+    session.dispose();
+  });
+
+  it("cancels and disposes active recognition idempotently", async () => {
+    const fixture = recognitionFixture();
+    const pending = fixture.provider.start();
+    fixture.recognition().emitStart();
+    const session = await pending;
+
+    session.cancel();
+    session.cancel();
+    await expect(session.completion).rejects.toMatchObject({
+      code: "cancelled"
+    });
+    expect(fixture.recognition().abort).toHaveBeenCalledOnce();
+    session.dispose();
+    session.dispose();
+    expect(fixture.recognition().onend).toBeNull();
   });
 
   it("normalizes synchronous platform start failures", async () => {
@@ -94,6 +209,7 @@ describe("speech-to-text boundary", () => {
       continuous = false;
       interimResults = false;
       lang = "";
+      onstart = null;
       onresult = null;
       onerror = null;
       onend = null;
@@ -103,36 +219,12 @@ describe("speech-to-text boundary", () => {
       stop() {}
       abort() {}
     }
-    await expect(createBrowserSpeechProvider({
+    const provider = createBrowserSpeechProvider({
       SpeechRecognition: FakeRecognition,
       navigator: { language: "en-GB" }
-    } as never).start()).rejects.toEqual(
-      new SpeechToTextError("failed", "Speech recognition could not start. Text input is still available.")
+    } as never);
+    await expect(provider.start()).rejects.toEqual(
+      new SpeechToTextError("startup-failure", "Dictation could not start. platform detail")
     );
-  });
-
-  it("cancels deliberate recording and disposes without retaining audio", async () => {
-    const abort = vi.fn();
-    class FakeRecognition {
-      continuous = false;
-      interimResults = false;
-      lang = "";
-      onresult = null;
-      onerror = null;
-      onend = null;
-      start() {}
-      stop() {}
-      abort() {
-        abort();
-      }
-    }
-    const session = await createBrowserSpeechProvider({
-      SpeechRecognition: FakeRecognition,
-      navigator: { language: "en-GB" }
-    } as never).start();
-    session.result.catch(() => {});
-    await session.cancel();
-    await session.dispose();
-    expect(abort).toHaveBeenCalledOnce();
   });
 });

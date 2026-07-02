@@ -2006,34 +2006,6 @@
   font-size: var(--text-12);
 }
 
-.voice-review {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2);
-  background: var(--surface-raised, var(--canvas));
-}
-
-.voice-review__status,
-.voice-review small {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-}
-
-.voice-review textarea {
-  width: 100%;
-  resize: vertical;
-}
-
-.voice-review > div {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 /* Connected AI backends panel (Connectors page) */
 
 .backends-panel {
