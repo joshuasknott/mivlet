@@ -441,9 +441,7 @@ mod tests {
     #[test]
     fn status_snapshot_contains_no_secrets() {
         let store = RemoteControlStore {
-            devices: vec![
-                device("device-1", RemoteDeviceTrustState::Trusted),
-            ],
+            devices: vec![device("device-1", RemoteDeviceTrustState::Trusted)],
             requested_enabled: true,
         };
         let status = status_snapshot(&store);
