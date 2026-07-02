@@ -45,28 +45,23 @@ import {
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
 import { getRuntimeRemoteControlStatus } from "../../runtime";
 import { ProviderIcon } from "../ProviderIcon";
+import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
 import type { ProfileFixture } from "../../data/workspace";
 
 export type SettingsTab =
-  | "profile"
+  | "general"
   | "providers"
-  | "appearance"
   | "privacy"
   | "history"
-  | "approvals"
-  | "notifications"
   | "workspace";
 
 export const tabs: { id: SettingsTab; label: string }[] = [
-  { id: "profile", label: "Profile" },
+  { id: "general", label: "General" },
   { id: "providers", label: "Providers" },
-  { id: "appearance", label: "Appearance" },
-  { id: "privacy", label: "Privacy" },
+  { id: "privacy", label: "Privacy & Permissions" },
   { id: "history", label: "History" },
-  { id: "approvals", label: "Approvals" },
-  { id: "notifications", label: "Notifications" },
   { id: "workspace", label: "Workspace" }
 ];
 
@@ -115,38 +110,35 @@ export function SettingsPage({
 
         {activeTab === "providers" ? (
           <ProviderAccessView runtime={runtime} onStatus={setStatus} />
-        ) : activeTab === "profile" ? (
-          <ProfileSettingsView
-            profile={profile}
-            onProfileChange={onProfileChange}
-            onStatus={setStatus}
-          />
-        ) : activeTab === "appearance" ? (
-          <AppearanceSettingsView
-            theme={theme}
-            onThemeChange={onThemeChange}
-            onStatus={setStatus}
-          />
+        ) : activeTab === "general" ? (
+          <>
+            <ProfileSettingsView
+              profile={profile}
+              onProfileChange={onProfileChange}
+              onStatus={setStatus}
+            />
+            <AppearanceSettingsView
+              theme={theme}
+              onThemeChange={onThemeChange}
+              onStatus={setStatus}
+            />
+          </>
         ) : activeTab === "workspace" ? (
           <WorkspaceSettingsView
             workspaceName={workspaceName}
             onStatus={setStatus}
           />
         ) : activeTab === "privacy" ? (
-          <PrivacySettingsView
-            runtime={runtime}
-            onStatus={setStatus}
-          />
-        ) : activeTab === "approvals" ? (
-          <ApprovalsSettingsView runtime={runtime} onStatus={setStatus} />
+          <>
+            <PrivacySettingsView runtime={runtime} onStatus={setStatus} />
+            <ApprovalsSettingsView runtime={runtime} onStatus={setStatus} />
+          </>
         ) : activeTab === "history" ? (
           <HistorySettingsView
             runtime={runtime}
             onStatus={setStatus}
           />
-        ) : (
-          <QuietPlaceholder tab={activeTab} />
-        )}
+        ) : null}
 
         {status ? (
           <p className="settings-status" role="status">
@@ -874,6 +866,46 @@ function HistorySettingsView({
   runtime: ShellRuntime;
   onStatus: (message: string) => void;
 }) {
+  const [view, setView] = useState<"runs" | "activity">("runs");
+
+  return (
+    <div className="settings-history">
+      <div className="settings-history__tabs" role="tablist" aria-label="History views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "runs"}
+          onClick={() => setView("runs")}
+        >
+          Runs
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === "activity"}
+          onClick={() => setView("activity")}
+        >
+          Activity
+        </button>
+      </div>
+      <div role="tabpanel" aria-label={view === "runs" ? "Runs" : "Activity"}>
+        {view === "runs" ? (
+          <RunHistoryPage runtime={runtime} embedded />
+        ) : (
+          <ActivityHistoryView runtime={runtime} onStatus={onStatus} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ActivityHistoryView({
+  runtime,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  onStatus: (message: string) => void;
+}) {
   const [filter, setFilter] = useState<string>("all");
   const events = runtime.actionHistory ?? [];
 
@@ -1243,26 +1275,6 @@ function ApprovalsSettingsView({
           </span>
         </div>
       </section>
-    </div>
-  );
-}
-
-function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace" | "privacy" | "history" | "approvals"> }) {
-  const copy = {
-    notifications: {
-      description: "Notification preferences will live here."
-    }
-  };
-
-  return (
-    <div className="settings-page__body">
-      <div className="settings-section-heading">
-        <p>{copy[tab].description}</p>
-      </div>
-      <div className="settings-empty-row">
-        <GearSix size={18} />
-        <span>Nothing to configure yet.</span>
-      </div>
     </div>
   );
 }

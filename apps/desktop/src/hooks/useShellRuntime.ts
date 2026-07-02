@@ -777,8 +777,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     activeUtility === "Departments" ||
     activeUtility === "Knowledge" ||
     activeUtility === "Schedules" ||
-    activeUtility === "Connectors" ||
-    activeUtility === "Run History"
+    activeUtility === "Connectors"
       ? (activeUtility as WorkspacePage)
       : activeItem === "Profile" || activeItem === "Settings"
         ? activeItem
@@ -3236,13 +3235,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   /**
-   * Navigate to Run History pre-filtered to a schedule's executions. Sets the
-   * one-shot filter then switches the active page; Run History consumes the
-   * filter on mount.
+   * Navigate to Settings -> History pre-filtered to a schedule's executions.
+   * The settings shell selects the History tab when it sees the one-shot
+   * filter; RunHistoryPage consumes that filter on mount.
    */
   const openRunHistoryForJob = (jobId: string) => {
     setRunHistoryJobId(jobId);
-    setActiveItem("Run History");
+    setActiveItem("Settings");
   };
 
   const clearRunHistoryJobId = () => setRunHistoryJobId(null);

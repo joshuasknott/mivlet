@@ -1,5 +1,4 @@
 import {
-  ClockCounterClockwise,
   GitBranch,
   Lightning,
   PuzzlePiece,
@@ -37,6 +36,5 @@ export const utilityItems = [
   { label: "Departments", icon: GitBranch },
   { label: "Connectors", icon: PuzzlePiece },
   { label: "Knowledge", icon: Stack },
-  { label: "Schedules", icon: Lightning },
-  { label: "Run History", icon: ClockCounterClockwise }
+  { label: "Schedules", icon: Lightning }
 ] as const;

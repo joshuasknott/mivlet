@@ -99,6 +99,58 @@
   padding-left: 0;
 }
 
+.settings-back-button {
+  justify-content: flex-start;
+}
+
+.settings-sidebar-search {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  margin-bottom: 16px;
+  padding: 0 9px;
+  color: var(--ink-soft);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+}
+
+.settings-sidebar-search input {
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: var(--text-13);
+}
+
+.settings-sidebar-search input::placeholder {
+  color: var(--ink-soft);
+}
+
+.settings-sidebar-empty {
+  margin: 12px 8px;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
+}
+
+.mobile-settings-back {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-1);
+  font-size: var(--text-13);
+}
+
 .workspace-switcher__caret {
   color: var(--ink-soft);
   flex-shrink: 0;
@@ -299,13 +351,52 @@
 
 .collection-caret {
   color: var(--ink-soft);
-  opacity: 1;
+  opacity: 0;
   transform: rotate(0deg);
-  transition: transform 140ms ease;
+  transition: opacity 120ms ease, transform 140ms ease;
+}
+
+.nav-group-heading:hover .collection-caret,
+.nav-group-heading:focus-visible .collection-caret,
+.nav-group-heading[aria-expanded="true"]:focus-within .collection-caret {
+  opacity: 1;
 }
 
 .nav-group-heading[aria-expanded="true"] .collection-caret {
   transform: rotate(90deg);
+}
+
+.settings-history {
+  display: grid;
+  gap: 18px;
+  padding-top: 12px;
+}
+
+.settings-history__tabs {
+  display: flex;
+  gap: 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.settings-history__tabs button {
+  margin-bottom: -1px;
+  padding: 7px 1px 8px;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  font-size: var(--text-13);
+}
+
+.settings-history__tabs button[aria-selected="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.departments-coming-soon {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
 }
 
 .thread-list,

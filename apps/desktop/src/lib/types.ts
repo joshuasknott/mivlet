@@ -23,8 +23,7 @@ export type UtilityItem =
   | "Departments"
   | "Connectors"
   | "Knowledge"
-  | "Schedules"
-  | "Run History";
+  | "Schedules";
 export type AccountPage = "Profile" | "Settings";
 export type WorkspacePage = UtilityItem | AccountPage;
 

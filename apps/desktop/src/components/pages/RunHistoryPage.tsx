@@ -52,9 +52,11 @@ export interface RunHistoryPageProps {
   runtime: ShellRuntime;
   /** Pre-select a run when navigating from a deep link (e.g. a notification). */
   initialRunId?: string;
+  /** Suppress the page heading when rendered inside Settings -> History. */
+  embedded?: boolean;
 }
 
-export function RunHistoryPage({ runtime, initialRunId }: RunHistoryPageProps) {
+export function RunHistoryPage({ runtime, initialRunId, embedded = false }: RunHistoryPageProps) {
   const runs = runtime.workflowRuns;
   const queue = runtime.schedulerQueue;
   const jobs = runtime.scheduledJobs;
@@ -138,11 +140,13 @@ export function RunHistoryPage({ runtime, initialRunId }: RunHistoryPageProps) {
 
   return (
     <>
-      <PageHeader
-        title="Run History"
-        description="Execution history and results for your scheduled workflows."
-        meta={`${filteredRuns.length} run${filteredRuns.length === 1 ? "" : "s"}`}
-      />
+      {embedded ? null : (
+        <PageHeader
+          title="Run History"
+          description="Execution history and results for your scheduled workflows."
+          meta={`${filteredRuns.length} run${filteredRuns.length === 1 ? "" : "s"}`}
+        />
+      )}
 
       <FilterBar
         statusFilter={statusFilter}

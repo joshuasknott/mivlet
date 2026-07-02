@@ -20,7 +20,6 @@ import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
 import { SchedulesPage } from "./components/pages/SchedulesPage";
-import { RunHistoryPage } from "./components/pages/RunHistoryPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
 import { DepartmentsPage } from "./components/pages/DepartmentsPage";
@@ -140,7 +139,7 @@ export function App() {
   }, [theme]);
 
   const [previousActiveItem, setPreviousActiveItem] = useState("new-chat");
-  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("providers");
+  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("general");
 
   useEffect(() => {
     if (runtime.activeItem !== "Settings" && runtime.activeItem !== "Profile") {
@@ -150,13 +149,12 @@ export function App() {
 
   useEffect(() => {
     if (runtime.activeItem === "Profile") {
-      setActiveSettingsTab("profile");
-    } else if (runtime.activeItem === "Settings") {
-      if (activeSettingsTab === "profile") {
-        setActiveSettingsTab("providers");
-      }
+      setActiveSettingsTab("general");
     }
-  }, [runtime.activeItem]);
+    if (runtime.runHistoryJobId && runtime.activeItem === "Settings") {
+      setActiveSettingsTab("history");
+    }
+  }, [runtime.activeItem, runtime.runHistoryJobId]);
 
   // Connected connectors shown on the home rail. Real provider marks only;
   // local-files is always available so it is not surfaced as a connector. If
@@ -168,15 +166,13 @@ export function App() {
   const renderPage = () => {
     switch (runtime.activePage) {
       case "Departments":
-        return <DepartmentsPage runtime={runtime} />;
+        return <DepartmentsPage />;
       case "Connectors":
         return <ConnectorsPage runtime={runtime} />;
       case "Knowledge":
         return <KnowledgePage runtime={runtime} />;
       case "Schedules":
         return <SchedulesPage runtime={runtime} />;
-      case "Run History":
-        return <RunHistoryPage runtime={runtime} />;
       case "Profile":
       case "Settings":
         return (
@@ -432,11 +428,7 @@ export function App() {
 
   const handleSelectSettingsTab = (tab: SettingsTab) => {
     setActiveSettingsTab(tab);
-    if (tab === "profile") {
-      runtime.setActiveItem("Profile");
-    } else {
-      runtime.setActiveItem("Settings");
-    }
+    runtime.setActiveItem("Settings");
   };
 
   return (
@@ -492,7 +484,7 @@ export function App() {
           runtime.setLastAction(sidebarCollapsed ? "Navigation opened" : "Navigation closed");
         }}
         onOpenMobileConnection={() => {
-          setActiveSettingsTab("approvals");
+          setActiveSettingsTab("privacy");
           runtime.setActiveItem("Settings");
           runtime.setMobileNavOpen(false);
           runtime.setLastAction("Mobile approvals opened");
