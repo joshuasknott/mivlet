@@ -320,6 +320,7 @@ fn aad(workspace_id: &str, id: &str) -> String {
 mod tests {
     use super::*;
     use crate::store::vault::{MasterKey, Vault};
+    use std::time::Instant;
 
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
@@ -439,5 +440,34 @@ mod tests {
             "queue payload leaked into plaintext"
         );
         assert_eq!(plaintext_error, "present");
+    }
+
+    #[test]
+    fn perf_scheduler_queue_lists_workspace_entries_at_current_scale() {
+        let store = store();
+        seed_job(&store, "default", "j");
+        store
+            .transaction(|tx| {
+                for index in 0..500 {
+                    let mut value = entry("j", &format!("r{index}"));
+                    value["deduplicationKey"] =
+                        serde_json::json!(format!("j:2026-07-01T09:{index:04}.000Z"));
+                    assert!(upsert_entry(tx, &store, "", &value, "now")?.is_some());
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let started = Instant::now();
+        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        let elapsed = started.elapsed();
+
+        eprintln!("perf_scheduler_queue_list_ms={}", elapsed.as_millis());
+        assert_eq!(rows.len(), 500);
+        assert!(
+            elapsed.as_millis() < 1_500,
+            "scheduler queue list took {} ms",
+            elapsed.as_millis()
+        );
     }
 }

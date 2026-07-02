@@ -772,6 +772,7 @@ fn unix_timestamp() -> String {
 mod tests {
     use super::*;
     use crate::store::vault::{MasterKey, Vault};
+    use std::time::Instant;
 
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
@@ -1162,5 +1163,43 @@ mod tests {
             .with_conn(|conn| search(conn, &store, "ws-a", None, "visible"))
             .unwrap();
         assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn perf_connector_cache_search_uses_plaintext_prefilter_at_current_scale() {
+        let store = store();
+        store
+            .transaction(|tx| {
+                for index in 0..750 {
+                    let title = if index % 25 == 0 {
+                        format!("Release blocker {index}")
+                    } else {
+                        format!("General issue {index}")
+                    };
+                    let mut value = item("github", &format!("issue-{index}"), &title);
+                    value["contentPreview"] = serde_json::json!(if index % 25 == 0 {
+                        "Connector cache approval search target"
+                    } else {
+                        "Routine workspace note"
+                    });
+                    upsert_from_value(tx, &store, "ws-a", value, "now")?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let started = Instant::now();
+        let rows = store
+            .with_conn(|conn| search(conn, &store, "ws-a", Some("github"), "approval search"))
+            .unwrap();
+        let elapsed = started.elapsed();
+
+        eprintln!("perf_connector_cache_search_ms={}", elapsed.as_millis());
+        assert_eq!(rows.len(), 30);
+        assert!(
+            elapsed.as_millis() < 1_500,
+            "connector cache search took {} ms",
+            elapsed.as_millis()
+        );
     }
 }
