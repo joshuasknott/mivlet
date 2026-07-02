@@ -113,6 +113,42 @@ pub fn keys_scoped(tx: &Connection, scope: &DataScope) -> Result<Vec<String>> {
     Ok(out)
 }
 
+/// Fetch every `document:*` preference for a scope as decrypted JSON, in a
+/// single query + decryption pass. Used by the credential-free local-data
+/// export so it does not re-acquire the store mutex and re-query once per key.
+/// Each entry is keyed by the document id (the key with the `document:` prefix
+/// stripped). A corrupt payload fails the export rather than silently producing
+/// an incomplete backup.
+pub fn documents_for_export(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+) -> Result<serde_json::Map<String, Value>> {
+    scope.ensure_exists(tx)?;
+    let mut stmt = tx.prepare(
+        "SELECT key, payload, payload_nonce FROM preferences
+         WHERE workspace_id = ?1 AND key LIKE 'document:%' ORDER BY key;",
+    )?;
+    let rows = stmt.query_map([scope.workspace_id()], |row| {
+        Ok((row.get::<_, String>(0)?, payload_of(row)?))
+    })?;
+    let mut out = serde_json::Map::new();
+    let default_ws = crate::store::repos::scope::DEFAULT_WORKSPACE_ID;
+    for row in rows {
+        let (key, sealed) = row?;
+        let value =
+            open_json(store, &sealed, &aad(scope.workspace_id(), &key)).or_else(|error| {
+                if scope.workspace_id() == default_ws {
+                    open_json(store, &sealed, &legacy_aad(&key))
+                } else {
+                    Err(error)
+                }
+            })?;
+        out.insert(key.trim_start_matches("document:").to_string(), value);
+    }
+    Ok(out)
+}
+
 /// Delete a preference by key.
 pub fn delete(tx: &Connection, key: &str) -> Result<()> {
     delete_scoped(tx, &DataScope::legacy_default(), key)
@@ -136,3 +172,81 @@ fn legacy_aad(key: &str) -> String {
 }
 
 use rusqlite::OptionalExtension as _;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::repos::scope::DataScope;
+    use crate::store::vault::{MasterKey, Vault};
+
+    fn store() -> Store {
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
+    }
+
+    fn seed_document(store: &Store, ws: &str, id: &str, body: &str) {
+        let scope = DataScope::workspace(ws.to_string()).unwrap();
+        store
+            .transaction(|tx| {
+                upsert_scoped(
+                    tx,
+                    store,
+                    &scope,
+                    &format!("document:{id}"),
+                    &serde_json::json!({ "text": body }),
+                    "now",
+                )
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn documents_for_export_returns_all_documents_in_one_pass() {
+        let store = store();
+        seed_document(&store, "default", "a", "alpha");
+        seed_document(&store, "default", "b", "beta");
+        // A non-document preference should be excluded from the export.
+        let scope = DataScope::workspace("default".to_string()).unwrap();
+        store
+            .transaction(|tx| {
+                upsert_scoped(
+                    tx,
+                    &store,
+                    &scope,
+                    "shell",
+                    &serde_json::json!("compact"),
+                    "now",
+                )
+            })
+            .unwrap();
+        let docs = store
+            .with_conn(|conn| documents_for_export(conn, &store, &scope))
+            .unwrap();
+        assert_eq!(docs.len(), 2, "only document:* keys are exported");
+        assert_eq!(docs["a"]["text"], "alpha");
+        assert_eq!(docs["b"]["text"], "beta");
+        assert!(!docs.contains_key("shell"));
+    }
+
+    #[test]
+    fn documents_for_export_is_workspace_scoped() {
+        let store = store();
+        // Create the secondary workspace row so the scope's FK check passes.
+        store
+            .transaction(|tx| {
+                crate::store::repos::workspace::upsert(tx, "ws-other", "Other", "now")
+            })
+            .unwrap();
+        seed_document(&store, "default", "shared", "from-default");
+        seed_document(&store, "ws-other", "shared", "from-other");
+        let scope = DataScope::workspace("ws-other".to_string()).unwrap();
+        let docs = store
+            .with_conn(|conn| documents_for_export(conn, &store, &scope))
+            .unwrap();
+        assert_eq!(
+            docs.len(),
+            1,
+            "export is scoped to the requesting workspace"
+        );
+        assert_eq!(docs["shared"]["text"], "from-other");
+    }
+}

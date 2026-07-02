@@ -146,11 +146,7 @@ impl Store {
         for workspace_id in workspaces {
             // Best-effort: never block store open on a backfill failure.
             let _ = self.transaction(|tx| {
-                crate::store::repos::connector_cache::backfill_search_text(
-                    tx,
-                    self,
-                    &workspace_id,
-                )
+                crate::store::repos::connector_cache::backfill_search_text(tx, self, &workspace_id)
             });
         }
         Ok(())
@@ -558,18 +554,11 @@ pub fn export_local_data(workspace_id: Option<String>) -> std::result::Result<St
         workspace_id.unwrap_or_else(|| repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
     )
     .map_err(|error| error.to_string())?;
-    let keys = store
-        .with_conn(|conn| repos::preferences::keys_scoped(conn, &scope))
+    // Fetch every document for the scope in a single query + decryption pass,
+    // rather than re-acquiring the store mutex and re-querying once per key.
+    let documents = store
+        .with_conn(|conn| repos::preferences::documents_for_export(conn, store, &scope))
         .map_err(|error| error.to_string())?;
-    let mut documents = serde_json::Map::new();
-    for key in keys.into_iter().filter(|key| key.starts_with("document:")) {
-        if let Some(value) = store
-            .with_conn(|conn| repos::preferences::get_scoped(conn, store, &scope, &key))
-            .map_err(|error| error.to_string())?
-        {
-            documents.insert(key.trim_start_matches("document:").to_string(), value);
-        }
-    }
     serde_json::to_string_pretty(&serde_json::json!({
         "version": CURRENT_SCHEMA_VERSION,
         "workspaceId": scope.workspace_id(),

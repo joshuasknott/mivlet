@@ -938,7 +938,9 @@ pub fn report_job_attempt(
 /// Called after deserializing a store from SQLite/JSON (the index is `serde(skip)`).
 fn index_occurrences(store: &mut SchedulerStore) {
     store.occurrence_index.clear();
-    store.occurrence_index.reserve(store.occurrence_ledger.len());
+    store
+        .occurrence_index
+        .reserve(store.occurrence_ledger.len());
     for key in &store.occurrence_ledger {
         store.occurrence_index.insert(key.clone());
     }
@@ -955,9 +957,8 @@ fn remember_occurrence(store: &mut SchedulerStore, key: &str) {
         let drop = store.occurrence_ledger.len() - MAX_OCCURRENCE_LEDGER;
         // Evict the oldest entries (the tail of the Vec) and drop them from the
         // index too so the index never retains a key the ledger no longer holds.
-        let evicted: Vec<String> = store.occurrence_ledger
-            [store.occurrence_ledger.len() - drop..]
-            .to_vec();
+        let evicted: Vec<String> =
+            store.occurrence_ledger[store.occurrence_ledger.len() - drop..].to_vec();
         store
             .occurrence_ledger
             .truncate(store.occurrence_ledger.len() - drop);

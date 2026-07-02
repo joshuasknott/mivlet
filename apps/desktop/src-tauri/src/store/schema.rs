@@ -334,6 +334,10 @@ CREATE TABLE IF NOT EXISTS approval (
   payload_nonce BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_approval_run ON approval(run_id);
+-- Partial covering index for the rule-listing query (WHERE decision='rule'
+-- ORDER BY service, action), which filters a small subset out of a growing
+-- table. Partial so it only indexes the rows the query touches.
+CREATE INDEX IF NOT EXISTS idx_approval_rules ON approval(service, action) WHERE decision='rule';
 
 -- Inspectable action history. Query columns are non-secret only (category,
 -- service, action, status, risk/mode, correlation id, normalized failure code,
@@ -389,6 +393,11 @@ CREATE TABLE IF NOT EXISTS connector_account (
   PRIMARY KEY (workspace_id, connector_id)
 );
 CREATE INDEX IF NOT EXISTS idx_connector_account_workspace ON connector_account(workspace_id);
+-- Supports the cross-workspace credential-ownership guard (EXISTS check on
+-- credential_ref WHERE workspace_id <> ?), run on every account upsert. Partial
+-- because empty credential refs are valid and never matched.
+CREATE INDEX IF NOT EXISTS idx_connector_account_credential
+  ON connector_account(credential_ref) WHERE credential_ref <> '';
 
 CREATE TABLE IF NOT EXISTS backend_connection (
   provider_id TEXT PRIMARY KEY,

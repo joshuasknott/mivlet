@@ -274,11 +274,7 @@ pub fn build_search_text(payload: &Value) -> String {
 /// itself runs without the vault and cannot decrypt payloads. Returns the number
 /// of rows backfilled. Safe to call repeatedly: only empty-`search_text` rows are
 /// touched, and each is recomputed from its (already-redacted) payload.
-pub fn backfill_search_text(
-    tx: &Connection,
-    store: &Store,
-    workspace_id: &str,
-) -> Result<usize> {
+pub fn backfill_search_text(tx: &Connection, store: &Store, workspace_id: &str) -> Result<usize> {
     let workspace_id = normalize_workspace(workspace_id)?;
     let mut stmt = tx.prepare(
         "SELECT id, payload, payload_nonce FROM connector_cache

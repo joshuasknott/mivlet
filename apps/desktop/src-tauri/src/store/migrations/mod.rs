@@ -201,18 +201,30 @@ fn apply_v4_to_v5(conn: &Connection) -> super::Result<()> {
 /// Backfill is performed lazily by the store on first read after upgrade (see
 /// `repos::connector_cache::backfill_search_text`), which has the vault.
 fn apply_v5_to_v6(conn: &Connection) -> super::Result<()> {
-    if !table_exists(conn, "connector_cache")? {
-        return Ok(());
+    if table_exists(conn, "connector_cache")? {
+        if !table_has_column(conn, "connector_cache", "search_text")? {
+            conn.execute_batch(crate::store::schema::SCHEMA_V5_TO_V6)?;
+        } else {
+            conn.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text
+                 ON connector_cache(workspace_id, disabled, search_text);",
+            )?;
+        }
     }
-    if !table_has_column(conn, "connector_cache", "search_text")? {
-        conn.execute_batch(crate::store::schema::SCHEMA_V5_TO_V6)?;
-        return Ok(());
+    // The additional v6 indexes are independent of connector_cache. Guard each
+    // table because migration unit fixtures deliberately use partial schemas.
+    if table_exists(conn, "approval")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_approval_rules
+             ON approval(service, action) WHERE decision='rule';",
+        )?;
     }
-    // Column already present; just backfill the index idempotently.
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text
-         ON connector_cache(workspace_id, disabled, search_text);",
-    )?;
+    if table_exists(conn, "connector_account")? {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_connector_account_credential
+             ON connector_account(credential_ref) WHERE credential_ref <> '';",
+        )?;
+    }
     Ok(())
 }
 
@@ -799,7 +811,7 @@ mod tests {
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM knowledge_source", [], |r| r
                 .get::<_, i64>(0))
-            .unwrap(),
+                .unwrap(),
             2
         );
     }

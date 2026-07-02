@@ -2046,6 +2046,83 @@ fn confine_path_rejects_parent_dir_and_absolute_escapes() {
 }
 
 #[test]
+fn bounded_output_truncates_with_a_clear_marker() {
+    use crate::tools::bounded_output;
+    // Under the cap: verbatim, no marker.
+    let small = b"hello world";
+    assert_eq!(bounded_output(small, 100), "hello world");
+    // Over the cap: truncated to the head plus a marker that names the limit.
+    let big = vec![b'x'; 100];
+    let out = bounded_output(&big, 40);
+    assert!(out.starts_with("xxxxxxxx"));
+    assert!(out.ends_with("bytes]"), "marker names the byte limit");
+    assert!(out.len() < big.len() + 100);
+}
+
+#[test]
+fn read_file_returns_small_file_verbatim() {
+    use crate::tools::run_read_file;
+    let root = temp_workspace();
+    std::fs::write(root.join("small.txt"), "hello").unwrap();
+    let res = run_read_file(&serde_json::json!({ "path": "small.txt" }), &root).unwrap();
+    assert_eq!(res.output, "hello");
+    assert!(!res.output.contains("truncated"));
+}
+
+#[test]
+fn read_file_truncates_large_files_with_a_clear_marker() {
+    use crate::tools::{run_read_file, MAX_TOOL_OUTPUT_BYTES};
+    let root = temp_workspace();
+    std::fs::write(
+        root.join("large.txt"),
+        vec![b'x'; MAX_TOOL_OUTPUT_BYTES + 32],
+    )
+    .unwrap();
+    let res = run_read_file(&serde_json::json!({ "path": "large.txt" }), &root).unwrap();
+    assert!(res.output.starts_with("xxxxxxxx"));
+    assert!(res.output.ends_with("bytes]"));
+    assert!(res.output.len() < MAX_TOOL_OUTPUT_BYTES + 100);
+}
+
+#[test]
+fn write_file_rejects_oversize_content() {
+    use crate::tools::{run_write_file, MAX_TOOL_INPUT_BYTES};
+    let root = temp_workspace();
+    // Content beyond the cap fails closed before touching disk.
+    let too_big = "y".repeat(MAX_TOOL_INPUT_BYTES + 1);
+    let err = run_write_file(
+        &serde_json::json!({ "path": "big.txt", "content": too_big }),
+        &root,
+    )
+    .unwrap_err();
+    assert!(err.contains("too large"), "oversize write rejected: {err}");
+    assert!(!root.join("big.txt").exists(), "nothing was written");
+
+    // Within the cap, the write succeeds.
+    let ok = "y".repeat(16);
+    run_write_file(
+        &serde_json::json!({ "path": "ok.txt", "content": ok }),
+        &root,
+    )
+    .unwrap();
+    assert!(root.join("ok.txt").exists());
+}
+
+#[test]
+fn run_shell_returns_bounded_success_output() {
+    use crate::tools::run_shell;
+    let root = temp_workspace();
+    // A small command returns its stdout verbatim.
+    #[cfg(target_os = "windows")]
+    let cmd = "echo hello";
+    #[cfg(not(target_os = "windows"))]
+    let cmd = "printf hello";
+    let res = run_shell(&serde_json::json!({ "command": cmd }), &root).unwrap();
+    assert!(res.ok);
+    assert!(res.output.contains("hello"));
+}
+
+#[test]
 fn execution_boundary_rejects_argument_substitution_and_permission_downgrade() {
     let mut approval = tool_approval(
         "write-file",

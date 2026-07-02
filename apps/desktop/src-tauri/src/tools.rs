@@ -304,27 +304,67 @@ fn require_string_argument(args: &serde_json::Value, key: &str) -> Result<String
     }
 }
 
-fn run_read_file(
+/// Maximum bytes returned by `read-file` / `run-shell` stdout. Larger output
+/// is truncated with an explicit marker so a caller can never mistake a partial
+/// result for a complete one (mirrors native_api's MAX_STREAM_RESPONSE_BYTES
+/// philosophy, sized for tool output). 1 MiB is generous for source files and
+/// bounded enough to prevent runaway-buffer OOM.
+pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 1 * 1024 * 1024;
+
+/// Maximum bytes accepted by `write-file` content. Bounds the on-disk write so
+/// a tool call cannot exhaust workspace storage in a single call.
+pub(crate) const MAX_TOOL_INPUT_BYTES: usize = 8 * 1024 * 1024;
+
+/// Truncate a byte buffer to `max_bytes`, appending a clear truncation marker so
+/// a partial result is never silently treated as complete. Returns the marker
+/// text appended to the (possibly-truncated) lossy-UTF-8 string.
+pub(crate) fn bounded_output(bytes: &[u8], max_bytes: usize) -> String {
+    if bytes.len() <= max_bytes {
+        return String::from_utf8_lossy(bytes).into_owned();
+    }
+    let head = &bytes[..max_bytes];
+    format!(
+        "{}\n\n[truncated: output exceeded {} bytes]",
+        String::from_utf8_lossy(head),
+        max_bytes
+    )
+}
+
+pub(crate) fn run_read_file(
     arguments: &serde_json::Value,
     workspace_root: &Path,
 ) -> Result<ToolResult, String> {
     let path = require_string_argument(arguments, "path")?;
     let confined = confine_path(&path, workspace_root)?;
-    match std::fs::read_to_string(&confined) {
-        Ok(content) => Ok(ToolResult {
-            ok: true,
-            output: content,
-        }),
-        Err(_) => Err(format!("File not found: {path}")),
-    }
+    // Read raw bytes and bound the result so a very large file cannot OOM the
+    // process. Reading one extra byte lets us detect truncation precisely.
+    let mut file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;
+    let mut buf = Vec::new();
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(&mut file, (MAX_TOOL_OUTPUT_BYTES + 1) as u64),
+        &mut buf,
+    )
+    .map_err(|err| err.to_string())?;
+    Ok(ToolResult {
+        ok: true,
+        output: bounded_output(&buf, MAX_TOOL_OUTPUT_BYTES),
+    })
 }
 
-fn run_write_file(
+pub(crate) fn run_write_file(
     arguments: &serde_json::Value,
     workspace_root: &Path,
 ) -> Result<ToolResult, String> {
     let path = require_string_argument(arguments, "path")?;
     let content = require_string_argument(arguments, "content")?;
+    // Bound the input before touching disk.
+    if content.len() > MAX_TOOL_INPUT_BYTES {
+        return Err(format!(
+            "write-file content is too large ({} bytes; max {} bytes).",
+            content.len(),
+            MAX_TOOL_INPUT_BYTES
+        ));
+    }
     let confined = confine_path(&path, workspace_root)?;
     if let Some(parent) = confined.parent() {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
@@ -336,7 +376,29 @@ fn run_write_file(
     })
 }
 
-fn run_shell(arguments: &serde_json::Value, workspace_root: &Path) -> Result<ToolResult, String> {
+/// Drain a child stream to EOF while retaining at most `cap` bytes. Draining
+/// beyond the retained prefix is required so a verbose child cannot block on a
+/// full pipe. The caller passes `max + 1` so truncation remains detectable.
+fn drain_stream(mut stream: impl std::io::Read, cap: usize) -> std::io::Result<Vec<u8>> {
+    let mut retained = Vec::with_capacity(cap);
+    let mut chunk = [0_u8; 16 * 1024];
+    loop {
+        let read = stream.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = cap.saturating_sub(retained.len());
+        if remaining > 0 {
+            retained.extend_from_slice(&chunk[..read.min(remaining)]);
+        }
+    }
+    Ok(retained)
+}
+
+pub(crate) fn run_shell(
+    arguments: &serde_json::Value,
+    workspace_root: &Path,
+) -> Result<ToolResult, String> {
     let command = require_string_argument(arguments, "command")?;
     if command.trim().is_empty() {
         return Err("Tool argument \"command\" must be a non-empty string.".to_string());
@@ -347,19 +409,46 @@ fn run_shell(arguments: &serde_json::Value, workspace_root: &Path) -> Result<Too
     #[cfg(not(target_os = "windows"))]
     let (program, flag) = ("sh", "-c");
 
-    let output = std::process::Command::new(program)
+    let mut child = std::process::Command::new(program)
         .arg(flag)
         .arg(&command)
         .current_dir(workspace_root)
-        .output()
+        // Pipe stdout/stderr so we can read them incrementally and bound them,
+        // rather than buffering the entire output to completion in memory.
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|err| err.to_string())?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !output.status.success() {
+    // Drain stdout and stderr concurrently while the child runs. Waiting before
+    // draining can deadlock once either OS pipe buffer fills.
+    let cap = MAX_TOOL_OUTPUT_BYTES + 1;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Shell stdout pipe was unavailable.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Shell stderr pipe was unavailable.".to_string())?;
+    let stdout_reader = std::thread::spawn(move || drain_stream(stdout, cap));
+    let stderr_reader = std::thread::spawn(move || drain_stream(stderr, cap));
+    let status = child.wait().map_err(|err| err.to_string())?;
+    let stdout_bytes = stdout_reader
+        .join()
+        .map_err(|_| "Shell stdout reader panicked.".to_string())?
+        .map_err(|err| err.to_string())?;
+    let stderr_bytes = stderr_reader
+        .join()
+        .map_err(|_| "Shell stderr reader panicked.".to_string())?
+        .map_err(|err| err.to_string())?;
+
+    let stdout = bounded_output(&stdout_bytes, MAX_TOOL_OUTPUT_BYTES);
+    let stderr = bounded_output(&stderr_bytes, MAX_TOOL_OUTPUT_BYTES);
+    if !status.success() {
         return Err(format!(
             "Shell command failed (exit code {}): {}",
-            output.status.code().unwrap_or(-1),
+            status.code().unwrap_or(-1),
             if stderr.trim().is_empty() {
                 stdout.trim()
             } else {

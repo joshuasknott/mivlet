@@ -88,10 +88,7 @@ mod lifecycle {
         )?;
         let connected: HashSet<(String, String)> = statement
             .query_map([workspace_id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
             .filter_map(|r| r.ok())
             .collect();
@@ -110,7 +107,8 @@ mod lifecycle {
                 // Authorization gate: an account-bound row is only authorized if
                 // a matching connected account exists for its connector. The
                 // predicate is unchanged; only the lookup is now O(1).
-                let account_ok = connected.contains(&(row.connector_id.clone(), item_account.to_string()));
+                let account_ok =
+                    connected.contains(&(row.connector_id.clone(), item_account.to_string()));
                 if !account_ok {
                     continue;
                 }
