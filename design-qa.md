@@ -57,4 +57,77 @@ No actionable P0, P1, or P2 visual mismatches remain.
 - P3: Replace the preview-only onboarding skip when the production onboarding completion path is finalized.
 - P3: Revisit provider descriptions with real connected-account data to determine whether Settings can become even denser.
 
+## Frontend optimization QA (branch `codex/frontend-optimization`)
+
+A dedicated frontend optimization pass (React render stability, bundle size,
+layout performance, and a small Schedules information-density cleanup) was
+verified with the package-level suite plus a real-browser pass against the
+local dev server (Playwright/Chromium). No backend or src-tauri files were
+touched.
+
+### Checks
+
+- `pnpm --filter @fable/desktop typecheck` — PASS
+- `pnpm --filter @fable/desktop test` — 341 passed / 12 failed (353 total)
+  - The 12 failures are pre-existing on the baseline (`6ae1a68`) and relate to
+    the earlier UI reorganization (nav "Projects"/"Josh's Fable" heading,
+    connector "Connect" button, onboarding "Add API key" button). None are
+    caused by this optimization pass; the count is unchanged from baseline
+    (one new test was added for the Schedules live summary).
+- `pnpm --filter @fable/desktop build` — PASS
+
+### Bundle: before vs after
+
+Baseline shipped a single 699.74 kB JS chunk (gzip 194.73 kB) over the 500 kB
+warning. After route-level `React.lazy` + vendor `manualChunks` + esnext target:
+
+| Chunk | Before | After |
+|---|---|---|
+| index (initial app) | 699.74 kB (gzip 194.73) | 226.76 kB (gzip 65.80) |
+| react-vendor | (in index) | 188.72 kB (gzip 59.01) |
+| icons | (in index) | 161.68 kB (gzip 35.10) |
+| SettingsPage (lazy) | (in index) | 52.82 kB (gzip 13.19) |
+| SchedulesPage (lazy) | (in index) | 15.47 kB (gzip 4.68) |
+| KnowledgePage (lazy) | (in index) | 13.42 kB (gzip 3.61) |
+| OnboardingPage (lazy) | (in index) | 11.10 kB (gzip 3.40) |
+| ConnectorsPage (lazy) | (in index) | 7.90 kB (gzip 2.64) |
+
+No chunk exceeds the 500 kB warning. Lazy pages load on demand; vendor chunks
+are cacheable across app changes. Inter fonts scoped to latin + latin-ext
+(28 → 8 font files; unused cyrillic/greek/vietnamese subsets dropped).
+
+### Render / layout
+
+- Composer typing no longer triggers a per-keystroke localStorage write and
+  Rust snapshot save (both debounced, with an unmount flush so drafts/schedules
+  still persist exactly).
+- Hot derivations memoized (openApprovals, connector cards/ids, recoverable
+  runs, model chip label, settings/sidebar tab filters, provider lists).
+- Scheduled-agent runner options held in a ref (mirrors useNativeAgent) so its
+  drain effect no longer re-evaluates every render; global shortcut listener
+  subscribes once.
+- Replaced the only literal `backdrop-filter: blur()` (always-visible reopen
+  card) with the `--glass-filter` token; enumerated `transition: all` on
+  onboarding buttons; added overflow/ellipsis truncation to model/permission
+  chips and connector/schedule/backend titles; layout containment on repeated
+  rows; stable height on the workspace-settings modal; submenu clamp in the
+  701–980px band.
+
+### Schedules cleanup
+
+The create/edit form now shows a single live recurrence summary
+("Weekly on Mon, Wed at 9:00 AM · Next …") reusing `summarizeRecurrence`, so
+the previously split Repeat/Frequency/Time/Weekdays readback is consolidated.
+List pattern + next-run grouped into one timing block. Scheduler logic,
+validation, data shapes, and accessibility labels are unchanged.
+
+### Browser QA (Playwright/Chromium, dev server)
+
+Viewports: 1440x900, 800x700, 390x844. Surfaces exercised: onboarding gate
+(lazy), empty workspace + composer typing, model menu, add menu, settings
+modal + search (lazy), Knowledge (lazy), Connectors (lazy), Schedules with the
+cleaned-up summary (lazy), mobile workspace. Console errors: none. Page
+errors: none. No text clipping, control overlap, broken menus, or blank
+lazy-loaded pages observed. Evidence: `qa-shots/*.png` in the worktree.
+
 final result: passed
