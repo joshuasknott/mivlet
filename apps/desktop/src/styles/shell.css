@@ -110,7 +110,7 @@
 
 .workspace-switcher__name {
   flex: 1;
-  font-size: var(--text-13);
+  font-size: var(--text-15);
   font-weight: 500;
   overflow: hidden;
   text-align: left;
@@ -185,7 +185,7 @@
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   width: 100%;
-  min-height: 36px;
+  min-height: 40px;
   gap: 10px;
   padding: 0 10px;
   color: var(--ink);
@@ -193,7 +193,7 @@
   border: 0;
   border-radius: var(--radius-pill);
   box-shadow: none;
-  font-size: var(--text-14);
+  font-size: var(--text-16);
   font-weight: 400;
   text-align: left;
 }
@@ -216,14 +216,14 @@
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   width: 100%;
-  min-height: 36px;
+  min-height: 40px;
   gap: 10px;
   padding: 0 10px;
   color: var(--ink);
   background: transparent;
   border: 0;
   border-radius: var(--radius-pill);
-  font-size: var(--text-14);
+  font-size: var(--text-16);
   font-weight: 400;
   line-height: 1.2;
   text-align: left;
@@ -309,8 +309,8 @@
   background: transparent;
   border: 0;
   border-radius: 5px;
-  font-size: var(--text-13);
-  font-weight: 500;
+  font-size: var(--text-15);
+  font-weight: 400;
   letter-spacing: 0;
   text-align: left;
 }
@@ -358,7 +358,7 @@
 }
 
 .nav-group-heading--plain .nav-group-title--plain {
-  font-size: var(--text-13);
+  font-size: var(--text-15);
   letter-spacing: 0;
 }
 
@@ -423,12 +423,12 @@
 .project-row,
 .utility-row {
   width: 100%;
-  min-height: 31px;
+  min-height: 34px;
   color: var(--ink);
   background: transparent;
   border: 0;
   border-radius: var(--radius-pill);
-  font-size: var(--text-13);
+  font-size: var(--text-15);
   font-weight: 400;
   line-height: 1.2;
   text-align: left;
@@ -515,7 +515,7 @@
 .thread-row--nested {
   color: var(--ink-muted);
   padding-left: 20px;
-  font-size: var(--text-13);
+  font-size: var(--text-15);
 }
 
 .thread-row--nested::before {
@@ -529,8 +529,8 @@
 
 .utility-row {
   grid-template-columns: 18px minmax(0, 1fr);
-  min-height: 36px;
-  font-size: var(--text-14);
+  min-height: 40px;
+  font-size: var(--text-16);
 }
 
 .utility-row:has(.utility-row__status) {
@@ -816,6 +816,13 @@
 
 .sidebar-chat-dock__toggle {
   grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--ink-muted);
+  font-size: var(--text-15);
+  font-weight: 400;
+}
+
+.desktop-frame[data-theme="dark"] .sidebar-chat-dock__toggle {
+  color: var(--ink-muted);
 }
 
 .sidebar-chat-dock__toggle[aria-expanded="true"] .collection-caret {
@@ -855,7 +862,7 @@
 }
 
 .chat-flyout__header strong {
-  font-size: var(--text-13);
+  font-size: var(--text-15);
 }
 
 .chat-flyout__header button,
@@ -870,7 +877,7 @@
   background: transparent;
   border: 0;
   border-radius: var(--radius-1);
-  font-size: var(--text-12);
+  font-size: var(--text-14);
 }
 
 .chat-flyout__header button:hover,
@@ -889,7 +896,7 @@
   margin: 0;
   padding: 14px 8px;
   color: var(--ink-muted);
-  font-size: var(--text-13);
+  font-size: var(--text-15);
 }
 
 .chat-history-modal {

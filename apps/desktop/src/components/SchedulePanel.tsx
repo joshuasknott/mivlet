@@ -1,20 +1,23 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPlus } from "@phosphor-icons/react/dist/csr/CalendarPlus";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { Play } from "@phosphor-icons/react/dist/csr/Play";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { WarningCircle } from "@phosphor-icons/react/dist/csr/WarningCircle";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import type {
   ConnectorManifest,
   MissedRunPolicy,
   ScheduledJob,
   SchedulerQueueEntry,
   ScheduleWeekday,
+  WorkflowDefinition,
   WorkflowRun
 } from "@fable/protocol";
-import { nextOccurrence, validateScheduleTrigger } from "@fable/connectors";
+import { validateScheduleTrigger } from "@fable/connectors";
 import {
   DEFAULT_FORM_VALUE,
   ScheduleFormValue,
@@ -32,6 +35,13 @@ import {
 
 const WEEKDAYS: ScheduleWeekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const CREATE_FORM_VALUE: ScheduleFormValue = {
+  ...DEFAULT_FORM_VALUE,
+  recurrence: {
+    ...DEFAULT_FORM_VALUE.recurrence,
+    frequency: "daily"
+  }
+};
 
 /**
  * Schedules management panel.
@@ -51,7 +61,10 @@ export function SchedulePanel({
   runs = [],
   queue = [],
   connectors = [],
+  definitions = [],
   loading = false,
+  isCreateModalOpen = false,
+  onRequestCloseCreateModal,
   onCreate,
   onEdit,
   onToggle,
@@ -65,8 +78,11 @@ export function SchedulePanel({
   queue?: SchedulerQueueEntry[];
   /** Connected connector manifests the form may compose into the workflow. */
   connectors?: ConnectorManifest[];
+  definitions?: WorkflowDefinition[];
   /** True while persisted jobs are being hydrated from the Rust store. */
   loading?: boolean;
+  isCreateModalOpen?: boolean;
+  onRequestCloseCreateModal?: () => void;
   onCreate: (input: {
     name: string;
     description: string;
@@ -89,38 +105,41 @@ export function SchedulePanel({
   /** Open Run History pre-filtered to this schedule's executions. */
   onViewRuns?: (job: ScheduledJob) => void;
 }) {
-  const [form, setForm] = useState<ScheduleFormValue>(DEFAULT_FORM_VALUE);
+  const [form, setForm] = useState<ScheduleFormValue>(CREATE_FORM_VALUE);
   const [submitted, setSubmitted] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const nameInputRef = useRef<HTMLInputElement>(null);
 
   const validation = useMemo(() => validateForm(form), [form]);
   const draftTrigger = useMemo(() => buildTrigger(form, TIMEZONE), [form]);
-  // The next-run preview runs the recurrence scan, which is comparatively
-  // expensive. Memoize on the trigger-relevant fields only (not the text the
-  // user is typing) so filling in the name/prompt never re-scans. Validate
-  // first — nextOccurrence throws on an invalid trigger, and the user passes
-  // through invalid states while editing (e.g. clearing the monthly day).
-  const triggerKey = `${form.triggerKind}|${form.onceAt}|${form.recurrence.frequency}|${form.recurrence.time}|${form.recurrence.weekdays.join(",")}|${form.recurrence.monthDay}`;
-  const nextRunPreview = useMemo(() => {
-    if (!draftTrigger || validateScheduleTrigger(draftTrigger)) return null;
-    const next = nextOccurrence(draftTrigger, new Date());
-    return next ? next.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [triggerKey]);
-
-  // A consolidated, human-readable recurrence summary produced from the same
-  // draft trigger the list will store — e.g. "Weekly on Mon, Wed at 9:00 AM".
-  // Surfacing it in the form gives a single scannable readback while the user
-  // edits Repeat/Frequency/Time/Weekdays, instead of forcing them to mentally
-  // combine those split controls. Reuses summarizeRecurrence so the form and
-  // the saved list can never disagree.
-  const recurrenceSummary = useMemo(
-    () => (draftTrigger && !validateScheduleTrigger(draftTrigger) ? summarizeRecurrence(draftTrigger) : null),
-    [draftTrigger]
-  );
 
   const resetForm = () => {
-    setForm(DEFAULT_FORM_VALUE);
+    setForm(CREATE_FORM_VALUE);
     setSubmitted(false);
+  };
+
+  useEffect(() => {
+    if (isCreateModalOpen) {
+      resetForm();
+      window.setTimeout(() => nameInputRef.current?.focus(), 0);
+    }
+  }, [isCreateModalOpen]);
+
+  useEffect(() => {
+    if (!isCreateModalOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && onRequestCloseCreateModal) {
+        onRequestCloseCreateModal();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCreateModalOpen, onRequestCloseCreateModal]);
+
+  const handleBackdropClick = (event: React.MouseEvent) => {
+    if (event.target === event.currentTarget && onRequestCloseCreateModal) {
+      onRequestCloseCreateModal();
+    }
   };
 
   const submit = (event: FormEvent) => {
@@ -135,21 +154,130 @@ export function SchedulePanel({
       connectorIds: form.connectorIds
     });
     resetForm();
+    if (onRequestCloseCreateModal) {
+      onRequestCloseCreateModal();
+    }
   };
+
+  const filteredJobs = useMemo(() => {
+    if (!searchTerm.trim()) return jobs;
+    const term = searchTerm.toLowerCase();
+    return jobs.filter(
+      (job) =>
+        job.name.toLowerCase().includes(term) ||
+        job.description.toLowerCase().includes(term)
+    );
+  }, [jobs, searchTerm]);
 
   return (
     <section className="schedule-panel" aria-label="Schedules">
-      <ScheduleForm
-        form={form}
-        onChange={setForm}
-        submitted={submitted}
-        validation={validation}
-        recurrenceSummary={recurrenceSummary}
-        nextRunPreview={nextRunPreview}
-        connectors={connectors}
-        onSubmit={submit}
-        onCancel={resetForm}
-      />
+      <div className="schedule-search">
+        <MagnifyingGlass size={16} className="schedule-search__icon" aria-hidden="true" />
+        <input
+          type="text"
+          placeholder="Search tasks..."
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          className="schedule-search__input"
+          aria-label="Search tasks"
+        />
+        {searchTerm ? (
+          <button
+            type="button"
+            className="schedule-search__clear"
+            onClick={() => setSearchTerm("")}
+            aria-label="Clear search"
+          >
+            <X size={14} />
+          </button>
+        ) : null}
+      </div>
+
+      {isCreateModalOpen && (
+        <div
+          className="schedule-modal-overlay"
+          onClick={handleBackdropClick}
+          data-testid="schedule-modal-overlay"
+        >
+          <div
+            className="schedule-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="new-schedule-title"
+          >
+            <div className="schedule-modal__header">
+              <h2 id="new-schedule-title" className="schedule-modal__title">
+                New Scheduled Task
+              </h2>
+              <button
+                type="button"
+                className="schedule-modal__close"
+                aria-label="Close dialog"
+                onClick={onRequestCloseCreateModal}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={submit} className="schedule-modal__form">
+              <div className="schedule-modal__row">
+                <label htmlFor="schedule-name" className="schedule-modal__label">Name</label>
+                <input
+                  ref={nameInputRef}
+                  id="schedule-name"
+                  className="schedule-modal__input"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                  placeholder="Enter scheduled task name..."
+                  aria-label="Schedule task name"
+                  aria-invalid={submitted && validation.errors.name ? "true" : undefined}
+                />
+                {submitted && validation.errors.name ? (
+                  <span className="schedule-modal__error" role="alert">{validation.errors.name}</span>
+                ) : null}
+              </div>
+
+              <div className="schedule-modal__row">
+                <div className="schedule-modal__label" id="schedule-modal-schedule-label">Schedule</div>
+                <CompactScheduleControls
+                  form={form}
+                  onChange={setForm}
+                  labelledBy="schedule-modal-schedule-label"
+                />
+                {submitted && validation.errors.trigger ? (
+                  <span className="schedule-modal__error" role="alert">{validation.errors.trigger}</span>
+                ) : null}
+              </div>
+
+              <div className="schedule-modal__row">
+                <label htmlFor="schedule-prompt" className="schedule-modal__label">Prompt</label>
+                <textarea
+                  id="schedule-prompt"
+                  className="schedule-modal__textarea"
+                  value={form.prompt}
+                  onChange={(event) => setForm({ ...form, prompt: event.target.value })}
+                  placeholder="Enter a prompt for the agent to run..."
+                  aria-label="Schedule description"
+                  rows={4}
+                />
+                {submitted && validation.errors.prompt ? (
+                  <span className="schedule-modal__error" role="alert">{validation.errors.prompt}</span>
+                ) : null}
+              </div>
+
+              <div className="schedule-modal__actions">
+                <button
+                  type="submit"
+                  className="button button--primary schedule-modal__submit"
+                  disabled={!validation.valid}
+                >
+                  Add Scheduled Task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="page-loading" role="status" aria-live="polite">
@@ -157,19 +285,25 @@ export function SchedulePanel({
           <span>Loading schedules…</span>
         </div>
       ) : jobs.length === 0 ? (
-        <div className="schedule-empty">
+        <div className="schedule-empty" data-testid="schedule-empty">
           <CalendarPlus size={28} weight="duotone" aria-hidden="true" />
-          <p>No schedules yet. Create one above.</p>
+          <p>No schedules yet. Create one with New.</p>
+        </div>
+      ) : filteredJobs.length === 0 ? (
+        <div className="schedule-empty schedule-empty--search" data-testid="schedule-no-results">
+          <MagnifyingGlass size={28} weight="duotone" aria-hidden="true" />
+          <p>No tasks match your search.</p>
         </div>
       ) : (
         <ul className="schedule-list" aria-label="Saved schedules">
-          {jobs.map((job) => (
+          {filteredJobs.map((job) => (
             <ScheduleRow
               key={job.id}
               job={job}
               runs={runs}
               queue={queue}
               connectors={connectors}
+              definitions={definitions}
               onEdit={onEdit}
               onToggle={onToggle}
               onDelete={onDelete}
@@ -282,6 +416,124 @@ function ScheduleForm({
         ) : null}
       </div>
     </form>
+  );
+}
+
+function CompactScheduleControls({
+  form,
+  onChange,
+  labelledBy
+}: {
+  form: ScheduleFormValue;
+  onChange: (next: ScheduleFormValue) => void;
+  labelledBy: string;
+}) {
+  const { recurrence } = form;
+  const scheduleKind = form.triggerKind === "once" ? "once" : recurrence.frequency;
+
+  const setRecurrence = (patch: Partial<ScheduleFormRecurrence>) =>
+    onChange({ ...form, recurrence: { ...recurrence, ...patch } });
+
+  const setScheduleKind = (value: "daily" | "weekly" | "monthly" | "once") => {
+    if (value === "once") {
+      onChange({ ...form, triggerKind: "once" });
+      return;
+    }
+    onChange({
+      ...form,
+      triggerKind: "recurring",
+      recurrence: {
+        ...recurrence,
+        frequency: value,
+        weekdays:
+          value === "weekly" && recurrence.weekdays.length === 0
+            ? ["Mon"]
+            : recurrence.weekdays
+      }
+    });
+  };
+
+  return (
+    <fieldset className="schedule-compact" aria-labelledby={labelledBy}>
+      <div className="schedule-compact__primary">
+        <select
+          className="schedule-compact__select"
+          value={scheduleKind}
+          onChange={(event) =>
+            setScheduleKind(event.target.value as "daily" | "weekly" | "monthly" | "once")
+          }
+          aria-label="Schedule frequency"
+        >
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="once">Once</option>
+        </select>
+
+        {scheduleKind === "once" ? (
+          <>
+            <span className="schedule-compact__joiner">on</span>
+            <input
+              className="schedule-compact__datetime"
+              type="datetime-local"
+              value={form.onceAt}
+              onChange={(event) => onChange({ ...form, onceAt: event.target.value })}
+              aria-label="Run at"
+            />
+          </>
+        ) : (
+          <>
+            {scheduleKind === "monthly" ? (
+              <>
+                <span className="schedule-compact__joiner">on day</span>
+                <input
+                  className="schedule-compact__day"
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={recurrence.monthDay}
+                  onChange={(event) => setRecurrence({ monthDay: Number(event.target.value) })}
+                  aria-label="Day of month"
+                />
+              </>
+            ) : null}
+            <span className="schedule-compact__joiner">at</span>
+            <input
+              className="schedule-compact__time"
+              type="time"
+              value={recurrence.time}
+              onChange={(event) => setRecurrence({ time: event.target.value })}
+              aria-label="Time"
+            />
+          </>
+        )}
+      </div>
+
+      {scheduleKind === "weekly" ? (
+        <div className="schedule-compact__weekdays" role="group" aria-label="Weekdays">
+          {WEEKDAYS.map((weekday) => {
+            const active = recurrence.weekdays.includes(weekday);
+            return (
+              <button
+                key={weekday}
+                type="button"
+                className={active ? "is-active" : undefined}
+                aria-pressed={active}
+                onClick={() =>
+                  setRecurrence({
+                    weekdays: active
+                      ? recurrence.weekdays.filter((day) => day !== weekday)
+                      : [...recurrence.weekdays, weekday]
+                  })
+                }
+              >
+                {weekday}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </fieldset>
   );
 }
 
@@ -470,6 +722,7 @@ function ScheduleRow({
   runs,
   queue,
   connectors,
+  definitions = [],
   onEdit,
   onToggle,
   onDelete,
@@ -481,6 +734,7 @@ function ScheduleRow({
   runs: WorkflowRun[];
   queue: SchedulerQueueEntry[];
   connectors: ConnectorManifest[];
+  definitions?: WorkflowDefinition[];
   onEdit: (input: {
     jobId: string;
     name: string;
@@ -519,6 +773,7 @@ function ScheduleRow({
           <ScheduleEditForm
             job={job}
             connectors={connectors}
+            definitions={definitions}
             onSave={(value) => {
               onEdit({
                 jobId: job.id,
@@ -656,15 +911,17 @@ function ScheduleRow({
 function ScheduleEditForm({
   job,
   connectors,
+  definitions = [],
   onSave,
   onCancel
 }: {
   job: ScheduledJob;
   connectors: ConnectorManifest[];
+  definitions?: WorkflowDefinition[];
   onSave: (value: ScheduleFormValue) => void;
   onCancel: () => void;
 }) {
-  const [form, setForm] = useState<ScheduleFormValue>(() => jobToForm(job));
+  const [form, setForm] = useState<ScheduleFormValue>(() => jobToForm(job, definitions));
   const validation = useMemo(() => validateForm(form), [form]);
   return (
     <form
@@ -696,7 +953,14 @@ function ScheduleEditForm({
 }
 
 /** Map a saved job back into the form value it would produce. */
-function jobToForm(job: ScheduledJob): ScheduleFormValue {
+function jobToForm(job: ScheduledJob, definitions: WorkflowDefinition[]): ScheduleFormValue {
+  const definition = definitions.find((d) => d.id === job.workflowDefinitionId);
+  const connectorIds = definition
+    ? definition.steps.flatMap((step) =>
+        step.kind === "connector-read" ? [step.connectorId] : []
+      )
+    : [];
+
   if (job.trigger.kind === "once") {
     const date = new Date(job.trigger.at);
     const pad = (value: number) => value.toString().padStart(2, "0");
@@ -709,7 +973,8 @@ function jobToForm(job: ScheduledJob): ScheduleFormValue {
       prompt: job.description,
       triggerKind: "once",
       onceAt: local,
-      missedRunPolicy: job.missedRunPolicy
+      missedRunPolicy: job.missedRunPolicy,
+      connectorIds
     };
   }
   const { rule } = job.trigger;
@@ -725,7 +990,8 @@ function jobToForm(job: ScheduledJob): ScheduleFormValue {
       monthDay: rule.byMonthDay ?? 1,
       time: `${pad(rule.hour)}:${pad(rule.minute)}`
     },
-    missedRunPolicy: job.missedRunPolicy
+    missedRunPolicy: job.missedRunPolicy,
+    connectorIds
   };
 }
 

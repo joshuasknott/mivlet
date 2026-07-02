@@ -350,12 +350,12 @@
 
   .composer-model {
     padding-inline: 13px;
-    font-size: var(--text-14);
+    font-size: var(--text-15);
   }
 
   .composer-permissions-card {
-    padding-inline: 11px;
-    font-size: var(--text-13);
+    padding-inline: 12px;
+    font-size: var(--text-15);
   }
 
   .composer-control-anchor--permissions .composer-menu {
@@ -397,8 +397,8 @@
   }
 
   .send-button {
-    width: 30px;
-    height: 30px;
+    width: 34px;
+    height: 34px;
   }
 
   .page-header {

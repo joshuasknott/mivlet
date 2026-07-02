@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { SchedulePanel } from "../SchedulePanel";
+import { SchedulesPage } from "./SchedulesPage";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ScheduledJob, WorkflowRun, SchedulerQueueEntry, WorkflowDefinition } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
@@ -97,30 +97,29 @@ function stubRuntime(overrides: Partial<ShellRuntime> = {}): ShellRuntime {
     refreshWorkflowRuns: vi.fn(async () => {}),
     retryWorkflowRun: vi.fn(async () => {}),
     cancelScheduledRun: vi.fn(async () => {}),
+    createScheduleFromTrigger: vi.fn(),
+    editScheduleFromTrigger: vi.fn(),
+    toggleSchedule: vi.fn(),
+    deleteSchedule: vi.fn(),
+    runScheduleNow: vi.fn(),
     openRunHistoryForJob: vi.fn(),
     clearRunHistoryJobId: vi.fn(),
+    schedulesReady: true,
     ...overrides
   } as unknown as ShellRuntime;
 }
 
-describe("Schedules + Run History UI Integration", () => {
-  it("renders active and paused schedules in the SchedulePanel", async () => {
+describe("Schedules Page & Runtime UI Integration", () => {
+  it("renders active and paused schedules and handles pause/resume flow", async () => {
     const user = userEvent.setup();
-    const onToggle = vi.fn();
     const activeJob = makeJob({ name: "Active Backup", status: "active" });
     const pausedJob = makeJob({ id: "job-paused", name: "Paused Cleanup", status: "paused" });
 
-    render(
-      <SchedulePanel
-        jobs={[activeJob, pausedJob]}
-        runs={[]}
-        queue={[]}
-        onCreate={vi.fn()}
-        onEdit={vi.fn()}
-        onToggle={onToggle}
-        onDelete={vi.fn()}
-      />
-    );
+    const runtime = stubRuntime({
+      scheduledJobs: [activeJob, pausedJob]
+    });
+
+    render(<SchedulesPage runtime={runtime} />);
 
     // Active schedule shows "Enabled" badge and "Pause" button
     expect(screen.getByText("Active Backup")).toBeInTheDocument();
@@ -136,14 +135,54 @@ describe("Schedules + Run History UI Integration", () => {
 
     // Pausing active job requires confirmation click
     await user.click(pauseBtn);
-    expect(onToggle).not.toHaveBeenCalled();
+    expect(runtime.toggleSchedule).not.toHaveBeenCalled();
     const confirmPauseBtn = screen.getByRole("button", { name: /confirm pause/i });
     await user.click(confirmPauseBtn);
-    expect(onToggle).toHaveBeenCalledWith(activeJob);
+    expect(runtime.toggleSchedule).toHaveBeenCalledWith(activeJob);
 
     // Resuming paused job works immediately
     await user.click(resumeBtn);
-    expect(onToggle).toHaveBeenCalledWith(pausedJob);
+    expect(runtime.toggleSchedule).toHaveBeenCalledWith(pausedJob);
+  });
+
+  it("handles opening the modal, focus management, submission, and close", async () => {
+    const user = userEvent.setup();
+    const runtime = stubRuntime({
+      scheduledJobs: []
+    });
+
+    render(<SchedulesPage runtime={runtime} />);
+
+    const newBtn = screen.getByRole("button", { name: /^New$/i });
+    expect(newBtn).toBeInTheDocument();
+
+    // Modal is initially closed
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Click "New" to open modal
+    await user.click(newBtn);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("New Scheduled Task")).toBeInTheDocument();
+
+    // Fill in Name and Prompt
+    await user.type(screen.getByLabelText(/^Name$/i), "Integration Schedule");
+    await user.type(screen.getByLabelText(/^Prompt$/i), "Run system backup.");
+
+    // Submit form
+    await user.click(screen.getByRole("button", { name: "Add Scheduled Task" }));
+
+    // Verifies onCreate (createScheduleFromTrigger) is called
+    expect(runtime.createScheduleFromTrigger).toHaveBeenCalledTimes(1);
+    expect(runtime.createScheduleFromTrigger).toHaveBeenCalledWith(expect.objectContaining({
+      name: "Integration Schedule",
+      description: "Run system backup."
+    }));
+
+    // Modal is closed after successful creation
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Focus is restored to the "New" button
+    expect(newBtn).toHaveFocus();
   });
 
   it("integrates RunHistoryPage navigation, viewing failed run detail, and triggering retry", async () => {

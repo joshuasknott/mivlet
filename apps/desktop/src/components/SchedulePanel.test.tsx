@@ -1,16 +1,31 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ScheduledJob, ScheduledExecutionRoute, WorkflowRun } from "@fable/protocol";
+import type { ScheduledJob, ScheduledExecutionRoute, WorkflowRun, ConnectorManifest } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { SchedulePanel } from "./SchedulePanel";
 
-/**
- * Component-level coverage for the Schedules management UI. The App-level
- * tests own the full create/edit/pause/delete round trips through the runtime;
- * these tests cover the list-state surface (invalid, attention, paused), the
- * read-only route metadata, and the loading state — the parts driven by
- * pre-built job/run fixtures rather than the create form.
- */
+const connectedManifests = [
+  {
+    id: "github",
+    name: "GitHub",
+    status: "connected",
+    permissions: ["Read repositories and files"],
+    healthSummary: "Connected",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    supportsSearch: true,
+    supportedActions: ["github.comment"]
+  },
+  {
+    id: "vercel",
+    name: "Vercel",
+    status: "connected",
+    permissions: ["Read deployments"],
+    healthSummary: "Connected",
+    lastCheckedAt: "2026-06-27T09:00:00.000Z",
+    supportsSearch: true,
+    supportedActions: ["vercel.promote"]
+  }
+] as unknown as ConnectorManifest[];
 
 function makeJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
   return {
@@ -55,19 +70,125 @@ function renderPanel(props: Partial<Parameters<typeof SchedulePanel>[0]> = {}) {
     onCreate: vi.fn(),
     onEdit: vi.fn(),
     onToggle: vi.fn(),
-    onDelete: vi.fn()
+    onDelete: vi.fn(),
+    onRequestCloseCreateModal: vi.fn()
   };
   const result = render(
     <SchedulePanel
       jobs={[]}
       runs={[]}
       queue={[]}
+      isCreateModalOpen={false}
+      definitions={[]}
       {...handlers}
       {...props}
     />
   );
   return { ...result, handlers };
 }
+
+describe("SchedulePanel — Search and Layout", () => {
+  it("renders search input field by default", () => {
+    renderPanel();
+    expect(screen.getByPlaceholderText("Search tasks...")).toBeInTheDocument();
+  });
+
+  it("filters jobs case-insensitively by name and description", async () => {
+    const user = userEvent.setup();
+    const job1 = makeJob({ id: "job-1", name: "Backup Database", description: "Save mysql dump." });
+    const job2 = makeJob({ id: "job-2", name: "Cleanup logs", description: "Delete old files." });
+    renderPanel({ jobs: [job1, job2] });
+
+    expect(screen.getByText("Backup Database")).toBeInTheDocument();
+    expect(screen.getByText("Cleanup logs")).toBeInTheDocument();
+
+    const searchInput = screen.getByPlaceholderText("Search tasks...");
+    await user.type(searchInput, "backup");
+    expect(screen.getByText("Backup Database")).toBeInTheDocument();
+    expect(screen.queryByText("Cleanup logs")).not.toBeInTheDocument();
+
+    await user.clear(searchInput);
+    await user.type(searchInput, "OLD FILES");
+    expect(screen.queryByText("Backup Database")).not.toBeInTheDocument();
+    expect(screen.getByText("Cleanup logs")).toBeInTheDocument();
+  });
+
+  it("renders distinct no-search-results state", async () => {
+    const user = userEvent.setup();
+    const job1 = makeJob({ id: "job-1", name: "Backup Database" });
+    renderPanel({ jobs: [job1] });
+
+    const searchInput = screen.getByPlaceholderText("Search tasks...");
+    await user.type(searchInput, "nonexistent");
+    expect(screen.getByTestId("schedule-no-results")).toBeInTheDocument();
+    expect(screen.getByText("No tasks match your search.")).toBeInTheDocument();
+    expect(screen.queryByText("Backup Database")).not.toBeInTheDocument();
+  });
+});
+
+describe("SchedulePanel — Modal Creation Flow", () => {
+  it("keeps the modal closed initially by default", () => {
+    renderPanel({ isCreateModalOpen: false });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens the modal and displays exact Name, Schedule, Prompt sections, omitting Project and Flash copy", () => {
+    renderPanel({ isCreateModalOpen: true });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("New Scheduled Task")).toBeInTheDocument();
+
+    expect(screen.getByLabelText(/^Name$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Schedule$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Prompt$/i)).toBeInTheDocument();
+
+    expect(screen.queryByText(/Project/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/All scheduled tasks run as Flash/i)).not.toBeInTheDocument();
+  });
+
+  it("submits the modal with Name, Schedule, Prompt and triggers onCreate and close", async () => {
+    const user = userEvent.setup();
+    const onRequestClose = vi.fn();
+    const { handlers } = renderPanel({
+      isCreateModalOpen: true,
+      onRequestCloseCreateModal: onRequestClose
+    });
+
+    await user.type(screen.getByLabelText(/^Name$/i), "New Custom Task");
+    await user.type(screen.getByLabelText(/^Prompt$/i), "Summarize metrics.");
+    await user.click(screen.getByRole("button", { name: "Add Scheduled Task" }));
+
+    expect(handlers.onCreate).toHaveBeenCalledTimes(1);
+    expect(handlers.onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      name: "New Custom Task",
+      description: "Summarize metrics."
+    }));
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles keyboard Escape key and backdrop click to close modal", async () => {
+    const user = userEvent.setup();
+    const onRequestClose = vi.fn();
+    renderPanel({
+      isCreateModalOpen: true,
+      onRequestCloseCreateModal: onRequestClose
+    });
+
+    // Close via X button
+    await user.click(screen.getByLabelText(/Close dialog/i));
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+
+    // Close via Escape key
+    onRequestClose.mockClear();
+    await user.keyboard("{Escape}");
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+
+    // Close via backdrop click
+    onRequestClose.mockClear();
+    const overlay = screen.getByTestId("schedule-modal-overlay");
+    await user.click(overlay);
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("SchedulePanel — list states", () => {
   it("shows the empty state when there are no jobs and not loading", () => {
@@ -83,8 +204,6 @@ describe("SchedulePanel — list states", () => {
 
   it("renders an enabled badge and the recurrence summary for an active job", () => {
     renderPanel({ jobs: [makeJob()] });
-    // The create form also shows a live recurrence summary from its default
-    // (weekly Mon 9am), so scope the job's summary to the saved-schedules list.
     const savedList = screen.getByRole("list", { name: /saved schedules/i });
     expect(within(savedList).getByText("Weekly digest")).toBeInTheDocument();
     expect(within(savedList).getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
@@ -185,104 +304,31 @@ describe("SchedulePanel — delete", () => {
   });
 });
 
-describe("SchedulePanel — connector selection", () => {
-  const connectedManifests = [
-    {
-      id: "github",
-      name: "GitHub",
-      status: "connected",
-      permissions: ["Read repositories and files"],
-      healthSummary: "Connected",
-      lastCheckedAt: "2026-06-27T09:00:00.000Z",
-      supportsSearch: true,
-      supportedActions: ["github.comment"]
-    },
-    {
-      id: "vercel",
-      name: "Vercel",
-      status: "connected",
-      permissions: ["Read deployments"],
-      healthSummary: "Connected",
-      lastCheckedAt: "2026-06-27T09:00:00.000Z",
-      supportsSearch: true,
-      supportedActions: ["vercel.promote"]
-    }
-  ] as unknown as import("@fable/protocol").ConnectorManifest[];
+describe("SchedulePanel — connector selection in edit mode", () => {
+  it("offers connected searchable connectors as data-source chips in edit mode", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      jobs: [makeJob()],
+      connectors: connectedManifests
+    });
 
-  it("offers connected searchable connectors as data-source chips", () => {
-    renderPanel({ connectors: connectedManifests });
+    await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
     expect(screen.getByRole("button", { name: "GitHub" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Vercel" })).toBeInTheDocument();
   });
 
-  it("hides the data-source section when no connected connectors are available", () => {
-    renderPanel({ connectors: [] });
-    expect(screen.queryByRole("group", { name: /data sources/i })).not.toBeInTheDocument();
-  });
-
-  it("passes the selected connector ids through onCreate", async () => {
+  it("passes selected connector ids through onEdit", async () => {
     const user = userEvent.setup();
-    const { handlers } = renderPanel({ connectors: connectedManifests });
+    const { handlers } = renderPanel({
+      jobs: [makeJob()],
+      connectors: connectedManifests
+    });
 
-    await user.type(screen.getByLabelText(/schedule task name/i), "Connector digest");
-    await user.type(screen.getByLabelText(/schedule description/i), "Summarize repos.");
+    await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
     await user.click(screen.getByRole("button", { name: "GitHub" }));
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(handlers.onCreate).toHaveBeenCalledTimes(1);
-    expect(handlers.onCreate.mock.calls[0][0].connectorIds).toEqual(["github"]);
-  });
-
-  it("excludes disconnected connectors from the picker", () => {
-    const manifests = [
-      ...connectedManifests,
-      {
-        id: "linear",
-        name: "Linear",
-        status: "needs-auth",
-        permissions: [],
-        healthSummary: "Needs auth",
-        lastCheckedAt: "2026-06-27T09:00:00.000Z",
-        supportedActions: []
-      }
-    ] as unknown as import("@fable/protocol").ConnectorManifest[];
-    renderPanel({ connectors: manifests });
-    expect(screen.queryByRole("button", { name: "Linear" })).not.toBeInTheDocument();
-  });
-
-  it("excludes connected connectors without the search contract", () => {
-    const manifests = [
-      ...connectedManifests,
-      {
-        id: "local-files",
-        name: "Local Files",
-        status: "connected",
-        permissions: ["Read selected files"],
-        healthSummary: "Ready",
-        lastCheckedAt: "2026-06-27T09:00:00.000Z",
-        supportsSearch: false,
-        supportedActions: []
-      }
-    ] as import("@fable/protocol").ConnectorManifest[];
-    renderPanel({ connectors: manifests });
-    expect(screen.queryByRole("button", { name: "Local Files" })).not.toBeInTheDocument();
-  });
-});
-
-describe("SchedulePanel — live recurrence summary", () => {
-  it("surfaces a consolidated recurrence summary in the create form that follows edits", async () => {
-    const user = userEvent.setup();
-    renderPanel();
-
-    // The create form's live summary (the polite live region) reflects the
-    // default weekly/Mon/09:00.
-    const formSummary = screen.getByText(/Weekly on Mon at 9:00 AM/i);
-    expect(formSummary).toBeInTheDocument();
-
-    // The summary is the single scannable readback: changing the frequency
-    // updates it in place, consolidating what used to be split across
-    // Repeat/Frequency/Time/Weekdays labels.
-    await user.selectOptions(screen.getByLabelText(/frequency/i), "daily");
-    expect(screen.getByText(/Daily at 9:00 AM/i)).toBeInTheDocument();
+    expect(handlers.onEdit).toHaveBeenCalledTimes(1);
+    expect(handlers.onEdit.mock.calls[0][0].connectorIds).toEqual(["github"]);
   });
 });

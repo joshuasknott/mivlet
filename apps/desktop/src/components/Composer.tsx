@@ -213,7 +213,7 @@ export function Composer({
                 aria-expanded={addMenuOpen}
                 aria-label="Add files and context"
               >
-                <Plus size={18} weight="bold" />
+                <Plus size={21} weight="bold" />
               </button>
               {addMenuOpen ? (
                 <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt">
@@ -400,9 +400,9 @@ export function Composer({
                 aria-expanded={permissionsOpen}
                 aria-label="Approval preset"
               >
-                <ActivePermissionIcon size={16} aria-hidden="true" />
+                <ActivePermissionIcon size={19} aria-hidden="true" />
                 <span>{visiblePermissionLabel}</span>
-                <CaretDown size={13} weight="bold" />
+                <CaretDown size={15} weight="bold" />
               </button>
               {permissionsOpen ? (
                 <div className="composer-menu composer-permissions" role="menu" aria-label="Approval preset">
@@ -455,7 +455,7 @@ export function Composer({
                 }}
               >
                 <span>{selectedModelLabel}</span>
-                <CaretDown size={14} weight="bold" />
+                <CaretDown size={16} weight="bold" />
               </button>
               {modelOpen ? (
                 <div className="composer-menu composer-model-menu" role="menu" aria-label="Models">
@@ -523,7 +523,7 @@ export function Composer({
               </button>
             </div>
             <button className="send-button" type="submit" aria-label="Send prompt">
-              <ArrowUp size={16} weight="bold" />
+              <ArrowUp size={19} weight="bold" />
             </button>
           </div>
         </div>

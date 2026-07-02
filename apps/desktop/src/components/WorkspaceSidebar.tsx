@@ -8,6 +8,7 @@ import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
@@ -361,7 +362,7 @@ export function WorkspaceSidebar({
             onClick={onNewChat}
             aria-keyshortcuts="Control+N Meta+N"
           >
-            <Plus size={18} weight="bold" />
+            <NotePencil size={18} />
             <span>New chat</span>
           </button>
 
@@ -511,7 +512,7 @@ export function WorkspaceSidebar({
                 <div className="chat-flyout__header">
                   <strong>Recent chats</strong>
                   <button type="button" onClick={onNewChat}>
-                    <Plus size={13} weight="bold" />
+                    <NotePencil size={14} />
                     New chat
                   </button>
                 </div>
@@ -643,7 +644,7 @@ export function WorkspaceSidebar({
           ) : (
             <>
               <button className="mobile-new-chat" type="button" onClick={onNewChat}>
-                <Plus size={16} weight="bold" />
+                <NotePencil size={17} />
                 <span>New chat</span>
               </button>
 

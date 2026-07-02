@@ -423,13 +423,14 @@ describe("Fable home", () => {
     // The hydration gate clears and the empty state is shown.
     expect(await screen.findByText(/no schedules yet/i)).toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Weekly digest");
     await user.type(
       screen.getByLabelText(/schedule description/i),
       "Summarize active projects and approvals."
     );
-    // Defaults: weekly, Monday at 09:00.
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "weekly");
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Weekly digest")).toBeInTheDocument();
     // The create form also shows a live weekly/Mon summary, so scope the saved
@@ -459,9 +460,10 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
 
+    await user.click(await screen.findByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Daily check");
     await user.type(screen.getByLabelText(/schedule description/i), "Quick daily summary.");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Daily check")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /pause/i })).toBeInTheDocument();
@@ -478,9 +480,10 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
 
+    await user.click(await screen.findByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Throwaway");
     await user.type(screen.getByLabelText(/schedule description/i), "To be removed.");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Throwaway")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /delete schedule throwaway/i }));
@@ -493,10 +496,10 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     await screen.findByText(/no schedules yet/i);
 
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Daily standup");
     await user.type(screen.getByLabelText(/schedule description/i), "Morning summary.");
-    await user.selectOptions(screen.getByLabelText(/frequency/i), "daily");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Daily standup")).toBeInTheDocument();
     expect(screen.getByText(/Daily at 9:00 AM/i)).toBeInTheDocument();
@@ -508,12 +511,13 @@ describe("Fable home", () => {
     expect(await screen.findByRole("heading", { name: "Schedules" })).toBeInTheDocument();
     await screen.findByText(/no schedules yet/i);
 
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Month-end review");
     await user.type(screen.getByLabelText(/schedule description/i), "Close the month.");
-    await user.selectOptions(screen.getByLabelText(/frequency/i), "monthly");
+    await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "monthly");
     // The day-of-month defaults to 1; append "5" to make it the 15th.
     await user.type(screen.getByLabelText(/day of month/i), "5");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Month-end review")).toBeInTheDocument();
     expect(screen.getByText(/Monthly on day 15 at 9:00 AM/i)).toBeInTheDocument();
@@ -524,11 +528,12 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     await screen.findByText(/no schedules yet/i);
 
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Launch day");
     await user.type(screen.getByLabelText(/schedule description/i), "Ship the release.");
-    await user.selectOptions(screen.getByLabelText(/repeat/i), "once");
+    await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "once");
     await user.type(screen.getByLabelText(/run at/i), "2026-12-01T09:00");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Launch day")).toBeInTheDocument();
     expect(screen.getByText(/Once ·/i)).toBeInTheDocument();
@@ -539,26 +544,26 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     await screen.findByText(/no schedules yet/i);
 
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Multi-day");
     await user.type(screen.getByLabelText(/schedule description/i), "Selected days.");
+    await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "weekly");
     // Add Wednesday and Friday to the default Monday.
     await user.click(screen.getByRole("button", { name: /^Wed$/ }));
     await user.click(screen.getByRole("button", { name: /^Fri$/ }));
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Multi-day")).toBeInTheDocument();
     expect(screen.getByText(/Weekly on Mon, Wed, Fri at 9:00 AM/i)).toBeInTheDocument();
   }, 15000);
 
-  it("surfaces inline validation feedback when required fields are empty", async () => {
+  it("keeps schedule creation disabled while required fields are empty", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     await screen.findByText(/no schedules yet/i);
 
-    // Submit with an empty name and prompt: the form shows inline errors and
-    // does not create a schedule.
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
-    expect(await screen.findAllByRole("alert")).not.toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    expect(screen.getByRole("button", { name: /add scheduled task/i })).toBeDisabled();
     expect(screen.queryByText(/no schedules yet/i)).toBeInTheDocument();
   }, 15000);
 
@@ -567,9 +572,10 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     await screen.findByText(/no schedules yet/i);
 
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Confirm guard");
     await user.type(screen.getByLabelText(/schedule description/i), "Needs a click.");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
     expect(await screen.findByText("Confirm guard")).toBeInTheDocument();
 
     // Pause shows a confirm step, not an immediate pause.
@@ -1095,9 +1101,10 @@ describe("Fable home", () => {
     await screen.findByLabelText(/universal composer/i);
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     await screen.findByText(/no schedules yet/i);
+    await user.click(screen.getByRole("button", { name: /^new$/i }));
     await user.type(screen.getByLabelText(/schedule task name/i), "Persisted digest");
     await user.type(screen.getByLabelText(/schedule description/i), "Survives reload.");
-    await user.click(screen.getByRole("button", { name: /create schedule/i }));
+    await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
     expect(await screen.findByText("Persisted digest")).toBeInTheDocument();
     first.unmount();
 
@@ -1705,12 +1712,22 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // All nine providers render in the unified list — API-key AND provider-owned
-    // runtimes on one screen, not split across path screens.
-    for (const label of ["OpenAI", "Anthropic", "Gemini", "xAI", "OpenRouter"]) {
+    // Account/runtime providers are immediately visible:
+    for (const label of ["Codex", "Cursor", "GitHub Copilot", "Grok"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
-    for (const label of ["Codex", "Cursor", "GitHub Copilot", "Grok"]) {
+
+    // API-key providers are not visible initially
+    for (const label of ["OpenAI", "Anthropic", "Gemini", "xAI", "OpenRouter"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+
+    // Activate disclosure
+    const disclosure = screen.getByRole("button", { name: /add an api key/i });
+    await user.click(disclosure);
+
+    // Now they should be visible!
+    for (const label of ["OpenAI", "Anthropic", "Gemini", "xAI", "OpenRouter"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
@@ -1722,16 +1739,19 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // The provider-owned runtimes surface an install/sign-in state, never a key
-    // field. Their action points to real setup, not a fake connect.
-    const cursorCard = screen.getByText("Cursor").closest("article");
-    expect(cursorCard).not.toBeNull();
+    // Click the Cursor tile to open the modal:
+    const cursorTile = screen.getByRole("button", { name: /^cursor,/i });
+    await user.click(cursorTile);
+
+    const modal = screen.getByRole("dialog");
+    expect(within(modal).getByRole("heading", { name: "Cursor" })).toBeInTheDocument();
     expect(
-      within(cursorCard as HTMLElement).getByLabelText(/cursor install required/i)
+      within(modal).getByLabelText(/cursor install required/i)
     ).toHaveTextContent(/cursor cli/i);
-    // No fake "Connect" that takes a token from this screen.
+
+    // No token input:
     expect(
-      within(cursorCard as HTMLElement).queryByLabelText(/api key for cursor/i)
+      within(modal).queryByLabelText(/api key for cursor/i)
     ).not.toBeInTheDocument();
   });
 
@@ -1742,8 +1762,16 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    expect(screen.getByLabelText(/cursor install required/i)).toHaveTextContent(/cursor cli/i);
-    expect(screen.getByLabelText(/grok install required/i)).toHaveTextContent(/grok cli/i);
+    // Check Cursor modal:
+    await user.click(screen.getByRole("button", { name: /^cursor,/i }));
+    const cursorModal = screen.getByRole("dialog");
+    expect(within(cursorModal).getByLabelText(/cursor install required/i)).toHaveTextContent(/cursor cli/i);
+    await user.click(within(cursorModal).getByRole("button", { name: /close provider setup/i }));
+
+    // Check Grok modal:
+    await user.click(screen.getByRole("button", { name: /^grok,/i }));
+    const grokModal = screen.getByRole("dialog");
+    expect(within(grokModal).getByLabelText(/grok install required/i)).toHaveTextContent(/grok cli/i);
   });
 
   it("clears the gate when a real capability-bearing runtime is connected", async () => {
@@ -1770,19 +1798,22 @@ describe("Fable onboarding", () => {
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
-  it("exposes an inline secure key field for API-key providers only", async () => {
+  it("exposes a secure key field in the modal for API-key providers only", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // The five native API-key providers render with an "Add API key" affordance.
-    const openaiRow = screen.getByText("OpenAI").closest("article");
-    expect(openaiRow).not.toBeNull();
-    await user.click(openaiRow as HTMLElement);
-    // Expanding reveals a secret input — the key never enters React state.
-    expect(await screen.findByLabelText(/api key for openai/i)).toBeInTheDocument();
+    // API-key providers are hidden initially. Activate disclosure:
+    await user.click(screen.getByRole("button", { name: /add an api key/i }));
+
+    // Click OpenAI tile:
+    await user.click(screen.getByRole("button", { name: /^openai,/i }));
+
+    // The modal is open. Expanding reveals a secure input — the key never enters React state.
+    const modal = screen.getByRole("dialog");
+    expect(within(modal).getByLabelText(/api key for openai/i)).toBeInTheDocument();
   });
 
   it("uses compliant copy for Claude and Gemini (no subscription reuse)", async () => {
@@ -1790,7 +1821,12 @@ describe("Fable onboarding", () => {
     render(<App />);
 
     await completeProfileStep(user);
-    const shell = await screen.findByRole("heading", { name: /add a model provider/i });
+    await screen.findByRole("heading", { name: /add a model provider/i });
+
+    // Open disclosure to put API key text in DOM
+    await user.click(screen.getByRole("button", { name: /add an api key/i }));
+
+    const shell = screen.getByRole("heading", { name: /add a model provider/i });
     const frame = shell.closest("main");
     const text = frame?.textContent?.toLowerCase() ?? "";
     // No Claude.ai subscription login; no Google AI Pro/Ultra subscription reuse.
@@ -1808,6 +1844,12 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
+    // Open disclosure:
+    await user.click(screen.getByRole("button", { name: /add an api key/i }));
+
+    // Click OpenAI tile to open modal:
+    await user.click(screen.getByRole("button", { name: /^openai,/i }));
+
     // Simulate the credential boundary resolving OpenAI to connected after the
     // store + verify call records the key.
     runtimeMocks.backends = [
@@ -1823,14 +1865,10 @@ describe("Fable onboarding", () => {
       ...failClosedBackends.filter((provider) => provider.id !== "openai")
     ];
 
-    const openaiCard = screen.getByText("OpenAI").closest("article");
-    expect(openaiCard).not.toBeNull();
-
-    // Open the inline key panel and submit the key through the verified path.
-    await user.click(openaiCard as HTMLElement);
-    const keyInput = await screen.findByLabelText(/api key for openai/i);
+    const modal = screen.getByRole("dialog");
+    const keyInput = within(modal).getByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-test-key");
-    await user.click(screen.getByRole("button", { name: /add key & connect/i }));
+    await user.click(within(modal).getByRole("button", { name: /add key & connect/i }));
 
     // The boundary recorded the secret (store_backend_credential) and verified it
     // (verify_backend_credential). The secret never returns to JS.
@@ -1867,15 +1905,19 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    const openaiCard = screen.getByText("OpenAI").closest("article");
-    expect(openaiCard).not.toBeNull();
-    await user.click(openaiCard as HTMLElement);
-    const keyInput = await screen.findByLabelText(/api key for openai/i);
-    await user.type(keyInput, "sk-bad-key");
-    await user.click(screen.getByRole("button", { name: /add key & connect/i }));
+    // Open disclosure:
+    await user.click(screen.getByRole("button", { name: /add an api key/i }));
 
-    // A useful error is shown on the provider row; the gate does not clear.
-    expect(await within(openaiCard as HTMLElement).findByText(/rejected this key/i)).toBeInTheDocument();
+    // Click OpenAI tile to open modal:
+    await user.click(screen.getByRole("button", { name: /^openai,/i }));
+
+    const modal = screen.getByRole("dialog");
+    const keyInput = within(modal).getByLabelText(/api key for openai/i);
+    await user.type(keyInput, "sk-bad-key");
+    await user.click(within(modal).getByRole("button", { name: /add key & connect/i }));
+
+    // A useful error is shown inside the modal; the gate does not clear.
+    expect(await within(modal).findByText(/rejected this key/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
     verifySpy.mockRestore();
   });

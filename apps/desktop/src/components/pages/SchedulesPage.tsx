@@ -1,3 +1,5 @@
+import { Plus } from "@phosphor-icons/react";
+import { useRef, useState } from "react";
 import { PageHeader } from "../PageHeader";
 import { SchedulePanel } from "../SchedulePanel";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
@@ -16,15 +18,29 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
  * contract directly, so no legacy UI adapter can discard recurrence data.
  */
 export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const newButtonRef = useRef<HTMLButtonElement>(null);
+
+  const handleCloseCreateModal = () => {
+    setIsCreateModalOpen(false);
+    newButtonRef.current?.focus();
+  };
+
   return (
     <>
       <PageHeader
         title="Schedules"
-        description="Run local workflows while the Fable desktop runtime is open."
-        meta={
-          runtime.scheduledJobs.length === 0
-            ? undefined
-            : `${runtime.scheduledJobs.length} schedule${runtime.scheduledJobs.length === 1 ? "" : "s"}`
+        actions={
+          <button
+            ref={newButtonRef}
+            type="button"
+            className="schedule-new-button"
+            onClick={() => setIsCreateModalOpen(true)}
+            id="new-schedule-btn"
+          >
+            <Plus size={15} weight="bold" aria-hidden="true" />
+            New
+          </button>
         }
       />
       <SchedulePanel
@@ -32,6 +48,7 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         runs={runtime.workflowRuns}
         queue={runtime.schedulerQueue}
         connectors={runtime.connectorManifests}
+        definitions={runtime.workflowDefinitions}
         loading={!runtime.schedulesReady && runtime.scheduledJobs.length === 0}
         onCreate={runtime.createScheduleFromTrigger}
         onEdit={runtime.editScheduleFromTrigger}
@@ -40,6 +57,8 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         onRunNow={runtime.runScheduleNow}
         onCancelRun={runtime.cancelScheduledRun}
         onViewRuns={(job) => runtime.openRunHistoryForJob(job.id)}
+        isCreateModalOpen={isCreateModalOpen}
+        onRequestCloseCreateModal={handleCloseCreateModal}
       />
       {runtime.notificationHistory.length > 0 ? (
         <details className="notification-history">

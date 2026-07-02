@@ -131,3 +131,87 @@ errors: none. No text clipping, control overlap, broken menus, or blank
 lazy-loaded pages observed. Evidence: `qa-shots/*.png` in the worktree.
 
 final result: passed
+
+## Onboarding and schedules merge QA (2026-07-02)
+
+### Comparison target
+
+- Source visual truth:
+  - `C:\Users\Josh\AppData\Local\Temp\codex-clipboard-737b2f70-2e73-483b-8276-88505609dd81.png`
+  - `C:\Users\Josh\AppData\Local\Temp\codex-clipboard-822a7295-4a7b-4060-9121-4a0e7d3dfdc6.png`
+- Implementation screenshot:
+  - `C:\Users\Josh\AppData\Local\Temp\fable-schedule-modal.png`
+- Combined focused comparison:
+  - `C:\Users\Josh\AppData\Local\Temp\fable-schedule-comparison.png`
+- Additional implementation evidence:
+  - `C:\Users\Josh\AppData\Local\Temp\fable-onboarding-profile.png`
+  - `C:\Users\Josh\AppData\Local\Temp\fable-provider-grid.png`
+  - `C:\Users\Josh\AppData\Local\Temp\fable-api-key-chooser.png`
+  - `C:\Users\Josh\AppData\Local\Temp\fable-provider-setup.png`
+  - `C:\Users\Josh\AppData\Local\Temp\fable-workspace-composer.png`
+  - `C:\Users\Josh\AppData\Local\Temp\fable-schedules-page.png`
+  - `C:\Users\Josh\AppData\Local\Temp\fable-schedule-modal-mobile.png`
+- Viewports: 1280x720 and 390x844.
+- States: onboarding profile, provider grid, API-key provider chooser, API-key entry,
+  workspace composer, empty schedules page, and new scheduled task modal.
+
+### Full-view comparison
+
+The schedules page preserves the reference hierarchy: one compact title/action
+row, a search field directly beneath it, and a modal-led creation flow. The
+scheduled-task modal matches the reference's Name, Schedule, and Prompt rhythm
+while intentionally using Fable's light/dark tokens and excluding Project and
+Flash-specific copy.
+
+The onboarding pass now uses the desktop canvas rather than a narrow centered
+column. Provider logos are the dominant tile content and API-key setup is a
+separate modal flow instead of an expanded secondary grid.
+
+### Focused comparison
+
+The scheduled-task modal was cropped to the same 640px content width as the
+reference and placed in one combined comparison image. The implementation keeps
+the source's alignment, field order, compact Daily/at/time row, prompt height,
+close placement, and bottom-right disabled action. Its shorter height is the
+expected result of removing the explicitly excluded Project and Flash rows.
+
+### Required fidelity surfaces
+
+- Fonts and typography: Inter remains the application font; the modal preserves
+  the reference's compact label hierarchy and readable control sizing.
+- Spacing and layout rhythm: title, fields, schedule row, prompt, and action use
+  the same top-to-bottom rhythm as the reference without the removed sections.
+- Colors and visual tokens: all surfaces and states use existing Fable tokens;
+  the reference colour scheme was intentionally not copied.
+- Image and asset fidelity: provider marks use the existing real ProviderIcon
+  assets at larger sizes; UI actions use Phosphor icons.
+- Copy and content: Project and Flash copy are absent; the API-key offer is now
+  “Prefer direct provider access? Add an API key.”
+- Accessibility and behavior: dialogs are labelled and modal, Escape/backdrop
+  close works, focus is restored, schedule fields are keyboard-accessible, and
+  the API key remains outside React state.
+
+### Findings
+
+No actionable P0, P1, or P2 mismatches remain.
+
+### Patches made during QA
+
+- Moved API-key provider selection into its own icon-first modal.
+- Centred and enlarged provider branding in tiles and setup dialogs.
+- Corrected CSS cascade ordering that kept the desktop profile form at 420px.
+- Replaced the nested recurrence form with a compact progressive schedule row.
+- Removed the schedules description line to match the sparse reference header.
+- Increased composer control sizing without changing the composer container.
+- Increased sidebar text sizing, softened Threads/Chats, and replaced the New
+  chat plus glyph with the NotePencil icon.
+- Updated stale App integration tests for the modal schedule flow.
+
+### Verification
+
+- `pnpm --filter @fable/desktop typecheck` — passed.
+- `pnpm --filter @fable/desktop test` — 360 passed.
+- `pnpm --filter @fable/desktop build` — passed.
+- Browser console errors/warnings for tested flows — none.
+
+final result: passed

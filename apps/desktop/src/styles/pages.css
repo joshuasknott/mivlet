@@ -1627,8 +1627,7 @@
   background: rgba(0, 0, 0, 0.24);
 }
 
-.provider-setup-modal__panel,
-.og-provider-modal__panel {
+.provider-setup-modal__panel {
   display: grid;
   gap: 18px;
   width: min(560px, 100%);
@@ -1641,12 +1640,45 @@
   box-shadow: var(--shadow-3);
 }
 
+.og-provider-modal__panel {
+  position: relative;
+  display: grid;
+  gap: 22px;
+  width: min(620px, 100%);
+  max-height: min(660px, calc(100dvh - 48px));
+  overflow: auto;
+  padding: 28px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-3);
+}
+
+@media (min-width: 769px) {
+  .og-provider-modal__panel {
+    width: min(720px, 100%);
+    max-height: min(800px, calc(100dvh - 64px));
+    padding: 38px 42px;
+    gap: 28px;
+  }
+
+  .og-provider-modal__panel--chooser {
+    width: min(860px, 100%);
+  }
+}
+
 .provider-setup-modal__header,
 .og-provider-modal__header {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 32px;
   align-items: start;
   gap: 12px;
+}
+
+@media (min-width: 769px) {
+  .og-provider-modal__header {
+    gap: 16px;
+  }
 }
 
 .provider-setup-modal__header h2,
@@ -1656,12 +1688,24 @@
   font-size: var(--text-20);
 }
 
+@media (min-width: 769px) {
+  .og-provider-modal__header h2 {
+    font-size: var(--text-24);
+  }
+}
+
 .provider-setup-modal__header p,
 .og-provider-modal__header p {
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-13);
   line-height: 1.45;
+}
+
+@media (min-width: 769px) {
+  .og-provider-modal__header p {
+    font-size: var(--text-14);
+  }
 }
 
 .provider-setup-modal__close,
@@ -1677,6 +1721,15 @@
   border-radius: var(--radius-1);
 }
 
+.og-provider-modal__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: 36px;
+  height: 36px;
+}
+
 .provider-setup-modal__close:hover,
 .og-provider-modal__close:hover {
   color: var(--ink);
@@ -1687,6 +1740,60 @@
 .og-provider-modal__body {
   display: grid;
   gap: 14px;
+}
+
+.og-provider-modal__hero {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 4px 38px 0;
+  text-align: center;
+}
+
+.og-provider-modal__icon {
+  display: grid;
+  width: 88px;
+  height: 88px;
+  margin-bottom: 5px;
+  place-items: center;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-3);
+}
+
+.og-provider-modal__hero h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.og-provider-modal__hero p {
+  max-width: 52ch;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-15);
+  line-height: 1.5;
+}
+
+.og-provider-modal__hero .og-provider__badge {
+  margin-top: 5px;
+}
+
+.og-provider-modal__body {
+  gap: 18px;
+}
+
+.og-provider-modal__action-area {
+  display: flex;
+  justify-content: center;
+}
+
+.og-provider-modal__pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .provider-setup-modal__meta {
@@ -1726,8 +1833,7 @@
   gap: 8px;
 }
 
-.provider-setup-modal__actions button,
-.og-provider-modal__primary {
+.provider-setup-modal__actions button {
   min-height: 34px;
   padding: 0 13px;
   color: var(--ink);
@@ -1735,6 +1841,17 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
   font-size: var(--text-13);
+  font-weight: 500;
+}
+
+.og-provider-modal__primary {
+  min-height: 42px;
+  padding: 0 18px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  font-size: var(--text-14);
   font-weight: 500;
 }
 
@@ -2117,7 +2234,7 @@
   justify-content: center;
   width: 100%;
   min-height: 100dvh;
-  padding: 32px 20px;
+  padding: 42px 28px;
   overflow-y: auto;
   background: var(--surface);
 }
@@ -2133,7 +2250,7 @@
 .og-center {
   position: relative;
   z-index: 1;
-  width: min(100%, 900px);
+  width: min(100%, 1180px);
   margin: auto;
   display: flex;
   flex-direction: column;
@@ -2151,22 +2268,74 @@
 }
 
 .og-hero h1 {
-  max-width: 760px;
+  max-width: 860px;
   margin: 12px 0 0;
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: clamp(var(--text-20), 2.4vw, var(--text-30));
+  font-size: clamp(28px, 3vw, 38px);
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1.08;
 }
 
 .og-lede {
-  max-width: 60ch;
-  margin: 14px 0 0;
+  max-width: 68ch;
+  margin: 16px 0 0;
   color: var(--ink-muted);
-  font-size: var(--text-14);
-  line-height: 1.5;
+  font-size: var(--text-16);
+  line-height: 1.55;
+}
+
+/* Scale up onboarding presence on desktop screens */
+@media (min-width: 769px) {
+  .og-form {
+    max-width: 680px;
+    padding: 38px 42px;
+    gap: 22px;
+    border-radius: var(--radius-3);
+  }
+  .og-progress-container {
+    max-width: 680px;
+    margin-bottom: 34px;
+  }
+  .og-progress-step {
+    padding: 14px 18px;
+    font-size: var(--text-15);
+    gap: 10px;
+  }
+  .og-progress-step > span {
+    width: 28px;
+    height: 28px;
+    font-size: var(--text-13);
+  }
+  .og-field {
+    gap: 8px;
+  }
+  .og-field span {
+    font-size: var(--text-15);
+  }
+  .og-field input {
+    min-height: 48px;
+    padding: 14px 18px;
+    font-size: var(--text-15);
+  }
+  .og-submit {
+    margin-top: 10px;
+    padding: 14px;
+    font-size: var(--text-15);
+  }
+  .og-hero {
+    margin-bottom: 34px;
+  }
+  .og-hero h1 {
+    font-size: 36px;
+    line-height: 1.15;
+  }
+  .og-lede {
+    font-size: var(--text-16);
+    margin-top: 16px;
+    max-width: 64ch;
+  }
 }
 
 /* Two equal frosted-glass path cards. */
@@ -2229,139 +2398,7 @@
   line-height: 1.5;
 }
 
-.og-provider-list {
-  list-style: none;
-  margin: 14px 0 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.og-provider {
-  display: flex;
-  align-items: stretch;
-  justify-content: flex-start;
-  gap: 12px;
-  min-height: 112px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2);
-  background: var(--surface-raised);
-  transition: border-color 160ms ease, background 160ms ease;
-}
-
-.og-provider:hover {
-  border-color: var(--accent-line);
-  background: var(--surface-hover);
-}
-
-.og-provider--connected {
-  border-color: var(--positive-subtle);
-  background: var(--positive-subtle);
-}
-
-.og-provider__lead {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  text-align: left;
-}
-
-.og-provider__lead strong {
-  font-size: var(--text-12);
-  font-weight: 500;
-}
-
-.og-provider__lead small {
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.45;
-}
-
-.og-provider__install {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--caution);
-  font-size: var(--text-12);
-  margin-top: 2px;
-}
-
-.og-provider__caps {
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-  margin-top: 2px;
-}
-
-.og-provider__apikey {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.og-provider__apikey input {
-  width: 150px;
-  padding: 8px 11px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-2);
-  background: var(--canvas);
-  color: var(--ink);
-  font-size: var(--text-12);
-  font-family: inherit;
-}
-
-.og-provider__apikey input:focus {
-  outline: none;
-  border-color: var(--accent-line);
-  box-shadow: var(--focus-ring);
-}
-
-.og-provider__apikey input:disabled {
-  opacity: 0.55;
-}
-
-.og-provider button {
-  flex-shrink: 0;
-  padding: 8px 16px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-2);
-  background: var(--accent);
-  color: var(--surface);
-  font-size: var(--text-12);
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 140ms ease, background 140ms ease;
-}
-
-.og-provider button:hover:not(:disabled) {
-  opacity: 0.88;
-}
-
-.og-provider button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.og-provider--connected button {
-  background: transparent;
-  color: var(--positive);
-  border-color: var(--positive-subtle);
-}
-
-/* Gated provider "connected" badge — shown only when a real capability-bearing
-   runtime is connected (not a preview/auth-pending state). */
-.og-provider__connected-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--positive);
-  font-size: var(--text-13);
-  font-weight: 500;
-  white-space: nowrap;
-}
+/* Obsolete og-provider card styles removed */
 
 /* Trust note — quiet centered frosted pill. */
 .og-trust {
@@ -2384,6 +2421,11 @@
   font-size: var(--text-12);
 }
 
+.og-status--error {
+  margin: 4px 0;
+  color: var(--destructive);
+}
+
 .og-skip {
   margin-top: 14px;
   background: none;
@@ -2395,6 +2437,10 @@
   gap: 5px;
   cursor: pointer;
   padding: 0;
+}
+
+.og-skip--profile {
+  margin-top: 6px;
 }
 
 .og-skip:hover {
@@ -2961,192 +3007,262 @@ button.og-path--primary .og-path__icon {
 
 .og-unified {
   width: 100%;
-  max-width: 720px;
-  margin-top: 8px;
+  max-width: 1120px;
+  margin-top: 14px;
 }
 
 .og-unified__hint {
-  margin: 0 0 14px;
+  margin: 0 0 24px;
   color: var(--ink-muted);
-  font-size: var(--text-13);
+  font-size: var(--text-15);
   line-height: 1.5;
+  text-align: center;
 }
 
-/* A provider card that owns an expandable key panel becomes a column. */
-.og-provider--expandable {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.og-provider__row {
+/* Logo-First Provider Grid & Tiles Layout */
+.og-provider-sections {
   display: flex;
-  flex: 1;
   flex-direction: column;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 0;
   width: 100%;
 }
 
-.og-provider__identity {
+.og-provider-group {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 9px;
-  min-width: 0;
+  gap: 16px;
+  width: 100%;
 }
 
-.og-provider__icon {
+.og-provider-group__heading {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-14);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+}
+
+.og-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .og-provider-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .og-provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.og-provider-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 184px;
+  padding: 26px 18px;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  width: 100%;
+}
+
+.og-provider-tile:hover:not(:disabled):not(.is-disabled) {
+  border-color: var(--accent-line);
+  background: var(--surface-hover);
+  transform: translateY(-2px);
+}
+
+.og-provider-tile:active:not(:disabled):not(.is-disabled) {
+  transform: translateY(0);
+}
+
+.og-provider-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.og-provider-tile__logo {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 auto;
+  width: 78px;
+  height: 78px;
+  margin-bottom: 16px;
+  border-radius: var(--radius-3);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
   overflow: hidden;
-  border: 1px solid #dedede;
-  border-radius: var(--radius-2);
-  background: #fff;
+  transition: border-color 160ms ease, background-color 160ms ease;
 }
 
-.og-provider__action {
+.og-provider-tile__logo img,
+.og-provider-tile__logo svg {
+  display: block;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.og-provider-tile__label {
+  font-size: var(--text-16);
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.og-provider-tile__status {
+  font-size: var(--text-13);
+  font-weight: 500;
+  color: var(--ink-soft);
+  margin-top: 6px;
+  line-height: 1.2;
+}
+
+/* State modifier rules for tiles */
+.og-provider-tile.og-provider--ready,
+.og-provider-tile--ready {
+  border-color: var(--positive-subtle);
+  background: var(--positive-subtle);
+}
+
+.og-provider-tile.og-provider--ready .og-provider-tile__status,
+.og-provider-tile--ready .og-provider-tile__status {
+  color: var(--positive);
+}
+
+.og-provider-tile.og-provider--caution,
+.og-provider-tile--caution {
+  border-color: var(--caution-subtle);
+  background: var(--caution-subtle);
+}
+
+.og-provider-tile.og-provider--caution .og-provider-tile__status,
+.og-provider-tile--caution .og-provider-tile__status {
+  color: var(--caution);
+}
+
+.og-provider-tile.og-provider--danger,
+.og-provider-tile--danger {
+  border-color: var(--destructive-subtle);
+  background: var(--destructive-subtle);
+}
+
+.og-provider-tile.og-provider--danger .og-provider-tile__status,
+.og-provider-tile--danger .og-provider-tile__status {
+  color: var(--destructive);
+}
+
+.og-provider-tile.og-provider--info,
+.og-provider-tile--info {
+  border-color: var(--accent-line);
+}
+
+.og-provider-tile:disabled,
+.og-provider-tile.is-disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Restrained API Key disclosure separator */
+.og-api-key-divider {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.og-provider__action button {
+  justify-content: center;
   width: 100%;
-  padding: 7px 10px;
-  background: transparent;
-  color: var(--ink-muted);
-  border-color: var(--line);
+  gap: 8px;
+  margin: 42px 0 0;
+  padding-top: 26px;
+  position: relative;
+  border-top: 1px solid var(--line);
 }
 
-.og-provider__action button:hover:not(:disabled) {
+.og-api-key-divider::before {
+  content: none;
+}
+
+.og-api-key-divider__label {
+  color: var(--ink-muted);
+  font-size: var(--text-15);
+  line-height: 1.4;
+}
+
+.og-api-key-disclosure {
+  padding: 6px 10px;
+  color: var(--ink);
+  background: transparent;
+  font-size: var(--text-15);
+  font-weight: 500;
+  border: 0;
+  border-radius: var(--radius-1);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  background-clip: padding-box;
+}
+
+.og-api-key-disclosure:hover {
   color: var(--ink);
   background: var(--surface-hover);
 }
 
-.og-provider__description {
-  margin: 10px 0 0;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.45;
-  text-align: left;
+.og-api-key-disclosure:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-.og-provider-list__expanded {
-  grid-column: 1 / -1;
-  order: 1;
+.og-provider-modal__panel--chooser .og-provider-grid--api {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-.og-provider--selected {
-  min-height: 0;
+.og-provider-modal__panel--chooser .og-provider-tile {
+  min-height: 154px;
+  padding: 20px 12px;
 }
 
-.og-provider--selected .og-provider__row {
-  flex-direction: row;
-  align-items: center;
+.og-provider-modal__panel--chooser .og-provider-tile__logo {
+  width: 68px;
+  height: 68px;
 }
 
-.og-provider--selected .og-provider__identity {
-  flex-direction: row;
-  align-items: center;
+@media (max-width: 900px) {
+  .og-provider-modal__panel--chooser .og-provider-grid--api {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
-.og-provider--selected .og-provider__action {
-  flex: 0 0 auto;
-}
+@media (max-width: 600px) {
+  .og-provider-modal__panel {
+    padding: 28px 20px 22px;
+  }
 
-.og-provider--selected .og-provider__action button {
-  width: auto;
-}
+  .og-provider-modal__hero {
+    padding-inline: 24px;
+  }
 
-/* State badge — short, plain label with tone color. */
-.og-provider__badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-11);
-  font-weight: 500;
-  white-space: nowrap;
-  border: 1px solid transparent;
-}
+  .og-provider-modal__panel--chooser .og-provider-grid--api {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 
-.og-provider__badge--ready {
-  color: var(--positive);
-  background: var(--positive-subtle);
-  border-color: var(--positive-subtle);
-}
-
-.og-provider__badge--info {
-  color: var(--ink-muted);
-  background: var(--surface-overlay);
-  border-color: var(--line);
-}
-
-.og-provider__badge--neutral {
-  color: var(--ink-soft);
-  background: transparent;
-  border-color: var(--line);
-}
-
-.og-provider__badge--caution {
-  color: var(--caution);
-  background: var(--caution-subtle);
-  border-color: var(--caution-subtle);
-}
-
-.og-provider__badge--danger {
-  color: var(--destructive);
-  background: var(--destructive-subtle);
-  border-color: var(--destructive-subtle);
-}
-
-/* Tone tints on the card border for non-neutral states. */
-.og-provider--caution {
-  border-color: var(--caution-subtle);
-}
-
-.og-provider--danger {
-  border-color: var(--destructive-subtle);
-}
-
-.og-provider--info {
-  border-color: var(--accent-line);
-}
-
-/* State hint — plain explanation under the row, shown for non-ready states. */
-.og-provider__state-hint {
-  margin: 6px 0 0;
-  padding-left: 0;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.45;
-}
-
-.og-provider__state-hint--danger {
-  color: var(--destructive);
-}
-
-.og-provider__state-hint--caution {
-  color: var(--caution);
-}
-
-.og-provider__state-hint[data-visually-hidden="true"] {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+  .og-provider__key-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 /* Expandable inline key panel (API-key providers only). */
@@ -3154,9 +3270,9 @@ button.og-path--primary .og-path__icon {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .og-provider__key-panel label {
@@ -3168,12 +3284,13 @@ button.og-path--primary .og-path__icon {
 }
 
 .og-provider__key-panel input {
-  padding: 9px 12px;
+  min-height: 48px;
+  padding: 11px 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
   background: var(--canvas);
   color: var(--ink);
-  font-size: var(--text-13);
+  font-size: var(--text-15);
   font-family: inherit;
 }
 
@@ -3190,7 +3307,8 @@ button.og-path--primary .og-path__icon {
 .og-provider__key-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 14px;
 }
 
 .og-provider__key-error {
@@ -3247,6 +3365,50 @@ button.og-path--primary .og-path__icon {
   margin-top: 3px;
 }
 
+/* These rules intentionally live after the base multi-step form styles so the
+   desktop onboarding scale is not reset by the earlier compatibility block. */
+@media (min-width: 769px) {
+  .og-progress-container,
+  .og-form {
+    max-width: 680px;
+  }
+
+  .og-progress-container {
+    margin-bottom: 24px;
+  }
+
+  .og-progress-step {
+    padding: 11px 16px;
+    font-size: var(--text-15);
+  }
+
+  .og-progress-step > span {
+    width: 28px;
+    height: 28px;
+    font-size: var(--text-13);
+  }
+
+  .og-form {
+    gap: 16px;
+    padding: 28px 38px;
+  }
+
+  .og-field span {
+    font-size: var(--text-15);
+  }
+
+  .og-field input {
+    min-height: 44px;
+    padding: 12px 16px;
+    font-size: var(--text-15);
+  }
+
+  .og-submit {
+    padding: 14px;
+    font-size: var(--text-15);
+  }
+}
+
 @media (max-width: 720px) {
   .og-frame {
     justify-content: flex-start;
@@ -3284,27 +3446,6 @@ button.og-path--primary .og-path__icon {
 
   .og-form {
     padding: 16px;
-  }
-
-  .og-provider-list {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .og-provider-list__expanded {
-    grid-column: 1;
-  }
-
-  .og-provider--selected .og-provider__row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .og-provider--selected .og-provider__action {
-    width: 100%;
-  }
-
-  .og-provider--selected .og-provider__action button {
-    width: 100%;
   }
 
   .og-provider__key-actions {
