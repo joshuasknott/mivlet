@@ -48,7 +48,7 @@
     top: 0;
     z-index: 20;
     display: grid;
-    grid-template-columns: 1fr 38px 38px;
+    grid-template-columns: minmax(0, 1fr) 36px 68px;
     align-items: center;
     min-height: 58px;
     padding: 9px 12px;
@@ -82,6 +82,12 @@
     display: none;
   }
 
+  .workspace-switcher.settings-back-button {
+    display: flex;
+    min-height: 32px;
+    padding: 4px 6px;
+  }
+
   .mobile-nav-toggle {
     display: grid;
     width: 36px;
@@ -101,27 +107,26 @@
   }
 
   .sidebar-footer {
+    display: block;
+    width: 68px;
     padding: 0;
     border: 0;
     margin: 0;
   }
 
-  .account-row {
-    width: 36px;
-    height: 36px;
-    grid-template-columns: 1fr;
-    padding: 0;
-  }
-
-  .account-row strong,
-  .account-row__email,
-  .account-row svg {
+  .sidebar-footer__identity {
     display: none;
   }
 
-  .avatar {
-    width: 30px;
-    height: 30px;
+  .sidebar-footer__actions {
+    justify-content: flex-end;
+    gap: 2px;
+  }
+
+  .sidebar-footer__action {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-1);
   }
 
   .account-popover {
@@ -271,7 +276,7 @@
   }
 
   .hero h1 {
-    font-size: 34px;
+    font-size: var(--text-13);
   }
 
   .theme-toggle {

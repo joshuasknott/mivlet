@@ -2862,6 +2862,18 @@ button.og-path--primary .og-path__icon {
   color: var(--caution);
 }
 
+.og-provider__state-hint[data-visually-hidden="true"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Expandable inline key panel (API-key providers only). */
 .og-provider__key-panel {
   display: flex;

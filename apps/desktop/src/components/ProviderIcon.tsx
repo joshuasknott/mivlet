@@ -10,15 +10,15 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
   const providerId = provider.toLowerCase();
   const gradientId = useId().replaceAll(":", "");
   const brandColor: Record<string, string> = {
-    codex: "#10A37F",
-    openai: "#10A37F",
+    codex: "var(--provider-monochrome)",
+    openai: "var(--provider-monochrome)",
     anthropic: "#D97757",
-    xai: "#000000",
+    xai: "var(--provider-monochrome)",
     openrouter: "#6467F2",
-    cursor: "#000000",
-    copilot: "#24292F",
-    grok: "#000000",
-    ollama: "#000000",
+    cursor: "var(--provider-monochrome)",
+    copilot: "#8957E5",
+    grok: "var(--provider-monochrome)",
+    ollama: "var(--provider-monochrome)",
     groq: "#F55036"
   };
 

@@ -235,7 +235,7 @@ describe("Fable home", () => {
 
     // Sections exist but start empty (mock projects and chats removed).
     expect(screen.getByText("Chats")).toBeInTheDocument();
-    expect(screen.getByText("Threads")).toBeInTheDocument();
+    expect(screen.getByText("Projects")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /daily catch-up/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /initial build/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /memory and approvals/i })).not.toBeInTheDocument();
@@ -243,7 +243,8 @@ describe("Fable home", () => {
     expect(screen.getByRole("button", { name: /^knowledge$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^threads$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^projects$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^chats$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /goals/i })).not.toBeInTheDocument();
   });
 
@@ -355,7 +356,7 @@ describe("Fable home", () => {
     expect(settings).toBeInTheDocument();
 
     await user.click(mobileConnection);
-    expect(screen.getByRole("heading", { name: /approvals/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /privacy & permissions/i })).toBeInTheDocument();
     expect(screen.getByText(/only this computer can run the action/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /close sidebar/i }));
@@ -377,9 +378,7 @@ describe("Fable home", () => {
     expect(within(sidebar).getByRole("button", { name: /select workspace/i })).toHaveTextContent(
       "Josh's Fable"
     );
-    expect(
-      screen.getByRole("heading", { name: /what are we building today in josh's fable/i })
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Josh's Fable" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /approval preset/i }));
     await user.click(screen.getByRole("menuitemradio", { name: /work freely/i }));
@@ -589,9 +588,8 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
-    await user.click(screen.getByRole("button", { name: /^profile$/i }));
 
-    expect(screen.getByRole("heading", { name: "Profile" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText(/^name$/i));
     await user.type(screen.getByLabelText(/^name$/i), "Joshua Knott");
@@ -642,6 +640,7 @@ describe("Fable home", () => {
     await skipOnboarding();
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^providers$/i }));
 
     expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
 
@@ -700,6 +699,7 @@ describe("Fable home", () => {
     await skipOnboarding();
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^providers$/i }));
 
     const anthropicCard = screen.getByText("Anthropic").closest("article");
     expect(anthropicCard).not.toBeNull();
@@ -775,6 +775,7 @@ describe("Fable home", () => {
     render(<App />);
     await skipOnboarding();
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^providers$/i }));
 
     const anthropicCard = screen.getByText("Anthropic").closest("article");
     await user.click(

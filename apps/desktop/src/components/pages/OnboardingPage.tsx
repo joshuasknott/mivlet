@@ -479,6 +479,7 @@ function ProviderRow({
           className={`og-provider__state-hint${
             view.tone === "danger" ? " og-provider__state-hint--danger" : ""
           }${view.tone === "caution" ? " og-provider__state-hint--caution" : ""}`}
+          data-visually-hidden={provider.authState === "install-required" ? "true" : undefined}
           aria-label={
             provider.authState === "install-required"
               ? `${provider.label} install required`

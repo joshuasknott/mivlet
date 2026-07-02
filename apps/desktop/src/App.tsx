@@ -130,7 +130,7 @@ export function App() {
       return storedTheme;
     }
 
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return "light";
   });
 
   useEffect(() => {
@@ -140,12 +140,24 @@ export function App() {
 
   const [previousActiveItem, setPreviousActiveItem] = useState("new-chat");
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("general");
+  const navigationHistory = useRef([runtime.activeItem]);
+  const navigationTarget = useRef<string | null>(null);
+  const [navigationIndex, setNavigationIndex] = useState(0);
 
   useEffect(() => {
+    if (navigationTarget.current === runtime.activeItem) {
+      navigationTarget.current = null;
+    } else if (navigationHistory.current[navigationIndex] !== runtime.activeItem) {
+      const nextHistory = navigationHistory.current.slice(0, navigationIndex + 1);
+      nextHistory.push(runtime.activeItem);
+      navigationHistory.current = nextHistory;
+      setNavigationIndex(nextHistory.length - 1);
+    }
+
     if (runtime.activeItem !== "Settings" && runtime.activeItem !== "Profile") {
       setPreviousActiveItem(runtime.activeItem);
     }
-  }, [runtime.activeItem]);
+  }, [navigationIndex, runtime.activeItem]);
 
   useEffect(() => {
     if (runtime.activeItem === "Profile") {
@@ -431,6 +443,17 @@ export function App() {
     runtime.setActiveItem("Settings");
   };
 
+  const navigateHistory = (offset: -1 | 1) => {
+    const nextIndex = navigationIndex + offset;
+    const target = navigationHistory.current[nextIndex];
+    if (!target || nextIndex < 0 || nextIndex >= navigationHistory.current.length) {
+      return;
+    }
+    navigationTarget.current = target;
+    setNavigationIndex(nextIndex);
+    runtime.setActiveItem(target);
+  };
+
   return (
     <main
       className={`desktop-frame${sidebarCollapsed ? " desktop-frame--sidebar-collapsed" : ""}`}
@@ -451,7 +474,17 @@ export function App() {
         isSettingsActive={isSettingsActive}
         activeSettingsTab={activeSettingsTab}
         onSelectSettingsTab={handleSelectSettingsTab}
-        onCloseSettings={() => runtime.setActiveItem(previousActiveItem)}
+        canNavigateBack={navigationIndex > 0}
+        canNavigateForward={navigationIndex < navigationHistory.current.length - 1}
+        onNavigateBack={() => navigateHistory(-1)}
+        onNavigateForward={() => navigateHistory(1)}
+        onCloseSettings={() => {
+          if (navigationIndex > 0) {
+            navigateHistory(-1);
+          } else {
+            runtime.setActiveItem(previousActiveItem);
+          }
+        }}
         onNewChat={runtime.startNewChat}
         onAddProject={() => {
           runtime.setActiveItem("new-project");
@@ -509,7 +542,7 @@ export function App() {
         ) : (
           <div className="workspace-center">
             <section className="hero" aria-labelledby="hero-title">
-              <h1 id="hero-title">What are we building today in {workspaceName}?</h1>
+              <h1 id="hero-title">{workspaceName}</h1>
             </section>
 
             <Composer

@@ -21,6 +21,15 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     connectedBackendIds: [],
     backendStatus: null,
     modelDiscoveryByProvider: {},
+    workflowRuns: [],
+    schedulerQueue: [],
+    scheduledJobs: [],
+    workflowDefinitions: [],
+    notificationHistory: [],
+    retryingRunIds: [],
+    runHistoryJobId: null,
+    clearRunHistoryJobId: vi.fn(),
+    refreshWorkflowRuns: vi.fn().mockResolvedValue(undefined),
     connectBackendWithVerify: vi.fn(),
     disconnectBackend: vi.fn(),
     refreshModels: vi.fn(),
@@ -56,7 +65,7 @@ describe("Settings -> Approvals", () => {
         runtime={runtime}
         theme="dark"
         onThemeChange={() => {}}
-        activeTab="approvals"
+        activeTab="privacy"
         workspaceName="Fable"
       />
     );
@@ -335,7 +344,7 @@ describe("Settings → Privacy UX states", () => {
       })
     );
 
-    expect(screen.getByRole("heading", { name: "Privacy" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Privacy & Permissions" })).toBeTruthy();
     expect(screen.getByText("Google Drive")).toBeTruthy();
     expect(screen.getByText("Active: user@example.com")).toBeTruthy();
     expect(screen.getByLabelText("Toggle personal memory")).toBeTruthy();
@@ -428,7 +437,7 @@ describe("Settings → Privacy UX states", () => {
 
 describe("Settings → History (inspectable action history)", () => {
   function renderHistory(runtime: ShellRuntime) {
-    return render(
+    const result = render(
       <SettingsPage
         runtime={runtime}
         theme="dark"
@@ -437,6 +446,8 @@ describe("Settings → History (inspectable action history)", () => {
         workspaceName="Fable"
       />
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+    return result;
   }
 
   const historyEvents: ActionHistoryEvent[] = [

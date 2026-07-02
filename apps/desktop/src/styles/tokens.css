@@ -18,6 +18,8 @@
   --surface-raised: #ffffff;
   --surface-hover: #f0f0f0;
   --surface-overlay: #ffffff;
+  --sidebar-surface: #f3f3f3;
+  --provider-monochrome: #111111;
   --line: #e6e6e6;
   --line-strong: #d7d7d7;
   --accent: #202124;
@@ -87,6 +89,8 @@
   --surface-raised: #1f1f1f;
   --surface-hover: #292929;
   --surface-overlay: #202020;
+  --sidebar-surface: #181818;
+  --provider-monochrome: #f2f2f2;
   --line: #2a2a2a;
   --line-strong: #3a3a3a;
   --accent: #f0f0f0;

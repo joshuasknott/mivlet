@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   CaretDown,
   CaretRight,
   Clock,
@@ -64,7 +65,11 @@ export function WorkspaceSidebar({
   isSettingsActive = false,
   activeSettingsTab,
   onSelectSettingsTab,
-  onCloseSettings
+  onCloseSettings,
+  canNavigateBack = false,
+  canNavigateForward = false,
+  onNavigateBack,
+  onNavigateForward
 }: {
   workspaceName: string;
   utilityItems: readonly UtilityNavItem[];
@@ -95,6 +100,10 @@ export function WorkspaceSidebar({
   activeSettingsTab?: SettingsTab;
   onSelectSettingsTab?: (tab: SettingsTab) => void;
   onCloseSettings?: () => void;
+  canNavigateBack?: boolean;
+  canNavigateForward?: boolean;
+  onNavigateBack?: () => void;
+  onNavigateForward?: () => void;
 }) {
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
   const [settingsSearch, setSettingsSearch] = useState("");
@@ -194,6 +203,26 @@ export function WorkspaceSidebar({
               )}
             </div>
           )}
+          {!isSettingsActive ? (
+            <div className="sidebar-history-controls" aria-label="Navigation history">
+              <button
+                type="button"
+                aria-label="Back"
+                disabled={!canNavigateBack}
+                onClick={onNavigateBack}
+              >
+                <ArrowLeft size={15} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label="Forward"
+                disabled={!canNavigateForward}
+                onClick={onNavigateForward}
+              >
+                <ArrowRight size={15} aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
           <button
             type="button"
             className="sidebar-minimize"
