@@ -25,6 +25,8 @@ export function Composer({
   onComposerChange,
   onSubmit,
   voiceEnabled,
+  voiceControlDisabled = false,
+  voiceDisabledReason,
   onToggleVoice,
   onAttach,
   addMenuOpen,
@@ -54,6 +56,8 @@ export function Composer({
   onComposerChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   voiceEnabled: boolean;
+  voiceControlDisabled?: boolean;
+  voiceDisabledReason?: string;
   onToggleVoice: () => void;
   onAttach: () => void;
   addMenuOpen: boolean;
@@ -458,8 +462,16 @@ export function Composer({
               type="button"
               className={`composer-chip${voiceEnabled ? " composer-chip--active" : ""}`}
               onClick={onToggleVoice}
+              disabled={voiceControlDisabled}
+              title={voiceDisabledReason}
               aria-pressed={voiceEnabled}
-              aria-label={voiceEnabled ? "Stop voice recording" : "Start voice recording"}
+              aria-label={
+                voiceEnabled
+                  ? "Stop voice recording"
+                  : voiceDisabledReason
+                    ? `Voice input unavailable: ${voiceDisabledReason}`
+                    : "Start voice recording"
+              }
             >
               <Microphone size={17} weight="fill" />
             </button>

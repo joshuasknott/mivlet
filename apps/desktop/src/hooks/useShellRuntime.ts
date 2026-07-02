@@ -289,6 +289,7 @@ export interface ShellRuntime {
   composerValue: string;
   setComposerValue: (value: string) => void;
   voiceEnabled: boolean;
+  setVoiceEnabled: (enabled: boolean) => void;
   toggleVoice: () => void;
   setImportStatus: (status: string | null) => void;
   triggerAttach: () => void;
@@ -2523,6 +2524,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     composerValue,
     setComposerValue,
     voiceEnabled,
+    setVoiceEnabled,
     toggleVoice,
     setImportStatus,
     triggerAttach,

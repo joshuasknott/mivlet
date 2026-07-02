@@ -172,6 +172,20 @@ describe("Fable persistence secret boundary", () => {
     expect(serialized).not.toContain('"apiKey"');
   });
 
+  it("keeps dictation opt-in conservative and never adds audio or transcript fields", () => {
+    const snapshot = shellStateToRuntimeSnapshot(defaultState);
+    expect(snapshot.voiceEnabled).toBe(false);
+    expect(JSON.stringify(snapshot)).not.toMatch(/"audio"|"transcript"/i);
+
+    const { voiceEnabled: _legacyMissing, ...legacySnapshot } = snapshot;
+    expect(
+      shellStateFromRuntimeSnapshot(
+        legacySnapshot as typeof snapshot,
+        { ...defaultState, voiceEnabled: true }
+      ).voiceEnabled
+    ).toBe(false);
+  });
+
   it("never carries secrets in connected backend ids (ids only)", () => {
     const state: PersistedShellState = {
       ...defaultState,

@@ -17,7 +17,7 @@ import {
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { BackendAuthState, BackendProvider } from "@fable/protocol";
+import type { BackendAuthState, BackendProvider, VoiceCapability } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import { stateViewFor } from "../../lib/backend-state";
 import { ProviderIcon } from "../ProviderIcon";
@@ -58,7 +58,8 @@ export function SettingsPage({
   theme,
   onThemeChange,
   activeTab,
-  workspaceName
+  workspaceName,
+  dictationCapability
 }: {
   runtime: ShellRuntime;
   profile?: ProfileFixture;
@@ -67,6 +68,7 @@ export function SettingsPage({
   onThemeChange: (theme: "light" | "dark") => void;
   activeTab: SettingsTab;
   workspaceName: string;
+  dictationCapability: VoiceCapability;
 }) {
   const [status, setStatus] = useState("");
 
@@ -91,6 +93,12 @@ export function SettingsPage({
           <AppearanceSettingsView
             theme={theme}
             onThemeChange={onThemeChange}
+            onStatus={setStatus}
+          />
+        ) : activeTab === "privacy" ? (
+          <PrivacySettingsView
+            runtime={runtime}
+            capability={dictationCapability}
             onStatus={setStatus}
           />
         ) : activeTab === "workspace" ? (
@@ -458,11 +466,8 @@ function authStateLabel(
   return stateViewFor(authState).label;
 }
 
-function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "profile" | "appearance" | "workspace"> }) {
+function QuietPlaceholder({ tab }: { tab: "notifications" }) {
   const copy = {
-    privacy: {
-      description: "Local defaults and data controls will live here."
-    },
     notifications: {
       description: "Notification preferences will live here."
     }
@@ -476,6 +481,48 @@ function QuietPlaceholder({ tab }: { tab: Exclude<SettingsTab, "providers" | "pr
       <div className="settings-empty-row">
         <GearSix size={18} />
         <span>Nothing to configure yet.</span>
+      </div>
+    </div>
+  );
+}
+
+function PrivacySettingsView({
+  runtime,
+  capability,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  capability: VoiceCapability;
+  onStatus: (message: string) => void;
+}) {
+  const available = capability.status === "supported";
+  return (
+    <div className="settings-page__body">
+      <div className="settings-section-heading">
+        <p>Control optional input features that can access sensitive device data.</p>
+      </div>
+      <div className="provider-access-list" style={{ padding: "14px 20px" }}>
+        <button
+          type="button"
+          className="toggle-row"
+          aria-pressed={runtime.voiceEnabled}
+          disabled={!available && !runtime.voiceEnabled}
+          onClick={() => {
+            const enabled = !runtime.voiceEnabled;
+            runtime.setVoiceEnabled(enabled);
+            onStatus(enabled ? "Dictation enabled." : "Dictation disabled.");
+          }}
+        >
+          <span>
+            <strong>Enable dictation</strong>
+            <small>
+              Starts only when you choose the microphone. Fable stores neither audio nor temporary transcripts.
+              Speech processing may use an operating-system or browser service.
+            </small>
+            {!available ? <small>{capability.reason} Text input remains available.</small> : null}
+          </span>
+          <span className="toggle-switch" aria-hidden="true"><span /></span>
+        </button>
       </div>
     </div>
   );

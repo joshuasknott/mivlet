@@ -523,6 +523,26 @@ describe("Fable home", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps dictation disabled by default and explains the text fallback when unsupported", async () => {
+    const user = await renderWorkspace();
+
+    expect(
+      screen.getByRole("button", {
+        name: /voice input unavailable: enable dictation in privacy settings/i
+      })
+    ).toBeDisabled();
+    expect(screen.getByLabelText(/universal composer/i)).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^privacy$/i }));
+
+    const dictation = screen.getByRole("button", { name: /enable dictation/i });
+    expect(dictation).toHaveAttribute("aria-pressed", "false");
+    expect(dictation).toBeDisabled();
+    expect(screen.getByText(/text input remains available/i)).toBeInTheDocument();
+    expect(screen.getByText(/stores neither audio nor temporary transcripts/i)).toBeInTheDocument();
+  });
+
   it("connects a native API-key provider through the credential boundary in Settings", async () => {
     // Serve a fail-closed Anthropic so Settings shows it as needs-auth; the test
     // then connects it through the boundary and asserts the boundary recorded

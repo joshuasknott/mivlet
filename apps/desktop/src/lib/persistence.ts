@@ -168,7 +168,8 @@ export function shellStateFromRuntimeSnapshot(
     ...defaultShellState,
     activeItem: normalizeActiveItem(snapshot.activeItem || defaultShellState.activeItem),
     composerValue: snapshot.composerDraft,
-    voiceEnabled: snapshot.voiceEnabled,
+    // Missing legacy values fail closed: dictation always requires an explicit opt-in.
+    voiceEnabled: snapshot.voiceEnabled ?? false,
     approvalAudit: snapshot.approvalAudit,
     dismissedApprovalIds: snapshot.dismissedApprovalIds,
     approvalRules: snapshot.approvalRules,

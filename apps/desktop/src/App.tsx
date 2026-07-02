@@ -89,7 +89,11 @@ export function App() {
     }
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
-  const voice = useVoice(voiceProvider, (transcript) => void submitComposerText(transcript));
+  const voice = useVoice(voiceProvider, runtime.voiceEnabled, (transcript) => {
+    // Dictation never bypasses the normal composer review/send path.
+    runtime.setComposerValue(transcript);
+    runtime.focusComposer(transcript);
+  });
 
   // Scheduled prompts run through a dedicated headless runner that drives the
   // same AgentBackend contract as the composer — but in complete isolation: it
@@ -179,6 +183,7 @@ export function App() {
             onThemeChange={setTheme}
             activeTab={activeSettingsTab}
             workspaceName={workspaceName}
+            dictationCapability={voice.capability}
           />
         );
       default:
@@ -518,9 +523,23 @@ export function App() {
                 if (!text.trim()) return;
                 void submitComposerText(text);
               }}
-              voiceEnabled={voice.state.status === "recording"}
+              voiceEnabled={voice.state.status === "active"}
+              voiceControlDisabled={
+                voice.state.status === "disabled" ||
+                voice.state.status === "unavailable" ||
+                voice.state.status === "processing"
+              }
+              voiceDisabledReason={
+                voice.state.status === "disabled"
+                  ? "Enable dictation in Privacy settings"
+                  : voice.state.status === "unavailable"
+                    ? voice.state.reason
+                    : voice.state.status === "processing"
+                      ? "Speech is being processed"
+                      : undefined
+              }
               onToggleVoice={() => {
-                if (voice.state.status === "recording") void voice.stop();
+                if (voice.state.status === "active") void voice.stop();
                 else if (voice.state.status !== "processing") void voice.start();
               }}
               onAttach={runtime.triggerAttach}
@@ -544,7 +563,7 @@ export function App() {
               onRunCommand={runtime.runCommand}
               onFileChange={runtime.handleLocalKnowledgeFileChange}
               voiceState={
-                voice.state.status === "recording"
+                voice.state.status === "active"
                   ? "Recording only after your explicit click."
                   : voice.state.status === "processing"
                     ? "Processing speech…"
@@ -563,7 +582,10 @@ export function App() {
               knowledgeSources={runtime.workspaceKnowledgeSources}
               schedules={runtime.schedules}
             />
-            <VoiceReview voice={voice} />
+            <VoiceReview
+              voice={voice}
+              onReturnToText={() => runtime.focusComposer(runtime.composerValue)}
+            />
 
             {renderChatContext()}
           </div>
