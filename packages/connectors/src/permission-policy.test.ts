@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CUSTOM_APPROVAL_SETTINGS,
+  effectForBrowserAction,
   effectForConnectorAction,
   effectForTool,
   evaluatePermissionPolicy,
@@ -59,6 +60,14 @@ describe("permission profile policy", () => {
     expect(effectForTool("run-shell")).toBe("shell-execution");
     expect(effectForTool("gmail-read")).toBe("connector-read");
   });
+
+  it("maps browser automation actions onto the shared permission effects", () => {
+    expect(effectForBrowserAction("browser.read-url")).toBe("browser-read");
+    expect(effectForBrowserAction("browser.click")).toBe("browser-state-mutation");
+    expect(effectForBrowserAction("browser.submit")).toBe("publish-external");
+    expect(effectForBrowserAction("browser.download")).toBe("local-write");
+    expect(effectForBrowserAction("browser.dom-dump")).toBeNull();
+  });
 });
 
 describe("plain approval choices map to one strict policy", () => {
@@ -78,7 +87,8 @@ describe("plain approval choices map to one strict policy", () => {
       "schedule-mutation",
       "schedule-execution",
       "memory-promotion",
-      "remote-approval-decision"
+      "remote-approval-decision",
+      "browser-state-mutation"
     ] as const) {
       expect(isHighSeverityEffect(effect)).toBe(true);
     }
@@ -110,12 +120,25 @@ describe("plain approval choices map to one strict policy", () => {
       "schedule-mutation",
       "schedule-execution",
       "memory-promotion",
-      "remote-approval-decision"
+      "remote-approval-decision",
+      "browser-state-mutation"
     ] as const) {
       expect(
         evaluatePermissionPolicy({ mode: "full-access", effect })
       ).toMatchObject({ allowed: true, approvalRequired: true });
     }
+  });
+
+  it("allows browser reads in read-only mode but requires approval for browser control", () => {
+    expect(
+      evaluatePermissionPolicy({ mode: "read-only", effect: "browser-read" })
+    ).toMatchObject({ allowed: true, approvalRequired: false });
+    expect(
+      evaluatePermissionPolicy({ mode: "trusted-scope", effect: "browser-state-mutation" })
+    ).toMatchObject({ allowed: true, approvalRequired: true });
+    expect(
+      evaluatePermissionPolicy({ mode: "read-only", effect: "browser-state-mutation" })
+    ).toMatchObject({ allowed: false, approvalRequired: false });
   });
 });
 

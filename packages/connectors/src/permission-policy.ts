@@ -11,6 +11,8 @@ export type PermissionEffect =
   | "delete"
   | "shell-execution"
   | "web-fetch"
+  | "browser-read"
+  | "browser-state-mutation"
   | "connector-read"
   | "connector-write"
   | "publish-external"
@@ -54,6 +56,7 @@ const READ_ONLY_ALLOWED = new Set<PermissionEffect>([
   "local-read",
   "connector-read",
   "web-fetch",
+  "browser-read",
   "cache-read"
 ]);
 
@@ -61,6 +64,7 @@ const TRUSTED_ALLOWED = new Set<PermissionEffect>([
   ...READ_ONLY_ALLOWED,
   "local-write",
   "connector-write",
+  "browser-state-mutation",
   "app-state-mutation",
   "schedule-mutation",
   "schedule-execution",
@@ -79,7 +83,8 @@ const HIGH_SEVERITY_EFFECTS = new Set<PermissionEffect>([
   "schedule-mutation",
   "schedule-execution",
   "memory-promotion",
-  "remote-approval-decision"
+  "remote-approval-decision",
+  "browser-state-mutation"
 ]);
 
 const CONSEQUENTIAL_EFFECTS = new Set<PermissionEffect>([
@@ -170,6 +175,29 @@ export function effectForConnectorAction(action: string): PermissionEffect {
   if (CONNECTOR_DELETE_ACTIONS.has(action)) return "delete";
   if (CONNECTOR_PUBLISH_ACTIONS.has(action)) return "publish-external";
   return "connector-write";
+}
+
+export function effectForBrowserAction(action: string): PermissionEffect | null {
+  switch (action) {
+    case "browser.read-url":
+    case "browser.read-title":
+      return "browser-read";
+    case "browser.download":
+      return "local-write";
+    case "browser.submit":
+    case "browser.upload":
+    case "browser.clipboard-write":
+      return "publish-external";
+    case "browser.navigate":
+    case "browser.click":
+    case "browser.type":
+    case "browser.select":
+    case "browser.screenshot":
+    case "browser.clipboard-read":
+      return "browser-state-mutation";
+    default:
+      return null;
+  }
 }
 
 export function isHighSeverityEffect(effect: PermissionEffect): boolean {
