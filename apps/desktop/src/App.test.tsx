@@ -435,8 +435,11 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /create schedule/i }));
 
     expect(await screen.findByText("Weekly digest")).toBeInTheDocument();
-    expect(screen.getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
-    expect(screen.getByText("Summarize active projects and approvals.")).toBeInTheDocument();
+    // The create form also shows a live weekly/Mon summary, so scope the saved
+    // schedule's recurrence summary to the saved-schedules list.
+    const savedSchedules = screen.getByRole("list", { name: /saved schedules/i });
+    expect(within(savedSchedules).getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
+    expect(within(savedSchedules).getByText("Summarize active projects and approvals.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
     const editName = screen.getByLabelText(/edit schedule task name/i);
     await user.clear(editName);

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ScheduledJob, ScheduledExecutionRoute, WorkflowRun } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
@@ -83,9 +83,12 @@ describe("SchedulePanel — list states", () => {
 
   it("renders an enabled badge and the recurrence summary for an active job", () => {
     renderPanel({ jobs: [makeJob()] });
-    expect(screen.getByText("Weekly digest")).toBeInTheDocument();
-    expect(screen.getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
-    expect(screen.getByText("Enabled")).toBeInTheDocument();
+    // The create form also shows a live recurrence summary from its default
+    // (weekly Mon 9am), so scope the job's summary to the saved-schedules list.
+    const savedList = screen.getByRole("list", { name: /saved schedules/i });
+    expect(within(savedList).getByText("Weekly digest")).toBeInTheDocument();
+    expect(within(savedList).getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
+    expect(within(savedList).getByText("Enabled")).toBeInTheDocument();
   });
 
   it("renders a paused badge for a paused job and dims the row", () => {
@@ -263,5 +266,23 @@ describe("SchedulePanel — connector selection", () => {
     ] as import("@fable/protocol").ConnectorManifest[];
     renderPanel({ connectors: manifests });
     expect(screen.queryByRole("button", { name: "Local Files" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SchedulePanel — live recurrence summary", () => {
+  it("surfaces a consolidated recurrence summary in the create form that follows edits", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    // The create form's live summary (the polite live region) reflects the
+    // default weekly/Mon/09:00.
+    const formSummary = screen.getByText(/Weekly on Mon at 9:00 AM/i);
+    expect(formSummary).toBeInTheDocument();
+
+    // The summary is the single scannable readback: changing the frequency
+    // updates it in place, consolidating what used to be split across
+    // Repeat/Frequency/Time/Weekdays labels.
+    await user.selectOptions(screen.getByLabelText(/frequency/i), "daily");
+    expect(screen.getByText(/Daily at 9:00 AM/i)).toBeInTheDocument();
   });
 });

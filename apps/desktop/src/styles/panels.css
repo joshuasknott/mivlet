@@ -1047,10 +1047,24 @@
   border-color: var(--accent-line);
 }
 
-.schedule-form__preview {
+/* Consolidated recurrence summary shown live while editing: the pattern
+   (e.g. "Weekly on Mon, Wed at 9:00 AM") and the next run read as one
+   scannable line, replacing the previously split Repeat/Frequency/Time/Days
+   readback. */
+.schedule-form__summary {
   margin: 0;
   color: var(--ink-muted);
   font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.schedule-form__summary-pattern {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.schedule-form__summary-next {
+  color: var(--ink-soft);
 }
 
 .schedule-form__actions {
@@ -1177,17 +1191,20 @@
   color: var(--caution);
 }
 
-.schedule-row__when {
-  display: block;
+.schedule-row__timing {
   margin-top: 3px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.schedule-row__when {
   color: var(--ink-muted);
   font-size: var(--text-12);
   font-weight: 500;
 }
 
 .schedule-row__next {
-  display: block;
-  margin-top: 2px;
   color: var(--ink-soft);
   font-size: var(--text-12);
 }

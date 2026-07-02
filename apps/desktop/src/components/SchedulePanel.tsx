@@ -109,6 +109,17 @@ export function SchedulePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerKey]);
 
+  // A consolidated, human-readable recurrence summary produced from the same
+  // draft trigger the list will store — e.g. "Weekly on Mon, Wed at 9:00 AM".
+  // Surfacing it in the form gives a single scannable readback while the user
+  // edits Repeat/Frequency/Time/Weekdays, instead of forcing them to mentally
+  // combine those split controls. Reuses summarizeRecurrence so the form and
+  // the saved list can never disagree.
+  const recurrenceSummary = useMemo(
+    () => (draftTrigger && !validateScheduleTrigger(draftTrigger) ? summarizeRecurrence(draftTrigger) : null),
+    [draftTrigger]
+  );
+
   const resetForm = () => {
     setForm(DEFAULT_FORM_VALUE);
     setSubmitted(false);
@@ -135,6 +146,7 @@ export function SchedulePanel({
         onChange={setForm}
         submitted={submitted}
         validation={validation}
+        recurrenceSummary={recurrenceSummary}
         nextRunPreview={nextRunPreview}
         connectors={connectors}
         onSubmit={submit}
@@ -188,6 +200,7 @@ function ScheduleForm({
   onChange,
   submitted,
   validation,
+  recurrenceSummary,
   nextRunPreview,
   connectors,
   onSubmit,
@@ -197,6 +210,7 @@ function ScheduleForm({
   onChange: (next: ScheduleFormValue) => void;
   submitted: boolean;
   validation: ReturnType<typeof validateForm>;
+  recurrenceSummary: string | null;
   nextRunPreview: string | null;
   connectors: ConnectorManifest[];
   onSubmit: (event: FormEvent) => void;
@@ -244,9 +258,14 @@ function ScheduleForm({
 
       <ConnectorControls form={form} onChange={onChange} connectors={connectors} />
 
-      {nextRunPreview ? (
-        <p className="schedule-form__preview" aria-live="polite">
-          Next run {nextRunPreview}
+      {recurrenceSummary || nextRunPreview ? (
+        <p className="schedule-form__summary" aria-live="polite">
+          {recurrenceSummary ? (
+            <span className="schedule-form__summary-pattern">{recurrenceSummary}</span>
+          ) : null}
+          {nextRunPreview ? (
+            <span className="schedule-form__summary-next"> · Next {nextRunPreview}</span>
+          ) : null}
         </p>
       ) : null}
 
@@ -523,12 +542,14 @@ function ScheduleRow({
                 {STATE_LABEL[state]}
               </span>
             </div>
-            <span className="schedule-row__when">{summarizeRecurrence(job.trigger)}</span>
-            {job.nextRunAt && job.status === "active" ? (
-              <span className="schedule-row__next">
-                Next {new Date(job.nextRunAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
-              </span>
-            ) : null}
+            <div className="schedule-row__timing">
+              <span className="schedule-row__when">{summarizeRecurrence(job.trigger)}</span>
+              {job.nextRunAt && job.status === "active" ? (
+                <span className="schedule-row__next">
+                  · Next {new Date(job.nextRunAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
+                </span>
+              ) : null}
+            </div>
             <p className="schedule-row__description">{job.description}</p>
 
             {job.execution ? (
