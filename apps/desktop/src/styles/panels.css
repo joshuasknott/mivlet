@@ -6,9 +6,9 @@
 
 .context-panel {
   display: grid;
-  gap: 14px;
-  margin-top: 38px;
-  padding-bottom: 48px;
+  gap: 12px;
+  margin-top: 24px;
+  padding-bottom: 32px;
 }
 
 .context-panel--split {
@@ -571,7 +571,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--line);
   border-radius: var(--radius-2);
-  box-shadow: var(--shadow-1);
+  box-shadow: none;
 }
 
 .connector-card__header {

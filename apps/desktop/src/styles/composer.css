@@ -10,13 +10,13 @@
  * than Google AI Studio's saturated rainbow. */
 .composer-glow {
   position: relative;
-  width: min(100%, 940px);
-  margin: 30px auto 0;
+  width: min(100%, 640px);
+  margin: 18px auto 0;
   padding: 0;
   border: 1px solid var(--line-strong);
-  border-radius: 28px;
+  border-radius: var(--radius-2);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-2);
+  box-shadow: none;
   backdrop-filter: var(--glass-filter);
   transition:
     border-color 200ms ease,
@@ -31,13 +31,13 @@
 .composer-glow:hover {
   border-color: var(--line-strong);
   background: var(--surface-hover);
-  box-shadow: var(--shadow-2);
+  box-shadow: none;
 }
 
 .composer-glow:focus-within {
   border-color: var(--line-strong);
   background: var(--surface-overlay);
-  box-shadow: var(--shadow-2);
+  box-shadow: var(--focus-ring);
 }
 
 /* The card itself — solid off-white surface that masks everything but the
@@ -46,10 +46,10 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 214px;
-  padding: 28px 28px 22px;
+  min-height: 100px;
+  padding: 10px 12px 9px;
   background: transparent;
-  border-radius: 28px;
+  border-radius: var(--radius-2);
 }
 
 .composer-field {
@@ -60,16 +60,16 @@
 .composer-input {
   flex: 1 1 auto;
   width: 100%;
-  min-height: 72px;
-  max-height: 180px;
-  padding: 8px 10px 12px;
+  min-height: 42px;
+  max-height: 128px;
+  padding: 5px 4px 8px;
   resize: none;
   color: var(--ink);
   background: transparent;
   border: 0;
   outline: 0;
-  font-size: var(--text-16);
-  line-height: 1.6;
+  font-size: var(--text-14);
+  line-height: 1.45;
   transition: color 150ms ease;
 }
 
@@ -91,14 +91,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 10px;
   margin-top: auto;
 }
 
 .composer-control-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
 }
 
 .composer-control-anchor {
@@ -116,7 +116,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
+  height: 28px;
   padding: 0;
   color: var(--ink);
   background: var(--surface-raised);
@@ -129,21 +129,21 @@
 }
 
 .composer-model {
-  gap: 8px;
-  padding: 0 14px 0 16px;
-  font-size: var(--text-13);
+  gap: 6px;
+  padding: 0 9px;
+  font-size: var(--text-12);
   font-weight: 500;
 }
 
 .composer-permissions-card {
   gap: 7px;
-  padding: 0 12px;
+  padding: 0 9px;
   font-size: var(--text-12);
   font-weight: 500;
 }
 
 .composer-chip {
-  width: 36px;
+  width: 28px;
   border-radius: 50% !important;
 }
 
@@ -185,9 +185,9 @@
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  color: #ffffff;
+  width: 28px;
+  height: 28px;
+  color: var(--surface);
   background: var(--accent);
   border: 0;
   border-radius: 50%;

@@ -6,7 +6,7 @@
 .workspace-center--page {
   display: flex;
   flex-direction: column;
-  margin: 64px auto 48px;
+  margin: 32px auto 36px;
   min-height: 0;
   justify-content: flex-start;
 }
@@ -15,9 +15,9 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 20px;
+  gap: 16px;
   margin-bottom: 8px;
-  padding-bottom: 20px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -78,7 +78,7 @@
 
 /* On the page views, the panel content sits directly under the header. */
 .workspace-center--page .context-panel {
-  margin-top: 28px;
+  margin-top: 18px;
 }
 
 .coming-soon-panel {
@@ -109,7 +109,7 @@
 .knowledge-page__header {
   display: grid;
   gap: 7px;
-  margin-bottom: 26px;
+  margin-bottom: 18px;
 }
 
 .knowledge-page__header h1 {
@@ -130,10 +130,10 @@
 .knowledge-search {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
-  min-height: 66px;
-  padding: 0 18px;
+  min-height: 44px;
+  padding: 0 12px;
   color: var(--ink-muted);
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
@@ -189,22 +189,24 @@
 .knowledge-sections {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 22px;
+  gap: 3px;
+  margin-top: 14px;
   border-bottom: 1px solid var(--line);
 }
 
 .knowledge-sections button {
   display: grid;
   align-content: center;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
-  min-height: 86px;
-  padding: 12px 18px 14px;
+  min-height: 58px;
+  padding: 8px 10px;
   color: var(--ink-muted);
   text-align: left;
   background: transparent;
   border: 0;
-  border-bottom: 3px solid transparent;
+  border-radius: var(--radius-1) var(--radius-1) 0 0;
+  border-bottom: 1px solid transparent;
 }
 
 .knowledge-sections button:hover {
@@ -213,15 +215,16 @@
 }
 
 .knowledge-sections button.is-active {
-  color: var(--brand-copper-strong);
-  border-bottom-color: var(--brand-copper);
+  color: var(--ink);
+  background: var(--accent-subtle);
+  border-bottom-color: var(--line-strong);
 }
 
 .knowledge-sections__label {
   display: flex;
   align-items: baseline;
-  gap: 9px;
-  font-size: var(--text-18);
+  gap: 7px;
+  font-size: var(--text-14);
   font-weight: 500;
 }
 
@@ -243,7 +246,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 58px;
+  min-height: 48px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -1106,14 +1109,14 @@
 
 .settings-page__body {
   display: grid;
-  gap: 24px;
+  gap: 18px;
   padding-top: 7px;
 }
 
 .settings-page__content {
   overflow-y: auto;
   width: min(100%, 1040px);
-  padding: 28px 48px 48px;
+  padding: 24px 36px 36px;
 }
 
 .settings-page__header {
@@ -1129,7 +1132,7 @@
 
 .settings-section-heading {
   display: grid;
-  gap: 5px;
+  gap: 3px;
 }
 
 .settings-section-heading h2 {
@@ -1144,7 +1147,7 @@
   margin: 0;
   color: var(--ink-soft);
   font-size: var(--text-14);
-  line-height: 1.45;
+  line-height: 1.4;
 }
 
 .provider-access-list {
@@ -1161,7 +1164,7 @@
 }
 
 .provider-access-groups {
-  gap: 28px;
+  gap: 20px;
 }
 
 .provider-access-group {
@@ -1471,7 +1474,7 @@
   grid-template-columns: 26px minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  padding-top: 50px;
+  padding-top: 28px;
   border-top: 1px solid var(--line);
 }
 
@@ -1534,8 +1537,8 @@
 }
 
 .settings-open-section .profile-clean-card__content {
-  gap: 26px;
-  padding: 30px 0;
+  gap: 18px;
+  padding: 22px 0;
 }
 
 .settings-open-section .profile-clean-card__footer {
@@ -1822,8 +1825,8 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 100vh;
-  padding: clamp(24px, 5vw, 56px) 24px;
+  min-height: 100dvh;
+  padding: 32px 20px;
   overflow-y: auto;
   background: var(--surface);
 }
@@ -1853,12 +1856,12 @@
   flex-direction: column;
   align-items: center;
   width: 100%;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .og-hero h1 {
   max-width: 760px;
-  margin: 20px 0 0;
+  margin: 12px 0 0;
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: clamp(var(--text-20), 2.4vw, var(--text-30));
@@ -1890,9 +1893,9 @@
   padding: 20px 22px;
   text-align: left;
   border: 1px solid var(--line);
-  border-radius: var(--radius-3);
+  border-radius: var(--radius-2);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-2);
+  box-shadow: none;
   backdrop-filter: var(--glass-filter);
 }
 
