@@ -50,18 +50,14 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
 import type { ProfileFixture } from "../../data/workspace";
 
-export type SettingsTab =
-  | "general"
-  | "providers"
-  | "privacy"
-  | "history";
-
-export const tabs: { id: SettingsTab; label: string }[] = [
-  { id: "general", label: "General" },
-  { id: "providers", label: "Providers" },
-  { id: "privacy", label: "Privacy & Permissions" },
-  { id: "history", label: "History" }
-];
+// Re-export the eager-loadable tab metadata so the lazy-loaded page module
+// remains the single source of truth for existing direct importers. The
+// lightweight `settings-tabs.ts` is what callers that only need the tab list
+// should import, so they don't pull this heavy module into the initial bundle.
+export type { SettingsTab } from "./settings-tabs";
+export { tabs } from "./settings-tabs";
+import { tabs } from "./settings-tabs";
+import type { SettingsTab } from "./settings-tabs";
 
 /**
  * Settings -> Providers: the real agent-runtime backend list.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createApprovalGate, createBrowserSpeechProvider, parseComposerText } from "@fable/connectors";
 import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
@@ -18,14 +18,36 @@ import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
 import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
-import { KnowledgePage } from "./components/pages/KnowledgePage";
-import { SchedulesPage } from "./components/pages/SchedulesPage";
-import { OnboardingPage } from "./components/pages/OnboardingPage";
-import { ConnectorsPage } from "./components/pages/ConnectorsPage";
-import { DepartmentsPage } from "./components/pages/DepartmentsPage";
-import { SettingsPage, WorkspaceSettingsView, tabs as settingsTabs } from "./components/pages/SettingsPage";
-import type { SettingsTab } from "./components/pages/SettingsPage";
+import { tabs as settingsTabs } from "./components/pages/settings-tabs";
+import type { SettingsTab } from "./components/pages/settings-tabs";
 import { VoiceReview } from "./components/VoiceReview";
+
+// Standalone pages are code-split: each is only rendered when navigated to, so
+// loading them lazily keeps the initial workspace bundle small. Named exports
+// are adapted to the lazy() default-export contract via `.then`. Suspense
+// fallbacks are minimal (no layout shift) — the heaviest of these (Settings)
+// pulls in Run History, Schedule panel, and provider rendering on demand.
+const KnowledgePage = lazy(() =>
+  import("./components/pages/KnowledgePage").then((m) => ({ default: m.KnowledgePage }))
+);
+const SchedulesPage = lazy(() =>
+  import("./components/pages/SchedulesPage").then((m) => ({ default: m.SchedulesPage }))
+);
+const OnboardingPage = lazy(() =>
+  import("./components/pages/OnboardingPage").then((m) => ({ default: m.OnboardingPage }))
+);
+const ConnectorsPage = lazy(() =>
+  import("./components/pages/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage }))
+);
+const DepartmentsPage = lazy(() =>
+  import("./components/pages/DepartmentsPage").then((m) => ({ default: m.DepartmentsPage }))
+);
+const SettingsPage = lazy(() =>
+  import("./components/pages/SettingsPage").then((m) => ({ default: m.SettingsPage }))
+);
+const WorkspaceSettingsView = lazy(() =>
+  import("./components/pages/SettingsPage").then((m) => ({ default: m.WorkspaceSettingsView }))
+);
 
 /**
  * Root composition for the Fable desktop shell.
@@ -400,32 +422,34 @@ export function App() {
   // preview), render the three-path onboarding shell instead of the workspace.
   if (runtime.onboardingRequired) {
     return (
-      <OnboardingPage
-        providers={runtime.backendProviders}
-        connectedBackendIds={runtime.connectedBackendIds}
-        status={runtime.backendStatus}
-        onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
-        onConnectWithVerify={(providerId, secret) =>
-          runtime.connectBackendWithVerify(providerId, secret)
-        }
-        onSkip={runtime.dismissOnboarding}
-        onSubmitProfile={(name, email) => {
-          setProfile((current) => ({
-            ...current,
-            // Local profile only: apply name/email when provided. No auth and no
-            // account is created — these are local display fields.
-            ...(name ? { name } : {}),
-            ...(email ? { email } : {}),
-            photoInitials: (name || current.name)
-              .split(" ")
-              .map((n) => n[0])
-              .join("")
-              .toUpperCase()
-              .slice(0, 2)
-          }));
-        }}
-        onOpenConnectors={() => runtime.setActiveItem("Connectors")}
-      />
+      <Suspense fallback={<div className="og-frame" aria-busy="true" />}>
+        <OnboardingPage
+          providers={runtime.backendProviders}
+          connectedBackendIds={runtime.connectedBackendIds}
+          status={runtime.backendStatus}
+          onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
+          onConnectWithVerify={(providerId, secret) =>
+            runtime.connectBackendWithVerify(providerId, secret)
+          }
+          onSkip={runtime.dismissOnboarding}
+          onSubmitProfile={(name, email) => {
+            setProfile((current) => ({
+              ...current,
+              // Local profile only: apply name/email when provided. No auth and no
+              // account is created — these are local display fields.
+              ...(name ? { name } : {}),
+              ...(email ? { email } : {}),
+              photoInitials: (name || current.name)
+                .split(" ")
+                .map((n) => n[0])
+                .join("")
+                .toUpperCase()
+                .slice(0, 2)
+            }));
+          }}
+          onOpenConnectors={() => runtime.setActiveItem("Connectors")}
+        />
+      </Suspense>
     );
   }
 
@@ -545,7 +569,9 @@ export function App() {
 
       <section className="workspace" aria-label="Fable workspace">
         {runtime.activePage && !isSettingsActive ? (
-          <div className="workspace-center workspace-center--page">{renderPage()}</div>
+          <div className="workspace-center workspace-center--page">
+            <Suspense fallback={null}>{renderPage()}</Suspense>
+          </div>
         ) : (
           <div className="workspace-center">
             <Composer
@@ -655,16 +681,18 @@ export function App() {
               >
                 <X size={17} />
               </button>
-              <SettingsPage
-                runtime={runtime}
-                profile={profile}
-                onProfileChange={setProfile}
-                theme={theme}
-                onThemeChange={setTheme}
-                activeTab={activeSettingsTab}
-                workspaceName={workspaceName}
-                titleId="settings-modal-title"
-              />
+              <Suspense fallback={null}>
+                <SettingsPage
+                  runtime={runtime}
+                  profile={profile}
+                  onProfileChange={setProfile}
+                  theme={theme}
+                  onThemeChange={setTheme}
+                  activeTab={activeSettingsTab}
+                  workspaceName={workspaceName}
+                  titleId="settings-modal-title"
+                />
+              </Suspense>
             </div>
           </section>
         </div>
@@ -695,13 +723,15 @@ export function App() {
                   <div className="settings-page__header">
                     <h1 id="workspace-settings-modal-title">{workspaceName}</h1>
                   </div>
-                  <WorkspaceSettingsView
-                    workspaceName={workspaceName}
-                    onStatus={(message) => {
-                      setWorkspaceSettingsStatus(message);
-                      runtime.setLastAction(message);
-                    }}
-                  />
+                  <Suspense fallback={null}>
+                    <WorkspaceSettingsView
+                      workspaceName={workspaceName}
+                      onStatus={(message) => {
+                        setWorkspaceSettingsStatus(message);
+                        runtime.setLastAction(message);
+                      }}
+                    />
+                  </Suspense>
                   {workspaceSettingsStatus ? (
                     <p className="settings-status" role="status">
                       {workspaceSettingsStatus}

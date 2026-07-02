@@ -356,7 +356,8 @@ describe("Fable home", () => {
     expect(settings).toBeInTheDocument();
 
     await user.click(mobileConnection);
-    expect(screen.getByRole("heading", { name: /privacy & permissions/i })).toBeInTheDocument();
+    // Settings renders from a lazily-loaded chunk; await its first paint.
+    expect(await screen.findByRole("heading", { name: /privacy & permissions/i })).toBeInTheDocument();
     expect(screen.getByText(/only this computer can run the action/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /close sidebar/i }));
@@ -392,7 +393,8 @@ describe("Fable home", () => {
 
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
-    expect(screen.getByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
+    // Knowledge is a lazily-loaded page; await its first paint before querying.
+    expect(await screen.findByRole("heading", { name: "Knowledge" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Sources" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Memories" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /import file/i })).toBeInTheDocument();
@@ -419,7 +421,8 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
 
-    expect(screen.getByRole("heading", { name: "Schedules" })).toBeInTheDocument();
+    // Schedules is a lazily-loaded page; await its first paint before querying.
+    expect(await screen.findByRole("heading", { name: "Schedules" })).toBeInTheDocument();
     // The hydration gate clears and the empty state is shown.
     expect(await screen.findByText(/no schedules yet/i)).toBeInTheDocument();
 

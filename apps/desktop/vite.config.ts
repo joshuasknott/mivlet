@@ -18,6 +18,28 @@ export default defineConfig({
       ignored: ["**/src-tauri/target/**"]
     }
   },
+  // The desktop shell ships to a modern WebView2 (Chromium) runtime, so the
+  // production build can target modern syntax without down-leveling. Splitting
+  // stable vendor code (react, react-dom, phosphor icons) into its own chunk
+  // keeps it cacheable across app changes and pairs with the route-level
+  // React.lazy splits to bring the initial workspace chunk well under the
+  // 500 kB warning.
+  build: {
+    target: "esnext",
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("@phosphor-icons")) return "icons";
+            if (id.includes("react-dom") || id.includes("/react/")) return "react-vendor";
+            return "vendor";
+          }
+          return undefined;
+        }
+      }
+    }
+  },
   envPrefix: ["VITE_", "TAURI_"],
   test: {
     environment: "jsdom",

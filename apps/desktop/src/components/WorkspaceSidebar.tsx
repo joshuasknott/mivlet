@@ -19,7 +19,7 @@ import {
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
-import type { SettingsTab } from "./pages/SettingsPage";
+import type { SettingsTab } from "./pages/settings-tabs";
 
 /**
  * Workspace sidebar / shell navigation.
