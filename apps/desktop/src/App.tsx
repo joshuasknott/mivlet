@@ -94,6 +94,10 @@ export function App() {
     runtime.setComposerValue(transcript);
     runtime.focusComposer(transcript);
   });
+  useEffect(() => {
+    // Do not leave a hidden recording alive when the composer is no longer visible.
+    if (!runtime.isChatView) voice.reset();
+  }, [runtime.isChatView, voice.reset]);
 
   // Scheduled prompts run through a dedicated headless runner that drives the
   // same AgentBackend contract as the composer — but in complete isolation: it
