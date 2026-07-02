@@ -666,6 +666,28 @@ describe("Fable home", () => {
     expect(screen.queryByRole("button", { name: /connect codex/i })).not.toBeInTheDocument();
   });
 
+  it("keeps dictation disabled by default and explains the text fallback when unsupported", async () => {
+    const user = await renderWorkspace();
+
+    expect(
+      screen.getByRole("button", {
+        name: /voice input unavailable: enable dictation in privacy settings/i
+      })
+    ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByLabelText(/universal composer/i)).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: /^settings$/i }));
+    await user.click(screen.getByRole("button", { name: /^privacy & permissions$/i }));
+
+    const dictation = await screen.findByRole("button", { name: /^enable dictation/i });
+    expect(dictation).toHaveAttribute("aria-pressed", "false");
+    expect(dictation).toBeDisabled();
+    expect(screen.getByText(/text input remains available/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/recognized text is added to your normal composer draft/i)
+    ).toBeInTheDocument();
+  });
+
   it("connects a native API-key provider through the credential boundary in Settings", async () => {
     // Serve a fail-closed Anthropic so Settings shows it as needs-auth; the test
     // then connects it through the boundary and asserts the boundary recorded
@@ -975,6 +997,94 @@ describe("Fable home", () => {
     expect(composer).toHaveValue("first line\n");
     // Nothing was sent: no agent activity surface is shown.
     expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
+  });
+
+  it("inserts real dictation into the existing draft exactly once", async () => {
+    let recognition!: {
+      onstart: (() => void) | null;
+      onresult:
+        | ((event: {
+            resultIndex: number;
+            results: ArrayLike<{
+              0: { transcript: string };
+              isFinal: boolean;
+            }>;
+          }) => void)
+        | null;
+      onend: (() => void) | null;
+    };
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "";
+      onstart: (() => void) | null = null;
+      onresult = null as typeof recognition.onresult;
+      onerror = null;
+      onend: (() => void) | null = null;
+      constructor() {
+        recognition = this;
+      }
+      start() {
+        this.onstart?.();
+      }
+      stop() {
+        this.onend?.();
+      }
+      abort() {}
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      value: FakeSpeechRecognition,
+      configurable: true
+    });
+
+    runtimeMocks.snapshot = {
+      version: 1,
+      activeItem: "new-chat",
+      composerDraft: "",
+      voiceEnabled: true,
+      approvalAudit: [],
+      dismissedApprovalIds: [],
+      approvalRules: [],
+      automationStatuses: {},
+      schedules: [],
+      goals: [],
+      plans: [],
+      pinnedSourceIds: [],
+      importedKnowledgeSources: [],
+      memoryDisabled: false,
+      memoryRecords: [],
+      connectedBackendIds: ["codex"],
+      selectedModelId: "",
+      permissionMode: "full-access",
+      savedAt: "2026-06-26T10:30:00.000Z"
+    };
+
+    const user = await renderWorkspace();
+    const composer = screen.getByLabelText("Universal composer");
+    await user.type(composer, "Plan launch");
+    await user.click(screen.getByRole("button", { name: "Start dictation" }));
+    expect(
+      await screen.findByRole("button", { name: "Stop dictation" })
+    ).toHaveAttribute("aria-pressed", "true");
+
+    recognition.onresult?.({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: "with the team" }, isFinal: true }
+      ]
+    });
+    await user.click(screen.getByRole("button", { name: "Stop dictation" }));
+
+    await waitFor(() =>
+      expect(composer).toHaveValue("Plan launch with the team")
+    );
+    recognition.onend?.();
+    await waitFor(() =>
+      expect(composer).toHaveFocus()
+    );
+
+    delete (window as Window & { SpeechRecognition?: unknown })
+      .SpeechRecognition;
   });
 
   it("recovers created schedules from local persistence", async () => {

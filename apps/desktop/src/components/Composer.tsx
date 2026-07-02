@@ -12,10 +12,13 @@ import {
   Plus,
   ShieldCheck,
   ShieldWarning,
+  Stop,
+  X,
   Terminal
 } from "@phosphor-icons/react";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
 import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
+import type { VoiceStatus } from "../hooks/useVoice";
 import { ConnectorIcon } from "./ConnectorIcon";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
@@ -49,8 +52,14 @@ export function Composer({
   composerValue,
   onComposerChange,
   onSubmit,
-  voiceEnabled,
-  onToggleVoice,
+  voiceStatus,
+  voiceMessage,
+  voiceCanStart,
+  voiceDisclosure,
+  onStartVoice,
+  onStopVoice,
+  onCancelVoice,
+  onDismissVoice,
   onAttach,
   addMenuOpen,
   permissionsOpen,
@@ -59,7 +68,6 @@ export function Composer({
   onOpenTool,
   onRunCommand,
   onFileChange,
-  voiceState,
   importStatus,
   models,
   selectedModelId,
@@ -77,8 +85,14 @@ export function Composer({
   composerValue: string;
   onComposerChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
-  voiceEnabled: boolean;
-  onToggleVoice: () => void;
+  voiceStatus: VoiceStatus;
+  voiceMessage: string;
+  voiceCanStart: boolean;
+  voiceDisclosure: string;
+  onStartVoice: () => void;
+  onStopVoice: () => void;
+  onCancelVoice: () => void;
+  onDismissVoice: () => void;
   onAttach: () => void;
   addMenuOpen: boolean;
   permissionsOpen: boolean;
@@ -87,7 +101,6 @@ export function Composer({
   onOpenTool: (tool: "Connectors" | "Knowledge" | "Schedules") => void;
   onRunCommand: (command: string) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  voiceState?: string;
   importStatus?: string | null;
   /** Models the connected backend exposes (id + label + availability). */
   models: { id: string; label: string; available: boolean }[];
@@ -120,9 +133,46 @@ export function Composer({
 
   const isNewThread = !inThread;
   const menuPlacementClass = isNewThread ? "composer-glow--new-thread" : "composer-glow--in-thread";
+  const voiceListening = voiceStatus === "listening";
+  const voiceTransitioning =
+    voiceStatus === "starting" ||
+    voiceStatus === "stopping" ||
+    voiceStatus === "processing";
+  const voiceCancelable =
+    voiceStatus === "starting" ||
+    voiceStatus === "listening" ||
+    voiceStatus === "stopping";
+  const voiceUnavailable =
+    voiceStatus === "disabled" || voiceStatus === "unsupported";
+  const voiceTerminal =
+    voiceStatus === "cancelled" ||
+    voiceStatus === "error" ||
+    voiceStatus === "permission-denied" ||
+    voiceStatus === "success" ||
+    voiceStatus === "unavailable";
+  const voiceActionLabel = voiceListening
+    ? "Stop dictation"
+    : voiceTransitioning
+      ? voiceStatus === "starting"
+        ? "Starting dictation"
+        : "Processing dictation"
+      : voiceCanStart
+        ? voiceTerminal
+          ? "Try dictation again"
+          : "Start dictation"
+        : voiceMessage;
 
   return (
-    <form className={`composer-glow ${menuPlacementClass}`} onSubmit={onSubmit}>
+    <form
+      className={`composer-glow ${menuPlacementClass}`}
+      onSubmit={onSubmit}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && voiceCancelable) {
+          event.preventDefault();
+          onCancelVoice();
+        }
+      }}
+    >
       <input
         ref={fileInputRef}
         className="sr-only"
@@ -438,22 +488,65 @@ export function Composer({
                 </div>
               ) : null}
             </div>
-            <button
-              type="button"
-              className={`composer-chip${voiceEnabled ? " composer-chip--active" : ""}`}
-              onClick={onToggleVoice}
-              aria-pressed={voiceEnabled}
-              aria-label={voiceEnabled ? "Stop voice recording" : "Start voice recording"}
-            >
-              <Microphone size={17} />
-            </button>
+            <div className="voice-actions" data-state={voiceStatus}>
+              <div className="voice-action">
+                <button
+                  type="button"
+                  className="composer-chip voice-action__primary"
+                  onClick={() => {
+                    if (voiceListening) onStopVoice();
+                    else if (voiceCanStart && !voiceTransitioning) onStartVoice();
+                  }}
+                  aria-label={voiceActionLabel}
+                  aria-pressed={voiceListening}
+                  aria-busy={voiceTransitioning}
+                  aria-disabled={voiceUnavailable || voiceTransitioning}
+                  aria-describedby="dictation-status dictation-disclosure"
+                >
+                  {voiceListening ? (
+                    <Stop size={15} weight="fill" />
+                  ) : (
+                    <Microphone size={17} weight="fill" />
+                  )}
+                </button>
+                <span className="voice-tooltip" role="tooltip" aria-hidden="true">
+                  {voiceActionLabel}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="composer-chip voice-action__cancel"
+                onClick={onCancelVoice}
+                aria-label="Cancel dictation"
+                aria-hidden={!voiceCancelable}
+                tabIndex={voiceCancelable ? 0 : -1}
+              >
+                <X size={16} weight="bold" />
+              </button>
+            </div>
             <button className="send-button" type="submit" aria-label="Send prompt">
               <ArrowUp size={16} weight="bold" />
             </button>
           </div>
         </div>
 
-        {voiceState ? <div className="voice-state" role="status">{voiceState}</div> : null}
+        <div
+          className="voice-feedback"
+          data-state={voiceStatus}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <span className="voice-feedback__indicator" aria-hidden="true" />
+          <span id="dictation-status">{voiceMessage}</span>
+          {voiceTerminal ? (
+            <button type="button" onClick={onDismissVoice}>
+              Dismiss
+            </button>
+          ) : null}
+        </div>
+        <span id="dictation-disclosure" className="sr-only">
+          {voiceDisclosure}
+        </span>
         {importStatus ? <div className="composer-status" role="status">{importStatus}</div> : null}
       </div>
     </form>

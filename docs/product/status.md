@@ -15,7 +15,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 ## Implemented
 
 - Desktop shell: local-profile onboarding, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
-- Composer: supports text entry, slash command insertion, local file import trigger, voice toggle UI, model selection, permission selection, and native-agent submit path when a connected native backend exists.
+- Composer: supports text entry, slash command insertion, local file import, opt-in browser dictation where the runtime exposes speech recognition, model selection, permission selection, and native-agent submit path when a connected native backend exists.
 - Protocol package: defines approvals, memory, connectors, backend providers, runtime snapshots, native agent events, native tool specs, and tool-call request shapes.
 - Local file import: supports `txt`, `md`, `markdown`, `json`, `csv`, `yaml`, and `yml`; rejects empty files, unsupported extensions, changed file sizes, and files over 2 MB; imported files are untrusted local knowledge with a 6,000-character preview.
 - Knowledge and retrieval: local files and recursive folders can be imported (with path-escape guards), structurally chunked (for Markdown, JSON, CSV, YAML), fingerprinted, scoped, searched, refreshed, disabled, and deleted. Retrieval uses reciprocal-rank fusion (RRF, k=60) for hybrid lexical/semantic ranking. Sources and memory records are subject to workspace-scoped composite key isolation (SQLite schema v5) with deletion/forget tombstones.
@@ -70,7 +70,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | GitHub Copilot Execution | **Missing** | Cataloged in provider list, but execution adapter/runner is not implemented. |
 | Local Model Execution | **Missing** | Onboarding UI labels local models as planned and disabled. |
 | Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
-| Voice, Convex collaboration | **Missing** | Voice is UI toggle only (no capture/pipeline). Convex is optional and lacks schema/collab code. |
+| Native voice providers, Convex collaboration | **Missing** | Dictation currently depends on the host Web Speech API; no native offline speech provider exists. Convex is optional and lacks schema/collab code. |
 
 ## Partially Implemented Or Preview-Only
 
@@ -83,7 +83,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   refresh, pin, disable/delete, explicit memory promotion, edit, export,
   disable, and forget controls.
 - Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back. The schedules are backed by encrypted SQLite tables.
-- Voice is a toggle and status affordance; no dictation, audio capture, realtime voice provider, or transcript pipeline was found.
+- Voice dictation is opt-in and available only when the host browser/webview exposes a Web Speech API. Unsupported runtimes preserve normal text entry; there is no native offline speech provider.
 - Convex is optional via `VITE_CONVEX_URL`, but no Convex schema or collaboration implementation was found in this repo.
 
 ## Not Implemented Yet

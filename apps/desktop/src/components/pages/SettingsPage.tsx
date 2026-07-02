@@ -26,7 +26,8 @@ import type {
   BackendAuthState,
   BackendProvider,
   CustomApprovalSettings,
-  RemoteControlStatusSnapshot
+  RemoteControlStatusSnapshot,
+  VoiceCapability
 } from "@fable/protocol";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
 import {
@@ -59,6 +60,17 @@ export { tabs } from "./settings-tabs";
 import { tabs } from "./settings-tabs";
 import type { SettingsTab } from "./settings-tabs";
 
+const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
+  status: "unavailable",
+  provider: {
+    id: "browser-speech",
+    kind: "remote",
+    label: "Browser speech service",
+    retainsAudio: false
+  },
+  reason: "Speech recognition is unavailable in this desktop webview."
+};
+
 /**
  * Settings -> Providers: the real agent-runtime backend list.
  *
@@ -82,6 +94,7 @@ export function SettingsPage({
   onThemeChange,
   activeTab,
   workspaceName,
+  dictationCapability = DEFAULT_DICTATION_CAPABILITY,
   titleId = "settings-title"
 }: {
   runtime: ShellRuntime;
@@ -91,6 +104,7 @@ export function SettingsPage({
   onThemeChange: (theme: "light" | "dark") => void;
   activeTab: SettingsTab;
   workspaceName: string;
+  dictationCapability?: VoiceCapability;
   titleId?: string;
 }) {
   const [status, setStatus] = useState("");
@@ -121,6 +135,11 @@ export function SettingsPage({
           </>
         ) : activeTab === "privacy" ? (
           <>
+            <DictationPrivacySettings
+              runtime={runtime}
+              capability={dictationCapability}
+              onStatus={setStatus}
+            />
             <PrivacySettingsView runtime={runtime} onStatus={setStatus} />
             <ApprovalsSettingsView runtime={runtime} onStatus={setStatus} />
           </>
@@ -1415,6 +1434,49 @@ function ApprovalsSettingsView({
           </span>
         </div>
       </section>
+    </div>
+  );
+}
+
+function DictationPrivacySettings({
+  runtime,
+  capability,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  capability: VoiceCapability;
+  onStatus: (message: string) => void;
+}) {
+  const available = capability.status === "supported";
+  return (
+    <div className="settings-page__body">
+      <div className="settings-section-heading">
+        <p>Control optional input features that can access sensitive device data.</p>
+      </div>
+      <div className="provider-access-list" style={{ padding: "14px 20px" }}>
+        <button
+          type="button"
+          className="toggle-row"
+          aria-pressed={runtime.voiceEnabled}
+          disabled={!available && !runtime.voiceEnabled}
+          onClick={() => {
+            const enabled = !runtime.voiceEnabled;
+            runtime.setVoiceEnabled(enabled);
+            onStatus(enabled ? "Dictation enabled." : "Dictation disabled.");
+          }}
+        >
+          <span>
+            <strong>Enable dictation</strong>
+            <small>
+              Starts only when you choose the microphone. Fable does not retain raw audio or persist a separate
+              dictation transcript. Recognized text is added to your normal composer draft. Speech processing may
+              use an operating-system or browser service.
+            </small>
+            {!available ? <small>{capability.reason} Text input remains available.</small> : null}
+          </span>
+          <span className="toggle-switch" aria-hidden="true"><span /></span>
+        </button>
+      </div>
     </div>
   );
 }

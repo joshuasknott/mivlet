@@ -9,6 +9,7 @@ import {
   validateModelSelection
 } from "./lib/agent-run";
 import { createDesktopToolExecutor } from "./lib/desktop-tool-runtime";
+import { insertDictation } from "./lib/insert-dictation";
 import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
 import { useScheduledAgent } from "./hooks/useScheduledAgent";
@@ -20,7 +21,6 @@ import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { tabs as settingsTabs } from "./components/pages/settings-tabs";
 import type { SettingsTab } from "./components/pages/settings-tabs";
-import { VoiceReview } from "./components/VoiceReview";
 
 // Standalone pages are code-split: each is only rendered when navigated to, so
 // loading them lazily keeps the initial workspace bundle small. Named exports
@@ -111,7 +111,16 @@ export function App() {
     }
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
-  const voice = useVoice(voiceProvider, (transcript) => void submitComposerText(transcript));
+
+  const voice = useVoice(voiceProvider, addDictationToComposer, {
+    disabled: !runtime.voiceEnabled,
+    onCancel: focusComposerAfterVoice
+  });
+
+  useEffect(() => {
+    // Do not leave a hidden recording alive when the composer is no longer visible.
+    if (!runtime.isChatView) voice.reset();
+  }, [runtime.isChatView, voice.reset]);
 
   // Connected connector ids the scheduled runner is allowed to read from.
   // Memoized so the options object passed to useScheduledAgent keeps a stable
@@ -411,6 +420,26 @@ export function App() {
     runPrompt(rawText);
   }
 
+  function focusComposerAfterVoice() {
+    window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+  }
+
+  function addDictationToComposer(transcript: string) {
+    const composer = runtime.composerRef.current;
+    const insertion = insertDictation(
+      runtime.composerValue,
+      transcript,
+      composer?.selectionStart ?? runtime.composerValue.length,
+      composer?.selectionEnd ?? runtime.composerValue.length
+    );
+    runtime.setComposerValue(insertion.value);
+    window.requestAnimationFrame(() => {
+      const currentComposer = runtime.composerRef.current;
+      currentComposer?.focus();
+      currentComposer?.setSelectionRange(insertion.caret, insertion.caret);
+    });
+  }
+
   function runPrompt(rawPrompt: string) {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
@@ -632,11 +661,14 @@ export function App() {
                 if (!text.trim()) return;
                 void submitComposerText(text);
               }}
-              voiceEnabled={voice.state.status === "recording"}
-              onToggleVoice={() => {
-                if (voice.state.status === "recording") void voice.stop();
-                else if (voice.state.status !== "processing") void voice.start();
-              }}
+              voiceStatus={voice.state.status}
+              voiceMessage={voice.state.message}
+              voiceCanStart={voice.canStart}
+              voiceDisclosure={voice.processingDisclosure}
+              onStartVoice={() => void voice.start()}
+              onStopVoice={voice.stop}
+              onCancelVoice={voice.cancel}
+              onDismissVoice={voice.dismiss}
               onAttach={runtime.triggerAttach}
               addMenuOpen={addMenuOpen}
               permissionsOpen={toolPickerOpen}
@@ -657,13 +689,7 @@ export function App() {
               }}
               onRunCommand={runtime.runCommand}
               onFileChange={runtime.handleLocalKnowledgeFileChange}
-              voiceState={
-                voice.state.status === "recording"
-                  ? "Recording only after your explicit click."
-                  : voice.state.status === "processing"
-                    ? "Processing speech…"
-                    : undefined
-              }
+
               importStatus={runtime.importStatus}
               models={runtime.selectableModels}
               selectedModelId={runtime.resolvedSelectedModelId}
@@ -676,7 +702,6 @@ export function App() {
               connectedConnectors={connectedConnectorCards}
               knowledgeSources={runtime.workspaceKnowledgeSources}
             />
-            <VoiceReview voice={voice} />
 
             {renderChatContext()}
           </div>
@@ -736,6 +761,7 @@ export function App() {
                   onThemeChange={setTheme}
                   activeTab={activeSettingsTab}
                   workspaceName={workspaceName}
+                  dictationCapability={voice.capability}
                   titleId="settings-modal-title"
                 />
               </Suspense>

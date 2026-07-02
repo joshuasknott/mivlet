@@ -334,6 +334,20 @@
     margin-left: auto;
   }
 
+  .voice-actions {
+    grid-template-columns: 44px 44px;
+    width: 94px;
+  }
+
+  .voice-actions .composer-chip {
+    width: 44px;
+    height: 44px;
+  }
+
+  .voice-feedback {
+    align-items: start;
+  }
+
   .composer-model {
     padding-inline: 13px;
     font-size: var(--text-14);

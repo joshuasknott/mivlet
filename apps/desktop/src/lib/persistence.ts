@@ -177,7 +177,8 @@ export function shellStateFromRuntimeSnapshot(
     ...defaultShellState,
     activeItem: normalizeActiveItem(snapshot.activeItem || defaultShellState.activeItem),
     composerValue: snapshot.composerDraft,
-    voiceEnabled: snapshot.voiceEnabled,
+    // Missing legacy values fail closed: dictation always requires an explicit opt-in.
+    voiceEnabled: snapshot.voiceEnabled === true,
     approvalAudit: snapshot.approvalAudit,
     dismissedApprovalIds: snapshot.dismissedApprovalIds,
     approvalRules: snapshot.approvalRules,
@@ -210,6 +211,7 @@ function normalizePersistedShellState(state: PersistedShellState): PersistedShel
   return {
     ...state,
     activeItem: normalizeActiveItem(state.activeItem),
+    voiceEnabled: state.voiceEnabled === true,
     permissionMode,
     permissionLabel: normalizeApprovalPresetLabel(state.permissionLabel, permissionMode),
     customApprovalSettings: normalizeCustomApprovalSettings(state.customApprovalSettings)
