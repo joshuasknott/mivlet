@@ -1467,14 +1467,42 @@ export interface VoiceProviderDescriptor {
   id: string;
   kind: VoiceProviderKind;
   label: string;
-  /** Whether raw audio is retained (must be false for the default local path). */
+  /** Whether Fable retains raw audio. This does not describe a platform vendor's policy. */
   retainsAudio: boolean;
   /** Setup/install message when the provider is unavailable. */
   setupHint?: string;
 }
 
-/** Discrete recording state for push-to-talk. */
-export type VoiceRecordingState = "idle" | "recording" | "processing" | "review" | "error";
+/** Side-effect-free availability check. Detecting support must never request microphone access. */
+export type VoiceCapability =
+  | { status: "supported"; provider: VoiceProviderDescriptor }
+  | { status: "unavailable"; provider: VoiceProviderDescriptor; reason: string };
+
+export type VoiceFailureCode =
+  | "permission-denied"
+  | "unavailable"
+  | "cancelled"
+  | "no-speech"
+  | "network"
+  | "failed";
+
+/**
+ * Dictation session state. `successful` is deliberately a review state: callers
+ * must explicitly apply the transcript to normal text input before it can be sent.
+ */
+export type VoiceInputState =
+  | { status: "disabled" }
+  | { status: "unavailable"; reason: string }
+  | { status: "idle" }
+  | { status: "active" }
+  | { status: "processing" }
+  | { status: "permission-denied"; message: string }
+  | { status: "cancelled" }
+  | { status: "failed"; code: Exclude<VoiceFailureCode, "permission-denied" | "cancelled">; message: string }
+  | { status: "successful"; transcript: string };
+
+/** @deprecated Use `VoiceInputState` for explicit capability and lifecycle behavior. */
+export type VoiceRecordingState = VoiceInputState["status"];
 
 // ---------------------------------------------------------------------------
 // Native-API agent loop: events + request shaping.

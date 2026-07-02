@@ -1,15 +1,33 @@
-import type { VoiceProviderDescriptor } from "@fable/protocol";
+import type {
+  VoiceCapability,
+  VoiceFailureCode,
+  VoiceProviderDescriptor
+} from "@fable/protocol";
 
 export interface SpeechToTextSession {
-  stop(): Promise<string>;
+  /** Resolves with the final transcript or rejects with a typed, content-free error. */
+  result: Promise<string>;
+  stop(): Promise<void>;
   cancel(): Promise<void>;
   dispose(): Promise<void>;
 }
 
 export interface SpeechToTextProvider {
   descriptor: VoiceProviderDescriptor;
+  /** Side-effect-free capability detection. It must not prompt for microphone access. */
+  capability: VoiceCapability;
   processingDisclosure: string;
   start(): Promise<SpeechToTextSession>;
+}
+
+export class SpeechToTextError extends Error {
+  constructor(
+    public readonly code: VoiceFailureCode,
+    message: string
+  ) {
+    super(message);
+    this.name = "SpeechToTextError";
+  }
 }
 
 interface BrowserRecognition {
@@ -26,33 +44,100 @@ interface BrowserRecognition {
 
 type BrowserRecognitionConstructor = new () => BrowserRecognition;
 
+const BROWSER_SPEECH_DESCRIPTOR: VoiceProviderDescriptor = {
+  id: "browser-speech",
+  kind: "remote",
+  label: "Browser speech service",
+  retainsAudio: false,
+  setupHint: "Speech recognition is unavailable in this desktop webview."
+};
+
+function browserSpeechConstructor(
+  environment: Window & {
+    SpeechRecognition?: BrowserRecognitionConstructor;
+    webkitSpeechRecognition?: BrowserRecognitionConstructor;
+  }
+): BrowserRecognitionConstructor | undefined {
+  return environment.SpeechRecognition ?? environment.webkitSpeechRecognition;
+}
+
+export function detectBrowserSpeechCapability(
+  environment: Window & {
+    SpeechRecognition?: BrowserRecognitionConstructor;
+    webkitSpeechRecognition?: BrowserRecognitionConstructor;
+  } = window
+): VoiceCapability {
+  return browserSpeechConstructor(environment)
+    ? { status: "supported", provider: BROWSER_SPEECH_DESCRIPTOR }
+    : {
+        status: "unavailable",
+        provider: BROWSER_SPEECH_DESCRIPTOR,
+        reason: BROWSER_SPEECH_DESCRIPTOR.setupHint!
+      };
+}
+
+function browserSpeechError(error: string): SpeechToTextError {
+  if (error === "not-allowed" || error === "service-not-allowed") {
+    return new SpeechToTextError(
+      "permission-denied",
+      "Microphone access was denied. You can keep typing, or allow microphone access in system settings and try again."
+    );
+  }
+  if (error === "audio-capture" || error === "language-not-supported") {
+    return new SpeechToTextError(
+      "unavailable",
+      "Speech recognition is unavailable on this device. Text input is still available."
+    );
+  }
+  if (error === "aborted") {
+    return new SpeechToTextError("cancelled", "Dictation was cancelled.");
+  }
+  if (error === "no-speech") {
+    return new SpeechToTextError("no-speech", "No speech was recognized. You can try again or keep typing.");
+  }
+  if (error === "network") {
+    return new SpeechToTextError("network", "The speech service could not be reached. Text input is still available.");
+  }
+  return new SpeechToTextError("failed", "Speech recognition failed. Text input is still available.");
+}
+
 export function createBrowserSpeechProvider(
   environment: Window & {
     SpeechRecognition?: BrowserRecognitionConstructor;
     webkitSpeechRecognition?: BrowserRecognitionConstructor;
   } = window
 ): SpeechToTextProvider {
+  const capability = detectBrowserSpeechCapability(environment);
   return {
-    descriptor: {
-      id: "browser-speech",
-      kind: "remote",
-      label: "Browser speech service",
-      retainsAudio: false,
-      setupHint: "Speech recognition is unavailable in this desktop webview."
-    },
+    descriptor: BROWSER_SPEECH_DESCRIPTOR,
+    capability,
     processingDisclosure:
       "Speech processing is provided by the operating system or browser and may use a remote service.",
     async start() {
-      const Constructor =
-        environment.SpeechRecognition ?? environment.webkitSpeechRecognition;
-      if (!Constructor) throw new Error("Speech recognition is unavailable on this device.");
+      const Constructor = browserSpeechConstructor(environment);
+      if (!Constructor) {
+        throw new SpeechToTextError("unavailable", capability.status === "unavailable"
+          ? capability.reason
+          : "Speech recognition is unavailable on this device.");
+      }
       const recognition = new Constructor();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = environment.navigator.language || "en-GB";
       let transcript = "";
-      let failure: Error | null = null;
-      let resolveEnd: (() => void) | null = null;
+      let settled = false;
+      let disposed = false;
+      let resolveResult!: (transcript: string) => void;
+      let rejectResult!: (error: SpeechToTextError) => void;
+      const result = new Promise<string>((resolve, reject) => {
+        resolveResult = resolve;
+        rejectResult = reject;
+      });
+      const settleError = (error: SpeechToTextError) => {
+        if (settled) return;
+        settled = true;
+        rejectResult(error);
+      };
       recognition.onresult = (event) => {
         transcript = Array.from(event.results)
           .map((result) => result[0]?.transcript ?? "")
@@ -60,35 +145,47 @@ export function createBrowserSpeechProvider(
           .trim();
       };
       recognition.onerror = (event) => {
-        failure = new Error(`Speech recognition failed: ${event.error}.`);
+        settleError(browserSpeechError(event.error));
       };
-      recognition.onend = () => resolveEnd?.();
-      recognition.start();
-      let disposed = false;
+      recognition.onend = () => {
+        if (settled) return;
+        settled = true;
+        if (transcript) resolveResult(transcript);
+        else rejectResult(browserSpeechError("no-speech"));
+      };
+      try {
+        recognition.start();
+      } catch {
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        throw new SpeechToTextError(
+          "failed",
+          "Speech recognition could not start. Text input is still available."
+        );
+      }
       return {
+        result,
         async stop() {
-          const ended = new Promise<void>((resolve) => {
-            resolveEnd = resolve;
-            globalThis.setTimeout(resolve, 2_000);
-          });
+          if (settled || disposed) return;
           recognition.stop();
-          await ended;
-          if (failure) throw failure;
-          if (!transcript) throw new Error("No speech was recognized.");
-          return transcript;
         },
         async cancel() {
+          if (disposed) return;
+          settleError(browserSpeechError("aborted"));
           recognition.abort();
         },
         async dispose() {
           if (disposed) return;
           disposed = true;
+          if (!settled) {
+            settleError(browserSpeechError("aborted"));
+            recognition.abort();
+          }
           recognition.onresult = null;
           recognition.onerror = null;
           recognition.onend = null;
           transcript = "";
-          failure = null;
-          resolveEnd = null;
         }
       };
     }
