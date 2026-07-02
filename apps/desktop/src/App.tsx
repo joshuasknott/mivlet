@@ -90,26 +90,6 @@ export function App() {
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
 
-  function focusComposerAfterVoice() {
-    window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
-  }
-
-  function addDictationToComposer(transcript: string) {
-    const composer = runtime.composerRef.current;
-    const insertion = insertDictation(
-      runtime.composerValue,
-      transcript,
-      composer?.selectionStart ?? runtime.composerValue.length,
-      composer?.selectionEnd ?? runtime.composerValue.length
-    );
-    runtime.setComposerValue(insertion.value);
-    window.requestAnimationFrame(() => {
-      const currentComposer = runtime.composerRef.current;
-      currentComposer?.focus();
-      currentComposer?.setSelectionRange(insertion.caret, insertion.caret);
-    });
-  }
-
   const voice = useVoice(voiceProvider, addDictationToComposer, {
     disabled: !runtime.voiceEnabled,
     onCancel: focusComposerAfterVoice
