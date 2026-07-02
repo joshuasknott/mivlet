@@ -1559,10 +1559,10 @@ describe("Fable onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: /set up your local fable workspace/i })
     ).toBeInTheDocument();
-    // The local profile step must NOT collect a password or claim account creation.
-    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText(/^name \(optional\)$/i), "Josh");
-    await user.type(screen.getByLabelText(/^email \(optional\)$/i), "josh@example.com");
+    // Password is a UI-only preview field; only name/email reach shell state.
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/^name$/i), "Josh");
+    await user.type(screen.getByLabelText(/^email$/i), "josh@example.com");
     // The submit button is exactly "Continue" (the profile form's type=submit).
     await user.click(screen.getByRole("button", { name: /^continue$/i }));
   };
@@ -1576,9 +1576,13 @@ describe("Fable onboarding", () => {
     ).toBeInTheDocument();
     // The composer must NOT render until a backend is connected.
     expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
-    // The local profile step must not claim account creation or require a password.
-    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
+    // The local profile step previews a password field without claiming account creation.
+    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.queryByText(/create your fable account/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /continue without profile/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: /onboarding progress/i })).toHaveTextContent(
+      /step 1 of 2/i
+    );
 
     // Proceed through the optional local profile to the unified provider list.
     await completeProfileStep(user);

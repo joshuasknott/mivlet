@@ -1823,7 +1823,7 @@
   justify-content: center;
   width: 100%;
   min-height: 100vh;
-  padding: 56px 24px;
+  padding: clamp(24px, 5vw, 56px) 24px;
   overflow-y: auto;
   background: var(--surface);
 }
@@ -1839,7 +1839,7 @@
 .og-center {
   position: relative;
   z-index: 1;
-  width: min(100% - 56px, 900px);
+  width: min(100%, 900px);
   margin: auto;
   display: flex;
   flex-direction: column;
@@ -1852,7 +1852,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 32px;
+  width: 100%;
+  margin-bottom: 24px;
 }
 
 .og-hero h1 {
@@ -1938,17 +1939,18 @@
   list-style: none;
   margin: 14px 0 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
 .og-provider {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 12px;
-  padding: 11px 13px;
+  min-height: 112px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-2);
   background: var(--surface-raised);
@@ -1968,13 +1970,13 @@
 .og-provider__lead {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
   text-align: left;
 }
 
 .og-provider__lead strong {
-  font-size: var(--text-13);
+  font-size: var(--text-12);
   font-weight: 500;
 }
 
@@ -2297,16 +2299,15 @@
 .og-form {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   width: 100%;
   max-width: 420px;
   margin-top: 24px;
-  padding: 32px 36px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius-3);
   background: var(--surface-raised);
-  box-shadow: var(--shadow-3);
-  backdrop-filter: var(--glass-filter);
+  box-shadow: none;
 }
 
 .og-field {
@@ -2370,32 +2371,58 @@
 .og-progress-container {
   width: 100%;
   max-width: 420px;
-  margin-bottom: 32px;
+  margin-bottom: 20px;
 }
 
-.og-progress-bar {
-  height: 3px;
-  width: 100%;
-  background: var(--line);
-  border-radius: var(--radius-1);
-  overflow: hidden;
+.og-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-.og-progress-fill {
-  height: 100%;
-  background: var(--ink-muted); /* Soft sage green */
-  transition: width 240ms ease;
-}
-
-.og-progress-text {
+.og-progress-step {
   display: flex;
-  justify-content: space-between;
-  margin-top: 8px;
-  font-size: var(--text-11);
-  font-weight: 500;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
   color: var(--ink-soft);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  font-size: var(--text-12);
+  text-align: left;
+}
+
+.og-progress-step > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  font-size: var(--text-11);
+}
+
+.og-progress-step.is-current {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: var(--surface-raised);
+}
+
+.og-progress-step.is-complete > span {
+  color: var(--positive);
+  border-color: transparent;
+}
+
+.og-progress-status {
+  margin: 7px 0 0;
+  color: var(--ink-soft);
+  font-size: var(--text-11);
+  text-align: center;
 }
 
 .og-back-btn {
@@ -2656,7 +2683,7 @@ button.og-path--primary .og-path__icon {
 
 .og-unified {
   width: 100%;
-  max-width: 560px;
+  max-width: 720px;
   margin-top: 8px;
 }
 
@@ -2675,10 +2702,88 @@ button.og-path--primary .og-path__icon {
 
 .og-provider__row {
   display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.og-provider__identity {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  min-width: 0;
+}
+
+.og-provider__icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid #dedede;
+  border-radius: var(--radius-2);
+  background: #fff;
+}
+
+.og-provider__action {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
+}
+
+.og-provider__action button {
   width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--ink-muted);
+  border-color: var(--line);
+}
+
+.og-provider__action button:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.og-provider__description {
+  margin: 10px 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  line-height: 1.45;
+  text-align: left;
+}
+
+.og-provider-list__expanded {
+  grid-column: 1 / -1;
+  order: 1;
+}
+
+.og-provider--selected {
+  min-height: 0;
+}
+
+.og-provider--selected .og-provider__row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.og-provider--selected .og-provider__identity {
+  flex-direction: row;
+  align-items: center;
+}
+
+.og-provider--selected .og-provider__action {
+  flex: 0 0 auto;
+}
+
+.og-provider--selected .og-provider__action button {
+  width: auto;
 }
 
 /* State badge — short, plain label with tone color. */
@@ -2740,7 +2845,7 @@ button.og-path--primary .og-path__icon {
 /* State hint — plain explanation under the row, shown for non-ready states. */
 .og-provider__state-hint {
   margin: 6px 0 0;
-  padding-left: 30px;
+  padding-left: 0;
   color: var(--ink-muted);
   font-size: var(--text-12);
   line-height: 1.45;
@@ -2761,7 +2866,7 @@ button.og-path--primary .og-path__icon {
   gap: 10px;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px dashed var(--line);
+  border-top: 1px solid var(--line);
 }
 
 .og-provider__key-panel label {
@@ -2850,6 +2955,76 @@ button.og-path--primary .og-path__icon {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-top: 3px;
+}
+
+@media (max-width: 720px) {
+  .og-frame {
+    justify-content: flex-start;
+    padding: 20px 16px;
+  }
+
+  .og-center {
+    margin: 0 auto;
+  }
+
+  .og-hero h1 {
+    margin-top: 10px;
+    font-size: var(--text-22);
+  }
+
+  .og-lede {
+    margin-top: 10px;
+    font-size: var(--text-13);
+  }
+
+  .og-provider-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 420px) {
+  .og-frame {
+    padding-inline: 12px;
+  }
+
+  .og-progress-step {
+    padding-inline: 8px;
+    font-size: var(--text-11);
+  }
+
+  .og-form {
+    padding: 16px;
+  }
+
+  .og-provider-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .og-provider-list__expanded {
+    grid-column: 1;
+  }
+
+  .og-provider--selected .og-provider__row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .og-provider--selected .og-provider__action {
+    width: 100%;
+  }
+
+  .og-provider--selected .og-provider__action button {
+    width: 100%;
+  }
+
+  .og-provider__key-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .og-provider__key-actions button {
+    width: 100%;
+  }
 }
 
 .schedule-edit {

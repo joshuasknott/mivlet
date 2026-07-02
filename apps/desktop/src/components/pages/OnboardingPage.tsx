@@ -2,8 +2,6 @@ import {
   ArrowRight,
   CheckCircle,
   Key,
-  LockSimple,
-  Plugs,
   Spinner,
   WarningCircle
 } from "@phosphor-icons/react";
@@ -21,9 +19,9 @@ import { ProviderIcon } from "../ProviderIcon";
  * Local-first AI-backend onboarding — rebuilt as ONE unified provider list.
  *
  * Honesty rules this component:
- *   - No fake account creation or password. The only step before choosing a
- *     backend is an OPTIONAL local profile (name/email), stored as shell state.
- *     Nothing leaves the device; no hosted account is created.
+ *   - No fake account creation. The only step before choosing a backend is a
+ *     local profile. Name/email are stored as shell state; the password field
+ *     is intentionally UI-only and is neither read nor persisted.
  *   - Every provider appears in a single list with its real auth-state badge
  *     and exactly one context-correct action. There is no fake "Connect".
  *   - API-key providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) expand an
@@ -64,12 +62,12 @@ export function OnboardingPage({
     secret: string
   ) => Promise<BackendVerifyResult>;
   onSkip: () => void;
-  /** Apply the optional local profile (name/email) to shell state. No auth. */
+  /** Apply the local profile (name/email) to shell state. No auth. */
   onSubmitProfile?: (name: string, email: string) => void;
   /** Route to the real Connectors page for optional workspace-tool setup. */
   onOpenConnectors?: () => void;
 }) {
-  // Steps: an optional local profile, then the unified provider list.
+  // Steps: a local profile, then the unified provider list.
   const [step, setStep] = useState<"profile" | "providers">(providers.length === 0 ? "providers" : "profile");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -87,8 +85,7 @@ export function OnboardingPage({
 
   const handleProfileSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Local profile only: name is optional, email is validated only if entered.
-    // There is no password and no account is created.
+    // The password input is deliberately not read or submitted; no account is created.
     if (email.trim() && !/^\S+@\S+\.\S+$/.test(email)) {
       setValidationError("Enter a valid email, or leave it blank.");
       return;
@@ -194,34 +191,42 @@ export function OnboardingPage({
   return (
     <main className="og-frame" aria-label="Fable onboarding">
       <div className="og-center">
-        {/* Progress Indicator */}
-        <div className="og-progress-container">
-          <div className="og-progress-bar">
-            <div
-              className="og-progress-fill"
-              style={{ width: step === "profile" ? "40%" : "100%" }}
-            />
-          </div>
-          <div className="og-progress-text">
-            <span>{step === "profile" ? "Step 1: Local profile" : "Step 2: Add a provider"}</span>
-            <span>{step === "profile" ? "40%" : "100%"}</span>
-          </div>
-        </div>
+        <nav className="og-progress-container" aria-label="Onboarding progress">
+          <ol className="og-progress-steps">
+            <li
+              className={step === "profile" ? "og-progress-step is-current" : "og-progress-step is-complete"}
+              aria-current={step === "profile" ? "step" : undefined}
+            >
+              <span aria-hidden="true">{step === "providers" ? <CheckCircle size={14} weight="fill" /> : "1"}</span>
+              Local profile
+            </li>
+            <li
+              className={step === "providers" ? "og-progress-step is-current" : "og-progress-step"}
+              aria-current={step === "providers" ? "step" : undefined}
+            >
+              <span aria-hidden="true">2</span>
+              Model provider
+            </li>
+          </ol>
+          <p className="og-progress-status" role="status">
+            Step {step === "profile" ? "1" : "2"} of 2
+          </p>
+        </nav>
 
         {step === "profile" && (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <h1 id="onboarding-title">Set up your local Fable workspace</h1>
             <p className="og-lede">
               Fable runs on this device. No account is created and nothing is sent to a hosted
-              service to begin. Add an optional name and email for local display, or skip ahead.
+              service to begin. Add your local profile details, then choose a model provider.
             </p>
 
             <form className="og-form" onSubmit={handleProfileSubmit}>
               <label className="og-field">
-                <span>Name (optional)</span>
+                <span>Name</span>
                 <input
                   type="text"
-                  aria-label="Name (optional)"
+                  aria-label="Name"
                   id="og-name"
                   placeholder="Josh Knott"
                   value={name}
@@ -230,15 +235,25 @@ export function OnboardingPage({
                 />
               </label>
               <label className="og-field">
-                <span>Email (optional)</span>
+                <span>Email</span>
                 <input
                   type="email"
-                  aria-label="Email (optional)"
+                  aria-label="Email"
                   id="og-email"
                   placeholder="josh@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="email"
+                />
+              </label>
+              <label className="og-field">
+                <span>Password</span>
+                <input
+                  type="password"
+                  aria-label="Password"
+                  id="og-password"
+                  placeholder="Enter a password"
+                  autoComplete="new-password"
                 />
               </label>
 
@@ -257,9 +272,6 @@ export function OnboardingPage({
               </button>
             </form>
 
-            <button type="button" className="og-skip button button--ghost" onClick={() => setStep("providers")}>
-              Continue without profile <ArrowRight size={14} />
-            </button>
             <button type="button" className="og-skip button button--ghost" onClick={onSkip} style={{ marginTop: 6 }}>
               Skip onboarding (preview) <ArrowRight size={14} />
             </button>
@@ -276,13 +288,15 @@ export function OnboardingPage({
 
             <div className="og-unified">
               <p className="og-unified__hint">
-                Keys live in your device's secure storage and never leave it. Provider-owned
-                runtimes (Codex, Cursor, Copilot, Grok) manage their own sign-in.
+                Choose a provider. You can add or change providers later in Settings.
               </p>
 
               <ul className="og-provider-list">
                 {providers.map((provider) => (
-                  <li key={provider.id}>
+                  <li
+                    key={provider.id}
+                    className={expandedProviderId === provider.id ? "og-provider-list__expanded" : undefined}
+                  >
                     <ProviderRow
                       provider={provider}
                       connected={connectedBackendIds.includes(provider.id)}
@@ -332,10 +346,6 @@ export function OnboardingPage({
           </section>
         )}
 
-        <p className="og-trust" aria-label="Onboarding trust note">
-          <LockSimple size={14} />
-          Credentials are held by Fable's local credential boundary and never leave this device.
-        </p>
       </div>
     </main>
   );
@@ -419,33 +429,22 @@ function ProviderRow({
 
   return (
     <article
-      className={`og-provider${canExpandKey ? " og-provider--expandable" : ""} ${stateClassFor(provider.authState)}`}
+      className={`og-provider${canExpandKey ? " og-provider--expandable" : ""}${expanded ? " og-provider--selected" : ""} ${stateClassFor(provider.authState)}`}
       data-provider-id={provider.id}
     >
       <div className="og-provider__row">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", minWidth: 0 }}>
-          <span
-            style={{
-              display: "grid",
-              placeItems: "center",
-              color: "var(--ink-muted)",
-              flexShrink: 0
-            }}
-          >
-            <ProviderIcon provider={provider.id} size={18} />
+        <div className="og-provider__identity">
+          <span className="og-provider__icon">
+            <ProviderIcon provider={provider.id} size={24} />
           </span>
           <div className="og-provider__lead">
             <strong>{provider.label}</strong>
-            <small>{provider.description}</small>
             <span className="og-provider__kind" aria-label={`${provider.label} ${kindLabel}`}>
               {kindLabel}
             </span>
-            {capabilityLabels.length > 0 ? (
-              <span className="og-provider__caps">{capabilityLabels.slice(0, 4).join(" · ")}</span>
-            ) : null}
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+        <div className="og-provider__action">
           {/* Show the state badge only for non-default states, to keep the UI
               plain. needs-auth is the default for unconnected API-key rows. The
               accessible state label lives on the state-hint below (which carries
@@ -464,6 +463,13 @@ function ProviderRow({
           {renderAction()}
         </div>
       </div>
+
+      {expanded ? (
+        <p className="og-provider__description">
+          {provider.description}
+          {capabilityLabels.length > 0 ? ` · ${capabilityLabels.slice(0, 4).join(" · ")}` : ""}
+        </p>
+      ) : null}
 
       {/* State hint for non-ready states (plain explanation). For install-
           required providers, the specific install hint (e.g. "Requires the
