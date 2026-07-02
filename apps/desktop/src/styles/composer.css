@@ -147,6 +147,18 @@
   border-radius: 50% !important;
 }
 
+/* Long model/permission labels must truncate instead of growing the chip and
+   shifting sibling controls in the space-between controls row. The min-width:0
+   lets the flex child shrink below its content size. */
+.composer-model > span,
+.composer-permissions-card > span {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composer-model:hover,
 .composer-permissions-card:hover,
 .composer-chip:hover {

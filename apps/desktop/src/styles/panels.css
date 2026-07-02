@@ -645,6 +645,9 @@
   font-size: var(--text-14);
   font-weight: 500;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .connector-card__subtitle {
@@ -860,6 +863,9 @@
 .connector-result strong {
   color: var(--ink);
   font-size: var(--text-14);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .connector-result small {
@@ -1146,6 +1152,9 @@
   font-size: var(--text-14);
   font-weight: 500;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .schedule-row__badge {
@@ -1598,4 +1607,18 @@
 .connector-detail__actions button:hover {
   background: var(--surface-overlay);
   border-color: var(--accent-line);
+}
+
+/*
+ * Layout containment for repeated list rows: a state/paint change inside one
+ * row no longer forces the browser to re-layout its siblings. `layout style`
+ * (no `paint`) is used deliberately so absolutely-positioned menus that open
+ * from a row are still allowed to overflow it visually.
+ */
+.connector-card,
+.schedule-row,
+.knowledge-item__row,
+.run-list__row,
+.thread-row {
+  contain: layout style;
 }

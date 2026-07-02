@@ -627,7 +627,7 @@
   border: 1px solid var(--line);
   border-radius: 50%;
   box-shadow: 0 14px 36px rgba(49, 62, 72, 0.13);
-  backdrop-filter: blur(18px) saturate(1.08);
+  backdrop-filter: var(--glass-filter);
 }
 
 .sidebar-reopen-card:hover,

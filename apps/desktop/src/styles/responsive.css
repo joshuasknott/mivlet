@@ -34,6 +34,14 @@
   .topbar {
     padding: 0 18px;
   }
+
+  /* At tablet widths the composer submenu (which flies out to the right of an
+     already left-anchored menu) can overflow the viewport's right edge. Clamp
+     its width so it never clips or pushes off-screen between the phone (700px)
+     and desktop layouts. */
+  .composer-submenu-sidebar {
+    max-width: min(320px, calc(100vw - 24px));
+  }
 }
 
 @media (max-width: 700px) {
