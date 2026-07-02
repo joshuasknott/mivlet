@@ -20,7 +20,8 @@ import type { FableBroker } from "./broker.js";
 import {
   createBrokerRouter,
   type BrokerRouterOptions,
-  CORRELATION_HEADER
+  CORRELATION_HEADER,
+  toBrokerErrorPayload
 } from "./router.js";
 
 /** Mirror of the router's body-size guard, enforced while reading the Node body. */
@@ -43,25 +44,28 @@ export function createBrokerHandler(options: BrokerServerOptions): BrokerRequest
   const router = createBrokerRouter({
     broker: options.broker,
     requestsPerMinute: options.requestsPerMinute,
-    allowedOrigins: options.allowedOrigins
+    allowedOrigins: options.allowedOrigins,
+    trustProxy: options.trustProxy
   });
+  const trustProxy = options.trustProxy ?? false;
 
   return async (req, res) => {
     try {
       const request = await nodeRequestToWeb(req);
-      const response = await router.handle(request, peerOf(req));
+      const response = await router.handle(request, peerOf(req, trustProxy));
       await writeWebResponse(res, response);
-    } catch {
+    } catch (error) {
       // The router never throws for normal handling (it returns error Responses),
-      // but a stream read failure can surface here. Fail closed.
+      // but an error can surface here while reading the Node stream. A
+      // BrokerContractError (e.g. an oversize body rejected by readNodeBody) must be
+      // routed through the same redacted error shape the router emits — otherwise an
+      // oversize body would collapse to a 500 provider-unavailable retryable, an
+      // infinite-retry footgun. Only a genuinely unexpected stream error falls back
+      // to the generic 500.
+      const { status, response } = toBrokerErrorPayload(error);
       if (!res.headersSent) {
-        res.writeHead(500, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
-        res.end(JSON.stringify({
-          contractVersion: 1,
-          error: "provider-unavailable",
-          message: "An unexpected broker error occurred.",
-          retryable: true
-        }));
+        res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+        res.end(JSON.stringify(response));
       }
       try {
         res.end();
@@ -156,10 +160,21 @@ async function writeWebResponse(res: ServerResponse, response: Response): Promis
   res.end();
 }
 
-function peerOf(req: IncomingMessage): string | undefined {
-  const forwarded = req.headers["x-forwarded-for"];
-  const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  if (first) return first.split(",")[0].trim();
+/**
+ * Resolve the rate-limit peer for a Node request. The socket address is the
+ * default: it is not client-controllable, so rotating a header per request cannot
+ * bypass the per-peer limit. `X-Forwarded-For` is honored ONLY when an explicit
+ * `trustProxy` configuration is present (the broker runs behind a trusted proxy
+ * that overwrites the header); otherwise the header is ignored, defeating the
+ * classic header-rotation bypass. The peer is used solely as a rate-limit key and
+ * is never logged.
+ */
+function peerOf(req: IncomingMessage, trustProxy: boolean): string | undefined {
+  if (trustProxy) {
+    const forwarded = req.headers["x-forwarded-for"];
+    const first = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    if (first) return first.split(",")[0].trim();
+  }
   return req.socket?.remoteAddress;
 }
 

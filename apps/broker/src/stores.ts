@@ -40,8 +40,6 @@ interface HandoffEntry {
   /** Desktop state the handoff is bound to; must match on redeem. */
   state: string;
   createdAt: number;
-  /** Becomes true after the first successful redemption. */
-  consumed: boolean;
 }
 
 export interface PendingExchangeStore {
@@ -52,9 +50,14 @@ export interface PendingExchangeStore {
 }
 
 export interface HandoffStore {
-  issue(entry: Omit<HandoffEntry, "createdAt" | "consumed">): string;
+  issue(entry: Omit<HandoffEntry, "createdAt">): string;
   redeem(handoff: string, state: string): HandoffEntry | undefined;
 }
+
+/** Minimum interval between full prune sweeps. The inline expiry check in each
+ * store method (consume/redeem) guarantees TTL is still enforced locally on every
+ * access, so the sweep only needs to reclaim idle/stranded entries. */
+const PRUNE_INTERVAL_MS = 5000;
 
 /** Create the in-process stores with an injectable clock (tests) + TTL. */
 export function createStores(clock: BrokerClock): {
@@ -65,7 +68,9 @@ export function createStores(clock: BrokerClock): {
   const handoffs = new Map<string, HandoffEntry>();
 
   const ttlMs = BROKER_HANDOFF_TTL_SECONDS * 1000;
+  let lastPruneMs = 0;
 
+  /** Full sweep of a single map, deleting every entry past its TTL. */
   function prune(map: Map<string, { createdAt: number }>) {
     const now = clock.nowMs();
     for (const [key, entry] of map) {
@@ -73,16 +78,40 @@ export function createStores(clock: BrokerClock): {
     }
   }
 
+  /**
+   * Lazy/throttled prune: only run the full sweep when more than
+   * {@link PRUNE_INTERVAL_MS} has elapsed since the last sweep. This is safe because
+   * each store method also performs an inline expiry check on the entry it touches,
+   * so TTL is enforced locally on every access regardless of when the sweep last ran.
+   */
+  function maybePrune(map: Map<string, { createdAt: number }>) {
+    const now = clock.nowMs();
+    if (now - lastPruneMs > PRUNE_INTERVAL_MS) {
+      lastPruneMs = now;
+      prune(map);
+    }
+  }
+
+  /** Inline (local) TTL check on a fetched entry: if expired, delete and signal miss. */
+  function isExpired(entry: { createdAt: number }, now: number): boolean {
+    return now - entry.createdAt > ttlMs;
+  }
+
   return {
     pending: {
       create(entry) {
-        prune(pending);
+        maybePrune(pending);
         pending.set(entry.state, { ...entry, createdAt: clock.nowMs() });
       },
       consume(state) {
-        prune(pending);
+        maybePrune(pending);
         const entry = pending.get(state);
         if (!entry) return undefined;
+        // Inline TTL check: if the fetched entry has expired, treat it as gone.
+        if (isExpired(entry, clock.nowMs())) {
+          pending.delete(state);
+          return undefined;
+        }
         // Single-use: remove before returning so a concurrent/replayed callback
         // cannot trigger a second token exchange.
         pending.delete(state);
@@ -94,17 +123,19 @@ export function createStores(clock: BrokerClock): {
     },
     handoff: {
       issue(entry) {
-        prune(handoffs);
+        maybePrune(handoffs);
         const ticket = urlSafeToken(32);
-        handoffs.set(ticket, { ...entry, createdAt: clock.nowMs(), consumed: false });
+        handoffs.set(ticket, { ...entry, createdAt: clock.nowMs() });
         return ticket;
       },
       redeem(handoff, state) {
-        prune(handoffs);
+        maybePrune(handoffs);
         const entry = handoffs.get(handoff);
         if (!entry) return undefined;
-        // Single-use: mark consumed and remove. A second redeem finds nothing.
+        // Single-use: delete before returning. A second redeem finds nothing.
+        // For an expired entry this also reclaims it (fail-closed).
         handoffs.delete(handoff);
+        if (isExpired(entry, clock.nowMs())) return undefined;
         if (entry.state !== state) return undefined;
         return entry;
       }

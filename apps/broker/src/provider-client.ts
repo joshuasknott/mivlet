@@ -31,6 +31,14 @@ export interface BrokerProviderClientOptions {
   credentials: ProviderCredentials;
   fetch?: BrokerFetch;
   clock?: BrokerClock;
+  /**
+   * Provider profile, pre-resolved by the broker once per request. Optional so
+   * standalone callers still work; when omitted the profile is resolved from the
+   * provider id on first use. PROFILES is immutable (`const`), so caching and
+   * passing the same reference is behavior-neutral and avoids re-resolving the
+   * profile inside each provider-client function on a single request.
+   */
+  profile?: ProviderProfile;
 }
 
 export class BrokerOAuthError extends Error {
@@ -53,8 +61,6 @@ export interface ExchangeResult {
   tokens: ConnectorTokenSet;
   /** Identity payload (provider-shaped) the profile normalizes. */
   identityPayload: unknown;
-  /** Whether identity came inline (e.g. Slack) or must be fetched separately. */
-  identityInline: boolean;
 }
 
 /**
@@ -65,7 +71,7 @@ export async function exchangeCode(
   options: BrokerProviderClientOptions,
   params: { code: string; redirectUri: string; verifier?: string }
 ): Promise<ExchangeResult> {
-  const profile = providerProfile(options.provider);
+  const profile = profileOf(options);
   const fetcher = options.fetch ?? globalThis.fetch;
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -84,12 +90,7 @@ export async function exchangeCode(
     body
   );
   const tokens = tokenSetFrom(json, options.clock ?? systemClockNow);
-  const profileIdentity = identityInlineFor(options.provider, json);
-  return {
-    tokens,
-    identityPayload: profileIdentity ?? json,
-    identityInline: profileIdentity !== undefined
-  };
+  return { tokens, identityPayload: json };
 }
 
 /** Rotate an expiring access token using the refresh token + confidential client. */
@@ -97,7 +98,7 @@ export async function refreshTokens(
   options: BrokerProviderClientOptions,
   refreshToken: string
 ): Promise<ConnectorTokenSet> {
-  const profile = providerProfile(options.provider);
+  const profile = profileOf(options);
   const fetcher = options.fetch ?? globalThis.fetch;
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -125,7 +126,7 @@ export async function revokeToken(
   token: string,
   hint?: "access_token" | "refresh_token"
 ): Promise<void> {
-  const profile = providerProfile(options.provider);
+  const profile = profileOf(options);
   const fetcher = options.fetch ?? globalThis.fetch;
   const body = new URLSearchParams({ token });
   if (hint) body.set("token_type_hint", hint);
@@ -159,7 +160,7 @@ export async function resolveIdentity(
   options: BrokerProviderClientOptions,
   tokens: ConnectorTokenSet
 ): Promise<unknown> {
-  const profile = providerProfile(options.provider);
+  const profile = profileOf(options);
   const fetcher = options.fetch ?? globalThis.fetch;
   if (options.provider === "linear") {
     // Linear identity is a GraphQL query.
@@ -195,13 +196,24 @@ export async function resolveIdentity(
 /** Normalize a provider identity payload via its profile. */
 export function normalizeAccount(
   provider: BrokerProviderId,
-  payload: unknown
+  payload: unknown,
+  profile?: ProviderProfile
 ): ConnectorAccountSummary {
-  const profile: ProviderProfile = providerProfile(provider);
-  return profile.normalizeIdentity(payload);
+  const resolved: ProviderProfile = profile ?? providerProfile(provider);
+  return resolved.normalizeIdentity(payload);
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Resolve the profile for an options bundle, preferring the broker's
+ * pre-resolved reference (one lookup per request) and falling back to a lookup
+ * from the provider id for standalone callers. PROFILES is immutable, so the
+ * cached reference is safe to reuse without copying.
+ */
+function profileOf(options: BrokerProviderClientOptions): ProviderProfile {
+  return options.profile ?? providerProfile(options.provider);
+}
 
 async function postForm(
   fetcher: BrokerFetch,
@@ -326,19 +338,6 @@ function tokenSetFrom(
       : undefined,
     scopes: scopeRaw ? scopeRaw.split(/[\s,]+/).filter(Boolean) : []
   };
-}
-
-/**
- * Some providers embed identity in the token-exchange response; for those the
- * broker skips a separate identity call. Slack's oauth.v2.access does include
- * user/team ids, but auth.test is the authoritative identity source, so the
- * broker always resolves Slack identity separately for correctness.
- */
-function identityInlineFor(
-  _provider: BrokerProviderId,
-  _json: Record<string, unknown>
-): unknown | undefined {
-  return undefined;
 }
 
 function basicAuth(credentials: ProviderCredentials): string | undefined {

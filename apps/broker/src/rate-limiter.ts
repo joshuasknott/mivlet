@@ -16,6 +16,13 @@ export interface RateLimiterOptions {
   /** Window length in milliseconds. */
   windowMs: number;
   clock?: BrokerClock;
+  /**
+   * Maximum number of tracked keys before an idle-entry sweep runs. Bounds memory
+   * so a hostile client rotating keys (e.g. one peer per request) cannot grow the
+   * windows map without limit. Default 4096. When the cap is reached the limiter
+   * sweeps expired entries and, if still full, fails closed (denies).
+   */
+  maxKeys?: number;
 }
 
 export interface RateLimitResult {
@@ -33,20 +40,49 @@ export interface RateLimiter {
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   const clock = options.clock ?? { nowMs: () => Date.now() };
-  const windows = new Map<string, { start: number; count: number }>();
+  const maxKeys = options.maxKeys ?? 4096;
+  // `lastSeen` is tracked so an idle-key sweep can drop entries whose window has
+  // expired even when the map has not reached the hard cap, preventing unbounded
+  // growth from distinct (route + peer) keys over time.
+  const windows = new Map<string, { start: number; count: number; lastSeen: number }>();
+
+  /** Drop every entry whose window has elapsed. Returns the number removed. */
+  function sweepExpired(now: number): number {
+    let removed = 0;
+    for (const [key, entry] of windows) {
+      if (now - entry.start >= options.windowMs) {
+        windows.delete(key);
+        removed++;
+      }
+    }
+    return removed;
+  }
 
   return {
     check(key) {
       const now = clock.nowMs();
-      const entry = windows.get(key);
-      if (!entry || now - entry.start >= options.windowMs) {
-        windows.set(key, { start: now, count: 1 });
+      const existing = windows.get(key);
+      if (!existing || now - existing.start >= options.windowMs) {
+        // New window for this key. Bound memory: if the map is at capacity, first
+        // reclaim expired entries; if still full, fail closed (deny) rather than
+        // letting an attacker exhaust memory by rotating keys.
+        if (windows.size >= maxKeys && !windows.has(key)) {
+          sweepExpired(now);
+          if (windows.size >= maxKeys) {
+            return { allowed: false, remaining: 0, retryAfterMs: options.windowMs };
+          }
+        }
+        windows.set(key, { start: now, count: 1, lastSeen: now });
         return { allowed: true, remaining: options.limit - 1, retryAfterMs: options.windowMs };
       }
-      entry.count += 1;
-      const allowed = entry.count <= options.limit;
-      const remaining = Math.max(0, options.limit - entry.count);
-      const retryAfterMs = Math.max(0, entry.start + options.windowMs - now);
+      existing.count += 1;
+      existing.lastSeen = now;
+      const allowed = existing.count <= options.limit;
+      const remaining = Math.max(0, options.limit - existing.count);
+      const retryAfterMs = Math.max(0, existing.start + options.windowMs - now);
+      // Opportunistic sweep once the map is reasonably full, so idle keys are
+      // reclaimed without waiting for the hard cap to be hit.
+      if (windows.size >= maxKeys) sweepExpired(now);
       return { allowed, remaining, retryAfterMs };
     }
   };

@@ -37,10 +37,19 @@ export const CORRELATION_HEADER = "x-fable-request-id";
 
 export interface BrokerRouterOptions {
   broker: FableBroker;
-  /** Requests per minute per route+peer. Default 60. */
+  /** Requests per minute per route. Default 60. */
   requestsPerMinute?: number;
   /** Allowed CORS origins. Default: loopback only. */
   allowedOrigins?: string[];
+  /**
+   * Whether to honor the client-controllable `X-Forwarded-For` header for the
+   * rate-limit peer on the Node transport. Default false: the peer is taken from
+   * the socket address, so rotating the header per request cannot bypass the
+   * per-peer limit. Set true only behind a trusted proxy that overwrites the
+   * header. The Workers transport always reads `cf-connecting-ip` (set by
+   * Cloudflare) and ignores this flag.
+   */
+  trustProxy?: boolean;
 }
 
 /** A logger sink the transports can supply; never receives bodies or secrets. */
@@ -110,7 +119,7 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
         log(redactLog("rate-limited", request.method, url.pathname, correlation));
         return jsonResponse(
           429,
-          errorResponse(new BrokerContractError("rate-limited", "Too many broker requests.", true)),
+          new BrokerContractError("rate-limited", "Too many broker requests.", true).toResponse(),
           {
             [CORRELATION_HEADER]: correlation,
             "retry-after": String(Math.ceil(limit.retryAfterMs / 1000))
@@ -122,13 +131,11 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
       try {
         return await route(request, url, segments, options.broker, corsHeaders, correlation);
       } catch (error) {
-        const normalized = error instanceof BrokerContractError
-          ? error
-          : new BrokerContractError("provider-unavailable", "An unexpected broker error occurred.", true);
-        log(redactLog(normalized.error, request.method, url.pathname, correlation));
+        const { status, response } = toBrokerErrorPayload(error);
+        log(redactLog(response.error, request.method, url.pathname, correlation));
         return jsonResponse(
-          httpStatusFor(normalized),
-          errorResponse(normalized),
+          status,
+          response,
           { [CORRELATION_HEADER]: correlation },
           corsHeaders
         );
@@ -148,7 +155,7 @@ async function route(
   const headers = { [CORRELATION_HEADER]: correlation };
 
   // /oauth/{provider}/authorize
-  if (request.method === "GET" && segments[0] === "oauth" && segments[2] === "authorize") {
+  if (request.method === "GET" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "authorize") {
     const provider = parseProvider(segments[1]);
     const { response } = await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION,
@@ -165,7 +172,7 @@ async function route(
   }
 
   // /oauth/{provider}/callback (the provider's registered callback)
-  if (request.method === "GET" && segments[0] === "oauth" && segments[2] === "callback") {
+  if (request.method === "GET" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "callback") {
     const provider = parseProvider(segments[1]);
     const { redirect } = await broker.callback(provider, url.searchParams);
     return new Response(null, {
@@ -175,7 +182,7 @@ async function route(
   }
 
   // /oauth/{provider}/handoff
-  if (request.method === "POST" && segments[0] === "oauth" && segments[2] === "handoff") {
+  if (request.method === "POST" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "handoff") {
     const provider = parseProvider(segments[1]);
     const body = await readJson(request);
     const response = await broker.redeem({
@@ -188,7 +195,7 @@ async function route(
   }
 
   // /oauth/{provider}/refresh
-  if (request.method === "POST" && segments[0] === "oauth" && segments[2] === "refresh") {
+  if (request.method === "POST" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "refresh") {
     const provider = parseProvider(segments[1]);
     const body = await readJson(request);
     const response = await broker.refresh({
@@ -200,7 +207,7 @@ async function route(
   }
 
   // /oauth/{provider}/revoke
-  if (request.method === "POST" && segments[0] === "oauth" && segments[2] === "revoke") {
+  if (request.method === "POST" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "revoke") {
     const provider = parseProvider(segments[1]);
     const body = await readJson(request);
     const response = await broker.revoke({
@@ -233,9 +240,40 @@ function requireQuery(url: URL, key: string): string {
 const MAX_BODY_BYTES = 64 * 1024;
 
 async function readJson(request: Request): Promise<Record<string, unknown>> {
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) {
+  // Pre-check content-length so a static oversize payload is rejected before any
+  // body bytes are materialized. The header is client-controllable, so the
+  // streaming cap below is the real enforcement; this just blocks the common case.
+  const declared = request.headers.get("content-length");
+  if (declared && Number.isFinite(Number(declared)) && Number(declared) > MAX_BODY_BYTES) {
     throw new BrokerContractError("invalid-request", "Request body too large.", false);
+  }
+  // Stream the body, aborting the moment the accumulated byte length exceeds the
+  // cap. This bounds memory on the Workers runtime where `request.text()` would
+  // otherwise buffer the whole body before the size check runs. A chunked or lying
+  // content-length is caught here. Raw byte length is tracked from the chunks so
+  // no Node `Buffer` global is needed (absent on the Workers runtime).
+  const reader = request.body?.getReader();
+  let text: string;
+  if (!reader) {
+    text = "";
+  } else {
+    const chunks: Uint8Array[] = [];
+    let totalBytes = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BODY_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* already gone */
+        }
+        throw new BrokerContractError("invalid-request", "Request body too large.", false);
+      }
+      chunks.push(value);
+    }
+    text = chunksToText(chunks, totalBytes);
   }
   try {
     const parsed = JSON.parse(text);
@@ -245,6 +283,20 @@ async function readJson(request: Request): Promise<Record<string, unknown>> {
   } catch {
     throw new BrokerContractError("invalid-request", "Request body was not valid JSON.", false);
   }
+}
+
+/** Decode a list of byte chunks into a UTF-8 string (no Node Buffer dependency). */
+function chunksToText(chunks: Uint8Array[], totalBytes: number): string {
+  if (chunks.length === 0) return "";
+  // A single chunk is the common case; decode it directly without copying.
+  if (chunks.length === 1) return new TextDecoder().decode(chunks[0]);
+  const merged = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 function stringRequired(body: Record<string, unknown>, key: string): string {
@@ -286,8 +338,20 @@ function jsonResponse(
   });
 }
 
-function errorResponse(error: BrokerContractError): BrokerErrorResponse {
-  return error.toResponse();
+/**
+ * Normalize a caught error into the HTTP status + redacted {@link BrokerErrorResponse}
+ * shape every broker route emits. A {@link BrokerContractError} is surfaced with its
+ * own code/status/retryability; any other (unexpected) error collapses to
+ * provider-unavailable (502, retryable) so provider diagnostics or caught messages
+ * never reach the client. Exposed so the Node transport's stream-error catch can
+ * route contract errors (e.g. an oversize body) through the identical path instead
+ * of emitting a generic 500.
+ */
+export function toBrokerErrorPayload(error: unknown): { status: number; response: BrokerErrorResponse } {
+  const normalized = error instanceof BrokerContractError
+    ? error
+    : new BrokerContractError("provider-unavailable", "An unexpected broker error occurred.", true);
+  return { status: httpStatusFor(normalized), response: normalized.toResponse() };
 }
 
 function httpStatusFor(error: BrokerContractError): number {

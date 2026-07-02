@@ -57,7 +57,8 @@ import {
   providerProfile,
   resolveCredentials,
   configuredProviders,
-  type BrokerEnv
+  type BrokerEnv,
+  type ProviderProfile
 } from "./provider-profiles.js";
 import { createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
 
@@ -96,6 +97,14 @@ export class FableBroker {
   private readonly env: BrokerEnv;
   private readonly publicBaseUrl?: URL;
   private readonly requirePublicBaseUrl: boolean;
+  /**
+   * Exact-match desktop redirect allowlist, parsed once at construction. Each
+   * entry is the exact string form of an allowed HTTPS callback URI; the loopback
+   * rule (http, 127.0.0.1/[::1], /callback) is enforced separately and always
+   * available. Hoisted out of `validateDesktopRedirect` so a request does not
+   * split/trim/filter the env var and toString the candidate URL every call.
+   */
+  private readonly allowedDesktopRedirects: Set<string>;
 
   constructor(options: BrokerOptions) {
     this.env = options.env;
@@ -110,6 +119,9 @@ export class FableBroker {
     const stores = createStores(this.clock);
     this.pending = options.pending ?? stores.pending;
     this.handoff = options.handoff ?? stores.handoff;
+    this.allowedDesktopRedirects = parseAllowedDesktopRedirects(
+      this.env.FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS
+    );
   }
 
   /** GET /healthz */
@@ -126,10 +138,13 @@ export class FableBroker {
   async authorize(request: BrokerAuthorizeRequest): Promise<BrokerAuthorizeOutput> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
-    this.requireConfigured(request.provider);
+    // Resolve the (immutable) profile once for this request and thread it through
+    // the configured-check + credential resolution so the profile is not
+    // re-resolved inside each helper.
     const profile = providerProfile(request.provider);
-    const credentials = resolveCredentials(request.provider, this.env);
-    validateDesktopRedirect(request.redirectUri, this.env);
+    this.requireConfigured(request.provider, profile);
+    const credentials = resolveCredentials(request.provider, this.env, profile);
+    validateDesktopRedirect(request.redirectUri, this.allowedDesktopRedirects);
     const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
 
     const url = new URL(profile.authorizationEndpoint);
@@ -181,7 +196,11 @@ export class FableBroker {
     query: URLSearchParams
   ): Promise<BrokerCallbackOutput> {
     this.requireProvider(provider);
-    this.requireConfigured(provider);
+    // Resolve the profile once for the whole callback; thread it through the
+    // configured-check, credential resolution, and every provider-client call so
+    // the immutable profile is not re-resolved inside each of them.
+    const profile = providerProfile(provider);
+    this.requireConfigured(provider, profile);
 
     const error = query.get("error");
     if (error) {
@@ -206,29 +225,28 @@ export class FableBroker {
       throw new BrokerContractError("invalid-state", "Authorization state did not match the provider.", false);
     }
 
-    const credentials = resolveCredentials(provider, this.env);
+    const credentials = resolveCredentials(provider, this.env, profile);
+    const clientOptions = { provider, credentials, profile, fetch: this.fetcher, clock: this.clock };
     let exchange: ExchangeResult;
     try {
       exchange = await exchangeCode(
-        { provider, credentials, fetch: this.fetcher, clock: this.clock },
+        clientOptions,
         { code, redirectUri: pending.providerRedirectUri, verifier: pending.verifier }
       );
     } catch (error) {
       throw brokerErrorFrom(error);
     }
 
-    let identityPayload = exchange.identityPayload;
-    if (!exchange.identityInline) {
-      try {
-        identityPayload = await resolveIdentity(
-          { provider, credentials, fetch: this.fetcher, clock: this.clock },
-          exchange.tokens
-        );
-      } catch (error) {
-        throw brokerErrorFrom(error);
-      }
+    // Identity is always resolved from the provider's identity endpoint (never
+    // trusted inline from the token exchange) so the authoritative source is used
+    // for every provider, including Slack where auth.test is canonical.
+    let identityPayload: unknown;
+    try {
+      identityPayload = await resolveIdentity(clientOptions, exchange.tokens);
+    } catch (error) {
+      throw brokerErrorFrom(error);
     }
-    const account = normalizeAccount(provider, identityPayload);
+    const account = normalizeAccount(provider, identityPayload, profile);
 
     // Issue a single-use, short-lived handoff bound to the desktop state.
     const ticket = this.handoff.issue({
@@ -270,11 +288,12 @@ export class FableBroker {
   async refresh(request: BrokerRefreshRequest): Promise<BrokerRefreshResponse> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
-    this.requireConfigured(request.provider);
-    const credentials = resolveCredentials(request.provider, this.env);
+    const profile = providerProfile(request.provider);
+    this.requireConfigured(request.provider, profile);
+    const credentials = resolveCredentials(request.provider, this.env, profile);
     try {
       const tokens = await refreshTokens(
-        { provider: request.provider, credentials, fetch: this.fetcher, clock: this.clock },
+        { provider: request.provider, credentials, profile, fetch: this.fetcher, clock: this.clock },
         request.refreshToken
       );
       return { contractVersion: BROKER_CONTRACT_VERSION, tokens: transportTokens(tokens, this.clock.nowMs()) };
@@ -287,11 +306,12 @@ export class FableBroker {
   async revoke(request: BrokerRevokeRequest): Promise<BrokerRevokeResponse> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
-    this.requireConfigured(request.provider);
-    const credentials = resolveCredentials(request.provider, this.env);
+    const profile = providerProfile(request.provider);
+    this.requireConfigured(request.provider, profile);
+    const credentials = resolveCredentials(request.provider, this.env, profile);
     try {
       await revokeToken(
-        { provider: request.provider, credentials, fetch: this.fetcher, clock: this.clock },
+        { provider: request.provider, credentials, profile, fetch: this.fetcher, clock: this.clock },
         request.token,
         request.tokenTypeHint
       );
@@ -312,12 +332,12 @@ export class FableBroker {
     }
   }
 
-  private requireConfigured(provider: BrokerProviderId): void {
-    const profile = providerProfile(provider);
-    if (!this.env[profile.clientIdEnv] || !this.env[profile.clientSecretEnv]) {
+  private requireConfigured(provider: BrokerProviderId, profile?: ProviderProfile): void {
+    const resolved = profile ?? providerProfile(provider);
+    if (!this.env[resolved.clientIdEnv] || !this.env[resolved.clientSecretEnv]) {
       throw new BrokerContractError(
         "configuration-required",
-        `${profile.label} is not configured on this broker.`,
+        `${resolved.label} is not configured on this broker.`,
         false
       );
     }
@@ -337,11 +357,27 @@ export class FableBroker {
 }
 
 /**
+ * Parse the `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` env value into an exact-match
+ * set once, at construction. Comma-separated entries are trimmed and empties
+ * dropped, preserving the prior split/trim/filter semantics.
+ */
+function parseAllowedDesktopRedirects(raw: string | undefined): Set<string> {
+  return new Set(
+    (raw ?? "").split(",").map((entry) => entry.trim()).filter(Boolean)
+  );
+}
+
+/**
  * Allow only the desktop loopback callback shape, or an exact HTTPS callback
  * explicitly listed for managed desktop schemes. Loopback ports are ephemeral,
  * but host and path are fixed and query/fragment/userinfo are forbidden.
+ *
+ * The allowlist set is pre-parsed at construction; this is a single exact-match
+ * `Set.has(redirect.toString())` per call — no split/trim/filter, no repeated
+ * toString of the env value. Exact-match semantics (no substring) and the
+ * loopback rule are preserved unchanged.
  */
-function validateDesktopRedirect(value: string, env: BrokerEnv): void {
+function validateDesktopRedirect(value: string, allowed: Set<string>): void {
   let redirect: URL;
   try {
     redirect = new URL(value);
@@ -351,9 +387,7 @@ function validateDesktopRedirect(value: string, env: BrokerEnv): void {
   const loopback = redirect.protocol === "http:"
     && (redirect.hostname === "127.0.0.1" || redirect.hostname === "[::1]")
     && redirect.pathname === "/callback";
-  const exact = (env.FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS ?? "")
-    .split(",").map((entry) => entry.trim()).filter(Boolean)
-    .some((entry) => entry === redirect.toString());
+  const exact = allowed.has(redirect.toString());
   if ((!loopback && !exact) || redirect.username || redirect.password || redirect.search || redirect.hash) {
     throw new BrokerContractError("invalid-request", "Desktop redirect URI is not allowed.", false);
   }

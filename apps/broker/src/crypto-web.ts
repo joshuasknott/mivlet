@@ -25,11 +25,19 @@ export function randomBytes(length: number): Uint8Array {
 }
 
 /**
+ * Module-level UTF-8 encoder, reused across every encode call. `TextEncoder` is
+ * stateless and allocation is cheap, but the broker encodes on every PKCE digest
+ * and Basic-auth header, so hoisting it avoids a per-call allocation. Stateless
+ * encoder → safe to share across calls.
+ */
+const TEXT_ENCODER = new TextEncoder();
+
+/**
  * SHA-256 digest of a UTF-8 string, as raw bytes. Used for the PKCE S256 code
  * challenge. Implemented against Web Crypto `digest` so no Node API is touched.
  */
 export async function sha256(input: string): Promise<Uint8Array> {
-  const data = new TextEncoder().encode(input);
+  const data = TEXT_ENCODER.encode(input);
   const digest = await globalThis.crypto.subtle.digest("SHA-256", data);
   return new Uint8Array(digest);
 }
@@ -51,5 +59,5 @@ export function base64(bytes: Uint8Array): string {
 
 /** Base64-encode a UTF-8 string (e.g. `client_id:client_secret` for Basic auth). */
 export function base64String(input: string): string {
-  return base64(new TextEncoder().encode(input));
+  return base64(TEXT_ENCODER.encode(input));
 }

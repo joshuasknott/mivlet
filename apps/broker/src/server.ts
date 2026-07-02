@@ -17,6 +17,10 @@ const port = Number(process.env.FABLE_BROKER_PORT ?? 8788);
 const host = process.env.FABLE_BROKER_HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
 const requestsPerMinute = Number(process.env.FABLE_BROKER_RATE_LIMIT_PER_MINUTE ?? 60);
 const publicBaseUrl = process.env.FABLE_BROKER_PUBLIC_URL ?? `http://127.0.0.1:${port}/`;
+// Honor X-Forwarded-For for the rate-limit peer only behind an explicit trusted
+// proxy. Without this flag the peer is the socket address, so a client cannot
+// rotate the header to bypass the per-peer limit.
+const trustProxy = /^(1|true)$/i.test(process.env.FABLE_BROKER_TRUST_PROXY ?? "");
 
 if (process.env.NODE_ENV === "production" && host === "127.0.0.1") {
   // Defensive: production should bind an externally reachable host behind HTTPS.
@@ -26,7 +30,7 @@ if (process.env.NODE_ENV === "production" && host === "127.0.0.1") {
 }
 
 const broker = new FableBroker({ env: process.env, publicBaseUrl });
-const server = createBrokerServer({ broker, host, port, requestsPerMinute });
+const server = createBrokerServer({ broker, host, port, requestsPerMinute, trustProxy });
 
 server.on("error", (error) => {
   // eslint-disable-next-line no-console

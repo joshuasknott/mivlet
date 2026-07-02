@@ -245,13 +245,14 @@ export interface ProviderCredentials {
 
 export function resolveCredentials(
   provider: BrokerProviderId,
-  env: BrokerEnv
+  env: BrokerEnv,
+  profile?: ProviderProfile
 ): ProviderCredentials {
-  const profile = providerProfile(provider);
-  const clientId = env[profile.clientIdEnv];
-  const clientSecret = env[profile.clientSecretEnv];
+  const resolved = profile ?? providerProfile(provider);
+  const clientId = env[resolved.clientIdEnv];
+  const clientSecret = env[resolved.clientSecretEnv];
   if (!clientId || !clientSecret) {
-    throw new Error(`${profile.label} is not configured on the broker.`);
+    throw new Error(`${resolved.label} is not configured on the broker.`);
   }
   return { clientId, clientSecret };
 }
