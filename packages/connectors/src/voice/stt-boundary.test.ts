@@ -61,6 +61,7 @@ describe("speech-to-text boundary", () => {
   });
 
   it("maps browser permission denial to a typed, retryable failure", async () => {
+    const abort = vi.fn();
     class FakeRecognition {
       continuous = false;
       interimResults = false;
@@ -72,7 +73,9 @@ describe("speech-to-text boundary", () => {
         queueMicrotask(() => this.onerror?.({ error: "not-allowed" }));
       }
       stop() {}
-      abort() {}
+      abort() {
+        abort();
+      }
     }
     const session = await createBrowserSpeechProvider({
       SpeechRecognition: FakeRecognition,
@@ -83,6 +86,7 @@ describe("speech-to-text boundary", () => {
       code: "permission-denied"
     });
     await session.dispose();
+    expect(abort).toHaveBeenCalledOnce();
   });
 
   it("normalizes synchronous platform start failures", async () => {

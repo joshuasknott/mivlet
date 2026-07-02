@@ -28,9 +28,7 @@ function failureState(error: unknown): VoiceInputState {
   return {
     status: "failed",
     code: "failed",
-    message: error instanceof Error
-      ? error.message
-      : "Speech recognition failed. Text input is still available."
+    message: "Speech recognition failed. Text input is still available."
   };
 }
 

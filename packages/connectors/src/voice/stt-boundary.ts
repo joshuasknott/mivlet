@@ -127,6 +127,8 @@ export function createBrowserSpeechProvider(
       let transcript = "";
       let settled = false;
       let disposed = false;
+      let ended = false;
+      let abortRequested = false;
       let resolveResult!: (transcript: string) => void;
       let rejectResult!: (error: SpeechToTextError) => void;
       const result = new Promise<string>((resolve, reject) => {
@@ -138,6 +140,11 @@ export function createBrowserSpeechProvider(
         settled = true;
         rejectResult(error);
       };
+      const abortOnce = () => {
+        if (ended || abortRequested) return;
+        abortRequested = true;
+        recognition.abort();
+      };
       recognition.onresult = (event) => {
         transcript = Array.from(event.results)
           .map((result) => result[0]?.transcript ?? "")
@@ -148,6 +155,7 @@ export function createBrowserSpeechProvider(
         settleError(browserSpeechError(event.error));
       };
       recognition.onend = () => {
+        ended = true;
         if (settled) return;
         settled = true;
         if (transcript) resolveResult(transcript);
@@ -173,15 +181,15 @@ export function createBrowserSpeechProvider(
         async cancel() {
           if (disposed) return;
           settleError(browserSpeechError("aborted"));
-          recognition.abort();
+          abortOnce();
         },
         async dispose() {
           if (disposed) return;
           disposed = true;
           if (!settled) {
             settleError(browserSpeechError("aborted"));
-            recognition.abort();
           }
+          abortOnce();
           recognition.onresult = null;
           recognition.onerror = null;
           recognition.onend = null;
