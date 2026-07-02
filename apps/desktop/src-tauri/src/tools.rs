@@ -309,7 +309,7 @@ fn require_string_argument(args: &serde_json::Value, key: &str) -> Result<String
 /// result for a complete one (mirrors native_api's MAX_STREAM_RESPONSE_BYTES
 /// philosophy, sized for tool output). 1 MiB is generous for source files and
 /// bounded enough to prevent runaway-buffer OOM.
-pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 1 * 1024 * 1024;
+pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 1024 * 1024;
 
 /// Maximum bytes accepted by `write-file` content. Bounds the on-disk write so
 /// a tool call cannot exhaust workspace storage in a single call.

@@ -653,7 +653,7 @@ pub fn save_scheduled_job(
     )
     .actor("user")
     .mode(
-        &job.execution
+        job.execution
             .as_ref()
             .map(|route| route.permission_mode.as_str())
             .unwrap_or(""),
@@ -1182,7 +1182,7 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     })?;
 
     let mut newly_leased = Vec::new();
-    let leased_this_tick = persist(app, DEFAULT_WORKSPACE_ID, |store| {
+    persist(app, DEFAULT_WORKSPACE_ID, |store| {
         let mut changed = false;
         // 1. Expire leases whose deadline has passed.
         for entry in &mut store.queue {
@@ -1241,7 +1241,6 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
         }
         changed
     })?;
-    let _ = leased_this_tick;
 
     // 3. Emit only entries leased by this tick. Previously every leased entry
     // was re-emitted every five seconds until acknowledgement.
