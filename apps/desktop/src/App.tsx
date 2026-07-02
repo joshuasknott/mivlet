@@ -620,7 +620,7 @@ export function App() {
             <Suspense fallback={null}>{renderPage()}</Suspense>
           </div>
         ) : (
-          <div className="workspace-center">
+          <div className="workspace-center workspace-center--composer">
             <Composer
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
@@ -675,7 +675,6 @@ export function App() {
               inThread={!!runtime.activeThread}
               connectedConnectors={connectedConnectorCards}
               knowledgeSources={runtime.workspaceKnowledgeSources}
-              schedules={runtime.schedules}
             />
             <VoiceReview voice={voice} />
 

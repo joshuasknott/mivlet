@@ -180,8 +180,8 @@ export function WorkspaceSidebar({
   return (
     <aside className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-header">
-        <div className="sidebar-top-row">
-          {isSettingsActive ? (
+        {isSettingsActive ? (
+          <div className="sidebar-top-row">
             <button
               type="button"
               className="workspace-switcher settings-back-button"
@@ -193,7 +193,47 @@ export function WorkspaceSidebar({
                 Back
               </span>
             </button>
-          ) : (
+            <button
+              type="button"
+              className="sidebar-minimize"
+              aria-label="Close sidebar"
+              aria-pressed="false"
+              onClick={onToggleCollapsed}
+            >
+              <SidebarSimple size={18} />
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="sidebar-top-row sidebar-top-row--controls">
+              <div className="sidebar-history-controls" aria-label="Navigation history">
+                <button
+                  type="button"
+                  aria-label="Back"
+                  disabled={!canNavigateBack}
+                  onClick={onNavigateBack}
+                >
+                  <ArrowLeft size={15} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Forward"
+                  disabled={!canNavigateForward}
+                  onClick={onNavigateForward}
+                >
+                  <ArrowRight size={15} aria-hidden="true" />
+                </button>
+              </div>
+              <button
+                type="button"
+                className="sidebar-minimize"
+                aria-label="Close sidebar"
+                aria-pressed="false"
+                onClick={onToggleCollapsed}
+              >
+                <SidebarSimple size={18} />
+              </button>
+            </div>
             <div className="workspace-switcher-container" ref={dropdownRef}>
               <button
                 type="button"
@@ -231,37 +271,8 @@ export function WorkspaceSidebar({
                 </div>
               )}
             </div>
-          )}
-          {!isSettingsActive ? (
-            <div className="sidebar-history-controls" aria-label="Navigation history">
-              <button
-                type="button"
-                aria-label="Back"
-                disabled={!canNavigateBack}
-                onClick={onNavigateBack}
-              >
-                <ArrowLeft size={15} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                aria-label="Forward"
-                disabled={!canNavigateForward}
-                onClick={onNavigateForward}
-              >
-                <ArrowRight size={15} aria-hidden="true" />
-              </button>
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="sidebar-minimize"
-            aria-label="Close sidebar"
-            aria-pressed="false"
-            onClick={onToggleCollapsed}
-          >
-            <SidebarSimple size={18} />
-          </button>
-        </div>
+          </>
+        )}
       </div>
 
       {isSettingsActive ? (
@@ -321,7 +332,6 @@ export function WorkspaceSidebar({
           ) : null}
 
           <div className="settings-logout-wrapper" style={{ marginTop: "auto", display: "grid", gap: "8px" }}>
-            <div className="sidebar-action-divider" aria-hidden="true" style={{ margin: "0 4px" }} />
             <div className="settings-sidebar-list" style={{ display: "grid", gap: "2px" }}>
               <button
                 type="button"
@@ -367,7 +377,6 @@ export function WorkspaceSidebar({
               <MagnifyingGlass size={16} />
               <span>Search</span>
             </button>
-            <div className="sidebar-action-divider" aria-hidden="true" />
             <nav className="primary-utility-nav" aria-label="Tools">
               {utilityItems.map((item) => {
                 const Icon = item.icon;
@@ -474,7 +483,6 @@ export function WorkspaceSidebar({
           </div>
 
           <div className="sidebar-chat-dock" ref={chatFlyoutRef}>
-            <div className="sidebar-action-divider" aria-hidden="true" />
             <div className="sidebar-chat-dock__row">
               <button
                 type="button"
@@ -488,7 +496,6 @@ export function WorkspaceSidebar({
                   }
                 }}
               >
-                <Clock size={17} />
                 <span>Chats</span>
                 <CaretRight className="collection-caret" size={13} weight="bold" />
               </button>

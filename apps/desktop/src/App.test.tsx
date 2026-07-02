@@ -362,10 +362,27 @@ describe("Fable home", () => {
       "Josh's Fable"
     );
     await user.click(screen.getByRole("button", { name: /approval preset/i }));
-    await user.click(screen.getByRole("menuitemradio", { name: /work freely/i }));
-    expect(screen.getByRole("button", { name: /approval preset/i })).toHaveTextContent(
-      "Work Freely"
+    const fullAccessOption = screen.getByRole("menuitemradio", { name: /full access/i });
+    const fullAccessIconPath = fullAccessOption.querySelector("svg path")?.getAttribute("d");
+    await user.click(fullAccessOption);
+    const permissionSelector = screen.getByRole("button", { name: /approval preset/i });
+    expect(permissionSelector).toHaveTextContent("Full access");
+    expect(permissionSelector.querySelector("svg path")?.getAttribute("d")).toBe(
+      fullAccessIconPath
     );
+    const chatsButton = within(sidebar).getByRole("button", { name: /^chats$/i });
+    expect(chatsButton.firstElementChild?.tagName).toBe("SPAN");
+    expect(chatsButton.querySelectorAll("svg")).toHaveLength(1);
+  });
+
+  it("keeps schedules out of the add menu while retaining the schedules navigation", async () => {
+    const user = await renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: /add files and context/i }));
+    const addMenu = screen.getByRole("menu", { name: /add to prompt/i });
+
+    expect(within(addMenu).queryByRole("menuitem", { name: /^schedules/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
   });
 
   it("opens the interactive knowledge workspace", async () => {

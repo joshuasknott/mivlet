@@ -2,14 +2,16 @@ import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useState } from "reac
 import {
   ArrowUp,
   Books,
-  CalendarBlank,
   CaretDown,
   CaretRight,
   FileArrowUp,
+  GearSix,
+  HandPalm,
   Microphone,
   PlugsConnected,
   Plus,
   ShieldCheck,
+  ShieldWarning,
   Terminal
 } from "@phosphor-icons/react";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
@@ -17,6 +19,29 @@ import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
 import { ConnectorIcon } from "./ConnectorIcon";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
+
+const PERMISSION_PRESENTATION = {
+  "Read Only": {
+    label: "Ask for approval",
+    description: "Always ask before Fable changes files or takes external actions.",
+    icon: HandPalm
+  },
+  "Ask Me": {
+    label: "Approve for me",
+    description: "Fable handles routine work and asks before sensitive actions.",
+    icon: ShieldCheck
+  },
+  "Work Freely": {
+    label: "Full access",
+    description: "Use Fable's broadest in-house permission profile.",
+    icon: ShieldWarning
+  },
+  Custom: {
+    label: "Custom",
+    description: "Use the permissions you set in Fable.",
+    icon: GearSix
+  }
+} as const;
 
 export function Composer({
   composerRef,
@@ -45,8 +70,7 @@ export function Composer({
   onSelectPermissionLabel,
   inThread = false,
   connectedConnectors = [],
-  knowledgeSources = [],
-  schedules = []
+  knowledgeSources = []
 }: {
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -80,10 +104,13 @@ export function Composer({
   inThread?: boolean;
   connectedConnectors?: { id: string; name: string; status: string }[];
   knowledgeSources?: { id: string; title: string; provenance: string; connectorId?: string }[];
-  schedules?: { id: string; name: string; description: string }[];
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | "schedules" | "commands" | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | "commands" | null>(null);
+  const activePermissionPresentation =
+    PERMISSION_PRESENTATION[permissionLabel as keyof typeof PERMISSION_PRESENTATION];
+  const visiblePermissionLabel = activePermissionPresentation?.label ?? permissionLabel;
+  const ActivePermissionIcon = activePermissionPresentation?.icon ?? ShieldCheck;
 
   const closeExternalMenus = () => {
     if (addMenuOpen) onToggleAddMenu();
@@ -265,64 +292,6 @@ export function Composer({
                     )}
                   </div>
 
-                  <div
-                    className={`composer-menu-item-wrapper${activeSubmenu === "schedules" ? " is-active" : ""}`}
-                    onMouseEnter={() => {
-                      if (schedules.length > 0) {
-                        setActiveSubmenu("schedules");
-                      }
-                    }}
-                    onMouseLeave={() => setActiveSubmenu(null)}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={schedules.length === 0}
-                      onClick={() => onOpenTool("Schedules")}
-                      className="composer-menu-item"
-                      onMouseEnter={() => {
-                        if (schedules.length > 0) {
-                          setActiveSubmenu("schedules");
-                        }
-                      }}
-                    >
-                      <CalendarBlank size={18} />
-                      <span>
-                        <strong>Schedules</strong>
-                        <small>
-                          {schedules.length > 0
-                            ? "Choose or create an automation"
-                            : "No schedules. Create one"}
-                        </small>
-                      </span>
-                      {schedules.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
-                    </button>
-                    {activeSubmenu === "schedules" && schedules.length > 0 && (
-                      <div className="composer-submenu-sidebar composer-submenu-sidebar--align-bottom" role="menu" aria-label="Schedules list">
-                        <span className="composer-menu__heading">Active Schedules</span>
-                        {schedules.map((schedule) => (
-                          <button
-                            key={schedule.id}
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              const prompt = `Run schedule "${schedule.name}" `;
-                              onComposerChange(prompt);
-                              composerRef.current?.focus();
-                              onToggleAddMenu();
-                              setActiveSubmenu(null);
-                            }}
-                          >
-                            <div className="composer-submenu-item-content">
-                              <CalendarBlank size={16} />
-                              <span className="composer-submenu-item-title" title={schedule.name}>{schedule.name}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
                   <div className="composer-add-menu__divider" aria-hidden="true" />
 
                   <div
@@ -372,7 +341,61 @@ export function Composer({
               ) : null}
             </div>
 
-            <div className="composer-control-anchor">
+            <div className="composer-control-anchor composer-control-anchor--permissions">
+              <button
+                type="button"
+                className={`composer-permissions-card${permissionsOpen ? " composer-chip--active composer-trigger--open" : ""}`}
+                onClick={() => {
+                  setModelOpen(false);
+                  onTogglePermissions();
+                }}
+                aria-expanded={permissionsOpen}
+                aria-label="Approval preset"
+              >
+                <ActivePermissionIcon size={16} aria-hidden="true" />
+                <span>{visiblePermissionLabel}</span>
+                <CaretDown size={13} weight="bold" />
+              </button>
+              {permissionsOpen ? (
+                <div className="composer-menu composer-permissions" role="menu" aria-label="Approval preset">
+                  <span className="composer-menu__heading">How Fable should work</span>
+                  {permissionProfiles.map((profile) => {
+                    const presentation =
+                      PERMISSION_PRESENTATION[
+                        profile.label as keyof typeof PERMISSION_PRESENTATION
+                      ];
+                    const PermissionIcon = presentation?.icon ?? ShieldCheck;
+                    return (
+                      <button
+                        key={profile.label}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={permissionLabel === profile.label}
+                        className={profile.custom ? "composer-permissions__custom" : undefined}
+                        onClick={() => {
+                          onSelectPermissionLabel(profile.label);
+                          onTogglePermissions();
+                        }}
+                      >
+                        <PermissionIcon
+                          className="composer-permissions__icon"
+                          size={17}
+                          aria-hidden="true"
+                        />
+                        <span>
+                          <strong>{presentation?.label ?? profile.label}</strong>
+                          <small>{presentation?.description ?? profile.description}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="composer-control-group composer-control-group--end">
+            <div className="composer-control-anchor composer-control-anchor--model">
               <button
                 type="button"
                 className={`composer-model${modelOpen ? " composer-trigger--open" : ""}`}
@@ -415,46 +438,6 @@ export function Composer({
                 </div>
               ) : null}
             </div>
-
-            <div className="composer-control-anchor composer-control-anchor--permissions">
-              <button
-                type="button"
-                className={`composer-permissions-card${permissionsOpen ? " composer-chip--active composer-trigger--open" : ""}`}
-                onClick={() => {
-                  setModelOpen(false);
-                  onTogglePermissions();
-                }}
-                aria-expanded={permissionsOpen}
-                aria-label="Approval preset"
-              >
-                <ShieldCheck size={16} weight="bold" />
-                <span>{permissionLabel}</span>
-                <CaretDown size={13} weight="bold" />
-              </button>
-              {permissionsOpen ? (
-                <div className="composer-menu composer-permissions" role="menu" aria-label="Approval preset">
-                  <span className="composer-menu__heading">How Fable should work</span>
-                  {permissionProfiles.map((profile) => (
-                    <button
-                      key={profile.label}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={permissionLabel === profile.label}
-                      className={profile.custom ? "composer-permissions__custom" : undefined}
-                      onClick={() => {
-                        onSelectPermissionLabel(profile.label);
-                        onTogglePermissions();
-                      }}
-                    >
-                      <span><strong>{profile.label}</strong><small>{profile.description}</small></span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="composer-control-group composer-control-group--end">
             <button
               type="button"
               className={`composer-chip${voiceEnabled ? " composer-chip--active" : ""}`}
@@ -462,7 +445,7 @@ export function Composer({
               aria-pressed={voiceEnabled}
               aria-label={voiceEnabled ? "Stop voice recording" : "Start voice recording"}
             >
-              <Microphone size={17} weight="fill" />
+              <Microphone size={17} />
             </button>
             <button className="send-button" type="submit" aria-label="Send prompt">
               <ArrowUp size={16} weight="bold" />

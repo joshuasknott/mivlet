@@ -112,6 +112,10 @@ kbd {
   min-height: calc(100dvh - 54px);
 }
 
+.workspace-center--composer {
+  width: min(100% - 48px, 1040px);
+}
+
 .hero {
   display: flex;
   flex-direction: column;
