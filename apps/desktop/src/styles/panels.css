@@ -29,7 +29,7 @@
   color: var(--ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: var(--text-30);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.05;
 }
 
@@ -81,7 +81,7 @@
 .approval-card__summary {
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -102,7 +102,7 @@
   background: var(--surface-raised);
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -122,7 +122,7 @@
   display: block;
   color: var(--ink);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .approval-card h3,
@@ -133,7 +133,7 @@
   margin: 0;
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -235,7 +235,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-1);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .approval-actions button:hover,
@@ -258,7 +258,7 @@
 .approval-edit label > span {
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .approval-edit label {
@@ -325,7 +325,7 @@
   color: var(--ink);
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .approval-confirmation input {
@@ -359,7 +359,7 @@
   background: var(--surface-raised);
   border-color: var(--line-strong);
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .empty-state {
@@ -422,7 +422,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .source-actions button:hover:not(:disabled) {
@@ -484,7 +484,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .memory-toolbar button:hover,
@@ -521,7 +521,7 @@
 .memory-edit label span {
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .memory-edit input,
@@ -643,7 +643,7 @@
   margin: 0;
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -729,7 +729,7 @@
   color: var(--ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: var(--text-30);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .connector-browser__heading p,
@@ -832,7 +832,7 @@
   border: none;
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: background-color 0.2s;
 }
@@ -927,7 +927,7 @@
 .schedule-form__label {
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 
@@ -974,7 +974,7 @@
   padding: 0;
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 
@@ -992,7 +992,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -1027,7 +1027,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -1062,7 +1062,7 @@
   border: 1px solid var(--accent);
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .schedule-form__submit:hover:not(:disabled) {
@@ -1144,7 +1144,7 @@
   margin: 0;
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -1152,7 +1152,7 @@
   padding: 1px 8px;
   border-radius: 999px;
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   background: var(--positive-subtle);
   color: var(--positive);
 }
@@ -1173,7 +1173,7 @@
   margin-top: 3px;
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .schedule-row__next {
@@ -1250,7 +1250,7 @@
 .schedule-row__confirm {
   padding: 5px 10px;
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink-muted);
   background: var(--surface-hover);
   border: 1px solid var(--line-strong);
@@ -1398,7 +1398,7 @@
 .connectors-panel .connector-card strong {
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
 }
 
@@ -1412,7 +1412,7 @@
   padding: 0 10px;
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
 }
 
@@ -1459,7 +1459,7 @@
   margin: 1px 0 4px;
   color: var(--ink);
   font-size: var(--text-16);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -1478,7 +1478,7 @@
   border: 1px solid var(--caution-subtle);
   border-radius: var(--radius-pill);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -1523,7 +1523,7 @@
   margin-bottom: 7px;
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .connector-detail__body ul {
@@ -1554,7 +1554,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .connector-detail__actions button:hover {

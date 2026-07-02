@@ -680,12 +680,12 @@ function PrivacySettingsView({
               </span>
             </div>
             <div style={{ marginTop: "16px" }}>
-              <p style={{ color: "var(--ink-soft)", fontSize: "13px", lineHeight: "1.5", marginBottom: "16px" }}>
+              <p style={{ color: "var(--ink-soft)", fontSize: "var(--text-13)", lineHeight: "1.5", marginBottom: "16px" }}>
                 To protect API rate limits and conserve system resources, Fable does not continuously poll or crawl your connected accounts.
                 While a background scheduler foundation manages local deferred jobs, no remote data is fetched in the background.
               </p>
 
-              <strong style={{ display: "block", color: "var(--ink)", fontSize: "13px", fontWeight: 600, marginBottom: "8px" }}>
+              <strong style={{ display: "block", color: "var(--ink)", fontSize: "var(--text-13)", fontWeight: 500, marginBottom: "8px" }}>
                 Active Connections ({connectedConnectors.length})
               </strong>
 
@@ -706,8 +706,8 @@ function PrivacySettingsView({
                       data-connected-connector-id={connector.id}
                     >
                       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <strong style={{ color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>{connector.name}</strong>
-                        <span style={{ color: "var(--ink-muted)", fontSize: "12px" }}>
+                        <strong style={{ color: "var(--ink)", fontSize: "var(--text-14)", fontWeight: 500 }}>{connector.name}</strong>
+                        <span style={{ color: "var(--ink-muted)", fontSize: "var(--text-12)" }}>
                           {connector.account
                             ? `Active: ${connector.account.email ?? connector.account.displayName}`
                             : "Connected"}
@@ -717,7 +717,7 @@ function PrivacySettingsView({
                         <button
                           type="button"
                           className="button button--secondary"
-                          style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          style={{ padding: "4px 10px", fontSize: "var(--text-12)", minHeight: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
                           onClick={() => handleResync(connector.id, connector.name)}
                           disabled={resyncingConnectorId === connector.id}
                           title="Resync this connector to refresh credentials and scopes"
@@ -729,7 +729,7 @@ function PrivacySettingsView({
                         <button
                           type="button"
                           className="button button--secondary"
-                          style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto" }}
+                          style={{ padding: "4px 10px", fontSize: "var(--text-12)", minHeight: "auto" }}
                           onClick={() => handleDisconnect(connector.id, connector.name)}
                           disabled={disconnectingConnectorId === connector.id}
                           title="Remove credentials from local secure keyring"
@@ -743,7 +743,7 @@ function PrivacySettingsView({
                   ))}
                 </div>
               ) : (
-                <p style={{ color: "var(--ink-muted)", fontSize: "13px", fontStyle: "italic", margin: "8px 0" }}>
+                <p style={{ color: "var(--ink-muted)", fontSize: "var(--text-13)", fontStyle: "italic", margin: "8px 0" }}>
                   No active connector connections. Connect external accounts in the Providers tab or the Connectors page.
                 </p>
               )}
@@ -760,7 +760,7 @@ function PrivacySettingsView({
                 <small>Normalized connector cache items are encrypted and workspace-scoped; credentials remain isolated.</small>
               </span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px", color: "var(--ink-soft)", fontSize: "13px", lineHeight: "1.5" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "16px", color: "var(--ink-soft)", fontSize: "var(--text-13)", lineHeight: "1.5" }}>
               <p>
                 - <strong>Keyring Protection:</strong> OAuth tokens, credentials, and secrets are stored inside your operating system keyring (or the native auth boundary) and never enter local storage or React state.
               </p>
@@ -786,8 +786,8 @@ function PrivacySettingsView({
             <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "16px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div>
-                  <strong style={{ display: "block", color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>Enable memory</strong>
-                  <span style={{ display: "block", color: "var(--ink-muted)", fontSize: "12px", marginTop: "4px" }}>Allow Fable to save and recall facts locally.</span>
+                  <strong style={{ display: "block", color: "var(--ink)", fontSize: "var(--text-14)", fontWeight: 500 }}>Enable memory</strong>
+                  <span style={{ display: "block", color: "var(--ink-muted)", fontSize: "var(--text-12)", marginTop: "4px" }}>Allow Fable to save and recall facts locally.</span>
                 </div>
                 <label className="toggle-switch" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer" }}>
                   <input
@@ -927,7 +927,7 @@ function HistorySettingsView({
                     className="button button--secondary"
                     style={{
                       padding: "4px 10px",
-                      fontSize: "12px",
+                      fontSize: "var(--text-12)",
                       minHeight: "auto",
                       borderColor: active ? "var(--accent)" : "var(--line-strong)",
                       color: active ? "var(--accent)" : "var(--ink-soft)"
@@ -942,7 +942,7 @@ function HistorySettingsView({
               <button
                 type="button"
                 className="button button--secondary"
-                style={{ padding: "4px 10px", fontSize: "12px", minHeight: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                style={{ padding: "4px 10px", fontSize: "var(--text-12)", minHeight: "auto", display: "inline-flex", alignItems: "center", gap: "4px" }}
                 onClick={handleRefresh}
                 aria-label="Refresh action history"
               >
@@ -1016,12 +1016,12 @@ function ActionHistoryRow({ event }: { event: ActionHistoryEvent }) {
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
-          <strong style={{ color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>
+          <strong style={{ color: "var(--ink)", fontSize: "var(--text-14)", fontWeight: 500 }}>
             {categoryLabel}
             {event.action ? ` · ${event.action}` : ""}
           </strong>
           {event.summary ? (
-            <span style={{ color: "var(--ink-soft)", fontSize: "13px", overflowWrap: "anywhere" }}>
+            <span style={{ color: "var(--ink-soft)", fontSize: "var(--text-13)", overflowWrap: "anywhere" }}>
               {event.summary}
             </span>
           ) : null}
@@ -1030,8 +1030,8 @@ function ActionHistoryRow({ event }: { event: ActionHistoryEvent }) {
           className="action-history-row__status"
           style={{
             color: statusTone(event.status),
-            fontSize: "12px",
-            fontWeight: 600,
+            fontSize: "var(--text-12)",
+            fontWeight: 500,
             textTransform: "capitalize",
             whiteSpace: "nowrap"
           }}
@@ -1041,7 +1041,7 @@ function ActionHistoryRow({ event }: { event: ActionHistoryEvent }) {
       </div>
       <div
         className="action-history-row__meta"
-        style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", color: "var(--ink-muted)", fontSize: "12px" }}
+        style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", color: "var(--ink-muted)", fontSize: "var(--text-12)" }}
       >
         <span data-action-history-time>{formatHistoryTime(event.createdAt)}</span>
         <span data-action-history-actor>actor: {event.actor || "system"}</span>
@@ -1055,7 +1055,7 @@ function ActionHistoryRow({ event }: { event: ActionHistoryEvent }) {
         <dl
           className="action-history-row__detail"
           data-testid="action-history-detail"
-          style={{ display: "grid", gridTemplateColumns: "max-content 1fr", columnGap: "10px", rowGap: "2px", margin: 0, fontSize: "12px", color: "var(--ink-soft)" }}
+          style={{ display: "grid", gridTemplateColumns: "max-content 1fr", columnGap: "10px", rowGap: "2px", margin: 0, fontSize: "var(--text-12)", color: "var(--ink-soft)" }}
         >
           {detailEntries.map(([key, value]) => (
             <div key={key} style={{ display: "contents" }}>
@@ -1464,8 +1464,8 @@ function AppearanceSettingsView({
       <div className="provider-access-list" style={{ padding: "20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <strong style={{ display: "block", color: "var(--ink)", fontSize: "14px", fontWeight: 600 }}>Interface Theme</strong>
-            <span style={{ display: "block", color: "var(--ink-muted)", fontSize: "12px", marginTop: "4px" }}>Choose between Light and Dark color schemes.</span>
+            <strong style={{ display: "block", color: "var(--ink)", fontSize: "var(--text-14)", fontWeight: 500 }}>Interface Theme</strong>
+            <span style={{ display: "block", color: "var(--ink-muted)", fontSize: "var(--text-12)", marginTop: "4px" }}>Choose between Light and Dark color schemes.</span>
           </div>
           <div className="theme-toggle theme-toggle--settings" role="group" aria-label="Theme">
             <button
@@ -1556,7 +1556,7 @@ function WorkspaceSettingsView({
                     background: "var(--accent-subtle)",
                     color: "var(--accent-strong)",
                     borderRadius: "10px",
-                    fontWeight: 600,
+                    fontWeight: 500,
                     verticalAlign: "middle"
                   }}>
                     WIP

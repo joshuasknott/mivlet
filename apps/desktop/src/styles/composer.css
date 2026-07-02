@@ -229,7 +229,7 @@
   padding: 4px 8px 2px;
   color: var(--ink-soft);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.02em;
 }
 
@@ -286,7 +286,7 @@
 .composer-model-menu button strong {
   color: var(--ink);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .composer-model-menu {
@@ -307,7 +307,7 @@
 .composer-menu__plugin strong {
   color: var(--accent-strong);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .composer-menu__command {
@@ -342,7 +342,7 @@
 }
 
 .composer-permissions__lead strong {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .composer-permissions__row small {
@@ -360,7 +360,7 @@
   background: var(--accent-subtle);
   border-radius: var(--radius-pill);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: capitalize;
 }
 
@@ -390,7 +390,7 @@
 .composer-permissions button strong {
   color: var(--ink);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .composer-menu button[aria-checked="true"] {

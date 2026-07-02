@@ -235,7 +235,7 @@ describe("Fable home", () => {
 
     // Sections exist but start empty (mock projects and chats removed).
     expect(screen.getByText("Chats")).toBeInTheDocument();
-    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Threads")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /daily catch-up/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /initial build/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /memory and approvals/i })).not.toBeInTheDocument();
@@ -243,7 +243,7 @@ describe("Fable home", () => {
     expect(screen.getByRole("button", { name: /^knowledge$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^threads$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^threads$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /goals/i })).not.toBeInTheDocument();
   });
 

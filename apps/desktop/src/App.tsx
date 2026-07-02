@@ -16,7 +16,6 @@ import { useVoice } from "./hooks/useVoice";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
-import { FableLogo } from "./components/FableLogo";
 import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { KnowledgePage } from "./components/pages/KnowledgePage";
@@ -518,7 +517,6 @@ export function App() {
         ) : (
           <div className="workspace-center">
             <section className="hero" aria-labelledby="hero-title">
-              <FableLogo size="hero" />
               <h1 id="hero-title">What are we building today in {workspaceName}?</h1>
             </section>
 

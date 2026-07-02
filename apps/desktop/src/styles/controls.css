@@ -10,7 +10,7 @@
   border: 1px solid transparent;
   border-radius: var(--radius-1);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
   transition:
     color 140ms ease,

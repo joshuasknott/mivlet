@@ -15,7 +15,6 @@ import {
   stateViewFor
 } from "../../lib/backend-state";
 import { providerCapabilityLabels } from "../../lib/backend-capabilities";
-import { FableLogo } from "../FableLogo";
 import { ProviderIcon } from "../ProviderIcon";
 
 /**
@@ -211,9 +210,6 @@ export function OnboardingPage({
 
         {step === "profile" && (
           <section className="og-hero" aria-labelledby="onboarding-title">
-            <span className="og-greeting" aria-hidden="true">
-              <FableLogo className="brand-lockup--onboarding" />
-            </span>
             <h1 id="onboarding-title">Set up your local Fable workspace</h1>
             <p className="og-lede">
               Fable runs on this device. No account is created and nothing is sent to a hosted
@@ -272,9 +268,6 @@ export function OnboardingPage({
 
         {step === "providers" && (
           <section className="og-hero" aria-labelledby="onboarding-title">
-            <span className="og-greeting" aria-hidden="true">
-              <FableLogo className="brand-lockup--onboarding" />
-            </span>
             <h1 id="onboarding-title">Add a model provider</h1>
             <p className="og-lede">
               Add one provider to start. Bring an API key for OpenAI, Anthropic, Gemini, xAI, or

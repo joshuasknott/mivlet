@@ -184,25 +184,9 @@
     margin: 0;
   }
 
-  .sidebar-brand-row {
-    display: none;
-    justify-content: flex-end;
-    min-height: 0;
-  }
-
   .sidebar-top-row {
     grid-template-columns: minmax(0, 1fr) 36px;
     width: 100%;
-  }
-
-  .sidebar-brand-lockup {
-    gap: 8px;
-    font-size: 18px;
-  }
-
-  .sidebar-brand-lockup .brand-mark {
-    width: 30px;
-    height: 30px;
   }
 
   .workspace-switcher {
@@ -314,8 +298,8 @@
   .mobile-drawer-section > strong {
     padding: 4px 8px;
     color: #66767a;
-    font-size: 11.5px;
-    font-weight: 600;
+    font-size: var(--text-12);
+    font-weight: 500;
   }
 
   .mobile-project {
@@ -398,13 +382,7 @@
   }
 
   .hero h1 {
-    font-size: 42px;
-  }
-
-  /* Keep the hero mark prominent on phones without crowding the composer. */
-  .hero .brand-mark--hero {
-    width: 164px;
-    height: 186px;
+    font-size: 34px;
   }
 
   .theme-toggle {
@@ -607,7 +585,7 @@
   .profile-photo {
     width: 64px;
     height: 64px;
-    font-size: 19px;
+    font-size: var(--text-20);
   }
 
   .provider-state {

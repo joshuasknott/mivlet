@@ -44,7 +44,7 @@
   color: var(--ink);
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: var(--text-30);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.1;
 }
 
@@ -116,7 +116,7 @@
   margin: 0;
   color: var(--ink);
   font-size: var(--text-30);
-  font-weight: 650;
+  font-weight: 500;
   line-height: 1.1;
 }
 
@@ -221,8 +221,8 @@
   display: flex;
   align-items: baseline;
   gap: 9px;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--text-18);
+  font-weight: 500;
 }
 
 .knowledge-sections__label small {
@@ -368,7 +368,7 @@
   padding-bottom: 10px;
   color: var(--ink);
   font-size: var(--text-16);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .knowledge-global-results h2 span {
@@ -432,7 +432,7 @@
 
 .knowledge-item__main strong {
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .knowledge-item__main small,
@@ -548,7 +548,7 @@
 .knowledge-empty strong {
   color: var(--ink);
   font-size: var(--text-16);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .knowledge-empty span {
@@ -795,7 +795,7 @@
 .profile-identity-copy strong {
   color: var(--ink);
   font-size: var(--text-20);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.15;
 }
 
@@ -826,7 +826,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .profile-photo-buttons button:hover,
@@ -875,7 +875,7 @@
   display: block;
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -917,7 +917,7 @@
   display: block;
   color: var(--ink);
   font-size: var(--text-16);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
 }
 
@@ -947,8 +947,8 @@
 
 .settings-field span {
   color: var(--ink-muted);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--text-12);
+  font-weight: 500;
 }
 
 .settings-field input,
@@ -996,7 +996,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .profile-action-row button:hover,
@@ -1020,7 +1020,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .profile-action-row .profile-button:hover {
@@ -1067,7 +1067,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .profile-secret-input {
@@ -1122,7 +1122,7 @@
 
 .settings-page__header h1 {
   font-size: var(--text-30);
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0;
   margin: 0;
 }
@@ -1136,7 +1136,7 @@
   margin: 0;
   color: var(--ink);
   font-size: var(--text-20);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
 }
 
@@ -1176,7 +1176,7 @@
 .provider-access-group__heading strong {
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .provider-access-group__heading span {
@@ -1222,7 +1222,7 @@
 .provider-access-row__name strong {
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.3;
 }
 
@@ -1338,7 +1338,7 @@
 .provider-access-key-form__field span {
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .provider-access-key-form__field input {
@@ -1366,7 +1366,7 @@
   padding: 0 14px;
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .provider-access-key-form__submit {
@@ -1409,7 +1409,7 @@
   padding: 0 9px;
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -1447,7 +1447,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .provider-access-row button:hover:not(:disabled),
@@ -1485,7 +1485,7 @@
   display: block;
   color: var(--ink);
   font-size: var(--text-16);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .settings-local-storage p {
@@ -1573,7 +1573,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .onboarding-panel {
@@ -1603,7 +1603,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .onboarding-checklist span[data-complete="true"] {
@@ -1619,7 +1619,7 @@
   border: 1px solid var(--caution-subtle);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -1761,15 +1761,15 @@
 .approval-preset-option strong,
 .custom-approval-toggle strong,
 .remote-approval-status strong {
-  font-size: 14px;
-  font-weight: 650;
+  font-size: var(--text-14);
+  font-weight: 500;
 }
 
 .approval-preset-option span,
 .custom-approval-toggle small,
 .remote-approval-status span {
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: var(--text-12);
   line-height: 1.45;
 }
 
@@ -1787,7 +1787,7 @@
 .approvals-settings__note {
   margin: 12px 0 0;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: var(--text-13);
   line-height: 1.5;
 }
 
@@ -1855,30 +1855,13 @@
   margin-bottom: 32px;
 }
 
-.og-greeting {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--ink-muted);
-  font-size: var(--text-14);
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.og-greeting .brand-lockup,
-.og-greeting .brand-mark {
-  width: 48px;
-  height: 48px;
-}
-
 .og-hero h1 {
   max-width: 760px;
   margin: 20px 0 0;
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: clamp(var(--text-20), 2.4vw, var(--text-30));
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0;
   line-height: 1.08;
 }
@@ -1922,7 +1905,7 @@
   display: block;
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .og-path__heading small {
@@ -1992,7 +1975,7 @@
 
 .og-provider__lead strong {
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .og-provider__lead small {
@@ -2052,7 +2035,7 @@
   background: var(--accent);
   color: var(--surface);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 140ms ease, background 140ms ease;
 }
@@ -2080,7 +2063,7 @@
   gap: 6px;
   color: var(--positive);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -2286,7 +2269,7 @@
 }
 
 .backends-list__lead strong {
-  font-size: 13px;
+  font-size: var(--text-13);
 }
 
 .backends-list__lead small {
@@ -2335,7 +2318,7 @@
 
 .og-field span {
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink-muted);
 }
 
@@ -2366,7 +2349,7 @@
   background: var(--ink);
   color: var(--canvas);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   box-shadow: var(--shadow-1);
   transition: opacity 140ms ease, transform 140ms ease, box-shadow 140ms ease;
@@ -2409,7 +2392,7 @@
   justify-content: space-between;
   margin-top: 8px;
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink-soft);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -2420,7 +2403,7 @@
   border: none;
   color: var(--ink-soft);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2539,20 +2522,20 @@ button.og-path--primary .og-path__icon {
 
 .og-connector-name {
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
 }
 
 .og-connector-status {
   margin-top: 6px;
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink-soft);
 }
 
 .og-connector-card--connected .og-connector-status {
   color: var(--positive);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .og-actions-row {
@@ -2570,7 +2553,7 @@ button.og-path--primary .og-path__icon {
   border: none;
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 140ms ease;
 }
@@ -2587,7 +2570,7 @@ button.og-path--primary .og-path__icon {
   color: var(--ink-muted);
   border-radius: var(--radius-2);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: all 140ms ease;
 }
@@ -2618,7 +2601,7 @@ button.og-path--primary .og-path__icon {
 
 .og-connection-success h2 {
   font-size: var(--text-20);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
   margin: 16px 0 8px 0;
 }
@@ -2640,14 +2623,14 @@ button.og-path--primary .og-path__icon {
   border-radius: var(--radius-2);
   color: var(--destructive);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   max-width: 460px;
 }
 
 .og-connection-status-msg {
   margin-top: 16px;
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink-soft);
   text-align: center;
   max-width: 460px;
@@ -2706,7 +2689,7 @@ button.og-path--primary .og-path__icon {
   padding: 3px 9px;
   border-radius: var(--radius-pill);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   border: 1px solid transparent;
 }
@@ -2837,7 +2820,7 @@ button.og-path--primary .og-path__icon {
   background: var(--accent);
   color: var(--surface);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: opacity 140ms ease;
 }
@@ -2907,7 +2890,7 @@ button.og-path--primary .og-path__icon {
   margin: 0;
   color: var(--ink);
   font-size: var(--text-18);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .department-section__heading p {
@@ -2947,7 +2930,7 @@ button.og-path--primary .og-path__icon {
 .department-pipeline__top strong {
   color: var(--ink);
   font-size: var(--text-15);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .department-pipeline__top span,
@@ -2969,7 +2952,7 @@ button.og-path--primary .og-path__icon {
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .department-status.is-ready {
@@ -3011,7 +2994,7 @@ button.og-path--primary .og-path__icon {
   display: block;
   color: var(--ink);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .department-meta-grid {
@@ -3032,7 +3015,7 @@ button.og-path--primary .og-path__icon {
   gap: 6px;
   color: var(--ink);
   font-size: var(--text-12);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .department-warning {
@@ -3080,7 +3063,7 @@ button.og-path--primary .og-path__icon {
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
   transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
 }
@@ -3106,7 +3089,7 @@ button.og-path--primary .og-path__icon {
 .run-filters__job-label {
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-filters__job select {
@@ -3117,7 +3100,7 @@ button.og-path--primary .og-path__icon {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-1);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-list {
@@ -3165,7 +3148,7 @@ button.og-path--primary .og-path__icon {
 .run-list__name {
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3177,7 +3160,7 @@ button.og-path--primary .og-path__icon {
   background: var(--accent-subtle);
   border-radius: var(--radius-pill);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: capitalize;
 }
 
@@ -3187,7 +3170,7 @@ button.og-path--primary .og-path__icon {
   gap: var(--space-3);
   color: var(--ink-muted);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -3199,7 +3182,7 @@ button.og-path--primary .og-path__icon {
   padding: 2px 9px;
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
   background: var(--accent-subtle);
   color: var(--ink-muted);
 }
@@ -3275,7 +3258,7 @@ button.og-path--primary .og-path__icon {
   margin: 0 0 var(--space-1);
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-empty__hint {
@@ -3301,7 +3284,7 @@ button.og-path--primary .og-path__icon {
   background: none;
   border: none;
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
 
@@ -3328,7 +3311,7 @@ button.og-path--primary .og-path__icon {
   margin: 0;
   color: var(--ink);
   font-size: var(--text-20);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .run-detail__definition {
@@ -3348,7 +3331,7 @@ button.og-path--primary .og-path__icon {
 .run-detail__fact dt {
   color: var(--ink-soft);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -3357,7 +3340,7 @@ button.og-path--primary .og-path__icon {
   margin: 3px 0 0;
   color: var(--ink);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-detail__link {
@@ -3388,7 +3371,7 @@ button.og-path--primary .og-path__icon {
 .run-detail__confirm-text {
   color: var(--ink-muted);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-detail__error {
@@ -3418,7 +3401,7 @@ button.og-path--primary .og-path__icon {
   margin: 0 0 var(--space-3);
   color: var(--ink);
   font-size: var(--text-14);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .run-detail__attempts,
@@ -3446,7 +3429,7 @@ button.og-path--primary .og-path__icon {
 
 .run-detail__attempt-number {
   color: var(--ink-soft);
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .run-detail__attempt-status {
@@ -3454,7 +3437,7 @@ button.og-path--primary .og-path__icon {
   border-radius: var(--radius-pill);
   background: var(--accent-subtle);
   color: var(--ink-muted);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: capitalize;
 }
 
@@ -3484,7 +3467,7 @@ button.og-path--primary .og-path__icon {
   background: var(--caution-subtle);
   border-radius: var(--radius-pill);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-detail__audit-item {
@@ -3506,7 +3489,7 @@ button.og-path--primary .og-path__icon {
 
 .run-detail__audit-title {
   color: var(--ink);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-detail__audit-body {
@@ -3552,7 +3535,7 @@ button.og-path--primary .og-path__icon {
 .run-detail__step-name {
   color: var(--ink);
   font-size: var(--text-13);
-  font-weight: 600;
+  font-weight: 500;
   word-break: break-word;
 }
 
@@ -3562,7 +3545,7 @@ button.og-path--primary .og-path__icon {
   background: var(--accent-subtle);
   color: var(--ink-muted);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: capitalize;
   white-space: nowrap;
 }
@@ -3606,7 +3589,7 @@ button.og-path--primary .og-path__icon {
   cursor: pointer;
   color: var(--ink);
   font-size: var(--text-12);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .run-detail__output {
@@ -3618,7 +3601,7 @@ button.og-path--primary .og-path__icon {
   margin-bottom: 4px;
   color: var(--ink-soft);
   font-size: var(--text-11);
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

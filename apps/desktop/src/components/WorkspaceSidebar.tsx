@@ -314,6 +314,9 @@ export function WorkspaceSidebar({
                   >
                     <Icon size={17} />
                     <span>{item.label}</span>
+                    {item.label === "Departments" ? (
+                      <span className="utility-row__status">Coming soon</span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -321,24 +324,24 @@ export function WorkspaceSidebar({
           </div>
 
           <div className="sidebar-body">
-            <section className="nav-group" aria-labelledby="projects-heading">
+            <section className="nav-group" aria-labelledby="threads-heading">
               <div className="nav-group-heading-row">
                 <button
                   type="button"
                   className="nav-group-heading nav-group-heading--plain"
-                  id="projects-heading"
+                  id="threads-heading"
                   aria-expanded={expandedCollections.projects}
                   onClick={onToggleProjects}
                 >
                   <span className="nav-group-title nav-group-title--plain">
-                    <span>Projects</span>
+                    <span>Threads</span>
                   </span>
                   <CaretRight className="collection-caret" size={13} weight="bold" />
                 </button>
                 <button
                   type="button"
                   className="nav-group-add"
-                  aria-label="Add project"
+                  aria-label="Add thread"
                   onClick={onAddProject}
                 >
                   <Plus size={13} weight="bold" />
@@ -387,7 +390,7 @@ export function WorkspaceSidebar({
               ) : null}
             </section>
 
-            <section className="nav-group" aria-labelledby="chats-heading">
+            <section className="nav-group nav-group--chats" aria-labelledby="chats-heading">
               <div className="nav-group-heading-row">
                 <button
                   type="button"
@@ -515,14 +518,15 @@ export function WorkspaceSidebar({
                       >
                         <Icon size={15} />
                         {item.label}
+                        {item.label === "Departments" ? " · Coming soon" : null}
                       </button>
                     );
                   })}
                 </nav>
               </section>
 
-              <section className="mobile-drawer-section" aria-label="Projects">
-                <strong>Projects</strong>
+              <section className="mobile-drawer-section" aria-label="Threads">
+                <strong>Threads</strong>
                 {projects.map((project) => (
                   <div className="mobile-project" key={project.id}>
                     <span>
