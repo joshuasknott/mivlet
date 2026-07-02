@@ -141,14 +141,15 @@ describe("useShellRuntime - connector approval execution", () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.clearAllMocks();
+    vi.mocked(runtime.executeRuntimeConnectorAction).mockResolvedValue(null);
   });
 
   it("executes a prepared connector write only after a fresh once decision", async () => {
-    vi.mocked(runtime.executeRuntimeConnectorAction).mockResolvedValue({
+    vi.mocked(runtime.executeRuntimeConnectorAction).mockResolvedValueOnce({
       requestId: "slack-slack-create-draft-channel-1",
       connectorId: "slack",
       action: "slack.create-draft",
-      status: "executed",
+      status: "completed",
       message: "Draft created."
     });
     const { result } = renderHook(() => useShellRuntime());
@@ -165,6 +166,49 @@ describe("useShellRuntime - connector approval execution", () => {
     act(() => result.current.requestApprovalDecision(approval, "once"));
     await waitFor(() => expect(runtime.executeRuntimeConnectorAction).toHaveBeenCalledOnce());
     expect(result.current.openApprovals).toHaveLength(0);
+  });
+
+  it("marks fixture preview actions as denied without a runtime execution", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+
+    await act(async () => {
+      await result.current.prepareConnectorAction("slack.create-draft", {
+        channelId: "channel-1",
+        text: "Draft"
+      });
+    });
+    const approval = result.current.openApprovals[0];
+
+    act(() => result.current.requestApprovalDecision(approval, "deny"));
+
+    await waitFor(() => expect(result.current.connectorStatus).toBe("The action was denied. Nothing ran."));
+    expect(runtime.executeRuntimeConnectorAction).toHaveBeenCalledOnce();
+    expect(result.current.openApprovals).toHaveLength(0);
+  });
+
+  it("completes approved fixture preview actions without leaking session data to persistence", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+
+    await act(async () => {
+      await result.current.prepareConnectorAction("slack.create-draft", {
+        channelId: "channel-1",
+        text: "Draft"
+      });
+    });
+    const approval = result.current.openApprovals[0];
+
+    act(() => result.current.requestApprovalDecision(approval, "once"));
+
+    await waitFor(() =>
+      expect(result.current.connectorStatus).toBe(
+        "Preview action completed with fixture data only. No live provider changed."
+      )
+    );
+    expect(result.current.openApprovals).toHaveLength(0);
+    const stored = window.localStorage.getItem(STORAGE_KEY) ?? "";
+    expect(stored.toLowerCase()).not.toMatch(
+      /fixture-preview-|cookie|token|secret|screenshot|clipboard|pagetext|localstorage|sessionstorage/
+    );
   });
 });
 

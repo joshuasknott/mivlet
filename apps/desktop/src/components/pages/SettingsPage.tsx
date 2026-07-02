@@ -1150,7 +1150,7 @@ function statusTone(status: string): string {
   switch (status) {
     case "ok":
     case "approved":
-    case "executed":
+    case "completed":
     case "done":
       return "var(--success)";
     case "blocked":

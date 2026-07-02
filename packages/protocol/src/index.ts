@@ -487,10 +487,11 @@ export interface ConnectorActionRequest {
 }
 
 export type ConnectorActionResultStatus =
-  | "awaiting-approval"
-  | "executed"
+  | "unavailable"
   | "denied"
-  | "configuration-required";
+  | "approved"
+  | "failed"
+  | "completed";
 
 export interface ConnectorActionResult {
   requestId: string;
@@ -499,6 +500,34 @@ export interface ConnectorActionResult {
   status: ConnectorActionResultStatus;
   message: string;
   providerResourceId?: string;
+}
+
+export type BrowserSessionLifecycle =
+  | "unavailable"
+  | "starting"
+  | "active"
+  | "expired"
+  | "closed"
+  | "failed";
+
+export type BrowserSessionSource = "live" | "fixture-preview";
+
+/**
+ * Browser/session metadata that is safe to keep in the shell process. It never
+ * carries cookies, tokens, screenshots, DOM dumps, page text, clipboard data,
+ * localStorage/sessionStorage, or any hidden browser state.
+ */
+export interface BrowserSessionState {
+  id: string;
+  source: BrowserSessionSource;
+  lifecycle: BrowserSessionLifecycle;
+  connectorIds: ConnectorId[];
+  startedAt?: string;
+  expiresAt?: string;
+  closedAt?: string;
+  failedAt?: string;
+  reason: string;
+  fixtureOnly: boolean;
 }
 
 export type ConnectorErrorCode =
@@ -573,7 +602,7 @@ export interface ConnectorApprovalRecord {
   target: string;
   preview: string;
   riskLevel: ApprovalRiskLevel;
-  result: "pending" | "approved" | "denied" | "executed" | "failed";
+  result: "pending" | "approved" | "denied" | "completed" | "failed";
   requestId: string;
   requestedAt: string;
   decidedAt?: string;

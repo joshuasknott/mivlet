@@ -1468,14 +1468,14 @@ pub async fn execute_approved_connector_action(
                 update_connector_action_result(
                     &records_path,
                     &action.approval.id,
-                    "executed",
+                    "completed",
                     &resolution.audit_entry.decided_at,
                     None,
                 )
                 .map_err(|message| {
                     command_error("unknown", &action.connector_id, &message, false)
                 })?;
-                audit_connector_action(&action, "ok", "", "Google connector action executed.");
+                audit_connector_action(&action, "ok", "", "Google connector action completed.");
                 return Ok(result);
             }
             Err(provider_error) => {
@@ -1503,7 +1503,7 @@ pub async fn execute_approved_connector_action(
                 update_connector_action_result(
                     &records_path,
                     &action.approval.id,
-                    "executed",
+                    "completed",
                     &resolution.audit_entry.decided_at,
                     None,
                 )
@@ -1514,7 +1514,7 @@ pub async fn execute_approved_connector_action(
                     &action,
                     "ok",
                     "",
-                    "Collaboration connector action executed.",
+                    "Collaboration connector action completed.",
                 );
                 return Ok(result);
             }
@@ -1543,20 +1543,20 @@ pub async fn execute_approved_connector_action(
                 update_connector_action_result(
                     &records_path,
                     &action.approval.id,
-                    "executed",
+                    "completed",
                     &resolution.audit_entry.decided_at,
                     None,
                 )
                 .map_err(|message| {
                     command_error("unknown", &action.connector_id, &message, false)
                 })?;
-                audit_connector_action(&action, "ok", "", "Provider connector action executed.");
+                audit_connector_action(&action, "ok", "", "Provider connector action completed.");
                 return Ok(ConnectorActionResult {
                     request_id: action.id,
                     connector_id: action.connector_id,
                     action: action.action,
-                    status: "executed".to_string(),
-                    message: "The approved connector action executed successfully.".to_string(),
+                    status: "completed".to_string(),
+                    message: "The approved connector action completed.".to_string(),
                     provider_resource_id,
                 });
             }

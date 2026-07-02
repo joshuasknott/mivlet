@@ -339,7 +339,7 @@ pub(crate) fn update_connector_action_result(
     if matches!(result, "approved" | "denied") {
         record.decided_at = Some(at.to_string());
     }
-    if matches!(result, "executed" | "failed") {
+    if matches!(result, "completed" | "executed" | "failed") {
         record.executed_at = Some(at.to_string());
     }
     record.error_code = error_code.map(str::to_string);
