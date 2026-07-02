@@ -11,13 +11,25 @@ export function ConnectorsPage({ runtime }: { runtime: ShellRuntime }) {
     (connector) => connector.id !== "local-files"
   );
   const connected = visibleConnectors.filter((connector) => connector.status === "connected").length;
+  const sessionLabel =
+    runtime.browserSession.source === "fixture-preview"
+      ? "Preview data only"
+      : runtime.browserSession.lifecycle === "active"
+        ? "Active session"
+        : runtime.browserSession.lifecycle === "starting"
+          ? "Starting session"
+          : runtime.browserSession.lifecycle === "expired" || runtime.browserSession.lifecycle === "closed"
+            ? "Session closed"
+            : runtime.browserSession.lifecycle === "failed"
+              ? "Session failed"
+              : "No active session";
 
   return (
     <>
       <PageHeader
         title="Connectors"
-        description="Connect Fable to the tools you explicitly choose."
-        meta={`${connected} of ${visibleConnectors.length} connected`}
+        description={runtime.browserSession.reason}
+        meta={`${connected} of ${visibleConnectors.length} connected · ${sessionLabel}`}
       />
 
       <PluginPanel

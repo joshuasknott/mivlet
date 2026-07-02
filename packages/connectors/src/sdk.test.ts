@@ -115,7 +115,7 @@ describe("ConnectorRuntime", () => {
         target: "production",
         preview: "Publish Release",
         riskLevel: "high",
-        result: "executed",
+        result: "completed",
         actor: "user"
       })
     );

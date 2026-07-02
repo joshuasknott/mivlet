@@ -419,7 +419,7 @@ pub(crate) async fn execute(
         request_id: action.id.clone(),
         connector_id: action.connector_id.clone(),
         action: action.action.clone(),
-        status: "executed".into(),
+        status: "completed".into(),
         message: "The approved connector action completed.".into(),
         provider_resource_id: resource,
     })

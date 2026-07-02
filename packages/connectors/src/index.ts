@@ -24,6 +24,15 @@ export type { LocalFileValidation, LocalTextFileCandidate } from "./local-files"
 export { searchKnowledgeSources } from "./knowledge-search";
 export type { KnowledgeSearchOptions } from "./knowledge-search";
 export {
+  assertBrowserSessionMetadataSafe,
+  canUseBrowserSession,
+  createFixtureBrowserSession,
+  createUnavailableBrowserSession,
+  deriveBrowserSessionFromConnectors,
+  labelFixtureSearchResult,
+  resolveBrowserSessionAction
+} from "./browser-session";
+export {
   DEFAULT_CUSTOM_APPROVAL_SETTINGS,
   effectForConnectorAction,
   effectForTool,

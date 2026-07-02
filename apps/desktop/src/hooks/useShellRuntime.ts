@@ -6,6 +6,7 @@ import type {
   ApprovalGrant,
   ApprovalModification,
   ApprovalRequest,
+  BrowserSessionState,
   BackendAuthState,
   BackendCapability,
   BackendConsequentialEvent,
@@ -62,12 +63,18 @@ import {
 import {
   FIRST_WAVE_CONNECTOR_IDS,
   captureExecutionRoute,
+  canUseBrowserSession,
+  createFixtureBrowserSession,
+  createUnavailableBrowserSession,
+  deriveBrowserSessionFromConnectors,
   hasRunnableAdapter,
   importFixtureConnectorItem,
   importLocalTextFile,
+  labelFixtureSearchResult,
   listBackendProviders,
   mergeDiscoveredModels,
   prepareFixtureConnectorAction,
+  resolveBrowserSessionAction,
   resolveCapabilities,
   searchFixtureConnector,
   searchKnowledgeSources,
@@ -367,6 +374,7 @@ export interface ShellRuntime {
   runCommand: (command: string) => void;
   // first-wave connectors
   connectorManifests: ConnectorManifest[];
+  browserSession: BrowserSessionState;
   connectorAccounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
   connectorSearchResult: ConnectorSearchResult | null;
@@ -713,6 +721,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [connectorImportedSources, setConnectorImportedSources] = useState<KnowledgeSource[]>([]);
   const [preparedConnectorActions, setPreparedConnectorActions] =
     useState<ConnectorActionRequest[]>([]);
+  const browserSession = useMemo(() => {
+    if (hasTauriRuntime()) {
+      return deriveBrowserSessionFromConnectors(connectorManifests);
+    }
+    return ALLOW_PREVIEW_FALLBACKS
+      ? createFixtureBrowserSession()
+      : createUnavailableBrowserSession("Browser sessions require the desktop runtime.");
+  }, [connectorManifests]);
   const [managedMemoryRecords, setManagedMemoryRecords] = useState<MemoryRecord[]>(
     initialState.memoryRecords
   );
@@ -2027,11 +2043,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     );
     setConnectorStatus(`Searching ${connector?.name ?? request.connectorId}...`);
     try {
-      const result = runtimeOrPreview(
-        await searchRuntimeConnector(request),
-        () => searchFixtureConnector(request),
-        "Connected app search requires the desktop runtime."
-      );
+      const runtimeResult = await searchRuntimeConnector(request);
+      const result = runtimeResult ?? (() => {
+        const sessionGate = canUseBrowserSession(browserSession, request.connectorId, {
+          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
+        });
+        if (!sessionGate.ok) {
+          throw new Error(sessionGate.result.message);
+        }
+        return labelFixtureSearchResult(searchFixtureConnector(request));
+      })();
       setConnectorSearchResult(result);
       setConnectorStatus(
         result.items.length > 0
@@ -2060,11 +2081,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     };
 
     try {
-      const imported = runtimeOrPreview(
-        await importRuntimeConnectorItem(request),
-        () => importFixtureConnectorItem(request),
-        "Connected app imports require the desktop runtime."
-      );
+      const runtimeImport = await importRuntimeConnectorItem(request);
+      const imported = runtimeImport ?? (() => {
+        const sessionGate = canUseBrowserSession(browserSession, request.connectorId, {
+          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
+        });
+        if (!sessionGate.ok) {
+          throw new Error(sessionGate.result.message);
+        }
+        return importFixtureConnectorItem(request);
+      })();
       setConnectorImportedSources((current) => [
         imported.source,
         ...current.filter((source) => source.id !== imported.source.id)
@@ -2089,11 +2115,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         ...prepareFixtureConnectorAction(action, payload),
         permissionMode
       };
-      const prepared = runtimeOrPreview(
-        await prepareRuntimeConnectorAction(fixtureRequest),
-        () => fixtureRequest,
-        "Connected app actions require the desktop runtime."
-      );
+      const prepared = await prepareRuntimeConnectorAction(fixtureRequest) ?? (() => {
+        const sessionGate = canUseBrowserSession(browserSession, fixtureRequest.connectorId, {
+          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
+        });
+        if (!sessionGate.ok) {
+          throw new Error(sessionGate.result.message);
+        }
+        return fixtureRequest;
+      })();
       setPreparedConnectorActions((current) => [
         prepared,
         ...current.filter((request) => request.id !== prepared.id)
@@ -2407,13 +2437,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
 
       if (connectorAction) {
-        const connectorResult = await executeRuntimeConnectorAction({
+        const runtimeResult = await executeRuntimeConnectorAction({
           action: connectorAction,
           approval: request
         });
-        if (connectorResult === null) {
-          throw new Error("Connected app changes require the desktop runtime.");
-        }
+        const connectorResult = runtimeResult ?? resolveBrowserSessionAction({
+          session: browserSession,
+          action: connectorAction,
+          decision,
+          permissionMode,
+          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
+        });
         setPreparedConnectorActions((current) =>
           current.filter((candidate) => candidate.id !== connectorAction.id)
         );
@@ -3339,6 +3373,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     useConnector,
     runCommand,
     connectorManifests,
+    browserSession,
     connectorAccounts,
     connectorStatus,
     connectorSearchResult,

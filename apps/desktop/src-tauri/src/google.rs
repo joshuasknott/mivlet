@@ -1249,8 +1249,8 @@ pub(crate) async fn execute_action(
         request_id: action.id.clone(),
         connector_id: action.connector_id.clone(),
         action: action.action.clone(),
-        status: "executed".to_string(),
-        message: "Google action executed after explicit approval.".to_string(),
+        status: "completed".to_string(),
+        message: "Google action completed after explicit approval.".to_string(),
         provider_resource_id: resource_id,
     })
 }

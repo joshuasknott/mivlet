@@ -187,7 +187,7 @@ export class ConnectorRuntime {
       });
       await this.approvals.complete({
         ...approved,
-        result: "executed",
+        result: "completed",
         executedAt: this.now().toISOString()
       });
       return result;
