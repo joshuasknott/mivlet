@@ -1,11 +1,9 @@
-import {
-  ArrowRight,
-  CheckCircle,
-  Key,
-  Spinner,
-  WarningCircle,
-  X
-} from "@phosphor-icons/react";
+import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
+import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { Key } from "@phosphor-icons/react/dist/csr/Key";
+import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
+import { WarningCircle } from "@phosphor-icons/react/dist/csr/WarningCircle";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useRef, useState } from "react";
 import type { BackendProvider, BackendVerifyResult } from "@fable/protocol";
 import {

@@ -1,13 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import {
-  CalendarPlus,
-  Clock,
-  PencilSimple,
-  Play,
-  Spinner,
-  Trash,
-  WarningCircle
-} from "@phosphor-icons/react";
+import { CalendarPlus } from "@phosphor-icons/react/dist/csr/CalendarPlus";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
+import { Play } from "@phosphor-icons/react/dist/csr/Play";
+import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
+import { WarningCircle } from "@phosphor-icons/react/dist/csr/WarningCircle";
 import type {
   ConnectorManifest,
   MissedRunPolicy,

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createApprovalGate, createBrowserSpeechProvider, parseComposerText } from "@fable/connectors";
-import { MagnifyingGlass, X } from "@phosphor-icons/react";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
 import {
@@ -17,7 +18,6 @@ import { useVoice } from "./hooks/useVoice";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
-import { ApprovalPanel } from "./components/ApprovalPanel";
 import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { tabs as settingsTabs } from "./components/pages/settings-tabs";
 import type { SettingsTab } from "./components/pages/settings-tabs";
@@ -47,6 +47,9 @@ const SettingsPage = lazy(() =>
 );
 const WorkspaceSettingsView = lazy(() =>
   import("./components/pages/SettingsPage").then((m) => ({ default: m.WorkspaceSettingsView }))
+);
+const ApprovalPanel = lazy(() =>
+  import("./components/ApprovalPanel").then((m) => ({ default: m.ApprovalPanel }))
 );
 
 /**
@@ -291,24 +294,26 @@ export function App() {
         runtime.pendingApprovalConfirmation ||
         runtime.sessionApprovalGrants.length > 0 ||
         runtime.approvalRules.length > 0 ? (
-          <ApprovalPanel
-            approvals={runtime.openApprovals}
-            audit={runtime.approvalAudit}
-            sessionGrants={runtime.sessionApprovalGrants}
-            approvalRules={runtime.approvalRules}
-            editingApprovalId={runtime.editingApprovalId}
-            modificationDraft={runtime.approvalModificationDraft}
-            pendingConfirmation={runtime.pendingApprovalConfirmation}
-            confirmationText={runtime.approvalConfirmationText}
-            onDecision={runtime.requestApprovalDecision}
-            onStartModify={runtime.startApprovalModify}
-            onUpdateModification={runtime.setApprovalModificationDraft}
-            onSaveModify={runtime.saveApprovalModify}
-            onCancelModify={runtime.clearApprovalInteraction}
-            onUpdateConfirmation={runtime.setApprovalConfirmationText}
-            onConfirmDecision={runtime.confirmApprovalDecision}
-            onCancelConfirmation={runtime.clearApprovalInteraction}
-          />
+          <Suspense fallback={null}>
+            <ApprovalPanel
+              approvals={runtime.openApprovals}
+              audit={runtime.approvalAudit}
+              sessionGrants={runtime.sessionApprovalGrants}
+              approvalRules={runtime.approvalRules}
+              editingApprovalId={runtime.editingApprovalId}
+              modificationDraft={runtime.approvalModificationDraft}
+              pendingConfirmation={runtime.pendingApprovalConfirmation}
+              confirmationText={runtime.approvalConfirmationText}
+              onDecision={runtime.requestApprovalDecision}
+              onStartModify={runtime.startApprovalModify}
+              onUpdateModification={runtime.setApprovalModificationDraft}
+              onSaveModify={runtime.saveApprovalModify}
+              onCancelModify={runtime.clearApprovalInteraction}
+              onUpdateConfirmation={runtime.setApprovalConfirmationText}
+              onConfirmDecision={runtime.confirmApprovalDecision}
+              onCancelConfirmation={runtime.clearApprovalInteraction}
+            />
+          </Suspense>
         ) : null}
         {runtime.knowledgeCitations.length > 0 ? (
           <CitationResults citations={runtime.knowledgeCitations} mode={runtime.knowledgeSearchMode} />

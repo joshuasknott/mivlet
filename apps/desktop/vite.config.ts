@@ -20,19 +20,20 @@ export default defineConfig({
   },
   // The desktop shell ships to a modern WebView2 (Chromium) runtime, so the
   // production build can target modern syntax without down-leveling. Splitting
-  // stable vendor code (react, react-dom, phosphor icons) into its own chunk
-  // keeps it cacheable across app changes and pairs with the route-level
-  // React.lazy splits to bring the initial workspace chunk well under the
-  // 500 kB warning.
+  // stable React vendor code into its own chunk keeps it cacheable across app
+  // changes. Icons are left to Rollup's route-level chunking so route-only icon
+  // modules do not ride along with the initial shell.
   build: {
     target: "esnext",
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.includes("@phosphor-icons")) return undefined;
           if (id.includes("node_modules")) {
-            if (id.includes("@phosphor-icons")) return "icons";
-            if (id.includes("react-dom") || id.includes("/react/")) return "react-vendor";
+            if (id.includes("react-dom") || /[/\\]node_modules[/\\]react[/\\]/.test(id)) {
+              return "react-vendor";
+            }
             return "vendor";
           }
           return undefined;

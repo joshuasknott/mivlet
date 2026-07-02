@@ -16,6 +16,7 @@
  *   7. responsive  — narrow (<=980px) and phone (<=700px) breakpoints
  */
 
+@import "./styles/fonts.css";
 @import "./styles/tokens.css";
 @import "./styles/shell.css";
 @import "./styles/workspace.css";

@@ -1,4 +1,6 @@
-import { ShieldCheck, ShieldWarning, XCircle } from "@phosphor-icons/react";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
+import { XCircle } from "@phosphor-icons/react/dist/csr/XCircle";
 import type {
   ApprovalAuditEntry,
   ApprovalDecision,

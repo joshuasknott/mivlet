@@ -1,4 +1,4 @@
-import { GitBranch } from "@phosphor-icons/react";
+import { GitBranch } from "@phosphor-icons/react/dist/csr/GitBranch";
 import { PageHeader } from "../PageHeader";
 
 export function DepartmentsPage() {

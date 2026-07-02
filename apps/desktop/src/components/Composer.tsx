@@ -1,21 +1,19 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useState } from "react";
-import {
-  ArrowUp,
-  Books,
-  CaretDown,
-  CaretRight,
-  FileArrowUp,
-  GearSix,
-  HandPalm,
-  Microphone,
-  PlugsConnected,
-  Plus,
-  ShieldCheck,
-  ShieldWarning,
-  Stop,
-  X,
-  Terminal
-} from "@phosphor-icons/react";
+import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { Books } from "@phosphor-icons/react/dist/csr/Books";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { FileArrowUp } from "@phosphor-icons/react/dist/csr/FileArrowUp";
+import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
+import { HandPalm } from "@phosphor-icons/react/dist/csr/HandPalm";
+import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
+import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
+import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
+import { Terminal } from "@phosphor-icons/react/dist/csr/Terminal";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
 import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
 import type { VoiceStatus } from "../hooks/useVoice";

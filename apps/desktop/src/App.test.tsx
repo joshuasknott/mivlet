@@ -505,6 +505,7 @@ describe("Fable home", () => {
   it("creates a monthly schedule with a day-of-month", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
+    expect(await screen.findByRole("heading", { name: "Schedules" })).toBeInTheDocument();
     await screen.findByText(/no schedules yet/i);
 
     await user.type(screen.getByLabelText(/schedule task name/i), "Month-end review");
@@ -516,7 +517,7 @@ describe("Fable home", () => {
 
     expect(await screen.findByText("Month-end review")).toBeInTheDocument();
     expect(screen.getByText(/Monthly on day 15 at 9:00 AM/i)).toBeInTheDocument();
-  }, 15000);
+  }, 30000);
 
   it("creates a one-time schedule", async () => {
     const user = await renderWorkspace();

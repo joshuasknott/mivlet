@@ -1,23 +1,21 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CaretDown,
-  CaretRight,
-  Clock,
-  DeviceMobile,
-  FolderOpen,
-  Gear,
-  MagnifyingGlass,
-  Plus,
-  SidebarSimple,
-  UserCircle,
-  Plugs,
-  ShieldCheck,
-  SignOut,
-  X
-} from "@phosphor-icons/react";
-import type { Icon } from "@phosphor-icons/react";
+import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
+import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
+import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
+import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
+import { SignOut } from "@phosphor-icons/react/dist/csr/SignOut";
+import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
+import { X } from "@phosphor-icons/react/dist/csr/X";
+import type { Icon } from "@phosphor-icons/react/dist/lib/types";
 import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
 import type { SettingsTab } from "./pages/settings-tabs";
 

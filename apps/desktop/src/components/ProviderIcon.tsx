@@ -1,4 +1,4 @@
-import { Cube } from "@phosphor-icons/react";
+import { Cube } from "@phosphor-icons/react/dist/csr/Cube";
 import { useId } from "react";
 
 interface ProviderIconProps {
