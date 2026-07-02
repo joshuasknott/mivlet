@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createApprovalGate, createBrowserSpeechProvider, parseComposerText } from "@fable/connectors";
-import { Moon, Sun } from "@phosphor-icons/react";
+import { MagnifyingGlass, X } from "@phosphor-icons/react";
 import { chatThreads, connectors, profileFixture, projects } from "./data/workspace";
 import { utilityItems } from "./lib/constants";
 import {
@@ -23,7 +23,7 @@ import { SchedulesPage } from "./components/pages/SchedulesPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { ConnectorsPage } from "./components/pages/ConnectorsPage";
 import { DepartmentsPage } from "./components/pages/DepartmentsPage";
-import { SettingsPage } from "./components/pages/SettingsPage";
+import { SettingsPage, WorkspaceSettingsView, tabs as settingsTabs } from "./components/pages/SettingsPage";
 import type { SettingsTab } from "./components/pages/SettingsPage";
 import { VoiceReview } from "./components/VoiceReview";
 
@@ -140,6 +140,9 @@ export function App() {
 
   const [previousActiveItem, setPreviousActiveItem] = useState("new-chat");
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("general");
+  const [settingsModalSearch, setSettingsModalSearch] = useState("");
+  const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
+  const [workspaceSettingsStatus, setWorkspaceSettingsStatus] = useState("");
   const navigationHistory = useRef([runtime.activeItem]);
   const navigationTarget = useRef<string | null>(null);
   const [navigationIndex, setNavigationIndex] = useState(0);
@@ -187,17 +190,7 @@ export function App() {
         return <SchedulesPage runtime={runtime} />;
       case "Profile":
       case "Settings":
-        return (
-          <SettingsPage
-            runtime={runtime}
-            profile={profile}
-            onProfileChange={setProfile}
-            theme={theme}
-            onThemeChange={setTheme}
-            activeTab={activeSettingsTab}
-            workspaceName={workspaceName}
-          />
-        );
+        return null;
       default:
         return null;
     }
@@ -443,6 +436,20 @@ export function App() {
     runtime.setActiveItem("Settings");
   };
 
+  const closeSettingsModal = () => {
+    if (navigationIndex > 0) {
+      navigateHistory(-1);
+    } else {
+      runtime.setActiveItem(previousActiveItem);
+    }
+  };
+
+  const visibleSettingsTabs = settingsTabs.filter((tab) => {
+    const query = settingsModalSearch.trim().toLocaleLowerCase();
+    if (!query) return true;
+    return tab.label.toLocaleLowerCase().includes(query);
+  });
+
   const navigateHistory = (offset: -1 | 1) => {
     const nextIndex = navigationIndex + offset;
     const target = navigationHistory.current[nextIndex];
@@ -471,25 +478,19 @@ export function App() {
         mobileNavOpen={runtime.mobileNavOpen}
         collapsed={sidebarCollapsed}
         loadingItemIds={agent.state.running && runtime.activeItem ? [runtime.activeItem] : []}
-        isSettingsActive={isSettingsActive}
+        isSettingsActive={false}
         activeSettingsTab={activeSettingsTab}
         onSelectSettingsTab={handleSelectSettingsTab}
         canNavigateBack={navigationIndex > 0}
         canNavigateForward={navigationIndex < navigationHistory.current.length - 1}
         onNavigateBack={() => navigateHistory(-1)}
         onNavigateForward={() => navigateHistory(1)}
-        onCloseSettings={() => {
-          if (navigationIndex > 0) {
-            navigateHistory(-1);
-          } else {
-            runtime.setActiveItem(previousActiveItem);
-          }
-        }}
+        onCloseSettings={closeSettingsModal}
         onNewChat={runtime.startNewChat}
         onAddProject={() => {
-          runtime.setActiveItem("new-project");
-          runtime.setLastAction("New project ready");
-          runtime.focusComposer("Create a project for ");
+          runtime.setActiveItem("new-thread");
+          runtime.setLastAction("New thread ready");
+          runtime.focusComposer("Create a thread for ");
         }}
         onSearch={() => {
           runtime.setLastAction("Search ready");
@@ -522,6 +523,12 @@ export function App() {
           runtime.setMobileNavOpen(false);
           runtime.setLastAction("Mobile approvals opened");
         }}
+        onOpenWorkspaceSettings={() => {
+          setWorkspaceSettingsStatus("");
+          setWorkspaceSettingsOpen(true);
+          runtime.setMobileNavOpen(false);
+          runtime.setLastAction("Workspace settings opened");
+        }}
         onSelectThread={(thread) => runtime.openThread(thread, "chat")}
         onAccountMenu={(item) => {
           if (item === "logout") {
@@ -537,14 +544,10 @@ export function App() {
       />
 
       <section className="workspace" aria-label="Fable workspace">
-        {runtime.activePage ? (
+        {runtime.activePage && !isSettingsActive ? (
           <div className="workspace-center workspace-center--page">{renderPage()}</div>
         ) : (
           <div className="workspace-center">
-            <section className="hero" aria-labelledby="hero-title">
-              <h1 id="hero-title">{workspaceName}</h1>
-            </section>
-
             <Composer
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
@@ -612,6 +615,104 @@ export function App() {
           pending. {scheduledActive ? `Running scheduled prompt ${scheduledActive.jobId}.` : ""}
         </p>
       </section>
+
+      {isSettingsActive ? (
+        <div className="settings-modal-backdrop" role="presentation">
+          <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+            <aside className="settings-modal__nav" aria-label="Settings sections">
+              <label className="settings-modal__search">
+                <MagnifyingGlass size={15} aria-hidden="true" />
+                <span className="sr-only">Search settings</span>
+                <input
+                  type="search"
+                  placeholder="Search settings"
+                  value={settingsModalSearch}
+                  onChange={(event) => setSettingsModalSearch(event.target.value)}
+                />
+              </label>
+              <nav className="settings-modal__tab-list" aria-label="Settings">
+                {visibleSettingsTabs.map((tab) => {
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      className={activeSettingsTab === tab.id ? "settings-modal__tab settings-modal__tab--active" : "settings-modal__tab"}
+                      aria-current={activeSettingsTab === tab.id ? "page" : undefined}
+                      onClick={() => handleSelectSettingsTab(tab.id)}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
+            <div className="settings-modal__content">
+              <button
+                type="button"
+                className="settings-modal__close"
+                aria-label="Close settings"
+                onClick={closeSettingsModal}
+              >
+                <X size={17} />
+              </button>
+              <SettingsPage
+                runtime={runtime}
+                profile={profile}
+                onProfileChange={setProfile}
+                theme={theme}
+                onThemeChange={setTheme}
+                activeTab={activeSettingsTab}
+                workspaceName={workspaceName}
+                titleId="settings-modal-title"
+              />
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {workspaceSettingsOpen ? (
+        <div className="settings-modal-backdrop" role="presentation">
+          <section
+            className="settings-modal settings-modal--workspace"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="workspace-settings-modal-title"
+          >
+            <div className="settings-modal__content">
+              <button
+                type="button"
+                className="settings-modal__close"
+                aria-label="Close workspace settings"
+                onClick={() => {
+                  setWorkspaceSettingsOpen(false);
+                  setWorkspaceSettingsStatus("");
+                }}
+              >
+                <X size={17} />
+              </button>
+              <section className="settings-page" aria-labelledby="workspace-settings-modal-title">
+                <div className="settings-page__content">
+                  <div className="settings-page__header">
+                    <h1 id="workspace-settings-modal-title">{workspaceName}</h1>
+                  </div>
+                  <WorkspaceSettingsView
+                    workspaceName={workspaceName}
+                    onStatus={(message) => {
+                      setWorkspaceSettingsStatus(message);
+                      runtime.setLastAction(message);
+                    }}
+                  />
+                  {workspaceSettingsStatus ? (
+                    <p className="settings-status" role="status">
+                      {workspaceSettingsStatus}
+                    </p>
+                  ) : null}
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

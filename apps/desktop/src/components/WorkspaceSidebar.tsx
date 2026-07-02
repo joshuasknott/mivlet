@@ -14,7 +14,8 @@ import {
   UserCircle,
   Plugs,
   ShieldCheck,
-  SignOut
+  SignOut,
+  X
 } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
 import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
@@ -58,6 +59,7 @@ export function WorkspaceSidebar({
   onToggleMobileNav,
   onToggleCollapsed,
   onOpenMobileConnection,
+  onOpenWorkspaceSettings,
   onSelectThread,
   onAccountMenu,
   loadingItemIds = [],
@@ -92,6 +94,7 @@ export function WorkspaceSidebar({
   onToggleMobileNav: () => void;
   onToggleCollapsed: () => void;
   onOpenMobileConnection: () => void;
+  onOpenWorkspaceSettings: () => void;
   onSelectThread: (thread: ThreadSummary) => void;
   onAccountMenu: (item: "profile" | "settings" | "logout") => void;
   loadingItemIds?: string[];
@@ -106,18 +109,23 @@ export function WorkspaceSidebar({
   onNavigateForward?: () => void;
 }) {
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
+  const [chatFlyoutOpen, setChatFlyoutOpen] = useState(false);
+  const [chatHistoryModalOpen, setChatHistoryModalOpen] = useState(false);
+  const [chatHistorySearch, setChatHistorySearch] = useState("");
   const [settingsSearch, setSettingsSearch] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const chatFlyoutRef = useRef<HTMLDivElement>(null);
   const normalizedSettingsSearch = settingsSearch.trim().toLocaleLowerCase();
   const visibleSettingsTabs = userSettingsTabs.filter((tab) =>
     tab.label.toLocaleLowerCase().includes(normalizedSettingsSearch)
   );
-  const workspaceMatchesSearch =
-    !normalizedSettingsSearch ||
-    "workspace".includes(normalizedSettingsSearch) ||
-    workspaceName.toLocaleLowerCase().includes(normalizedSettingsSearch);
   const hasProjects = projects.length > 0;
   const hasChats = chatThreads.length > 0;
+  const normalizedChatSearch = chatHistorySearch.trim().toLocaleLowerCase();
+  const filteredChatThreads = chatThreads.filter((thread) =>
+    thread.title.toLocaleLowerCase().includes(normalizedChatSearch)
+  );
+  const recentChatThreads = chatThreads.slice(0, 6);
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -132,6 +140,20 @@ export function WorkspaceSidebar({
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [workspaceDropdownOpen]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (chatFlyoutRef.current && !chatFlyoutRef.current.contains(event.target as Node)) {
+        setChatFlyoutOpen(false);
+      }
+    }
+    if (chatFlyoutOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [chatFlyoutOpen]);
 
   if (collapsed) {
     return (
@@ -184,21 +206,20 @@ export function WorkspaceSidebar({
                 <div className="workspace-dropdown" role="menu">
                   <div className="workspace-dropdown__item workspace-dropdown__item--active">
                     <span className="workspace-dropdown__name">{workspaceName}</span>
-                    <button
-                      type="button"
-                      className="workspace-dropdown__settings-btn"
-                      aria-label="Workspace Settings"
-                      title="Workspace Settings"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setWorkspaceDropdownOpen(false);
-                        onAccountMenu("settings");
-                        onSelectSettingsTab?.("workspace");
-                      }}
-                    >
-                      <Gear size={14} />
-                    </button>
                   </div>
+                  <div className="workspace-dropdown__divider" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className="workspace-dropdown__settings-card"
+                    role="menuitem"
+                    onClick={() => {
+                      setWorkspaceDropdownOpen(false);
+                      onOpenWorkspaceSettings();
+                    }}
+                  >
+                    <Gear size={15} />
+                    <span>Workspace settings</span>
+                  </button>
                 </div>
               )}
             </div>
@@ -287,29 +308,7 @@ export function WorkspaceSidebar({
           </section>
           ) : null}
 
-          {workspaceMatchesSearch ? (
-          <section className="nav-group" aria-labelledby="workspace-settings-nav-heading" style={{ marginTop: "16px" }}>
-            <div className="nav-group-heading-row">
-              <span className="nav-group-title nav-group-title--plain" id="workspace-settings-nav-heading">
-                <span>Workspaces</span>
-              </span>
-            </div>
-            <div className="settings-sidebar-list" style={{ display: "grid", gap: "2px", marginTop: "8px" }}>
-              <button
-                type="button"
-                className={`sidebar-action-card utility-row settings-workspace-row${
-                  activeSettingsTab === "workspace" ? " utility-row--active" : ""
-                }`}
-                onClick={() => onSelectSettingsTab?.("workspace")}
-                aria-current={activeSettingsTab === "workspace" ? "page" : undefined}
-              >
-                <span>{workspaceName}</span>
-              </button>
-            </div>
-          </section>
-          ) : null}
-
-          {visibleSettingsTabs.length === 0 && !workspaceMatchesSearch ? (
+          {visibleSettingsTabs.length === 0 ? (
             <p className="settings-sidebar-empty">No settings found</p>
           ) : null}
 
@@ -394,15 +393,15 @@ export function WorkspaceSidebar({
                     aria-expanded={expandedCollections.projects}
                     onClick={onToggleProjects}
                   >
-                    <span className="nav-group-title nav-group-title--plain">
-                      <span>Projects</span>
+                      <span className="nav-group-title nav-group-title--plain">
+                      <span>Threads</span>
                     </span>
                     <CaretRight className="collection-caret" size={13} weight="bold" />
                   </button>
                 ) : (
                   <span className="nav-group-heading nav-group-heading--plain" id="threads-heading">
                     <span className="nav-group-title nav-group-title--plain">
-                      <span>Projects</span>
+                      <span>Threads</span>
                     </span>
                   </span>
                 )}
@@ -464,59 +463,83 @@ export function WorkspaceSidebar({
                 </div>
               ) : null}
             </section>
+          </div>
 
-            <section className="nav-group nav-group--chats" aria-labelledby="chats-heading">
-              <div className="nav-group-heading-row">
-                {hasChats ? (
-                  <button
-                    type="button"
-                    className="nav-group-heading nav-group-heading--plain"
-                    id="chats-heading"
-                    aria-expanded={expandedCollections.chats}
-                    onClick={onToggleChats}
-                  >
-                    <span className="nav-group-title nav-group-title--plain">
-                      <span>Chats</span>
-                    </span>
-                    <CaretRight className="collection-caret" size={13} weight="bold" />
+          <div className="sidebar-chat-dock" ref={chatFlyoutRef}>
+            <div className="sidebar-action-divider" aria-hidden="true" />
+            <div className="sidebar-chat-dock__row">
+              <button
+                type="button"
+                className="sidebar-action-card sidebar-chat-dock__toggle"
+                aria-expanded={chatFlyoutOpen}
+                aria-haspopup="menu"
+                onClick={() => {
+                  setChatFlyoutOpen((open) => !open);
+                  if (!chatFlyoutOpen) {
+                    onToggleChats();
+                  }
+                }}
+              >
+                <Clock size={17} />
+                <span>Chats</span>
+                <CaretRight className="collection-caret" size={13} weight="bold" />
+              </button>
+              <button
+                type="button"
+                className="nav-group-add sidebar-chat-dock__add"
+                aria-label="Add chat"
+                onClick={onNewChat}
+              >
+                <Plus size={13} weight="bold" />
+              </button>
+            </div>
+            {chatFlyoutOpen ? (
+              <div className="chat-flyout" role="menu" aria-label="Recent chats">
+                <div className="chat-flyout__header">
+                  <strong>Recent chats</strong>
+                  <button type="button" onClick={onNewChat}>
+                    <Plus size={13} weight="bold" />
+                    New chat
                   </button>
+                </div>
+                {hasChats ? (
+                  <div className="chat-flyout__list">
+                    {recentChatThreads.map((thread) => {
+                      const isActive = activeItem === thread.id;
+                      const isThreadLoading = loadingItemIds.includes(thread.id);
+                      return (
+                        <button
+                          key={thread.id}
+                          type="button"
+                          role="menuitem"
+                          className={`thread-row${isActive ? " thread-row--active" : ""}${
+                            isThreadLoading ? " thread-row--loading" : ""
+                          }`}
+                          onClick={() => {
+                            setChatFlyoutOpen(false);
+                            onSelectThread(thread);
+                          }}
+                        >
+                          {thread.title}
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : (
-                  <span className="nav-group-heading nav-group-heading--plain" id="chats-heading">
-                    <span className="nav-group-title nav-group-title--plain">
-                      <span>Chats</span>
-                    </span>
-                  </span>
+                  <p className="chat-flyout__empty">No chats yet</p>
                 )}
                 <button
                   type="button"
-                  className="nav-group-add"
-                  aria-label="Add chat"
-                  onClick={onNewChat}
+                  className="chat-flyout__more"
+                  onClick={() => {
+                    setChatFlyoutOpen(false);
+                    setChatHistoryModalOpen(true);
+                  }}
                 >
-                  <Plus size={13} weight="bold" />
+                  Search more chats
                 </button>
               </div>
-              {hasChats && expandedCollections.chats ? (
-                <div className="thread-list">
-                  {chatThreads.map((thread) => {
-                    const isActive = activeItem === thread.id;
-                    const isThreadLoading = loadingItemIds.includes(thread.id);
-                    return (
-                      <button
-                        key={thread.id}
-                        type="button"
-                        className={`thread-row${isActive ? " thread-row--active" : ""}${
-                          isThreadLoading ? " thread-row--loading" : ""
-                        }`}
-                        onClick={() => onSelectThread(thread)}
-                      >
-                        {thread.title}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </section>
+            ) : null}
           </div>
         </>
       )}
@@ -599,20 +622,8 @@ export function WorkspaceSidebar({
                     </button>
                   );
                 })}
-                {workspaceMatchesSearch ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onSelectSettingsTab?.("workspace");
-                      onToggleMobileNav();
-                    }}
-                  >
-                    <Gear size={15} />
-                    {workspaceName}
-                  </button>
-                ) : null}
               </nav>
-              {visibleSettingsTabs.length === 0 && !workspaceMatchesSearch ? (
+              {visibleSettingsTabs.length === 0 ? (
                 <p className="settings-sidebar-empty">No settings found</p>
               ) : null}
             </section>
@@ -642,8 +653,8 @@ export function WorkspaceSidebar({
                 </nav>
               </section>
 
-              <section className="mobile-drawer-section" aria-label="Projects">
-                <strong>Projects</strong>
+              <section className="mobile-drawer-section" aria-label="Threads">
+                <strong>Threads</strong>
                 {projects.map((project) => (
                   <div className="mobile-project" key={project.id}>
                     <span>
@@ -691,6 +702,59 @@ export function WorkspaceSidebar({
               </section>
             </>
           )}
+        </div>
+      ) : null}
+
+      {chatHistoryModalOpen ? (
+        <div className="chat-history-modal" role="dialog" aria-modal="true" aria-labelledby="chat-history-title">
+          <div className="chat-history-modal__panel">
+            <div className="chat-history-modal__header">
+              <div>
+                <h2 id="chat-history-title">Chat history</h2>
+                <p>Search or browse older chats.</p>
+              </div>
+              <button
+                type="button"
+                className="chat-history-modal__close"
+                aria-label="Close chat history"
+                onClick={() => setChatHistoryModalOpen(false)}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <label className="chat-history-modal__search">
+              <MagnifyingGlass size={15} aria-hidden="true" />
+              <span className="sr-only">Search chats</span>
+              <input
+                type="search"
+                placeholder="Search chats"
+                value={chatHistorySearch}
+                onChange={(event) => setChatHistorySearch(event.target.value)}
+              />
+            </label>
+            <div className="chat-history-modal__list">
+              {filteredChatThreads.length > 0 ? (
+                filteredChatThreads.map((thread) => {
+                  const isActive = activeItem === thread.id;
+                  return (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      className={`thread-row${isActive ? " thread-row--active" : ""}`}
+                      onClick={() => {
+                        setChatHistoryModalOpen(false);
+                        onSelectThread(thread);
+                      }}
+                    >
+                      {thread.title}
+                    </button>
+                  );
+                })
+              ) : (
+                <p className="chat-history-modal__empty">No chats found</p>
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
     </aside>

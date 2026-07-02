@@ -174,7 +174,7 @@ button:disabled,
 
 .desktop-frame {
   display: grid;
-  grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   width: 100%;
   height: 100dvh;
   min-height: 0;

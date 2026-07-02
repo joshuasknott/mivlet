@@ -93,6 +93,48 @@
   }
 }
 
+input,
+textarea {
+  border-color: transparent;
+}
+
+input:focus,
+textarea:focus,
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.settings-sidebar-search,
+.search-control,
+.provider-access-key-form__field input,
+.og-field input,
+.og-provider__key-panel input,
+.settings-field input,
+.knowledge-search input,
+.knowledge-pin-filter input,
+.connector-search-bar__input-wrapper,
+.schedule-form__input,
+.schedule-edit input {
+  border-color: transparent;
+}
+
+.settings-sidebar-search:focus-within,
+.search-control:focus-within,
+.provider-access-key-form__field input:focus,
+.og-field input:focus,
+.og-provider__key-panel input:focus,
+.settings-field input:focus,
+.knowledge-search input:focus,
+.knowledge-pin-filter input:focus,
+.connector-search-bar__input-wrapper:focus-within,
+.schedule-form__input:focus,
+.schedule-edit input:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .button {
     transition: none;

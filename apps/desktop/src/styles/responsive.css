@@ -26,6 +26,11 @@
     grid-template-columns: 1fr;
   }
 
+  .settings-modal {
+    grid-template-columns: 188px minmax(0, 1fr);
+    width: min(100%, 900px);
+  }
+
   .topbar {
     padding: 0 18px;
   }
@@ -285,8 +290,8 @@
   }
 
   .composer {
-    min-height: 100px;
-    padding: 10px 12px 9px;
+    min-height: 136px;
+    padding: 15px 12px 11px;
   }
 
 
@@ -433,6 +438,29 @@
   .settings-page__content {
     width: 100%;
     padding: 24px 20px 40px;
+  }
+
+  .settings-modal-backdrop {
+    padding: 12px;
+  }
+
+  .settings-modal {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    height: min(720px, calc(100dvh - 24px));
+  }
+
+  .settings-modal__nav {
+    max-height: 116px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .settings-modal__tab-list {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
   .settings-open-section .profile-clean-card__identity {

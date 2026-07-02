@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ConnectorAccountOption,
   ConnectorActionKind,
   ConnectorManifest
 } from "@fable/protocol";
+import { X } from "@phosphor-icons/react";
 import { ConnectorIcon } from "./ConnectorIcon";
 
 /**
@@ -32,12 +33,27 @@ export function PluginPanel({
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
-    manifests[0]?.id ?? null
+    null
   );
   const selectedConnector = useMemo(
-    () => manifests.find((connector) => connector.id === selectedConnectorId) ?? manifests[0],
+    () => manifests.find((connector) => connector.id === selectedConnectorId) ?? null,
     [manifests, selectedConnectorId]
   );
+
+  useEffect(() => {
+    if (!selectedConnectorId) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSelectedConnectorId(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedConnectorId]);
 
   return (
     <section className="context-panel connectors-panel" aria-label="Connectors">
@@ -54,6 +70,8 @@ export function PluginPanel({
               key={connector.id}
               data-connector-id={connector.id}
               data-selected={selected}
+              role="button"
+              aria-label={connected ? `Manage ${connector.name}` : connector.authMode !== "none" ? "Connect" : `Open ${connector.name}`}
               tabIndex={0}
               onClick={() => {
                 setSelectedConnectorId(connector.id);
@@ -79,16 +97,9 @@ export function PluginPanel({
                   Connected
                 </span>
               ) : connector.authMode !== "none" ? (
-                <button
-                  type="button"
-                  className="connector-card__connect button button--secondary"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onConnect(connector);
-                  }}
-                >
+                <span className="connector-card__connect">
                   {needsReconnect ? "Reconnect" : "Connect"}
-                </button>
+                </span>
               ) : (
                 <span className="connector-card__connected">Available</span>
               )}
@@ -98,16 +109,39 @@ export function PluginPanel({
       </div>
 
       {selectedConnector ? (
-        <ConnectorDetails
-          connector={selectedConnector}
-          onUseConnector={onUseConnector}
-          onDisconnect={onDisconnect}
-          onRefresh={onRefresh}
-          accounts={accounts[selectedConnector.id] ?? []}
-          onSwitchAccount={onSwitchAccount}
-          onPrepareAction={onPrepareAction}
-          onConnect={onConnect}
-        />
+        <div
+          className="connector-detail-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`connector-detail-${selectedConnector.id}`}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedConnectorId(null);
+            }
+          }}
+        >
+          <div className="connector-detail-modal__panel" onMouseDown={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="connector-detail-modal__close"
+              aria-label="Close connector setup"
+              onClick={() => setSelectedConnectorId(null)}
+            >
+              <X size={17} />
+            </button>
+            <ConnectorDetails
+              connector={selectedConnector}
+              onUseConnector={onUseConnector}
+              onDisconnect={onDisconnect}
+              onRefresh={onRefresh}
+              accounts={accounts[selectedConnector.id] ?? []}
+              onSwitchAccount={onSwitchAccount}
+              onPrepareAction={onPrepareAction}
+              onConnect={onConnect}
+              titleId={`connector-detail-${selectedConnector.id}`}
+            />
+          </div>
+        </div>
       ) : null}
     </section>
   );
@@ -121,7 +155,8 @@ function ConnectorDetails({
   accounts,
   onSwitchAccount,
   onPrepareAction,
-  onConnect
+  onConnect,
+  titleId
 }: {
   connector: ConnectorManifest;
   onUseConnector: (connector: ConnectorManifest) => void;
@@ -131,6 +166,7 @@ function ConnectorDetails({
   onSwitchAccount: (connectorId: string, accountId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
   onConnect: (connector: ConnectorManifest) => void;
+  titleId?: string;
 }) {
   const firstAction = connector.supportedActions?.[0];
   const permissions = connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
@@ -143,7 +179,7 @@ function ConnectorDetails({
           <ConnectorIcon id={connector.id} />
         </span>
         <div>
-          <h2>{connector.name}</h2>
+          <h2 id={titleId}>{connector.name}</h2>
           <p>{connector.setupMessage ?? detail.summary}</p>
         </div>
         <span className={`connector-detail__status connector-detail__status--${detail.className}`}>

@@ -10,7 +10,7 @@
  * than Google AI Studio's saturated rainbow. */
 .composer-glow {
   position: relative;
-  width: min(100%, 640px);
+  width: min(100%, 760px);
   margin: 18px auto 0;
   padding: 0;
   border: 1px solid var(--line-strong);
@@ -36,8 +36,8 @@
 
 .composer-glow:focus-within {
   border-color: var(--line-strong);
-  background: var(--surface-overlay);
-  box-shadow: var(--focus-ring);
+  background: var(--surface-raised);
+  box-shadow: none;
 }
 
 /* The card itself — solid off-white surface that masks everything but the
@@ -46,8 +46,8 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 100px;
-  padding: 10px 12px 9px;
+  min-height: 152px;
+  padding: 18px 16px 14px;
   background: transparent;
   border-radius: var(--radius-2);
 }
@@ -60,8 +60,8 @@
 .composer-input {
   flex: 1 1 auto;
   width: 100%;
-  min-height: 42px;
-  max-height: 128px;
+  min-height: 88px;
+  max-height: 188px;
   padding: 5px 4px 8px;
   resize: none;
   color: var(--ink);

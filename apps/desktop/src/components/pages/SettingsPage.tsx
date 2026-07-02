@@ -54,15 +54,13 @@ export type SettingsTab =
   | "general"
   | "providers"
   | "privacy"
-  | "history"
-  | "workspace";
+  | "history";
 
 export const tabs: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "providers", label: "Providers" },
   { id: "privacy", label: "Privacy & Permissions" },
-  { id: "history", label: "History" },
-  { id: "workspace", label: "Workspace" }
+  { id: "history", label: "History" }
 ];
 
 /**
@@ -87,7 +85,8 @@ export function SettingsPage({
   theme,
   onThemeChange,
   activeTab,
-  workspaceName
+  workspaceName,
+  titleId = "settings-title"
 }: {
   runtime: ShellRuntime;
   profile?: ProfileFixture;
@@ -96,15 +95,16 @@ export function SettingsPage({
   onThemeChange: (theme: "light" | "dark") => void;
   activeTab: SettingsTab;
   workspaceName: string;
+  titleId?: string;
 }) {
   const [status, setStatus] = useState("");
 
   return (
-    <section className="settings-page" aria-labelledby="settings-title">
+    <section className="settings-page" aria-labelledby={titleId}>
       <div className="settings-page__content">
         <div className="settings-page__header">
-          <h1 id="settings-title">
-            {activeTab === "workspace" ? workspaceName : (tabs.find((t) => t.id === activeTab)?.label || "Settings")}
+          <h1 id={titleId}>
+            {tabs.find((t) => t.id === activeTab)?.label || "Settings"}
           </h1>
         </div>
 
@@ -123,11 +123,6 @@ export function SettingsPage({
               onStatus={setStatus}
             />
           </>
-        ) : activeTab === "workspace" ? (
-          <WorkspaceSettingsView
-            workspaceName={workspaceName}
-            onStatus={setStatus}
-          />
         ) : activeTab === "privacy" ? (
           <>
             <PrivacySettingsView runtime={runtime} onStatus={setStatus} />
@@ -158,6 +153,7 @@ function ProviderAccessView({
   onStatus: (message: string) => void;
 }) {
   const providers = runtime.backendProviders;
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
   // The runtime emits "Connecting <providerId>…" while a connect/disconnect is
   // in flight; surface it as the pending provider id so the row shows a spinner.
   const pendingProviderId = runtime.backendStatus?.match(/Connecting (\S+?)[\u2026.]?/)?.[1];
@@ -187,6 +183,16 @@ function ProviderAccessView({
   const subscriptionProviders = providers
     .filter((provider) => provider.backendType !== "native-api")
     .sort(byPriority);
+  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
+  const selectedConnected = selectedProvider
+    ? runtime.connectedBackendIds.includes(selectedProvider.id)
+    : false;
+  const selectedPending = selectedProvider
+    ? pendingProviderId === selectedProvider.id
+    : false;
+  const selectedDiscoveryState = selectedProvider
+    ? runtime.modelDiscoveryByProvider[selectedProvider.id] ?? "idle"
+    : "idle";
 
   return (
     <div className="settings-page__body">
@@ -206,7 +212,11 @@ function ProviderAccessView({
           <div className="provider-access-list">
             {subscriptionProviders.length > 0 ? (
               subscriptionProviders.map((provider) => (
-                <SubscriptionProviderRow key={provider.id} provider={provider} />
+                <SubscriptionProviderRow
+                  key={provider.id}
+                  provider={provider}
+                  onOpen={() => setSelectedProviderId(provider.id)}
+                />
               ))
             ) : (
               <p className="provider-access-empty">No subscription providers are registered.</p>
@@ -228,37 +238,7 @@ function ProviderAccessView({
                   connected={runtime.connectedBackendIds.includes(provider.id)}
                   pending={pendingProviderId === provider.id}
                   discoveryState={runtime.modelDiscoveryByProvider[provider.id] ?? "idle"}
-                  onStatus={onStatus}
-                  onConnect={(providerId, secret) =>
-                    void runtime
-                      .connectBackendWithVerify(providerId, secret)
-                      .then((result) => {
-                        // Report accurately: never claim "connected" when the
-                        // key was rejected or verification failed. Route every
-                        // outcome through connectResultCopy so a MISSING key
-                        // ('add a key') is distinguished from a REJECTED key
-                        // ('key was rejected/expired') and transient outcomes
-                        // never mention the key. Secrets/stack traces never
-                        // appear here — the message comes from the boundary.
-                        const missingKey = isMissingKeyMessage(result.message);
-                        onStatus(
-                          connectResultCopy(result.outcome, {
-                            missingKey,
-                            detail: result.message
-                          }).message
-                        );
-                      })
-                  }
-                  onDisconnect={(providerId) =>
-                    void runtime.disconnectBackend(providerId).then(() => {
-                      onStatus(`${providerId} disconnected.`);
-                    })
-                  }
-                  onRefreshModels={(providerId) =>
-                    void runtime.refreshModels(providerId).then(() => {
-                      onStatus(`${providerId} models refreshed.`);
-                    })
-                  }
+                  onOpen={() => setSelectedProviderId(provider.id)}
                 />
               ))
             ) : (
@@ -280,6 +260,47 @@ function ProviderAccessView({
           </p>
         </div>
       </div>
+
+      {selectedProvider ? (
+        selectedProvider.backendType === "native-api" ? (
+          <NativeProviderSetupModal
+            provider={selectedProvider}
+            connected={selectedConnected}
+            pending={selectedPending}
+            discoveryState={selectedDiscoveryState}
+            onStatus={onStatus}
+            onClose={() => setSelectedProviderId(null)}
+            onConnect={(providerId, secret) =>
+              void runtime
+                .connectBackendWithVerify(providerId, secret)
+                .then((result) => {
+                  const missingKey = isMissingKeyMessage(result.message);
+                  onStatus(
+                    connectResultCopy(result.outcome, {
+                      missingKey,
+                      detail: result.message
+                    }).message
+                  );
+                })
+            }
+            onDisconnect={(providerId) =>
+              void runtime.disconnectBackend(providerId).then(() => {
+                onStatus(`${providerId} disconnected.`);
+              })
+            }
+            onRefreshModels={(providerId) =>
+              void runtime.refreshModels(providerId).then(() => {
+                onStatus(`${providerId} models refreshed.`);
+              })
+            }
+          />
+        ) : (
+          <SubscriptionProviderSetupModal
+            provider={selectedProvider}
+            onClose={() => setSelectedProviderId(null)}
+          />
+        )
+      ) : null}
     </div>
   );
 }
@@ -295,26 +316,15 @@ function NativeProviderRow({
   connected,
   pending,
   discoveryState,
-  onStatus,
-  onConnect,
-  onDisconnect,
-  onRefreshModels
+  onOpen
 }: {
   provider: BackendProvider;
   connected: boolean;
   pending: boolean;
   /** Per-provider model-discovery lifecycle (idle when discovery hasn't run). */
   discoveryState: ModelDiscoveryOutcome;
-  onStatus: (message: string) => void;
-  onConnect: (providerId: string, secret: string) => void;
-  onDisconnect: (providerId: string) => void;
-  onRefreshModels: (providerId: string) => void;
+  onOpen: () => void;
 }) {
-  // UI-only flag: whether the inline key form is open. Holds no secret.
-  const [revealed, setRevealed] = useState(false);
-  // The key input is uncontrolled on purpose so the secret never enters React.
-  const keyInputRef = useRef<HTMLInputElement>(null);
-
   const capabilities = providerCapabilityLabels(provider);
   const availableModels = provider.models.filter((model) => model.available);
   const authLabel = authStateLabel(provider.authState, "native-api");
@@ -327,27 +337,22 @@ function NativeProviderRow({
   const discoveryDegraded = connected && isDiscoveryDegraded(discoveryState);
   const discoveryLoading = discoveryState === "loading";
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    const secret = keyInputRef.current?.value.trim() ?? "";
-    if (!secret) {
-      onStatus("Enter an API key to connect.");
-      return;
-    }
-    onConnect(provider.id, secret);
-    // Clear the DOM field immediately so the key does not linger in the input.
-    if (keyInputRef.current) {
-      keyInputRef.current.value = "";
-    }
-    setRevealed(false);
-  };
-
   return (
     <article
       className={`provider-access-row provider-access-row--native${
         connected ? " provider-access-row--connected" : ""
       }`}
       data-provider-id={provider.id}
+      role="button"
+      aria-label={connected ? `Manage ${provider.label}` : "Connect"}
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
     >
       <span className="provider-access-row__icon" aria-hidden="true">
         <ProviderIcon provider={provider.id} size={23} />
@@ -402,48 +407,6 @@ function NativeProviderRow({
           </p>
         ) : null}
 
-        {revealed && !connected ? (
-          <form className="provider-access-key-form" onSubmit={handleSubmit}>
-            <label className="provider-access-key-form__field">
-              <span>{provider.label} API key</span>
-              <input
-                ref={keyInputRef}
-                type="password"
-                aria-label={`API key for ${provider.label.toLowerCase()}`}
-                placeholder={`Enter your ${provider.label} API key`}
-                autoComplete="off"
-                spellCheck={false}
-                disabled={pending}
-              />
-            </label>
-            <button
-              type="submit"
-              className="provider-access-key-form__submit"
-              disabled={pending}
-            >
-              {pending ? (
-                <span className="provider-access-key-form__pending">
-                  <Spinner size={14} /> Connecting…
-                </span>
-              ) : (
-                "Add key & connect"
-              )}
-            </button>
-            <button
-              type="button"
-              className="provider-access-key-form__cancel"
-              onClick={() => {
-                if (keyInputRef.current) {
-                  keyInputRef.current.value = "";
-                }
-                setRevealed(false);
-              }}
-              disabled={pending}
-            >
-              Cancel
-            </button>
-          </form>
-        ) : null}
       </div>
 
       <span
@@ -459,43 +422,197 @@ function NativeProviderRow({
       </span>
 
       <span className="provider-access-row__action">
+        <span>{connected ? "Manage" : pending ? "Connecting" : "Connect"}</span>
+      </span>
+    </article>
+  );
+}
+
+function NativeProviderSetupModal({
+  provider,
+  connected,
+  pending,
+  discoveryState,
+  onStatus,
+  onClose,
+  onConnect,
+  onDisconnect,
+  onRefreshModels
+}: {
+  provider: BackendProvider;
+  connected: boolean;
+  pending: boolean;
+  discoveryState: ModelDiscoveryOutcome;
+  onStatus: (message: string) => void;
+  onClose: () => void;
+  onConnect: (providerId: string, secret: string) => void;
+  onDisconnect: (providerId: string) => void;
+  onRefreshModels: (providerId: string) => void;
+}) {
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const capabilities = providerCapabilityLabels(provider);
+  const availableModels = provider.models.filter((model) => model.available);
+  const authLabel = authStateLabel(provider.authState, "native-api");
+  const discoveryView = modelDiscoveryView(discoveryState);
+  const discoveryDegraded = connected && isDiscoveryDegraded(discoveryState);
+  const discoveryLoading = discoveryState === "loading";
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const secret = keyInputRef.current?.value.trim() ?? "";
+    if (!secret) {
+      onStatus("Enter an API key to connect.");
+      return;
+    }
+    onConnect(provider.id, secret);
+    if (keyInputRef.current) {
+      keyInputRef.current.value = "";
+    }
+  };
+
+  return (
+    <div className="provider-setup-modal" role="dialog" aria-modal="true" aria-labelledby={`provider-setup-${provider.id}`}>
+      <article className="provider-setup-modal__panel">
+        <header className="provider-setup-modal__header">
+          <span className="provider-access-row__icon" aria-hidden="true">
+            <ProviderIcon provider={provider.id} size={28} />
+          </span>
+          <div>
+            <h2 id={`provider-setup-${provider.id}`}>{provider.label}</h2>
+            <p>{provider.description}</p>
+          </div>
+          <button type="button" className="provider-setup-modal__close" aria-label="Close provider setup" onClick={onClose}>
+            <X size={17} />
+          </button>
+        </header>
+
+        <div className="provider-setup-modal__body">
+          <span className={`provider-access-state provider-access-state--${provider.authState}`}>
+            {connected ? <CheckCircle size={14} weight="fill" /> : <WarningCircle size={14} />}
+            {authLabel}
+          </span>
+
+          <div className="provider-setup-modal__meta">
+            <section>
+              <strong>Capabilities</strong>
+              <p>{capabilities.length > 0 ? capabilities.slice(0, 4).join(" / ") : "Connect to load capabilities."}</p>
+            </section>
+            <section>
+              <strong>Models</strong>
+              <p>
+                {availableModels.length > 0
+                  ? availableModels.slice(0, 4).map((model) => model.label).join(" / ")
+                  : connected
+                    ? "No models available on this account"
+                    : "Connect to see available models"}
+              </p>
+            </section>
+          </div>
+
+          {connected && discoveryState !== "idle" ? (
+            <p className={`provider-access-discovery provider-access-discovery--${discoveryView.tone}`}>
+              {discoveryLoading ? "Checking available models." : discoveryView.hint}
+            </p>
+          ) : null}
+
+          {!connected ? (
+            <form className="provider-access-key-form provider-access-key-form--modal" onSubmit={handleSubmit}>
+              <label className="provider-access-key-form__field">
+                <span>{provider.label} API key</span>
+                <input
+                  ref={keyInputRef}
+                  type="password"
+                  aria-label={`API key for ${provider.label.toLowerCase()}`}
+                  placeholder={`Enter your ${provider.label} API key`}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={pending}
+                />
+              </label>
+              <button type="submit" className="provider-access-key-form__submit" disabled={pending}>
+                {pending ? (
+                  <span className="provider-access-key-form__pending">
+                    <Spinner size={14} /> Connecting...
+                  </span>
+                ) : (
+                  "Add key & connect"
+                )}
+              </button>
+            </form>
+          ) : null}
+        </div>
+
         {connected ? (
-          <>
-            {/* Recoverable model refresh: re-runs discovery so the row reflects
-                the real model-list state and a failed/offline list can be
-                retried without reconnecting. Disabled while a refresh is in
-                flight or the connect round-trip is pending. */}
+          <footer className="provider-setup-modal__actions">
             <button
               type="button"
               className="provider-access-row__refresh"
               onClick={() => onRefreshModels(provider.id)}
               disabled={pending || discoveryLoading}
-              title="Refresh the list of models this account can use."
               aria-label={`Refresh models for ${provider.label}`}
             >
               {discoveryLoading ? <Spinner size={12} /> : <ArrowClockwise size={12} />}
-              {discoveryDegraded ? "Retry" : "Refresh models"}
+              {discoveryDegraded ? "Retry models" : "Refresh models"}
             </button>
-            <button
-              type="button"
-              onClick={() => onDisconnect(provider.id)}
-              disabled={pending}
-              title="Remove the stored credential from the local boundary."
-            >
+            <button type="button" onClick={() => onDisconnect(provider.id)} disabled={pending}>
               Disconnect
             </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setRevealed((open) => !open)}
-            disabled={pending}
-          >
-            {revealed ? "Hide" : "Connect"}
+          </footer>
+        ) : null}
+      </article>
+    </div>
+  );
+}
+
+function SubscriptionProviderSetupModal({
+  provider,
+  onClose
+}: {
+  provider: BackendProvider;
+  onClose: () => void;
+}) {
+  const capabilities = providerCapabilityLabels(provider);
+  const capabilityBearing = provider.authState === "connected" && capabilities.length > 0;
+  const authLabel = authStateLabel(provider.authState, provider.backendType);
+  const installRequired = provider.authState === "install-required";
+
+  return (
+    <div className="provider-setup-modal" role="dialog" aria-modal="true" aria-labelledby={`provider-setup-${provider.id}`}>
+      <article className="provider-setup-modal__panel">
+        <header className="provider-setup-modal__header">
+          <span className="provider-access-row__icon" aria-hidden="true">
+            <ProviderIcon provider={provider.id} size={28} />
+          </span>
+          <div>
+            <h2 id={`provider-setup-${provider.id}`}>{provider.label}</h2>
+            <p>{provider.description}</p>
+          </div>
+          <button type="button" className="provider-setup-modal__close" aria-label="Close provider setup" onClick={onClose}>
+            <X size={17} />
           </button>
-        )}
-      </span>
-    </article>
+        </header>
+        <div className="provider-setup-modal__body">
+          <span className={`provider-access-state provider-access-state--${provider.authState}`}>
+            {capabilityBearing ? <CheckCircle size={14} weight="fill" /> : <Plugs size={14} />}
+            {authLabel}
+          </span>
+          <div className="provider-setup-modal__meta">
+            <section>
+              <strong>Setup</strong>
+              <p>
+                {installRequired && provider.installHint
+                  ? provider.installHint
+                  : "Use the provider's own app, CLI, or sign-in before Fable can use this runtime."}
+              </p>
+            </section>
+            <section>
+              <strong>Capabilities</strong>
+              <p>{capabilityBearing ? capabilities.slice(0, 4).join(" / ") : "Available after the provider runtime is ready."}</p>
+            </section>
+          </div>
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -505,7 +622,13 @@ function NativeProviderRow({
  * row states what is required (CLI install, sign-in) and exposes no fake token
  * entry field.
  */
-function SubscriptionProviderRow({ provider }: { provider: BackendProvider }) {
+function SubscriptionProviderRow({
+  provider,
+  onOpen
+}: {
+  provider: BackendProvider;
+  onOpen: () => void;
+}) {
   const capabilities = providerCapabilityLabels(provider);
   const capabilityBearing = provider.authState === "connected" && capabilities.length > 0;
   const authLabel = authStateLabel(provider.authState, provider.backendType);
@@ -517,6 +640,16 @@ function SubscriptionProviderRow({ provider }: { provider: BackendProvider }) {
         capabilityBearing ? " provider-access-row--connected" : ""
       }`}
       data-provider-id={provider.id}
+      role="button"
+      aria-label={capabilityBearing ? `Manage ${provider.label}` : `View setup for ${provider.label}`}
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
     >
       <span className="provider-access-row__icon" aria-hidden="true">
         <ProviderIcon provider={provider.id} size={23} />
@@ -550,9 +683,7 @@ function SubscriptionProviderRow({ provider }: { provider: BackendProvider }) {
       </span>
 
       <span className="provider-access-row__action" title="Subscription providers use their provider-owned runtime and auth.">
-        <button type="button" disabled aria-disabled="true">
-          {capabilityBearing ? "Connected" : "Gated"}
-        </button>
+        <span>{capabilityBearing ? "Manage" : "View setup"}</span>
       </span>
     </article>
   );
@@ -1511,7 +1642,7 @@ function AppearanceSettingsView({
   );
 }
 
-function WorkspaceSettingsView({
+export function WorkspaceSettingsView({
   workspaceName,
   onStatus
 }: {

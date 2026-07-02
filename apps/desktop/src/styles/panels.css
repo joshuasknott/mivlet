@@ -1448,6 +1448,44 @@
   border-radius: var(--radius-2);
 }
 
+.connector-detail-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 105;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.connector-detail-modal__panel {
+  position: relative;
+  width: min(680px, 100%);
+  max-height: min(720px, calc(100dvh - 48px));
+  overflow: auto;
+}
+
+.connector-detail-modal__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-1);
+}
+
+.connector-detail-modal__close:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
 .connector-detail__header {
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr) auto;

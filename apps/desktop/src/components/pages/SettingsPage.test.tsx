@@ -173,6 +173,7 @@ describe("Settings → Providers UX states", () => {
     );
 
     expect(providerRow("openai").textContent).toMatch(/connected/i);
+    fireEvent.click(screen.getByRole("button", { name: /manage openai/i }));
     const refreshBtn = screen.getByLabelText(/refresh models for openai/i);
     fireEvent.click(refreshBtn);
     expect(refresh).toHaveBeenCalledWith("openai");
@@ -193,6 +194,7 @@ describe("Settings → Providers UX states", () => {
       })
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /manage openai/i }));
     const refreshBtn = screen.getByLabelText(
       /refresh models for openai/i
     ) as HTMLButtonElement;
@@ -219,6 +221,7 @@ describe("Settings → Providers UX states", () => {
     expect(row).toMatch(/your key is fine/i);
     expect(row.toLowerCase()).toMatch(/refresh|retry|try again/);
     // The refresh button becomes "Retry" for a degraded provider.
+    fireEvent.click(screen.getByRole("button", { name: /manage openai/i }));
     expect(screen.getByRole("button", { name: /refresh models for openai/i })).toBeTruthy();
   });
 

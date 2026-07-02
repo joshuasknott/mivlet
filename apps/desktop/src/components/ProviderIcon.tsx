@@ -10,13 +10,13 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
   const providerId = provider.toLowerCase();
   const gradientId = useId().replaceAll(":", "");
   const brandColor: Record<string, string> = {
-    codex: "var(--provider-monochrome)",
+    codex: "#3941FF",
     openai: "var(--provider-monochrome)",
     anthropic: "#D97757",
     xai: "var(--provider-monochrome)",
     openrouter: "#6467F2",
     cursor: "var(--provider-monochrome)",
-    copilot: "#8957E5",
+    copilot: "#8534F3",
     grok: "var(--provider-monochrome)",
     ollama: "var(--provider-monochrome)",
     groq: "#F55036"
