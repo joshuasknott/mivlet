@@ -138,7 +138,7 @@ describe("Mobile Remote Control Foundation Integration Tests", () => {
       setJobStatus: vi.fn(),
       deleteJob: vi.fn()
     };
-    
+
     // Command is for an approval that does not exist in the pending approvals index (denied/not found)
     const command: RemoteCommand = {
       type: "approve",
@@ -211,7 +211,7 @@ describe("Mobile Remote Control Foundation Integration Tests", () => {
       approvalId: "appr-1",
       decision: "once"
     });
-    
+
     // Remote approval only resolves the request in the queue; it does not directly invoke
     // the native permit-storage execution API, ensuring the desktop remains the only authority.
   });

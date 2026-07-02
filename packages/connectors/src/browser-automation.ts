@@ -468,4 +468,3 @@ function redactBrowserAuditText(value: string): string {
   }
   return normalized.length <= 160 ? normalized : `${normalized.slice(0, 160)}...`;
 }
-
