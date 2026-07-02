@@ -1447,6 +1447,86 @@ export interface RecordActionHistoryRequest {
   detail?: unknown;
 }
 
+// ---------------------------------------------------------------------------
+// Browser automation foundation.
+//
+// Browser actions are proposals bound to an agent run and a browser session.
+// These types carry only non-secret action metadata. Page contents, cookies,
+// tokens, DOM dumps, screenshots, clipboard contents, and hidden browser state
+// must not be represented here or persisted in audit detail.
+// ---------------------------------------------------------------------------
+
+export type BrowserAutomationActionKind =
+  | "browser.read-url"
+  | "browser.read-title"
+  | "browser.navigate"
+  | "browser.click"
+  | "browser.type"
+  | "browser.select"
+  | "browser.submit"
+  | "browser.download"
+  | "browser.upload"
+  | "browser.screenshot"
+  | "browser.clipboard-read"
+  | "browser.clipboard-write";
+
+export type BrowserAutomationActionStatus =
+  | "unavailable"
+  | "safe/read-only"
+  | "approval-required"
+  | "denied"
+  | "approved"
+  | "failed"
+  | "completed";
+
+export type BrowserAutomationFailureCode =
+  | "transport-unavailable"
+  | "unsupported-action"
+  | "stale-action"
+  | "replayed-action"
+  | "cross-session"
+  | "cross-run"
+  | "permission-denied"
+  | "approval-required"
+  | "approval-denied"
+  | "approval-missing"
+  | "execution-failed";
+
+export interface BrowserAutomationSession {
+  id: string;
+  runId: string;
+  state: "active" | "expired" | "closed";
+  createdAt: string;
+  expiresAt: string;
+  permissionMode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
+}
+
+export interface BrowserAutomationActionRequest {
+  id: string;
+  runId: string;
+  sessionId: string;
+  action: BrowserAutomationActionKind | (string & {});
+  requestedAt: string;
+  targetLabel?: string;
+  pageOrigin?: string;
+  arguments?: Record<string, unknown>;
+}
+
+export interface BrowserAutomationActionDecision {
+  requestId: string;
+  runId: string;
+  sessionId: string;
+  action: string;
+  status: BrowserAutomationActionStatus;
+  riskLevel: ApprovalRiskLevel;
+  mode: PermissionMode;
+  permissionProfile?: PermissionProfileId;
+  approval?: ApprovalRequest;
+  failureCode?: BrowserAutomationFailureCode;
+  message: string;
+}
+
 export interface RuntimeSnapshot {
   version: 1;
   activeItem: string;

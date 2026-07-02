@@ -247,3 +247,8 @@ export * from "./commands";
 // logic for the desktop-side remote-control surface. Secrets (PSK, device keys)
 // live behind the Rust boundary. See docs/architecture/mobile-remote.md.
 export * from "./mobile-remote";
+
+// Browser automation foundation: pure run/session binding, shared permission
+// policy classification, and redacted audit shaping. Live transport is supplied
+// by a future native/browser boundary; unavailable runtimes fail closed.
+export * from "./browser-automation";
