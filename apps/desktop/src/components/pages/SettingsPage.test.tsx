@@ -265,7 +265,7 @@ describe("Settings → Providers UX states", () => {
 
     // Reveal the key form, enter a key, and submit. The key input is
     // uncontrolled on purpose; set the DOM value directly like a user.
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI" }));
     const keyInput = screen.getByLabelText(/api key for openai/i) as HTMLInputElement;
     keyInput.value = "sk-test";
     fireEvent.submit(keyInput.closest("form")!);
@@ -298,7 +298,7 @@ describe("Settings → Providers UX states", () => {
         workspaceName="Fable"
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI" }));
     const keyInput2 = screen.getByLabelText(/api key for openai/i) as HTMLInputElement;
     keyInput2.value = "sk-bad";
     fireEvent.submit(keyInput2.closest("form")!);

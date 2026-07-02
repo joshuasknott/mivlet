@@ -235,7 +235,7 @@ describe("Fable home", () => {
 
     // Sections exist but start empty (mock projects and chats removed).
     expect(screen.getByText("Chats")).toBeInTheDocument();
-    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Threads")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /daily catch-up/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /initial build/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /memory and approvals/i })).not.toBeInTheDocument();
@@ -244,7 +244,7 @@ describe("Fable home", () => {
     expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^projects$/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^chats$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^chats$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /goals/i })).not.toBeInTheDocument();
   });
 
@@ -261,21 +261,17 @@ describe("Fable home", () => {
       "Slack",
       "Google Calendar"
     ]) {
-      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+      expect(
+        await screen.findByRole("button", { name: new RegExp(`connect ${name}`, "i") })
+      ).toBeInTheDocument();
     }
 
-    const gmailCard = screen
-      .getAllByText("Gmail")
-      .map((node) => node.closest("article"))
-      .find(Boolean);
-    expect(gmailCard).not.toBeNull();
-    expect(within(gmailCard as HTMLElement).getByText("fixture")).toBeInTheDocument();
-    expect(within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
+    const gmailCard = screen.getByRole("button", { name: /connect gmail/i });
+    expect(within(gmailCard).getByText("fixture")).toBeInTheDocument();
 
-    await user.click(
-      within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })
-    );
-    expect(within(gmailCard as HTMLElement).getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
+    await user.click(gmailCard);
+    expect(screen.getByRole("dialog", { name: "Gmail" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^connect$/i })).toBeInTheDocument();
   });
 
   it("reveals connector details after selecting a card", async () => {
@@ -294,15 +290,8 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
 
-    const githubCard = screen
-      .getAllByText("GitHub")
-      .map((node) => node.closest("article"))
-      .find(Boolean);
-    expect(githubCard).not.toBeNull();
-
-    await user.click(
-      within(githubCard as HTMLElement).getByRole("button", { name: /^connect$/i })
-    );
+    await user.click(await screen.findByRole("button", { name: /connect github/i }));
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
     expect(runtimeMocks.connectorOAuthCalls).toContain("github");
   });
@@ -315,15 +304,8 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
 
-    const vercelCard = screen
-      .getAllByText("Vercel")
-      .map((node) => node.closest("article"))
-      .find(Boolean);
-    expect(vercelCard).not.toBeNull();
-
-    await user.click(
-      within(vercelCard as HTMLElement).getByRole("button", { name: /^connect$/i })
-    );
+    await user.click(await screen.findByRole("button", { name: /connect vercel/i }));
+    await user.click(screen.getByRole("button", { name: /^connect$/i }));
 
     expect(runtimeMocks.connectorOAuthCalls).toContain("vercel");
   });
@@ -379,8 +361,6 @@ describe("Fable home", () => {
     expect(within(sidebar).getByRole("button", { name: /select workspace/i })).toHaveTextContent(
       "Josh's Fable"
     );
-    expect(screen.getByRole("heading", { name: "Josh's Fable" })).toBeInTheDocument();
-
     await user.click(screen.getByRole("button", { name: /approval preset/i }));
     await user.click(screen.getByRole("menuitemradio", { name: /work freely/i }));
     expect(screen.getByRole("button", { name: /approval preset/i })).toHaveTextContent(
@@ -602,7 +582,7 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^save profile$/i }));
 
     expect(screen.getByText(/profile saved locally/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "General" })).toBeInTheDocument();
   });
 
   it("opens settings from the account menu and lists real runtime provider state", async () => {
@@ -658,21 +638,15 @@ describe("Fable home", () => {
       within(openaiCard as HTMLElement).getByLabelText(/openai is needs api key/i)
     ).toBeInTheDocument();
     // No pre-existing fake connection: the "Connect" affordance is present.
-    expect(
-      within(openaiCard as HTMLElement).getByRole("button", { name: /^connect$/i })
-    ).toBeInTheDocument();
+    expect(openaiCard).toHaveAccessibleName("Connect OpenAI");
     // No "mock session" copy anywhere on the page.
     expect(screen.queryByText(/mock session/i)).not.toBeInTheDocument();
 
     // The subscription/CLI provider (Codex) is gated: no fake one-click connect.
     const codexCard = screen.getByText("Codex").closest("article");
     expect(codexCard).not.toBeNull();
-    expect(
-      within(codexCard as HTMLElement).getByRole("button", { name: /gated/i })
-    ).toBeDisabled();
-    expect(
-      within(codexCard as HTMLElement).queryByRole("button", { name: /^connect$/i })
-    ).not.toBeInTheDocument();
+    expect(codexCard).toHaveAccessibleName("View setup for Codex");
+    expect(screen.queryByRole("button", { name: /connect codex/i })).not.toBeInTheDocument();
   });
 
   it("connects a native API-key provider through the credential boundary in Settings", async () => {
@@ -710,11 +684,10 @@ describe("Fable home", () => {
     const anthropicCard = screen.getByText("Anthropic").closest("article");
     expect(anthropicCard).not.toBeNull();
 
-    // Open the inline key form and submit the key through the boundary.
-    await user.click(
-      within(anthropicCard as HTMLElement).getByRole("button", { name: /^connect$/i })
-    );
-    const keyInput = within(anthropicCard as HTMLElement).getByLabelText(/api key for anthropic/i);
+    // Open the provider setup modal and submit the key through the boundary.
+    await user.click(anthropicCard as HTMLElement);
+    const providerDialog = screen.getByRole("dialog", { name: "Anthropic" });
+    const keyInput = within(providerDialog).getByLabelText(/api key for anthropic/i);
     await user.type(keyInput, "sk-ant-test-key");
 
     // Simulate the boundary resolving Anthropic to connected + capability-bearing
@@ -733,7 +706,7 @@ describe("Fable home", () => {
     ];
 
     await user.click(
-      within(anthropicCard as HTMLElement).getByRole("button", { name: /add key & connect/i })
+      within(providerDialog).getByRole("button", { name: /add key & connect/i })
     );
 
     // The boundary recorded the secret (connectRuntimeBackend was called) and
@@ -750,9 +723,9 @@ describe("Fable home", () => {
     expect(
       within(anthropicCard as HTMLElement).getByText(/streaming/i)
     ).toBeInTheDocument();
-    // After connecting, the affordance switches to Disconnect.
+    // After connecting, the setup modal switches to Disconnect.
     expect(
-      within(anthropicCard as HTMLElement).getByRole("button", { name: /disconnect/i })
+      within(providerDialog).getByRole("button", { name: /disconnect/i })
     ).toBeInTheDocument();
   });
 
@@ -784,13 +757,12 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^providers$/i }));
 
     const anthropicCard = screen.getByText("Anthropic").closest("article");
-    await user.click(
-      within(anthropicCard as HTMLElement).getByRole("button", { name: /^connect$/i })
-    );
-    const keyInput = within(anthropicCard as HTMLElement).getByLabelText(/api key for anthropic/i);
+    await user.click(anthropicCard as HTMLElement);
+    const providerDialog = screen.getByRole("dialog", { name: "Anthropic" });
+    const keyInput = within(providerDialog).getByLabelText(/api key for anthropic/i);
     await user.type(keyInput, "sk-bad");
     await user.click(
-      within(anthropicCard as HTMLElement).getByRole("button", { name: /add key & connect/i })
+      within(providerDialog).getByRole("button", { name: /add key & connect/i })
     );
 
     // The page status surfaces the rejection — never a fake "connected".
@@ -1680,7 +1652,7 @@ describe("Fable onboarding", () => {
     // The five native API-key providers render with an "Add API key" affordance.
     const openaiRow = screen.getByText("OpenAI").closest("article");
     expect(openaiRow).not.toBeNull();
-    await user.click(within(openaiRow as HTMLElement).getByRole("button", { name: /add api key/i }));
+    await user.click(openaiRow as HTMLElement);
     // Expanding reveals a secret input — the key never enters React state.
     expect(await screen.findByLabelText(/api key for openai/i)).toBeInTheDocument();
   });
@@ -1727,7 +1699,7 @@ describe("Fable onboarding", () => {
     expect(openaiCard).not.toBeNull();
 
     // Open the inline key panel and submit the key through the verified path.
-    await user.click(within(openaiCard as HTMLElement).getByRole("button", { name: /add api key/i }));
+    await user.click(openaiCard as HTMLElement);
     const keyInput = await screen.findByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-test-key");
     await user.click(screen.getByRole("button", { name: /add key & connect/i }));
@@ -1769,7 +1741,7 @@ describe("Fable onboarding", () => {
 
     const openaiCard = screen.getByText("OpenAI").closest("article");
     expect(openaiCard).not.toBeNull();
-    await user.click(within(openaiCard as HTMLElement).getByRole("button", { name: /add api key/i }));
+    await user.click(openaiCard as HTMLElement);
     const keyInput = await screen.findByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-bad-key");
     await user.click(screen.getByRole("button", { name: /add key & connect/i }));

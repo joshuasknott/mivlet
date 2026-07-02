@@ -353,7 +353,7 @@ function NativeProviderRow({
       }`}
       data-provider-id={provider.id}
       role="button"
-      aria-label={connected ? `Manage ${provider.label}` : "Connect"}
+      aria-label={connected ? `Manage ${provider.label}` : `Connect ${provider.label}`}
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(event) => {

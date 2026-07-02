@@ -427,6 +427,17 @@ function ProviderRow({
       className={`og-provider${canExpandKey ? " og-provider--expandable" : ""}${expanded ? " og-provider--selected" : ""} ${stateClassFor(provider.authState)}`}
       data-provider-id={provider.id}
       role="button"
+      aria-label={
+        connected
+          ? `${provider.label} connected`
+          : provider.authState === "connecting" || pending
+            ? `${provider.label} connecting`
+            : isApiKey
+              ? `${expanded ? "Close" : "Add"} ${provider.label} API key`
+              : `Set up ${provider.label}`
+      }
+      aria-expanded={canExpandKey ? expanded : undefined}
+      aria-controls={canExpandKey ? `og-key-panel-${provider.id}` : undefined}
       tabIndex={0}
       onClick={onToggle}
       onKeyDown={(event) => {

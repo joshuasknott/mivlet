@@ -71,7 +71,13 @@ export function PluginPanel({
               data-connector-id={connector.id}
               data-selected={selected}
               role="button"
-              aria-label={connected ? `Manage ${connector.name}` : connector.authMode !== "none" ? "Connect" : `Open ${connector.name}`}
+              aria-label={
+                connected
+                  ? `Manage ${connector.name}`
+                  : connector.authMode !== "none"
+                    ? `${needsReconnect ? "Reconnect" : "Connect"} ${connector.name}`
+                    : `Open ${connector.name}`
+              }
               tabIndex={0}
               onClick={() => {
                 setSelectedConnectorId(connector.id);
@@ -232,7 +238,7 @@ function ConnectorDetails({
             Use in composer
           </button>
         ) : null}
-        {connector.status !== "connected" && connector.status !== "fixture" && connector.authMode !== "none" ? (
+        {connector.status !== "connected" && connector.authMode !== "none" ? (
           <button
             type="button"
             className="button button--primary"

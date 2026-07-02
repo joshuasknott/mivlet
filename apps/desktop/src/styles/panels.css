@@ -1517,6 +1517,7 @@
   grid-template-columns: 46px minmax(0, 1fr) auto;
   align-items: start;
   gap: 13px;
+  padding-right: 36px;
 }
 
 .connector-detail__header h2 {
