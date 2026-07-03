@@ -513,7 +513,8 @@ mod tests {
                 upd["leaseHolder"] = serde_json::json!("holder-x");
                 upd["deduplicationKey"] = serde_json::json!("j:2026-07-01T09:00:00.000Z"); // keep same dedup
                 let qid = queue_id("default", "r-dup");
-                apply_state(tx, &store, "", &qid, &upd, "later").expect("apply_state succeeds for state transition test");
+                apply_state(tx, &store, "", &qid, &upd, "later")
+                    .expect("apply_state succeeds for state transition test");
                 Ok(())
             })
             .unwrap();

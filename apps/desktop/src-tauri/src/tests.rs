@@ -1965,12 +1965,12 @@ fn in_memory_fallback_store_implements_the_trait_contract() {
 // ---------------------------------------------------------------------------
 
 use crate::models::ApprovalModification;
-use crate::tools::{
-    confine_path, execute_tool, validate_tool_approval_binding, ToolExecutionRequest,
-};
 use crate::paths::{
     contains_symlink, harden_workspace_root, is_unc_or_device_path, resolve_data_directory,
     resolve_data_directory_pre_init, strict_canonicalize, PathResolutionError,
+};
+use crate::tools::{
+    confine_path, execute_tool, validate_tool_approval_binding, ToolExecutionRequest,
 };
 
 fn tool_approval(
@@ -2443,10 +2443,10 @@ fn web_fetch_parse_rejects_forbidden_ipv4_literals_including_alt_encodings() {
         "https://192.168.1.1",
         "http://172.16.0.1",
         "https://169.254.169.254", // metadata
-        "http://192.0.2.1", // TEST-NET-1 reserved
-        "https://198.51.100.5", // TEST-NET-2 reserved
-        "http://203.0.113.10", // TEST-NET-3 reserved
-        "https://198.18.5.5", // benchmark reserved
+        "http://192.0.2.1",        // TEST-NET-1 reserved
+        "https://198.51.100.5",    // TEST-NET-2 reserved
+        "http://203.0.113.10",     // TEST-NET-3 reserved
+        "https://198.18.5.5",      // benchmark reserved
         "http://0.0.0.0",
         "https://224.0.0.1", // multicast
         "http://240.0.0.1",
@@ -2611,7 +2611,11 @@ fn web_fetch_parse_rejects_localhost_hostname_aliases() {
     ];
     for u in bad {
         let res = parse_and_validate_fetch_url(u);
-        assert!(res.is_err(), "should reject localhost alias {u} but got {:?}", res);
+        assert!(
+            res.is_err(),
+            "should reject localhost alias {u} but got {:?}",
+            res
+        );
     }
     // public hostnames with .com etc must still parse ok (DNS/re-resolve later)
     assert!(parse_and_validate_fetch_url("https://example.com").is_ok());
@@ -2640,7 +2644,10 @@ fn web_fetch_redirect_target_strings_validated_by_parse() {
     for loc in bad_redirects {
         let next = base.join(loc).expect("joinable loc");
         let res = parse_and_validate_fetch_url(next.as_str());
-        assert!(res.is_err(), "redirect target {loc} -> {next} must be rejected by parse");
+        assert!(
+            res.is_err(),
+            "redirect target {loc} -> {next} must be rejected by parse"
+        );
     }
     // good public redirect targets accepted by parse (full egress would still
     // re-resolve DNS and apply bounds/redirect count etc)
@@ -2651,7 +2658,10 @@ fn web_fetch_redirect_target_strings_validated_by_parse() {
     ];
     for loc in good_locs {
         let next = base.join(loc).expect("join ok");
-        assert!(parse_and_validate_fetch_url(next.as_str()).is_ok(), "good redirect {loc} should parse ok");
+        assert!(
+            parse_and_validate_fetch_url(next.as_str()).is_ok(),
+            "good redirect {loc} should parse ok"
+        );
     }
 }
 
@@ -2660,10 +2670,10 @@ fn web_fetch_parse_rejects_more_encoded_ip_bypasses() {
     // Additional encoded / alt-representation cases for thoroughness (parser
     // normalizes to IP then is_forbidden_ip rejects).
     let more_bad: &[&str] = &[
-        "http://0x7f.0.0.1",       // dotted hex
-        "https://2130706433/",     // already in main but repeat for coverage
+        "http://0x7f.0.0.1",          // dotted hex
+        "https://2130706433/",        // already in main but repeat for coverage
         "http://[::ffff:0x7f.0.0.1]", // mapped with alt
-        "https://127.0.0.1%2e1",   // may not parse as IP but test rejection path
+        "https://127.0.0.1%2e1",      // may not parse as IP but test rejection path
     ];
     for u in more_bad {
         // some may fail early parse, some at policy; either is fail-closed
@@ -3142,7 +3152,11 @@ fn resolve_data_directory_chooses_portable_subdir_on_marker_synthetic_fixture() 
 
     let data = resolve_data_directory(Some(&exe), None).expect("portable resolve");
     assert!(data.exists(), "data dir created");
-    assert_eq!(last_name(&data), Some("fable-data".into()), "uses portable sibling");
+    assert_eq!(
+        last_name(&data),
+        Some("fable-data".into()),
+        "uses portable sibling"
+    );
     // component count inspection (portable under the temp root)
     assert!(data.components().count() >= exe_dir.components().count());
 }
@@ -3188,7 +3202,11 @@ fn resolve_data_directory_fails_closed_no_marker_no_tauri_cand() {
     let exe = td.path().join("fable.exe");
     let err = resolve_data_directory(Some(&exe), None).expect_err("fail closed");
     let msg = err.to_string();
-    assert!(msg.contains("no portable") || msg.contains("no data dir"), "explicit error: {}", msg);
+    assert!(
+        msg.contains("no portable") || msg.contains("no data dir"),
+        "explicit error: {}",
+        msg
+    );
 }
 
 #[test]
@@ -3227,7 +3245,9 @@ fn harden_workspace_root_accepts_valid_synthetic_and_rejects_missing() {
 
     let missing = root.join("does-not-exist-subdir-root");
     let e = harden_workspace_root(&missing).expect_err("missing");
-    assert!(matches!(e, PathResolutionError::MissingRoot) || e.to_string().contains("does not exist"));
+    assert!(
+        matches!(e, PathResolutionError::MissingRoot) || e.to_string().contains("does not exist")
+    );
 }
 
 #[test]
@@ -3235,13 +3255,38 @@ fn harden_workspace_root_rejects_empty_and_trivial_roots() {
     let empty = std::path::PathBuf::new();
     assert!(harden_workspace_root(&empty).is_err());
 
-    // root-like (0 or 1 component) should be invalid per heuristic (synthetic)
+    // Filesystem roots must never become an unrestricted workspace.
     #[cfg(unix)]
     {
         let fsroot = std::path::PathBuf::from("/");
-        // may exist, but harden should reject low component count
-        let _ = harden_workspace_root(&fsroot); // do not assert specific if platform varies; covered by impl
+        assert!(harden_workspace_root(&fsroot).is_err());
     }
+    #[cfg(windows)]
+    {
+        let current = std::env::current_dir().expect("current directory");
+        let drive_root = current
+            .ancestors()
+            .last()
+            .expect("Windows path has a drive root");
+        assert!(harden_workspace_root(drive_root).is_err());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn confine_path_rejects_nonexistent_target_below_symlinked_parent() {
+    use std::os::unix::fs as unix_fs;
+
+    let td = tempfile::tempdir().expect("synthetic");
+    let workspace = td.path().join("workspace");
+    let outside = td.path().join("outside");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    unix_fs::symlink(&outside, workspace.join("linked")).unwrap();
+
+    let err = confine_path("linked/new-file.txt", &workspace)
+        .expect_err("a missing target below a symlink must remain confined");
+    assert!(err.contains("symlink") || err.contains("junction"));
 }
 
 #[cfg(unix)]
@@ -3254,7 +3299,10 @@ fn strict_canonicalize_rejects_symlinked_root_synthetic() {
     let linked = td.path().join("symlink-root");
     unix_fs::symlink(&real, &linked).expect("create symlink in temp (dev env)");
     let err = strict_canonicalize(&linked).expect_err("symlink root rejected");
-    assert!(err.to_string().contains("Symlink") || matches!(err, PathResolutionError::SymlinkOrJunction));
+    assert!(
+        err.to_string().contains("Symlink")
+            || matches!(err, PathResolutionError::SymlinkOrJunction)
+    );
 }
 
 #[test]
@@ -3295,7 +3343,13 @@ fn windows_junction_rejected_in_strict_harden_and_data_resolve() {
     std::fs::create_dir_all(&real).expect("real target");
     let junc = td.path().join("junc-root");
     let created = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J", &junc.to_string_lossy(), &real.to_string_lossy()])
+        .args([
+            "/C",
+            "mklink",
+            "/J",
+            &junc.to_string_lossy(),
+            &real.to_string_lossy(),
+        ])
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -3309,9 +3363,13 @@ fn windows_junction_rejected_in_strict_harden_and_data_resolve() {
     }
     // Junction exists as root -> strict/harden reject
     let e1 = strict_canonicalize(&junc).expect_err("junc root strict rejected");
-    assert!(e1.to_string().contains("Symlink") || matches!(e1, PathResolutionError::SymlinkOrJunction));
+    assert!(
+        e1.to_string().contains("Symlink") || matches!(e1, PathResolutionError::SymlinkOrJunction)
+    );
     let e2 = harden_workspace_root(&junc).expect_err("junc root harden rejected");
-    assert!(e2.to_string().contains("Symlink") || matches!(e2, PathResolutionError::SymlinkOrJunction));
+    assert!(
+        e2.to_string().contains("Symlink") || matches!(e2, PathResolutionError::SymlinkOrJunction)
+    );
 
     // As tauri cand (no marker) -> resolve rejects, no side effect on target
     let exe = td.path().join("fable.exe");
@@ -3322,10 +3380,16 @@ fn windows_junction_rejected_in_strict_harden_and_data_resolve() {
 
     // Non-existing last under junction prefix -> contains catches prefix, resolve no-create
     let non_last = junc.join("new-data-sub");
-    assert!(contains_symlink(&non_last) || is_unc_or_device_path(&non_last) /* unlikely */ , "prefix junction detected even for nonexist last");
+    assert!(
+        contains_symlink(&non_last) || is_unc_or_device_path(&non_last), /* unlikely */
+        "prefix junction detected even for nonexist last"
+    );
     let res2 = resolve_data_directory(Some(&exe), Some(non_last.clone()));
     assert!(res2.is_err());
-    assert!(!non_last.exists(), "pre-create check prevented side-effect dir under junc prefix");
+    assert!(
+        !non_last.exists(),
+        "pre-create check prevented side-effect dir under junc prefix"
+    );
 }
 
 #[test]
@@ -3357,11 +3421,24 @@ fn tauri_cand_with_junction_is_fail_closed_not_silently_preserved() {
     std::fs::create_dir_all(&real).unwrap();
     let junc_as_tauri = td.path().join("junc-as-existing-data");
     let created = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J", &junc_as_tauri.to_string_lossy(), &real.to_string_lossy()])
-        .status().map(|s| s.success()).unwrap_or(false);
-    if !created { return; }
+        .args([
+            "/C",
+            "mklink",
+            "/J",
+            &junc_as_tauri.to_string_lossy(),
+            &real.to_string_lossy(),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !created {
+        return;
+    }
     let exe = td.path().join("f.exe");
     let res = resolve_data_directory(Some(&exe), Some(junc_as_tauri.clone()));
-    assert!(res.is_err(), "junctioned 'existing' tauri cand is rejected (fail-closed, not preserved silently)");
+    assert!(
+        res.is_err(),
+        "junctioned 'existing' tauri cand is rejected (fail-closed, not preserved silently)"
+    );
     // the link exists but we didn't use it as data root
 }

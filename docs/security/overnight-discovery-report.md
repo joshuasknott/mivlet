@@ -1,5 +1,11 @@
 # Overnight Security Discovery Report
 
+> Historical discovery snapshot. Findings 1–3 were remediated during the
+> 2026-07-03 integration of the web-fetch SSRF, workspace-path, and Tauri CSP
+> hardening branches. The remaining plausible findings are backlog candidates,
+> not verified vulnerabilities. Line numbers below refer to the pre-integration
+> source and may have shifted.
+
 **Branch:** `grok/overnight-security-discovery` (local worktree only)  
 **Date:** 2026-07-03  
 **Scope:** Read-only repository-wide security discovery pass.  

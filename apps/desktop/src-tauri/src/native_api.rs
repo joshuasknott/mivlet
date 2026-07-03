@@ -120,7 +120,11 @@ fn normalize_sse_chunk(chunk: &str) -> String {
 
 /// Helper extracted from stream_backend_completion buffer path.
 /// Drives the shipped size bound check + accumulation + CRLF norm when called from unit tests.
-fn accumulate_and_check_bound(response_bytes: &mut usize, buffer: &mut String, bytes: &[u8]) -> bool {
+fn accumulate_and_check_bound(
+    response_bytes: &mut usize,
+    buffer: &mut String,
+    bytes: &[u8],
+) -> bool {
     *response_bytes = response_bytes.saturating_add(bytes.len());
     if *response_bytes > MAX_STREAM_RESPONSE_BYTES {
         return true;
@@ -192,10 +196,17 @@ fn retry_after_ms(header: Option<&str>, attempt: usize) -> u64 {
     let header = header.unwrap_or("");
     let header_seconds: Option<u64> = header.parse::<u64>().ok().or_else(|| {
         let digits: String = header.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() { None } else { digits.parse().ok() }
+        if digits.is_empty() {
+            None
+        } else {
+            digits.parse().ok()
+        }
     });
     let backoff = 250u64.saturating_mul(2u64.pow(attempt as u32));
-    header_seconds.map(|s| s * 1000).unwrap_or(backoff).min(30_000)
+    header_seconds
+        .map(|s| s * 1000)
+        .unwrap_or(backoff)
+        .min(30_000)
 }
 
 fn header_to_retry(header: Option<&reqwest::header::HeaderValue>, attempt: usize) -> Duration {
@@ -204,7 +215,10 @@ fn header_to_retry(header: Option<&reqwest::header::HeaderValue>, attempt: usize
 }
 
 fn retry_after(response: &reqwest::Response, attempt: usize) -> Duration {
-    header_to_retry(response.headers().get(reqwest::header::RETRY_AFTER), attempt)
+    header_to_retry(
+        response.headers().get(reqwest::header::RETRY_AFTER),
+        attempt,
+    )
 }
 
 fn status_error_code(status: reqwest::StatusCode) -> &'static str {
@@ -1093,7 +1107,9 @@ mod transport_policy_tests {
         assert_eq!(ms[0].id, "good");
 
         let mut big = vec![];
-        for i in 0..(MAX_DISCOVERED_MODELS + 100) { big.push(serde_json::json!({"id": format!("m{}", i)})); }
+        for i in 0..(MAX_DISCOVERED_MODELS + 100) {
+            big.push(serde_json::json!({"id": format!("m{}", i)}));
+        }
         let b = serde_json::json!({"data": big});
         assert_eq!(parse_models_body("openai", &b).len(), MAX_DISCOVERED_MODELS);
     }
@@ -1115,10 +1131,26 @@ mod transport_policy_tests {
 
     #[test]
     fn is_generation_filters_non_gen_and_unknown() {
-        assert!(is_generation_model("openai", &serde_json::json!({}), "gpt-5"));
-        assert!(!is_generation_model("openai", &serde_json::json!({}), "text-embedding-ada"));
-        assert!(!is_generation_model("openai", &serde_json::json!({}), "dall-e-3"));
-        assert!(is_generation_model("gemini", &serde_json::json!({"supportedGenerationMethods":["generateContent"]}), "x"));
+        assert!(is_generation_model(
+            "openai",
+            &serde_json::json!({}),
+            "gpt-5"
+        ));
+        assert!(!is_generation_model(
+            "openai",
+            &serde_json::json!({}),
+            "text-embedding-ada"
+        ));
+        assert!(!is_generation_model(
+            "openai",
+            &serde_json::json!({}),
+            "dall-e-3"
+        ));
+        assert!(is_generation_model(
+            "gemini",
+            &serde_json::json!({"supportedGenerationMethods":["generateContent"]}),
+            "x"
+        ));
         assert!(!is_generation_model("gemini", &serde_json::json!({}), "x"));
     }
 

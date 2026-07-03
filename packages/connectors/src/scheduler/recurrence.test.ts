@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ScheduledJob, ScheduleTrigger } from "@fable/protocol";
 import { calculateDueRuns, missedOccurrences, nextOccurrence, validateScheduleTrigger } from "./recurrence";
 
 describe("scheduler recurrence", () => {
@@ -76,6 +77,27 @@ describe("scheduler recurrence", () => {
 // ---------------------------------------------------------------------------
 
 describe("scheduler recurrence matrix (deterministic, injected clocks)", () => {
+  const scheduledJob = (overrides: Partial<ScheduledJob> = {}): ScheduledJob => ({
+    workspaceId: "default",
+    id: "recurrence-test-job",
+    schemaVersion: 1,
+    name: "Recurrence test",
+    description: "",
+    workflowDefinitionId: "test-workflow",
+    trigger: {
+      kind: "recurring",
+      rule: { frequency: "daily", interval: 1, hour: 9, minute: 0, timezone: "UTC" }
+    },
+    missedRunPolicy: "skip",
+    status: "active",
+    nextRunAt: "",
+    lastRunAt: "",
+    lastRunId: "",
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+    ...overrides
+  });
+
   // Conservative policy decisions (documented, encoded in assertions first):
   // 1. Monthly day D (29/30/31): only fires in months that contain that calendar day.
   //    No "last day of month" fallback. This is conservative (misses some intent but
@@ -162,16 +184,15 @@ describe("scheduler recurrence matrix (deterministic, injected clocks)", () => {
   });
 
   it("pause yields no due runs; resume uses lastRunAt as base (conservative)", () => {
-    const jobPaused: any = {
+    const jobPaused = scheduledJob({
       status: "paused",
       lastRunAt: "2026-06-20T09:00:00.000Z",
-      createdAt: "2026-06-01T00:00:00.000Z",
       missedRunPolicy: "run-all",
       trigger: { kind: "recurring", rule: { frequency: "daily", interval: 1, hour: 9, minute: 0, timezone: "UTC" } }
-    };
+    });
     expect(calculateDueRuns(jobPaused, new Date("2026-06-25T10:00:00Z")).occurrences).toHaveLength(0);
 
-    const jobActive = { ...jobPaused, status: "active" };
+    const jobActive = { ...jobPaused, status: "active" as const };
     const plan = calculateDueRuns(jobActive, new Date("2026-06-25T10:00:00Z"));
     // From lastRun 20th, missed 21..24 (run-all) <= now
     expect(plan.occurrences.length).toBeGreaterThan(0);
@@ -182,13 +203,23 @@ describe("scheduler recurrence matrix (deterministic, injected clocks)", () => {
     // Due one-time (between created/prev and now) appears in occurrences; future one-time does not (goes to nextRunAt).
     const onceDue = { kind: "once" as const, at: "2026-06-15T00:00:00.000Z" };
     const onceFuture = { kind: "once" as const, at: "2026-08-01T00:00:00.000Z" };
-    const jobActive = (t: any) => ({ status: "active", lastRunAt: "", createdAt: "2026-05-01T00:00:00.000Z", missedRunPolicy: "run-all" as const, trigger: t });
+    const jobActive = (trigger: ScheduleTrigger) =>
+      scheduledJob({
+        status: "active",
+        lastRunAt: "",
+        createdAt: "2026-05-01T00:00:00.000Z",
+        missedRunPolicy: "run-all",
+        trigger
+      });
     expect(calculateDueRuns(jobActive(onceDue), new Date("2026-07-01T00:00:00Z")).occurrences).toEqual(["2026-06-15T00:00:00.000Z"]);
     expect(calculateDueRuns(jobActive(onceFuture), new Date("2026-07-01T00:00:00Z")).occurrences).toHaveLength(0);
   });
 
   it("produced scheduledAt strings form stable occurrence identity matching queue dedup construction", () => {
-    const trig = { kind: "recurring" as const, rule: { frequency: "weekly" as const, interval: 1, byWeekday: ["Fri"], hour: 9, minute: 0, timezone: "UTC" } };
+    const trig: ScheduleTrigger = {
+      kind: "recurring",
+      rule: { frequency: "weekly", interval: 1, byWeekday: ["Fri"], hour: 9, minute: 0, timezone: "UTC" }
+    };
     const after = new Date("2026-06-25T12:00:00Z");
     const occ = nextOccurrence(trig, after)!;
     const iso = occ.toISOString();
@@ -198,12 +229,24 @@ describe("scheduler recurrence matrix (deterministic, injected clocks)", () => {
     // Roundtrip stable
     expect(new Date(iso).toISOString()).toBe(iso);
     // Used in calculateDue too
-    const plan = calculateDueRuns({ status: "active", lastRunAt: "2026-06-20T09:00:00.000Z", createdAt: "2026-06-01", missedRunPolicy: "skip", trigger: trig } as any, new Date("2026-06-27T00:00:00Z"));
+    const plan = calculateDueRuns(
+      scheduledJob({
+        status: "active",
+        lastRunAt: "2026-06-20T09:00:00.000Z",
+        createdAt: "2026-06-01T00:00:00.000Z",
+        missedRunPolicy: "skip",
+        trigger: trig
+      }),
+      new Date("2026-06-27T00:00:00Z")
+    );
     expect(plan.occurrences.every((s) => s.endsWith(".000Z"))).toBe(true);
   });
 
   it("clock forward/rollback handled by explicit after (no wall assumption)", () => {
-    const trig = { kind: "recurring" as const, rule: { frequency: "daily", interval: 1, hour: 9, minute: 0, timezone: "UTC" } };
+    const trig: ScheduleTrigger = {
+      kind: "recurring",
+      rule: { frequency: "daily", interval: 1, hour: 9, minute: 0, timezone: "UTC" }
+    };
     // Simulate clock jump forward: after is "now" after jump
     expect(nextOccurrence(trig, new Date("2026-07-10T10:00:00Z"))?.toISOString()).toBe("2026-07-11T09:00:00.000Z");
     // Rollback: after is earlier than last nominal
@@ -212,7 +255,17 @@ describe("scheduler recurrence matrix (deterministic, injected clocks)", () => {
 
   it("timezone offset changes do not duplicate or lose occurrences", () => {
     // London has offset change; use a weekly that crosses
-    const trig = { kind: "recurring" as const, rule: { frequency: "weekly", interval: 1, byWeekday: ["Sun"], hour: 10, minute: 0, timezone: "Europe/London" } };
+    const trig: ScheduleTrigger = {
+      kind: "recurring",
+      rule: {
+        frequency: "weekly",
+        interval: 1,
+        byWeekday: ["Sun"],
+        hour: 10,
+        minute: 0,
+        timezone: "Europe/London"
+      }
+    };
     const n1 = nextOccurrence(trig, new Date("2026-03-28T12:00:00Z"));
     const n2 = nextOccurrence(trig, new Date("2026-03-29T12:00:00Z"));
     expect(n1).not.toBeNull();

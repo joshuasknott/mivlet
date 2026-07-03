@@ -19,24 +19,26 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use reqwest::header::{HeaderMap, HeaderValue};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::approvals::resolve_approval;
 use crate::connector_api;
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{ApprovalResolutionRequest, ConnectorSearchRequest, APPROVAL_DECISIONS};
-use crate::paths::{execution_approvals_path, harden_workspace_root, normalize_spaces, truncate_characters};
+use crate::paths::{
+    execution_approvals_path, harden_workspace_root, normalize_spaces, truncate_characters,
+};
 
 /// The workspace root tools operate within. The command layer resolves it from
 /// the app handle (for API compat); hardened selection uses only cwd (fail-closed,
 /// no app_data fallback). Pure harden fn is unit-testable with explicit input.
 pub fn resolve_workspace_root(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let cwd = std::env::current_dir()
-        .map_err(|_| "Fable could not determine current working directory for workspace root.".to_string())?;
-    harden_workspace_root(&cwd)
-        .map_err(|e| format!("Workspace root selection failed: {}", e))
+    let cwd = std::env::current_dir().map_err(|_| {
+        "Fable could not determine current working directory for workspace root.".to_string()
+    })?;
+    harden_workspace_root(&cwd).map_err(|e| format!("Workspace root selection failed: {}", e))
 }
 
 /// The opaque request the TypeScript executor hands Rust for every tool call.
@@ -305,6 +307,9 @@ pub fn confine_path(raw: &str, workspace_root: &Path) -> Result<PathBuf, String>
     // This catches symlink/junction escapes post-resolution.
     let canon_root = crate::paths::strict_canonicalize(workspace_root)
         .map_err(|e| format!("Workspace root failed canonical validation: {}", e))?;
+    if crate::paths::contains_symlink(&joined) {
+        return Err("Path contains a symlink or junction inside the workspace root.".to_string());
+    }
     if joined.exists() {
         match std::fs::canonicalize(&joined) {
             Ok(canon_joined) => {
@@ -568,27 +573,34 @@ fn is_forbidden_hostname(host: &str) -> bool {
         || h.ends_with(".local")
 }
 
-async fn resolve_and_check_host(host: &str, port: u16) -> Result<(), String> {
-    // Use platform resolver; any resulting address that is forbidden is
-    // rejected (covers DNS rebinding at resolution time).
+async fn resolve_and_check_host(
+    host: &str,
+    port: u16,
+) -> Result<Vec<std::net::SocketAddr>, String> {
+    // Resolve once, reject the whole answer if any address is forbidden, then
+    // pin this exact answer set into reqwest. Checking DNS and subsequently
+    // allowing the HTTP client to resolve again would leave a rebinding race.
     let addrs = tokio::net::lookup_host((host, port))
         .await
-        .map_err(|_| "DNS resolution failed for web-fetch target".to_string())?;
-    for sa in addrs {
+        .map_err(|_| "DNS resolution failed for web-fetch target".to_string())?
+        .collect::<Vec<_>>();
+    if addrs.is_empty() {
+        return Err("DNS resolution returned no addresses for web-fetch target".to_string());
+    }
+    for sa in &addrs {
         if is_forbidden_ip(sa.ip()) {
             return Err(
                 "web-fetch blocked: target resolves to a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address (DNS rebinding protection).".to_string(),
             );
         }
     }
-    Ok(())
+    Ok(addrs)
 }
 
-/// Read response body with hard cap on (decompressed) size. Rejects oversized
-/// before materializing full body. Also guards against decompression abuse by
-/// bounding the expanded result we accept.
+/// Read a response incrementally with a hard cap. `Response::bytes()` would
+/// materialize an untrusted body before checking its length.
 async fn read_bounded_text(
-    response: reqwest::Response,
+    mut response: reqwest::Response,
     max_bytes: usize,
 ) -> Result<String, String> {
     if let Some(len) = response.content_length() {
@@ -596,12 +608,17 @@ async fn read_bounded_text(
             return Err("web-fetch blocked: response body too large".to_string());
         }
     }
-    let bytes = response
-        .bytes()
+    let mut bytes =
+        Vec::with_capacity(response.content_length().unwrap_or(0).min(max_bytes as u64) as usize);
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|e| format!("web-fetch body read error: {}", e))?;
-    if bytes.len() > max_bytes {
-        return Err("web-fetch blocked: response body too large".to_string());
+        .map_err(|e| format!("web-fetch body read error: {}", e))?
+    {
+        if bytes.len().saturating_add(chunk.len()) > max_bytes {
+            return Err("web-fetch blocked: response body too large".to_string());
+        }
+        bytes.extend_from_slice(&chunk);
     }
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
@@ -1206,17 +1223,6 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
         reqwest::header::ACCEPT_ENCODING,
         HeaderValue::from_static("identity"),
     );
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
-        .user_agent("Fable/0.1 (web-fetch)")
-        // Manual redirect handling so we can re-apply policy to every Location
-        // target. Default policy would let a public->private redirect escape.
-        .redirect(reqwest::redirect::Policy::none())
-        // Ask for identity (no server compression) to eliminate decompression abuse.
-        .default_headers(default_headers)
-        .build()
-        .map_err(|_| "web-fetch client initialization failed".to_string())?;
-
     let mut current = initial;
     let mut redirects = 0usize;
 
@@ -1224,6 +1230,13 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
     let fetch_fut = async {
         loop {
             // Re-check host for current hop (hostname DNS or IP literal).
+            let mut client_builder = reqwest::Client::builder()
+                .timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
+                .user_agent("Fable/0.1 (web-fetch)")
+                // Manual redirects ensure every destination gets a fresh
+                // policy check and pinned DNS answer.
+                .redirect(reqwest::redirect::Policy::none())
+                .default_headers(default_headers.clone());
             if let Some(host) = current.host() {
                 match host {
                     url::Host::Domain(d) => {
@@ -1234,7 +1247,8 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
                                 80
                             }
                         });
-                        resolve_and_check_host(d, port).await?;
+                        let addrs = resolve_and_check_host(d, port).await?;
+                        client_builder = client_builder.resolve_to_addrs(d, &addrs);
                     }
                     url::Host::Ipv4(ip) => {
                         if is_forbidden_ip(IpAddr::V4(ip)) {
@@ -1258,7 +1272,12 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
                 }
             }
 
-            // Issue request (no auto-redirect).
+            let client = client_builder
+                .build()
+                .map_err(|_| "web-fetch client initialization failed".to_string())?;
+
+            // Issue request with the validated DNS answer pinned into this
+            // per-hop client (and with automatic redirects disabled).
             let resp_res = client.get(current.clone()).send().await;
             let resp = match resp_res {
                 Ok(r) => r,

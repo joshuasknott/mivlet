@@ -152,11 +152,21 @@ impl std::fmt::Display for PathResolutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PathResolutionError::MissingRoot => write!(f, "Root path does not exist"),
-            PathResolutionError::Traversal => write!(f, "Parent-directory traversal is not permitted"),
-            PathResolutionError::NotContained => write!(f, "Path is not contained within the root after canonicalization"),
-            PathResolutionError::SymlinkOrJunction => write!(f, "Symlinks and Windows junctions are not permitted in root paths"),
+            PathResolutionError::Traversal => {
+                write!(f, "Parent-directory traversal is not permitted")
+            }
+            PathResolutionError::NotContained => write!(
+                f,
+                "Path is not contained within the root after canonicalization"
+            ),
+            PathResolutionError::SymlinkOrJunction => write!(
+                f,
+                "Symlinks and Windows junctions are not permitted in root paths"
+            ),
             PathResolutionError::UncOrDevice => write!(f, "UNC and device paths are not permitted"),
-            PathResolutionError::CanonicalizationFailed(s) => write!(f, "Canonicalization failed: {}", s),
+            PathResolutionError::CanonicalizationFailed(s) => {
+                write!(f, "Canonicalization failed: {}", s)
+            }
             PathResolutionError::Invalid(s) => write!(f, "Invalid path: {}", s),
         }
     }
@@ -250,7 +260,9 @@ pub fn strict_canonicalize(p: &std::path::Path) -> Result<std::path::PathBuf, Pa
 /// Safe create + strict validate for data dirs (portable or tauri).
 /// Pre-validates UNC/symlink/junction, creates, then strict-canon.
 /// If post-create strict fails and we created it (!existed), best-effort remove to avoid side-effect dir.
-fn ensure_valid_data_dir(candidate: std::path::PathBuf) -> Result<std::path::PathBuf, PathResolutionError> {
+fn ensure_valid_data_dir(
+    candidate: std::path::PathBuf,
+) -> Result<std::path::PathBuf, PathResolutionError> {
     let existed = candidate.exists();
     if is_unc_or_device_path(&candidate) {
         return Err(PathResolutionError::UncOrDevice);
@@ -285,15 +297,19 @@ fn ensure_valid_data_dir(candidate: std::path::PathBuf) -> Result<std::path::Pat
 
 /// Hardened workspace root selection from an explicit candidate (e.g. cwd).
 /// Fail-closed, no silent fallbacks. Returns the canonical root.
-pub fn harden_workspace_root(candidate: &std::path::Path) -> Result<std::path::PathBuf, PathResolutionError> {
+pub fn harden_workspace_root(
+    candidate: &std::path::Path,
+) -> Result<std::path::PathBuf, PathResolutionError> {
     if candidate.as_os_str().is_empty() {
         return Err(PathResolutionError::Invalid("empty root".into()));
     }
     let canon = strict_canonicalize(candidate)?;
-    // Reject trivial FS roots for safety (e.g. / or C:\); component count heuristic.
-    let comp_count = candidate.components().count();
-    if comp_count <= 1 {
-        return Err(PathResolutionError::Invalid("filesystem root not allowed as workspace".into()));
+    // Reject filesystem roots on every platform. Counting components is not
+    // portable: a Windows drive root commonly has both Prefix and RootDir.
+    if canon.parent().is_none() {
+        return Err(PathResolutionError::Invalid(
+            "filesystem root not allowed as workspace".into(),
+        ));
     }
     Ok(canon)
 }
@@ -321,7 +337,9 @@ pub fn resolve_data_directory(
     let candidate = if let Some(tauri) = tauri_app_data {
         tauri
     } else {
-        return Err(PathResolutionError::Invalid("no data dir source available".into()));
+        return Err(PathResolutionError::Invalid(
+            "no data dir source available".into(),
+        ));
     };
 
     // Use shared ensure: pre-validate + create + strict + cleanup-on-fail-if-we-created.
@@ -331,9 +349,14 @@ pub fn resolve_data_directory(
 
 /// Thin pre-init only resolver (std::env only). Supports portable marker only;
 /// fails closed otherwise (no unsafe default to app_data without Tauri context).
-pub fn resolve_data_directory_pre_init(exe_path: &std::path::Path) -> Result<std::path::PathBuf, PathResolutionError> {
-    let p = detect_portable_data_dir(exe_path)
-        .ok_or_else(|| PathResolutionError::Invalid("pre-init requires portable marker next to exe; no fallback".into()))?;
+pub fn resolve_data_directory_pre_init(
+    exe_path: &std::path::Path,
+) -> Result<std::path::PathBuf, PathResolutionError> {
+    let p = detect_portable_data_dir(exe_path).ok_or_else(|| {
+        PathResolutionError::Invalid(
+            "pre-init requires portable marker next to exe; no fallback".into(),
+        )
+    })?;
     // Delegate to ensure for consistent pre-validate + create + strict + no-side-effect cleanup.
     ensure_valid_data_dir(p)
 }
