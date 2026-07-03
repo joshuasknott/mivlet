@@ -1,16 +1,18 @@
 #!/usr/bin/env node
-import { gzipSync } from "node:zlib";
-import { readdir, stat, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { dirname, extname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { collectAssets, formatBytes, formatMs } from "./assets.mjs";
+import { formatViolationReport, runBudgetCheck } from "./budget-check.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const desktopDist = join(repoRoot, "apps", "desktop", "dist");
+const desktopDist = resolve(repoRoot, "apps", "desktop", "dist");
 const args = process.argv.slice(2).filter((arg) => arg !== "--");
 
 const options = {
   build: !args.includes("--skip-build"),
+  check: !args.includes("--no-check"),
   output: valueAfter("--output")
 };
 
@@ -22,16 +24,6 @@ function valueAfter(flag) {
     throw new Error(`${flag} needs a value.`);
   }
   return value;
-}
-
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
-}
-
-function formatMs(ms) {
-  return `${Math.round(ms)} ms`;
 }
 
 function commandLine(command, commandArgs) {
@@ -67,39 +59,7 @@ function run(command, commandArgs) {
   });
 }
 
-async function walk(dir) {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const files = [];
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await walk(path)));
-    } else if (entry.isFile()) {
-      files.push(path);
-    }
-  }
-  return files;
-}
-
-async function collectAssets() {
-  const files = await walk(desktopDist);
-  const assets = [];
-  for (const file of files) {
-    const extension = extname(file).toLowerCase();
-    if (extension !== ".js" && extension !== ".css") continue;
-    const info = await stat(file);
-    const data = await import("node:fs/promises").then((fs) => fs.readFile(file));
-    assets.push({
-      path: relative(repoRoot, file).replaceAll("\\", "/"),
-      type: extension.slice(1),
-      bytes: info.size,
-      gzipBytes: gzipSync(data).byteLength
-    });
-  }
-  return assets.sort((left, right) => right.bytes - left.bytes);
-}
-
-function markdownReport({ commandResults, assets, pnpmVersion }) {
+function markdownReport({ commandResults, assets, pnpmVersion, budgetCheck }) {
   const jsAssets = assets.filter((asset) => asset.type === "js");
   const cssAssets = assets.filter((asset) => asset.type === "css");
   const sum = (items, key) => items.reduce((total, item) => total + item[key], 0);
@@ -144,6 +104,15 @@ function markdownReport({ commandResults, assets, pnpmVersion }) {
           `| \`${asset.path}\` | ${asset.type} | ${formatBytes(asset.bytes)} | ${formatBytes(asset.gzipBytes)} |`
       ),
     "",
+    "## Budget Gate",
+    "",
+    budgetCheck.violations.length === 0
+      ? "- Status: passed (`scripts/perf/budget.json` ceilings)"
+      : "- Status: failed",
+    ...(budgetCheck.violations.length === 0
+      ? []
+      : budgetCheck.violations.map((violation) => `- ${violation.message}`)),
+    "",
     "## Limits",
     "",
     "- This reports local build timings and static Vite output sizes only.",
@@ -174,7 +143,12 @@ if (options.build) {
 }
 if (commandResults.some((result) => result.code !== 0)) {
   const pnpmVersion = await readPnpmVersion();
-  const report = markdownReport({ commandResults, assets: [], pnpmVersion });
+  const report = markdownReport({
+    commandResults,
+    assets: [],
+    pnpmVersion,
+    budgetCheck: { violations: [] }
+  });
   if (options.output) {
     await writeFile(resolve(repoRoot, options.output), report);
   }
@@ -184,11 +158,17 @@ if (commandResults.some((result) => result.code !== 0)) {
 }
 
 const pnpmVersion = await readPnpmVersion();
-const assets = await collectAssets();
-const report = markdownReport({ commandResults, assets, pnpmVersion });
+const assets = await collectAssets(desktopDist, repoRoot);
+const budgetCheck = options.check ? await runBudgetCheck() : { violations: [] };
+const report = markdownReport({ commandResults, assets, pnpmVersion, budgetCheck });
 
 if (options.output) {
   await writeFile(resolve(repoRoot, options.output), report);
 }
 
 process.stdout.write(report);
+
+if (budgetCheck.violations.length > 0) {
+  process.stderr.write(formatViolationReport(budgetCheck.violations, budgetCheck.budget));
+  process.exitCode = 1;
+}

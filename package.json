@@ -11,6 +11,8 @@
     "test": "pnpm --filter @fable/connectors test && pnpm --filter @fable/broker test && pnpm --filter @fable/knowledge test && pnpm --filter @fable/desktop test",
     "lint": "pnpm -r --if-present lint",
     "perf:baseline": "node scripts/perf/baseline.mjs",
+    "perf:check": "node scripts/perf/budget-check.mjs",
+    "perf:test": "node --test scripts/perf/budget.test.mjs",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "pnpm --filter @fable/desktop tauri build",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm tauri:check"

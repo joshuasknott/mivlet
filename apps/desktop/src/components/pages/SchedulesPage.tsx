@@ -1,4 +1,4 @@
-import { Plus } from "@phosphor-icons/react";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { useRef, useState } from "react";
 import { PageHeader } from "../PageHeader";
 import { SchedulePanel } from "../SchedulePanel";

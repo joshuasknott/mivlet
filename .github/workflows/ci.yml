@@ -24,6 +24,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm perf:check
+      - run: pnpm perf:test
       - run: pnpm tauri:check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
