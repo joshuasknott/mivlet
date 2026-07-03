@@ -1,31 +1,156 @@
 ---
 import Layout from '../layouts/Layout.astro';
+import WaitlistForm from '../components/WaitlistForm.astro';
 ---
 <Layout title="Fable — Open AI workspace for real work" description="Open-source, local-first AI workspace. Your workspace stays on your machine.">
-  <h1>Open AI workspace for real work.</h1>
-  <p class="lead">Fable is an open-source, local-first AI workspace that lets you chat with your computer, delegate work across files and tools, and stay in control at every step.</p>
-
-  <div class="honest">
-    <p><strong>Your workspace stays on your machine.</strong> Local files, memory, approvals, and schedules run in the desktop app without a Fable cloud account.</p>
-    <p><strong>Windows preview today.</strong> Unsigned Windows builds exist in the repository. macOS and Linux packaging are not ready.</p>
-  </div>
-
-  <section id="waitlist-cta">
-    <h2>Join the Fable Windows preview waitlist</h2>
-    <p>We are preparing an unsigned Windows preview. Waitlist sign-up does not create a Fable account and does not grant early access by itself.</p>
-    <p class="honesty">Fable's core desktop workspace runs locally without a hosted account. Waitlist data is stored separately from OAuth connector authentication.</p>
-
-    <a href="/waitlist" class="btn">Join the waitlist</a>
+  
+  <!-- Hero Section -->
+  <section id="hero" style="padding-top: 3rem; padding-bottom: 3rem; text-align: center;">
+    <h1 style="font-size: 2.8rem; margin-bottom: 1.5rem;">Open AI workspace for real work.</h1>
+    <p class="lead" style="max-width: 60ch; margin-left: auto; margin-right: auto;">
+      Fable is an open-source, local-first AI workspace. Your work stays on your machine. Chat with your codebase, delegate work across files and tools, and maintain absolute control at every step.
+    </p>
+    <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
+      <span class="status preview" style="font-size: 0.9rem; padding: 0.3rem 0.8rem;">Windows preview</span>
+      <a href="#waitlist" class="btn" style="width: auto; padding: 0.4rem 1.2rem;">Join the waitlist</a>
+    </div>
   </section>
 
-  <section>
-    <h2>Evidence-backed status</h2>
-    <ul>
-      <li>Open-source, Tauri + React desktop shell — <span class="status implemented">Implemented</span></li>
-      <li>Encrypted SQLite vault, BYOK API providers — <span class="status implemented">Implemented</span></li>
-      <li>Windows preview (unsigned) — <span class="status preview">Preview</span></li>
-      <li>Confidential connectors require broker deployment — <span class="status gated">Functional but gated</span></li>
-    </ul>
-    <p><a href="/status">See full status</a> · <a href="/connectors">Connector matrix</a></p>
+  <!-- Honest Box Disclaimer -->
+  <div class="honest-box" style="margin-top: 1rem; margin-bottom: 3rem;">
+    <strong>Grounded Repository State</strong>
+    Fable core runs locally without a hosted cloud account. Unsigned Windows preview builds are available to build from source; packaging for macOS and Linux is not yet complete.
+  </div>
+
+  <hr style="border: 0; border-top: 1px solid var(--border-color); margin-bottom: 3rem;" />
+
+  <!-- What it does now (Product Features) -->
+  <section id="product" style="margin-bottom: 4rem;">
+    <h2>What Fable is & does today</h2>
+    <p style="margin-bottom: 2rem;">Fable is designed to bypass cloud intermediaries, providing local agency directly on your machine. The following features are fully implemented in the current repository:</p>
+    
+    <div class="grid">
+      <div class="card">
+        <h3>Local-First Architecture</h3>
+        <p>Built with Tauri 2 and React. All files, prompts, and settings are stored locally in an encrypted SQLite database on your device. No Fable account is required to use the core application.</p>
+      </div>
+      
+      <div class="card">
+        <h3>Knowledge & Retrieval</h3>
+        <p>Import local files and folders (up to 2MB). Includes structural chunking (for Markdown, JSON, CSV, YAML) and hybrid lexical/semantic ranking (reciprocal-rank fusion) for secure local search.</p>
+      </div>
+
+      <div class="card">
+        <h3>Control & Approvals</h3>
+        <p>Exposes granular permission levels (Read Only, Ask Me, Work Freely). The Rust runtime persists exact one-time execution permits and audit logs to prevent unauthorized tool execution.</p>
+      </div>
+
+      <div class="card">
+        <h3>Local Schedules</h3>
+        <p>Create, pause, resume, and manage automated task schedules locally. The scheduler leases due occurrences and executes workflows through your connected API providers when the app is active.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Connectors Matrix Section -->
+  <section id="connectors" style="margin-bottom: 4rem;">
+    <h2>Connector Status</h2>
+    <p>We are committed to absolute honesty regarding integrations. Every connector operates under one of these statuses:</p>
+    
+    <div style="overflow-x: auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Integration / Feature</th>
+            <th>Status</th>
+            <th>Capabilities & Constraints</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Local Files & Folders</strong></td>
+            <td><span class="status implemented">Implemented</span></td>
+            <td>Full local read/import, chunking, and SQLite cache integration.</td>
+          </tr>
+          <tr>
+            <td><strong>Knowledge & Memory</strong></td>
+            <td><span class="status implemented">Implemented</span></td>
+            <td>Durable SQLite storage with Composite-Key isolation (schema v5).</td>
+          </tr>
+          <tr>
+            <td><strong>BYOK API Providers</strong></td>
+            <td><span class="status implemented">Implemented</span></td>
+            <td>Bring Your Own Key for OpenAI, Anthropic, Gemini, xAI, and OpenRouter.</td>
+          </tr>
+          <tr>
+            <td><strong>Google Connectors</strong> (Drive, Gmail, Calendar)</td>
+            <td><span class="status gated">Functional but gated</span></td>
+            <td>Works via local PKCE, but requires user-supplied Google Cloud Console OAuth setup.</td>
+          </tr>
+          <tr>
+            <td><strong>Confidential Connectors</strong> (Notion, Slack, Linear)</td>
+            <td><span class="status gated">Functional but gated</span></td>
+            <td>Local adapters are ready, but require client-side configuration or a deployed auth broker.</td>
+          </tr>
+          <tr>
+            <td><strong>GitHub Integration</strong></td>
+            <td><span class="status gated">Functional but gated</span></td>
+            <td>Read-only for issues, repositories, and PRs. GitHub writes are currently <span class="status missing">Missing</span>.</td>
+          </tr>
+          <tr>
+            <td><strong>Browser Automation</strong></td>
+            <td><span class="status preview">Preview-only</span></td>
+            <td>Runs on synthetic test fixtures; live headless transport is deferred.</td>
+          </tr>
+          <tr>
+            <td><strong>Local AI Models</strong></td>
+            <td><span class="status missing">Missing</span></td>
+            <td>UI labels local models as planned/disabled; no offline execution runtime is included.</td>
+          </tr>
+          <tr>
+            <td><strong>Voice Dictation</strong></td>
+            <td><span class="status preview">Preview-only</span></td>
+            <td>Relies on browser Web Speech API; no native offline speech engine is integrated.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="fine">Connector statuses are audited and matched against <code>docs/product/connectors.md</code>.</p>
+  </section>
+
+  <!-- Why Local First Matters -->
+  <section id="why-local" style="margin-bottom: 4rem;">
+    <h2>Why local-first matters</h2>
+    <div class="grid">
+      <div class="card" style="border-left: 2px solid var(--copper);">
+        <h3>Absolute Data Privacy</h3>
+        <p>Your codebase, databases, API calls, and workspace context remain strictly on your own hardware. Your data is never collected or analyzed by Fable.</p>
+      </div>
+      <div class="card" style="border-left: 2px solid var(--copper);">
+        <h3>Credential Boundaries</h3>
+        <p>Your API keys and OAuth tokens are kept in secure OS credential stores (Windows Credential Manager / macOS Keychain) through Tauri's credential boundaries, never in the cloud.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Waitlist Section -->
+  <section id="waitlist" style="margin-bottom: 4rem; scroll-margin-top: 2rem;">
+    <h2>Join the Fable Windows preview waitlist</h2>
+    <p>Sign up to receive updates and access to the unsigned Windows preview. Joining the waitlist does not create a Fable account and does not guarantee early access.</p>
+    
+    <div class="honest-box">
+      <strong>Waitlist & Data Notice:</strong>
+      Waitlist emails are stored separately from any OAuth or connector configurations. Fable's desktop workspace does not require a cloud account.
+    </div>
+
+    <WaitlistForm />
+  </section>
+
+  <!-- Status / Privacy Note -->
+  <section id="status-note" style="margin-bottom: 2rem;">
+    <h2>Legal & Project Status</h2>
+    <p class="fine">
+      Fable is currently in active development. Unsigned Windows preview builds are available to build from source directly from the repository. Full legal notices can be found in our <a href="/privacy-policy">Privacy Policy (Draft)</a> and <a href="/privacy">Privacy Notice</a>.
+    </p>
   </section>
 </Layout>

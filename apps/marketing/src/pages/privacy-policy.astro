@@ -1,9 +1,12 @@
 ---
 import Layout from '../layouts/Layout.astro';
 ---
-<Layout title="Privacy Policy (DRAFT)" description="Draft privacy notice.">
-  <h1>Marketing Site Privacy Notice — Source Text</h1>
-  <pre style="white-space:pre-wrap; background:#f8f8f8; padding:1rem; font-size:0.9rem;">
+<Layout title="Privacy Policy (DRAFT) - Fable" description="Draft marketing site privacy notice.">
+  <div style="margin-top: 2rem; margin-bottom: 2rem;">
+    <h1>Marketing Site Privacy Notice — Source Text</h1>
+    
+    <div class="card" style="background: rgba(255, 255, 255, 0.01); border-color: var(--border-color);">
+      <pre style="white-space: pre-wrap; font-family: monospace; font-size: 0.9rem; color: var(--text-secondary); margin: 0;">
 ```yaml
 legal_status: DRAFT — LEGAL REVIEW REQUIRED
 document_id: fable-marketing-privacy-notice
@@ -27,7 +30,9 @@ Fable is an open-source, local-first AI workspace for real work. This notice des
 
 Grounded in the current repository:
 - The desktop workspace does not require a hosted Fable account.
-- ...
-  </pre>
-  <p><strong>This is a DRAFT. Legal review required before publication. All placeholders remain.</strong></p>
+      </pre>
+    </div>
+    
+    <p style="margin-top: 1.5rem;"><strong>This is a DRAFT. Legal review required before publication. All placeholders remain.</strong></p>
+  </div>
 </Layout>

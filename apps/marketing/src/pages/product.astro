@@ -1,14 +1,21 @@
 ---
 import Layout from '../layouts/Layout.astro';
 ---
-<Layout title="What is Fable" description="Local-first desktop workspace.">
-  <h1>What Fable is</h1>
-  <p>Fable is an open-source, local-first AI workspace. Core use requires no hosted account.</p>
-  <ul>
-    <li>Tauri 2 + React desktop shell — Implemented</li>
-    <li>Encrypted SQLite vault (schema v5) — Implemented</li>
-    <li>BYOK native providers — Implemented</li>
-    <li>Windows unsigned preview builds — Preview</li>
-  </ul>
-  <p>See <a href="/status">status</a> for full matrix.</p>
+<Layout title="Fable Product - Local-First AI Workspace" description="A local-first desktop workspace that keeps you in control.">
+  <div style="margin-top: 2rem; margin-bottom: 2rem;">
+    <h1>The Fable Workspace</h1>
+    <p class="lead">Fable is an open-source, local-first AI workspace. Core use requires no hosted account.</p>
+    
+    <div class="card">
+      <h3>Core Architecture</h3>
+      <ul>
+        <li>Tauri 2 + React desktop shell — <span class="status implemented">Implemented</span></li>
+        <li>Encrypted SQLite vault (schema v5) — <span class="status implemented">Implemented</span></li>
+        <li>BYOK native providers — <span class="status implemented">Implemented</span></li>
+        <li>Windows unsigned preview builds — <span class="status preview">Preview</span></li>
+      </ul>
+    </div>
+
+    <p>For a detailed breakdown of all connectors, see the <a href="/connectors">Connector Matrix</a>.</p>
+  </div>
 </Layout>

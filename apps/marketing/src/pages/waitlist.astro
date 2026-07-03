@@ -1,95 +1,18 @@
 ---
 import Layout from '../layouts/Layout.astro';
-const WAITLIST_ENDPOINT = import.meta.env.PUBLIC_WAITLIST_ENDPOINT ?? 'http://localhost:8789/v1/signup';
-const TURNSTILE_SITE_KEY = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? '1x00000000000000000000AA';
-const WAITLIST_CONTACT_EMAIL = import.meta.env.PUBLIC_WAITLIST_CONTACT_EMAIL ?? 'hello@example.invalid';
-const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
+import WaitlistForm from '../components/WaitlistForm.astro';
 ---
 <Layout title="Join the Fable waitlist" description="Sign up for the Windows preview waitlist.">
-  <h1>Join the Fable Windows preview waitlist</h1>
+  <div style="max-width: 600px; margin: 2rem auto;">
+    <h1>Join the Fable Windows preview waitlist</h1>
 
-  <p>We are preparing an unsigned Windows preview. Waitlist sign-up does not create a Fable account and does not grant early access by itself.</p>
+    <p>We are preparing an unsigned Windows preview. Waitlist sign-up does not create a Fable account and does not grant early access by itself.</p>
 
-  <div class="honesty-box">
-    Fable's core desktop workspace runs locally without a hosted account. Waitlist data is stored separately from OAuth connector authentication.
+    <div class="honest-box">
+      <strong>Onboarding & Privacy:</strong>
+      Fable's core desktop workspace runs locally without a hosted account. Waitlist data is stored separately from OAuth connector credentials.
+    </div>
+
+    <WaitlistForm />
   </div>
-
-  <form id="waitlist-form" method="POST" action={WAITLIST_ENDPOINT} accept-charset="utf-8">
-    <label for="email">Email address</label>
-    <input id="email" name="email" type="email" required maxlength="254" autocomplete="email" />
-
-    <fieldset>
-      <legend>Platform interest (optional)</legend>
-      <label><input type="radio" name="platform_interest" value="windows" checked /> Windows (current preview)</label>
-      <label><input type="radio" name="platform_interest" value="macos" /> macOS</label>
-      <label><input type="radio" name="platform_interest" value="linux" /> Linux</label>
-      <label><input type="radio" name="platform_interest" value="unspecified" /> Unspecified</label>
-    </fieldset>
-
-    <!-- Honeypot -->
-    <div style="position:absolute;left:-9999px;top:-9999px;" aria-hidden="true">
-      <label for="website">Website (leave empty)</label>
-      <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
-    </div>
-
-    <label>
-      <input type="checkbox" name="consent_marketing" value="true" required aria-describedby="consent-desc" />
-      I agree to the Waitlist Signup Notice (version {CONSENT_VERSION}) and want to receive waitlist and product update emails from Fable.
-    </label>
-    <p id="consent-desc" class="fine">
-      See full <a href="/privacy-policy">Privacy Policy</a> and <a href="/privacy">Privacy notice</a>.
-      Version {CONSENT_VERSION}. Consent text hash is recorded server-side.
-    </p>
-
-    <!-- Turnstile widget -->
-    <div id="turnstile-container">
-      <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-      <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-theme="light"></div>
-    </div>
-    <input type="hidden" name="consent_version" value={CONSENT_VERSION} />
-    <input type="hidden" name="turnstile_token" id="turnstile_token" />
-
-    <noscript>
-      <div class="fallback">
-        JavaScript is required for the Turnstile challenge. You can still join by emailing <a href={`mailto:${WAITLIST_CONTACT_EMAIL}?subject=Waitlist%20signup`}>{WAITLIST_CONTACT_EMAIL}</a>.
-        Include only your email and the notice version above.
-      </div>
-    </noscript>
-
-    <button type="submit">Join waitlist</button>
-    <p class="fine" id="form-status" aria-live="polite"></p>
-  </form>
-
-  <script>
-    // Progressive enhancement: native form POST (form-urlencoded) always works for no-JS.
-    // JS uses FormData so server parseBody accepts it + maps cf-turnstile-response.
-    const form = document.getElementById('waitlist-form');
-    if (form) {
-      // Allow local dev override of action without changing built HTML
-      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
-        (form as HTMLFormElement).action = 'http://localhost:8789/v1/signup';
-      }
-      form.addEventListener('submit', async (e) => {
-        const ts = (window as any).turnstile;
-        if (!ts) return; // fallthrough to native POST (widget script still renders hidden input)
-        e.preventDefault();
-        const fd = new FormData(form as HTMLFormElement);
-        const turnstileResponse = (form.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement)?.value || '';
-        if (turnstileResponse) {
-          // ensure our server field has it (parseBody also maps)
-          fd.set('turnstile_token', turnstileResponse);
-        }
-        const res = await fetch((form as HTMLFormElement).action, {
-          method: 'POST',
-          body: fd
-        });
-        const status = document.getElementById('form-status');
-        if (res.status === 202) {
-          window.location.href = '/waitlist/confirmed';
-        } else if (status) {
-          status.textContent = 'There was a problem. Please try again or use the mailto fallback.';
-        }
-      });
-    }
-  </script>
 </Layout>

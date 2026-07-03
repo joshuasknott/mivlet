@@ -1,8 +1,17 @@
 ---
 import Layout from '../layouts/Layout.astro';
 ---
-<Layout title="Open Source">
-  <h1>Open Source</h1>
-  <p>Fable source is published in the monorepo. Protocol and runtime boundaries are inspectable.</p>
-  <p>Windows preview builds are unsigned. See README and docs for current state.</p>
+<Layout title="Open Source - Fable">
+  <div style="margin-top: 2rem; margin-bottom: 2rem;">
+    <h1>Open Source & Transparency</h1>
+    <p class="lead">Fable is fully open-source and developed in public.</p>
+    
+    <div class="card">
+      <p>All protocol boundaries, database schemas, and client-side agent loops are inspectable directly within the repository. We believe that AI workspaces must be fully transparent to be trusted with real work.</p>
+      <ul>
+        <li>Tauri desktop shell and Rust backend are open for audit.</li>
+        <li>Windows preview builds are currently unsigned and available for source-based compilation.</li>
+      </ul>
+    </div>
+  </div>
 </Layout>

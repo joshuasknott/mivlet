@@ -5,8 +5,8 @@ export interface Props {
   description?: string;
   noindex?: boolean;
 }
-const { title, description = "Open AI workspace for real work.", noindex = false } = Astro.props;
-const canonical = new URL(Astro.url.pathname, Astro.site).href;
+const { title, description = "Open-source, local-first AI workspace.", noindex = false } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site || 'https://fable.tools').href;
 ---
 <!doctype html>
 <html lang="en">
@@ -17,7 +17,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
   <meta name="description" content={description} />
   <link rel="canonical" href={canonical} />
   {noindex && <meta name="robots" content="noindex" />}
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/brand/fable-mark.svg" type="image/svg+xml" />
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:image" content="/og-image.png" />
@@ -27,13 +27,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
   <a href="#main" class="skip-link">Skip to main content</a>
   <header>
     <nav aria-label="Primary">
-      <a href="/" class="logo">Fable</a>
+      <a href="/" class="logo-container">
+        <img src="/brand/fable-logo-dark.svg" alt="Fable" class="logo-image" />
+      </a>
       <ul>
-        <li><a href="/product">Product</a></li>
-        <li><a href="/connectors">Connectors</a></li>
-        <li><a href="/open-source">Open Source</a></li>
-        <li><a href="/privacy">Privacy</a></li>
-        <li><a href="/waitlist">Waitlist</a></li>
+        <li><a href="/#product">Product</a></li>
+        <li><a href="/#connectors">Connectors</a></li>
+        <li><a href="/#why-local">Why Local-First</a></li>
+        <li><a href="/#waitlist">Waitlist</a></li>
       </ul>
     </nav>
   </header>
@@ -43,12 +44,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
   <footer>
     <nav aria-label="Legal">
       <a href="/privacy-policy">Privacy Policy</a>
-      <a href="/privacy">Privacy</a>
-      <a href="/status">Status</a>
-      <a href="https://github.com" rel="noopener">GitHub</a>
-      <!-- mailto decided by owner -->
+      <a href="/privacy">Privacy Notice</a>
+      <a href="/status">Status Matrix</a>
+      <a href="https://github.com" rel="noopener" target="_blank">GitHub</a>
     </nav>
-    <p class="fine">Fable is open-source, local-first software. All claims are grounded in the repository.</p>
+    <p class="fine" style="margin-top: 1.5rem;">Fable is open-source, local-first software. All claims are grounded in the repository.</p>
   </footer>
   <script>
     // Minimal progressive enhancement hook (no PII)
