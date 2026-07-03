@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fable.app/schemas/waitlist/v1.json",
+  "title": "Fable Waitlist API v1",
+  "description": "Normative request/response shapes for apps/waitlist Cloudflare Worker. OAuth broker (apps/broker) MUST NOT implement these routes or persist these fields.",
+  "version": "1.0.0",
+  "definitions": {
+    "ErrorBody": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "invalid-request",
+                "turnstile-failed",
+                "rate-limited",
+                "consent-invalid",
+                "token-invalid",
+                "token-expired",
+                "not-found",
+                "server-error"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "PlatformInterest": {
+      "type": "string",
+      "enum": ["windows", "macos", "linux", "unspecified"],
+      "default": "windows"
+    },
+    "ConnectorId": {
+      "type": "string",
+      "enum": [
+        "local-files",
+        "github",
+        "vercel",
+        "google-drive",
+        "gmail",
+        "google-calendar",
+        "notion",
+        "slack",
+        "linear"
+      ]
+    },
+    "SubscriberStatus": {
+      "type": "string",
+      "enum": ["pending", "confirmed", "unsubscribed", "deleted"]
+    },
+    "SubscriberExport": {
+      "type": "object",
+      "required": [
+        "id",
+        "email",
+        "status",
+        "consent_version",
+        "consent_marketing",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "email": { "type": "string", "format": "email" },
+        "status": { "$ref": "#/definitions/SubscriberStatus" },
+        "consent_version": { "type": "string" },
+        "consent_marketing": { "type": "boolean" },
+        "platform_interest": { "$ref": "#/definitions/PlatformInterest" },
+        "connector_interest": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ConnectorId" }
+        },
+        "referral_code": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "D1SubscriberRow": {
+      "description": "Internal persistence shape — email stored encrypted at rest; email_hash for dedup",
+      "type": "object",
+      "required": [
+        "id",
+        "email_ciphertext",
+        "email_hash",
+        "status",
+        "consent_version",
+        "consent_text_hash",
+        "consent_marketing",
+        "created_at"
+      ],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "email_ciphertext": { "type": "string" },
+        "email_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "status": { "$ref": "#/definitions/SubscriberStatus" },
+        "consent_version": { "type": "string" },
+        "consent_text_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "consent_marketing": { "type": "boolean" },
+        "platform_interest": { "$ref": "#/definitions/PlatformInterest" },
+        "connector_interest_json": { "type": "string" },
+        "referral_code": { "type": "string" },
+        "confirm_token_hash": { "type": "string" },
+        "confirm_expires_at": { "type": "string", "format": "date-time" },
+        "locale": { "type": "string", "maxLength": 35 },
+        "source": { "type": "string", "const": "web_waitlist" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "confirmed_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "paths": {
+    "/v1/signup": {
+      "post": {
+        "summary": "Create or refresh a pending waitlist signup",
+        "requestBody": {
+          "contentType": "application/json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "email",
+              "consent_marketing",
+              "consent_version",
+              "turnstile_token"
+            ],
+            "properties": {
+              "email": {
+                "type": "string",
+                "format": "email",
+                "maxLength": 254
+              },
+              "consent_marketing": {
+                "type": "boolean",
+                "const": true
+              },
+              "consent_version": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "platform_interest": {
+                "$ref": "#/definitions/PlatformInterest"
+              },
+              "connector_interest": {
+                "type": "array",
+                "items": { "$ref": "#/definitions/ConnectorId" },
+                "maxItems": 9,
+                "uniqueItems": true
+              },
+              "referral_code": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,32}$"
+              },
+              "turnstile_token": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048
+              },
+              "website": {
+                "type": "string",
+                "description": "Honeypot — must be empty or omitted"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted (new or duplicate — indistinguishable)",
+            "schema": {
+              "type": "object",
+              "required": ["id", "status"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "status": {
+                  "type": "string",
+                  "const": "pending"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "400": { "$ref": "#/definitions/ErrorBody" },
+          "429": { "$ref": "#/definitions/ErrorBody" }
+        }
+      }
+    },
+    "/v1/confirm": {
+      "get": {
+        "summary": "Confirm email via single-use token",
+        "query": {
+          "token": { "type": "string", "minLength": 32, "maxLength": 256 }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed",
+            "schema": {
+              "type": "object",
+              "required": ["status"],
+              "properties": {
+                "status": { "type": "string", "const": "confirmed" }
+              }
+            }
+          },
+          "400": { "$ref": "#/definitions/ErrorBody" }
+        }
+      }
+    },
+    "/v1/unsubscribe": {
+      "post": {
+        "summary": "Unsubscribe confirmed subscriber",
+        "requestBody": {
+          "schema": {
+            "type": "object",
+            "required": ["token"],
+            "properties": {
+              "token": { "type": "string", "minLength": 32, "maxLength": 256 }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "schema": {
+              "type": "object",
+              "required": ["status"],
+              "properties": {
+                "status": { "type": "string", "const": "unsubscribed" }
+              }
+            }
+          },
+          "400": { "$ref": "#/definitions/ErrorBody" }
+        }
+      }
+    },
+    "/v1/export-request": {
+      "post": {
+        "summary": "Email a magic link to export subscriber data",
+        "requestBody": {
+          "schema": {
+            "type": "object",
+            "required": ["email"],
+            "properties": {
+              "email": { "type": "string", "format": "email" }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Always accepted to prevent enumeration"
+          }
+        }
+      }
+    },
+    "/v1/export": {
+      "get": {
+        "summary": "Download subscriber JSON export",
+        "query": {
+          "token": { "type": "string" }
+        },
+        "responses": {
+          "200": {
+            "contentType": "application/json",
+            "schema": { "$ref": "#/definitions/SubscriberExport" }
+          },
+          "400": { "$ref": "#/definitions/ErrorBody" }
+        }
+      }
+    },
+    "/v1/delete-request": {
+      "post": {
+        "summary": "Email a magic link to delete subscriber data",
+        "requestBody": {
+          "schema": {
+            "type": "object",
+            "required": ["email"],
+            "properties": {
+              "email": { "type": "string", "format": "email" }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Always accepted" }
+        }
+      }
+    },
+    "/v1/delete": {
+      "post": {
+        "summary": "Execute deletion after magic link",
+        "requestBody": {
+          "schema": {
+            "type": "object",
+            "required": ["token"],
+            "properties": {
+              "token": { "type": "string" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "schema": {
+              "type": "object",
+              "required": ["status"],
+              "properties": {
+                "status": { "type": "string", "const": "deleted" }
+              }
+            }
+          },
+          "400": { "$ref": "#/definitions/ErrorBody" }
+        }
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "schema": {
+              "type": "object",
+              "required": ["ok"],
+              "properties": {
+                "ok": { "type": "boolean", "const": true }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "brokerSeparation": {
+    "description": "Contractual invariant enforced by repo layout and CI",
+    "rules": [
+      "apps/broker MUST NOT import apps/waitlist or reference waitlist tables",
+      "apps/broker MUST NOT expose /v1/signup, /v1/confirm, or marketing routes",
+      "Waitlist Worker MUST NOT store OAuth tokens, client secrets, or provider handoff tickets",
+      "No foreign key or shared subscriber_id between broker OAuth state and waitlist id"
+    ]
+  }
+}
