@@ -410,21 +410,21 @@ export function WorkspaceSidebar({
                     onClick={onToggleProjects}
                   >
                       <span className="nav-group-title nav-group-title--plain">
-                      <span>Threads</span>
+                      <span>Projects</span>
                     </span>
                     <CaretRight className="collection-caret" size={13} weight="bold" />
                   </button>
                 ) : (
                   <span className="nav-group-heading nav-group-heading--plain" id="threads-heading">
                     <span className="nav-group-title nav-group-title--plain">
-                      <span>Threads</span>
+                      <span>Projects</span>
                     </span>
                   </span>
                 )}
                 <button
                   type="button"
                   className="nav-group-add"
-                  aria-label="Add thread"
+                  aria-label="Add project"
                   onClick={onAddProject}
                 >
                   <Plus size={13} weight="bold" />
@@ -667,8 +667,8 @@ export function WorkspaceSidebar({
                 </nav>
               </section>
 
-              <section className="mobile-drawer-section" aria-label="Threads">
-                <strong>Threads</strong>
+              <section className="mobile-drawer-section" aria-label="Projects">
+                <strong>Projects</strong>
                 {projects.map((project) => (
                   <div className="mobile-project" key={project.id}>
                     <span>

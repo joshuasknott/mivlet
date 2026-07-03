@@ -594,8 +594,8 @@ export function App() {
         onNewChat={runtime.startNewChat}
         onAddProject={() => {
           runtime.setActiveItem("new-thread");
-          runtime.setLastAction("New thread ready");
-          runtime.focusComposer("Create a thread for ");
+          runtime.setLastAction("New project ready");
+          runtime.focusComposer("Create a project for ");
         }}
         onSearch={() => {
           runtime.setLastAction("Search ready");
