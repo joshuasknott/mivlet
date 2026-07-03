@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fable-waitlist",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-30",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "WAITLIST_CONSENT_VERSION": "2026-07-03-waitlist-v0.1",
+    "MARKETING_ORIGIN": "http://localhost:4321",
+    "CONFIRM_URL_BASE": "http://localhost:8789",
+    "RATE_LIMIT_SIGNUP_PER_HOUR": "10",
+    "RATE_LIMIT_EMAIL_PER_DAY": "3"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "waitlist-db",
+      "database_id": "local-dev-placeholder",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // EMAIL_API_KEY is optional and intentionally not declared here; Wrangler warns on unknown optional secrets.
+  "secrets": {
+    "required": [
+      "TURNSTILE_SECRET",
+      "WAITLIST_EMAIL_PEPPER",
+      "WAITLIST_SIGNING_KEY"
+    ]
+  }
+}

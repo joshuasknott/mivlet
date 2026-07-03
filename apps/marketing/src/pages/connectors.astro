@@ -1,0 +1,23 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Fable Connectors" description="Connector matrix with honest status labels.">
+  <h1>Connectors</h1>
+  <p>Every integration uses exactly one of: <strong>Implemented</strong>, <strong>Functional but gated</strong>, <strong>Preview-only</strong>, <strong>Missing</strong>.</p>
+
+  <table>
+    <thead><tr><th>Integration</th><th>Label</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>Local files</td><td><span class="status implemented">Implemented</span></td><td>Live in Tauri</td></tr>
+      <tr><td>Knowledge search &amp; memory</td><td><span class="status implemented">Implemented</span></td><td>Encrypted SQLite</td></tr>
+      <tr><td>BYOK API providers</td><td><span class="status implemented">Implemented</span></td><td>User supplies keys</td></tr>
+      <tr><td>Google Drive, Gmail, Calendar</td><td><span class="status gated">Functional but gated</span></td><td>User Google Cloud OAuth</td></tr>
+      <tr><td>GitHub, Vercel, Notion, Slack, Linear</td><td><span class="status gated">Functional but gated</span></td><td>Auth broker not deployed</td></tr>
+      <tr><td>GitHub writes</td><td><span class="status missing">Missing</span></td><td>Read-only live surface</td></tr>
+      <tr><td>Local models</td><td><span class="status missing">Missing</span></td><td>UI shows planned/disabled</td></tr>
+      <tr><td>Browser automation</td><td><span class="status preview">Preview-only</span></td><td>Fixture preview</td></tr>
+      <tr><td>Voice dictation</td><td><span class="status preview">Preview-only</span></td><td>Web Speech where host supports</td></tr>
+    </tbody>
+  </table>
+  <p class="fine">Grounded in <code>docs/product/status.md</code> and <code>docs/product/connectors.md</code>.</p>
+</Layout>

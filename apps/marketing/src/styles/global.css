@@ -1,0 +1,64 @@
+:root {
+  --graphite: #17191A;
+  --surface: #F6F2EA;
+  --copper: #A16B3F;
+  --strong-copper: #8A5832;
+  --text: var(--graphite);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+a { color: var(--copper); text-decoration: underline; }
+a:hover { color: var(--strong-copper); }
+
+header, footer, main { max-width: 72ch; margin: 0 auto; padding: 1rem; }
+
+nav ul { display: flex; gap: 1rem; list-style: none; padding: 0; }
+
+.logo { font-weight: 600; font-size: 1.25rem; color: var(--graphite); text-decoration: none; }
+
+.skip-link {
+  position: absolute; left: -9999px; top: auto;
+}
+.skip-link:focus { left: 1rem; top: 1rem; background: white; padding: .5rem; }
+
+h1, h2 { font-weight: 600; }
+
+.status { 
+  display: inline-block; padding: .1rem .4rem; border: 1px solid currentColor; border-radius: 2px; 
+  font-size: .8rem; font-weight: 500;
+}
+.status.implemented { color: #0a7; }
+.status.gated, .status.missing { color: #b50; }
+.status.preview { color: #07a; }
+
+form { border: 1px solid #ccc; padding: 1rem; background: white; }
+label { display: block; margin: .5rem 0; }
+input[type="email"] { width: 100%; padding: .5rem; font-size: 1rem; border: 1px solid #aaa; }
+
+button, .btn {
+  background: var(--surface); color: var(--graphite); border: 2px solid var(--copper);
+  padding: .5rem 1rem; cursor: pointer; font-size: 1rem;
+}
+button:hover { border-color: var(--strong-copper); }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #ccc; padding: .4rem; text-align: left; }
+
+.fine { font-size: .8rem; opacity: .7; }
+
+noscript .fallback { border: 1px solid #c90; padding: 1rem; background: #fffbeb; }
+
+.error { color: #900; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

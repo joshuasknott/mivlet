@@ -1,0 +1,31 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout title="Fable — Open AI workspace for real work" description="Open-source, local-first AI workspace. Your workspace stays on your machine.">
+  <h1>Open AI workspace for real work.</h1>
+  <p class="lead">Fable is an open-source, local-first AI workspace that lets you chat with your computer, delegate work across files and tools, and stay in control at every step.</p>
+
+  <div class="honest">
+    <p><strong>Your workspace stays on your machine.</strong> Local files, memory, approvals, and schedules run in the desktop app without a Fable cloud account.</p>
+    <p><strong>Windows preview today.</strong> Unsigned Windows builds exist in the repository. macOS and Linux packaging are not ready.</p>
+  </div>
+
+  <section id="waitlist-cta">
+    <h2>Join the Fable Windows preview waitlist</h2>
+    <p>We are preparing an unsigned Windows preview. Waitlist sign-up does not create a Fable account and does not grant early access by itself.</p>
+    <p class="honesty">Fable's core desktop workspace runs locally without a hosted account. Waitlist data is stored separately from OAuth connector authentication.</p>
+
+    <a href="/waitlist" class="btn">Join the waitlist</a>
+  </section>
+
+  <section>
+    <h2>Evidence-backed status</h2>
+    <ul>
+      <li>Open-source, Tauri + React desktop shell — <span class="status implemented">Implemented</span></li>
+      <li>Encrypted SQLite vault, BYOK API providers — <span class="status implemented">Implemented</span></li>
+      <li>Windows preview (unsigned) — <span class="status preview">Preview</span></li>
+      <li>Confidential connectors require broker deployment — <span class="status gated">Functional but gated</span></li>
+    </ul>
+    <p><a href="/status">See full status</a> · <a href="/connectors">Connector matrix</a></p>
+  </section>
+</Layout>

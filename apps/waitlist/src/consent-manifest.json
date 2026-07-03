@@ -1,0 +1,8 @@
+{
+  "versions": {
+    "2026-07-03-waitlist-v0.1": {
+      "canonicalText": "By joining the Fable waitlist, you agree that:\n\n1. We will collect your email address (and any optional information you choose to provide on the form) to manage your place on the waitlist and send you product-related updates about Fable.\n2. Fable is in preview. The open-source desktop app (currently version 0.1.0) is an early preview. Features, timelines, and availability may change. Waitlist signup does not guarantee access, priority, pricing, or a delivery date.\n3. This is a marketing waitlist, not a Fable account. Joining the waitlist does not create a hosted Fable workspace account and does not give us access to your local desktop data, files, API keys, or connector credentials.\n4. Email from us. We may email you about waitlist status, early access opportunities, and major product announcements. You can withdraw consent and unsubscribe using the link in our emails or by contacting [PRIVACY_CONTACT_EMAIL].\n5. How we handle your data is described in our Privacy Notice. Our Cookie Notice applies if analytics or preference cookies are enabled on the page.\n\nData controller: [CONTROLLER_LEGAL_NAME]\nContact: [PRIVACY_CONTACT_EMAIL]\n\nCheckbox label: I agree to the Waitlist Signup Notice (version 2026-07-03-waitlist-v0.1) and want to receive waitlist and product update emails from Fable.",
+      "checkboxLabel": "I agree to the Waitlist Signup Notice (version 2026-07-03-waitlist-v0.1) and want to receive waitlist and product update emails from Fable."
+    }
+  }
+}

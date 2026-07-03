@@ -19,3 +19,12 @@ coverage/
 **/.wrangler/
 .superpowers/
 .worktrees/
+
+# local wrangler/d1 state
+.wrangler/
+*.sqlite
+*.sqlite-*
+
+
+.astro/
+
