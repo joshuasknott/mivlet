@@ -635,11 +635,8 @@ pub fn delete_local_data(
             Ok(())
         })
         .map_err(|error| error.to_string())?;
-    use tauri::Manager as _;
-    let app_data = app
-        .path()
-        .app_data_dir()
-        .map_err(|_| "Fable could not resolve the app data folder.".to_string())?;
+    // Use hardened (portable-aware) resolution; do not bypass via direct tauri path().
+    let app_data = crate::paths::app_data_dir(&app)?;
     for name in [
         "runtime-snapshot.json",
         "agent-runs.json",

@@ -26,14 +26,14 @@ mod models;
 mod native_api;
 mod notifications;
 mod oauth_loopback;
-mod paths;
+pub mod paths;
 mod permission_policy;
-mod portable;
+pub mod portable;
 mod remote_control;
 mod scheduler;
 mod snapshot;
 mod store;
-mod tools;
+pub mod tools;
 mod workflows;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install
@@ -57,10 +57,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let app_data = app
-                .path()
-                .app_data_dir()
-                .map_err(|_| "Fable could not resolve the app data folder.")?;
+            // Use hardened portable-aware data dir resolution (fail-closed).
+            let handle = app.handle().clone();
+            let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
             // Load the durable scheduler store once and manage it as process
             // state. The in-process tick leases due entries; because Tauri is

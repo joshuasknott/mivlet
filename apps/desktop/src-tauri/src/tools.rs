@@ -23,21 +23,16 @@ use crate::approvals::resolve_approval;
 use crate::connector_api;
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{ApprovalResolutionRequest, ConnectorSearchRequest, APPROVAL_DECISIONS};
-use crate::paths::{execution_approvals_path, normalize_spaces, truncate_characters};
+use crate::paths::{execution_approvals_path, harden_workspace_root, normalize_spaces, truncate_characters};
 
 /// The workspace root tools operate within. The command layer resolves it from
-/// the app handle; the pure helpers below take an explicit root so they are
-/// unit-testable without a live Tauri runtime.
-pub(crate) fn resolve_workspace_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    use tauri::Manager;
+/// the app handle (for API compat); hardened selection uses only cwd (fail-closed,
+/// no app_data fallback). Pure harden fn is unit-testable with explicit input.
+pub fn resolve_workspace_root(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let cwd = std::env::current_dir()
-        .or_else(|_| {
-            app.path()
-                .app_data_dir()
-                .map_err(|_| "Fable could not resolve the workspace root.".to_string())
-        })
-        .map_err(|_| "Fable could not resolve the workspace root.".to_string())?;
-    Ok(cwd)
+        .map_err(|_| "Fable could not determine current working directory for workspace root.".to_string())?;
+    harden_workspace_root(&cwd)
+        .map_err(|e| format!("Workspace root selection failed: {}", e))
 }
 
 /// The opaque request the TypeScript executor hands Rust for every tool call.
@@ -270,7 +265,9 @@ pub(crate) fn validate_tool_approval_binding(
 
 /// Confine a relative path under the workspace root. Rejects `..` escapes and
 /// absolute paths so a tool call can never reach outside the workspace.
-pub(crate) fn confine_path(raw: &str, workspace_root: &Path) -> Result<PathBuf, String> {
+/// Enhanced with post-canonical containment check (when target exists) using
+/// the hardened canonical root so symlink/junction escapes are also rejected.
+pub fn confine_path(raw: &str, workspace_root: &Path) -> Result<PathBuf, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err("A non-empty path argument is required.".to_string());
@@ -292,7 +289,27 @@ pub(crate) fn confine_path(raw: &str, workspace_root: &Path) -> Result<PathBuf, 
             }
         }
     }
-    Ok(workspace_root.join(candidate))
+    let joined = workspace_root.join(candidate);
+
+    // Hardened containment: require root itself canonicalizes cleanly, and if
+    // the target exists, its canonical form must be under the root's canonical.
+    // This catches symlink/junction escapes post-resolution.
+    let canon_root = crate::paths::strict_canonicalize(workspace_root)
+        .map_err(|e| format!("Workspace root failed canonical validation: {}", e))?;
+    if joined.exists() {
+        match std::fs::canonicalize(&joined) {
+            Ok(canon_joined) => {
+                if !canon_joined.starts_with(&canon_root) {
+                    return Err("Path escapes the workspace root after canonicalization (possible symlink/junction traversal).".to_string());
+                }
+            }
+            Err(_) => {
+                // If canon of existing target fails, fail closed (do not allow).
+                return Err("Could not canonicalize target path for containment check.".to_string());
+            }
+        }
+    }
+    Ok(joined)
 }
 
 fn require_string_argument(args: &serde_json::Value, key: &str) -> Result<String, String> {
