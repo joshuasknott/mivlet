@@ -30,6 +30,10 @@ export interface WaitlistDB {
   getByConfirmTokenHash(hash: string, now: string): Promise<D1SubscriberRow | null>;
   exportForId(id: string, emailKey: string): Promise<any>; // shape per schema, decrypted
   hardDelete(id: string): Promise<void>;
+  createMagicToken(subscriberId: string, type: 'export'|'delete'|'unsub', tokenHash: string, expiresAt: string, now: string): Promise<void>;
+  getMagicToken(tokenHash: string, type: string, now: string): Promise<{subscriber_id: string} | null>;
+  consumeMagicToken(tokenHash: string): Promise<void>;
+  findByEmailHashForMagic(hash: string): Promise<D1SubscriberRow | null>;
 }
 
 export function createWaitlistDB(d1: D1Database, emailEncKey: string): WaitlistDB {
@@ -138,6 +142,33 @@ export function createWaitlistDB(d1: D1Database, emailEncKey: string): WaitlistD
     async hardDelete(id: string) {
       await d1.prepare("DELETE FROM subscribers WHERE id = ?1").bind(id).run();
       await d1.prepare("DELETE FROM consent_audits WHERE subscriber_id = ?1").bind(id).run();
+    },
+
+    async createMagicToken(subscriberId, type, tokenHash, expiresAt, now) {
+      await d1.prepare(
+        "INSERT INTO magic_tokens (token_hash, type, subscriber_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)"
+      ).bind(tokenHash, type, subscriberId, expiresAt, now).run();
+    },
+
+    async getMagicToken(tokenHash, type, now) {
+      const row = await d1
+        .prepare("SELECT subscriber_id FROM magic_tokens WHERE token_hash = ?1 AND type = ?2 AND expires_at > ?3 LIMIT 1")
+        .bind(tokenHash, type, now)
+        .first<{subscriber_id: string}>();
+      return row ?? null;
+    },
+
+    async consumeMagicToken(tokenHash) {
+      await d1.prepare("DELETE FROM magic_tokens WHERE token_hash = ?1").bind(tokenHash).run();
+    },
+
+    async findByEmailHashForMagic(hash: string) {
+      // Same as findByEmailHash
+      const res = await d1
+        .prepare("SELECT * FROM subscribers WHERE email_hash = ?1 LIMIT 1")
+        .bind(hash)
+        .first<D1SubscriberRow>();
+      return res ?? null;
     }
   };
 }
