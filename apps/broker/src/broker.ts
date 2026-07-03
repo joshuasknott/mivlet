@@ -61,6 +61,7 @@ import {
   type ProviderProfile
 } from "./provider-profiles.js";
 import { createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
+import type { EphemeralOps } from "./ephemeral-rpc.js";
 
 export interface BrokerOptions {
   /**
@@ -78,6 +79,13 @@ export interface BrokerOptions {
   fetch?: BrokerFetch;
   pending?: PendingExchangeStore;
   handoff?: HandoffStore;
+  /**
+   * Optional async delegate for production Durable Object path (pending exchanges,
+   * handoffs). When present the broker awaits these for create/consume/issue/redeem
+   * instead of the injected sync stores. Memory/default paths continue to use the
+   * sync stores so existing contracts, injection sites and tests are untouched.
+   */
+  ephemeralOps?: EphemeralOps;
 }
 
 export interface BrokerAuthorizeOutput {
@@ -94,6 +102,7 @@ export class FableBroker {
   private readonly fetcher?: BrokerFetch;
   private readonly pending: PendingExchangeStore;
   private readonly handoff: HandoffStore;
+  private readonly ephemeralOps?: EphemeralOps;
   private readonly env: BrokerEnv;
   private readonly publicBaseUrl?: URL;
   private readonly requirePublicBaseUrl: boolean;
@@ -119,6 +128,7 @@ export class FableBroker {
     const stores = createStores(this.clock);
     this.pending = options.pending ?? stores.pending;
     this.handoff = options.handoff ?? stores.handoff;
+    this.ephemeralOps = options.ephemeralOps;
     this.allowedDesktopRedirects = parseAllowedDesktopRedirects(
       this.env.FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS
     );
@@ -169,13 +179,23 @@ export class FableBroker {
     }
 
     // Store the single-use pending exchange keyed by the desktop state.
-    this.pending.create({
-      provider: request.provider,
-      redirectUri: request.redirectUri,
-      providerRedirectUri,
-      state: request.state,
-      verifier
-    });
+    if (this.ephemeralOps) {
+      await this.ephemeralOps.createPending({
+        provider: request.provider,
+        redirectUri: request.redirectUri,
+        providerRedirectUri,
+        state: request.state,
+        verifier,
+      });
+    } else {
+      this.pending.create({
+        provider: request.provider,
+        redirectUri: request.redirectUri,
+        providerRedirectUri,
+        state: request.state,
+        verifier,
+      });
+    }
 
     return {
       response: {
@@ -217,7 +237,9 @@ export class FableBroker {
 
     // Single-use: consume the pending exchange. A replayed or unknown callback
     // finds nothing here and is rejected before any token exchange.
-    const pending = this.pending.consume(state);
+    const pending = this.ephemeralOps
+      ? await this.ephemeralOps.consumePending(state)
+      : this.pending.consume(state);
     if (!pending) {
       throw new BrokerContractError("invalid-state", "Authorization state is unknown, expired, or already used.", false);
     }
@@ -249,12 +271,19 @@ export class FableBroker {
     const account = normalizeAccount(provider, identityPayload, profile);
 
     // Issue a single-use, short-lived handoff bound to the desktop state.
-    const ticket = this.handoff.issue({
-      provider,
-      tokens: exchange.tokens,
-      account,
-      state
-    });
+    const ticket = this.ephemeralOps
+      ? await this.ephemeralOps.issueHandoff({
+          provider,
+          tokens: exchange.tokens,
+          account,
+          state,
+        })
+      : this.handoff.issue({
+          provider,
+          tokens: exchange.tokens,
+          account,
+          state,
+        });
 
     const redirect = new URL(pending.redirectUri);
     redirect.searchParams.set("handoff", ticket);
@@ -266,7 +295,9 @@ export class FableBroker {
   async redeem(request: BrokerHandoffRedeemRequest): Promise<BrokerHandoffRedeemResponse> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
-    const entry = this.handoff.redeem(request.handoff, request.state);
+    const entry = this.ephemeralOps
+      ? await this.ephemeralOps.redeemHandoff(request.handoff, request.state)
+      : this.handoff.redeem(request.handoff, request.state);
     if (!entry) {
       throw new BrokerContractError(
         "invalid-handoff",

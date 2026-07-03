@@ -19,3 +19,10 @@ FABLE_BROKER_NOTION_CLIENT_ID=
 FABLE_BROKER_NOTION_CLIENT_SECRET=
 FABLE_BROKER_SLACK_CLIENT_ID=
 FABLE_BROKER_SLACK_CLIENT_SECRET=
+
+# --- Durable Object broker storage (ephemeral OAuth state) ---
+# Default is memory (see wrangler.jsonc). Set to "durable" only for Worker dev with real bindings.
+# FABLE_BROKER_STORE_ENCRYPTION_KEY is REQUIRED when backend=durable (32-byte base64url secret).
+# Generate once locally for .dev.vars only; never commit real value. For prod: wrangler secret put.
+# FABLE_BROKER_STORAGE_BACKEND=memory
+# FABLE_BROKER_STORE_ENCRYPTION_KEY=

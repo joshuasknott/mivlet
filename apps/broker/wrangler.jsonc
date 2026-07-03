@@ -8,11 +8,37 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60"
+    "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+    // Storage backend for ephemeral OAuth state. Default "memory" keeps local/Node
+    // deterministic. Set to "durable" only in Worker deployments after wiring secret.
+    "FABLE_BROKER_STORAGE_BACKEND": "memory"
   },
   "secrets": {
     "required": [
       "FABLE_BROKER_PUBLIC_URL"
+      // FABLE_BROKER_STORE_ENCRYPTION_KEY is required when FABLE_BROKER_STORAGE_BACKEND=durable.
+      // It is a 32-byte base64url CSPRNG secret. Never commit; set via wrangler secret put.
     ]
-  }
+  },
+
+  // Durable Object bindings for pending OAuth exchanges, single-use handoffs,
+  // and per-route/peer rate limiting. One DO instance per high-entropy key.
+  // These are declared here (and migrations) WITHOUT creating resources.
+  // The classes are implemented in src/durable-stores.ts and exported for the runtime.
+  "durable_objects": {
+    "bindings": [
+      { "name": "BROKER_PENDING", "class_name": "BrokerPending" },
+      { "name": "BROKER_HANDOFF", "class_name": "BrokerHandoff" },
+      { "name": "BROKER_RATELIMIT", "class_name": "BrokerRateLimit" }
+    ]
+  },
+
+  // Migration to introduce the three broker ephemeral DO classes.
+  // Applied via `wrangler deploy` or `wrangler migrations` (not executed here).
+  "migrations": [
+    {
+      "tag": "v1-broker-ephemeral",
+      "new_sqlite_classes": ["BrokerPending", "BrokerHandoff", "BrokerRateLimit"]
+    }
+  ]
 }

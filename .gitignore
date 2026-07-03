@@ -16,5 +16,6 @@ output/
 coverage/
 .npm-cache/
 .vite/
+**/.wrangler/
 .superpowers/
 .worktrees/

@@ -61,3 +61,30 @@ export function base64(bytes: Uint8Array): string {
 export function base64String(input: string): string {
   return base64(TEXT_ENCODER.encode(input));
 }
+
+const TEXT_DECODER = new TextDecoder();
+
+/** Decode base64url (no pad) to bytes. Inverse of base64url(). */
+export function base64urlToBytes(input: string): Uint8Array {
+  let b64 = input.replace(/-/g, "+").replace(/_/g, "/");
+  switch (b64.length % 4) {
+    case 0: break;
+    case 2: b64 += "=="; break;
+    case 3: b64 += "="; break;
+    default: throw new Error("invalid base64url length");
+  }
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** UTF-8 encode (hoisted). */
+export function utf8Encode(s: string): Uint8Array {
+  return TEXT_ENCODER.encode(s);
+}
+
+/** UTF-8 decode. */
+export function utf8Decode(bytes: Uint8Array): string {
+  return TEXT_DECODER.decode(bytes);
+}

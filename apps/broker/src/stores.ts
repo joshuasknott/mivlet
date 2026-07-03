@@ -20,7 +20,7 @@ import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol
 import type { BrokerClock } from "./clock.js";
 import { base64url, randomBytes } from "./crypto-web.js";
 
-interface PendingExchange {
+export interface PendingExchange {
   provider: BrokerProviderId;
   /** The desktop's exact redirect URI the provider callback must return to. */
   redirectUri: string;
@@ -33,7 +33,7 @@ interface PendingExchange {
   createdAt: number;
 }
 
-interface HandoffEntry {
+export interface HandoffEntry {
   provider: BrokerProviderId;
   tokens: ConnectorTokenSet;
   account: ConnectorAccountSummary;

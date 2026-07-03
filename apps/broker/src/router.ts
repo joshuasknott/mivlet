@@ -30,8 +30,11 @@ import {
   createRateLimiter,
   newCorrelationId,
   rateLimitKey,
-  redactForLog
+  redactForLog,
+  type RateLimiter
 } from "./rate-limiter.js";
+
+export type { RateLimiter };
 
 export const CORRELATION_HEADER = "x-fable-request-id";
 
@@ -50,6 +53,8 @@ export interface BrokerRouterOptions {
    * Cloudflare) and ignores this flag.
    */
   trustProxy?: boolean;
+  /** Optional pre-created RateLimiter (for durable adapter injection or tests). Defaults to in-memory. */
+  rateLimiter?: RateLimiter;
 }
 
 /** A logger sink the transports can supply; never receives bodies or secrets. */
@@ -70,7 +75,7 @@ export interface BrokerRouter {
  * share one implementation.
  */
 export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
-  const limiter = createRateLimiter({
+  const limiter = options.rateLimiter ?? createRateLimiter({
     limit: options.requestsPerMinute ?? 60,
     windowMs: 60_000
   });
@@ -114,21 +119,21 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
       }
 
       // Rate limit every OAuth route per route+peer.
-      const limit = limiter.check(rateLimitKey(url.pathname, peer));
-      if (!limit.allowed) {
-        log(redactLog("rate-limited", request.method, url.pathname, correlation));
-        return jsonResponse(
-          429,
-          new BrokerContractError("rate-limited", "Too many broker requests.", true).toResponse(),
-          {
-            [CORRELATION_HEADER]: correlation,
-            "retry-after": String(Math.ceil(limit.retryAfterMs / 1000))
-          },
-          corsHeaders
-        );
-      }
-
       try {
+        const limit = await limiter.check(rateLimitKey(url.pathname, peer));
+        if (!limit.allowed) {
+          log(redactLog("rate-limited", request.method, url.pathname, correlation));
+          return jsonResponse(
+            429,
+            new BrokerContractError("rate-limited", "Too many broker requests.", true).toResponse(),
+            {
+              [CORRELATION_HEADER]: correlation,
+              "retry-after": String(Math.ceil(limit.retryAfterMs / 1000))
+            },
+            corsHeaders
+          );
+        }
+
         return await route(request, url, segments, options.broker, corsHeaders, correlation);
       } catch (error) {
         const { status, response } = toBrokerErrorPayload(error);

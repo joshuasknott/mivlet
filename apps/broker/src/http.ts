@@ -45,7 +45,8 @@ export function createBrokerHandler(options: BrokerServerOptions): BrokerRequest
     broker: options.broker,
     requestsPerMinute: options.requestsPerMinute,
     allowedOrigins: options.allowedOrigins,
-    trustProxy: options.trustProxy
+    trustProxy: options.trustProxy,
+    rateLimiter: options.rateLimiter
   });
   const trustProxy = options.trustProxy ?? false;
 

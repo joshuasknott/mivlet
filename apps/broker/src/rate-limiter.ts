@@ -35,7 +35,7 @@ export interface RateLimitResult {
 
 export interface RateLimiter {
   /** Check + record a request for a key. */
-  check(key: string): RateLimitResult;
+  check(key: string): RateLimitResult | Promise<RateLimitResult>;
 }
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
