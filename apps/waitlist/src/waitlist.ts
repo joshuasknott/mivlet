@@ -12,6 +12,7 @@ import { createRateLimiter, rateLimitKeyForSignup, rateLimitKeyForEmailHash } fr
 import type { WaitlistDB } from "./db.js";
 import type { SignupInput, SignupResult, SubscriberStatus } from "./types.js";
 import { hmacSha256, encryptEmail } from "./crypto.js";
+import { issueMagicToken, redeemMagicToken, type MagicTokenType } from "./magic-tokens.js";
 
 export interface WaitlistEnv {
   DB: D1Database; // from cf
@@ -29,6 +30,8 @@ export interface WaitlistServices {
   verifyTurnstile: (token: string, ip?: string) => Promise<boolean>;
   clock: { nowMs: () => number; nowIso: () => string };
   log: (msg: string) => void; // redacted only
+  /** Test-only capture for issued magic tokens (populated by issueMagicToken; no-op in production). */
+  capture?: { issued: Array<{ type: string; token: string; subscriberId: string }> };
 }
 
 function makeRedactedLog(base: (s: string) => void) {
@@ -163,16 +166,64 @@ export async function confirm(token: string, services: WaitlistServices): Promis
   }
   const now = services.clock.nowIso();
   await services.db.markConfirmed(row.id, now);
+
+  // Per spec: issue unsub magic token on confirm (emailed in real; captured in tests via services.capture)
+  // This ensures a real shipped path creates 'unsub' tokens needed for later unsubscribe.
+  await issueMagicToken(row.id, "unsub", services);
+
   return { status: "confirmed" };
 }
 
 // Additional flows (unsub, delete, export) follow same pattern: token hash lookup, no plaintext token in DB.
 // Stubs for completeness; full in router handler tests drive them.
 export async function unsubscribe(token: string, services: WaitlistServices) {
-  // Similar hash lookup + update status
-  const h = await hashToken(token);
-  const row = await services.db.getByConfirmTokenHash(h, services.clock.nowIso()); // reuse for unsub token concept (separate in full)
-  if (!row) return { error: { code: "token-invalid", message: "Invalid" } };
-  await services.db.setUnsubscribed(row.id, services.clock.nowIso());
+  const redeemed = await redeemMagicToken(token, "unsub", services);
+  if (!redeemed) return { error: { code: "token-invalid", message: "Invalid token" } };
+  const now = services.clock.nowIso();
+  await services.db.setUnsubscribed(redeemed.subscriberId, now);
   return { status: "unsubscribed" as const };
+}
+
+export async function requestExport(email: string, services: WaitlistServices, env: WaitlistEnv) {
+  const norm = normalizeEmail(email);
+  if (!isValidEmail(norm)) return { status: 202 }; // always accept
+  const hash = await hmacSha256(env.WAITLIST_EMAIL_PEPPER, norm);
+  const row = await services.db.findByEmailHashForMagic(hash);
+  if (!row) return { status: 202 };
+  // Centralized issuance (will also populate test capture if present)
+  await issueMagicToken(row.id, "export", services);
+  // In real: email the token link using CONFIRM_URL_BASE or equiv. Here we never log token.
+  return { status: 202 };
+}
+
+export async function performExport(token: string, services: WaitlistServices, emailKey: string) {
+  const redeemed = await redeemMagicToken(token, "export", services);
+  if (!redeemed) return { error: { code: "token-invalid", message: "Invalid or expired" } };
+  const data = await services.db.exportForId(redeemed.subscriberId, emailKey);
+  if (!data) return { error: { code: "not-found", message: "Not found" } };
+  return { status: 200, data };
+}
+
+export async function requestDelete(email: string, services: WaitlistServices, env: WaitlistEnv) {
+  const norm = normalizeEmail(email);
+  if (!isValidEmail(norm)) return { status: 202 };
+  const hash = await hmacSha256(env.WAITLIST_EMAIL_PEPPER, norm);
+  const row = await services.db.findByEmailHashForMagic(hash);
+  if (!row) return { status: 202 };
+  await issueMagicToken(row.id, "delete", services);
+  return { status: 202 };
+}
+
+// Back-compat wrapper (prefer issueMagicToken directly). Kept so existing test imports continue to work during transition.
+export async function issueUnsubscribeToken(subscriberId: string, services: WaitlistServices): Promise<string> {
+  return issueMagicToken(subscriberId, "unsub", services);
+}
+
+export async function doDelete(token: string, services: WaitlistServices) {
+  const redeemed = await redeemMagicToken(token, "delete", services);
+  if (!redeemed) return { error: { code: "token-invalid", message: "Invalid or expired token" } };
+  const now = services.clock.nowIso();
+  await services.db.setDeleted(redeemed.subscriberId, now);
+  // For hard delete after hold, operator can call hardDelete later; here soft + consume
+  return { status: "deleted" as const };
 }

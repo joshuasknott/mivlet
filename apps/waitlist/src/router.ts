@@ -4,11 +4,11 @@
  * All paths under /v1/ ; no overlap with broker.
  */
 
-import { signup, confirm, unsubscribe } from "./waitlist.js";
+import { signup, confirm, unsubscribe, requestExport, performExport, requestDelete, doDelete } from "./waitlist.js";
 import { createWaitlistDB } from "./db.js";
 import { normalizeEmail, isValidEmail } from "./validation.js";
 import { hmacSha256 } from "./crypto.js";
-import type { WaitlistEnv } from "./waitlist.js";
+import type { WaitlistEnv, WaitlistServices } from "./waitlist.js";
 import type { ErrorBody } from "./types.js";
 
 export const WAITLIST_CORRELATION = "x-fable-request-id";
@@ -16,6 +16,8 @@ export const WAITLIST_CORRELATION = "x-fable-request-id";
 export interface WaitlistRouterOptions {
   env: WaitlistEnv;
   allowedOrigins?: string[];
+  /** Test-only: shared capture object so journey tests can read tokens issued by real code paths (e.g. confirm). */
+  capture?: { issued: Array<{ type: string; token: string; subscriberId: string }> };
 }
 
 export interface WaitlistRouter {
@@ -67,7 +69,7 @@ export function createWaitlistRouter(opts: WaitlistRouterOptions): WaitlistRoute
 
   const db = createWaitlistDB(env.DB as any, env.WAITLIST_EMAIL_PEPPER || "dev-pepper");
 
-  const services = {
+  const services: WaitlistServices = {
     db,
     verifyTurnstile: (tok: string, ip?: string) => verifyTurnstileReal(env.TURNSTILE_SECRET || "", tok, ip),
     clock: {
@@ -77,7 +79,8 @@ export function createWaitlistRouter(opts: WaitlistRouterOptions): WaitlistRoute
     log: (m: string) => {
       // Production: send to observability without PII
       // Here: console only redacted by caller
-    }
+    },
+    capture: opts.capture
   };
 
   return {
@@ -118,8 +121,32 @@ export function createWaitlistRouter(opts: WaitlistRouterOptions): WaitlistRoute
           return jsonOk({ ok: true }, 200);
         }
 
+        // Parse body supporting JSON (tests) + form-urlencoded / multipart (native HTML form no-JS POST)
+        async function parseBody(req: Request): Promise<Record<string, any>> {
+          const ct = req.headers.get("content-type") || "";
+          try {
+            if (ct.includes("application/json")) {
+              return await req.json();
+            }
+            if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
+              const fd = await req.formData();
+              const out: Record<string, any> = {};
+              fd.forEach((v, k) => { out[k] = typeof v === "string" ? v : ""; });
+              // Map Turnstile widget response field to our expected turnstile_token
+              if (!out.turnstile_token && out["cf-turnstile-response"]) {
+                out.turnstile_token = out["cf-turnstile-response"];
+              }
+              return out;
+            }
+            // Fallback try json
+            return await req.json();
+          } catch {
+            return {};
+          }
+        }
+
         if (path === "/v1/signup" && method === "POST") {
-          const body = await request.json().catch(() => ({}));
+          const body = await parseBody(request);
           // locale from header
           const locale = request.headers.get("accept-language")?.split(",")[0]?.slice(0, 35);
           const ip = (request as any).cf?.["connecting-ip"] || request.headers.get("cf-connecting-ip") || peer;
@@ -150,34 +177,40 @@ export function createWaitlistRouter(opts: WaitlistRouterOptions): WaitlistRoute
         }
 
         if (path === "/v1/unsubscribe" && method === "POST") {
-          const body = await request.json().catch(() => ({} as any));
+          const body = await parseBody(request);
           const token = (body as any)?.token || "";
           const res: any = await unsubscribe(token, services);
           if (res.error) return jsonError(400, res.error.code, res.error.message);
           return jsonOk({ status: res.status });
         }
 
-        // Minimal stubs for export/delete flows to satisfy schema + tests (always accept to avoid enum)
+        // Real export/delete request + redeem per schema (always 202 on request to avoid enum)
         if (path === "/v1/export-request" && method === "POST") {
-          // Always 202 to avoid enumeration. Real impl would validate email + send magic (out of scope for email)
-          return new Response(null, { status: 202 });
+          const body = await parseBody(request);
+          const email = (body as any).email || "";
+          const r = await requestExport(email, services, env);
+          return new Response(null, { status: r.status });
         }
         if (path === "/v1/delete-request" && method === "POST") {
-          return new Response(null, { status: 202 });
+          const body = await parseBody(request);
+          const email = (body as any).email || "";
+          const r = await requestDelete(email, services, env);
+          return new Response(null, { status: r.status });
         }
         if (path === "/v1/export" && method === "GET") {
-          // For full, would validate export token, here return 404 or minimal for test
-          const tok = url.searchParams.get("token");
+          const tok = url.searchParams.get("token") || "";
           if (!tok) return jsonError(400, "token-invalid", "Missing token");
-          // In test harness we can drive direct db; API returns 404 for now to keep bounded
-          return jsonError(400, "not-found", "Export token not implemented in this build");
+          const r: any = await performExport(tok, services, env.WAITLIST_EMAIL_PEPPER);
+          if (r.error) return jsonError(400, r.error.code, r.error.message);
+          return new Response(JSON.stringify(r.data), { status: 200, headers: { "content-type": "application/json" } });
         }
         if (path === "/v1/delete" && method === "POST") {
-          const body = await request.json().catch(() => ({} as any));
+          const body = await parseBody(request);
           const token = (body as any).token;
           if (!token) return jsonError(400, "token-invalid", "Missing");
-          // For task, simulate success path via direct if test uses internal
-          return jsonOk({ status: "deleted" });
+          const delRes = await doDelete(token, services);
+          if ((delRes as any).error) return jsonError(400, (delRes as any).error.code, (delRes as any).error.message);
+          return jsonOk({ status: (delRes as any).status || "deleted" });
         }
 
         return jsonError(404, "not-found", "Not found");
