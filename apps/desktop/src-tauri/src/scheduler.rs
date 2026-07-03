@@ -341,7 +341,9 @@ fn decode_store_from_sqlite_rows(
     // (enqueue also checks queue presence; this makes index complete like JSON path.)
     for entry in &store.queue {
         if !store.occurrence_ledger.contains(&entry.deduplication_key) {
-            store.occurrence_ledger.push(entry.deduplication_key.clone());
+            store
+                .occurrence_ledger
+                .push(entry.deduplication_key.clone());
         }
     }
     index_occurrences(&mut store);
@@ -363,7 +365,11 @@ fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, 
     let Some((jobs, queue)) = result else {
         return Ok(None);
     };
-    Ok(Some(decode_store_from_sqlite_rows(jobs, queue, workspace_id)?))
+    Ok(Some(decode_store_from_sqlite_rows(
+        jobs,
+        queue,
+        workspace_id,
+    )?))
 }
 
 /// Flush the full scheduler store back to encrypted SQLite, replacing every job
@@ -1264,7 +1270,6 @@ pub fn run_tick_on_store(
     now_ms: i64,
     instance: &str,
 ) -> Vec<SchedulerQueueEntry> {
-    println!("RUN_TICK_ON_STORE_BODY: now_ms={} instance={} (real mutate path from run_tick)", now_ms, instance);
     let (_changed, newly_leased) = apply_tick_logic(&mut store.queue, now_ms, instance);
     newly_leased
 }
@@ -1275,7 +1280,6 @@ pub fn run_tick_on_store(
 /// deadline; the next tick re-queues expired leases.
 pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     let now_ms = now_epoch_ms();
-    eprintln!("RUN_TICK_BODY_ENTERED: now_ms={} (real run_tick body executing)", now_ms);
     let instance = with_state(app, |mutex| {
         let guard = mutex
             .lock()
@@ -1786,11 +1790,9 @@ mod tests {
         recover_store_at(&mut store);
         assert_eq!(store.queue[0].state, "queued");
         assert!(store.queue[0].lease_holder.is_empty());
-        // Exercise REAL shared tick logic (apply_tick_logic, used by run_tick)
         let now_ms = 2000i64;
         let (_ch, _new) = apply_tick_logic(&mut store.queue, now_ms, "test-inst");
         assert_eq!(store.queue[0].state, "queued");
-        println!("REAL_PATH: recover+apply_tick_logic (from run_tick) requeued stale without dup");
     }
 
     #[test]
@@ -1940,7 +1942,13 @@ mod tests {
     // recovery determinism, backoff, idempotency, malformed safe-fail.
     // -----------------------------------------------------------------------
 
-    fn make_entry(job: &str, run: &str, sched: &str, avail: &str, state: &str) -> SchedulerQueueEntry {
+    fn make_entry(
+        job: &str,
+        run: &str,
+        sched: &str,
+        avail: &str,
+        state: &str,
+    ) -> SchedulerQueueEntry {
         let mut e = sample_entry(job, state);
         e.run_id = run.to_string();
         e.scheduled_at = sched.to_string();
@@ -1952,22 +1960,58 @@ mod tests {
     #[test]
     fn tick_boundaries_and_no_early_execution() {
         // scheduled_at > now must not lease; <= now does (when queued + avail ok). Use parsed ms for consistency.
-        // Drives REAL apply_tick_logic (the code inside run_tick).
-        let cases: &[(&str, &str, bool)] = &[
-            ("2026-07-03T10:00:00.000Z", "2026-07-03T09:00:00.000Z", false), // future
-            ("2026-07-03T09:00:00.000Z", "2026-07-03T09:00:00.000Z", true), // exact <=
-            ("2026-07-03T08:59:59.000Z", "2026-07-03T09:00:00.000Z", true), // past
+        // Drives apply_tick_logic (the code inside run_tick). Cases cover available_at and clock rollback.
+        let cases: &[(&str, &str, &str, bool)] = &[
+            (
+                "2026-07-03T10:00:00.000Z",
+                "",
+                "2026-07-03T09:00:00.000Z",
+                false,
+            ), // future sched
+            (
+                "2026-07-03T09:00:00.000Z",
+                "",
+                "2026-07-03T09:00:00.000Z",
+                true,
+            ), // exact <=
+            (
+                "2026-07-03T08:59:59.000Z",
+                "",
+                "2026-07-03T09:00:00.000Z",
+                true,
+            ), // past sched
+            (
+                "2026-07-03T09:00:00.000Z",
+                "2026-07-03T09:05:00.000Z",
+                "2026-07-03T09:00:00.000Z",
+                false,
+            ), // sched ok but avail future
+            (
+                "2026-07-03T09:00:00.000Z",
+                "2026-07-03T08:59:00.000Z",
+                "2026-07-03T09:00:00.000Z",
+                true,
+            ), // both ok
+            (
+                "2026-07-03T09:00:00.000Z",
+                "",
+                "2026-07-03T08:00:00.000Z",
+                false,
+            ), // clock rollback: now before sched
         ];
-        for (sched, now_str, should_lease) in cases {
+        for (sched, avail, now_str, should_lease) in cases {
             let now_ms = parse_ms(now_str);
-            let mut entries = vec![make_entry("jb", "r1", sched, "", "queued")];
+            let mut entries = vec![make_entry("jb", "r1", sched, avail, "queued")];
             let (_ch, newly) = apply_tick_logic(&mut entries, now_ms, "test-inst");
-            assert_eq!(newly.is_empty(), !should_lease, "case {} should_lease={}", sched, should_lease);
-            if !should_lease {
-                println!("NO_EARLY: future/after-boundary scheduledAt not leased (via real tick logic)");
-            } else {
-                println!("BOUNDARY: scheduledAt <= now leased (via real tick logic)");
-            }
+            assert_eq!(
+                newly.is_empty(),
+                !should_lease,
+                "case sched={} avail={} now={} should_lease={}",
+                sched,
+                avail,
+                now_str,
+                should_lease
+            );
         }
     }
 
@@ -1981,7 +2025,12 @@ mod tests {
         store.queue.push(e1.clone());
         remember_occurrence(&mut store, &e1.deduplication_key);
         let e2 = make_entry("j", "r2", t, "", "queued");
-        if !store.occurrence_index.contains(&e2.deduplication_key) && !store.queue.iter().any(|q| q.deduplication_key == e2.deduplication_key) {
+        if !store.occurrence_index.contains(&e2.deduplication_key)
+            && !store
+                .queue
+                .iter()
+                .any(|q| q.deduplication_key == e2.deduplication_key)
+        {
             store.queue.push(e2);
         }
         assert_eq!(store.queue.len(), 1);
@@ -1989,15 +2038,19 @@ mod tests {
 
     #[test]
     fn repeated_polling_does_not_reexecute_without_report_or_expire() {
-        let mut entries = vec![make_entry("j", "r1", "2026-07-03T09:00:00.000Z", "", "queued")];
+        let mut entries = vec![make_entry(
+            "j",
+            "r1",
+            "2026-07-03T09:00:00.000Z",
+            "",
+            "queued",
+        )];
         let now = parse_ms("2026-07-03T09:00:00.000Z");
-        // Drive real helper (used by run_tick)
         let (_c1, newly1) = apply_tick_logic(&mut entries, now, "w1");
         assert_eq!(newly1.len(), 1);
         // simulate ack/report would clear, but here second call sees leased
         let (_c2, newly2) = apply_tick_logic(&mut entries, now, "w1");
         assert!(newly2.is_empty());
-        println!("NO_DUP: repeated poll after lease yields 0 new (real tick logic)");
     }
 
     #[test]
@@ -2008,35 +2061,34 @@ mod tests {
         e.lease_token = "t1".into();
         let mut entries = vec![e];
         let now_after = parse_ms("2026-07-03T09:00:20.000Z"); // after lease expire
-        // Use real helper for expire + select
         let (_c, newly) = apply_tick_logic(&mut entries, now_after, "w2");
         assert!(!newly.is_empty());
-        println!("CONCURRENCY: after expire, different holder can lease (real tick logic)");
     }
 
     #[test]
     fn cancel_and_disable_prevent_new_leases_and_are_idempotent() {
         let mut store = empty_store("i");
         store.jobs.push(sample_job_for_tests("j"));
-        let mut e = make_entry("j", "r1", "2026-07-03T09:00:00.000Z", "", "queued");
+        let e = make_entry("j", "r1", "2026-07-03T09:00:00.000Z", "", "queued");
         store.queue.push(e.clone());
         // cancel (as cancel_job_run does)
         for ent in &mut store.queue {
-            if ent.run_id == "r1" && !matches!(ent.state.as_str(), "done"|"dead"|"cancelled") {
+            if ent.run_id == "r1" && !matches!(ent.state.as_str(), "done" | "dead" | "cancelled") {
                 ent.state = "cancelled".into();
-                ent.lease_holder.clear(); ent.lease_expires_at.clear(); ent.lease_token.clear();
+                ent.lease_holder.clear();
+                ent.lease_expires_at.clear();
+                ent.lease_token.clear();
             }
         }
-        // Drive real tick logic: should not lease cancelled
         let now = parse_ms("2026-07-03T09:00:00.000Z");
         let (_c, newly) = apply_tick_logic(&mut store.queue, now, "inst");
         assert!(newly.is_empty());
-        println!("CANCEL: cancelled state prevents lease (real tick helper)");
         // idempotent...
         let before_len = store.queue[0].attempts.len();
         assert_eq!(store.queue[0].state, "cancelled");
         assert_eq!(store.queue[0].attempts.len(), before_len);
-        let mut job = store.jobs[0].clone(); job.status = "paused".into();
+        let mut job = store.jobs[0].clone();
+        job.status = "paused".into();
         assert_ne!(job.status, "active");
     }
 
@@ -2045,7 +2097,12 @@ mod tests {
         let mut e = make_entry("j", "r1", "2026-07-03T09:00:00.000Z", "", "queued");
         // fail once -> backoff sets available (keep mut for field sets)
         let fails = 1u32;
-        let policy = normalize_retry_policy(RetryPolicy { max_attempts: 3, initial_backoff_ms: 1000, backoff_multiplier: 2.0, max_backoff_ms: 60000 });
+        let policy = normalize_retry_policy(RetryPolicy {
+            max_attempts: 3,
+            initial_backoff_ms: 1000,
+            backoff_multiplier: 2.0,
+            max_backoff_ms: 60000,
+        });
         let back = retry_backoff_ms(&policy, fails);
         let base_ms = parse_ms("2026-07-03T09:00:00.000Z");
         e.state = "queued".into();
@@ -2053,7 +2110,6 @@ mod tests {
         let mut entries = vec![e];
         let (_c, newly_early) = apply_tick_logic(&mut entries, base_ms + 100, "w");
         assert!(newly_early.is_empty());
-        println!("BACKOFF: availableAt respected - no early retry lease (real tick logic)");
         let (_c2, newly_late) = apply_tick_logic(&mut entries, base_ms + back + 10, "w");
         assert!(!newly_late.is_empty());
     }
@@ -2074,27 +2130,18 @@ mod tests {
         let would = parse_ms(&store.queue[0].scheduled_at) <= now; // MAX > 0
         assert!(!would);
         // no panic on bad data paths
-        let _ = parse_ms(""); let _ = parse_ms("garbage");
+        let _ = parse_ms("");
+        let _ = parse_ms("garbage");
 
         // Cover JSON read_store malformed persisted -> fails closed (no exec)
         let p = tmp_path();
         let _ = fs::write(&p, b"not-json-at-all");
         let read_res = read_store(&p);
         assert!(read_res.is_err(), "malformed persisted store fails closed");
-
-        // sqlite load path: bad decode in from_value would fail collect -> init falls to empty (safe, no exec)
-        // Drive the exact from_value used in load_store_from_sqlite:
-        let bad_job: Result<ScheduledJob, _> = serde_json::from_value(serde_json::json!({"id":"bad"}));
-        assert!(bad_job.is_err());
-        let bad_q: Result<SchedulerQueueEntry, _> = serde_json::from_value(serde_json::json!({"jobId":"x"}));
-        assert!(bad_q.is_err());
-        println!("SQLITE_MALFORMED: from_value bad data (as in load_store_from_sqlite) fails -> load errors -> empty (fail closed)");
     }
 
     #[test]
     fn run_tick_on_store_drives_real_lease_logic_with_fake_clock() {
-        // Drive the SHIPPED mutate path via the extracted run_tick_on_store.
-        // This executes apply_tick_logic (the body inside run_tick) with explicit now_ms.
         let mut store = empty_store("inst");
         store.jobs.push(sample_job_for_tests("j1"));
         // future scheduled -> no lease
@@ -2103,7 +2150,6 @@ mod tests {
         store.queue.push(fut);
         let leased_future = run_tick_on_store(&mut store, 0, "inst");
         assert!(leased_future.is_empty(), "future must not lease");
-        println!("NO_EARLY: run_tick_on_store (real path) returned 0 for future scheduledAt");
 
         // due -> leases
         let mut due = sample_entry("j1", "queued");
@@ -2111,13 +2157,14 @@ mod tests {
         store.queue.push(due);
         let leased = run_tick_on_store(&mut store, 1_000_000, "inst");
         assert_eq!(leased.len(), 1);
-        assert_eq!(store.queue.iter().filter(|e| e.state == "leased").count(), 1);
-        println!("REAL_TICK: run_tick_on_store executed lease for due entry (body of run_tick)");
+        assert_eq!(
+            store.queue.iter().filter(|e| e.state == "leased").count(),
+            1
+        );
     }
 
     #[test]
     fn decode_store_from_sqlite_rows_rejects_malformed_and_seeds_ledger_on_good() {
-        // Drive the exact decode path used by load_store_from_sqlite.
         // Bad rows -> error (fail closed). Good rows -> store + ledger seeded.
         use crate::store::repos::scheduled_job::ScheduledJobRow;
         use crate::store::repos::scheduler_queue::QueueRow;
@@ -2140,11 +2187,16 @@ mod tests {
         let good_entry = {
             let mut e = sample_entry("j1", "done");
             e.deduplication_key = "j1:2026-07-03T09:00:00.000Z".into();
-            QueueRow { id: "q1".into(), workspace_id: "default".into(), job_id: "j1".into(), value: serde_json::to_value(&e).unwrap() }
+            QueueRow {
+                id: "q1".into(),
+                workspace_id: "default".into(),
+                job_id: "j1".into(),
+                value: serde_json::to_value(&e).unwrap(),
+            }
         };
-        let res = decode_store_from_sqlite_rows(vec![good_job], vec![good_entry], "default").unwrap();
+        let res =
+            decode_store_from_sqlite_rows(vec![good_job], vec![good_entry], "default").unwrap();
         assert!(res.occurrence_index.contains("j1:2026-07-03T09:00:00.000Z"));
-        println!("DECODE: decode_store_from_sqlite_rows rejected bad and seeded ledger for good terminal row");
     }
 
     #[test]
