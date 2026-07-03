@@ -23,14 +23,12 @@
       "migrations_dir": "migrations"
     }
   ],
+  // EMAIL_API_KEY is optional and intentionally not declared here; Wrangler warns on unknown optional secrets.
   "secrets": {
     "required": [
       "TURNSTILE_SECRET",
       "WAITLIST_EMAIL_PEPPER",
       "WAITLIST_SIGNING_KEY"
-    ],
-    "optional": [
-      "EMAIL_API_KEY"
     ]
   }
 }

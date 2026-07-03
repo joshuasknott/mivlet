@@ -147,6 +147,23 @@ describe("waitlist deterministic (W-01 to W-13, no raw PII logging)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("W-04 signup rate limit persists across requests", async () => {
+    const env = { ...TEST_ENV, DB: makeMockD1(), RATE_LIMIT_SIGNUP_PER_HOUR: "1" };
+    const limited = createWaitlistRouter({ env, allowedOrigins: ["http://localhost:4321"] });
+    const body = (email: string) => ({
+      email,
+      consent_marketing: true,
+      consent_version: "2026-07-03-waitlist-v0.1",
+      turnstile_token: "1x0000000000000000000000000000000AA"
+    });
+
+    const first = await limited.handle(makeReq("POST", "/v1/signup", body("limit-a@b.test")), "4.4.4.4");
+    const second = await limited.handle(makeReq("POST", "/v1/signup", body("limit-b@b.test")), "4.4.4.4");
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(429);
+  });
+
   it("W-11 honeypot 202 silent", async () => {
     const res = await router.handle(makeReq("POST", "/v1/signup", {
       email: "h@b.co", consent_marketing: true, consent_version: "2026-07-03-waitlist-v0.1", turnstile_token: "1x...", website: "spam"

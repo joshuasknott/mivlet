@@ -6,8 +6,7 @@
 
 import { signup, confirm, unsubscribe, requestExport, performExport, requestDelete, doDelete } from "./waitlist.js";
 import { createWaitlistDB } from "./db.js";
-import { normalizeEmail, isValidEmail } from "./validation.js";
-import { hmacSha256 } from "./crypto.js";
+import { createRateLimiter } from "./rate-limiter.js";
 import type { WaitlistEnv, WaitlistServices } from "./waitlist.js";
 import type { ErrorBody } from "./types.js";
 
@@ -68,18 +67,21 @@ export function createWaitlistRouter(opts: WaitlistRouterOptions): WaitlistRoute
   const allowed = new Set(opts.allowedOrigins ?? ["http://localhost:4321", "http://127.0.0.1:4321"]);
 
   const db = createWaitlistDB(env.DB as any, env.WAITLIST_EMAIL_PEPPER || "dev-pepper");
+  const clock = {
+    nowMs: () => Date.now(),
+    nowIso: () => new Date().toISOString()
+  };
 
   const services: WaitlistServices = {
     db,
     verifyTurnstile: (tok: string, ip?: string) => verifyTurnstileReal(env.TURNSTILE_SECRET || "", tok, ip),
-    clock: {
-      nowMs: () => Date.now(),
-      nowIso: () => new Date().toISOString()
-    },
+    clock,
     log: (m: string) => {
       // Production: send to observability without PII
       // Here: console only redacted by caller
     },
+    signupLimiter: createRateLimiter({ limit: parseInt(env.RATE_LIMIT_SIGNUP_PER_HOUR || "10", 10), windowMs: 3600_000, clock }),
+    emailLimiter: createRateLimiter({ limit: parseInt(env.RATE_LIMIT_EMAIL_PER_DAY || "3", 10), windowMs: 24 * 3600_000, clock }),
     capture: opts.capture
   };
 

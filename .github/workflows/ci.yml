@@ -24,7 +24,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      - run: pnpm marketing:check-forbidden-claims || node apps/marketing/scripts/check-claims.mjs dist || echo "claims scanner (non-blocking in this step)"
+      - run: node apps/marketing/scripts/check-claims.mjs apps/marketing/dist
       - run: pnpm perf:check
       - run: pnpm perf:test
       - run: pnpm tauri:check

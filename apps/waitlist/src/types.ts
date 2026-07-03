@@ -34,7 +34,7 @@ export interface SignupInput {
   referral_code?: string;
   turnstile_token: string;
   website?: string; // honeypot
-  // locale from header in handler
+  locale?: string; // bounded from Accept-Language header in handler
 }
 
 export interface SignupResult {

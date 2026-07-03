@@ -63,8 +63,8 @@ export function rateLimitKeyForSignup(peer: string | undefined): string {
   return `signup:${peer ?? "anon"}`;
 }
 
-export function rateLimitKeyForEmailHash(emailHash: string): string {
+export function rateLimitKeyForEmailHash(emailHash: string, nowMs = Date.now()): string {
   // per-email_hash daily budget; use coarse day key
-  const day = Math.floor(Date.now() / (24 * 3600 * 1000));
+  const day = Math.floor(nowMs / (24 * 3600 * 1000));
   return `email:${emailHash}:${day}`;
 }

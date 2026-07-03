@@ -1,6 +1,8 @@
 ---
 import Layout from '../layouts/Layout.astro';
-const WAITLIST_ENDPOINT = 'http://localhost:8789/v1/signup'; // local documented; prod owner sets
+const WAITLIST_ENDPOINT = import.meta.env.PUBLIC_WAITLIST_ENDPOINT ?? 'http://localhost:8789/v1/signup';
+const TURNSTILE_SITE_KEY = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? '1x00000000000000000000AA';
+const WAITLIST_CONTACT_EMAIL = import.meta.env.PUBLIC_WAITLIST_CONTACT_EMAIL ?? 'hello@example.invalid';
 const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
 ---
 <Layout title="Join the Fable waitlist" description="Sign up for the Windows preview waitlist.">
@@ -41,15 +43,15 @@ const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
 
     <!-- Turnstile widget -->
     <div id="turnstile-container">
-      <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-      <div class="cf-turnstile" data-sitekey="1x00000000000000000000AA" data-theme="light"></div>
+      <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+      <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-theme="light"></div>
     </div>
     <input type="hidden" name="consent_version" value={CONSENT_VERSION} />
     <input type="hidden" name="turnstile_token" id="turnstile_token" />
 
     <noscript>
       <div class="fallback">
-        JavaScript is required for the Turnstile challenge. You can still join by emailing <a href="mailto:hello@example.invalid?subject=Waitlist%20signup">hello@example.invalid</a> (owner will replace).
+        JavaScript is required for the Turnstile challenge. You can still join by emailing <a href={`mailto:${WAITLIST_CONTACT_EMAIL}?subject=Waitlist%20signup`}>{WAITLIST_CONTACT_EMAIL}</a>.
         Include only your email and the notice version above.
       </div>
     </noscript>
@@ -59,30 +61,33 @@ const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
   </form>
 
   <script>
-    // Progressive enhancement: intercept for better UX, but native POST always works (no-JS fallback)
+    // Progressive enhancement: native form POST (form-urlencoded) always works for no-JS.
+    // JS uses FormData so server parseBody accepts it + maps cf-turnstile-response.
     const form = document.getElementById('waitlist-form');
     if (form) {
+      // Allow local dev override of action without changing built HTML
+      if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+        (form as HTMLFormElement).action = 'http://localhost:8789/v1/signup';
+      }
       form.addEventListener('submit', async (e) => {
-        // Let native submit if no JS or no token widget ready
         const ts = (window as any).turnstile;
-        if (!ts) return; // fall to native POST
+        if (!ts) return; // fallthrough to native POST (widget script still renders hidden input)
         e.preventDefault();
         const fd = new FormData(form as HTMLFormElement);
-        // Turnstile token is populated by widget callback or we read from rendered
-        const tokenEl = document.getElementById('turnstile_token') as HTMLInputElement;
-        // For test key the widget injects; we rely on name=cf-turnstile-response or manual
         const turnstileResponse = (form.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement)?.value || '';
-        if (turnstileResponse) tokenEl.value = turnstileResponse;
+        if (turnstileResponse) {
+          // ensure our server field has it (parseBody also maps)
+          fd.set('turnstile_token', turnstileResponse);
+        }
         const res = await fetch((form as HTMLFormElement).action, {
           method: 'POST',
-          body: fd,
-          headers: { 'accept': 'application/json' }
+          body: fd
         });
         const status = document.getElementById('form-status');
         if (res.status === 202) {
           window.location.href = '/waitlist/confirmed';
-        } else {
-          if (status) status.textContent = 'There was a problem. Please try again or use the mailto fallback.';
+        } else if (status) {
+          status.textContent = 'There was a problem. Please try again or use the mailto fallback.';
         }
       });
     }

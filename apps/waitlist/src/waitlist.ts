@@ -8,7 +8,7 @@ import { randomUUID } from "./uuid.js"; // simple uuid
 import { normalizeEmail, isValidEmail, boundPlatformInterest, boundConnectorInterest, boundReferralCode, boundLocale, isHoneypotFilled } from "./validation.js";
 import { computeConsentTextHash, verifyConsent } from "./consent.js";
 import { generateConfirmToken, hashToken, computeExpiry, isExpired } from "./tokens.js";
-import { createRateLimiter, rateLimitKeyForSignup, rateLimitKeyForEmailHash } from "./rate-limiter.js";
+import { createRateLimiter, rateLimitKeyForSignup, rateLimitKeyForEmailHash, type RateLimiter } from "./rate-limiter.js";
 import type { WaitlistDB } from "./db.js";
 import type { SignupInput, SignupResult, SubscriberStatus } from "./types.js";
 import { hmacSha256, encryptEmail } from "./crypto.js";
@@ -30,6 +30,8 @@ export interface WaitlistServices {
   verifyTurnstile: (token: string, ip?: string) => Promise<boolean>;
   clock: { nowMs: () => number; nowIso: () => string };
   log: (msg: string) => void; // redacted only
+  signupLimiter?: RateLimiter;
+  emailLimiter?: RateLimiter;
   /** Test-only capture for issued magic tokens (populated by issueMagicToken; no-op in production). */
   capture?: { issued: Array<{ type: string; token: string; subscriberId: string }> };
 }
@@ -77,15 +79,15 @@ export async function signup(
   const nowIso = services.clock.nowIso();
 
   // Rate limit IP
-  const ipLimit = createRateLimiter({ limit: parseInt(env.RATE_LIMIT_SIGNUP_PER_HOUR || "10", 10), windowMs: 3600_000 });
+  const ipLimit = services.signupLimiter ?? createRateLimiter({ limit: parseInt(env.RATE_LIMIT_SIGNUP_PER_HOUR || "10", 10), windowMs: 3600_000, clock: services.clock });
   const ipRes = ipLimit.check(rateLimitKeyForSignup(ip));
   if (!ipRes.allowed) {
     return { status: 429, error: { code: "rate-limited", message: "Too many requests" } };
   }
 
   // Rate per email_hash (daily)
-  const emailLimit = createRateLimiter({ limit: parseInt(env.RATE_LIMIT_EMAIL_PER_DAY || "3", 10), windowMs: 24 * 3600_000 });
-  const eRes = emailLimit.check(rateLimitKeyForEmailHash(emailHash));
+  const emailLimit = services.emailLimiter ?? createRateLimiter({ limit: parseInt(env.RATE_LIMIT_EMAIL_PER_DAY || "3", 10), windowMs: 24 * 3600_000, clock: services.clock });
+  const eRes = emailLimit.check(rateLimitKeyForEmailHash(emailHash, services.clock.nowMs()));
   if (!eRes.allowed) {
     // silent duplicate-like
     log("email rate limited (silent)");
@@ -123,7 +125,7 @@ export async function signup(
   const platform = boundPlatformInterest(input.platform_interest);
   const conns = JSON.stringify(boundConnectorInterest(input.connector_interest));
   const ref = boundReferralCode(input.referral_code);
-  const loc = boundLocale("en"); // passed from handler typically
+  const loc = boundLocale(input.locale);
 
   await services.db.insertPending({
     id,
