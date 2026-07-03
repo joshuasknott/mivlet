@@ -15,6 +15,7 @@
     "perf:test": "node --test scripts/perf/budget.test.mjs",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "pnpm --filter @fable/desktop tauri build",
+    "tauri:dev": "pnpm --filter @fable/desktop tauri dev --config src-tauri/tauri.dev.conf.json",
     "check": "pnpm typecheck && pnpm test && pnpm build && pnpm tauri:check"
   },
   "engines": {

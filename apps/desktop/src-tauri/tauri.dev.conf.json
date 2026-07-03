@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "connect-src": "'self' ipc: http://ipc.localhost ws: ws://127.0.0.1:* http://127.0.0.1:1420",
+        "font-src": "'self' data:",
+        "img-src": "'self' data: blob:",
+        "script-src": "'self' 'unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'"
+      }
+    }
+  }
+}
