@@ -3,6 +3,7 @@ import type { NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { parseOpenAiLine, shapeOpenAiRequest, streamOpenAiEvents } from "./openai-compat";
+import type { HttpTransport } from "./transport";
 
 const request: NativeCompletionRequest = {
   providerId: "openai",
@@ -86,5 +87,95 @@ describe("openai-compatible shaping", () => {
       arguments: '{"path":"README.md"}'
     });
     expect(events[1]).toEqual({ type: "done", finishReason: "tool-calls" });
+  });
+
+  it("handles multiple events in one chunk via splitLines", async () => {
+    class MultiChunkTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield 'data: {"choices":[{"delta":{"content":"A"}}]}\ndata: {"choices":[{"delta":{"content":"B"}}]}';
+      }
+    }
+    const events: any[] = [];
+    for await (const e of streamOpenAiEvents(new MultiChunkTransport(), request)) events.push(e);
+    expect(events).toEqual([
+      { type: "text-delta", text: "A" },
+      { type: "text-delta", text: "B" }
+    ]);
+  });
+
+  it("drops comments, heartbeats, blanks and [DONE] via shared extract", async () => {
+    const transport = new FixtureTransport([
+      ": this is :heartbeat comment",
+      "",
+      'data: {"choices":[{"delta":{"content":"X"}}]}',
+      "data: [DONE]",
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ]);
+    const events: any[] = [];
+    for await (const e of streamOpenAiEvents(transport, request)) events.push(e);
+    expect(events.map((e) => e.type)).toEqual(["text-delta", "done"]);
+  });
+
+  it("emits error for malformed JSON without leaking payload content", () => {
+    const bad = 'data: {"choices":[{"delta":{"content":"leak sk-FAKESECRET1234567890"}}]}xxx';
+    const events = parseOpenAiLine("openai", bad);
+    expect(events).toEqual([{ type: "error", message: "Unparseable OpenAI chunk." }]);
+  });
+
+  it("treats provider error frame as error without leaking raw payload", () => {
+    const errLine = 'data: {"error":{"message":"bad","type":"invalid"},"id":"x"}';
+    const events = parseOpenAiLine("openai", errLine);
+    expect(events).toEqual([{ type: "error", message: "Provider error." }]);
+  });
+
+  it("handles UTF-8 replacement fragments and still yields one terminal", async () => {
+    const transport = new FixtureTransport([
+      'data: {"choices":[{"delta":{"content":"ok' + "\uFFFD" + '"}}]}',
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ]);
+    const events: any[] = [];
+    for await (const e of streamOpenAiEvents(transport, request)) events.push(e);
+    expect(events.some((e) => e.type === "text-delta")).toBe(true);
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "stop" });
+  });
+
+  it("late events after terminal are forwarded by raw stream parser (single terminal asserted in agent-loop)", async () => {
+    const transport = new FixtureTransport([
+      'data: {"choices":[{"delta":{"content":"first"}}]}',
+      'data: {"choices":[{"finish_reason":"stop"}]}',
+      'data: {"choices":[{"delta":{"content":"late"}}]}',
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ]);
+    const events: any[] = [];
+    for await (const e of streamOpenAiEvents(transport, request)) events.push(e);
+    // Raw stream/parser forwards late; the runAgentLoop guarantees exactly one terminal outcome.
+    expect(events.filter((e) => e.type === "done").length).toBeGreaterThanOrEqual(1);
+    expect(events.some((e) => e.type === "text-delta" && e.text === "first")).toBe(true);
+  });
+
+  it("supports delayed chunks without dropping events or crashing", async () => {
+    class DelayedTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield 'data: {"choices":[{"delta":{"content":"d"}}]}';
+        await new Promise((res) => setTimeout(res, 2));
+        yield 'data: {"choices":[{"delta":{"content":"e"}}]}';
+        await new Promise((res) => setTimeout(res, 2));
+        yield 'data: {"choices":[{"finish_reason":"stop"}]}';
+      }
+    }
+    const events: any[] = [];
+    for await (const e of streamOpenAiEvents(new DelayedTransport(), request)) events.push(e);
+    expect(events.map((e) => e.type)).toEqual(["text-delta", "text-delta", "done"]);
+  });
+
+  it("handles lone CR (\\r) splits via splitLines for CRLF coverage", async () => {
+    class CrTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield 'data: {"choices":[{"delta":{"content":"cr1"}}]}\rdata: {"choices":[{"delta":{"content":"cr2"}}]}\r\n data: {"choices":[{"finish_reason":"stop"}]}';
+      }
+    }
+    const events: any[] = [];
+    for await (const e of streamOpenAiEvents(new CrTransport(), request)) events.push(e);
+    expect(events.map((e) => e.type)).toEqual(["text-delta", "text-delta", "done"]);
   });
 });

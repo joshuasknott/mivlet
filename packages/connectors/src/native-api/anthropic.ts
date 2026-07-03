@@ -14,6 +14,7 @@ import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
+import { extractPayload, splitLines } from "./transport";
 
 interface ToolBuffer {
   id: string;
@@ -93,13 +94,16 @@ export function parseAnthropicLine(
   dataLine: string,
   state: AnthropicStreamState = newAnthropicState()
 ): BackendAgentEvent[] {
-  const payload = dataLine.startsWith("data:") ? dataLine.slice(5).trim() : dataLine.trim();
+  const payload = extractPayload(dataLine);
   if (!payload) return [];
   let chunk: Record<string, unknown>;
   try {
     chunk = JSON.parse(payload) as Record<string, unknown>;
   } catch {
     return [{ type: "error", message: "Unparseable Anthropic chunk." }];
+  }
+  if (chunk && typeof chunk === "object" && "error" in chunk) {
+    return [{ type: "error", message: "Provider error." }];
   }
 
   const type = chunk.type as string;
@@ -188,11 +192,11 @@ export async function* streamAnthropicEvents(
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
   const state = newAnthropicState();
-  for await (const line of transport.stream(request)) {
-    if (line.startsWith("event:")) {
-      continue; // Anthropic event labels are informational; data carries the type.
-    }
-    if (line.startsWith("data:")) {
+  for await (const chunk of transport.stream(request)) {
+    for (const line of splitLines(chunk)) {
+      if (line.startsWith("event:")) {
+        continue; // Anthropic event labels are informational; data carries the type.
+      }
       for (const event of parseAnthropicLine(line, state)) {
         yield event;
       }

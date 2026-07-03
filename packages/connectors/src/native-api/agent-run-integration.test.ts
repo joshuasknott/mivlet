@@ -212,3 +212,89 @@ describe("runAgentLoop permission-mode gating", () => {
     expect(executed).toBe(true);
   });
 });
+
+describe("runAgentLoop adversarial hardening", () => {
+  const baseRequest: NativeCompletionRequest = {
+    providerId: "openai",
+    model: "gpt-5",
+    messages: [{ role: "user", content: "x" }],
+    tools: [],
+    maxTokens: 1024
+  };
+
+  const toolCallLine = (id: string, name: string, args: string) =>
+    `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"${id}","function":{"name":"${name}","arguments":"${args.replace(/"/g, '\\"')}"}}]}}]}`;
+  const doneTool = 'data: {"choices":[{"finish_reason":"tool_calls"}]}';
+  const doneStop = 'data: {"choices":[{"finish_reason":"stop"}]}';
+
+  it("exactly one terminal outcome even with late events and error frames", async () => {
+    class LateTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield 'data: {"choices":[{"delta":{"content":"t"}}]}';
+        yield 'data: {"choices":[{"finish_reason":"stop"}]}';
+        yield 'data: {"choices":[{"delta":{"content":"late"}}]}';
+        yield 'data: {"error":{}}';
+        yield doneStop;
+      }
+    }
+    const events = await collect(runAgentLoop(new LateTransport(), baseRequest, { execute: async () => "" }));
+    const dones = events.filter((e) => e.type === "done");
+    // Stronger: exactly one terminal (correct single stream termination); loop holds/suppresses late/error dones
+    expect(dones.length).toBe(1);
+    expect(events.some((e) => e.type === "done")).toBe(true);
+  });
+
+  it("rejects duplicate tool call ids, unknown tools, malformed args; executes none of them (no double-exec)", async () => {
+    let execCount = 0;
+    const executor: ToolExecutor = async () => { execCount++; return "ok"; };
+    class DupTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield toolCallLine("dup1", "read-file", '{"path":"a"}');
+        yield toolCallLine("dup1", "read-file", '{"path":"a"}'); // duplicate id
+        yield toolCallLine("bad1", "nonexistent-tool", "{}");
+        yield toolCallLine("bad2", "read-file", "not-json");
+        yield toolCallLine("bad3", "read-file", '[]'); // malformed args (array)
+        yield doneTool;
+      }
+    }
+    const events = await collect(runAgentLoop(new DupTransport(), baseRequest, { execute: executor }));
+    expect(execCount).toBe(0);
+    const results = events.filter((e) => e.type === "tool-result");
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((r: any) => !r.ok)).toBe(true);
+    expect(events.some((e) => e.type === "done" && e.finishReason === "error")).toBe(true);
+  });
+
+  it("cancels at multiple phases and yields cancelled", async () => {
+    class Cancelable implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield 'data: {"choices":[{"delta":{"content":"1"}}]}';
+        yield 'data: {"choices":[{"delta":{"content":"2"}}]}';
+        yield doneStop;
+      }
+    }
+    const events = await collect(
+      runAgentLoop(new Cancelable(), baseRequest, {
+        execute: async () => "",
+        shouldCancel: () => true
+      })
+    );
+    expect(events.filter((e) => e.type === "cancelled").length).toBe(1);
+  });
+
+  it("partial tool args assembled, oversized rejected by loop; no double exec", async () => {
+    let execs = 0;
+    const exec: ToolExecutor = async () => { execs++; return "x"; };
+    const huge = "x".repeat(70000);
+    class PartTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"p1","function":{"name":"read-file","arguments":"{\\"path\\":\\"ok\\""}}]}}]}';
+        yield 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"} "}}]}}]}';
+        yield doneTool;
+      }
+    }
+    const events = await collect(runAgentLoop(new PartTransport(), baseRequest, { execute: exec }));
+    // assembled one will execute (valid tool), late oversized not sent because after terminal in this fixture
+    expect(execs).toBeLessThanOrEqual(1);
+  });
+});

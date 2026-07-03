@@ -13,6 +13,7 @@ import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
+import { extractPayload, splitLines } from "./transport";
 
 interface OpenAiToolCallDelta {
   index: number;
@@ -82,13 +83,16 @@ function parseOpenAiStreamLine(
   line: string,
   state: OpenAiStreamState
 ): BackendAgentEvent[] {
-  const payload = line.startsWith("data:") ? line.slice(5).trim() : line.trim();
-  if (!payload || payload === "[DONE]") return [];
+  const payload = extractPayload(line);
+  if (!payload) return [];
   let chunk: OpenAiChunk;
   try {
     chunk = JSON.parse(payload) as OpenAiChunk;
   } catch {
     return [{ type: "error", message: "Unparseable OpenAI chunk." }];
+  }
+  if (chunk && typeof chunk === "object" && "error" in (chunk as any)) {
+    return [{ type: "error", message: "Provider error." }];
   }
   const events: BackendAgentEvent[] = [];
   const choice = chunk.choices?.[0];
@@ -159,8 +163,8 @@ export function parseOpenAiLine(
   providerId: string,
   line: string
 ): BackendAgentEvent[] {
-  const payload = line.startsWith("data:") ? line.slice(5).trim() : line.trim();
-  if (!payload || payload === "[DONE]") {
+  const payload = extractPayload(line);
+  if (!payload) {
     return [];
   }
   let chunk: OpenAiChunk;
@@ -168,6 +172,9 @@ export function parseOpenAiLine(
     chunk = JSON.parse(payload) as OpenAiChunk;
   } catch {
     return [{ type: "error", message: "Unparseable OpenAI chunk." }];
+  }
+  if (chunk && typeof chunk === "object" && "error" in (chunk as any)) {
+    return [{ type: "error", message: "Provider error." }];
   }
 
   const events: BackendAgentEvent[] = [];
@@ -209,9 +216,11 @@ export async function* streamOpenAiEvents(
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
   const state = newOpenAiStreamState();
-  for await (const line of transport.stream(request)) {
-    for (const event of parseOpenAiStreamLine(request.providerId, line, state)) {
-      yield event;
+  for await (const chunk of transport.stream(request)) {
+    for (const line of splitLines(chunk)) {
+      for (const event of parseOpenAiStreamLine(request.providerId, line, state)) {
+        yield event;
+      }
     }
   }
 }

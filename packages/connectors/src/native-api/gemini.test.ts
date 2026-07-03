@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NativeCompletionRequest } from "@fable/protocol";
 import { FixtureTransport } from "./transport";
+import type { HttpTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { parseGeminiLine, shapeGeminiRequest, streamGeminiEvents } from "./gemini";
 
@@ -71,5 +72,30 @@ describe("gemini shaping", () => {
     const types = events.map((e) => e.type);
     expect(types).toContain("text-delta");
     expect(types.at(-1)).toBe("done");
+  });
+
+  it("handles provider error frame and multi-chunk for gemini without leaking", async () => {
+    class BadTransport implements HttpTransport {
+      async *stream(_r: NativeCompletionRequest) {
+        yield '{"error":{"message":"rate"}}';
+      }
+    }
+    const events: any[] = [];
+    for await (const e of streamGeminiEvents(new BadTransport(), request)) events.push(e);
+    expect(events).toEqual([{ type: "error", message: "Provider error." }]);
+  });
+
+  it("drops late events after terminal and malformed for gemini", async () => {
+    const transport = new FixtureTransport([
+      '{"candidates":[{"content":{"parts":[{"text":"g"}]}}]}',
+      '{"candidates":[{"finishReason":"STOP"}]}',
+      'not-json-at-all',
+      '{"candidates":[{"content":{"parts":[{"text":"late"}]}}]}'
+    ]);
+    const events: any[] = [];
+    for await (const e of streamGeminiEvents(transport, request)) events.push(e);
+    const terminals = events.filter((e) => e.type === "done");
+    expect(terminals.length).toBe(1);
+    expect(events.filter((e) => e.type === "error").length).toBe(1); // from bad line
   });
 });

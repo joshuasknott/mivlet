@@ -39,6 +39,9 @@ export class FixtureTransport implements HttpTransport {
       if (trimmed.length === 0) {
         continue;
       }
+      if (trimmed.startsWith(":")) {
+        continue;
+      }
       yield trimmed;
     }
   }
@@ -74,4 +77,28 @@ export class SequencedFixtureTransport implements HttpTransport {
       yield trimmed;
     }
   }
+}
+
+/**
+ * Shared line splitter for transport yields. Handles multiple events per yielded chunk.
+ */
+export function* splitLines(chunk: string): Generator<string> {
+  for (const raw of chunk.split(/\r\n|\r|\n/)) {
+    const trimmed = raw.trim();
+    if (trimmed.length > 0 && !trimmed.startsWith(":")) {
+      yield trimmed;
+    }
+  }
+}
+
+/** Shared payload extractor to dedupe prefix stripping logic across parsers. */
+export function extractPayload(line: string): string | null {
+  let s = line.trim();
+  if (!s || s === "[DONE]") return null;
+  if (s.startsWith(":")) return null;
+  if (s.toLowerCase().startsWith("data:")) {
+    s = s.slice(5).trim();
+  }
+  if (!s || s === "[DONE]") return null;
+  return s;
 }

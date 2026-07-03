@@ -13,6 +13,7 @@ import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol
 import { buildToolApproval } from "./approvals";
 import { priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
+import { extractPayload, splitLines } from "./transport";
 
 interface GeminiPart {
   text?: string;
@@ -85,13 +86,16 @@ export function parseGeminiLine(
   providerId: string,
   line: string
 ): BackendAgentEvent[] {
-  const payload = line.startsWith("data:") ? line.slice(5).trim() : line.trim();
-  if (!payload || payload === "[DONE]") return [];
+  const payload = extractPayload(line);
+  if (!payload) return [];
   let chunk: GeminiChunk;
   try {
     chunk = JSON.parse(payload) as GeminiChunk;
   } catch {
     return [{ type: "error", message: "Unparseable Gemini chunk." }];
+  }
+  if (chunk && typeof chunk === "object" && "error" in (chunk as any)) {
+    return [{ type: "error", message: "Provider error." }];
   }
 
   const events: BackendAgentEvent[] = [];
@@ -146,9 +150,11 @@ export async function* streamGeminiEvents(
   transport: HttpTransport,
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
-  for await (const line of transport.stream(request)) {
-    for (const event of parseGeminiLine(request.providerId, line)) {
-      yield event;
+  for await (const chunk of transport.stream(request)) {
+    for (const line of splitLines(chunk)) {
+      for (const event of parseGeminiLine(request.providerId, line)) {
+        yield event;
+      }
     }
   }
 }
