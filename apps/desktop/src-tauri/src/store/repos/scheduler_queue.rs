@@ -493,4 +493,33 @@ mod tests {
             elapsed.as_millis()
         );
     }
+
+    // Table test for dedup identity, state apply, and restart recovery (stale leases cleared on load path via higher layer)
+    #[test]
+    fn dedup_key_and_state_transitions_conservative() {
+        let store = store();
+        seed_job(&store, "default", "j");
+        let base = entry("j", "r-dup");
+        store
+            .transaction(|tx| {
+                assert!(upsert_entry(tx, &store, "", &base, "now")?.is_some());
+                // same dedup key (even diff run) -> no insert
+                let mut dup = base.clone();
+                dup["runId"] = serde_json::json!("r-dup2");
+                assert!(upsert_entry(tx, &store, "", &dup, "now")?.is_none());
+                // update via apply_state (the path used by tick/report for state/lease/backoff changes); upsert with same dedup intentionally NO-OPs for dup prevention
+                let mut upd = base.clone();
+                upd["state"] = serde_json::json!("leased");
+                upd["leaseHolder"] = serde_json::json!("holder-x");
+                upd["deduplicationKey"] = serde_json::json!("j:2026-07-01T09:00:00.000Z"); // keep same dedup
+                let qid = queue_id("default", "r-dup");
+                apply_state(tx, &store, "", &qid, &upd, "later").expect("apply_state succeeds for state transition test");
+                Ok(())
+            })
+            .unwrap();
+        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].value["state"], "leased");
+        assert_eq!(rows[0].value["leaseHolder"], "holder-x");
+    }
 }
