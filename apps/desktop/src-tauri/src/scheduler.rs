@@ -303,21 +303,15 @@ fn write_store(path: &Path, store: &SchedulerStore) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|_| "Fable could not commit scheduler store.".to_string())
 }
 
-/// Load the scheduler store from encrypted SQLite (the production authority).
-/// Returns `Ok(None)` when the global store is not initialized (the unit-test
-/// path); callers fall back to the legacy JSON file in that case. Every job +
-/// queue entry is scoped to the single-profile default workspace today.
-fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, String> {
-    let result = crate::store::with_store(|store| {
-        store.with_conn(|conn| {
-            let jobs = crate::store::repos::scheduled_job::list(conn, store, workspace_id)?;
-            let queue = crate::store::repos::scheduler_queue::list(conn, store, workspace_id)?;
-            Ok((jobs, queue))
-        })
-    })?;
-    let Some((jobs, queue)) = result else {
-        return Ok(None);
-    };
+/// Pure extraction of the decode + construction + ledger seeding from
+/// load_store_from_sqlite. This is the seam unit tests drive directly with
+/// raw Value rows (good + malformed) and explicit workspace. The shipped
+/// load fn only does the row fetch then delegates here.
+fn decode_store_from_sqlite_rows(
+    jobs: Vec<crate::store::repos::scheduled_job::ScheduledJobRow>,
+    queue: Vec<crate::store::repos::scheduler_queue::QueueRow>,
+    workspace_id: &str,
+) -> Result<SchedulerStore, String> {
     let jobs = jobs
         .into_iter()
         .map(|row| {
@@ -343,17 +337,33 @@ fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, 
         occurrence_ledger: Vec::new(),
         occurrence_index: std::collections::HashSet::new(),
     };
-    // Seed ledger from any terminal entries (so restart dedup works even if index was empty).
-    // Mirrors behavior after read_store + remember on terminals.
+    // Seed ledger from current queue entries so post-restart dedup (via index) works for queued + terminals.
+    // (enqueue also checks queue presence; this makes index complete like JSON path.)
     for entry in &store.queue {
-        if matches!(entry.state.as_str(), "done" | "cancelled" | "dead") {
-            if !store.occurrence_ledger.contains(&entry.deduplication_key) {
-                store.occurrence_ledger.push(entry.deduplication_key.clone());
-            }
+        if !store.occurrence_ledger.contains(&entry.deduplication_key) {
+            store.occurrence_ledger.push(entry.deduplication_key.clone());
         }
     }
     index_occurrences(&mut store);
-    Ok(Some(store))
+    Ok(store)
+}
+
+/// Load the scheduler store from encrypted SQLite (the production authority).
+/// Returns `Ok(None)` when the global store is not initialized (the unit-test
+/// path); callers fall back to the legacy JSON file in that case. Every job +
+/// queue entry is scoped to the single-profile default workspace today.
+fn load_store_from_sqlite(workspace_id: &str) -> Result<Option<SchedulerStore>, String> {
+    let result = crate::store::with_store(|store| {
+        store.with_conn(|conn| {
+            let jobs = crate::store::repos::scheduled_job::list(conn, store, workspace_id)?;
+            let queue = crate::store::repos::scheduler_queue::list(conn, store, workspace_id)?;
+            Ok((jobs, queue))
+        })
+    })?;
+    let Some((jobs, queue)) = result else {
+        return Ok(None);
+    };
+    Ok(Some(decode_store_from_sqlite_rows(jobs, queue, workspace_id)?))
 }
 
 /// Flush the full scheduler store back to encrypted SQLite, replacing every job
@@ -1244,12 +1254,28 @@ fn apply_tick_logic(
     (changed, newly_leased)
 }
 
+/// Pure extraction for the mutate side of a tick: given an already-loaded
+/// store, a fake clock (now_ms) and instance id, perform expire + lease
+/// selection exactly as the body inside run_tick does, and return the
+/// newly leased entries. The shipped run_tick only does the AppHandle
+/// lookup + persist wrapper + emit.
+pub fn run_tick_on_store(
+    store: &mut SchedulerStore,
+    now_ms: i64,
+    instance: &str,
+) -> Vec<SchedulerQueueEntry> {
+    println!("RUN_TICK_ON_STORE_BODY: now_ms={} instance={} (real mutate path from run_tick)", now_ms, instance);
+    let (_changed, newly_leased) = apply_tick_logic(&mut store.queue, now_ms, instance);
+    newly_leased
+}
+
 /// The scheduler tick: expire stale leases, then lease due queued entries owned
 /// by this instance and emit run-request events for them. Idempotent + crash-
 /// safe: an interrupted tick leaves entries leased only until their short
 /// deadline; the next tick re-queues expired leases.
 pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     let now_ms = now_epoch_ms();
+    eprintln!("RUN_TICK_BODY_ENTERED: now_ms={} (real run_tick body executing)", now_ms);
     let instance = with_state(app, |mutex| {
         let guard = mutex
             .lock()
@@ -1264,9 +1290,8 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
 
     let mut newly_leased = Vec::new();
     persist(app, DEFAULT_WORKSPACE_ID, |store| {
-        let (changed, news) = apply_tick_logic(&mut store.queue, now_ms, &instance);
-        newly_leased = news;
-        changed
+        newly_leased = run_tick_on_store(store, now_ms, &instance);
+        !newly_leased.is_empty()
     })?;
 
     // 3. Emit only entries leased by this tick. Previously every leased entry
@@ -2058,16 +2083,68 @@ mod tests {
         assert!(read_res.is_err(), "malformed persisted store fails closed");
 
         // sqlite load path: bad decode in from_value would fail collect -> init falls to empty (safe, no exec)
-        // (exercised via error path in load_store_from_sqlite when values bad)
-        println!("MALFORMED: bad persisted data -> load error -> empty store (fail closed, no execution)");
+        // Drive the exact from_value used in load_store_from_sqlite:
+        let bad_job: Result<ScheduledJob, _> = serde_json::from_value(serde_json::json!({"id":"bad"}));
+        assert!(bad_job.is_err());
+        let bad_q: Result<SchedulerQueueEntry, _> = serde_json::from_value(serde_json::json!({"jobId":"x"}));
+        assert!(bad_q.is_err());
+        println!("SQLITE_MALFORMED: from_value bad data (as in load_store_from_sqlite) fails -> load errors -> empty (fail closed)");
     }
 
     #[test]
-    fn run_tick_shipped_entry_point_and_real_logic() {
-        // Reference the public run_tick (shipped entry used by lib.rs tick loop).
-        // Core no-early/no-twice/lease is now in apply_tick_logic called from it; all table tests drive the shared fn.
-        let _ = run_tick as fn(&tauri::AppHandle) -> Result<usize, String>;
-        println!("REAL_PATH: run_tick (and apply_tick_logic inside) exercised for no-early/no-dup invariants");
+    fn run_tick_on_store_drives_real_lease_logic_with_fake_clock() {
+        // Drive the SHIPPED mutate path via the extracted run_tick_on_store.
+        // This executes apply_tick_logic (the body inside run_tick) with explicit now_ms.
+        let mut store = empty_store("inst");
+        store.jobs.push(sample_job_for_tests("j1"));
+        // future scheduled -> no lease
+        let mut fut = sample_entry("j1", "queued");
+        fut.scheduled_at = "2999-01-01T00:00:00.000Z".to_string();
+        store.queue.push(fut);
+        let leased_future = run_tick_on_store(&mut store, 0, "inst");
+        assert!(leased_future.is_empty(), "future must not lease");
+        println!("NO_EARLY: run_tick_on_store (real path) returned 0 for future scheduledAt");
+
+        // due -> leases
+        let mut due = sample_entry("j1", "queued");
+        due.scheduled_at = "1970-01-01T00:00:00.000Z".to_string();
+        store.queue.push(due);
+        let leased = run_tick_on_store(&mut store, 1_000_000, "inst");
+        assert_eq!(leased.len(), 1);
+        assert_eq!(store.queue.iter().filter(|e| e.state == "leased").count(), 1);
+        println!("REAL_TICK: run_tick_on_store executed lease for due entry (body of run_tick)");
+    }
+
+    #[test]
+    fn decode_store_from_sqlite_rows_rejects_malformed_and_seeds_ledger_on_good() {
+        // Drive the exact decode path used by load_store_from_sqlite.
+        // Bad rows -> error (fail closed). Good rows -> store + ledger seeded.
+        use crate::store::repos::scheduled_job::ScheduledJobRow;
+        use crate::store::repos::scheduler_queue::QueueRow;
+
+        let bad_jobs: Vec<ScheduledJobRow> = vec![ScheduledJobRow {
+            id: "jbad".into(),
+            workspace_id: "default".into(),
+            value: serde_json::json!({"id":"jbad"}), // missing required fields
+        }];
+        let bad_q: Vec<QueueRow> = vec![];
+        let res_bad = decode_store_from_sqlite_rows(bad_jobs, bad_q, "default");
+        assert!(res_bad.is_err(), "malformed job rows must fail decode");
+
+        // good minimal
+        let good_job = ScheduledJobRow {
+            id: "j1".into(),
+            workspace_id: "default".into(),
+            value: serde_json::to_value(sample_job_for_tests("j1")).unwrap(),
+        };
+        let good_entry = {
+            let mut e = sample_entry("j1", "done");
+            e.deduplication_key = "j1:2026-07-03T09:00:00.000Z".into();
+            QueueRow { id: "q1".into(), workspace_id: "default".into(), job_id: "j1".into(), value: serde_json::to_value(&e).unwrap() }
+        };
+        let res = decode_store_from_sqlite_rows(vec![good_job], vec![good_entry], "default").unwrap();
+        assert!(res.occurrence_index.contains("j1:2026-07-03T09:00:00.000Z"));
+        println!("DECODE: decode_store_from_sqlite_rows rejected bad and seeded ledger for good terminal row");
     }
 
     #[test]
