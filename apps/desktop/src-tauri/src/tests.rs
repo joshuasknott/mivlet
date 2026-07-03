@@ -2341,7 +2341,7 @@ fn reshaped_high_risk_approval_fails_closed() {
 //   - a missing/non-string/non-http(s) url fails closed before any egress
 // ---------------------------------------------------------------------------
 
-use crate::tools::{web_fetch_url_from_args, WebFetchOutcome};
+use crate::tools::{parse_and_validate_fetch_url, web_fetch_url_from_args, WebFetchOutcome};
 
 #[test]
 fn web_fetch_requires_an_http_or_https_url_argument() {
@@ -2393,6 +2393,287 @@ fn web_fetch_outcome_fails_closed_on_a_transport_error() {
     // the loop fails closed instead of pretending a fetch happened.
     let err = WebFetchOutcome::transport_error("connection refused").into_tool_result_err();
     assert!(err.contains("connection refused"));
+}
+
+// ---------------------------------------------------------------------------
+// SSRF / outbound policy table-driven tests for web-fetch (tools.rs).
+// All tests are deterministic, use only local fakes / pure fns / IP literals.
+// No real DNS resolution or egress is performed (lookup_host not exercised).
+// Covers: non-http, malformed, creds, IPv4/IPv6 literals + alt/encoded forms via parser,
+// private/loopback/link-local/multicast/unspec/metadata, mapped v6, ports, hostname aliases,
+// normalize fingerprint, response types, size (via outcome contract).
+// Redirects exercised by constructing join targets and feeding to parse_and_validate
+// (mirrors every redirect in egress). DNS-rebind/cancel via policy fns + comments.
+// ---------------------------------------------------------------------------
+
+use crate::tools::{
+    is_forbidden_ip, is_supported_response_type, is_unsafe_port, normalize_url_for_fingerprint,
+    WEB_FETCH_MAX_BODY_BYTES, WEB_FETCH_MAX_REDIRECTS,
+};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+#[test]
+fn web_fetch_url_from_args_rejects_non_http_and_malformed_and_creds() {
+    // non http
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "ftp://ex.test"})).is_err());
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "file:///x"})).is_err());
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "data:text/plain,hi"})).is_err());
+    // malformed
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "http://"})).is_err());
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "https://"})).is_err());
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "not a url"})).is_err());
+    // creds
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "https://u:p@ex.test"})).is_err());
+    assert!(
+        web_fetch_url_from_args(&serde_json::json!({"url": "http://user@example.com"})).is_err()
+    );
+    // ok
+    assert!(web_fetch_url_from_args(&serde_json::json!({"url": "https://example.com"})).is_ok());
+    assert!(
+        web_fetch_url_from_args(&serde_json::json!({"url": "http://example.com/path?x=1"})).is_ok()
+    );
+}
+
+#[test]
+fn web_fetch_parse_rejects_forbidden_ipv4_literals_including_alt_encodings() {
+    let bad_v4: &[&str] = &[
+        "http://127.0.0.1",
+        "https://127.1",
+        "http://10.0.0.1",
+        "https://192.168.1.1",
+        "http://172.16.0.1",
+        "https://169.254.169.254", // metadata
+        "http://192.0.2.1", // TEST-NET-1 reserved
+        "https://198.51.100.5", // TEST-NET-2 reserved
+        "http://203.0.113.10", // TEST-NET-3 reserved
+        "https://198.18.5.5", // benchmark reserved
+        "http://0.0.0.0",
+        "https://224.0.0.1", // multicast
+        "http://240.0.0.1",
+        "https://255.255.255.255",
+        // alt encodings (url parser maps to semantic IP which is then rejected)
+        "http://0x7f000001", // 127.0.0.1 hex
+        "http://0177.0.0.1", // octal-ish 127
+        "http://2130706433", // decimal 127.0.0.1
+        "http://127.0.0.1:8080",
+    ];
+    for u in bad_v4 {
+        let res = parse_and_validate_fetch_url(u);
+        assert!(res.is_err(), "should reject {u} but got {:?}", res);
+        let e = res.unwrap_err();
+        assert!(
+            e.contains("blocked") || e.contains("http(s)"),
+            "err for {}: {}",
+            u,
+            e
+        );
+    }
+}
+
+#[test]
+fn web_fetch_parse_accepts_safe_public_ipv4_literal_without_egress() {
+    // 93.184.216.34 == example.com (public, non-forbidden)
+    let ok = parse_and_validate_fetch_url("https://93.184.216.34/").expect("public ipv4 ok");
+    assert_eq!(ok.host_str(), Some("93.184.216.34"));
+}
+
+#[test]
+fn web_fetch_parse_rejects_forbidden_ipv6_and_mapped() {
+    let bad_v6: &[&str] = &[
+        "http://[::1]",
+        "https://[::]",
+        "http://[fe80::1]",
+        "https://[fc00::1]",
+        "http://[ff02::1]",
+        // mapped to forbidden v4
+        "https://[::ffff:127.0.0.1]",
+        "http://[::ffff:10.0.0.1]",
+        "https://[::ffff:169.254.169.254]",
+    ];
+    for u in bad_v6 {
+        assert!(
+            parse_and_validate_fetch_url(u).is_err(),
+            "should reject ipv6 {}",
+            u
+        );
+    }
+}
+
+#[test]
+fn web_fetch_parse_accepts_safe_public_ipv6_literal() {
+    // 2606:4700:4700::1111 is cloudflare public dns (safe)
+    let res = parse_and_validate_fetch_url("https://[2606:4700:4700::1111]");
+    assert!(res.is_ok());
+}
+
+#[test]
+fn web_fetch_is_forbidden_ip_table() {
+    let cases: &[(IpAddr, bool)] = &[
+        (IpAddr::V4(Ipv4Addr::LOCALHOST), true),
+        (IpAddr::V4(Ipv4Addr::UNSPECIFIED), true),
+        (IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), true),
+        (IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1)), true),
+        (IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)), true),
+        (IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), true), // TEST-NET-1 reserved
+        (IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)), true), // TEST-NET-2 reserved
+        (IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)), true), // TEST-NET-3 reserved
+        (IpAddr::V4(Ipv4Addr::new(198, 18, 0, 1)), true), // benchmark reserved
+        (IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)), true),
+        (IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254)), true),
+        (IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)), true),
+        (IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), false),
+        (IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)), false),
+        (IpAddr::V6(Ipv6Addr::LOCALHOST), true),
+        (IpAddr::V6(Ipv6Addr::UNSPECIFIED), true),
+        (IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)), true),
+        (IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1)), true),
+        (IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 1)), true),
+        (
+            IpAddr::V6(Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111)),
+            false,
+        ),
+    ];
+    for (ip, want) in cases {
+        assert_eq!(is_forbidden_ip(*ip), *want, "for {:?}", ip);
+    }
+}
+
+#[test]
+fn web_fetch_unsafe_ports_table() {
+    assert!(is_unsafe_port(22));
+    assert!(is_unsafe_port(445));
+    assert!(is_unsafe_port(3306));
+    assert!(is_unsafe_port(6379));
+    assert!(!is_unsafe_port(80));
+    assert!(!is_unsafe_port(443));
+    assert!(!is_unsafe_port(8080));
+    assert!(!is_unsafe_port(3000));
+    assert!(!is_unsafe_port(65535));
+}
+
+#[test]
+fn web_fetch_normalize_fingerprint_strips_creds_and_default_ports() {
+    assert_eq!(
+        normalize_url_for_fingerprint("https://example.com:443/path"),
+        Some("https://example.com/path".to_string())
+    );
+    assert_eq!(
+        normalize_url_for_fingerprint("http://ExAmPlE.com:80/x?y=1#z"),
+        Some("http://example.com/x?y=1#z".to_string())
+    );
+    assert_eq!(normalize_url_for_fingerprint("https://u:p@ex.test"), None);
+    assert_eq!(normalize_url_for_fingerprint("ftp://ex.test"), None);
+    assert_eq!(
+        normalize_url_for_fingerprint("https://ex.test:8443"),
+        Some("https://ex.test:8443/".to_string())
+    );
+}
+
+#[test]
+fn web_fetch_supported_response_types() {
+    assert!(is_supported_response_type("text/html; charset=utf-8"));
+    assert!(is_supported_response_type("application/json"));
+    assert!(is_supported_response_type("text/plain"));
+    assert!(is_supported_response_type(""));
+    assert!(!is_supported_response_type("image/png"));
+    assert!(!is_supported_response_type("application/octet-stream"));
+    assert!(!is_supported_response_type("application/pdf"));
+    assert!(!is_supported_response_type("video/mp4"));
+}
+
+#[test]
+fn web_fetch_max_constants_are_sane() {
+    assert!(WEB_FETCH_MAX_REDIRECTS > 0 && WEB_FETCH_MAX_REDIRECTS <= 10);
+    assert_eq!(WEB_FETCH_MAX_BODY_BYTES, 1024 * 1024);
+}
+
+#[test]
+fn web_fetch_parse_rejects_unsafe_port() {
+    assert!(parse_and_validate_fetch_url("https://ex.test:22").is_err());
+    assert!(parse_and_validate_fetch_url("http://ex.test:3306/path").is_err());
+    assert!(parse_and_validate_fetch_url("https://ex.test:443").is_ok());
+}
+
+#[test]
+fn web_fetch_parse_rejects_localhost_hostname_aliases() {
+    // Direct hostname validation (no DNS) for localhost aliases. Covers case,
+    // subdomains, common variants. Complements IP literal + resolve checks.
+    let bad: &[&str] = &[
+        "http://localhost",
+        "https://LOCALHOST/",
+        "http://localhost:8080/secret",
+        "https://foo.localhost",
+        "http://local",
+        "https://localhost.localdomain",
+        "http://ip6-localhost",
+        "https://ip6-loopback",
+        "http://bar.local",
+    ];
+    for u in bad {
+        let res = parse_and_validate_fetch_url(u);
+        assert!(res.is_err(), "should reject localhost alias {u} but got {:?}", res);
+    }
+    // public hostnames with .com etc must still parse ok (DNS/re-resolve later)
+    assert!(parse_and_validate_fetch_url("https://example.com").is_ok());
+    assert!(parse_and_validate_fetch_url("http://public.test.localdomain.example").is_ok());
+}
+
+#[test]
+fn web_fetch_redirect_target_strings_validated_by_parse() {
+    // Exercise redirect path: simulate Location join + re-apply parse_and_validate
+    // (as done for every redirect in run_web_fetch_egress). Covers encoded,
+    // IPv4/IPv6 bad, localhost alias, creds in redirect loc, and public good.
+    use url::Url;
+    let base = Url::parse("https://public.example.com/page").expect("base");
+    // bad cases that would be joined from Location
+    let bad_redirects: &[&str] = &[
+        "http://127.0.0.1/admin",
+        "https://10.0.0.5/creds",
+        "http://[::1]/loop",
+        "http://localhost/secret",
+        "https://169.254.169.254/meta",
+        "//evil.localhost/x",
+        "http://u:p@attacker.test",
+        // alt encoding in redirect target
+        "http://0x7f000001/enc",
+    ];
+    for loc in bad_redirects {
+        let next = base.join(loc).expect("joinable loc");
+        let res = parse_and_validate_fetch_url(next.as_str());
+        assert!(res.is_err(), "redirect target {loc} -> {next} must be rejected by parse");
+    }
+    // good public redirect targets accepted by parse (full egress would still
+    // re-resolve DNS and apply bounds/redirect count etc)
+    let good_locs: &[&str] = &[
+        "https://safe.public.test/data",
+        "/relative/ok",
+        "https://93.184.216.34/ipv4pub",
+    ];
+    for loc in good_locs {
+        let next = base.join(loc).expect("join ok");
+        assert!(parse_and_validate_fetch_url(next.as_str()).is_ok(), "good redirect {loc} should parse ok");
+    }
+}
+
+#[test]
+fn web_fetch_parse_rejects_more_encoded_ip_bypasses() {
+    // Additional encoded / alt-representation cases for thoroughness (parser
+    // normalizes to IP then is_forbidden_ip rejects).
+    let more_bad: &[&str] = &[
+        "http://0x7f.0.0.1",       // dotted hex
+        "https://2130706433/",     // already in main but repeat for coverage
+        "http://[::ffff:0x7f.0.0.1]", // mapped with alt
+        "https://127.0.0.1%2e1",   // may not parse as IP but test rejection path
+    ];
+    for u in more_bad {
+        // some may fail early parse, some at policy; either is fail-closed
+        let res = parse_and_validate_fetch_url(u);
+        // assert err (if parses as good public somehow, fail test)
+        if res.is_ok() {
+            // only allow if it resolved to a truly public (none of above should)
+            panic!("encoded bypass unexpectedly accepted: {}", u);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

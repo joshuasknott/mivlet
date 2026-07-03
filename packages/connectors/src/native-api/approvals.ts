@@ -23,6 +23,26 @@ function safeParseArgs(args: string): Record<string, unknown> {
   }
 }
 
+/** Normalize a web-fetch URL for approval fingerprinting so the bound request
+ *  uses a canonical form (no default ports, no embedded credentials). The Rust
+ *  boundary applies the same normalization when re-computing the expected
+ *  preview so approval binding cannot be bypassed by encoding differences.
+ */
+function normalizeWebFetchUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (u.username || u.password) return null;
+    // Strip default ports for canonical form.
+    if ((u.protocol === "http:" && u.port === "80") || (u.protocol === "https:" && u.port === "443")) {
+      u.port = "";
+    }
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Build the ApprovalRequest for a model-emitted tool call. */
 export function buildToolApproval(
   providerId: string,
@@ -38,7 +58,14 @@ export function buildToolApproval(
   const risk = registered?.defaultRisk ?? "critical";
   const dataUsed = Object.entries(parsed)
     .slice(0, 4)
-    .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+    .map(([key, value]) => {
+      let vstr = typeof value === "string" ? value : JSON.stringify(value);
+      if (toolName === "web-fetch" && key === "url" && typeof value === "string") {
+        const norm = normalizeWebFetchUrl(value);
+        if (norm) vstr = norm;
+      }
+      return `${key}: ${vstr}`;
+    });
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
   const consequence = isRegistered

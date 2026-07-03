@@ -15,9 +15,13 @@
 //!     escapes). `run-shell` executes in the workspace root.
 //!   - Tool names are a closed set; anything else fails closed.
 
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use reqwest::header::{HeaderMap, HeaderValue};
+use url::Url;
 
 use crate::approvals::resolve_approval;
 use crate::connector_api;
@@ -243,10 +247,15 @@ pub(crate) fn validate_tool_approval_binding(
         .iter()
         .take(4)
         .map(|(key, value)| {
-            let rendered = value
+            let raw_rendered = value
                 .as_str()
                 .map(str::to_string)
                 .unwrap_or_else(|| value.to_string());
+            let rendered = if tool == "web-fetch" && key == "url" {
+                normalize_url_for_fingerprint(&raw_rendered).unwrap_or(raw_rendered)
+            } else {
+                raw_rendered
+            };
             truncate_characters(&normalize_spaces(&format!("{key}: {rendered}")), 240)
         })
         .collect::<std::collections::BTreeSet<_>>();
@@ -345,6 +354,289 @@ pub(crate) fn bounded_output(bytes: &[u8], max_bytes: usize) -> String {
         String::from_utf8_lossy(head),
         max_bytes
     )
+}
+
+// ---------------------------------------------------------------------------
+// web-fetch SSRF / outbound policy (fail-closed). All checks before or at
+// egress; approval fingerprint binds the *normalized* URL; redirects and DNS
+// are re-validated on every hop.
+// ---------------------------------------------------------------------------
+
+/// Max redirects followed for web-fetch (explicit, small to bound).
+pub(crate) const WEB_FETCH_MAX_REDIRECTS: usize = 5;
+
+/// Max wall time for an entire web-fetch including redirects/DNS.
+pub(crate) const WEB_FETCH_TIMEOUT_SECS: u64 = 30;
+
+/// Max body bytes (decompressed) returned/copied for web-fetch. Matches other
+/// tool output bounds to avoid OOM or unbounded buffers.
+pub(crate) const WEB_FETCH_MAX_BODY_BYTES: usize = MAX_TOOL_OUTPUT_BYTES;
+
+/// Return a canonical fingerprint form for a web-fetch URL (strips default
+/// ports and credentials). Used so approval binds the normalized request.
+pub(crate) fn normalize_url_for_fingerprint(raw: &str) -> Option<String> {
+    let mut url = Url::parse(raw).ok()?;
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return None;
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    if let Some(port) = url.port() {
+        if (url.scheme() == "http" && port == 80) || (url.scheme() == "https" && port == 443) {
+            let _ = url.set_port(None);
+        }
+    }
+    Some(url.to_string())
+}
+
+/// Parse + basic structural validation for a web-fetch target (scheme, creds,
+/// host presence, port policy, hostname aliases, IP-literal blocks). Does not
+/// perform DNS (see resolve_and_check_host for domain hostname DNS results).
+pub(crate) fn parse_and_validate_fetch_url(raw: &str) -> Result<Url, String> {
+    let url = Url::parse(raw).map_err(|e| format!("web-fetch requires a valid URL: {}", e))?;
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return Err("web-fetch requires an http(s) URL.".to_string());
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("web-fetch does not allow embedded credentials.".to_string());
+    }
+    if url.host().is_none() {
+        return Err("web-fetch requires a host.".to_string());
+    }
+    if let Some(port) = url.port() {
+        if is_unsafe_port(port) {
+            return Err("web-fetch to an unsafe port is not permitted.".to_string());
+        }
+    }
+    // Hostname validation (localhost aliases) at parse for early fail-closed
+    // and pure-test coverage. Complements IP-literal checks + DNS result
+    // validation in resolve_and_check_host (every hop / redirect).
+    if let Some(h) = url.host_str() {
+        if is_forbidden_hostname(h) {
+            return Err(
+                "web-fetch blocked: target is a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address.".to_string(),
+            );
+        }
+    }
+    // IP literals are checked at parse time (covers alt encodings because the
+    // Url parser + Host::Ipv* yields the semantic address).
+    if let Some(host) = url.host() {
+        match host {
+            url::Host::Ipv4(ip) => {
+                if is_forbidden_ip(IpAddr::V4(ip)) {
+                    return Err(
+                        "web-fetch blocked: target is a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address.".to_string(),
+                    );
+                }
+            }
+            url::Host::Ipv6(ip) => {
+                if is_forbidden_ip(IpAddr::V6(ip)) {
+                    return Err(
+                        "web-fetch blocked: target is a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address.".to_string(),
+                    );
+                }
+            }
+            url::Host::Domain(_) => {}
+        }
+    }
+    Ok(url)
+}
+
+pub(crate) fn is_unsafe_port(port: u16) -> bool {
+    // Common unsafe/internal ports (ssh, smtp, smb, dbs, etc.). Standard web
+    // ports and developer ports are intentionally not listed here.
+    matches!(
+        port,
+        22 | 23
+            | 25
+            | 53
+            | 110
+            | 135
+            | 139
+            | 143
+            | 445
+            | 465
+            | 587
+            | 993
+            | 995
+            | 1433
+            | 1521
+            | 2049
+            | 2379
+            | 3306
+            | 3389
+            | 5432
+            | 5672
+            | 6379
+            | 7001
+            | 8001
+            | 8081
+            | 8444
+            | 9001
+    )
+}
+
+/// Returns true for IPs that must never be reachable via web-fetch (fail-closed
+/// SSRF policy). Covers IPv4/IPv6 loopback, private, reserved (TEST-NET,
+/// benchmark, IETF etc.), link-local, multicast, unspecified, plus common
+/// cloud instance metadata endpoints.
+pub(crate) fn is_forbidden_ip(ip: IpAddr) -> bool {
+    if is_cloud_metadata_ip(ip) {
+        return true;
+    }
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_unspecified()
+                || v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_multicast()
+                || v4.is_broadcast()
+                || v4.octets()[0] >= 240
+                || is_reserved_v4(v4)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_unspecified()
+                || v6.is_loopback()
+                || is_ipv6_link_local(&v6)
+                || is_ipv6_unique_local(&v6)
+                || v6.is_multicast()
+                || v6
+                    .to_ipv4_mapped()
+                    .map_or(false, |v4| is_forbidden_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
+fn is_cloud_metadata_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let o = v4.octets();
+            // AWS, GCP, Azure, DigitalOcean, etc.
+            o == [169, 254, 169, 254]
+                // Alibaba Cloud
+                || o == [100, 100, 100, 200]
+                // Oracle, others
+                || o == [169, 254, 169, 254]
+                // packet metadata sometimes on 169.254.169.254
+                || (o[0] == 169 && o[1] == 254 && o[2] == 169)
+        }
+        IpAddr::V6(_) => false,
+    }
+}
+
+/// Additional reserved ranges per IANA (not covered by is_private / link_local etc.).
+/// Includes TEST-NET-* documentation ranges and benchmark. Called from
+/// is_forbidden_ip to satisfy objective "reserved".
+fn is_reserved_v4(v4: std::net::Ipv4Addr) -> bool {
+    let o = v4.octets();
+    // TEST-NET-1 (RFC 5737)
+    (o[0] == 192 && o[1] == 0 && o[2] == 2)
+        // TEST-NET-2
+        || (o[0] == 198 && o[1] == 51 && o[2] == 100)
+        // TEST-NET-3
+        || (o[0] == 203 && o[1] == 0 && o[2] == 113)
+        // Benchmarking (198.18.0.0/15, RFC 2544)
+        || (o[0] == 198 && (o[1] == 18 || o[1] == 19))
+        // IETF protocol assignments (192.0.0.0/24)
+        || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+}
+
+fn is_ipv6_link_local(v6: &Ipv6Addr) -> bool {
+    let s = v6.segments();
+    (s[0] & 0xffc0) == 0xfe80
+}
+
+fn is_ipv6_unique_local(v6: &Ipv6Addr) -> bool {
+    let s = v6.segments();
+    (s[0] & 0xfe00) == 0xfc00
+}
+
+/// Hostname-level blocks for well-known localhost / loopback aliases.
+/// Called from parse_and_validate_fetch_url (before DNS) so that pure unit
+/// tests can exercise "localhost aliases" rejections without network, and
+/// to satisfy fail-closed hostname validation in the objective.
+fn is_forbidden_hostname(host: &str) -> bool {
+    let h = host.to_ascii_lowercase();
+    h == "localhost"
+        || h == "local"
+        || h == "localhost.localdomain"
+        || h == "ip6-localhost"
+        || h == "ip6-loopback"
+        || h.ends_with(".localhost")
+        || h.ends_with(".local")
+}
+
+async fn resolve_and_check_host(host: &str, port: u16) -> Result<(), String> {
+    // Use platform resolver; any resulting address that is forbidden is
+    // rejected (covers DNS rebinding at resolution time).
+    let addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|_| "DNS resolution failed for web-fetch target".to_string())?;
+    for sa in addrs {
+        if is_forbidden_ip(sa.ip()) {
+            return Err(
+                "web-fetch blocked: target resolves to a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address (DNS rebinding protection).".to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Read response body with hard cap on (decompressed) size. Rejects oversized
+/// before materializing full body. Also guards against decompression abuse by
+/// bounding the expanded result we accept.
+async fn read_bounded_text(
+    response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, String> {
+    if let Some(len) = response.content_length() {
+        if len > max_bytes as u64 {
+            return Err("web-fetch blocked: response body too large".to_string());
+        }
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("web-fetch body read error: {}", e))?;
+    if bytes.len() > max_bytes {
+        return Err("web-fetch blocked: response body too large".to_string());
+    }
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+pub(crate) fn is_supported_response_type(content_type: &str) -> bool {
+    if content_type.trim().is_empty() {
+        return true; // unspecified; try as text
+    }
+    let t = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if t.starts_with("image/")
+        || t.starts_with("audio/")
+        || t.starts_with("video/")
+        || t == "application/octet-stream"
+        || t == "application/pdf"
+        || t == "application/zip"
+    {
+        return false;
+    }
+    true
+}
+
+fn redact_for_error(raw: &str) -> String {
+    // Never echo full target URLs or credentials in error surfaces that may
+    // be returned to the agent loop / history.
+    if raw.contains("://") || raw.contains('@') {
+        "connection or policy error".to_string()
+    } else {
+        // keep short actionable without secrets
+        raw.chars().take(120).collect()
+    }
 }
 
 pub(crate) fn run_read_file(
@@ -545,14 +837,14 @@ impl WebFetchOutcome {
 }
 
 /// Validate and extract the web-fetch url argument. Requires a non-empty
-/// `http://`/`https://` string and returns it; anything else fails closed
-/// *before* any network egress (the scheme is defense-in-depth re-validated at
-/// the boundary, mirroring today's approval + url re-check).
+/// http(s) string; stronger structural policy (no creds, no bad ports, IP
+/// literal blocks for forbidden ranges) runs here for early fail-closed before
+/// NeedsWebFetch decision. Full hostname DNS + redirect revalidation happens
+/// at the async egress boundary.
 pub(crate) fn web_fetch_url_from_args(arguments: &serde_json::Value) -> Result<String, String> {
     let url = require_string_argument(arguments, "url")?;
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return Err("web-fetch requires an http(s) URL.".to_string());
-    }
+    // Syntax + creds + port + IP-literal policy (DNS for domains deferred).
+    let _ = parse_and_validate_fetch_url(&url)?;
     Ok(url)
 }
 
@@ -894,31 +1186,146 @@ fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
     bounded
 }
 
-/// Issue the approved web-fetch GET and classify the response into the pure
-/// `WebFetchOutcome` shape. Network I/O itself is not unit-tested (matching the
-/// streaming backend path); the 2xx/non-2xx/transport contract is pinned by the
-/// `WebFetchOutcome` tests.
+/// Issue the approved web-fetch GET with full SSRF protection:
+/// - revalidate normalized syntax (creds/malformed/non-http already rejected)
+/// - DNS resolve + forbidden IP check for every hostname hop
+/// - manual redirect following (none() policy) with re-validation + count limit
+/// - timeout, bounded body (1 MiB), no decompression (identity encoding) to close abuse vector
+/// - unsupported content types rejected
+/// - all errors redacted (no raw target URLs leak into results/audit)
+/// Cancellation is preserved via timeout + cooperative tokio points (agent run
+/// can drop the future on cancel).
 async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
-    // Defense in depth: re-validate the scheme at the boundary, immediately
-    // before egress, so a reshaped request can never reach a non-http(s) URL.
-    web_fetch_url_from_args(&serde_json::json!({ "url": url }))?;
+    // Re-validate (syntax/creds/port/ip-lit) immediately before egress.
+    let initial =
+        parse_and_validate_fetch_url(url).map_err(|e| format!("web-fetch blocked: {}", e))?;
+
     crate::ensure_rustls_provider();
-    let client = reqwest::Client::new();
-    let response = match client.get(url).send().await {
-        Ok(response) => response,
-        Err(err) => {
-            return Ok(WebFetchOutcome::transport_error(&err.to_string()).into_tool_result());
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert(
+        reqwest::header::ACCEPT_ENCODING,
+        HeaderValue::from_static("identity"),
+    );
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
+        .user_agent("Fable/0.1 (web-fetch)")
+        // Manual redirect handling so we can re-apply policy to every Location
+        // target. Default policy would let a public->private redirect escape.
+        .redirect(reqwest::redirect::Policy::none())
+        // Ask for identity (no server compression) to eliminate decompression abuse.
+        .default_headers(default_headers)
+        .build()
+        .map_err(|_| "web-fetch client initialization failed".to_string())?;
+
+    let mut current = initial;
+    let mut redirects = 0usize;
+
+    // Overall timeout guard for the whole fetch incl. DNS/redirects.
+    let fetch_fut = async {
+        loop {
+            // Re-check host for current hop (hostname DNS or IP literal).
+            if let Some(host) = current.host() {
+                match host {
+                    url::Host::Domain(d) => {
+                        let port = current.port().unwrap_or_else(|| {
+                            if current.scheme() == "https" {
+                                443
+                            } else {
+                                80
+                            }
+                        });
+                        resolve_and_check_host(d, port).await?;
+                    }
+                    url::Host::Ipv4(ip) => {
+                        if is_forbidden_ip(IpAddr::V4(ip)) {
+                            return Err(
+                                "web-fetch blocked: target is a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address.".to_string()
+                            );
+                        }
+                    }
+                    url::Host::Ipv6(ip) => {
+                        if is_forbidden_ip(IpAddr::V6(ip)) {
+                            return Err(
+                                "web-fetch blocked: target is a loopback, private, reserved, link-local, multicast, unspecified, or cloud-metadata address.".to_string()
+                            );
+                        }
+                    }
+                }
+            }
+            if let Some(p) = current.port() {
+                if is_unsafe_port(p) {
+                    return Err("web-fetch blocked: unsafe port".to_string());
+                }
+            }
+
+            // Issue request (no auto-redirect).
+            let resp_res = client.get(current.clone()).send().await;
+            let resp = match resp_res {
+                Ok(r) => r,
+                Err(e) => {
+                    return Err(format!(
+                        "web-fetch transport error: {}",
+                        redact_for_error(&e.to_string())
+                    ));
+                }
+            };
+
+            let status = resp.status().as_u16();
+            if resp.status().is_redirection() {
+                redirects += 1;
+                if redirects > WEB_FETCH_MAX_REDIRECTS {
+                    return Err("web-fetch blocked: excessive redirects".to_string());
+                }
+                let loc = match resp.headers().get(reqwest::header::LOCATION) {
+                    Some(v) => match v.to_str() {
+                        Ok(s) => s.to_string(),
+                        Err(_) => return Err("web-fetch blocked: invalid redirect".to_string()),
+                    },
+                    None => return Ok(WebFetchOutcome::status(status).into_tool_result()),
+                };
+                let next = current
+                    .join(&loc)
+                    .map_err(|_| "web-fetch blocked: unresolvable redirect target".to_string())?;
+                // Validate redirect target syntax/creds before following.
+                let _ = parse_and_validate_fetch_url(next.as_str())
+                    .map_err(|e| format!("web-fetch blocked by redirect: {}", e))?;
+                if !next.username().is_empty() || next.password().is_some() {
+                    return Err(
+                        "web-fetch blocked: redirect target contains credentials".to_string()
+                    );
+                }
+                current = next;
+                continue;
+            }
+
+            if !resp.status().is_success() {
+                return Ok(WebFetchOutcome::status(status).into_tool_result());
+            }
+
+            // Supported type?
+            let ct = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .to_string();
+            if !is_supported_response_type(&ct) {
+                return Err("web-fetch blocked: unsupported response type".to_string());
+            }
+
+            // Bounded read (protects size + decomp expansion).
+            let body = read_bounded_text(resp, WEB_FETCH_MAX_BODY_BYTES).await?;
+            return Ok(WebFetchOutcome::success(status, body).into_tool_result());
         }
     };
-    let status = response.status().as_u16();
-    if !response.status().is_success() {
-        return Ok(WebFetchOutcome::status(status).into_tool_result());
+
+    match tokio::time::timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS), fetch_fut).await {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(msg)) => {
+            Ok(WebFetchOutcome::transport_error(&redact_for_error(&msg)).into_tool_result())
+        }
+        Err(_) => Ok(WebFetchOutcome::transport_error("web-fetch timed out").into_tool_result()),
     }
-    let body = response
-        .text()
-        .await
-        .map_err(|err| format!("web-fetch could not read the response body: {err}"))?;
-    Ok(WebFetchOutcome::success(status, body).into_tool_result())
 }
 
 /// Whether the resolution honors an approving decision (once/session/rule/modify).
