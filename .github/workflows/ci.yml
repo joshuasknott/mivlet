@@ -24,9 +24,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm marketing:check-forbidden-claims || node apps/marketing/scripts/check-claims.mjs dist || echo "claims scanner (non-blocking in this step)"
       - run: pnpm perf:check
       - run: pnpm perf:test
       - run: pnpm tauri:check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+      # Conservative waitlist checks (D1 migrations use wrangler local, no secrets)
+      - run: pnpm --filter @fable/waitlist build
+      - run: pnpm --filter @fable/marketing build

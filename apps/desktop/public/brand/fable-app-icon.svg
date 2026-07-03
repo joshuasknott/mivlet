@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" aria-hidden="true">
+  <!-- Placeholder app icon base; copper on graphite per brand tokens -->
+  <rect width="512" height="512" rx="80" fill="#17191A"/>
+  <rect x="64" y="64" width="384" height="384" rx="40" fill="#A16B3F"/>
+  <circle cx="256" cy="256" r="96" fill="#F6F2EA"/>
+</svg>
