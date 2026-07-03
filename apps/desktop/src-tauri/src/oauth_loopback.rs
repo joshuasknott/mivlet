@@ -22,6 +22,7 @@ use crate::models::{ConnectorAuthRequest, ConnectorAuthResult, ConnectorCommandE
 /// The window of time a loopback listener waits for the provider callback before
 /// the in-flight authorization attempt is considered abandoned.
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
+const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Bounded limits for the deterministic single-callback HTTP/1.x parser.
 /// These reject DoS, smuggling, and oversized inputs while passing all
@@ -110,6 +111,41 @@ fn contains_control(s: &str) -> bool {
     s.bytes().any(|b| b < 0x20 || b == 0x7f)
 }
 
+fn is_http_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|b| {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'!' | b'#'
+                        | b'$'
+                        | b'%'
+                        | b'&'
+                        | b'\''
+                        | b'*'
+                        | b'+'
+                        | b'-'
+                        | b'.'
+                        | b'^'
+                        | b'_'
+                        | b'`'
+                        | b'|'
+                        | b'~'
+                )
+        })
+}
+
+fn is_literal_loopback_host(value: &str) -> bool {
+    let value = value.trim();
+    if value == "127.0.0.1" || value == "[::1]" {
+        return true;
+    }
+    value
+        .strip_prefix("127.0.0.1:")
+        .or_else(|| value.strip_prefix("[::1]:"))
+        .is_some_and(|port| port.parse::<u16>().is_ok())
+}
+
 fn has_valid_percent_encoding(s: &str) -> bool {
     let b = s.as_bytes();
     let mut i = 0;
@@ -161,7 +197,6 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
             false,
         ));
     }
-
     let header_section = &request[..header_end + 2];
 
     // Strict CRLF line extraction; bare CR or LF is CRLF confusion / smuggling.
@@ -376,7 +411,7 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
         };
         let name = &line[..colon_pos];
         let value = &line[colon_pos + 1..].trim_start();
-        if name.trim().is_empty() {
+        if !is_http_token(name) {
             return Err(command_error(
                 "invalid-request",
                 "oauth",
@@ -415,6 +450,14 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
             host = Some(value);
         }
         if name_lower == "content-length" {
+            if has_content_length {
+                return Err(command_error(
+                    "invalid-request",
+                    "oauth",
+                    "OAuth callback had duplicate Content-Length headers.",
+                    false,
+                ));
+            }
             has_content_length = true;
             match value.parse::<usize>() {
                 Ok(len) => content_length = Some(len),
@@ -429,6 +472,14 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
             }
         }
         if name_lower == "transfer-encoding" {
+            if has_transfer_encoding {
+                return Err(command_error(
+                    "invalid-request",
+                    "oauth",
+                    "OAuth callback had duplicate Transfer-Encoding headers.",
+                    false,
+                ));
+            }
             has_transfer_encoding = true;
         }
     }
@@ -450,6 +501,14 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
             false,
         ));
     }
+    if !request[header_end + 4..].is_empty() {
+        return Err(command_error(
+            "invalid-request",
+            "oauth",
+            "OAuth callback must contain exactly one header-only request.",
+            false,
+        ));
+    }
 
     // Enforce literal loopback listener Host expectations (127.0.0.1 or ::1
     // forms) where applicable. HTTP/1.1 requires Host; HTTP/1.0 does not.
@@ -458,14 +517,7 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
     // callbacks that the prior minimal parser would have forwarded).
     let is_http11 = version == "HTTP/1.1";
     if let Some(h) = host {
-        let h = h.trim();
-        let is_literal_loopback = h == "127.0.0.1"
-            || h.starts_with("127.0.0.1:")
-            || h == "[::1]"
-            || h.starts_with("[::1]:")
-            || h == "::1"
-            || h.starts_with("::1:");
-        if !is_literal_loopback {
+        if !is_literal_loopback_host(h) {
             return Err(command_error(
                 "invalid-request",
                 "oauth",
@@ -495,10 +547,8 @@ async fn read_callback_target(
 ) -> Result<String, ConnectorCommandError> {
     let mut buffer = Vec::with_capacity(8192);
     let mut tmp = [0u8; 1024];
-    // Bounded read iterations prevent pathological non-progression while
-    // still using the outer CALLBACK_TIMEOUT (only around accept) for timing.
-    // Partial or slow sends that never produce a full request are rejected
-    // as malformed once EOF or limit is hit; no new per-read timeouts added.
+    // Bound each read after accept so a client cannot hold the single callback
+    // socket open indefinitely with a partial request.
     const MAX_READ_ITERS: usize = 16;
     for _ in 0..MAX_READ_ITERS {
         if buffer.len() > MAX_TOTAL_HEADER_BYTES {
@@ -509,9 +559,19 @@ async fn read_callback_target(
                 false,
             ));
         }
-        let n = stream.read(&mut tmp).await.map_err(|_| {
-            command_error("unknown", "oauth", "OAuth callback was unreadable.", false)
-        })?;
+        let n = tokio::time::timeout(CALLBACK_READ_TIMEOUT, stream.read(&mut tmp))
+            .await
+            .map_err(|_| {
+                command_error(
+                    "invalid-request",
+                    "oauth",
+                    "OAuth callback request timed out.",
+                    false,
+                )
+            })?
+            .map_err(|_| {
+                command_error("unknown", "oauth", "OAuth callback was unreadable.", false)
+            })?;
         if n == 0 {
             break;
         }
@@ -849,44 +909,28 @@ mod tests {
                 b"GET /callback?code=1&state=2 HTTP/1.1\r\nHost: 127.0.0.1:1\nX-Bar: z\r\n\r\n".to_vec(),
                 Err("ambiguous line endings"),
             ),
-            // Request smuggling: extra request after terminator must not affect first parse
+            // Pipelined/smuggled bytes after the header-only callback are rejected.
             (
                 b"GET /callback?code=good&state=good HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\nGET /smuggle?code=bad HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n".to_vec(),
-                Ok("/callback?code=good&state=good"),
+                Err("exactly one"),
+            ),
+            // Duplicate framing headers are rejected even when values agree.
+            (
+                b"GET /callback?code=1&state=2 HTTP/1.1\r\nHost: 127.0.0.1:1\r\nContent-Length: 0\r\nContent-Length: 0\r\n\r\n".to_vec(),
+                Err("duplicate Content-Length"),
             ),
             // Oversized total headers (via many small)
             // (constructed below to exceed MAX without huge literal)
         ];
 
-        for (i, (input, expected)) in cases.iter().enumerate() {
+        for (input, expected) in &cases {
             let res = parse_callback_target(input);
-            // Verbose per-case output for --nocapture so verification log
-            // explicitly shows every table case (attack + valid) result.
             match expected {
                 Ok(exp_target) => {
-                    let got = res.as_ref().map(|s| s.as_str()).unwrap_or("<err>");
-                    eprintln!(
-                        "TABLE[{}]: len={} expected=Ok({}) got={}",
-                        i,
-                        input.len(),
-                        exp_target,
-                        got
-                    );
                     let got = res.expect("valid case must parse");
                     assert_eq!(got, *exp_target, "target must match verbatim for valid");
                 }
                 Err(substr) => {
-                    let got = match &res {
-                        Ok(t) => format!("Ok({})", t),
-                        Err(e) => format!("Err({})", e.message),
-                    };
-                    eprintln!(
-                        "TABLE[{}]: len={} expected=Err({}) got={}",
-                        i,
-                        input.len(),
-                        substr,
-                        got
-                    );
                     let err = res.expect_err("attack must be rejected");
                     assert_eq!(err.code, "invalid-request");
                     assert!(
@@ -906,10 +950,6 @@ mod tests {
             many_headers.push_str(&format!("X-Hdr-{}: value{}\r\n", i, i));
         }
         many_headers.push_str("\r\n");
-        eprintln!(
-            "TABLE[dynamic]: many_headers len={} (expect too many)",
-            many_headers.len()
-        );
         let res = parse_callback_target(many_headers.as_bytes());
         let err = res.expect_err("excessive headers");
         assert_eq!(err.code, "invalid-request");
@@ -919,10 +959,6 @@ mod tests {
         let long_header = format!(
             "GET /callback?state=ok HTTP/1.1\r\nHost: 127.0.0.1:1\r\nX-Long: {}\r\n\r\n",
             "Y".repeat(2000)
-        );
-        eprintln!(
-            "TABLE[dynamic]: long_header len={} (expect too long/large)",
-            long_header.len()
         );
         let res = parse_callback_target(long_header.as_bytes());
         let err = res.expect_err("oversized header");
@@ -936,7 +972,6 @@ mod tests {
             "GET /callback?state={} HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n",
             "Z".repeat(4096)
         );
-        eprintln!("OVERSIZE_TEST: len={} (expect too long)", long.len());
         let err = parse_callback_target(long.as_bytes()).expect_err("line too long");
         assert_eq!(err.code, "invalid-request");
         assert!(err.message.contains("too long"));
