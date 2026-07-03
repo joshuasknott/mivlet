@@ -1,0 +1,26 @@
+{
+  "name": "@fable/waitlist",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fable waitlist Cloudflare Worker (isolated from auth broker). Implements privacy-conscious signup per docs/marketing.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "wrangler dev --config wrangler.jsonc --port 8789",
+    "worker:dev": "wrangler dev --config wrangler.jsonc --port 8789",
+    "worker:deploy": "wrangler deploy --config wrangler.jsonc",
+    "worker:deploy:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
+    "worker:types": "wrangler types --config wrangler.jsonc",
+    "test": "vitest run",
+    "migrate": "wrangler d1 migrations apply waitlist-db --local --config wrangler.jsonc"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "@cloudflare/workers-types": "^4.20240620.0",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.105.0"
+  }
+}
