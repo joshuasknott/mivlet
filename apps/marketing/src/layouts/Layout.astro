@@ -1,0 +1,58 @@
+---
+import '../styles/global.css';
+export interface Props {
+  title: string;
+  description?: string;
+  noindex?: boolean;
+}
+const { title, description = "Open AI workspace for real work.", noindex = false } = Astro.props;
+const canonical = new URL(Astro.url.pathname, Astro.site).href;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonical} />
+  {noindex && <meta name="robots" content="noindex" />}
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:image" content="/og-image.png" />
+  <meta name="theme-color" content="#17191A" />
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to main content</a>
+  <header>
+    <nav aria-label="Primary">
+      <a href="/" class="logo">Fable</a>
+      <ul>
+        <li><a href="/product">Product</a></li>
+        <li><a href="/connectors">Connectors</a></li>
+        <li><a href="/open-source">Open Source</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/waitlist">Waitlist</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main id="main">
+    <slot />
+  </main>
+  <footer>
+    <nav aria-label="Legal">
+      <a href="/privacy-policy">Privacy Policy</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/status">Status</a>
+      <a href="https://github.com" rel="noopener">GitHub</a>
+      <!-- mailto decided by owner -->
+    </nav>
+    <p class="fine">Fable is open-source, local-first software. All claims are grounded in the repository.</p>
+  </footer>
+  <script>
+    // Minimal progressive enhancement hook (no PII)
+    document.documentElement.classList.add('js');
+  </script>
+</body>
+</html>
