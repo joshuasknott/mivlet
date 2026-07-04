@@ -5,12 +5,15 @@ import { join } from 'node:path';
 const DIST = 'dist';
 
 describe('marketing site build artifacts (M-*)', () => {
-  it('M-01 home has tagline and Windows preview label', () => {
+  it('M-01 home has provider section and no Windows preview label', () => {
     const p = join(DIST, 'index.html');
     if (!existsSync(p)) { console.warn('dist not present; run build first'); return; }
     const html = readFileSync(p, 'utf8');
-    expect(html).toMatch(/Open AI workspace for real work/i);
-    expect(html).toMatch(/Windows preview/i);
+    expect(html).toMatch(/Your local command surface for AI/i);
+    expect(html).toMatch(/Codex/i);
+    expect(html).toMatch(/OpenCode/i);
+    expect(html).not.toMatch(/Hugging Face/i);
+    expect(html).not.toMatch(/Windows preview/i);
   });
 
   it('M-02 connectors uses only allowed status labels', () => {

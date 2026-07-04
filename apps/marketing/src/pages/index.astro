@@ -1,156 +1,237 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import WaitlistForm from '../components/WaitlistForm.astro';
+
+const providers = [
+  { name: 'Codex', icon: '/provider-icons/codex.svg' },
+  { name: 'Cursor', icon: '/provider-icons/cursor.svg' },
+  { name: 'Claude', icon: '/provider-icons/claude.svg' },
+  { name: 'Grok', icon: '/provider-icons/grok.svg' },
+  { name: 'GitHub Copilot', icon: '/provider-icons/github-copilot.svg' },
+  { name: 'Gemini', icon: '/provider-icons/gemini.svg' },
+  { name: 'OpenAI', icon: '/provider-icons/openai.svg' },
+  { name: 'Z.ai', icon: '/provider-icons/zai.svg' },
+  { name: 'DeepSeek', icon: '/provider-icons/deepseek.svg' },
+  { name: 'MiniMax', icon: '/provider-icons/minimax.svg' },
+  { name: 'Kimi', icon: '/provider-icons/kimi.svg' },
+  { name: 'OpenCode', icon: '/provider-icons/opencode.svg' },
+];
+
+const pillars = [
+  {
+    title: 'Local-first',
+    body: 'Private context starts on your machine, with clear boundaries before anything leaves it.',
+  },
+  {
+    title: 'Open source',
+    body: 'Runtime contracts, adapter boundaries, and local data formats are built to be inspectable.',
+  },
+  {
+    title: 'Permissioned',
+    body: 'Files, tools, memory, schedules, and external actions stay visible before work is delegated.',
+  },
+];
+
+const connectors = [
+  { name: 'GitHub', icon: '/provider-icons/github.svg' },
+  { name: 'Vercel', icon: '/provider-icons/vercel.svg' },
+  { name: 'Google Drive', icon: '/provider-icons/google-drive.svg' },
+  { name: 'Gmail', icon: '/provider-icons/gmail.svg' },
+  { name: 'Calendar', icon: '/provider-icons/calendar.svg' },
+  { name: 'Slack', icon: '/provider-icons/slack.svg' },
+  { name: 'Notion', icon: '/provider-icons/notion.svg' },
+  { name: 'Linear', icon: '/provider-icons/linear.svg' },
+];
 ---
-<Layout title="Fable — Open AI workspace for real work" description="Open-source, local-first AI workspace. Your workspace stays on your machine.">
-  
-  <!-- Hero Section -->
-  <section id="hero" style="padding-top: 3rem; padding-bottom: 3rem; text-align: center;">
-    <h1 style="font-size: 2.8rem; margin-bottom: 1.5rem;">Open AI workspace for real work.</h1>
-    <p class="lead" style="max-width: 60ch; margin-left: auto; margin-right: auto;">
-      Fable is an open-source, local-first AI workspace. Your work stays on your machine. Chat with your codebase, delegate work across files and tools, and maintain absolute control at every step.
-    </p>
-    <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap;">
-      <span class="status preview" style="font-size: 0.9rem; padding: 0.3rem 0.8rem;">Windows preview</span>
-      <a href="#waitlist" class="btn" style="width: auto; padding: 0.4rem 1.2rem;">Join the waitlist</a>
-    </div>
-  </section>
+<Layout title="Fable | Local-first AI, open by design" description="Fable is a local-first, open-source command surface for AI providers, files, tools, memory, schedules, and approvals.">
+  <section id="hero" class="home-hero" aria-labelledby="hero-title">
+    <div class="hero-light" aria-hidden="true"></div>
 
-  <!-- Honest Box Disclaimer -->
-  <div class="honest-box" style="margin-top: 1rem; margin-bottom: 3rem;">
-    <strong>Grounded Repository State</strong>
-    Fable core runs locally without a hosted cloud account. Unsigned Windows preview builds are available to build from source; packaging for macOS and Linux is not yet complete.
-  </div>
-
-  <hr style="border: 0; border-top: 1px solid var(--border-color); margin-bottom: 3rem;" />
-
-  <!-- What it does now (Product Features) -->
-  <section id="product" style="margin-bottom: 4rem;">
-    <h2>What Fable is & does today</h2>
-    <p style="margin-bottom: 2rem;">Fable is designed to bypass cloud intermediaries, providing local agency directly on your machine. The following features are fully implemented in the current repository:</p>
-    
-    <div class="grid">
-      <div class="card">
-        <h3>Local-First Architecture</h3>
-        <p>Built with Tauri 2 and React. All files, prompts, and settings are stored locally in an encrypted SQLite database on your device. No Fable account is required to use the core application.</p>
-      </div>
-      
-      <div class="card">
-        <h3>Knowledge & Retrieval</h3>
-        <p>Import local files and folders (up to 2MB). Includes structural chunking (for Markdown, JSON, CSV, YAML) and hybrid lexical/semantic ranking (reciprocal-rank fusion) for secure local search.</p>
-      </div>
-
-      <div class="card">
-        <h3>Control & Approvals</h3>
-        <p>Exposes granular permission levels (Read Only, Ask Me, Work Freely). The Rust runtime persists exact one-time execution permits and audit logs to prevent unauthorized tool execution.</p>
-      </div>
-
-      <div class="card">
-        <h3>Local Schedules</h3>
-        <p>Create, pause, resume, and manage automated task schedules locally. The scheduler leases due occurrences and executes workflows through your connected API providers when the app is active.</p>
+    <div class="hero-copy">
+      <img class="dragon-mark" src="/brand/fable-tech-dragon-transparent.png" alt="Minimal Fable technology dragon mark" loading="eager" />
+      <p class="eyebrow">Local-first AI. Open by design.</p>
+      <h1 id="hero-title">Fable</h1>
+      <p class="hero-subtitle">Your local command surface for AI.</p>
+      <p class="hero-body">
+        Use the models you choose. Keep context, approvals, and execution under your control.
+      </p>
+      <div class="hero-actions" aria-label="Primary actions">
+        <a class="btn btn-light" href="#updates">Get updates</a>
+        <a class="btn btn-ghost" href="#connectors">View connectors</a>
       </div>
     </div>
   </section>
 
-  <!-- Connectors Matrix Section -->
-  <section id="connectors" style="margin-bottom: 4rem;">
-    <h2>Connector Status</h2>
-    <p>We are committed to absolute honesty regarding integrations. Every connector operates under one of these statuses:</p>
-    
-    <div style="overflow-x: auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>Integration / Feature</th>
-            <th>Status</th>
-            <th>Capabilities & Constraints</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><strong>Local Files & Folders</strong></td>
-            <td><span class="status implemented">Implemented</span></td>
-            <td>Full local read/import, chunking, and SQLite cache integration.</td>
-          </tr>
-          <tr>
-            <td><strong>Knowledge & Memory</strong></td>
-            <td><span class="status implemented">Implemented</span></td>
-            <td>Durable SQLite storage with Composite-Key isolation (schema v5).</td>
-          </tr>
-          <tr>
-            <td><strong>BYOK API Providers</strong></td>
-            <td><span class="status implemented">Implemented</span></td>
-            <td>Bring Your Own Key for OpenAI, Anthropic, Gemini, xAI, and OpenRouter.</td>
-          </tr>
-          <tr>
-            <td><strong>Google Connectors</strong> (Drive, Gmail, Calendar)</td>
-            <td><span class="status gated">Functional but gated</span></td>
-            <td>Works via local PKCE, but requires user-supplied Google Cloud Console OAuth setup.</td>
-          </tr>
-          <tr>
-            <td><strong>Confidential Connectors</strong> (Notion, Slack, Linear)</td>
-            <td><span class="status gated">Functional but gated</span></td>
-            <td>Local adapters are ready, but require client-side configuration or a deployed auth broker.</td>
-          </tr>
-          <tr>
-            <td><strong>GitHub Integration</strong></td>
-            <td><span class="status gated">Functional but gated</span></td>
-            <td>Read-only for issues, repositories, and PRs. GitHub writes are currently <span class="status missing">Missing</span>.</td>
-          </tr>
-          <tr>
-            <td><strong>Browser Automation</strong></td>
-            <td><span class="status preview">Preview-only</span></td>
-            <td>Runs on synthetic test fixtures; live headless transport is deferred.</td>
-          </tr>
-          <tr>
-            <td><strong>Local AI Models</strong></td>
-            <td><span class="status missing">Missing</span></td>
-            <td>UI labels local models as planned/disabled; no offline execution runtime is included.</td>
-          </tr>
-          <tr>
-            <td><strong>Voice Dictation</strong></td>
-            <td><span class="status preview">Preview-only</span></td>
-            <td>Relies on browser Web Speech API; no native offline speech engine is integrated.</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="fine">Connector statuses are audited and matched against <code>docs/product/connectors.md</code>.</p>
-  </section>
-
-  <!-- Why Local First Matters -->
-  <section id="why-local" style="margin-bottom: 4rem;">
-    <h2>Why local-first matters</h2>
-    <div class="grid">
-      <div class="card" style="border-left: 2px solid var(--copper);">
-        <h3>Absolute Data Privacy</h3>
-        <p>Your codebase, databases, API calls, and workspace context remain strictly on your own hardware. Your data is never collected or analyzed by Fable.</p>
+  <section id="providers" class="section providers-section" aria-labelledby="providers-title">
+    <div class="section-heading split">
+      <div>
+        <p class="eyebrow dark">Providers</p>
+        <h2 id="providers-title">Use the models you choose.</h2>
       </div>
-      <div class="card" style="border-left: 2px solid var(--copper);">
-        <h3>Credential Boundaries</h3>
-        <p>Your API keys and OAuth tokens are kept in secure OS credential stores (Windows Credential Manager / macOS Keychain) through Tauri's credential boundaries, never in the cloud.</p>
+      <p>
+        Bring subscription tools, hosted APIs, and open runtimes into one local command surface without locking the workspace to one provider.
+      </p>
+    </div>
+    <div class="ecosystem-rail" data-auto-rail data-speed="22" tabindex="0" aria-label="AI provider ecosystem">
+      <div class="ecosystem-track">
+        <div class="ecosystem-set">
+          {providers.map((provider) => (
+            <div class="ecosystem-item provider-item">
+              <img src={provider.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+              <span>{provider.name}</span>
+            </div>
+          ))}
+        </div>
+        <div class="ecosystem-set" aria-hidden="true">
+          {providers.map((provider) => (
+            <div class="ecosystem-item provider-item">
+              <img src={provider.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+              <span>{provider.name}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- Waitlist Section -->
-  <section id="waitlist" style="margin-bottom: 4rem; scroll-margin-top: 2rem;">
-    <h2>Join the Fable Windows preview waitlist</h2>
-    <p>Sign up to receive updates and access to the unsigned Windows preview. Joining the waitlist does not create a Fable account and does not guarantee early access.</p>
-    
-    <div class="honest-box">
-      <strong>Waitlist & Data Notice:</strong>
-      Waitlist emails are stored separately from any OAuth or connector configurations. Fable's desktop workspace does not require a cloud account.
+  <section id="product" class="section product-section" aria-labelledby="product-title">
+    <div class="section-heading">
+      <p class="eyebrow dark">Product</p>
+      <h2 id="product-title">Built local-first. Open by default.</h2>
+      <p>
+        Fable organizes models, files, context, memory, schedules, and approvals into one controlled workspace.
+      </p>
     </div>
+    <div class="pillar-grid">
+      {pillars.map((pillar, index) => (
+        <article class="pillar">
+          <span class="pillar-icon" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+          <h3>{pillar.title}</h3>
+          <p>{pillar.body}</p>
+        </article>
+      ))}
+    </div>
+  </section>
 
+  <section id="connectors" class="section connectors-section" aria-labelledby="connectors-title">
+    <div class="section-heading split">
+      <div>
+        <p class="eyebrow dark">Connectors</p>
+        <h2 id="connectors-title">Connect the tools around your work.</h2>
+      </div>
+      <p>
+        Providers supply the intelligence. Connectors are explicit bridges to the tools, files, and services around your workspace.
+      </p>
+    </div>
+    <div class="ecosystem-rail" data-auto-rail data-speed="18" tabindex="0" aria-label="Connector ecosystem">
+      <div class="ecosystem-track">
+        <div class="ecosystem-set">
+          {connectors.map((connector) => (
+            <div class="ecosystem-item connector-item">
+              <img src={connector.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+              <span>{connector.name}</span>
+            </div>
+          ))}
+        </div>
+        <div class="ecosystem-set" aria-hidden="true">
+          {connectors.map((connector) => (
+            <div class="ecosystem-item connector-item">
+              <img src={connector.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+              <span>{connector.name}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="updates" class="section updates-section" aria-labelledby="updates-title">
+    <div class="updates-copy">
+      <p class="eyebrow dark">Updates</p>
+      <h2 id="updates-title">Follow the product as it opens up.</h2>
+      <p>
+        Join the Fable list for product updates. This is not a hosted workspace account and does not give Fable access to your local data.
+      </p>
+    </div>
     <WaitlistForm />
   </section>
-
-  <!-- Status / Privacy Note -->
-  <section id="status-note" style="margin-bottom: 2rem;">
-    <h2>Legal & Project Status</h2>
-    <p class="fine">
-      Fable is currently in active development. Unsigned Windows preview builds are available to build from source directly from the repository. Full legal notices can be found in our <a href="/privacy-policy">Privacy Policy (Draft)</a> and <a href="/privacy">Privacy Notice</a>.
-    </p>
-  </section>
 </Layout>
+
+<script>
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  document.querySelectorAll<HTMLElement>('[data-auto-rail]').forEach((rail) => {
+    let paused = false;
+    let dragging = false;
+    let startX = 0;
+    let startScroll = 0;
+    let lastFrame = performance.now();
+    let resumeTimer = 0;
+    const speed = Number(rail.dataset.speed ?? 20);
+
+    const resumeSoon = () => {
+      window.clearTimeout(resumeTimer);
+      resumeTimer = window.setTimeout(() => {
+        paused = false;
+      }, 900);
+    };
+
+    const normalizeScroll = () => {
+      const midpoint = rail.scrollWidth / 2;
+      if (midpoint > 0 && rail.scrollLeft >= midpoint) rail.scrollLeft -= midpoint;
+      if (rail.scrollLeft < 0) rail.scrollLeft += midpoint;
+    };
+
+    const animate = (time: number) => {
+      const elapsed = Math.min(time - lastFrame, 50);
+      lastFrame = time;
+      if (!paused && !reducedMotion.matches) {
+        rail.scrollLeft += speed * (elapsed / 1000);
+        normalizeScroll();
+      }
+      requestAnimationFrame(animate);
+    };
+
+    rail.addEventListener('pointerdown', (event) => {
+      dragging = true;
+      paused = true;
+      startX = event.clientX;
+      startScroll = rail.scrollLeft;
+      rail.setPointerCapture(event.pointerId);
+      rail.classList.add('is-dragging');
+    });
+
+    rail.addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      rail.scrollLeft = startScroll - (event.clientX - startX);
+    });
+
+    const stopDragging = (event: PointerEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      rail.releasePointerCapture(event.pointerId);
+      rail.classList.remove('is-dragging');
+      normalizeScroll();
+      resumeSoon();
+    };
+
+    rail.addEventListener('pointerup', stopDragging);
+    rail.addEventListener('pointercancel', stopDragging);
+    rail.addEventListener('wheel', () => {
+      paused = true;
+      resumeSoon();
+    }, { passive: true });
+    rail.addEventListener('mouseenter', () => {
+      paused = true;
+    });
+    rail.addEventListener('mouseleave', () => {
+      if (!dragging) resumeSoon();
+    });
+    rail.addEventListener('focusin', () => {
+      paused = true;
+    });
+    rail.addEventListener('focusout', resumeSoon);
+
+    requestAnimationFrame(animate);
+  });
+</script>

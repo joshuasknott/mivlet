@@ -215,3 +215,74 @@ No actionable P0, P1, or P2 mismatches remain.
 - Browser console errors/warnings for tested flows — none.
 
 final result: passed
+
+## Marketing page QA (2026-07-04)
+
+### Comparison target
+
+- Source visual truth:
+  - `C:\Users\Josh\.codex\generated_images\019f2a7d-2c89-7bf3-b48c-85c90e7d18b2\ig_0a10ca53dfea0ee0016a485b25a4c48191a41b0d89a2f40129.png`
+- Implementation screenshot:
+  - `C:\Users\Josh\Projects\fable\output\playwright\marketing-home-full.png`
+- Combined comparison:
+  - `C:\Users\Josh\Projects\fable\output\playwright\marketing-design-comparison.png`
+- Viewport: 1440x1100, full-page capture.
+- State: marketing home, default state.
+
+### Full-view comparison
+
+The implementation preserves the selected mockup's black-and-white visual
+system, large Fable dragon lockup, strong hero typography, grayscale horizon
+light, local-first/open-source product framing, connector ecosystem, and
+product updates section.
+
+Later user direction intentionally moved providers out of the hero into a
+dedicated rail directly below it, removed Hugging Face, removed icon cards,
+required real provider and connector icons, and added automatic and manual
+horizontal rail movement.
+
+### Focused comparison
+
+The hero, provider rail, connector rail, and update form are readable in the
+full-page comparison. Desktop and mobile screenshots were reviewed
+independently for text overlap, asset transparency, responsive hierarchy, and
+rail clipping.
+
+### Required fidelity surfaces
+
+- Fonts and typography: hierarchy, wrapping, line height, and weights remain
+  legible at desktop and mobile sizes.
+- Spacing and layout rhythm: hero, section rhythm, rails, product pillars, and
+  update form maintain consistent alignment.
+- Colors and visual tokens: the implementation uses a strict black, white, and
+  grayscale token system.
+- Image and asset fidelity: the Fable dragon has a transparent background;
+  Codex, OpenCode, provider, and connector icons use local real SVG assets
+  rendered in grayscale.
+- Copy and content: Windows preview language and Hugging Face are absent from
+  the marketing implementation.
+- Accessibility and behavior: the rails auto-scroll, support pointer/touch
+  scrolling and manual drag, remain keyboard-focusable, and disable animation
+  for reduced-motion preferences.
+
+### Findings
+
+No actionable P0, P1, or P2 findings remain.
+
+### Patches made during QA
+
+- Rebuilt the home page from the selected third mockup direction.
+- Added the transparent Fable technology-dragon asset.
+- Added local provider and connector SVG assets.
+- Moved providers below the hero.
+- Converted provider and connector groups into transparent, one-line,
+  auto-scrolling, manually draggable rails.
+- Added smooth light-horizon animation and responsive layouts.
+- Updated waitlist copy and static marketing tests.
+
+### Follow-up polish
+
+- P3: A future brand pass can replace the generated raster dragon with a
+  production vector master while preserving the current silhouette.
+
+final result: passed

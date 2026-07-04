@@ -5,7 +5,7 @@ export interface Props {
   description?: string;
   noindex?: boolean;
 }
-const { title, description = "Open-source, local-first AI workspace.", noindex = false } = Astro.props;
+const { title, description = "Local-first AI, open by design.", noindex = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site || 'https://fable.tools').href;
 ---
 <!doctype html>
@@ -28,13 +28,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site || 'https://fable.tools
   <header>
     <nav aria-label="Primary">
       <a href="/" class="logo-container">
-        <img src="/brand/fable-logo-dark.svg" alt="Fable" class="logo-image" />
+        <img src="/brand/fable-tech-dragon-transparent.png" alt="" class="logo-image" />
+        <span>Fable</span>
       </a>
       <ul>
         <li><a href="/#product">Product</a></li>
+        <li><a href="/#providers">Providers</a></li>
         <li><a href="/#connectors">Connectors</a></li>
-        <li><a href="/#why-local">Why Local-First</a></li>
-        <li><a href="/#waitlist">Waitlist</a></li>
+        <li><a href="/open-source">Open Source</a></li>
       </ul>
     </nav>
   </header>

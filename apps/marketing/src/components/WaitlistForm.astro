@@ -9,11 +9,11 @@ const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
   <input id="email" name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" />
 
   <fieldset>
-    <legend>Platform interest (optional)</legend>
-    <label><input type="radio" name="platform_interest" value="windows" checked /> Windows (current preview)</label>
+    <legend>Product interest (optional)</legend>
+    <label><input type="radio" name="platform_interest" value="unspecified" checked /> Product updates</label>
     <label><input type="radio" name="platform_interest" value="macos" /> macOS</label>
     <label><input type="radio" name="platform_interest" value="linux" /> Linux</label>
-    <label><input type="radio" name="platform_interest" value="unspecified" /> Unspecified</label>
+    <label><input type="radio" name="platform_interest" value="windows" /> Windows</label>
   </fieldset>
 
   <!-- Honeypot -->
@@ -46,7 +46,7 @@ const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
     </div>
   </noscript>
 
-  <button type="submit">Join the Windows Preview Waitlist</button>
+  <button type="submit">Get product updates</button>
   <p class="fine" id="form-status" aria-live="polite" style="margin-top: 1rem;"></p>
 </form>
 
