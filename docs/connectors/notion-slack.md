@@ -28,7 +28,7 @@ Implemented API operations: search; page metadata; paginated block trees; databa
 
 ## Slack
 
-Create and distribute a Slack app, enable OAuth v2, and install it separately in each workspace. Typical read scopes are `channels:read`, `channels:history`, `groups:read`, `groups:history`, `users:read`, and (when provider policy permits it) `search:read`. Writes require `chat:write`; reactions require `reactions:write`. Slack only returns conversations covered by the installed token and scopes, and private-channel access normally requires the app to be present in that channel.
+Create and distribute a Slack app, enable OAuth v2, and install it separately in each workspace. Current brokered Slack support uses bot-token scopes only: `channels:read`, `channels:history`, `groups:read`, `groups:history`, `im:read`, `mpim:read`, and `users:read`. Writes require `chat:write`; reactions require `reactions:write`. Slack global message search (`search:read` / `search.messages`) requires a user token and is intentionally not advertised by the broker until Fable has a two-token Slack model. Slack only returns conversations covered by the installed token and scopes, and private-channel access normally requires the app to be present in that channel.
 
 ## Sync and cache lifecycle
 

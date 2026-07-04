@@ -17,7 +17,7 @@ confidential OAuth lifecycle, and all redacted error handling) is
 runtime-neutral: it uses only the Web Crypto API and standard
 `Request`/`Response`, and both transports delegate to one shared
 `src/router.ts`. Provider-specific differences (token/identity/revoke endpoint
-shapes, PKCE mode, identity normalization) are isolated in
+shapes, PKCE mode, refresh/revoke support, scope serialization, and identity normalization) are isolated in
 `src/provider-profiles.ts`.
 
 The implemented version-1 browser protocol is authoritative: `authorize`
@@ -68,9 +68,12 @@ directly with the provider APIs.
   redeems the single-use handoff ticket for the token set and normalized account
   identity.
 - **Token refresh** - `POST /oauth/{provider}/refresh`: rotate an expiring
-  access token using the refresh token and confidential client credentials.
-- **Revocation** - `POST /oauth/{provider}/revoke`: revoke the access/refresh
-  token at the provider during a desktop disconnect.
+  access token only for providers whose documented OAuth flow returns refresh
+  tokens. Providers without refresh support fail closed with `needs-auth`.
+- **Revocation** - `POST /oauth/{provider}/revoke`: revoke or delete the token
+  at the provider only when that provider documents a matching endpoint. Providers
+  without a remote revoke endpoint return local success so desktop disconnect can
+  still remove local credentials.
 - **Identity resolution (internal)**: resolve the connected account's stable ID,
   display name, handle, email, workspace, and avatar during callback handling.
   There is no public identity route.
@@ -78,6 +81,23 @@ directly with the provider APIs.
 The desktop resolves exactly the OAuth routes above from the broker base URL via
 `resolve_broker_endpoints` in `connector_auth.rs`. No connector data route is
 derivable.
+
+## Provider protocol matrix
+
+The broker intentionally does **not** claim uniform OAuth behavior across
+providers:
+
+| Provider | Flow | PKCE | Refresh | Remote revoke/disconnect | Notable setup |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| GitHub | OAuth App web flow | S256 supported | No for OAuth Apps | `DELETE /applications/{client_id}/token` | `repo` is broad read/write OAuth scope; GitHub App is the future fine-grained alternative. |
+| Vercel | Integration REST API install flow | Not documented | Not documented | No generic revoke endpoint | Requires `FABLE_BROKER_VERCEL_INTEGRATION_SLUG`; team installs require live validation. |
+| Linear | OAuth 2.0 app | S256 supported | Yes | `POST /oauth/revoke` form body | Authorization URL is `https://linear.app/oauth/authorize`; scopes are comma-separated. |
+| Notion | Public connection OAuth | Not documented for this flow | Yes | Not enabled in this broker until live semantics are certified | Authorization includes `owner=user`; token/refresh use HTTP Basic auth plus JSON and `Notion-Version`. |
+| Slack | OAuth v2 confidential app | Not used for confidential broker flow | No unless token rotation is separately enabled | `auth.revoke` | Current single-token model uses bot token scopes only; global `search:read` requires a future user-token path. |
+
+The desktop still stores only provider tokens in the OS credential boundary, and
+the broker still holds only provider client secrets and short-lived pending
+state/handoff material.
 
 ### The broker MUST NOT do
 
@@ -147,6 +167,7 @@ pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_GITHUB_CLIENT_ID
 pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET
 pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_CLIENT_ID
 pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET
+pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_INTEGRATION_SLUG
 pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_LINEAR_CLIENT_ID
 pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET
 pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_NOTION_CLIENT_ID
@@ -195,6 +216,7 @@ or secrets.
 | `FABLE_BROKER_PORT` / `FABLE_BROKER_HOST` | Public var | Bind settings for the local Node.js fallback server. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_ID` | Secret/config | Client ID registered in the provider developer console. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET` | Secret | Confidential client secret registered in the provider developer console. |
+| `FABLE_BROKER_VERCEL_INTEGRATION_SLUG` | Config/secret | Vercel Integration URL slug used to build `https://vercel.com/integrations/<slug>/new`. Required for Vercel only. |
 
 Replace `<PROVIDER>` with `GITHUB`, `VERCEL`, `LINEAR`, `NOTION`, or `SLACK`.
 
@@ -335,9 +357,18 @@ provider diagnostic):
   never appears in the response.
 - **`revoke`** — revokes at the provider; HTTP 404 / unknown-token is treated as
   success (already revoked). Non-404 failures map the same way as refresh. The
-  revoked token never appears in the response. GitHub's token-grant revocation
+  revoked token never appears in the response. GitHub's token deletion
   endpoint is keyed by client id; the `{clientId}` placeholder is substituted
   with the configured confidential client id before the call.
+
+Current provider-specific correction: refresh is implemented only for providers
+whose selected OAuth flow documents refresh tokens (Linear and Notion). GitHub
+OAuth App, Vercel Integration, and default Slack OAuth v2 installs fail closed
+with `needs-auth` on refresh. GitHub revocation now uses
+`DELETE /applications/{client_id}/token` with HTTP Basic app authentication and
+an `access_token` JSON body. Vercel Integration and Notion remote revocation are
+treated as unsupported in this broker until live semantics are certified;
+desktop disconnect still removes local credentials.
 
 OAuth error responses are safe to show and log: every response is built from the
 broker's own redacted messages, and the logger redacts token/secret-shaped
@@ -347,12 +378,19 @@ bodies are never logged.
 
 ## Current deployment limitation
 
-The implemented foundation keeps pending OAuth exchanges, handoff tickets, and
-rate-limit counters in memory. This is suitable for local development and
-single-process tests, and it preserves the existing desktop expectations. Before
-external production use on Cloudflare, the single-use pending/handoff stores
-should move to a durable, atomic Worker binding such as a Durable Object so a
-callback and handoff redemption remain valid across isolates and restarts.
+The repository contains Durable Object bindings and encrypted durable-store code,
+but `wrangler.jsonc` still defaults `FABLE_BROKER_STORAGE_BACKEND` to `memory`
+for local determinism. Before external production use on Cloudflare, deployment
+configuration must explicitly set `FABLE_BROKER_STORAGE_BACKEND=durable`, set
+`FABLE_BROKER_STORE_ENCRYPTION_KEY`, and verify the Durable Object migrations and
+bindings in the target account.
+
+Security review also flagged broker contract work that remains outside this
+batch: bind handoff redemption to a desktop-held proof, sender-bind refresh and
+revoke (or replace raw refresh-token POSTs with broker-issued handles), and bind
+connector approvals to the account active at execution time. Do not deploy the
+broker for external users until those contract changes are designed, implemented,
+and reviewed.
 
 ## Provider OAuth callback URL guidance
 
@@ -371,3 +409,15 @@ Examples:
 
 Replace `<your-broker-domain>` with the Cloudflare Workers public origin or a
 custom HTTPS domain bound to the Worker.
+
+## Official protocol references
+
+- GitHub OAuth Apps: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+- GitHub OAuth application REST endpoints: https://docs.github.com/en/rest/apps/oauth-applications?apiVersion=2022-11-28
+- Vercel Integrations REST API OAuth exchange: https://vercel.com/docs/integrations/create-integration/vercel-api-integrations
+- Vercel Sign in with Vercel authorization server reference: https://vercel.com/docs/sign-in-with-vercel/authorization-server-api
+- Linear OAuth 2.0 authentication: https://linear.app/developers/oauth-2-0-authentication
+- Notion public connection authorization: https://developers.notion.com/guides/get-started/authorization
+- Notion create/refresh/revoke token references: https://developers.notion.com/reference/create-a-token
+- Slack OAuth v2 installation: https://docs.slack.dev/authentication/installing-with-oauth/
+- Slack token rotation, PKCE, and revocation references: https://docs.slack.dev/authentication/using-token-rotation/
