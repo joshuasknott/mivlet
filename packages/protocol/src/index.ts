@@ -555,7 +555,7 @@ export interface ConnectorAuthRequest {
   redirectUri?: string;
   /** Authorization callback URL, or the provider-returned code when completing OAuth. */
   callbackUrl?: string;
-  /** Optional incremental subset of the connector's declared OAuth scopes. */
+  /** Optional declared scope set for an explicit reconnect; active grants come from the provider response. */
   requestedScopes?: string[];
 }
 

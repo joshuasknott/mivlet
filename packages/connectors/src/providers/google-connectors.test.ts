@@ -64,7 +64,7 @@ describe("Google Drive production adapter", () => {
       "profile",
       "https://www.googleapis.com/auth/drive.file"
     ]);
-    expect(url.searchParams.get("include_granted_scopes")).toBe("true");
+    expect(url.searchParams.get("include_granted_scopes")).toBeNull();
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
@@ -255,6 +255,34 @@ describe("Google Drive production adapter", () => {
     expect(result.account).toMatchObject({ id: "user-1", displayName: "Test User" });
   });
 
+  it("does not infer granted scopes when Google omits the scope field", async () => {
+    const fetcher = vi.fn(async (url: string) => {
+      if (url === "https://oauth2.googleapis.com/token") {
+        return response({
+          access_token: "access-1",
+          refresh_token: "refresh-1",
+          token_type: "Bearer",
+          expires_in: 3600
+        });
+      }
+      if (url === "https://openidconnect.googleapis.com/v1/userinfo") {
+        return response({ sub: "user-1", email: "test@example.com" });
+      }
+      return response({}, 404);
+    });
+    const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
+    const result = await adapter.completeAuth({
+      callbackUrl: "http://127.0.0.1:43123/callback?state=state-xyz&code=auth-code-123",
+      expectedState: "state-xyz",
+      codeVerifier: "verifier-abc"
+    });
+    expect(result.tokens.scopes).toEqual([]);
+    await expect(adapter.read(
+      { capability: "drive.search", input: {} },
+      result.tokens
+    )).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
   it("rejects callback substitution and missing scopes before provider egress", async () => {
     const fetcher = vi.fn(async () => response({}));
     const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
@@ -270,7 +298,7 @@ describe("Google Drive production adapter", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("preserves refresh tokens and granted scopes when Google omits replacements", async () => {
+  it("preserves refresh tokens but not historical scopes when Google omits scope", async () => {
     const fetcher = vi.fn(async () => response({
       access_token: "new-access",
       token_type: "Bearer",
@@ -285,7 +313,7 @@ describe("Google Drive production adapter", () => {
     })).resolves.toMatchObject({
       accessToken: "new-access",
       refreshToken: "old-refresh",
-      scopes: ["https://www.googleapis.com/auth/drive.file"]
+      scopes: []
     });
   });
 
@@ -601,10 +629,34 @@ describe("google connector capability and approval registration", () => {
 });
 
 describe.skipIf(!process.env.FABLE_LIVE_CONNECTOR_TESTS)("opt-in live google connectors", () => {
-  it("requires deliberately supplied credentials", () => {
+  it("requires deliberately supplied credentials and expected scope claims", () => {
     expect(process.env.FABLE_LIVE_CONNECTOR_TESTS).toBeTruthy();
     expect(
       process.env.FABLE_GOOGLE_TEST_TOKEN
     ).toBeTruthy();
+    expect(
+      process.env.FABLE_GOOGLE_TEST_EXPECTED_SCOPES
+    ).toBeTruthy();
+  });
+
+  it("validates the supplied token's active granted scopes without running OAuth", async () => {
+    const token = process.env.FABLE_GOOGLE_TEST_TOKEN;
+    const expectedScopes = (process.env.FABLE_GOOGLE_TEST_EXPECTED_SCOPES ?? "")
+      .split(/[,\s]+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+    expect(token).toBeTruthy();
+    expect(expectedScopes.length).toBeGreaterThan(0);
+
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(token!)}`);
+    expect(response.ok).toBe(true);
+    const body = await response.json() as { scope?: string; email?: string };
+    const granted = new Set((body.scope ?? "").split(/\s+/).filter(Boolean));
+    for (const scope of expectedScopes) {
+      expect(granted.has(scope)).toBe(true);
+    }
+    if (process.env.FABLE_GOOGLE_TEST_EMAIL) {
+      expect(body.email).toBe(process.env.FABLE_GOOGLE_TEST_EMAIL);
+    }
   });
 });

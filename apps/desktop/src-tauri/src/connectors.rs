@@ -163,6 +163,14 @@ const LINEAR_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("comments:create", "Create comments", "write", false),
 ];
 
+const DRIVE_FILE_ACTION_SCOPES: &[&str] = &["https://www.googleapis.com/auth/drive.file"];
+const GMAIL_COMPOSE_ACTION_SCOPES: &[&str] = &["https://www.googleapis.com/auth/gmail.compose"];
+const GMAIL_SEND_ACTION_SCOPES: &[&str] = &[
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.compose",
+];
+const CALENDAR_WRITE_ACTION_SCOPES: &[&str] = &["https://www.googleapis.com/auth/calendar.events"];
+
 const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
         id: "github",
@@ -658,6 +666,50 @@ fn configuration_required(connector_id: &str) -> ConnectorCommandError {
     )
 }
 
+fn connection_has_scope(connection: &ConnectorConnection, scope_id: &str) -> bool {
+    let shorthand = format!("/{scope_id}");
+    connection
+        .scopes
+        .iter()
+        .any(|scope| scope == scope_id || scope.ends_with(&shorthand))
+}
+
+fn missing_required_scopes(
+    entry: &'static ConnectorCatalogEntry,
+    connection: &ConnectorConnection,
+) -> bool {
+    entry
+        .scopes
+        .iter()
+        .any(|(id, _, _, required)| *required && !connection_has_scope(connection, id))
+}
+
+fn action_required_scopes(action: &str) -> &'static [&'static str] {
+    match action {
+        "google-drive.create-file"
+        | "google-drive.update-file"
+        | "google-drive.move-file"
+        | "google-drive.rename-file"
+        | "google-drive.share-file"
+        | "google-drive.delete-file" => DRIVE_FILE_ACTION_SCOPES,
+        "gmail.create-draft" => GMAIL_COMPOSE_ACTION_SCOPES,
+        "gmail.send" => GMAIL_SEND_ACTION_SCOPES,
+        "google-calendar.create-draft"
+        | "google-calendar.update-draft"
+        | "google-calendar.cancel-event"
+        | "google-calendar.delete-event" => CALENDAR_WRITE_ACTION_SCOPES,
+        _ => &[],
+    }
+}
+
+fn action_available(action: &str, connection: &ConnectorConnection) -> bool {
+    let required = action_required_scopes(action);
+    required.is_empty()
+        || required
+            .iter()
+            .any(|scope| connection_has_scope(connection, scope))
+}
+
 fn build_manifest(
     entry: &'static ConnectorCatalogEntry,
     boundary: &dyn ConnectorCredentialBoundary,
@@ -675,6 +727,11 @@ fn build_manifest_with_health(
     let configured = configuration_state == "configured";
     let status = connector_manifest_status(entry, connection.as_ref(), health.as_ref());
     let connected = status == "connected";
+    let missing_required = connected
+        && connection
+            .as_ref()
+            .is_some_and(|connection| missing_required_scopes(entry, connection));
+    let connector_available = connected && !missing_required;
     debug_assert!(CONNECTOR_AUTH_STATES.contains(&status));
 
     let health = health.unwrap_or(ConnectorHealth {
@@ -690,6 +747,9 @@ fn build_manifest_with_health(
         retry_after: None,
     });
     let health_summary = match health.state.as_str() {
+        _ if missing_required => {
+            "Missing required OAuth scopes; reconnect this provider.".to_string()
+        }
         "healthy" => health.summary.clone(),
         "degraded" | "error" => health.summary.clone(),
         _ if connected => {
@@ -720,12 +780,9 @@ fn build_manifest_with_health(
                 access: (*access).to_string(),
                 required: *required,
                 granted: connected
-                    && connection.as_ref().is_some_and(|connection| {
-                        connection
-                            .scopes
-                            .iter()
-                            .any(|scope| scope == id || scope.ends_with(&format!("/{id}")))
-                    }),
+                    && connection
+                        .as_ref()
+                        .is_some_and(|connection| connection_has_scope(connection, id)),
             })
             .collect(),
         health,
@@ -743,14 +800,79 @@ fn build_manifest_with_health(
                 entry.setup_message.to_string()
             }
         }),
-        supports_search: true,
-        supports_import: true,
+        supports_search: connector_available,
+        supports_import: connector_available,
         supported_actions: entry
             .actions
             .iter()
+            .filter(|action| {
+                connected
+                    && connection
+                        .as_ref()
+                        .is_some_and(|connection| action_available(action, connection))
+            })
             .map(|action| (*action).to_string())
             .collect(),
     }
+}
+
+fn selected_auth_scopes(
+    entry: &'static ConnectorCatalogEntry,
+    requested_scopes: Option<&[String]>,
+) -> Result<Vec<String>, ConnectorCommandError> {
+    let declared = entry
+        .scopes
+        .iter()
+        .map(|scope| scope.0)
+        .collect::<BTreeSet<_>>();
+    let mut selected = Vec::new();
+    let mut push_unique = |scope: &str| {
+        let normalized = normalize_spaces(scope);
+        if !selected.contains(&normalized) {
+            selected.push(normalized);
+        }
+    };
+
+    match requested_scopes {
+        Some(scopes) if scopes.is_empty() => {
+            return Err(command_error(
+                "invalid-request",
+                entry.id,
+                "Requested OAuth scope set requires at least one scope.",
+                false,
+            ));
+        }
+        Some(scopes) => {
+            if entry.auth_mode == "oauth-pkce" {
+                for &(scope, _, _, required) in entry.scopes {
+                    if required {
+                        push_unique(scope);
+                    }
+                }
+            }
+            for scope in scopes {
+                let normalized = normalize_spaces(scope);
+                if !declared.contains(normalized.as_str()) {
+                    return Err(command_error(
+                        "invalid-request",
+                        entry.id,
+                        "Requested OAuth scope is not declared by this connector.",
+                        false,
+                    ));
+                }
+                push_unique(&normalized);
+            }
+        }
+        None => {
+            for &(scope, _, _, required) in entry.scopes {
+                if required {
+                    push_unique(scope);
+                }
+            }
+        }
+    }
+
+    Ok(selected)
 }
 
 fn connector_configuration_state(entry: &'static ConnectorCatalogEntry) -> &'static str {
@@ -1066,45 +1188,7 @@ pub fn start_connector_auth(
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
-    let declared = entry
-        .scopes
-        .iter()
-        .map(|scope| scope.0)
-        .collect::<BTreeSet<_>>();
-    let scopes = match request.requested_scopes.as_ref() {
-        Some(scopes) if scopes.is_empty() => {
-            return Err(command_error(
-                "invalid-request",
-                entry.id,
-                "Incremental authorization requires at least one scope.",
-                false,
-            ))
-        }
-        Some(scopes) => {
-            let mut selected = Vec::new();
-            for scope in scopes {
-                let normalized = normalize_spaces(scope);
-                if !declared.contains(normalized.as_str()) {
-                    return Err(command_error(
-                        "invalid-request",
-                        entry.id,
-                        "Requested OAuth scope is not declared by this connector.",
-                        false,
-                    ));
-                }
-                if !selected.contains(&normalized) {
-                    selected.push(normalized);
-                }
-            }
-            selected
-        }
-        None => entry
-            .scopes
-            .iter()
-            .filter(|scope| scope.3)
-            .map(|scope| scope.0.to_string())
-            .collect(),
-    };
+    let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
     start_auth(entry.id, entry.auth_mode, scopes, request)
 }
 
@@ -1132,45 +1216,7 @@ pub async fn begin_connector_oauth(
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
-    let declared = entry
-        .scopes
-        .iter()
-        .map(|scope| scope.0)
-        .collect::<BTreeSet<_>>();
-    let scopes = match request.requested_scopes.as_ref() {
-        Some(scopes) if scopes.is_empty() => {
-            return Err(command_error(
-                "invalid-request",
-                entry.id,
-                "Incremental authorization requires at least one scope.",
-                false,
-            ))
-        }
-        Some(scopes) => {
-            let mut selected = Vec::new();
-            for scope in scopes {
-                let normalized = normalize_spaces(scope);
-                if !declared.contains(normalized.as_str()) {
-                    return Err(command_error(
-                        "invalid-request",
-                        entry.id,
-                        "Requested OAuth scope is not declared by this connector.",
-                        false,
-                    ));
-                }
-                if !selected.contains(&normalized) {
-                    selected.push(normalized);
-                }
-            }
-            selected
-        }
-        None => entry
-            .scopes
-            .iter()
-            .filter(|scope| scope.3)
-            .map(|scope| scope.0.to_string())
-            .collect(),
-    };
+    let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
     oauth_loopback::run_loopback_oauth(&app, entry.id, entry.auth_mode, scopes, request).await
 }
 
@@ -1607,5 +1653,35 @@ mod workspace_scope_tests {
     fn connector_commands_fail_closed_for_an_unconfigured_workspace() {
         let error = require_connector_workspace(Some("another-workspace".to_string())).unwrap_err();
         assert_eq!(error.code, "invalid-request");
+    }
+
+    #[test]
+    fn google_requested_optional_scope_uses_complete_reconnect_scope_set() {
+        let entry = require_connector("gmail").unwrap();
+        let scopes = selected_auth_scopes(
+            entry,
+            Some(&["https://www.googleapis.com/auth/gmail.send".to_string()]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            scopes,
+            vec![
+                "https://www.googleapis.com/auth/gmail.readonly".to_string(),
+                "https://www.googleapis.com/auth/gmail.send".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn requested_oauth_scope_set_must_not_be_empty() {
+        let entry = require_connector("gmail").unwrap();
+        let error = selected_auth_scopes(entry, Some(&[])).unwrap_err();
+
+        assert_eq!(error.code, "invalid-request");
+        assert_eq!(
+            error.message,
+            "Requested OAuth scope set requires at least one scope."
+        );
     }
 }

@@ -68,9 +68,10 @@ Google Calendar read mode uses
 `calendar.calendarlist.readonly` and `calendar.events.readonly`. Event
 create/update requires `calendar.events`.
 
-Google classifies `gmail.readonly` and `gmail.compose` as restricted scopes.
-Production use requires the applicable OAuth verification and, when restricted
-data is transmitted or stored on servers, may require a security assessment.
+Google classifies Gmail read, compose, and send scopes as sensitive or
+restricted. Production use requires the applicable OAuth verification and, when
+restricted data is transmitted or stored on servers, may require a security
+assessment.
 
 ## Google production connector setup
 
@@ -90,15 +91,17 @@ Authorization Code + PKCE implementation:
 
 The desktop binds `http://127.0.0.1:<port>/callback`, sends the exact redirect
 and PKCE S256 challenge directly to Google, validates state and redirect before
-exchange, and stores tokens only through the native credential boundary. Google
-refresh tokens and granted scopes are preserved when a refresh response omits
-replacements. The confidential broker is not involved.
+exchange, and stores tokens only through the native credential boundary. The
+confidential broker is not involved.
 
-Fable requests only required scopes on the default connection attempt. Optional
-capabilities require a deliberate incremental authorization request before the
-operation; the runtime fails closed if the needed scope is absent:
+Fable preserves refresh tokens when Google omits a replacement, but it does not
+preserve or merge historical granted scopes. Google installed apps do not
+support incremental authorization, so a deliberate reconnect requests the full
+declared service-scope set needed for the attempted capability. The runtime
+fails closed if the active credential or a provider verification call does not
+show the needed scope:
 
-| Connector | Initial read scopes | Incremental scopes |
+| Connector | Default read scopes | Reconnect scopes for optional writes |
 | --- | --- | --- |
 | Google Drive | `https://www.googleapis.com/auth/drive.file` | Same bounded file grant for create/update/move/rename/share/delete on files opened or created with Fable |
 | Gmail | `https://www.googleapis.com/auth/gmail.readonly` | `https://www.googleapis.com/auth/gmail.compose` for drafts; `https://www.googleapis.com/auth/gmail.send` for explicit sends |

@@ -287,7 +287,7 @@ describe("shared Google connector lifecycle", () => {
     ]);
   });
 
-  it("preserves existing refresh tokens and scopes when Google omits them during refresh", () => {
+  it("preserves refresh tokens but not historical scopes when Google omits scopes during refresh", () => {
     expect(mergeGoogleTokenRefresh(
       {
         accessToken: "old-access",
@@ -305,7 +305,7 @@ describe("shared Google connector lifecycle", () => {
     )).toMatchObject({
       accessToken: "new-access",
       refreshToken: "keep-refresh",
-      scopes: ["https://www.googleapis.com/auth/gmail.readonly"]
+      scopes: []
     });
   });
 
