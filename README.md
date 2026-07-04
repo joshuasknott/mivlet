@@ -16,7 +16,9 @@ Local-first and private by default, Fable is built for people who want powerful 
 - Local recovery for composer drafts, pinned sources, schedule definitions, and approval audit.
 - Protocol types for approvals, memory, connector health, directives, and runtime snapshots.
 - Native API-key agent path for OpenAI-compatible, Anthropic, Gemini, xAI, and OpenRouter providers, with keys held by the local credential boundary.
+- Local Ollama runtime path via an explicitly trusted loopback service on a literal loopback IP; Fable does not bundle, start, or download models.
 - First-wave connector boundaries with explicit fixture previews, Google public-client PKCE support, and broker-gated confidential connectors that fail closed until configured.
+- Optional Fable cloud identity is modeled as a Clerk public-client PKCE spike; missing Clerk configuration keeps the account feature disabled and local-first use available.
 
 ## Feature Status Matrix
 
@@ -29,12 +31,13 @@ Local-first and private by default, Fable is built for people who want powerful 
 | **BYOK Native APIs** | **Implemented (Live)** | OpenAI, Anthropic, Gemini, xAI, and OpenRouter backend model execution using local keyring credentials |
 | **Google Connectors** | **Functional (Gated)** | Google Drive, Gmail, and Calendar read/write via loopback PKCE; requires user Google Cloud Console config |
 | **ACP/Codex Providers** | **Functional (Gated)** | Cursor, Grok, and Codex run via local stdio JSON-RPC or CLI app-server if installed and authenticated |
+| **Local Model Execution** | **Functional (Gated)** | Ollama can run through a trusted `127.0.0.1` loopback service when the user installs/starts Ollama and pulls a model; no bundled model runtime or downloads |
 | **Confidential Connectors** | **Functional (Gated)** | Brokered adapters and fail-closed lifecycle states are implemented for GitHub, Vercel, Notion, Slack, and Linear; deployment, provider configuration, and live OAuth validation remain external |
+| **Optional Cloud Identity** | **Spike (Config-gated)** | Clerk public-client PKCE boundary, keyring storage, and disabled/missing-config status surface exist; production enablement needs live Clerk validation and cloud/team verifier work |
 | **Browser Preview Mode** | **Preview/fixture-only; transport deferred** | Permission architecture, session derivation, and audit redaction implemented; live browser transport deferred |
 | **Mobile Remote Control** | **Local status surface; transport deferred** | Settings reports the native local status honestly. No socket, live pairing, mobile app, or remote execution path is enabled. |
 | **Voice Dictation** | **Preview/Stub** | Composer voice toggle changes UI status; no audio capture or transcription pipeline |
 | **GitHub Copilot Execution** | **Planned (Missing)** | Cataloged in provider list, but execution adapter/runner is not implemented |
-| **Local Model Execution** | **Planned (Missing)** | Onboarding UI labels local models as planned and disabled |
 | **Signing, Updater, Multi-OS** | **Planned (Missing)** | Unsigned Windows preview build only; macOS/Linux packaging and updater channels are deferred |
 
 ## Brand

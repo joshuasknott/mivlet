@@ -10,6 +10,7 @@ mod action_history;
 mod agent_runs;
 mod approvals;
 mod backends;
+mod clerk_identity;
 mod codex_app_server;
 mod collaboration_connectors;
 mod connector_api;
@@ -173,6 +174,10 @@ pub fn run() {
             local_model::list_local_model_models,
             local_model::stream_local_model_completion,
             local_model::cancel_local_model_completion,
+            clerk_identity::identity_status,
+            clerk_identity::identity_begin_sign_in,
+            clerk_identity::identity_refresh,
+            clerk_identity::identity_sign_out,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,

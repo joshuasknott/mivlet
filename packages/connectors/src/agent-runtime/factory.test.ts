@@ -258,7 +258,13 @@ describe("resolveAgentBackend dispatch", () => {
     });
 
     await collect(
-      backend?.run(baseRunRequest, { execute: async () => "ok" }) as AsyncIterable<BackendAgentEvent>
+      backend?.run(
+        {
+          ...baseRunRequest,
+          tools: [{ name: "read_file", description: "Read a file", parameters: "{}" }]
+        },
+        { execute: async () => "ok" }
+      ) as AsyncIterable<BackendAgentEvent>
     );
 
     expect(requests[0]?.tools).toEqual([]);

@@ -86,8 +86,11 @@ pub fn validate_literal_loopback_base_url(raw: &str) -> Result<Url, String> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err("Local model endpoint must not include credentials.".to_string());
     }
-    if url.query().is_some() || url.fragment().is_some() {
-        return Err("Local model endpoint must not include a query or fragment.".to_string());
+    if !matches!(url.path(), "" | "/") || url.query().is_some() || url.fragment().is_some() {
+        return Err(
+            "Local model endpoint must be a loopback base URL without a path, query, or fragment."
+                .to_string(),
+        );
     }
     match url.host() {
         Some(Host::Ipv4(addr)) if addr.is_loopback() => {}
@@ -694,6 +697,7 @@ mod tests {
         assert!(validate_literal_loopback_base_url("https://127.0.0.1:11434").is_err());
         assert!(validate_literal_loopback_base_url("http://192.168.1.2:11434").is_err());
         assert!(validate_literal_loopback_base_url("http://user:pass@127.0.0.1:11434").is_err());
+        assert!(validate_literal_loopback_base_url("http://127.0.0.1:11434/api/tags").is_err());
     }
 
     #[test]

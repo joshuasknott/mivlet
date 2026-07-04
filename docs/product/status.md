@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-06-30.
+Last audited: 2026-07-05.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
@@ -22,7 +22,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Approvals: the shell exposes Read Only, Ask Me (default), Work Freely, and Custom. Rust persists exact one-time execution permits, audit entries, high-risk confirmation, and denied-action handling.
 - Memory: Rust commands support listing, saving, exporting, disabling, editing through shell state, and approval-gated promotion from a knowledge source into durable memory.
 - Local recovery: runtime snapshot, approval audit, approval rules, imported knowledge, memory state, and connected backend ids are persisted through encrypted SQLite in Tauri; browser preview still uses localStorage. Schedules, workflows, and knowledge structures are persisted inside the encrypted SQLite database under schema v5.
-- Backend catalog: Codex, Cursor, GitHub Copilot, Grok, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Native API-key providers connect through the Rust credential boundary. Codex can run through `codex app-server`; Cursor and Grok can run through ACP CLI processes when the corresponding CLI is installed and signed in. GitHub Copilot remains cataloged but not runnable until its SDK adapter lands.
+- Backend catalog: Codex, Cursor, GitHub Copilot, Grok, Ollama, OpenAI, Anthropic, Gemini, xAI, and OpenRouter are modeled as agent-runtime backends. Native API-key providers connect through the Rust credential boundary. Codex can run through `codex app-server`; Cursor and Grok can run through ACP CLI processes when the corresponding CLI is installed and signed in. Ollama can run through an externally managed literal-loopback service when installed, started, and populated with a local generation model. GitHub Copilot remains cataloged but not runnable until its SDK adapter lands.
 - Backend credentials: Rust uses a keyring-backed credential boundary for backend secrets, with an in-memory fallback for headless/test paths. JavaScript receives auth state, capabilities, and models, not raw secrets.
 - Native API agent loop: TypeScript owns provider request shaping and a bounded
   multi-round agent loop; Rust owns API key lookup, bounded HTTP/SSE egress,
@@ -31,6 +31,16 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Native model discovery: provider lists are paginated and bounded with
   distinct success/empty/unsupported/offline/failed outcomes. Non-generation
   and unknown-capability models cannot be selected.
+- Local model runtime: Ollama discovery and streaming generation are wired
+  through Rust commands that only accept `http` literal-loopback base URLs
+  (default `http://127.0.0.1:11434`). Fable does not bundle Ollama, start it,
+  pull models, or broaden webview/network egress. Prompt and response payloads
+  are not logged; action history records provider/model/request status only.
+- Optional cloud identity: a Clerk public-client PKCE spike exists behind a
+  missing-configuration gate. Credentials and pending PKCE state use a dedicated
+  identity keyring service; React receives only secret-free identity status.
+  Local files, memory, schedules, connectors, BYOK backends, and solo workspaces
+  do not require a Fable account.
 - Agent recovery: run checkpoints persist active-thread user, assistant, and
   tool exchanges. Interrupted runs surface in chat and retry as new child runs
   from the durable user prompt without replaying tool effects.
@@ -63,12 +73,13 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
 | ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
+| Local Ollama Runtime | **Functional but gated** | Live loopback streaming is available only when the user installs Ollama, starts its local service on a literal loopback IP, and pulls a generation model. Real-runtime smoke testing is opt-in. |
 | Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth, lifecycle states, and provider adapters exist. Notion, Slack, and Linear expose authenticated reads and approval-gated writes; GitHub's implemented live surface is read-only. Durable atomic handoff storage, production deployment, provider secrets, callback registration, and live OAuth validation are still missing. |
+| Optional Fable Cloud Identity (Clerk) | **Spike; config-gated** | Rust/keyring boundary, system-browser PKCE flow, status surface, and ADR exist. Missing Clerk env config disables the feature. Production enablement still needs live Clerk claim validation, callback policy, and cloud/team verifier work. |
 | Browser Preview Mode | **Preview/fixture-only; transport deferred** | Purely synthetic fixture responses. Browser permission policy architecture, session derivation, and audit redaction are implemented; headless browser transport and live execution are deferred. |
 | Mobile Remote Control | **Local status surface; transport deferred** | Protocol metadata, trust checks, and native status commands exist. Settings reports that live LAN transport and pairing are unavailable; no socket, mobile app, hosted account, or remote execution authority exists. |
 | Schedules & Workflows SQLite migration | **Finished** | In Batch 9, schedules, queue entries, workflow definitions, and workflow runs were fully migrated from legacy JSON files into encrypted SQLite tables. |
 | GitHub Copilot Execution | **Missing** | Cataloged in provider list, but execution adapter/runner is not implemented. |
-| Local Model Execution | **Missing** | Onboarding UI labels local models as planned and disabled. |
 | Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
 | Native voice providers, Convex collaboration | **Missing** | Dictation currently depends on the host Web Speech API; no native offline speech provider exists. Convex is optional and lacks schema/collab code. |
 
@@ -94,13 +105,16 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, schedules, workflows, and knowledge structures. Backend and connector credentials remain separately handled by OS secure storage.
-- No local model runtime path. The onboarding UI labels local models as planned and disabled.
+- No bundled local model runtime, model download flow, model license UI, or live Ollama smoke evidence in the default suite. Ollama remains a user-installed trusted loopback integration.
+- No production-enabled hosted Fable account or team workspace authority. Clerk identity is optional, config-gated, and still needs live provider validation plus cloud/Convex verifier work before unlocking team data.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
 - No product website, legal pages, downloads page, or public release pipeline in the audited files.
 
 ## Highest-Risk Gaps
 
 - External connectors look close in the UI but remain gated by provider setup and credentials. GitHub now has a brokered live read path in code, but product messaging must keep production deployment and read-only limits clear.
+- Local model execution now exists through Ollama but depends on a user-managed local service and model installation; Fable must keep avoiding bundled downloads or broader egress until those are intentionally designed.
+- Optional Clerk identity must remain separate from connector OAuth and local-first features; production team/cloud use is blocked until live Clerk validation and server-side verifier work land.
 - Backup restoration requires the database and matching OS-secure master key; external recovery UI polish remains future work.
 - Scheduled work still depends on a connected runnable backend and user approval gates for consequential actions; live account coverage was not externally validated in this checkout.
 
@@ -141,6 +155,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `apps/desktop/src-tauri/src/oauth_loopback.rs`
 - `apps/desktop/src-tauri/src/backends.rs`
 - `apps/desktop/src-tauri/src/native_api.rs`
+- `apps/desktop/src-tauri/src/local_model.rs`
+- `apps/desktop/src-tauri/src/clerk_identity.rs`
 - `apps/desktop/src-tauri/src/tools.rs`
 - `packages/protocol/src/index.ts`
 - `packages/connectors/src/index.ts`
@@ -149,7 +165,10 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `packages/connectors/src/providers/registry.ts`
 - `packages/connectors/src/backends/registry.ts`
 - `packages/connectors/src/native-api/agent-loop.ts`
+- `packages/connectors/src/native-api/ollama.ts`
 - `packages/connectors/src/native-api/tools.ts`
 - `packages/connectors/src/native-api/tool-executor.ts`
 - `docs/connectors/auth-broker.md`
+- `docs/architecture/local-model-runtime.md`
+- `docs/adr/2026-07-04-clerk-tauri-identity.md`
 - `docs/architecture/browser-automation.md`

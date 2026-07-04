@@ -33,20 +33,6 @@ export function createLocalLoopbackBackend(
       capabilities.includes("tool-requests") &&
       capabilities.includes("approvals") &&
       selectedModel?.capabilities?.tools === true;
-    if (
-      request.tools.length > 0 &&
-      !supportsTools
-    ) {
-      return (async function* unsupportedTools(): AsyncIterable<BackendAgentEvent> {
-        yield {
-          type: "error",
-          message: "This local model has not reported tool-use support.",
-          code: "invalid-request",
-          retryable: false
-        };
-        yield { type: "done", finishReason: "error" };
-      })();
-    }
     if (!deps.createLocalModelTransport) return null;
     const handlers: TransportHandlers = {
       onRequestStarted: (requestId) => {

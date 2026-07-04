@@ -87,7 +87,7 @@ ollama pull llama3.2
 Fable will verify that the service is reachable and that at least one generation
 model is installed. The smoke test does not download models.
 
-## Future llama.cpp Seam
+## Future llama.cpp Runtime
 
 A future bundled llama.cpp runtime should plug into the same provider-neutral
 `AgentBackend` contract and should keep the local-runtime boundary separate from

@@ -834,7 +834,7 @@ fn selected_auth_scopes(
     };
 
     match requested_scopes {
-        Some(scopes) if scopes.is_empty() => {
+        Some([]) => {
             return Err(command_error(
                 "invalid-request",
                 entry.id,

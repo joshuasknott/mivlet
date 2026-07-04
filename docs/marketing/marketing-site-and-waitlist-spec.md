@@ -39,13 +39,13 @@ This document is the implementation-grade specification for a public marketing s
 | **Privacy-conscious early adopters** | Keep work on-device; no mandatory cloud account | Encrypted SQLite, OS credential boundary, export/delete paths | Waitlist with explicit consent copy |
 | **Connector evaluators** | Understand which integrations work vs. are gated | Connector status matrix with honest labels | Optional interest field for connectors (not a commitment) |
 
-**Anti-audience:** Users who need macOS/Linux signed releases, production OAuth connectors without operator setup, local model execution, or a hosted-only assistant. The site must surface these gaps instead of hiding them.
+**Anti-audience:** Users who need macOS/Linux signed releases, production OAuth connectors without operator setup, bundled local models, or a hosted-only assistant. The site must surface these gaps instead of hiding them.
 
 ---
 
 ## 3. Product Evidence Summary (Marketing May Claim)
 
-Ground all copy in `docs/product/status.md` (audited 2026-06-30) and related docs.
+Ground all copy in `docs/product/status.md` (audited 2026-07-05) and related docs.
 
 | Claim | Evidence | Marketing label |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Ground all copy in `docs/product/status.md` (audited 2026-06-30) and related doc
 | Confidential connectors (GitHub, Vercel, Notion, Slack, Linear) | connectors + auth-broker | **Functional but gated** (broker not deployed) |
 | GitHub live writes | connectors §Known limitations | **Missing** (read-only) |
 | GitHub Copilot execution | status matrix | **Missing** |
-| Local model execution | status matrix | **Missing** |
+| Local model execution | status matrix + `docs/architecture/local-model-runtime.md` | **Functional but gated** (user-installed Ollama service and model) |
 | Browser preview mode | status matrix | **Preview/fixture-only** |
 | Mobile remote control | status matrix | **Local status surface; transport deferred** |
 | Voice dictation | `docs/product/voice.md` | **Preview** (Web Speech API where available; unsupported in Tauri webview) |
@@ -127,7 +127,7 @@ Every row MUST use exactly one of: **Implemented**, **Functional but gated**, **
 | GitHub, Vercel, Notion, Slack, Linear | Functional but gated | Auth broker not deployed; provider console setup required |
 | GitHub writes | Missing | Read-only live surface |
 | GitHub Copilot | Missing | Catalog only |
-| Local models | Missing | UI shows planned/disabled |
+| Local models | Functional but gated | Requires user-installed Ollama service and model; no bundled models/downloads |
 | Browser automation | Preview-only | Fixture preview; transport deferred |
 | Mobile remote | Preview-only | Status surface only; no live pairing |
 | Voice dictation | Preview-only | Web Speech where host supports; not in Tauri webview |
@@ -653,7 +653,7 @@ Marketing CI SHOULD fail if any page contains these patterns (case-insensitive):
 | Specific price / "Free forever" / subscription price | No pricing product |
 | Ship dates ("July 2026 public launch") | No committed dates |
 | "GitHub writes" / "post to GitHub automatically" | Read-only |
-| "Local AI models included" | Missing |
+| "Local AI models included" | Fable does not bundle models; Ollama is user-installed/gated |
 | "Fable account" required for core use | False |
 | "Fully HIPAA" / "bank-grade" | Hype |
 | "Copilot replacement" | Brand voice avoids copilot positioning |
