@@ -113,8 +113,8 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
     ...options,
     connectorId: "github",
     authorizationEndpoint: new URL("oauth/github/authorize", authBase).toString(),
-    tokenEndpoint: new URL("oauth/github/token", authBase).toString(),
-    identityEndpoint: new URL("oauth/github/identity", authBase).toString(),
+    handoffEndpoint: new URL("oauth/github/handoff", authBase).toString(),
+    refreshEndpoint: new URL("oauth/github/refresh", authBase).toString(),
     revocationEndpoint: new URL("oauth/github/revoke", authBase).toString(),
     scopes: ["read:user", "read:org", "repo"]
   });

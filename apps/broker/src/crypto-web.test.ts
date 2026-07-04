@@ -67,10 +67,10 @@ describe("PKCE over web crypto", () => {
 });
 
 describe("endpoint templating", () => {
-  it("substitutes the GitHub {clientId} revocation placeholder with the configured client id", () => {
+  it("substitutes the GitHub {clientId} token deletion placeholder with the configured client id", () => {
     const creds: ProviderCredentials = { clientId: "client-123", clientSecret: "s" };
     expect(resolveEndpoint(providerProfile("github").revocationEndpoint, creds))
-      .toBe("https://api.github.com/applications/client-123/grant");
+      .toBe("https://api.github.com/applications/client-123/token");
   });
 
   it("returns static endpoints unchanged (no placeholder)", () => {

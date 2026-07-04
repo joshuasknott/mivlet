@@ -129,7 +129,6 @@ const SLACK_SCOPES: &[(&str, &str, &str, bool)] = &[
         false,
     ),
     ("users:read", "Workspace users", "read", true),
-    ("search:read", "Supported message search", "read", false),
     ("chat:write", "Post approved messages", "write", false),
     (
         "reactions:write",

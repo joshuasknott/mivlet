@@ -10,13 +10,15 @@
 import type { BrokerProviderId } from "@fable/connectors";
 
 /**
- * How a provider wants the broker's own PKCE verifier handled.
- * - `none`: provider does PKCE against the desktop-supplied challenge.
+ * How a provider wants PKCE handled by the broker.
+ * - `none`: the provider flow in use does not document PKCE; omit it.
  * - `broker-pkce`: the broker generates its own verifier/challenge and presents it
- *   to the provider, then uses the verifier in the confidential exchange (Vercel,
- *   Linear, Notion, Slack accept PKCE on the confidential client).
+ *   to the provider, then uses the verifier in the confidential exchange.
  */
 export type BrokerPkceMode = "none" | "broker-pkce";
+
+export type ProviderTokenRequestStyle = "form" | "form-without-grant-type" | "json-basic";
+export type ProviderRevocationStyle = "none" | "form" | "github-oauth-app";
 
 export interface ProviderProfile {
   /** Display only; never a secret. */
@@ -31,12 +33,26 @@ export interface ProviderProfile {
   identityEndpoint: string;
   /** Scopes the broker requests on the desktop's behalf. */
   scopes: readonly string[];
+  /** Extra fixed authorization parameters required by the provider. */
+  authorizationParams?: Readonly<Record<string, string>>;
+  /** Optional env var values needed in addition to client id/secret. */
+  requiredEnv?: readonly string[];
   /** Environment variable holding the confidential client id (display only here). */
   clientIdEnv: string;
   /** Environment variable holding the confidential client secret. */
   clientSecretEnv: string;
   /** Whether the provider accepts/needs PKCE on the confidential exchange. */
   pkce: BrokerPkceMode;
+  /** How scopes are represented on the authorization URL. */
+  scopeParameter?: "scope" | "omit";
+  /** Separator for multi-scope provider authorization values. Defaults to space. */
+  scopeSeparator?: " " | ",";
+  /** Whether the provider returns refresh tokens for this flow. */
+  supportsRefresh: boolean;
+  /** Token exchange body/authentication convention. */
+  tokenRequestStyle: ProviderTokenRequestStyle;
+  /** Revocation convention. */
+  revocationStyle: ProviderRevocationStyle;
   /**
    * Normalizes a provider identity payload into a stable account summary.
    * Provider-specific because each returns a different shape.
@@ -55,12 +71,15 @@ const GITHUB_PROFILE: ProviderProfile = {
   label: "GitHub",
   authorizationEndpoint: "https://github.com/login/oauth/authorize",
   tokenEndpoint: "https://github.com/login/oauth/access_token",
-  revocationEndpoint: `https://api.github.com/applications/${"{clientId}"}/grant`,
+  revocationEndpoint: `https://api.github.com/applications/${"{clientId}"}/token`,
   identityEndpoint: "https://api.github.com/user",
   scopes: ["read:user", "read:org", "repo"],
   clientIdEnv: "FABLE_BROKER_GITHUB_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_GITHUB_CLIENT_SECRET",
   pkce: "broker-pkce",
+  supportsRefresh: false,
+  tokenRequestStyle: "form",
+  revocationStyle: "github-oauth-app",
   normalizeIdentity(payload) {
     const p = asObject(payload);
     const id = pickString(p, "id") ?? pickString(p, "node_id");
@@ -77,14 +96,19 @@ const GITHUB_PROFILE: ProviderProfile = {
 
 const VERCEL_PROFILE: ProviderProfile = {
   label: "Vercel",
-  authorizationEndpoint: "https://api.vercel.com/oauth/authorize",
+  authorizationEndpoint: `https://vercel.com/integrations/${"{vercelIntegrationSlug}"}/new`,
   tokenEndpoint: "https://api.vercel.com/v2/oauth/access_token",
-  revocationEndpoint: "https://api.vercel.com/v2/oauth/revoke",
+  revocationEndpoint: "",
   identityEndpoint: "https://api.vercel.com/v2/user",
-  scopes: ["user:read", "team:read", "project:read", "deployment:read", "deployment:write"],
+  scopes: ["user", "team", "project", "deployment"],
+  requiredEnv: ["FABLE_BROKER_VERCEL_INTEGRATION_SLUG"],
   clientIdEnv: "FABLE_BROKER_VERCEL_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_VERCEL_CLIENT_SECRET",
-  pkce: "broker-pkce",
+  pkce: "none",
+  scopeParameter: "omit",
+  supportsRefresh: false,
+  tokenRequestStyle: "form-without-grant-type",
+  revocationStyle: "none",
   normalizeIdentity(payload) {
     const p = asObject(asObject(payload, "user"), undefined) ?? asObject(payload);
     const root = asObject(payload, "user") ?? p;
@@ -101,7 +125,7 @@ const VERCEL_PROFILE: ProviderProfile = {
 
 const LINEAR_PROFILE: ProviderProfile = {
   label: "Linear",
-  authorizationEndpoint: "https://api.linear.app/oauth/authorize",
+  authorizationEndpoint: "https://linear.app/oauth/authorize",
   tokenEndpoint: "https://api.linear.app/oauth/token",
   revocationEndpoint: "https://api.linear.app/oauth/revoke",
   identityEndpoint: "https://api.linear.app/graphql",
@@ -109,6 +133,10 @@ const LINEAR_PROFILE: ProviderProfile = {
   clientIdEnv: "FABLE_BROKER_LINEAR_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_LINEAR_CLIENT_SECRET",
   pkce: "broker-pkce",
+  scopeSeparator: ",",
+  supportsRefresh: true,
+  tokenRequestStyle: "form",
+  revocationStyle: "form",
   normalizeIdentity(payload) {
     // Identity endpoint is GraphQL; the broker posts the viewer query and the
     // normalized payload arrives here as { data: { viewer: {...} } }.
@@ -134,20 +162,24 @@ const NOTION_PROFILE: ProviderProfile = {
   revocationEndpoint: "https://api.notion.com/v1/oauth/revoke",
   identityEndpoint: "https://api.notion.com/v1/users/me",
   scopes: [],
+  authorizationParams: { owner: "user" },
   clientIdEnv: "FABLE_BROKER_NOTION_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_NOTION_CLIENT_SECRET",
-  pkce: "broker-pkce",
+  pkce: "none",
+  supportsRefresh: true,
+  tokenRequestStyle: "json-basic",
+  revocationStyle: "none",
   normalizeIdentity(payload) {
     const p = asObject(payload);
     const bot = asObject(p, "bot");
     const owner = asObject(bot, "owner");
-    const workspaceId = pickString(bot, "workspace_id") ?? pickString(owner, "workspace_id");
+    const workspaceId = pickString(p, "workspace_id") ?? pickString(bot, "workspace_id") ?? pickString(owner, "workspace_id");
     const id = workspaceId ?? pickString(p, "id");
     if (!id) throw identityError("Notion");
     return {
       id,
-      displayName: pickString(bot, "workspace_name") ?? "Notion workspace",
-      workspace: pickString(bot, "workspace_name")
+      displayName: pickString(p, "workspace_name") ?? pickString(bot, "workspace_name") ?? "Notion workspace",
+      workspace: pickString(p, "workspace_name") ?? pickString(bot, "workspace_name")
     };
   }
 };
@@ -166,13 +198,16 @@ const SLACK_PROFILE: ProviderProfile = {
     "im:read",
     "mpim:read",
     "users:read",
-    "search:read",
     "chat:write",
     "reactions:write"
   ],
   clientIdEnv: "FABLE_BROKER_SLACK_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_SLACK_CLIENT_SECRET",
-  pkce: "broker-pkce",
+  pkce: "none",
+  scopeSeparator: ",",
+  supportsRefresh: false,
+  tokenRequestStyle: "form",
+  revocationStyle: "form",
   normalizeIdentity(payload) {
     const p = asObject(payload);
     if (p.ok === false) throw identityError("Slack");
@@ -211,8 +246,8 @@ export function providerProfile(provider: BrokerProviderId): ProviderProfile {
 
 /**
  * Resolve a profile endpoint, substituting any `{clientId}` placeholder with the
- * confidential client id. GitHub's token-grant revocation endpoint is keyed by
- * the application's client id (`/applications/{clientId}/grant`); other providers
+ * confidential client id. GitHub's token deletion endpoint is keyed by
+ * the application's client id (`/applications/{clientId}/token`); other providers
  * have static endpoints and resolve unchanged. The client id is not a secret.
  */
 export function resolveEndpoint(
@@ -230,7 +265,7 @@ export function configuredProviders(
   for (const [provider, profile] of Object.entries(PROFILES) as Array<
     [BrokerProviderId, ProviderProfile]
   >) {
-    if (env[profile.clientIdEnv] && env[profile.clientSecretEnv]) {
+    if (isProfileConfigured(profile, env)) {
       configured.push(provider);
     }
   }
@@ -255,6 +290,28 @@ export function resolveCredentials(
     throw new Error(`${resolved.label} is not configured on the broker.`);
   }
   return { clientId, clientSecret };
+}
+
+export function isProfileConfigured(profile: ProviderProfile, env: BrokerEnv): boolean {
+  return Boolean(
+    env[profile.clientIdEnv]
+    && env[profile.clientSecretEnv]
+    && (profile.requiredEnv ?? []).every((name) => Boolean(env[name]))
+  );
+}
+
+export function resolveAuthorizationEndpoint(
+  profile: ProviderProfile,
+  env: BrokerEnv,
+  credentials: ProviderCredentials
+): string {
+  let endpoint = resolveEndpoint(profile.authorizationEndpoint, credentials);
+  if (endpoint.includes("{vercelIntegrationSlug}")) {
+    const slug = env.FABLE_BROKER_VERCEL_INTEGRATION_SLUG;
+    if (!slug) throw new Error("Vercel integration slug is not configured on the broker.");
+    endpoint = endpoint.replaceAll("{vercelIntegrationSlug}", encodeURIComponent(slug));
+  }
+  return endpoint;
 }
 
 function identityError(provider: string): Error {

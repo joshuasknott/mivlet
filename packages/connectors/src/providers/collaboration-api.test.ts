@@ -191,14 +191,15 @@ describe("Slack production adapter", () => {
     expect(SLACK_CAPABILITIES.filter((capability) => capability.kind === "write").every((capability) => capability.consequential)).toBe(true);
   });
 
-  it("maps channel history, threads, users, and search responses", async () => {
-    const fetcher = vi.fn<ProviderFetch>(async (url: string | URL | Request) => String(url).includes("search.messages")
-      ? json({ ok: true, messages: { matches: [{ ts: "1", text: "found" }] } })
+  it("maps channel history and user responses without claiming user-token message search", async () => {
+    const fetcher = vi.fn<ProviderFetch>(async (url: string | URL | Request) => String(url).includes("users.list")
+      ? json({ ok: true, members: [{ id: "U1", name: "tester" }], response_metadata: { next_cursor: "users-next" } })
       : json({ ok: true, messages: [{ ts: "1", text: "hello" }], response_metadata: { next_cursor: "next" } }));
     const adapter = slack(fetcher);
     await expect(adapter.read({ capability: "slack.history.read", input: { channel: "C1" } }, tokens)).resolves.toMatchObject({ nextCursor: "next", items: [{ text: "hello" }] });
-    await expect(adapter.read({ capability: "slack.messages.search", input: { query: "found" } }, tokens)).resolves.toMatchObject({ items: [{ text: "found" }] });
-    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(expect.arrayContaining([expect.stringContaining("conversations.history"), expect.stringContaining("search.messages")]));
+    await expect(adapter.read({ capability: "slack.users.list", input: {} }, tokens)).resolves.toMatchObject({ nextCursor: "users-next", items: [{ name: "tester" }] });
+    expect(adapter.capabilities.map((capability) => capability.id)).not.toContain("slack.messages.search");
+    expect(fetcher.mock.calls.map(([url]) => String(url))).toEqual(expect.arrayContaining([expect.stringContaining("conversations.history"), expect.stringContaining("users.list")]));
   });
 
   it("normalizes missing scopes, revoked tokens, inaccessible/archived channels, and API rate limits", async () => {
