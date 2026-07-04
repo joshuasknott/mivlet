@@ -567,6 +567,52 @@ export interface ConnectorAuthResult {
   message: string;
 }
 
+// ---------------------------------------------------------------------------
+// Optional Fable cloud identity.
+//
+// This is not connector OAuth and not the confidential auth broker. It is a
+// future-facing, optional identity surface for cloud/team features. These wire
+// types are intentionally secret-free: React receives only status, short-lived
+// expiry metadata, and display identity. Refresh/session credentials remain in
+// the Rust OS-keyring boundary.
+// ---------------------------------------------------------------------------
+
+export type IdentityAuthState =
+  | "disabled"
+  | "signed-out"
+  | "signed-in"
+  | "offline"
+  | "refreshing"
+  | "revoked"
+  | "needs-organization"
+  | "error";
+
+export interface IdentityOrganization {
+  id: string;
+  name?: string;
+  slug?: string;
+  role?: string;
+}
+
+export interface IdentitySummary {
+  userId: string;
+  displayName?: string;
+  email?: string;
+  organization?: IdentityOrganization;
+}
+
+export interface IdentityStatus {
+  enabled: boolean;
+  state: IdentityAuthState;
+  message: string;
+  issuer?: string;
+  audience?: string;
+  scopes: string[];
+  expiresAt?: string;
+  identity?: IdentitySummary;
+  organizationRequired?: boolean;
+}
+
 export interface ConnectorTokenSet {
   accessToken: string;
   refreshToken?: string;

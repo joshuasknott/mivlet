@@ -44,6 +44,7 @@ import type {
   WorkflowRun,
   WorkflowStep,
   NotificationRecord,
+  IdentityStatus,
   WorkspaceDirective,
   WorkspaceGoal,
   WorkspacePlan
@@ -109,6 +110,7 @@ import {
 } from "../data/workspace";
 import {
   beginRuntimeConnectorOAuth,
+  beginRuntimeIdentitySignIn,
   clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
@@ -131,6 +133,7 @@ import {
   listRuntimeSchedulerQueue,
   listRuntimeWorkflowRuns,
   listRuntimeWorkflowDefinitions,
+  loadRuntimeIdentityStatus,
   listenRuntimeSchedulerRunRequest,
   enqueueRuntimeJobRun,
   reportRuntimeJobAttempt,
@@ -156,6 +159,8 @@ import {
   searchRuntimeKnowledgeSources,
   switchRuntimeConnectorAccount,
   syncRuntimeConnector,
+  refreshRuntimeIdentity,
+  signOutRuntimeIdentity,
   verifyRuntimeBackend,
   wireToWorkflowRun
 } from "../runtime";
@@ -226,6 +231,13 @@ const defaultShellState: PersistedShellState = {
 
 const ALLOW_PREVIEW_FALLBACKS =
   import.meta.env.DEV || import.meta.env.MODE === "test";
+
+const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
+  enabled: false,
+  state: "disabled",
+  message: "Optional Fable cloud identity is not configured.",
+  scopes: []
+};
 
 function runtimeOrPreview<T>(
   runtimeValue: T | null,
@@ -609,6 +621,16 @@ export interface ShellRuntime {
     approval: ApprovalRequest;
   }) => void;
   /**
+   * Optional Fable cloud identity. This is separate from connector OAuth and
+   * from agent/backend credentials; it is never required for local files,
+   * schedules, memory, BYOK models, or solo workspaces.
+   */
+  identityStatus: IdentityStatus;
+  identityPending: boolean;
+  signInIdentity: () => Promise<void>;
+  refreshIdentity: () => Promise<void>;
+  signOutIdentity: () => Promise<void>;
+  /**
    * Inspectable action history (model calls, connector actions, tool/shell
    * actions, web actions, approvals, schedules, blocked policy decisions).
    * Audit observes actions and never carries secrets. Surfaced for the
@@ -658,6 +680,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [lastAction, setLastAction] = useState("Workspace ready");
+  const [identityStatus, setIdentityStatus] =
+    useState<IdentityStatus>(DEFAULT_IDENTITY_STATUS);
+  const [identityPending, setIdentityPending] = useState(false);
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
   const [actionHistory, setActionHistory] = useState<ActionHistoryEvent[]>([]);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(initialState.dismissedApprovalIds);
@@ -1151,6 +1176,81 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   useEffect(() => {
     refreshActionHistory();
   }, [refreshActionHistory]);
+
+  const refreshIdentityStatus = useCallback(async () => {
+    const status = await loadRuntimeIdentityStatus();
+    setIdentityStatus(status ?? DEFAULT_IDENTITY_STATUS);
+  }, []);
+
+  useEffect(() => {
+    void refreshIdentityStatus();
+  }, [refreshIdentityStatus]);
+
+  const signInIdentity = useCallback(async () => {
+    setIdentityPending(true);
+    try {
+      const status = await beginRuntimeIdentitySignIn();
+      const next = status ?? DEFAULT_IDENTITY_STATUS;
+      setIdentityStatus(next);
+      setLastAction(next.message);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Fable cloud sign-in is unavailable.";
+      setIdentityStatus((current) => ({
+        ...current,
+        state: current.enabled ? "error" : "disabled",
+        message
+      }));
+      setLastAction(message);
+    } finally {
+      setIdentityPending(false);
+    }
+  }, []);
+
+  const refreshIdentity = useCallback(async () => {
+    setIdentityPending(true);
+    try {
+      const status = await refreshRuntimeIdentity();
+      if (status) {
+        setIdentityStatus(status);
+        setLastAction(status.message);
+      } else {
+        await refreshIdentityStatus();
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Fable cloud identity could not refresh.";
+      setIdentityStatus((current) => ({
+        ...current,
+        state: current.enabled ? "error" : "disabled",
+        message
+      }));
+      setLastAction(message);
+    } finally {
+      setIdentityPending(false);
+    }
+  }, [refreshIdentityStatus]);
+
+  const signOutIdentity = useCallback(async () => {
+    setIdentityPending(true);
+    try {
+      const status = await signOutRuntimeIdentity();
+      const next = status ?? DEFAULT_IDENTITY_STATUS;
+      setIdentityStatus(next);
+      setLastAction(next.message);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Fable cloud identity could not sign out.";
+      setIdentityStatus((current) => ({
+        ...current,
+        state: current.enabled ? "error" : "disabled",
+        message
+      }));
+      setLastAction(message);
+    } finally {
+      setIdentityPending(false);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -3478,6 +3578,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     customApprovalSettings,
     updateCustomApprovalSetting,
     recordBackendToolCall,
+    identityStatus,
+    identityPending,
+    signInIdentity,
+    refreshIdentity,
+    signOutIdentity,
     dismissOnboarding,
     lastAction,
     mobileNavOpen,

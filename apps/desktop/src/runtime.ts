@@ -47,7 +47,8 @@ import type {
   SchedulerQueueEntry,
   WorkflowDefinition,
   WorkflowRun,
-  WorkflowRunStatus
+  WorkflowRunStatus,
+  IdentityStatus
 } from "@fable/protocol";
 
 interface ApprovalAuditRecordResponse {
@@ -353,6 +354,62 @@ export async function recordRuntimeActionHistory(
     return await invoke<boolean>("record_action_history", { request });
   } catch {
     return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Optional cloud identity.
+//
+// Rust owns Clerk OAuth, refresh, token validation, and keyring storage. These
+// wrappers expose only the secret-free status surface to React.
+// ---------------------------------------------------------------------------
+
+export async function loadRuntimeIdentityStatus() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<IdentityStatus>("identity_status");
+  } catch (error) {
+    return {
+      enabled: true,
+      state: "error",
+      message: toRuntimeError(error).message,
+      scopes: []
+    } satisfies IdentityStatus;
+  }
+}
+
+export async function beginRuntimeIdentitySignIn() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<IdentityStatus>("identity_begin_sign_in");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function refreshRuntimeIdentity() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<IdentityStatus>("identity_refresh");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function signOutRuntimeIdentity() {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<IdentityStatus>("identity_sign_out");
+  } catch (error) {
+    throw toRuntimeError(error);
   }
 }
 
