@@ -5,12 +5,15 @@
 This repository contains the portable TypeScript auth broker in `apps/broker`. The auth broker is buildable and configured targeting Cloudflare Workers (`src/worker.ts` + `wrangler.jsonc`) as the primary host. 
 
 The broker targets Cloudflare Workers but is not deployed or production-ready in
-this repository. Its pending authorization, one-time handoff, and rate-limit
-stores are process-local memory. Durable atomic storage is required before a
-multi-isolate or restart-tolerant production deployment. Until an operator
-deploys the broker and registers its callback URLs in each provider console
-(including a GitHub OAuth App and Vercel Integration), confidential-client
-connectors fail closed with `configuration-required`.
+this repository. The default storage backend is process-local memory for local
+determinism. Durable Object classes, Worker bindings, migrations, encryption
+helpers, and contract tests exist for pending authorization state, one-time
+handoffs, and rate limiting behind `FABLE_BROKER_STORAGE_BACKEND=durable`; that
+mode still requires a deployed Worker, Durable Object bindings, and
+`FABLE_BROKER_STORE_ENCRYPTION_KEY`. Until an operator deploys the broker and
+registers its callback URLs in each provider console (including a GitHub OAuth
+App and Vercel Integration), confidential-client connectors fail closed with
+`configuration-required`.
 
 The broker core (routing, CORS, rate limiting, contract validation, the
 confidential OAuth lifecycle, and all redacted error handling) is
@@ -192,6 +195,8 @@ or secrets.
 | `FABLE_BROKER_PUBLIC_URL` | Public var / Worker secret binding | The public base URL of the broker, for example `https://fable-auth-broker.workers.dev/`. Required by the Worker. |
 | `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` | Public var | Comma-separated list of allowed non-loopback desktop redirect URLs. Optional. |
 | `FABLE_BROKER_RATE_LIMIT_PER_MINUTE` | Public var | Rate limit threshold per peer and route. Defaults to `60`. |
+| `FABLE_BROKER_STORAGE_BACKEND` | Public var | `memory` by default; set to `durable` only for Worker deployments with Durable Object bindings. |
+| `FABLE_BROKER_STORE_ENCRYPTION_KEY` | Secret | Required only when `FABLE_BROKER_STORAGE_BACKEND=durable`; 32-byte base64url root secret for broker ephemeral-store encryption. |
 | `FABLE_BROKER_PORT` / `FABLE_BROKER_HOST` | Public var | Bind settings for the local Node.js fallback server. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_ID` | Secret/config | Client ID registered in the provider developer console. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET` | Secret | Confidential client secret registered in the provider developer console. |
@@ -269,10 +274,10 @@ The fail-closed and non-proxying boundaries are covered by tests in
 
 Before the broker is enabled for external production use, it must, at minimum:
 
-1. Implement exactly the five operations above per provider, scoped to the
-   provider's confidential-client flow.
-2. Store client secrets and signing material in its own server-side secret store
+1. Store client secrets and signing material in its own server-side secret store
    (never in repo config, never shipped to the desktop).
+2. Run durable storage mode for external Worker deployments, with Durable Object
+   bindings and `FABLE_BROKER_STORE_ENCRYPTION_KEY` configured.
 3. Return only a short-lived handoff ticket and state to the exact desktop
    redirect URI it was given. Long-lived desktop-scoped sessions are forbidden.
 4. Be deployed behind HTTPS with registered callback URLs in each provider
@@ -347,12 +352,13 @@ bodies are never logged.
 
 ## Current deployment limitation
 
-The implemented foundation keeps pending OAuth exchanges, handoff tickets, and
-rate-limit counters in memory. This is suitable for local development and
-single-process tests, and it preserves the existing desktop expectations. Before
-external production use on Cloudflare, the single-use pending/handoff stores
-should move to a durable, atomic Worker binding such as a Durable Object so a
-callback and handoff redemption remain valid across isolates and restarts.
+The implemented foundation defaults to memory storage, which is suitable for
+local development and single-process tests. Cloudflare Worker durable mode is
+implemented with Durable Object classes and bindings, but has not been deployed
+or validated against live provider OAuth flows in this repository. Before
+external production use, operators still need to enable durable mode, configure
+the encryption secret, deploy the Worker, register provider callbacks, and run
+live non-production OAuth validation.
 
 ## Provider OAuth callback URL guidance
 

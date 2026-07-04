@@ -1,12 +1,12 @@
 # Fable Status
 
-Last audited: 2026-06-30.
+Last audited: 2026-07-04.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
 ## Repo Shape
 
-- The repo is a private pnpm monorepo named `fable`, with `@fable/desktop`, `@fable/broker`, `@fable/connectors`, `@fable/knowledge`, and `@fable/protocol`.
+- The repo is a private pnpm monorepo named `fable`, with apps `@fable/desktop`, `@fable/broker`, `@fable/marketing`, and `@fable/waitlist`, plus packages `@fable/connectors`, `@fable/knowledge`, and `@fable/protocol`.
 - The desktop app is Tauri 2 plus React, TypeScript, and Vite.
 - The Rust runtime is under `apps/desktop/src-tauri`.
 - Product docs already exist for thesis, roadmap, architecture, connectors, native-runtime, release notes, and threat model.
@@ -63,7 +63,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Google Connectors (Drive, Gmail, Calendar) | **Functional but gated** | Live public-client PKCE egress is functional, but requires user-supplied Google Cloud Console OAuth Client configuration. |
 | ACP Providers (Cursor, Grok) | **Functional but gated** | Live stdio JSON-RPC runs when local CLI is installed/authenticated. Grok entitlements resolved post-login. |
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
-| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth, lifecycle states, and provider adapters exist. Notion, Slack, and Linear expose authenticated reads and approval-gated writes; GitHub's implemented live surface is read-only. Durable atomic handoff storage, production deployment, provider secrets, callback registration, and live OAuth validation are still missing. |
+| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth, lifecycle states, and provider adapters exist. Notion, Slack, and Linear expose authenticated reads and approval-gated writes; GitHub's implemented live surface is read-only. Durable Object storage adapters and Worker bindings exist, but production deployment, durable-mode secrets, provider secrets, callback registration, and live OAuth validation are still missing. |
 | Browser Preview Mode | **Preview/fixture-only; transport deferred** | Purely synthetic fixture responses. Browser permission policy architecture, session derivation, and audit redaction are implemented; headless browser transport and live execution are deferred. |
 | Mobile Remote Control | **Local status surface; transport deferred** | Protocol metadata, trust checks, and native status commands exist. Settings reports that live LAN transport and pairing are unavailable; no socket, mobile app, hosted account, or remote execution authority exists. |
 | Schedules & Workflows SQLite migration | **Finished** | In Batch 9, schedules, queue entries, workflow definitions, and workflow runs were fully migrated from legacy JSON files into encrypted SQLite tables. |
@@ -89,8 +89,9 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 ## Not Implemented Yet
 
 - No deployed production auth broker or externally validated OAuth session. The
-  broker's pending/handoff/rate-limit state is in memory and must move to
-  durable atomic storage before production use.
+  broker defaults to memory storage, but durable atomic storage classes and
+  Worker bindings exist behind `FABLE_BROKER_STORAGE_BACKEND=durable`; durable
+  mode still requires deployment, bindings, and `FABLE_BROKER_STORE_ENCRYPTION_KEY`.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, schedules, workflows, and knowledge structures. Backend and connector credentials remain separately handled by OS secure storage.
