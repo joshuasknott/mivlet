@@ -166,6 +166,7 @@ const PROVIDER_PRIORITY = [
   "cursor",
   "copilot",
   "grok",
+  "ollama",
   "openai",
   "anthropic",
   "gemini",
@@ -193,8 +194,8 @@ function ProviderAccessView({
   // in flight; surface it as the pending provider id so the row shows a spinner.
   const pendingProviderId = runtime.backendStatus?.match(/Connecting (\S+?)[\u2026.]?/)?.[1];
 
-  // Native-API (key) providers are connectable here. Subscription/CLI providers
-  // (codex/cursor/copilot/grok) report provider-owned runtime state.
+  // Native-API (key) providers are connectable here. Subscription/CLI/local
+  // providers report provider-owned or externally managed runtime state.
   const nativeProviders = useMemo(
     () =>
       providers
@@ -224,16 +225,16 @@ function ProviderAccessView({
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          Connect API-key providers to run Fable&rsquo;s agent loop directly. Subscription and
-          CLI-backed providers use their installed provider runtime.
+          Connect API-key providers to run Fable&rsquo;s agent loop directly. Subscription,
+          CLI-backed, and local model providers use their own installed runtime.
         </p>
       </div>
 
       <div className="provider-access-groups" aria-label="Provider access">
         <section className="provider-access-group" aria-labelledby="subscription-providers-title">
           <div className="provider-access-group__heading">
-            <strong id="subscription-providers-title">Subscriptions</strong>
-            <span>Use an existing provider subscription or installed CLI.</span>
+            <strong id="subscription-providers-title">Installed runtimes</strong>
+            <span>Use an existing provider subscription, installed CLI, or local model service.</span>
           </div>
           <div className="provider-access-list">
             {subscriptionProviders.length > 0 ? (
@@ -628,7 +629,9 @@ function SubscriptionProviderSetupModal({
               <p>
                 {installRequired && provider.installHint
                   ? provider.installHint
-                  : "Use the provider's own app, CLI, or sign-in before Fable can use this runtime."}
+                  : provider.backendType === "local-loopback"
+                    ? "Fable detects this local service automatically. Start Ollama and pull a model in Ollama before running local prompts."
+                    : "Use the provider's own app, CLI, or sign-in before Fable can use this runtime."}
               </p>
             </section>
             <section>
@@ -694,7 +697,9 @@ function SubscriptionProviderRow({
             <span className="provider-access-caps provider-access-caps--muted">
               {installRequired && provider.installHint
                 ? provider.installHint
-                : "Requires the provider's real runtime to be connected first."}
+                : provider.backendType === "local-loopback"
+                  ? stateViewFor(provider.authState).hint ?? "Requires a running local model service."
+                  : "Requires the provider's real runtime to be connected first."}
             </span>
           )}
         </div>
@@ -708,7 +713,7 @@ function SubscriptionProviderRow({
         {authLabel}
       </span>
 
-      <span className="provider-access-row__action" title="Subscription providers use their provider-owned runtime and auth.">
+      <span className="provider-access-row__action" title="These providers use their own installed runtime and auth.">
         <span>{capabilityBearing ? "Manage" : "View setup"}</span>
       </span>
     </article>

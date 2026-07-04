@@ -114,6 +114,15 @@ export interface BackendDeps {
    * inject a scripted fake. Holds no secret because auth is CLI-owned.
    */
   createAcpTransport?: AcpTransportFactory;
+  /**
+   * Build a transport for an explicitly trusted local loopback provider such as
+   * Ollama. This is not general web egress: production validates the endpoint
+   * as literal loopback before any request leaves the process.
+   */
+  createLocalModelTransport?: (
+    provider: BackendProvider,
+    handlers: TransportHandlers
+  ) => TransportHandle | null;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }

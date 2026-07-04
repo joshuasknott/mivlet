@@ -119,7 +119,9 @@ export {
   resolveCursorProvider,
   resolveGrokProvider,
   resolveNativeProvider,
-  NATIVE_BACKEND_TYPE
+  resolveOllamaProvider,
+  NATIVE_BACKEND_TYPE,
+  LOCAL_LOOPBACK_BACKEND_TYPE
 } from "./backends/registry";
 export { hasCapability } from "./backends/capabilities";
 export type {
@@ -157,6 +159,10 @@ export {
   shapeGeminiRequest,
   streamGeminiEvents
 } from "./native-api/gemini";
+export {
+  shapeOllamaChatRequest,
+  streamOllamaEvents
+} from "./native-api/ollama";
 export { buildToolApproval } from "./native-api/approvals";
 export { lookupTool, registeredToolSpecs } from "./native-api/tools";
 export { priceFor } from "./native-api/pricing";
@@ -187,6 +193,7 @@ export {
   hasRunnableAdapter,
   createCodexBackend,
   createNativeApiBackend,
+  createLocalLoopbackBackend,
   resolveAcpBackend,
   ACP_PROVIDERS,
   detectAcpRuntime,

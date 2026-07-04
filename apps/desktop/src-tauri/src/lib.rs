@@ -21,6 +21,7 @@ mod connectors;
 mod execution_approvals;
 mod google;
 mod knowledge;
+mod local_model;
 mod memory;
 mod models;
 mod native_api;
@@ -168,6 +169,10 @@ pub fn run() {
             native_api::cancel_backend_completion,
             native_api::list_backend_models,
             native_api::verify_backend_credential,
+            local_model::detect_local_model_runtime,
+            local_model::list_local_model_models,
+            local_model::stream_local_model_completion,
+            local_model::cancel_local_model_completion,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,

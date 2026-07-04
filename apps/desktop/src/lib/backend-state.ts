@@ -34,6 +34,8 @@ export function authKindForProvider(provider: BackendProvider): BackendAuthKind 
   switch (provider.backendType) {
     case "native-api":
       return "api-key";
+    case "local-loopback":
+      return "install-gated";
     case "codex-app-server":
     case "acp":
     case "copilot-sdk":
@@ -93,6 +95,18 @@ export function stateViewFor(state: BackendAuthState): BackendStateView {
         tone: "caution",
         hint: "Install this provider's app or CLI, then come back."
       };
+    case "start-required":
+      return {
+        label: "Start required",
+        tone: "caution",
+        hint: "The local runtime is installed, but its service is not running."
+      };
+    case "download-required":
+      return {
+        label: "Model required",
+        tone: "caution",
+        hint: "The local runtime is running, but no usable model is installed."
+      };
     case "needs-auth":
       return { label: "Not connected", tone: "neutral" };
     case "expired":
@@ -143,6 +157,10 @@ export function actionLabelForProvider(provider: BackendProvider): string {
     case "sign-in-required":
     case "install-required":
       return kind === "install-gated" ? "Install required" : "Set up";
+    case "start-required":
+      return "Start runtime";
+    case "download-required":
+      return "Add model";
     case "unsupported":
       return "Not supported";
     case "failed":
