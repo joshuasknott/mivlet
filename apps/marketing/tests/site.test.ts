@@ -5,15 +5,17 @@ import { join } from 'node:path';
 const DIST = 'dist';
 
 describe('marketing site build artifacts (M-*)', () => {
-  it('M-01 home has provider section and no Windows preview label', () => {
+  it('M-01 home has the new hero and provider section', () => {
     const p = join(DIST, 'index.html');
     if (!existsSync(p)) { console.warn('dist not present; run build first'); return; }
     const html = readFileSync(p, 'utf8');
-    expect(html).toMatch(/Your local command surface for AI/i);
+    expect(html).toMatch(/Where people and agents/i);
+    expect(html).toMatch(/fable-product-demo\.mp4/i);
     expect(html).toMatch(/Codex/i);
     expect(html).toMatch(/OpenCode/i);
     expect(html).not.toMatch(/Hugging Face/i);
     expect(html).not.toMatch(/Windows preview/i);
+    expect(html).not.toMatch(/All claims are grounded in the repository/i);
   });
 
   it('M-02 connectors uses only allowed status labels', () => {
@@ -54,5 +56,15 @@ describe('marketing site build artifacts (M-*)', () => {
     if (!existsSync(p)) return;
     const html = readFileSync(p, 'utf8');
     expect(html).toMatch(/privacy-policy|Privacy Policy/i);
+    expect(html).not.toMatch(/Privacy Notice/i);
+  });
+
+  it('M-07 footer uses a single privacy link and 2026 mark', () => {
+    const p = join(DIST, 'index.html');
+    if (!existsSync(p)) return;
+    const html = readFileSync(p, 'utf8');
+    expect(html).toMatch(/© 2026 Fable/i);
+    expect(html).toMatch(/Privacy Policy/i);
+    expect(html).not.toMatch(/Privacy Notice/i);
   });
 });

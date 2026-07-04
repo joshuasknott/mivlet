@@ -2,8 +2,11 @@
 import Layout from '../../layouts/Layout.astro';
 ---
 <Layout title="Waitlist signup received" noindex={true} description="Thank you.">
-  <h1>Thank you — your signup was received</h1>
-  <p>We recorded a pending confirmation. If email delivery is configured you will receive a link to confirm. Otherwise the operator can confirm via token for local testing.</p>
-  <p><a href="/">Back to home</a></p>
-  <p class="fine">No personal data is shown in this URL.</p>
+  <div class="redirect-page">
+    <div>
+      <h1>Signup received.</h1>
+      <p>If confirmation email is enabled, you will receive a link shortly.</p>
+      <p><a class="btn btn-light" href="/">Back to home</a></p>
+    </div>
+  </div>
 </Layout>

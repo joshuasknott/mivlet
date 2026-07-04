@@ -3,18 +3,18 @@ import Layout from '../layouts/Layout.astro';
 import WaitlistForm from '../components/WaitlistForm.astro';
 
 const providers = [
-  { name: 'Codex', icon: '/provider-icons/codex.svg' },
-  { name: 'Cursor', icon: '/provider-icons/cursor.svg' },
-  { name: 'Claude', icon: '/provider-icons/claude.svg' },
-  { name: 'Grok', icon: '/provider-icons/grok.svg' },
-  { name: 'GitHub Copilot', icon: '/provider-icons/github-copilot.svg' },
-  { name: 'Gemini', icon: '/provider-icons/gemini.svg' },
-  { name: 'OpenAI', icon: '/provider-icons/openai.svg' },
-  { name: 'Z.ai', icon: '/provider-icons/zai.svg' },
-  { name: 'DeepSeek', icon: '/provider-icons/deepseek.svg' },
-  { name: 'MiniMax', icon: '/provider-icons/minimax.svg' },
-  { name: 'Kimi', icon: '/provider-icons/kimi.svg' },
-  { name: 'OpenCode', icon: '/provider-icons/opencode.svg' },
+  { name: 'Codex', icon: '/provider-icons/codex.svg', color: '#ffffff' },
+  { name: 'Cursor', icon: '/provider-icons/cursor.svg', color: '#ffffff' },
+  { name: 'Claude', icon: '/provider-icons/claude.svg', color: '#d97757' },
+  { name: 'Grok', icon: '/provider-icons/grok.svg', color: '#ffffff' },
+  { name: 'GitHub Copilot', icon: '/provider-icons/github-copilot.svg', color: '#7c5cff' },
+  { name: 'Gemini', icon: '/provider-icons/gemini.svg', color: '#8e75b2' },
+  { name: 'OpenAI', icon: '/provider-icons/openai.svg', color: '#ffffff' },
+  { name: 'Z.ai', icon: '/provider-icons/zai.svg', color: '#e3e3e3' },
+  { name: 'DeepSeek', icon: '/provider-icons/deepseek.svg', color: '#5786fe' },
+  { name: 'MiniMax', icon: '/provider-icons/minimax.svg', color: '#e73562' },
+  { name: 'Kimi', icon: '/provider-icons/kimi.svg', color: '#ffffff' },
+  { name: 'OpenCode', icon: '/provider-icons/opencode.svg', color: '#33b8ff' },
 ];
 
 const pillars = [
@@ -33,59 +33,74 @@ const pillars = [
 ];
 
 const connectors = [
-  { name: 'GitHub', icon: '/provider-icons/github.svg' },
-  { name: 'Vercel', icon: '/provider-icons/vercel.svg' },
-  { name: 'Google Drive', icon: '/provider-icons/google-drive.svg' },
-  { name: 'Gmail', icon: '/provider-icons/gmail.svg' },
-  { name: 'Calendar', icon: '/provider-icons/calendar.svg' },
-  { name: 'Slack', icon: '/provider-icons/slack.svg' },
-  { name: 'Notion', icon: '/provider-icons/notion.svg' },
-  { name: 'Linear', icon: '/provider-icons/linear.svg' },
+  { name: 'GitHub', icon: '/provider-icons/github.svg', color: '#ffffff' },
+  { name: 'Vercel', icon: '/provider-icons/vercel.svg', color: '#ffffff' },
+  { name: 'Google Drive', icon: '/provider-icons/google-drive.svg', color: '#4285f4' },
+  { name: 'Gmail', icon: '/provider-icons/gmail.svg', color: '#ea4335' },
+  { name: 'Calendar', icon: '/provider-icons/calendar.svg', color: '#4285f4' },
+  { name: 'Slack', icon: '/provider-icons/slack.svg', color: '#e01e5a' },
+  { name: 'Notion', icon: '/provider-icons/notion.svg', color: '#ffffff' },
+  { name: 'Linear', icon: '/provider-icons/linear.svg', color: '#5e6ad2' },
 ];
 ---
-<Layout title="Fable | Local-first AI, open by design" description="Fable is a local-first, open-source command surface for AI providers, files, tools, memory, schedules, and approvals.">
+<Layout title="Fable — Where people and agents build together" description="A local-first, open-source workspace for thinking, creating, and getting real work done with AI.">
   <section id="hero" class="home-hero" aria-labelledby="hero-title">
-    <div class="hero-light" aria-hidden="true"></div>
-
     <div class="hero-copy">
-      <img class="dragon-mark" src="/brand/fable-tech-dragon-transparent.png" alt="Minimal Fable technology dragon mark" loading="eager" />
-      <p class="eyebrow">Local-first AI. Open by design.</p>
-      <h1 id="hero-title">Fable</h1>
-      <p class="hero-subtitle">Your local command surface for AI.</p>
+      <img class="dragon-mark" src="/brand/fable-tech-dragon-transparent.png" alt="" loading="eager" />
+      <h1 id="hero-title" aria-label="Where people and agents build together.">
+        Where people and agents
+        <span class="headline-line">
+          <span class="rotating-word" aria-hidden="true">build</span>
+          <span> together.</span>
+        </span>
+      </h1>
       <p class="hero-body">
-        Use the models you choose. Keep context, approvals, and execution under your control.
+        A local-first, open-source workspace for thinking, creating, and getting real work done with AI.
       </p>
       <div class="hero-actions" aria-label="Primary actions">
-        <a class="btn btn-light" href="#updates">Get updates</a>
-        <a class="btn btn-ghost" href="#connectors">View connectors</a>
+        <a class="btn btn-light" href="#updates">Join the waitlist</a>
+        <a class="btn btn-ghost" href="#product">Explore the product</a>
       </div>
+    </div>
+
+    <div id="product" class="product-demo" aria-label="Animated Fable product preview">
+      <div class="demo-frame">
+        <video
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="metadata"
+          poster="/fable-product-demo-poster.jpg"
+          aria-label="Fable workspace showing delegated tasks, connected tools, and an approval"
+        >
+          <source src="/fable-product-demo.mp4" type="video/mp4" />
+        </video>
+      </div>
+      <p class="demo-caption">Work stays visible. External actions wait for your approval.</p>
     </div>
   </section>
 
   <section id="providers" class="section providers-section" aria-labelledby="providers-title">
-    <div class="section-heading split">
-      <div>
-        <p class="eyebrow dark">Providers</p>
-        <h2 id="providers-title">Use the models you choose.</h2>
-      </div>
-      <p>
-        Bring subscription tools, hosted APIs, and open runtimes into one local command surface without locking the workspace to one provider.
-      </p>
+    <div class="section-heading">
+      <p class="section-label">Providers</p>
+      <h2 id="providers-title">Use the models you choose.</h2>
+      <p>Bring the providers you already use into one local workspace.</p>
     </div>
     <div class="ecosystem-rail" data-auto-rail data-speed="22" tabindex="0" aria-label="AI provider ecosystem">
       <div class="ecosystem-track">
         <div class="ecosystem-set">
           {providers.map((provider) => (
-            <div class="ecosystem-item provider-item">
-              <img src={provider.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+            <div class="ecosystem-item provider-item" style={`--icon: url("${provider.icon}"); --brand: ${provider.color};`}>
+              <span class="ecosystem-logo" aria-hidden="true"></span>
               <span>{provider.name}</span>
             </div>
           ))}
         </div>
         <div class="ecosystem-set" aria-hidden="true">
           {providers.map((provider) => (
-            <div class="ecosystem-item provider-item">
-              <img src={provider.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+            <div class="ecosystem-item provider-item" style={`--icon: url("${provider.icon}"); --brand: ${provider.color};`}>
+              <span class="ecosystem-logo" aria-hidden="true"></span>
               <span>{provider.name}</span>
             </div>
           ))}
@@ -94,18 +109,16 @@ const connectors = [
     </div>
   </section>
 
-  <section id="product" class="section product-section" aria-labelledby="product-title">
+  <section id="principles" class="section product-section" aria-labelledby="product-title">
     <div class="section-heading">
-      <p class="eyebrow dark">Product</p>
+      <p class="section-label">Product principles</p>
       <h2 id="product-title">Built local-first. Open by default.</h2>
-      <p>
-        Fable organizes models, files, context, memory, schedules, and approvals into one controlled workspace.
-      </p>
+      <p>Bring files, tools, memory, schedules, and approvals together without giving up control.</p>
     </div>
     <div class="pillar-grid">
       {pillars.map((pillar, index) => (
         <article class="pillar">
-          <span class="pillar-icon" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+          <span class="pillar-index" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
           <h3>{pillar.title}</h3>
           <p>{pillar.body}</p>
         </article>
@@ -114,29 +127,25 @@ const connectors = [
   </section>
 
   <section id="connectors" class="section connectors-section" aria-labelledby="connectors-title">
-    <div class="section-heading split">
-      <div>
-        <p class="eyebrow dark">Connectors</p>
-        <h2 id="connectors-title">Connect the tools around your work.</h2>
-      </div>
-      <p>
-        Providers supply the intelligence. Connectors are explicit bridges to the tools, files, and services around your workspace.
-      </p>
+    <div class="section-heading">
+      <p class="section-label">Connectors</p>
+      <h2 id="connectors-title">Connect the tools around your work.</h2>
+      <p>Explicit bridges to the files and services your work already depends on.</p>
     </div>
     <div class="ecosystem-rail" data-auto-rail data-speed="18" tabindex="0" aria-label="Connector ecosystem">
       <div class="ecosystem-track">
         <div class="ecosystem-set">
           {connectors.map((connector) => (
-            <div class="ecosystem-item connector-item">
-              <img src={connector.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+            <div class="ecosystem-item connector-item" style={`--icon: url("${connector.icon}"); --brand: ${connector.color};`}>
+              <span class="ecosystem-logo" aria-hidden="true"></span>
               <span>{connector.name}</span>
             </div>
           ))}
         </div>
         <div class="ecosystem-set" aria-hidden="true">
           {connectors.map((connector) => (
-            <div class="ecosystem-item connector-item">
-              <img src={connector.icon} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+            <div class="ecosystem-item connector-item" style={`--icon: url("${connector.icon}"); --brand: ${connector.color};`}>
+              <span class="ecosystem-logo" aria-hidden="true"></span>
               <span>{connector.name}</span>
             </div>
           ))}
@@ -147,11 +156,9 @@ const connectors = [
 
   <section id="updates" class="section updates-section" aria-labelledby="updates-title">
     <div class="updates-copy">
-      <p class="eyebrow dark">Updates</p>
-      <h2 id="updates-title">Follow the product as it opens up.</h2>
-      <p>
-        Join the Fable list for product updates. This is not a hosted workspace account and does not give Fable access to your local data.
-      </p>
+      <img src="/brand/fable-tech-dragon-transparent.png" alt="" class="updates-mark" />
+      <h2 id="updates-title">Get Fable updates.</h2>
+      <p>Product news and preview access. No account required.</p>
     </div>
     <WaitlistForm />
   </section>
@@ -159,6 +166,16 @@ const connectors = [
 
 <script>
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const rotatingWord = document.querySelector<HTMLElement>('.rotating-word');
+  const words = ['think', 'create', 'build', 'scale'];
+  let wordIndex = words.indexOf(rotatingWord?.textContent?.trim() ?? 'build');
+
+  if (rotatingWord && !reducedMotion.matches) {
+    window.setInterval(() => {
+      wordIndex = (wordIndex + 1) % words.length;
+      rotatingWord.textContent = words[wordIndex];
+    }, 2600);
+  }
 
   document.querySelectorAll<HTMLElement>('[data-auto-rail]').forEach((rail) => {
     let paused = false;
@@ -173,7 +190,7 @@ const connectors = [
       window.clearTimeout(resumeTimer);
       resumeTimer = window.setTimeout(() => {
         paused = false;
-      }, 900);
+      }, 1100);
     };
 
     const normalizeScroll = () => {

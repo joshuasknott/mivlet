@@ -1,0 +1,11 @@
+{
+  "name": "fable-product-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.7.29 preview",
+    "check": "npx --yes hyperframes@0.7.29 lint && npx --yes hyperframes@0.7.29 validate && npx --yes hyperframes@0.7.29 inspect",
+    "render": "npx --yes hyperframes@0.7.29 render",
+    "publish": "npx --yes hyperframes@0.7.29 publish"
+  }
+}

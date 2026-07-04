@@ -4,9 +4,11 @@ const TURNSTILE_SITE_KEY = import.meta.env.PUBLIC_TURNSTILE_SITE_KEY ?? '1x00000
 const WAITLIST_CONTACT_EMAIL = import.meta.env.PUBLIC_WAITLIST_CONTACT_EMAIL ?? 'hello@example.invalid';
 const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
 ---
-<form id="waitlist-form" method="POST" action={WAITLIST_ENDPOINT} accept-charset="utf-8">
-  <label for="email">Email address</label>
-  <input id="email" name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" />
+<form id="waitlist-form" class="waitlist-form" method="POST" action={WAITLIST_ENDPOINT} accept-charset="utf-8">
+  <div class="field-group">
+    <label for="email">Email address</label>
+    <input id="email" name="email" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" />
+  </div>
 
   <fieldset>
     <legend>Product interest (optional)</legend>
@@ -24,30 +26,33 @@ const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
 
   <label class="checkbox-label">
     <input type="checkbox" name="consent_marketing" value="true" required aria-describedby="consent-desc" />
-    <span>I agree to the Waitlist Signup Notice (version {CONSENT_VERSION}) and want to receive waitlist and product updates from Fable.</span>
+    <span>I agree to receive waitlist and product update emails from Fable.</span>
   </label>
   <p id="consent-desc" class="fine">
-    See full <a href="/privacy-policy">Privacy Policy</a> and <a href="/privacy">Privacy Notice</a>.
-    Version {CONSENT_VERSION}. Consent text hash is recorded server-side.
+    See our <a href="/privacy-policy">Privacy Policy</a> for how we handle your information.
   </p>
+  <details class="consent-details">
+    <summary>Consent details</summary>
+    <p>
+      Notice {CONSENT_VERSION}. Joining the waitlist does not create a Fable account, guarantee access, or give Fable access to your local workspace.
+    </p>
+  </details>
 
-  <!-- Turnstile widget -->
   <div id="turnstile-container">
     <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
-    <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-theme="dark"></div>
+    <div class="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} data-theme="light"></div>
   </div>
   <input type="hidden" name="consent_version" value={CONSENT_VERSION} />
   <input type="hidden" name="turnstile_token" id="turnstile_token" />
 
   <noscript>
     <div class="fallback">
-      JavaScript is required for the Turnstile challenge. You can still join by emailing <a href={`mailto:${WAITLIST_CONTACT_EMAIL}?subject=Waitlist%20signup`}>{WAITLIST_CONTACT_EMAIL}</a>.
-      Include only your email and the notice version above.
+      JavaScript is required for the verification step. You can join by emailing <a href={`mailto:${WAITLIST_CONTACT_EMAIL}?subject=Waitlist%20signup`}>{WAITLIST_CONTACT_EMAIL}</a>.
     </div>
   </noscript>
 
-  <button type="submit">Get product updates</button>
-  <p class="fine" id="form-status" aria-live="polite" style="margin-top: 1rem;"></p>
+  <button type="submit">Join the waitlist</button>
+  <p class="fine form-status" id="form-status" aria-live="polite"></p>
 </form>
 
 <script>
@@ -58,22 +63,27 @@ const CONSENT_VERSION = '2026-07-03-waitlist-v0.1';
     }
     form.addEventListener('submit', async (e) => {
       const ts = (window as any).turnstile;
-      if (!ts) return; 
+      if (!ts) return;
       e.preventDefault();
       const fd = new FormData(form as HTMLFormElement);
       const turnstileResponse = (form.querySelector('input[name="cf-turnstile-response"]') as HTMLInputElement)?.value || '';
       if (turnstileResponse) {
         fd.set('turnstile_token', turnstileResponse);
       }
-      const res = await fetch((form as HTMLFormElement).action, {
-        method: 'POST',
-        body: fd
-      });
       const status = document.getElementById('form-status');
-      if (res.status === 202) {
-        window.location.href = '/waitlist/confirmed';
-      } else if (status) {
-        status.textContent = 'There was a problem. Please try again or use the mailto fallback.';
+      if (status) status.textContent = 'Joining…';
+      try {
+        const res = await fetch((form as HTMLFormElement).action, {
+          method: 'POST',
+          body: fd
+        });
+        if (res.status === 202) {
+          window.location.href = '/waitlist/confirmed';
+        } else if (status) {
+          status.textContent = 'There was a problem. Please try again or use the email fallback.';
+        }
+      } catch {
+        if (status) status.textContent = 'The waitlist service is unavailable. Please try again shortly.';
       }
     });
   }

@@ -2,17 +2,16 @@
 import Layout from '../layouts/Layout.astro';
 import WaitlistForm from '../components/WaitlistForm.astro';
 ---
-<Layout title="Get Fable product updates" description="Follow Fable, the local-first AI workspace built open by design.">
-  <div style="max-width: 600px; margin: 2rem auto;">
-    <h1>Get Fable product updates</h1>
-
-    <p>Follow Fable as the local-first AI workspace opens up across providers, connectors, memory, schedules, and approvals.</p>
-
-    <div class="honest-box">
-      <strong>Onboarding & Privacy:</strong>
-      Fable's core desktop workspace runs locally without a hosted account. Product update data is stored separately from OAuth connector credentials.
+<Layout title="Join the Fable waitlist" description="Product news and preview access for Fable. No account required.">
+  <section class="section updates-section standalone-waitlist" aria-labelledby="waitlist-title">
+    <div class="updates-copy">
+      <img src="/brand/fable-tech-dragon-transparent.png" alt="" class="updates-mark" />
+      <h1 id="waitlist-title">Join the Fable waitlist.</h1>
+      <p>Product news and preview access. No account required.</p>
+      <div class="honest-box">
+        Fable's desktop workspace runs locally. Waitlist data is stored separately from connector credentials and does not provide access to your local files.
+      </div>
     </div>
-
     <WaitlistForm />
-  </div>
+  </section>
 </Layout>

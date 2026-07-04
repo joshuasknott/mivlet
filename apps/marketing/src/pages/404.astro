@@ -2,6 +2,10 @@
 import Layout from '../layouts/Layout.astro';
 ---
 <Layout title="Not found" noindex={true}>
-  <h1>Page not found</h1>
-  <p>The page you requested does not exist. <a href="/">Go home</a>.</p>
+  <div class="redirect-page">
+    <div>
+      <h1>Page not found</h1>
+      <p>The page you requested does not exist. <a href="/">Go home</a>.</p>
+    </div>
+  </div>
 </Layout>

@@ -7,6 +7,7 @@ export interface Props {
 }
 const { title, description = "Local-first AI, open by design.", noindex = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site || 'https://fable.tools').href;
+const year = 2026;
 ---
 <!doctype html>
 <html lang="en">
@@ -21,38 +22,43 @@ const canonical = new URL(Astro.url.pathname, Astro.site || 'https://fable.tools
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:image" content="/og-image.png" />
-  <meta name="theme-color" content="#17191A" />
+  <meta name="theme-color" content="#050505" />
+  <meta name="color-scheme" content="dark" />
 </head>
 <body>
   <a href="#main" class="skip-link">Skip to main content</a>
-  <header>
-    <nav aria-label="Primary">
-      <a href="/" class="logo-container">
+  <header class="site-header">
+    <nav class="site-nav" aria-label="Primary">
+      <a href="/" class="logo-container" aria-label="Fable home">
         <img src="/brand/fable-tech-dragon-transparent.png" alt="" class="logo-image" />
-        <span>Fable</span>
       </a>
-      <ul>
+      <ul class="nav-links">
         <li><a href="/#product">Product</a></li>
         <li><a href="/#providers">Providers</a></li>
         <li><a href="/#connectors">Connectors</a></li>
         <li><a href="/open-source">Open Source</a></li>
       </ul>
+      <a class="header-cta" href="/#updates">Join waitlist</a>
     </nav>
   </header>
   <main id="main">
     <slot />
   </main>
-  <footer>
-    <nav aria-label="Legal">
-      <a href="/privacy-policy">Privacy Policy</a>
-      <a href="/privacy">Privacy Notice</a>
-      <a href="/status">Status Matrix</a>
-      <a href="https://github.com" rel="noopener" target="_blank">GitHub</a>
-    </nav>
-    <p class="fine" style="margin-top: 1.5rem;">Fable is open-source, local-first software. All claims are grounded in the repository.</p>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <a href="/" class="footer-mark" aria-label="Fable home">
+        <img src="/brand/fable-tech-dragon-transparent.png" alt="" />
+      </a>
+      <nav aria-label="Legal">
+        <a href="/privacy-policy">Privacy Policy</a>
+        <a href="/status">Status</a>
+        <a href="/open-source">Open Source</a>
+        <a href="https://github.com" rel="noopener" target="_blank">GitHub</a>
+      </nav>
+      <p>© {year} Fable. Open-source, local-first software.</p>
+    </div>
   </footer>
   <script>
-    // Minimal progressive enhancement hook (no PII)
     document.documentElement.classList.add('js');
   </script>
 </body>

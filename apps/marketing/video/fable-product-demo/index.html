@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --canvas: #050505;
+        --shell: #0d0d0e;
+        --surface: #151516;
+        --surface-2: #1c1c1e;
+        --line: #303034;
+        --line-soft: #232326;
+        --text: #ffffff;
+        --muted: #a6a6ab;
+      }
+
+      @font-face {
+        font-family: "Geist";
+        src: local("Segoe UI");
+        font-style: normal;
+        font-weight: 100 900;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--canvas);
+      }
+
+      body {
+        color: var(--text);
+        font-family: "Geist", "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      code,
+      pre,
+      .monospace {
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+          var(--canvas);
+        background-size: 72px 72px;
+      }
+
+      .demo-scene {
+        width: 100%;
+        height: 100%;
+        padding: 70px;
+      }
+
+      .window {
+        display: grid;
+        grid-template-rows: 74px 1fr;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        background: var(--shell);
+        box-shadow: 0 44px 120px rgba(0, 0, 0, 0.48);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 340px 1fr auto;
+        align-items: center;
+        min-width: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .window-controls,
+      .workspace-title,
+      .top-actions,
+      .brand-row,
+      .nav-item,
+      .status-row,
+      .task-meta,
+      .approval-actions,
+      .composer,
+      .typing-line {
+        display: flex;
+        align-items: center;
+      }
+
+      .window-controls {
+        gap: 12px;
+        padding-left: 28px;
+      }
+
+      .window-dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #3a3a3e;
+      }
+
+      .workspace-title {
+        gap: 14px;
+        height: 100%;
+        padding-left: 28px;
+        border-left: 1px solid var(--line);
+        font-size: 21px;
+        font-weight: 650;
+      }
+
+      .workspace-mark {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border: 1px solid #414146;
+        border-radius: 10px;
+        font-size: 19px;
+        font-weight: 800;
+      }
+
+      .top-actions {
+        gap: 12px;
+        padding-right: 24px;
+      }
+
+      .top-action {
+        min-width: 86px;
+        border: 1px solid var(--line);
+        border-radius: 11px;
+        padding: 10px 14px;
+        color: var(--muted);
+        font-size: 17px;
+        text-align: center;
+      }
+
+      .top-action.primary {
+        border-color: var(--text);
+        color: var(--canvas);
+        background: var(--text);
+        font-weight: 650;
+      }
+
+      .app-body {
+        display: grid;
+        grid-template-columns: 340px minmax(0, 1fr) 430px;
+        min-height: 0;
+      }
+
+      .sidebar,
+      .activity-panel {
+        min-height: 0;
+        padding: 28px 24px;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--line);
+      }
+
+      .brand-row {
+        gap: 13px;
+        margin-bottom: 30px;
+        padding: 0 8px;
+        font-size: 23px;
+        font-weight: 700;
+      }
+
+      .brand-symbol {
+        display: grid;
+        place-items: center;
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        color: var(--canvas);
+        background: var(--text);
+        font-size: 22px;
+        font-weight: 900;
+      }
+
+      .nav-group + .nav-group {
+        margin-top: 30px;
+      }
+
+      .nav-label {
+        margin: 0 10px 10px;
+        color: #75757b;
+        font: 15px/1 "JetBrains Mono", monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .nav-item {
+        gap: 14px;
+        min-height: 48px;
+        margin-bottom: 4px;
+        border-radius: 11px;
+        padding: 0 12px;
+        color: var(--muted);
+        font-size: 18px;
+      }
+
+      .nav-item.active {
+        color: var(--text);
+        background: var(--surface-2);
+      }
+
+      .nav-icon {
+        width: 16px;
+        height: 16px;
+        border: 1px solid currentColor;
+        border-radius: 4px;
+      }
+
+      .workspace {
+        display: flex;
+        min-width: 0;
+        min-height: 0;
+        flex-direction: column;
+        padding: 30px 32px 26px;
+      }
+
+      .workspace-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 26px;
+      }
+
+      .workspace-kicker {
+        margin-bottom: 7px;
+        color: #77777d;
+        font: 15px/1 "JetBrains Mono", monospace;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .workspace-heading h1 {
+        max-width: 740px;
+        font-size: 42px;
+        font-weight: 760;
+        line-height: 1.03;
+        letter-spacing: -0.035em;
+      }
+
+      .workspace-heading p {
+        max-width: 380px;
+        color: var(--muted);
+        font-size: 18px;
+        font-weight: 350;
+        line-height: 1.45;
+      }
+
+      .board {
+        display: grid;
+        min-width: 0;
+        min-height: 0;
+        flex: 1;
+        grid-template-columns: repeat(3, minmax(250px, 1fr));
+        gap: 16px;
+      }
+
+      .column {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 15px;
+        background: #101011;
+      }
+
+      .status-row {
+        justify-content: space-between;
+        margin-bottom: 15px;
+        padding: 0 4px;
+      }
+
+      .status-name {
+        font-size: 17px;
+        font-weight: 650;
+      }
+
+      .status-count {
+        color: #737378;
+        font: 15px/1 "JetBrains Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .task {
+        margin-bottom: 11px;
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        padding: 15px;
+        background: var(--surface);
+      }
+
+      .task:last-child {
+        margin-bottom: 0;
+      }
+
+      .task-title {
+        min-height: 46px;
+        font-size: 18px;
+        font-weight: 560;
+        line-height: 1.28;
+      }
+
+      .task-meta {
+        justify-content: space-between;
+        margin-top: 13px;
+        color: #74747a;
+        font: 14px/1 "JetBrains Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .agent-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .agent-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #9a9aa0;
+      }
+
+      .activity-panel {
+        border-left: 1px solid var(--line);
+        background: #0a0a0b;
+      }
+
+      .activity-heading {
+        margin-bottom: 22px;
+        font-size: 23px;
+        font-weight: 680;
+      }
+
+      .activity-subhead {
+        margin: 24px 0 12px;
+        color: #85858a;
+        font: 15px/1 "JetBrains Mono", monospace;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .approval-card,
+      .activity-card {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--surface);
+      }
+
+      .approval-card {
+        padding: 18px;
+      }
+
+      .approval-title {
+        margin-bottom: 8px;
+        font-size: 19px;
+        font-weight: 650;
+      }
+
+      .approval-copy {
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.4;
+      }
+
+      .approval-actions {
+        gap: 9px;
+        margin-top: 18px;
+      }
+
+      .approval-button {
+        flex: 1;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: 11px 10px;
+        color: var(--muted);
+        font-size: 15px;
+        text-align: center;
+      }
+
+      .approval-button.approve {
+        border-color: var(--text);
+        color: var(--canvas);
+        background: var(--text);
+        font-weight: 650;
+      }
+
+      .activity-card {
+        padding: 4px 16px;
+      }
+
+      .activity-item {
+        display: grid;
+        grid-template-columns: 20px 1fr auto;
+        align-items: center;
+        gap: 12px;
+        min-height: 58px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .activity-item:last-child {
+        border-bottom: 0;
+      }
+
+      .activity-check {
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        border: 1px solid #8d8d92;
+        border-radius: 50%;
+        color: var(--text);
+        font-size: 12px;
+      }
+
+      .activity-text {
+        font-size: 16px;
+      }
+
+      .activity-time {
+        color: #6f6f75;
+        font: 13px/1 "JetBrains Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .composer {
+        gap: 14px;
+        min-height: 68px;
+        margin-top: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 0 18px;
+        background: #101011;
+      }
+
+      .composer-plus {
+        font-size: 27px;
+      }
+
+      .typing-line {
+        flex: 1;
+        gap: 3px;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 17px;
+      }
+
+      .typing-text {
+        overflow: hidden;
+        white-space: nowrap;
+      }
+
+      .caret {
+        width: 2px;
+        height: 22px;
+        background: var(--text);
+      }
+
+      .send {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        color: var(--canvas);
+        background: var(--text);
+        font-size: 19px;
+      }
+
+      .cursor {
+        position: absolute;
+        z-index: 20;
+        left: 1660px;
+        top: 520px;
+        width: 32px;
+        height: 42px;
+        filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.45));
+        transform-origin: 2px 2px;
+      }
+
+      .cursor::before {
+        content: "";
+        display: block;
+        width: 0;
+        height: 0;
+        border-top: 38px solid var(--text);
+        border-right: 22px solid transparent;
+        transform: rotate(-8deg);
+      }
+
+      .approval-pulse {
+        position: absolute;
+        z-index: 19;
+        left: 1530px;
+        top: 525px;
+        width: 150px;
+        height: 52px;
+        border: 2px solid var(--text);
+        border-radius: 12px;
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="10"
+      data-width="1920"
+      data-height="1080"
+    >
+      <div
+        id="demo-scene"
+        class="clip demo-scene"
+        data-start="0"
+        data-duration="10"
+        data-track-index="1"
+      >
+        <div class="window">
+          <div class="topbar" data-layout-allow-overflow>
+            <div class="window-controls" aria-hidden="true">
+              <span class="window-dot"></span>
+              <span class="window-dot"></span>
+              <span class="window-dot"></span>
+            </div>
+            <div class="workspace-title">
+              <span class="workspace-mark">F</span>
+              <span>Product launch workspace</span>
+            </div>
+            <div class="top-actions">
+              <span class="top-action">Share</span>
+              <span class="top-action primary">New task</span>
+            </div>
+          </div>
+
+          <div class="app-body">
+            <aside class="sidebar">
+              <div class="brand-row">
+                <span class="brand-symbol">F</span>
+                <span>Fable</span>
+              </div>
+
+              <div class="nav-group">
+                <div class="nav-label">Workspace</div>
+                <div class="nav-item active"><span class="nav-icon"></span><span>Launch plan</span></div>
+                <div class="nav-item"><span class="nav-icon"></span><span>Agent activity</span></div>
+                <div class="nav-item"><span class="nav-icon"></span><span>Approvals</span></div>
+                <div class="nav-item"><span class="nav-icon"></span><span>Knowledge</span></div>
+              </div>
+
+              <div class="nav-group">
+                <div class="nav-label">Connected</div>
+                <div class="nav-item"><span class="nav-icon"></span><span>Local files</span></div>
+                <div class="nav-item"><span class="nav-icon"></span><span>GitHub</span></div>
+                <div class="nav-item"><span class="nav-icon"></span><span>Calendar</span></div>
+              </div>
+            </aside>
+
+            <main class="workspace">
+              <div class="workspace-heading">
+                <div>
+                  <div class="workspace-kicker">Shared work</div>
+                  <h1>Plan the launch with people and agents.</h1>
+                </div>
+                <p>Tasks stay visible. Every external action waits for the permission you set.</p>
+              </div>
+
+              <div class="board">
+                <section class="column">
+                  <div class="status-row"><span class="status-name">To do</span><span class="status-count">03</span></div>
+                  <article class="task">
+                    <div class="task-title">Review launch brief and open questions</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>You</span><span>Today</span></div>
+                  </article>
+                  <article class="task">
+                    <div class="task-title">Prepare customer interview synthesis</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>Research</span><span>Queued</span></div>
+                  </article>
+                  <article class="task">
+                    <div class="task-title">Draft launch checklist from local notes</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>Fable</span><span>Ready</span></div>
+                  </article>
+                </section>
+
+                <section class="column">
+                  <div class="status-row"><span class="status-name">In progress</span><span class="status-count">02</span></div>
+                  <article class="task">
+                    <div class="task-title">Turn research into positioning options</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>Strategy</span><span>Working</span></div>
+                  </article>
+                  <article class="task">
+                    <div class="task-title">Check dependencies across connected tools</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>Fable</span><span>Working</span></div>
+                  </article>
+                </section>
+
+                <section class="column">
+                  <div class="status-row"><span class="status-name">Needs approval</span><span class="status-count">02</span></div>
+                  <article class="task">
+                    <div class="task-title">Publish final launch timeline to the team</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>Calendar</span><span>Blocked</span></div>
+                  </article>
+                  <article class="task">
+                    <div class="task-title">Share release notes with collaborators</div>
+                    <div class="task-meta"><span class="agent-chip"><span class="agent-dot"></span>GitHub</span><span>Blocked</span></div>
+                  </article>
+                </section>
+              </div>
+
+              <div class="composer">
+                <span class="composer-plus">+</span>
+                <div class="typing-line">
+                  <span class="typing-text">Ask Fable to prepare the release summary</span>
+                  <span class="caret"></span>
+                </div>
+                <span class="send">↑</span>
+              </div>
+            </main>
+
+            <aside class="activity-panel" data-layout-allow-overflow>
+              <h2 class="activity-heading">Activity</h2>
+              <div class="activity-subhead">Waiting for you</div>
+              <div class="approval-card">
+                <div class="approval-title">Publish launch timeline</div>
+                <div class="approval-copy">Calendar can create one event and invite the launch team.</div>
+                <div class="approval-actions">
+                  <span class="approval-button approve">Approve once</span>
+                  <span class="approval-button">Review</span>
+                </div>
+              </div>
+
+              <div class="activity-subhead">Completed locally</div>
+              <div class="activity-card">
+                <div class="activity-item">
+                  <span class="activity-check">✓</span><span class="activity-text">Launch brief indexed</span><span class="activity-time">09:42</span>
+                </div>
+                <div class="activity-item">
+                  <span class="activity-check">✓</span><span class="activity-text">Research notes grouped</span><span class="activity-time">09:45</span>
+                </div>
+                <div class="activity-item">
+                  <span class="activity-check">✓</span><span class="activity-text">Three options drafted</span><span class="activity-time">09:47</span>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <div class="approval-pulse" data-layout-ignore aria-hidden="true"></div>
+        <div class="cursor" data-layout-ignore aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.from(".window", { opacity: 0, scale: 0.975, duration: 0.78, ease: "expo.out" }, 0.2);
+      tl.from(".topbar", { opacity: 0, y: -24, duration: 0.48, ease: "power3.out" }, 0.34);
+      tl.from(".brand-row", { opacity: 0, x: -28, duration: 0.42, ease: "circ.out" }, 0.45);
+      tl.from(".nav-item", { opacity: 0, x: -20, duration: 0.34, stagger: 0.045, ease: "power2.out" }, 0.56);
+      tl.from(".workspace-heading > div", { opacity: 0, y: 30, duration: 0.58, ease: "expo.out" }, 0.52);
+      tl.from(".workspace-heading > p", { opacity: 0, x: 34, duration: 0.5, ease: "circ.out" }, 0.68);
+      tl.from(".column", { opacity: 0, y: 34, scale: 0.985, duration: 0.62, stagger: 0.09, ease: "power4.out" }, 0.78);
+      tl.from(".task", { opacity: 0, y: 22, duration: 0.38, stagger: 0.045, ease: "power2.out" }, 1.02);
+      tl.from(".activity-heading", { opacity: 0, x: 30, duration: 0.42, ease: "expo.out" }, 0.66);
+      tl.from(".activity-subhead", { opacity: 0, duration: 0.36, stagger: 0.2, ease: "sine.out" }, 0.92);
+      tl.from(".approval-card", { opacity: 0, x: 28, duration: 0.5, ease: "power3.out" }, 1.0);
+      tl.from(".activity-card", { opacity: 0, x: 28, duration: 0.48, ease: "circ.out" }, 1.26);
+      tl.from(".activity-item", { opacity: 0, y: 12, duration: 0.3, stagger: 0.08, ease: "power1.out" }, 1.4);
+      tl.from(".composer", { opacity: 0, y: 24, duration: 0.5, ease: "power4.out" }, 1.32);
+      tl.from(".cursor", { opacity: 0, scale: 0.7, duration: 0.32, ease: "back.out(1.4)" }, 2.0);
+      tl.to(".cursor", { x: -110, y: 80, duration: 1.1, ease: "power3.inOut" }, 2.5);
+      tl.to(".cursor", { scale: 0.82, duration: 0.14, ease: "power2.in" }, 3.62);
+      tl.to(".cursor", { scale: 1, duration: 0.18, ease: "power2.out" }, 3.77);
+      tl.fromTo(".approval-pulse", { opacity: 0, scale: 0.82 }, { opacity: 0.8, scale: 1, duration: 0.34, ease: "expo.out" }, 3.64);
+      tl.to(".approval-pulse", { opacity: 0, scale: 1.12, duration: 0.48, ease: "power2.in" }, 4.02);
+      tl.to(".approval-button.approve", { color: "#ffffff", backgroundColor: "#151516", borderColor: "#303034", duration: 0.35, ease: "sine.inOut" }, 3.72);
+      tl.to(".status-count", { color: "#ffffff", duration: 0.34, stagger: 0.08, ease: "sine.inOut" }, 4.32);
+      tl.to(".caret", { opacity: 0, duration: 0.42, repeat: 5, yoyo: true, ease: "none" }, 4.4);
+      tl.to(".cursor", { x: -520, y: 400, duration: 1.45, ease: "power3.inOut" }, 5.0);
+      tl.to(".board", { x: -10, duration: 2.5, ease: "sine.inOut" }, 5.2);
+      tl.to(".board", { x: 0, duration: 2.1, ease: "sine.inOut" }, 7.7);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
