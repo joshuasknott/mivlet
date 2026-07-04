@@ -37,6 +37,7 @@ const DRIVE_READONLY: &str = "https://www.googleapis.com/auth/drive.readonly";
 const DRIVE_METADATA: &str = "https://www.googleapis.com/auth/drive.metadata.readonly";
 const GMAIL_READONLY: &str = "https://www.googleapis.com/auth/gmail.readonly";
 const GMAIL_COMPOSE: &str = "https://www.googleapis.com/auth/gmail.compose";
+const GMAIL_SEND: &str = "https://www.googleapis.com/auth/gmail.send";
 const CALENDAR_LIST: &str = "https://www.googleapis.com/auth/calendar.calendarlist.readonly";
 const CALENDAR_READONLY: &str = "https://www.googleapis.com/auth/calendar.events.readonly";
 const CALENDAR_EVENTS: &str = "https://www.googleapis.com/auth/calendar.events";
@@ -1489,10 +1490,10 @@ async fn execute_gmail_action(
     tokens: &StoredTokenSet,
     action: &ConnectorActionRequest,
 ) -> Result<Option<String>, ConnectorCommandError> {
-    require_scope("gmail", tokens, &[GMAIL_COMPOSE])?;
     let payload = &action.payload;
     let (url, body) = match action.action.as_str() {
         "gmail.create-draft" => {
+            require_scope("gmail", tokens, &[GMAIL_COMPOSE])?;
             let raw = URL_SAFE_NO_PAD.encode(build_mime(payload)?);
             let mut message = json!({ "raw": raw });
             if let Some(thread_id) = payload.get("threadId").filter(|value| !value.is_empty()) {
@@ -1504,6 +1505,7 @@ async fn execute_gmail_action(
             )
         }
         "gmail.send" => {
+            require_scope("gmail", tokens, &[GMAIL_SEND, GMAIL_COMPOSE])?;
             if let Some(draft_id) = payload.get("draftId").filter(|value| !value.is_empty()) {
                 (
                     api_url(GMAIL_API, "users/me/drafts/send")?,

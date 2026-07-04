@@ -100,6 +100,27 @@ fn slack_connection(status: &str) -> ConnectorConnection {
     }
 }
 
+fn google_connection(connector_id: &str, scopes: Vec<&str>) -> ConnectorConnection {
+    ConnectorConnection {
+        connector_id: connector_id.to_string(),
+        account: ConnectorAccountSummary {
+            id: "google-user-1".to_string(),
+            display_name: "Google User".to_string(),
+            handle: None,
+            email: Some("user@example.test".to_string()),
+            workspace: None,
+            avatar_url: None,
+        },
+        status: "connected".to_string(),
+        scopes: scopes.into_iter().map(str::to_string).collect(),
+        expires_at: None,
+        credential_ref: format!("oauth-token:{connector_id}:google-user-1"),
+        connected_at: "1".to_string(),
+        updated_at: "1".to_string(),
+        is_active: true,
+    }
+}
+
 #[test]
 fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
     let _lock = ENV_LOCK.lock().unwrap();
@@ -121,6 +142,46 @@ fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
         std::env::set_var("FABLE_AUTH_BROKER_URL", value);
     } else {
         std::env::remove_var("FABLE_AUTH_BROKER_URL");
+    }
+}
+
+#[test]
+fn google_manifest_fail_closes_without_active_required_scopes() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let old_google = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+    std::env::set_var(
+        "FABLE_GOOGLE_OAUTH_CLIENT_ID",
+        "desktop-client.apps.googleusercontent.com",
+    );
+
+    let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
+        connection: Some(google_connection(
+            "gmail",
+            vec!["openid", "email", "profile"],
+        )),
+    });
+    let gmail = manifests
+        .iter()
+        .find(|manifest| manifest.id == "gmail")
+        .unwrap();
+
+    assert_eq!(gmail.status, "connected");
+    assert!(gmail
+        .scopes
+        .iter()
+        .any(|scope| scope.required && !scope.granted));
+    assert!(!gmail.supports_search);
+    assert!(!gmail.supports_import);
+    assert!(gmail.supported_actions.is_empty());
+    assert_eq!(
+        gmail.health_summary,
+        "Missing required OAuth scopes; reconnect this provider."
+    );
+
+    if let Some(value) = old_google {
+        std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", value);
+    } else {
+        std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
     }
 }
 

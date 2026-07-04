@@ -214,8 +214,7 @@ export function mergeGoogleTokenRefresh(
 ): ConnectorTokenSet {
   return {
     ...refreshed,
-    refreshToken: refreshed.refreshToken ?? previous.refreshToken,
-    scopes: refreshed.scopes.length ? refreshed.scopes : previous.scopes
+    refreshToken: refreshed.refreshToken ?? previous.refreshToken
   };
 }
 
@@ -266,7 +265,7 @@ export function googleHealthFromLifecycle(
     "needs-auth": `${profile.name} needs Google authorization.`,
     expired: `${profile.name} token expired; reconnect or refresh is required.`,
     stale: `${profile.name} is missing required Google scopes.`,
-    "configuration-required": `${profile.name} is not configured on the Fable auth broker.`,
+    "configuration-required": `${profile.name} needs Google desktop OAuth client configuration.`,
     "provider-unavailable": "Google is temporarily unavailable.",
     "partial-failure": `${profile.name} had a recoverable Google provider failure.`,
     revoked: `${profile.name} was disconnected.`
