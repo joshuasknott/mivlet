@@ -1010,13 +1010,16 @@ fn runtime_backends_are_fail_closed_before_any_credential() {
     let store = HashMap::new();
     let providers = list_providers_from(&store, &path).expect("providers should list");
 
-    // The four runtime providers (codex/cursor/copilot/grok) are present...
+    // Runtime providers (codex/cursor/copilot/grok plus local Ollama) are present...
     let runtime_ids: Vec<&str> = providers
         .iter()
         .filter(|p| p.backend_type != "native-api")
         .map(|p| p.id.as_str())
         .collect();
-    assert_eq!(runtime_ids, vec!["codex", "cursor", "copilot", "grok"]);
+    assert_eq!(
+        runtime_ids,
+        vec!["codex", "cursor", "copilot", "grok", "ollama"]
+    );
 
     // ...and without credentials every provider is fail-closed: no capabilities.
     for provider in &providers {
@@ -1420,6 +1423,8 @@ fn backend_auth_state_vocabulary_is_closed_and_fail_closed_set_excludes_connecte
     // boundary's fail-closed guard relies on this.
     assert!(BACKEND_AUTH_STATES.contains(&"connected"));
     assert!(BACKEND_AUTH_STATES.contains(&"sign-in-required"));
+    assert!(BACKEND_AUTH_STATES.contains(&"start-required"));
+    assert!(BACKEND_AUTH_STATES.contains(&"download-required"));
     assert!(BACKEND_AUTH_STATES.contains(&"connecting"));
     assert!(BACKEND_AUTH_STATES.contains(&"failed"));
     assert!(BACKEND_AUTH_STATES.contains(&"ready"));
@@ -1655,12 +1660,12 @@ fn normalize_sse_line_strips_data_prefix_and_drops_blanks_and_done() {
 }
 
 // ---------------------------------------------------------------------------
-// Native API provider catalog (Stage 4): the five native providers are served
-// from the credential boundary, fail-closed until a key exists.
+// Runtime provider catalog: native providers are served from the credential
+// boundary, while local loopback providers fail closed until probed.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() {
+fn lists_all_ten_backends_with_runtime_providers_fail_closed_before_connection() {
     let path = temp_backends_path("backends-native-list");
     let _ = fs::remove_file(&path);
 
@@ -1675,6 +1680,7 @@ fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() 
             "cursor",
             "copilot",
             "grok",
+            "ollama",
             "openai",
             "anthropic",
             "gemini",
@@ -1699,6 +1705,13 @@ fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() 
             assert_eq!(provider.backend_type, "native-api");
         }
     }
+    let ollama = providers
+        .iter()
+        .find(|provider| provider.id == "ollama")
+        .expect("ollama exists");
+    assert_eq!(ollama.auth_state, "unavailable");
+    assert!(ollama.capabilities.is_empty());
+    assert_eq!(ollama.backend_type, "local-loopback");
 
     let _ = fs::remove_file(&path);
 }

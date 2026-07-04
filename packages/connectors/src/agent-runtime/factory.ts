@@ -18,6 +18,7 @@ import { createNativeApiBackend } from "./adapters/native-api";
 import { resolveCodexBackend } from "./adapters/codex";
 import { resolveAcpBackend } from "./adapters/acp";
 import { resolveCopilotBackend } from "./adapters/copilot";
+import { createLocalLoopbackBackend } from "./adapters/local-loopback";
 
 /** A backend must be connected AND report streaming to be runnable. */
 function isRunnable(provider: BackendProvider): boolean {
@@ -44,7 +45,8 @@ export function hasRunnableAdapter(backendType: string): boolean {
   return (
     backendType === "native-api" ||
     backendType === "codex-app-server" ||
-    backendType === "acp"
+    backendType === "acp" ||
+    backendType === "local-loopback"
   );
 }
 
@@ -69,6 +71,9 @@ export function resolveAgentBackend(
     case "acp":
       // ACP providers own auth in their CLIs; Fable maps the JSON-RPC stream.
       return resolveAcpBackend(provider, deps);
+    case "local-loopback":
+      // Externally managed literal-loopback runtimes such as Ollama.
+      return createLocalLoopbackBackend(provider, deps);
     case "copilot-sdk":
       // Metadata-only until the Copilot SDK adapter lands.
       return resolveCopilotBackend(provider, deps);

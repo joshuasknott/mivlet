@@ -45,12 +45,20 @@ pub const AUTOMATION_STATUSES: [&str; 3] = ["draft", "active", "paused"];
 pub const SCHEDULE_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
-pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", "native-api"];
-pub const BACKEND_AUTH_STATES: [&str; 11] = [
+pub const BACKEND_TYPES: [&str; 5] = [
+    "codex-app-server",
+    "acp",
+    "copilot-sdk",
+    "native-api",
+    "local-loopback",
+];
+pub const BACKEND_AUTH_STATES: [&str; 13] = [
     "connected",
     "needs-auth",
     "sign-in-required",
     "install-required",
+    "start-required",
+    "download-required",
     "connecting",
     "expired",
     "unsupported",
@@ -64,10 +72,12 @@ pub const BACKEND_AUTH_STATES: [&str; 11] = [
 /// as a contract constant — asserted by the vocabulary test in `tests.rs` (which
 /// is the only non-test reference), so it is allowed as dead code in the lib.
 #[allow(dead_code)]
-pub const BACKEND_AUTH_FAIL_CLOSED_STATES: [&str; 10] = [
+pub const BACKEND_AUTH_FAIL_CLOSED_STATES: [&str; 12] = [
     "needs-auth",
     "sign-in-required",
     "install-required",
+    "start-required",
+    "download-required",
     "connecting",
     "expired",
     "unsupported",
@@ -93,11 +103,12 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 9] = [
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 10] = [
     "codex",
     "cursor",
     "copilot",
     "grok",
+    "ollama",
     "openai",
     "anthropic",
     "gemini",
@@ -571,6 +582,8 @@ pub struct BackendModel {
     pub id: String,
     pub label: String,
     pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
 }
 
 /// Describes a connected (or connectable) agent-runtime backend. The Rust

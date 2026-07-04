@@ -787,6 +787,7 @@ export async function cancelRuntimeCompletion(requestId: string) {
 export interface RuntimeDiscoveredModel {
   id: string;
   available: boolean;
+  capabilities?: import("@fable/protocol").ModelCapabilities;
 }
 
 export interface RuntimeModelDiscoveryResult {
@@ -800,12 +801,40 @@ export async function listRuntimeBackendModels(providerId: string) {
     return null;
   }
   try {
+    if (providerId === "ollama") {
+      return await invoke<RuntimeModelDiscoveryResult>("list_local_model_models", { providerId });
+    }
     return await invoke<RuntimeModelDiscoveryResult>("list_backend_models", { providerId });
   } catch (error) {
     return {
       outcome: "failed" as const,
       models: [],
       message: toRuntimeError(error).message
+    };
+  }
+}
+
+export interface RuntimeLocalModelStatus {
+  providerId: string;
+  authState: import("@fable/protocol").BackendAuthState;
+  version?: string;
+  endpoint?: string;
+  message: string;
+  models: import("@fable/protocol").BackendModel[];
+}
+
+export async function detectRuntimeLocalModel(providerId: string) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<RuntimeLocalModelStatus>("detect_local_model_runtime", { providerId });
+  } catch {
+    return {
+      providerId,
+      authState: "unavailable" as const,
+      message: "Fable could not inspect the local model runtime.",
+      models: []
     };
   }
 }
@@ -823,6 +852,46 @@ export async function listenRuntimeBackendEvents(
   }
   try {
     const unlisten = await listen<string>(`arden://backend/${requestId}`, (event) => {
+      onLine(event.payload as string);
+    });
+    return unlisten;
+  } catch {
+    return null;
+  }
+}
+
+export interface RuntimeLocalModelStreamRequest {
+  providerId: string;
+  requestId: string;
+  model: string;
+  body: unknown;
+}
+
+export async function streamRuntimeLocalModelCompletion(request: RuntimeLocalModelStreamRequest) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("stream_local_model_completion", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function cancelRuntimeLocalModelCompletion(requestId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<boolean>("cancel_local_model_completion", { requestId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listenRuntimeLocalModelEvents(
+  requestId: string,
+  onLine: (line: string) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const unlisten = await listen<string>(`arden://local-model/${requestId}`, (event) => {
       onLine(event.payload as string);
     });
     return unlisten;

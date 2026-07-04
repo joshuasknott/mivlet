@@ -112,6 +112,7 @@ import {
   clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
+  detectRuntimeLocalModel,
   detectRuntimeAcpCli,
   exportRuntimeMemoryState,
   importRuntimeConnectorItem,
@@ -320,6 +321,53 @@ async function mergeAcpProbeResults(
           ...model,
           available: authState === "connected"
         }))
+      };
+    })
+  );
+}
+
+function localLoopbackCapabilities(provider: BackendProvider): BackendCapability[] {
+  const caps = resolveCapabilities("local-loopback", provider.authState);
+  const hasToolModel = provider.models.some(
+    (model) => model.capabilities?.tools === true && model.available
+  );
+  if (provider.authState === "connected" && hasToolModel) {
+    return Array.from(
+      new Set<BackendCapability>([
+        ...caps,
+        "tool-requests",
+        "approvals",
+        "file-changes"
+      ])
+    );
+  }
+  return caps;
+}
+
+async function mergeLocalLoopbackProbeResults(
+  providers: BackendProvider[]
+): Promise<BackendProvider[]> {
+  if (providers.every((provider) => provider.backendType !== "local-loopback")) {
+    return providers;
+  }
+  return Promise.all(
+    providers.map(async (provider) => {
+      if (provider.backendType !== "local-loopback") {
+        return provider;
+      }
+      const probe = await detectRuntimeLocalModel(provider.id);
+      if (!probe) {
+        return provider;
+      }
+      const next: BackendProvider = {
+        ...provider,
+        authState: probe.authState,
+        models: probe.models,
+        installHint: probe.message
+      };
+      return {
+        ...next,
+        capabilities: localLoopbackCapabilities(next)
       };
     })
   );
@@ -1244,7 +1292,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       // through the Rust boundary (detect_acp_cli — never reads a secret) and
       // merge the truthful auth state + capabilities so a signed-in CLI reaches
       // connected. Native + other backends keep their resolved state as-is.
-      const resolved = await mergeAcpProbeResults(providers);
+      const withAcp = await mergeAcpProbeResults(providers);
+      const resolved = await mergeLocalLoopbackProbeResults(withAcp);
 
       if (!active) {
         return;

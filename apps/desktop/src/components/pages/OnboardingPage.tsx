@@ -507,6 +507,7 @@ function OnboardingProviderModal({
   const kind = authKindForProvider(provider);
   const view = stateViewFor(provider.authState);
   const isApiKey = kind === "api-key";
+  const isLocalLoopback = provider.backendType === "local-loopback";
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -615,6 +616,12 @@ function OnboardingProviderModal({
                   <Key size={12} /> Stored on this device
                 </span>
               </div>
+            </div>
+          ) : isLocalLoopback ? (
+            <div className="og-provider-modal__action-area">
+              <button type="button" className="og-provider-modal__primary button" disabled>
+                Detected automatically
+              </button>
             </div>
           ) : (
             <div className="og-provider-modal__action-area">
