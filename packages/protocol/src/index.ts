@@ -613,6 +613,73 @@ export interface IdentityStatus {
   organizationRequired?: boolean;
 }
 
+export type CloudWorkspaceRole = "owner" | "admin" | "editor" | "viewer";
+export type CloudSyncState = "disabled" | "unlinked" | "active" | "stale" | "revoked" | "blocked" | "error";
+export type CloudSyncRecordType = "project";
+export type CloudSyncOperation = "create" | "update" | "delete";
+
+export interface CloudWorkspaceLinkState {
+  localWorkspaceId: string;
+  cloudWorkspaceId: string;
+  clerkOrgId: string;
+  role: CloudWorkspaceRole;
+  syncState: CloudSyncState;
+  linkedDeviceId: string;
+  lastAcceptedRevision: number;
+  linkedAt: string;
+  updatedAt: string;
+}
+
+export interface CloudSyncStatus {
+  configured: boolean;
+  linked: boolean;
+  state: CloudSyncState | string;
+  message: string;
+  link?: CloudWorkspaceLinkState | null;
+  queuedCount: number;
+}
+
+export interface CloudSyncEnqueueRequest {
+  localWorkspaceId: string;
+  localMutationId: string;
+  clientMutationId: string;
+  baseRevision: number;
+  recordType: CloudSyncRecordType;
+  recordId: string;
+  operation: CloudSyncOperation;
+  payload: unknown;
+}
+
+export interface CloudMutationOutboxRow {
+  localMutationId: string;
+  idempotencyKey: string;
+  localWorkspaceId: string;
+  cloudWorkspaceId: string;
+  deviceId: string;
+  clientMutationId: string;
+  baseRevision: number;
+  recordType: CloudSyncRecordType;
+  recordId: string;
+  operation: CloudSyncOperation;
+  status: "queued" | "flushing" | "accepted" | "rejected" | "conflict";
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+  payload: unknown;
+}
+
+export interface CloudSyncFlushResult {
+  phase: "disabled" | "unlinked" | "blocked" | "adapter-unavailable" | string;
+  queuedCount: number;
+  message: string;
+}
+
+export interface CloudSyncPullResult {
+  phase: "disabled" | "unlinked" | "blocked" | "adapter-unavailable" | string;
+  lastPulledRevision: number;
+  message: string;
+}
+
 export interface ConnectorTokenSet {
   accessToken: string;
   refreshToken?: string;

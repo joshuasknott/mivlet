@@ -618,9 +618,14 @@ pub fn delete_local_data(
                  DELETE FROM memory_record;
                  DELETE FROM schedule;
                   DELETE FROM scheduled_job;
-                  DELETE FROM scheduler_queue_entry;
-                  DELETE FROM workflow_definition;
-                  DELETE FROM workflow_run;
+                 DELETE FROM scheduler_queue_entry;
+                 DELETE FROM workflow_definition;
+                 DELETE FROM workflow_run;
+                 DELETE FROM cloud_conflict;
+                 DELETE FROM cloud_record_shadow;
+                 DELETE FROM cloud_mutation_outbox;
+                 DELETE FROM cloud_sync_cursor;
+                 DELETE FROM cloud_workspace_link;
                  DELETE FROM model_config;
                  DELETE FROM draft;
                  DELETE FROM connector_cache;

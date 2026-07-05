@@ -50,6 +50,8 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // lexical search filters via SQL LIKE without decrypting payloads.
             // Existing rows are backfilled lazily by the store on first read.
             5 => apply_v5_to_v6(conn)?,
+            // 6 -> 7: add local cloud-team sync cache/outbox tables.
+            6 => conn.execute_batch(crate::store::schema::SCHEMA_V6_TO_V7)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -521,8 +523,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // 6 is the current registered version; 7 is one step beyond it.
-        let err = apply(&conn, 6, 7).unwrap_err();
+        // 7 is the current registered version; 8 is one step beyond it.
+        let err = apply(&conn, 7, 8).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -903,5 +905,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tables, 0);
+    }
+
+    #[test]
+    fn v6_to_v7_adds_cloud_sync_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE workspace (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            INSERT INTO workspace VALUES ('default','Default','now','now');
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 6, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 6, CURRENT_SCHEMA_VERSION).unwrap();
+
+        let tables: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='table' AND name IN (
+                   'cloud_workspace_link',
+                   'cloud_sync_cursor',
+                   'cloud_mutation_outbox',
+                   'cloud_record_shadow',
+                   'cloud_conflict'
+                 );",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 5);
+        conn.execute(
+            "INSERT INTO cloud_workspace_link (
+               local_workspace_id, cloud_workspace_id, clerk_org_id, role,
+               sync_state, linked_device_id, last_accepted_revision, linked_at, updated_at
+             ) VALUES ('default','cloud-ws','org','owner','active','device',0,'now','now');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cloud_sync_cursor (
+               local_workspace_id, device_id, last_pulled_revision,
+               last_realtime_sequence, last_successful_sync_at
+             ) VALUES ('default','device',0,0,'');",
+            [],
+        )
+        .unwrap();
     }
 }
