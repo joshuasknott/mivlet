@@ -48,7 +48,13 @@ import type {
   WorkflowDefinition,
   WorkflowRun,
   WorkflowRunStatus,
-  IdentityStatus
+  IdentityStatus,
+  CloudMutationOutboxRow,
+  CloudSyncEnqueueRequest,
+  CloudSyncFlushResult,
+  CloudSyncPullResult,
+  CloudSyncStatus,
+  CloudWorkspaceLinkState
 } from "@fable/protocol";
 
 interface ApprovalAuditRecordResponse {
@@ -408,6 +414,61 @@ export async function signOutRuntimeIdentity() {
   }
   try {
     return await invoke<IdentityStatus>("identity_sign_out");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function loadRuntimeCloudSyncStatus(workspaceId = "default") {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<CloudSyncStatus>("cloud_sync_status", { workspaceId });
+  } catch {
+    return null;
+  }
+}
+
+export async function loadRuntimeCloudSyncLinkState(workspaceId = "default") {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<CloudWorkspaceLinkState | null>("cloud_sync_link_state", { workspaceId });
+  } catch {
+    return null;
+  }
+}
+
+export async function enqueueRuntimeCloudSyncMutation(request: CloudSyncEnqueueRequest) {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<CloudMutationOutboxRow>("cloud_sync_enqueue_shared_mutation", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function flushRuntimeCloudSyncOutbox(workspaceId = "default") {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<CloudSyncFlushResult>("cloud_sync_flush_outbox", { workspaceId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function pullRuntimeCloudSyncAfterCursor(workspaceId = "default") {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  try {
+    return await invoke<CloudSyncPullResult>("cloud_sync_pull_after_cursor", { workspaceId });
   } catch (error) {
     throw toRuntimeError(error);
   }

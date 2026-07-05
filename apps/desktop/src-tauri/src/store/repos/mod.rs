@@ -17,6 +17,7 @@ pub mod action_history;
 pub mod approval;
 pub mod audit_event;
 pub mod backend_connection;
+pub mod cloud_sync;
 pub mod connector_account;
 pub mod connector_cache;
 pub mod connector_cache_settings;

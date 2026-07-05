@@ -11,6 +11,7 @@ mod agent_runs;
 mod approvals;
 mod backends;
 mod clerk_identity;
+mod cloud_sync;
 mod codex_app_server;
 mod collaboration_connectors;
 mod connector_api;
@@ -178,6 +179,11 @@ pub fn run() {
             clerk_identity::identity_begin_sign_in,
             clerk_identity::identity_refresh,
             clerk_identity::identity_sign_out,
+            cloud_sync::cloud_sync_status,
+            cloud_sync::cloud_sync_link_state,
+            cloud_sync::cloud_sync_enqueue_shared_mutation,
+            cloud_sync::cloud_sync_flush_outbox,
+            cloud_sync::cloud_sync_pull_after_cursor,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,

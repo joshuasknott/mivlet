@@ -72,7 +72,8 @@ fn omitted_summary() -> Value {
         ],
         "transient": [
             "run_state is exported (user-recoverable), but documented here as recoverable state",
-            "scheduler_queue_entry is execution state and is rebuilt; it is never imported as live authority"
+            "scheduler_queue_entry is execution state and is rebuilt; it is never imported as live authority",
+            "cloud_workspace_link, cloud_sync_cursor, cloud_mutation_outbox, cloud_record_shadow, and cloud_conflict are local shared-workspace sync state and are never imported as solo authority"
         ],
         "bookkeeping": [
             "schema_meta (DB-internal version row)",
@@ -2645,6 +2646,61 @@ mod tests {
             !sections_json.contains("workspace_id"),
             "connector_cache workspace rows must not leak into exported sections"
         );
+    }
+
+    #[test]
+    fn cloud_sync_state_does_not_leak_into_export_or_import() {
+        let a =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        a.transaction(|tx| {
+            tx.execute(
+                "INSERT INTO cloud_workspace_link (
+                   local_workspace_id, cloud_workspace_id, clerk_org_id, role,
+                   sync_state, linked_device_id, last_accepted_revision, linked_at, updated_at
+                 ) VALUES ('default','cloud-ws-secret','org-a','owner','active','device-a',7,'t','t');",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO cloud_sync_cursor (
+                   local_workspace_id, device_id, last_pulled_revision,
+                   last_realtime_sequence, last_successful_sync_at
+                 ) VALUES ('default','device-a',7,1,'t');",
+                [],
+            )?;
+            let sealed = a.seal_json_owned(&serde_json::json!({"name":"Shared"}), "cloud_mutation_outbox:m1")?;
+            tx.execute(
+                "INSERT INTO cloud_mutation_outbox (
+                   local_mutation_id, idempotency_key, local_workspace_id,
+                   cloud_workspace_id, device_id, client_mutation_id, base_revision,
+                   record_type, record_id, operation, status, attempt_count,
+                   created_at, updated_at, payload, payload_nonce
+                 ) VALUES ('m1','cloud-ws-secret:device-a:c1','default','cloud-ws-secret',
+                   'device-a','c1',7,'project','p1','update','queued',0,'t','t',?1,?2);",
+                rusqlite::params![sealed.ciphertext, sealed.nonce],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let manifest = export_workspace(&a).unwrap();
+        let sections_json = serde_json::to_string(&manifest.sections).unwrap();
+        assert!(!sections_json.contains("cloud-ws-secret"));
+        assert!(!sections_json.contains("cloudWorkspaceId"));
+        assert!(!sections_json.contains("idempotencyKey"));
+
+        let b =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let json = serde_json::to_string(&manifest).unwrap();
+        import_workspace(&b, &json, ImportOptions::default()).unwrap();
+        for table in [
+            "cloud_workspace_link",
+            "cloud_sync_cursor",
+            "cloud_mutation_outbox",
+            "cloud_record_shadow",
+            "cloud_conflict",
+        ] {
+            assert_eq!(count(&b, table), 0, "{table} must not import cloud state");
+        }
     }
 
     #[test]

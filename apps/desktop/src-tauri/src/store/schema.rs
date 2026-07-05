@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 6;
+pub const CURRENT_SCHEMA_VERSION: u32 = 7;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -216,6 +216,92 @@ PRAGMA foreign_keys = ON;
 ALTER TABLE connector_cache ADD COLUMN search_text TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text
   ON connector_cache(workspace_id, disabled, search_text);
+"#;
+
+/// Forward schema step `v6 -> v7`: adds the local encrypted cloud-sync
+/// skeleton for optional shared workspaces. These tables are local runtime
+/// state only: they cache Convex authority, hold encrypted pending payloads,
+/// and are deliberately excluded from portable solo exports.
+pub const SCHEMA_V6_TO_V7: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS cloud_workspace_link (
+  local_workspace_id TEXT PRIMARY KEY REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  clerk_org_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  sync_state TEXT NOT NULL,
+  linked_device_id TEXT NOT NULL,
+  last_accepted_revision INTEGER NOT NULL DEFAULT 0,
+  linked_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_workspace_link_cloud
+  ON cloud_workspace_link(cloud_workspace_id);
+CREATE INDEX IF NOT EXISTS idx_cloud_workspace_link_state
+  ON cloud_workspace_link(sync_state);
+
+CREATE TABLE IF NOT EXISTS cloud_sync_cursor (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  last_pulled_revision INTEGER NOT NULL DEFAULT 0,
+  last_realtime_sequence INTEGER NOT NULL DEFAULT 0,
+  last_successful_sync_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (local_workspace_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_mutation_outbox (
+  local_mutation_id TEXT PRIMARY KEY,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  client_mutation_id TEXT NOT NULL,
+  base_revision INTEGER NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_outbox_workspace_status
+  ON cloud_mutation_outbox(local_workspace_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_cloud_outbox_cloud_workspace
+  ON cloud_mutation_outbox(cloud_workspace_id, status);
+
+CREATE TABLE IF NOT EXISTS cloud_record_shadow (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  server_revision INTEGER NOT NULL,
+  content_fingerprint TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT '',
+  conflict_id TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (local_workspace_id, record_type, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_shadow_workspace_revision
+  ON cloud_record_shadow(local_workspace_id, server_revision);
+
+CREATE TABLE IF NOT EXISTS cloud_conflict (
+  id TEXT PRIMARY KEY,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  local_mutation_id TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  reason_code TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace
+  ON cloud_conflict(local_workspace_id, created_at);
 "#;
 
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
@@ -699,6 +785,86 @@ CREATE TABLE IF NOT EXISTS workflow_run (
 CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace ON workflow_run(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_run_definition ON workflow_run(workspace_id, definition_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_run_status ON workflow_run(status);
+
+-- Optional shared workspace sync skeleton. These rows are local runtime state
+-- and pending encrypted payloads, not portable solo archive content.
+CREATE TABLE IF NOT EXISTS cloud_workspace_link (
+  local_workspace_id TEXT PRIMARY KEY REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  clerk_org_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  sync_state TEXT NOT NULL,
+  linked_device_id TEXT NOT NULL,
+  last_accepted_revision INTEGER NOT NULL DEFAULT 0,
+  linked_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_workspace_link_cloud
+  ON cloud_workspace_link(cloud_workspace_id);
+CREATE INDEX IF NOT EXISTS idx_cloud_workspace_link_state
+  ON cloud_workspace_link(sync_state);
+
+CREATE TABLE IF NOT EXISTS cloud_sync_cursor (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  last_pulled_revision INTEGER NOT NULL DEFAULT 0,
+  last_realtime_sequence INTEGER NOT NULL DEFAULT 0,
+  last_successful_sync_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (local_workspace_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_mutation_outbox (
+  local_mutation_id TEXT PRIMARY KEY,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  client_mutation_id TEXT NOT NULL,
+  base_revision INTEGER NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_outbox_workspace_status
+  ON cloud_mutation_outbox(local_workspace_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_cloud_outbox_cloud_workspace
+  ON cloud_mutation_outbox(cloud_workspace_id, status);
+
+CREATE TABLE IF NOT EXISTS cloud_record_shadow (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  server_revision INTEGER NOT NULL,
+  content_fingerprint TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT '',
+  conflict_id TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (local_workspace_id, record_type, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_shadow_workspace_revision
+  ON cloud_record_shadow(local_workspace_id, server_revision);
+
+CREATE TABLE IF NOT EXISTS cloud_conflict (
+  id TEXT PRIMARY KEY,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  cloud_workspace_id TEXT NOT NULL,
+  local_mutation_id TEXT NOT NULL,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  reason_code TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace
+  ON cloud_conflict(local_workspace_id, created_at);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (
