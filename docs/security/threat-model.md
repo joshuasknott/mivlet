@@ -14,7 +14,7 @@
 - User interface to Rust runtime.
 - Runtime to local filesystem.
 - Runtime to external connectors.
-- Runtime to Convex shared state.
+- Runtime to optional Convex shared workspace state.
 - Model-generated content to trusted user action.
 - Auth broker to native desktop token exchange.
 - Native execution permit store to side-effecting tool/connector commands.
@@ -65,6 +65,14 @@
 - Native provider retries are bounded and limited to connection failures, rate limits, and server failures. Connector writes are not blindly replayed after an ambiguous provider success.
 - Agent runs and connector state persist only non-secret metadata. Interrupted runs are marked recoverable after restart; an old approval permit cannot be replayed.
 - Action history provides an inspectable local record of Fable's past actions (such as model calls, connector actions, shell commands, web queries, approvals, schedules, and policy blocks). This log is saved locally in the encrypted SQLite `audit_event` table. For security and privacy, all secrets, keys, credentials, full file/email content, and environment variables are redacted at the storage boundary and never persisted. Action history only observes activity; it does not grant execution authority and does not bypass any security checks.
+- Optional cloud/team sync uses Clerk identity and Convex only for explicitly
+  shared workspaces. Solo encrypted SQLite remains authoritative for local
+  workspaces. Cloud sync must use explicit record allowlists, workspace-scoped
+  authorization, device linking, idempotent outbox mutation handling, revisioned
+  tombstones, and denied-record tests so credentials, OAuth tokens, approval
+  permits, raw connector responses, local model prompts/responses, and
+  unselected private knowledge never leave the device. See
+  [Cloud Team Sync Threat Note](./cloud-team-sync-threat-note.md).
 
 ## Remaining Security Work
 
@@ -74,3 +82,6 @@
   domains are integrated; do not create a competing persistence layer.
 - Add platform CI for macOS Keychain and Linux Secret Service; Windows and mock-store coverage alone is insufficient for release confidence.
 - Add outbound network policy controls and SSRF protection before broadening `web-fetch` beyond the current explicit approval and HTTP(S) checks.
+- Before enabling shared workspaces for external users, implement and review the
+  Clerk + Convex authorization, device identity, idempotency, tombstone, export,
+  and denied-record controls in the cloud team sync threat note.

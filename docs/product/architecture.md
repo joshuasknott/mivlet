@@ -5,7 +5,7 @@
 - Tauri 2 for the desktop shell.
 - Rust for runtime commands, permissions, jobs, local context, and connector execution.
 - React, TypeScript, and Vite for the interface.
-- Convex for optional realtime shared state and collaboration state when configured.
+- Clerk + Convex for future optional shared workspaces when configured.
 - Encrypted SQLite for offline/private local state (including schedules, workflows, and knowledge structures).
 - OS secure storage for credentials.
 
@@ -186,4 +186,19 @@ Fable did not reuse TokenMaxxer’s quota scraping, fixed blended cost estimates
 
 ## Convex Boundary
 
-Convex is optional. If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for realtime shared state, though collaboration schema and synchronization logic are not implemented on the main branch. Without it, the core desktop workspace, local files, approvals, runtime snapshots, memory controls, schedules, and API-key providers remain usable.
+Convex is optional. Batch 6 selected Clerk + Convex for the first shared
+workspace MVP, documented in
+[ADR: Optional Cloud Team Backend](../adr/2026-07-05-cloud-team-backend.md).
+If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for
+realtime shared state, though collaboration schema and synchronization logic are
+not implemented on the main branch. Without it, the core desktop workspace,
+local files, approvals, runtime snapshots, memory controls, schedules, and
+API-key providers remain usable.
+
+Solo workspaces remain authoritative in encrypted local SQLite. Future shared
+workspaces use Convex as the shared authority only after explicit enrollment,
+with a local encrypted cache/outbox, workspace-scoped authorization, device
+linking, idempotency keys, revision cursors, deterministic conflict handling,
+and tombstones. Connector OAuth remains separate from Clerk identity and the
+confidential auth broker remains limited to authorize, callback, handoff,
+refresh, and revoke.

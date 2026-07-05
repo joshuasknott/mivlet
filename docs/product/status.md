@@ -41,6 +41,10 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   identity keyring service; React receives only secret-free identity status.
   Local files, memory, schedules, connectors, BYOK backends, and solo workspaces
   do not require a Fable account.
+- Optional cloud/team backend decision: Batch 6 selected Clerk + Convex for the
+  first shared workspace MVP, with encrypted local SQLite remaining
+  authoritative for solo workspaces and Convex authoritative only for explicitly
+  shared workspaces. Batch 7 implementation is planned but not yet present.
 - Agent recovery: run checkpoints persist active-thread user, assistant, and
   tool exchanges. Interrupted runs surface in chat and retry as new child runs
   from the durable user prompt without replaying tool effects.
@@ -81,7 +85,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Schedules & Workflows SQLite migration | **Finished** | In Batch 9, schedules, queue entries, workflow definitions, and workflow runs were fully migrated from legacy JSON files into encrypted SQLite tables. |
 | GitHub Copilot Execution | **Missing** | Cataloged in provider list, but execution adapter/runner is not implemented. |
 | Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
-| Native voice providers, Convex collaboration | **Missing** | Dictation currently depends on the host Web Speech API; no native offline speech provider exists. Convex is optional and lacks schema/collab code. |
+| Native voice providers, Convex collaboration | **Missing** | Dictation currently depends on the host Web Speech API; no native offline speech provider exists. Convex is optional and lacks schema/collab code. Batch 6 selected Clerk + Convex as the future shared-workspace backend, but no Batch 7 implementation exists yet. |
 
 ## Partially Implemented Or Preview-Only
 
@@ -107,6 +111,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, schedules, workflows, and knowledge structures. Backend and connector credentials remain separately handled by OS secure storage.
 - No bundled local model runtime, model download flow, model license UI, or live Ollama smoke evidence in the default suite. Ollama remains a user-installed trusted loopback integration.
 - No production-enabled hosted Fable account or team workspace authority. Clerk identity is optional, config-gated, and still needs live provider validation plus cloud/Convex verifier work before unlocking team data.
+- No cloud/team sync implementation yet. The accepted Batch 6 architecture is
+  documented in `docs/adr/2026-07-05-cloud-team-backend.md`.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
 - No product website, legal pages, downloads page, or public release pipeline in the audited files.
 
@@ -171,4 +177,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `docs/connectors/auth-broker.md`
 - `docs/architecture/local-model-runtime.md`
 - `docs/adr/2026-07-04-clerk-tauri-identity.md`
+- `docs/adr/2026-07-05-cloud-team-backend.md`
+- `docs/security/cloud-team-sync-threat-note.md`
+- `docs/architecture/cloud-team-sync-mvp.md`
 - `docs/architecture/browser-automation.md`
