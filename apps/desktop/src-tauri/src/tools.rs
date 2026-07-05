@@ -509,7 +509,7 @@ pub(crate) fn is_forbidden_ip(ip: IpAddr) -> bool {
                 || v6.is_multicast()
                 || v6
                     .to_ipv4_mapped()
-                    .map_or(false, |v4| is_forbidden_ip(IpAddr::V4(v4)))
+                    .is_some_and(|v4| is_forbidden_ip(IpAddr::V4(v4)))
         }
     }
 }
@@ -522,8 +522,6 @@ fn is_cloud_metadata_ip(ip: IpAddr) -> bool {
             o == [169, 254, 169, 254]
                 // Alibaba Cloud
                 || o == [100, 100, 100, 200]
-                // Oracle, others
-                || o == [169, 254, 169, 254]
                 // packet metadata sometimes on 169.254.169.254
                 || (o[0] == 169 && o[1] == 254 && o[2] == 169)
         }
@@ -1210,6 +1208,7 @@ fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
 /// - timeout, bounded body (1 MiB), no decompression (identity encoding) to close abuse vector
 /// - unsupported content types rejected
 /// - all errors redacted (no raw target URLs leak into results/audit)
+///
 /// Cancellation is preserved via timeout + cooperative tokio points (agent run
 /// can drop the future on cancel).
 async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {

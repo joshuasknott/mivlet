@@ -104,7 +104,7 @@ fn bound_redirect(listener: &TcpListener) -> Result<String, ConnectorCommandErro
 }
 
 fn is_hex_digit(b: u8) -> bool {
-    (b >= b'0' && b <= b'9') || (b >= b'a' && b <= b'f') || (b >= b'A' && b <= b'F')
+    b.is_ascii_hexdigit()
 }
 
 fn contains_control(s: &str) -> bool {
@@ -357,15 +357,15 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
                 pair
             };
             let key_l = key.to_ascii_lowercase();
-            if ["state", "code", "handoff", "error"].contains(&key_l.as_str()) {
-                if !seen.insert(key_l) {
-                    return Err(command_error(
-                        "invalid-request",
-                        "oauth",
-                        "OAuth callback contains duplicate parameters.",
-                        false,
-                    ));
-                }
+            if ["state", "code", "handoff", "error"].contains(&key_l.as_str())
+                && !seen.insert(key_l)
+            {
+                return Err(command_error(
+                    "invalid-request",
+                    "oauth",
+                    "OAuth callback contains duplicate parameters.",
+                    false,
+                ));
             }
         }
     }

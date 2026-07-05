@@ -1195,7 +1195,7 @@ pub fn initialize_store(app: &AppHandle) -> Result<(), String> {
 /// AppHandle. Returns (changed, newly_leased_entries). Real run_tick delegates
 /// to this for the decision + mutation.
 fn apply_tick_logic(
-    queue: &mut Vec<SchedulerQueueEntry>,
+    queue: &mut [SchedulerQueueEntry],
     now_ms: i64,
     instance: &str,
 ) -> (bool, Vec<SchedulerQueueEntry>) {
