@@ -100,6 +100,27 @@ fn slack_connection(status: &str) -> ConnectorConnection {
     }
 }
 
+fn google_connection(connector_id: &str, scopes: Vec<&str>) -> ConnectorConnection {
+    ConnectorConnection {
+        connector_id: connector_id.to_string(),
+        account: ConnectorAccountSummary {
+            id: "google-user-1".to_string(),
+            display_name: "Google User".to_string(),
+            handle: None,
+            email: Some("user@example.test".to_string()),
+            workspace: None,
+            avatar_url: None,
+        },
+        status: "connected".to_string(),
+        scopes: scopes.into_iter().map(str::to_string).collect(),
+        expires_at: None,
+        credential_ref: format!("oauth-token:{connector_id}:google-user-1"),
+        connected_at: "1".to_string(),
+        updated_at: "1".to_string(),
+        is_active: true,
+    }
+}
+
 #[test]
 fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
     let _lock = ENV_LOCK.lock().unwrap();
@@ -121,6 +142,46 @@ fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
         std::env::set_var("FABLE_AUTH_BROKER_URL", value);
     } else {
         std::env::remove_var("FABLE_AUTH_BROKER_URL");
+    }
+}
+
+#[test]
+fn google_manifest_fail_closes_without_active_required_scopes() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let old_google = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+    std::env::set_var(
+        "FABLE_GOOGLE_OAUTH_CLIENT_ID",
+        "desktop-client.apps.googleusercontent.com",
+    );
+
+    let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
+        connection: Some(google_connection(
+            "gmail",
+            vec!["openid", "email", "profile"],
+        )),
+    });
+    let gmail = manifests
+        .iter()
+        .find(|manifest| manifest.id == "gmail")
+        .unwrap();
+
+    assert_eq!(gmail.status, "connected");
+    assert!(gmail
+        .scopes
+        .iter()
+        .any(|scope| scope.required && !scope.granted));
+    assert!(!gmail.supports_search);
+    assert!(!gmail.supports_import);
+    assert!(gmail.supported_actions.is_empty());
+    assert_eq!(
+        gmail.health_summary,
+        "Missing required OAuth scopes; reconnect this provider."
+    );
+
+    if let Some(value) = old_google {
+        std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", value);
+    } else {
+        std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
     }
 }
 
@@ -1010,13 +1071,16 @@ fn runtime_backends_are_fail_closed_before_any_credential() {
     let store = HashMap::new();
     let providers = list_providers_from(&store, &path).expect("providers should list");
 
-    // The four runtime providers (codex/cursor/copilot/grok) are present...
+    // Runtime providers (codex/cursor/copilot/grok plus local Ollama) are present...
     let runtime_ids: Vec<&str> = providers
         .iter()
         .filter(|p| p.backend_type != "native-api")
         .map(|p| p.id.as_str())
         .collect();
-    assert_eq!(runtime_ids, vec!["codex", "cursor", "copilot", "grok"]);
+    assert_eq!(
+        runtime_ids,
+        vec!["codex", "cursor", "copilot", "grok", "ollama"]
+    );
 
     // ...and without credentials every provider is fail-closed: no capabilities.
     for provider in &providers {
@@ -1420,6 +1484,8 @@ fn backend_auth_state_vocabulary_is_closed_and_fail_closed_set_excludes_connecte
     // boundary's fail-closed guard relies on this.
     assert!(BACKEND_AUTH_STATES.contains(&"connected"));
     assert!(BACKEND_AUTH_STATES.contains(&"sign-in-required"));
+    assert!(BACKEND_AUTH_STATES.contains(&"start-required"));
+    assert!(BACKEND_AUTH_STATES.contains(&"download-required"));
     assert!(BACKEND_AUTH_STATES.contains(&"connecting"));
     assert!(BACKEND_AUTH_STATES.contains(&"failed"));
     assert!(BACKEND_AUTH_STATES.contains(&"ready"));
@@ -1655,12 +1721,12 @@ fn normalize_sse_line_strips_data_prefix_and_drops_blanks_and_done() {
 }
 
 // ---------------------------------------------------------------------------
-// Native API provider catalog (Stage 4): the five native providers are served
-// from the credential boundary, fail-closed until a key exists.
+// Runtime provider catalog: native providers are served from the credential
+// boundary, while local loopback providers fail closed until probed.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() {
+fn lists_all_ten_backends_with_runtime_providers_fail_closed_before_connection() {
     let path = temp_backends_path("backends-native-list");
     let _ = fs::remove_file(&path);
 
@@ -1675,6 +1741,7 @@ fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() 
             "cursor",
             "copilot",
             "grok",
+            "ollama",
             "openai",
             "anthropic",
             "gemini",
@@ -1699,6 +1766,13 @@ fn lists_all_nine_backends_with_native_providers_needs_auth_before_credential() 
             assert_eq!(provider.backend_type, "native-api");
         }
     }
+    let ollama = providers
+        .iter()
+        .find(|provider| provider.id == "ollama")
+        .expect("ollama exists");
+    assert_eq!(ollama.auth_state, "unavailable");
+    assert!(ollama.capabilities.is_empty());
+    assert_eq!(ollama.backend_type, "local-loopback");
 
     let _ = fs::remove_file(&path);
 }

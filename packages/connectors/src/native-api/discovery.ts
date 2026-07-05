@@ -16,13 +16,14 @@
  * GET; this module only merges the result with the catalogue. Fixture-testable.
  */
 
-import type { BackendModel } from "@fable/protocol";
+import type { BackendModel, ModelCapabilities } from "@fable/protocol";
 import { catalogueCapabilities } from "./model-catalogue";
 
 /** A model id the provider's list-models endpoint returned. */
 export interface DiscoveredModel {
   id: string;
   available: boolean;
+  capabilities?: ModelCapabilities;
 }
 
 export type DiscoveryOutcome = "success" | "unsupported" | "offline" | "failed" | "empty";
@@ -66,8 +67,11 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
     out.push({
       id: model.id,
       label: catalogueModels.find((entry) => entry.id === model.id)?.label ?? model.id,
-      available: model.available && catalogueCapabilities(providerId, model.id) !== undefined,
-      capabilities: catalogueCapabilities(providerId, model.id)
+      available:
+        model.available &&
+        (model.capabilities !== undefined ||
+          catalogueCapabilities(providerId, model.id) !== undefined),
+      capabilities: model.capabilities ?? catalogueCapabilities(providerId, model.id)
     });
   }
 

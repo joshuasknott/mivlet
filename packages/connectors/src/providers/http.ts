@@ -231,10 +231,10 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       url.searchParams.set("state", context.state);
       url.searchParams.set("code_challenge", context.codeChallenge);
       url.searchParams.set("code_challenge_method", "S256");
-      // Offline access keeps refresh tokens recoverable across reconnects;
-      // incremental consent lets callers request optional scopes deliberately.
+      // Offline access keeps refresh tokens recoverable across reconnects.
+      // Google does not support incremental authorization for installed apps,
+      // so the active token response is the only scope truth we persist.
       url.searchParams.set("access_type", "offline");
-      url.searchParams.set("include_granted_scopes", "true");
       url.searchParams.set("prompt", "consent");
       return { authorizationUrl: url.toString(), state: context.state };
     },
@@ -269,11 +269,7 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       });
       if (!response.ok) throw providerError(options.connectorId, response.status, "token_exchange");
       const tokenBody = await safeJson(response);
-      const parsedTokens = tokenSet(tokenBody);
-      const tokens = {
-        ...parsedTokens,
-        scopes: parsedTokens.scopes.length ? parsedTokens.scopes : [...options.scopes]
-      };
+      const tokens = tokenSet(tokenBody);
       const account = await googleIdentity(tokens.accessToken);
       return { tokens, account };
     },
@@ -294,7 +290,7 @@ export function googleOAuthClient(options: OAuthClientOptions) {
       return {
         ...refreshed,
         refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
-        scopes: refreshed.scopes.length ? refreshed.scopes : tokens.scopes
+        scopes: refreshed.scopes
       };
     },
     async revoke(tokens: ConnectorTokenSet): Promise<void> {

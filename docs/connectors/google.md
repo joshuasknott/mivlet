@@ -31,9 +31,13 @@ false connected state.
 ## OAuth and credential boundary
 
 The desktop sends the authorization request directly to Google with PKCE S256,
-`access_type=offline`, incremental consent, and an exact state/redirect check.
-It exchanges the returned code directly at Google's token endpoint, resolves
-identity from Google OpenID userinfo, refreshes directly, and revokes directly.
+`access_type=offline`, a fresh state value, and an exact state/redirect check.
+It does not send `include_granted_scopes`: Google's installed-app guidance says
+incremental authorization is unsupported for installed apps. Fable treats each
+Google reconnect as a request for the complete service-scope set needed for that
+attempt, exchanges the returned code directly at Google's token endpoint,
+resolves identity from Google OpenID userinfo, refreshes directly, and revokes
+directly.
 
 Access tokens, refresh tokens, and pending PKCE verifiers remain behind the
 native OS credential boundary. React state, localStorage, logs, snapshots,
@@ -43,42 +47,55 @@ non-secret identity, scope, expiry, health, and opaque credential references.
 
 Multiple Google accounts can remain connected. The native runtime stores an
 explicit active-account selection per Google connector; reads and approved
-writes use only that selected account. Reconnect preserves an existing refresh
-token when Google omits a replacement.
+writes use only that selected account. Reconnect and refresh may preserve an
+existing refresh token when Google omits a replacement, but Fable does not
+preserve or merge historical scopes into the active credential.
 
 ## Scopes
 
 All three connectors also request `openid email profile` for account identity.
-Service scopes are requested incrementally from the connector's declared set.
+Service scopes are requested from the connector's declared set for the current
+connection attempt. The active credential's granted-scope truth comes from the
+Google token response, or from a deliberate provider verification call such as
+the opt-in live tokeninfo harness below. If Google omits `scope`, Fable records
+no active service grants and disables gated search/import/action surfaces until
+the account is reconnected or provider truth is obtained.
 
 ### Google Drive
 
-- `https://www.googleapis.com/auth/drive.file` — see and change files created
+- `https://www.googleapis.com/auth/drive.file` - see and change files created
   by, or explicitly opened with, Fable.
 
 The native runtime also recognizes
 `https://www.googleapis.com/auth/drive.metadata.readonly` and
 `https://www.googleapis.com/auth/drive.readonly` when those broader read paths
 are deliberately granted. Broad Drive content access should not be requested
-by default.
+by default; broader Drive scopes can trigger Google restricted-scope review and
+security-assessment requirements.
 
 ### Gmail
 
-- `https://www.googleapis.com/auth/gmail.readonly` — search and read mail.
-- `https://www.googleapis.com/auth/gmail.compose` — create or update drafts.
-- `https://www.googleapis.com/auth/gmail.send` — send an explicitly approved
+- `https://www.googleapis.com/auth/gmail.readonly` - search and read mail.
+- `https://www.googleapis.com/auth/gmail.compose` - create or update drafts.
+- `https://www.googleapis.com/auth/gmail.send` - send an explicitly approved
   message.
 
-Gmail scopes can be sensitive or restricted and may require Google verification
-or an independent security assessment before external distribution.
+Gmail read, compose, and send scopes are sensitive or restricted. External
+production use requires Google's OAuth verification and, for restricted scopes,
+the applicable restricted-scope verification and security-assessment process.
+Unverified or unavailable Gmail capabilities remain fail-closed in the UI and
+runtime rather than being advertised as usable.
 
 ### Google Calendar
 
-- `https://www.googleapis.com/auth/calendar.calendarlist.readonly` — list
+- `https://www.googleapis.com/auth/calendar.calendarlist.readonly` - list
   calendars.
-- `https://www.googleapis.com/auth/calendar.events.readonly` — read events.
-- `https://www.googleapis.com/auth/calendar.events` — create, update, cancel,
+- `https://www.googleapis.com/auth/calendar.events.readonly` - read events.
+- `https://www.googleapis.com/auth/calendar.events` - create, update, cancel,
   or delete events after explicit approval.
+
+Calendar user-data scopes can still require OAuth app verification for external
+production use even though they are not Gmail restricted scopes.
 
 ## Runtime behavior
 
@@ -102,7 +119,7 @@ refresh/revoke, approval gating, and per-service failure isolation.
 
 - **Manual, on-demand sync:** Reads are performed on demand when requested. There is no continuous background sync, scheduled polling, or automatic crawler indexing of your Google account data.
 - **Cache boundaries:** Raw provider responses and unselected account content are not persisted. Account metadata, granted scopes, active status, connection health, and normalized user-selected cache items may be stored in the encrypted workspace-scoped cache. Tokens never enter that cache.
-- **Stale states (Missing scopes):** If a user disconnects or unchecks required scopes during the Google authorization consent step, the connector enters a `stale` (Error) state. A full reconnect is required to request and restore the missing required scopes.
+- **Stale states (Missing scopes):** If a user disconnects or unchecks required scopes during the Google authorization consent step, or if Google returns no active `scope` truth, the connector enters a permission-limited or stale state. A full reconnect is required to request and restore the missing required scopes.
 - **Verification constraints:** Live-provider validation is not part of the default test suite and requires external Google Cloud configuration and deliberate test accounts.
 - **Production blocking:** OAuth consent verification and any restricted-scope security assessment are external production blockers.
 
@@ -111,10 +128,25 @@ refresh/revoke, approval gating, and per-service failure isolation.
 Default checks use mocked HTTP and require no Google account:
 
 ```powershell
-pnpm --filter @fable/connectors test
+corepack pnpm --filter @fable/connectors test
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml google
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml connector_auth
 ```
+
+An opt-in live harness can validate an already-obtained test access token
+without running OAuth or committing credentials:
+
+```powershell
+$env:FABLE_LIVE_CONNECTOR_TESTS = "1"
+$env:FABLE_GOOGLE_TEST_TOKEN = "ya29..."
+$env:FABLE_GOOGLE_TEST_EXPECTED_SCOPES = "https://www.googleapis.com/auth/gmail.readonly"
+$env:FABLE_GOOGLE_TEST_EMAIL = "optional-test-user@example.com"
+corepack pnpm --filter @fable/connectors test
+```
+
+The harness calls Google's tokeninfo endpoint and verifies the provider-returned
+scope set. It must be run only with deliberate test accounts and throwaway
+tokens.
 
 Never place live tokens, email addresses, calendar IDs, file IDs, or provider
 content in test fixtures, snapshots, logs, or committed files.

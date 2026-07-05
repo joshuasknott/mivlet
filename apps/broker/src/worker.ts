@@ -12,8 +12,8 @@
  * Secrets: provider client id/secret are configured as Worker secrets (or
  * encrypted vars) named exactly as in `.env.example` (FABLE_BROKER_<PROVIDER>_*).
  * They are read into broker memory only and sent solely to provider token/
- * revocation endpoints over TLS — never logged, returned, or persisted. The
- * The default memory backend keeps short-lived pending exchanges and handoff
+ * revocation endpoints over TLS; never logged, returned, or persisted. The
+ * default memory backend keeps short-lived pending exchanges and handoff
  * tickets per isolate. The opt-in durable backend routes those values through
  * encrypted, SQLite-backed Durable Objects and coordinates rate limits across
  * isolates.
@@ -30,6 +30,7 @@ import {
   BrokerRateLimit
 } from "./durable-stores.js";
 import { createEphemeralOps } from "./ephemeral-rpc.js";
+import { StoreCryptoError, assertStoreEncryptionKey } from "./store-crypto.js";
 
 /**
  * Worker environment bindings. Plain text/secret vars are strings; secrets are
@@ -41,6 +42,8 @@ export interface Env {
   FABLE_BROKER_PUBLIC_URL?: string;
   /** Requests per minute per route+peer. Default 60. */
   FABLE_BROKER_RATE_LIMIT_PER_MINUTE?: string;
+  /** Declared deploy environment: local, staging, or production. */
+  FABLE_BROKER_ENVIRONMENT?: string;
   /** Comma-separated exact HTTPS desktop callbacks (loopback allowed by rule). */
   FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS?: string;
 
@@ -58,6 +61,7 @@ export interface Env {
   FABLE_BROKER_GITHUB_CLIENT_SECRET?: string;
   FABLE_BROKER_VERCEL_CLIENT_ID?: string;
   FABLE_BROKER_VERCEL_CLIENT_SECRET?: string;
+  FABLE_BROKER_VERCEL_INTEGRATION_SLUG?: string;
   FABLE_BROKER_LINEAR_CLIENT_ID?: string;
   FABLE_BROKER_LINEAR_CLIENT_SECRET?: string;
   FABLE_BROKER_NOTION_CLIENT_ID?: string;
@@ -72,10 +76,11 @@ interface BrokerRuntime {
   router: ReturnType<typeof createBrokerRouter>;
 }
 
-let runtime: BrokerRuntime | undefined;
+const runtimes = new WeakMap<Env, BrokerRuntime>();
 
 function runtimeFor(env: Env): BrokerRuntime {
-  if (runtime) return runtime;
+  const cached = runtimes.get(env);
+  if (cached) return cached;
   const backend = (env.FABLE_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
   const useDurable = backend === "durable";
 
@@ -89,24 +94,15 @@ function runtimeFor(env: Env): BrokerRuntime {
   let handoffForBroker: any;
   if (useDurable) {
     const secret = env.FABLE_BROKER_STORE_ENCRYPTION_KEY;
-    if (!secret) {
-      // Guarded earlier in fetch; here provide no-op ops (will not be reached for real use)
-      ephemeralOps = {
-        async createPending() {},
-        async consumePending() { return undefined; },
-        async issueHandoff() { return ""; },
-        async redeemHandoff() { return undefined; },
-      };
-    } else {
-      ephemeralOps = createEphemeralOps(
-        {
-          BROKER_PENDING: (env as any).BROKER_PENDING,
-          BROKER_HANDOFF: (env as any).BROKER_HANDOFF,
-        },
-        secret,
-        clock
-      );
-    }
+    assertStoreEncryptionKey(secret ?? "");
+    ephemeralOps = createEphemeralOps(
+      {
+        BROKER_PENDING: (env as any).BROKER_PENDING,
+        BROKER_HANDOFF: (env as any).BROKER_HANDOFF,
+      },
+      secret!,
+      clock
+    );
     rateLimiter = createDurableRateLimiter(env.BROKER_RATELIMIT!, {
       limit: parsePositiveInt(env.FABLE_BROKER_RATE_LIMIT_PER_MINUTE, 60),
       windowMs: 60_000,
@@ -135,7 +131,8 @@ function runtimeFor(env: Env): BrokerRuntime {
     allowedOrigins: loopbackOrigins(),
     rateLimiter
   });
-  runtime = { broker, router };
+  const runtime = { broker, router };
+  runtimes.set(env, runtime);
   return runtime;
 }
 
@@ -147,30 +144,70 @@ function runtimeFor(env: Env): BrokerRuntime {
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const backend = (env.FABLE_BROKER_STORAGE_BACKEND ?? 'memory').toLowerCase();
-    if (backend === 'durable' && !env.FABLE_BROKER_STORE_ENCRYPTION_KEY) {
-      return new Response(JSON.stringify({ error: 'configuration-required', message: 'Encryption key required for durable backend.' }), { status: 503, headers: { 'content-type': 'application/json' } });
+    const configError = validateWorkerConfig(env);
+    if (configError) return configurationRequired(configError);
+    try {
+      const { router } = runtimeFor(env);
+      const peer = request.headers.get("cf-connecting-ip") ?? undefined;
+      return router.handle(request, peer);
+    } catch (error) {
+      if (error instanceof StoreCryptoError) {
+        return configurationRequired("Durable storage encryption key is invalid.");
+      }
+      return configurationRequired("Broker Worker configuration is invalid.");
     }
-    if (
-      backend === "durable"
-      && (!env.BROKER_PENDING || !env.BROKER_HANDOFF || !env.BROKER_RATELIMIT)
-    ) {
-      return new Response(
-        JSON.stringify({
-          error: "configuration-required",
-          message: "Durable Object bindings are required for durable backend."
-        }),
-        {
-          status: 503,
-          headers: { "content-type": "application/json" }
-        }
-      );
-    }
-    const { router } = runtimeFor(env);
-    const peer = request.headers.get("cf-connecting-ip") ?? undefined;
-    return router.handle(request, peer);
   }
 };
+
+function validateWorkerConfig(env: Env): string | undefined {
+  const backend = (env.FABLE_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
+  const deployment = (env.FABLE_BROKER_ENVIRONMENT ?? "local").toLowerCase();
+  if (backend !== "memory" && backend !== "durable") {
+    return "Storage backend must be memory or durable.";
+  }
+  if ((deployment === "staging" || deployment === "production") && backend !== "durable") {
+    return "Staging and production Workers require durable storage.";
+  }
+  if (backend === "durable") {
+    if (!env.BROKER_PENDING || !env.BROKER_HANDOFF || !env.BROKER_RATELIMIT) {
+      return "Durable Object bindings are required for durable backend.";
+    }
+    if (!env.FABLE_BROKER_STORE_ENCRYPTION_KEY) {
+      return "Encryption key required for durable backend.";
+    }
+    try {
+      assertStoreEncryptionKey(env.FABLE_BROKER_STORE_ENCRYPTION_KEY);
+    } catch {
+      return "Durable storage encryption key is invalid.";
+    }
+    if (!isHttpsPublicUrl(env.FABLE_BROKER_PUBLIC_URL)) {
+      return "Durable Worker deployments require an explicit HTTPS public URL.";
+    }
+  }
+  return undefined;
+}
+
+function isHttpsPublicUrl(value: string | undefined): boolean {
+  if (!value) return false;
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function configurationRequired(message: string): Response {
+  return new Response(
+    JSON.stringify({ error: "configuration-required", message }),
+    {
+      status: 503,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store"
+      }
+    }
+  );
+}
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;

@@ -23,7 +23,7 @@ Unless a file header states otherwise, use of the source code is governed by tha
 
 The Fable desktop application is an **early preview** (currently version **0.1.0** in the repository). You should expect:
 
-- **Incomplete features.** Voice input, local model execution, GitHub Copilot execution, multi-OS packaging, and other items are planned, preview-only, or not yet implemented (see `README.md` feature matrix).
+- **Incomplete or gated features.** Voice input, local model execution through user-installed Ollama, GitHub Copilot execution, multi-OS packaging, and other items are planned, gated, preview-only, or not yet implemented (see `README.md` feature matrix).
 - **Unsigned builds.** Windows preview builds are unsigned (`docs/product/release.md`).
 - **Configuration required.** Many connectors need provider setup, OAuth registration, or a deployed auth broker before they work outside fixtures.
 - **Data on your device.** The desktop app is designed to be local-first. You are responsible for backups, workspace security, and how you configure API keys and connectors.

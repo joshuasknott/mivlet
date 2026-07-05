@@ -26,6 +26,19 @@ The following matrix documents the exact features implemented in the codebase fo
 | **Cancellation** | Yes | Yes | Yes | Yes | Yes | Active HTTP request is dropped immediately when cancelled. |
 | **Credential Validation** | Yes | Yes | Yes | Yes | Yes | Bounded list-models GET request (15s connect, 20s total timeout). |
 
+## Local Loopback Runtime
+
+Ollama is integrated as a separate `local-loopback` backend, not as an API-key
+provider. The Rust boundary probes and streams only to an `http` literal
+loopback base URL, defaulting to `http://127.0.0.1:11434`. Fable does not
+install Ollama, start its service, pull models, or use the webview for local
+model egress.
+
+Local model states are explicit: `install-required`, `start-required`,
+`download-required`, `connected`, `failed`, or `unavailable`. Tool schemas are
+sent only when the selected discovered model reports tool support; ordinary
+prompts still run without tools.
+
 ## Settings provider UX states
 
 The Settings -> Providers view reflects real runtime state instead of optimistic

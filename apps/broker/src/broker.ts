@@ -56,7 +56,9 @@ import {
 import {
   providerProfile,
   resolveCredentials,
+  resolveAuthorizationEndpoint,
   configuredProviders,
+  isProfileConfigured,
   type BrokerEnv,
   type ProviderProfile
 } from "./provider-profiles.js";
@@ -157,12 +159,15 @@ export class FableBroker {
     validateDesktopRedirect(request.redirectUri, this.allowedDesktopRedirects);
     const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
 
-    const url = new URL(profile.authorizationEndpoint);
+    const url = new URL(resolveAuthorizationEndpoint(profile, this.env, credentials));
     url.searchParams.set("client_id", credentials.clientId);
     url.searchParams.set("redirect_uri", providerRedirectUri);
     url.searchParams.set("response_type", "code");
-    if (profile.scopes.length) {
-      url.searchParams.set("scope", profile.scopes.join(" "));
+    if (profile.scopes.length && profile.scopeParameter !== "omit") {
+      url.searchParams.set("scope", profile.scopes.join(profile.scopeSeparator ?? " "));
+    }
+    for (const [key, value] of Object.entries(profile.authorizationParams ?? {})) {
+      url.searchParams.set(key, value);
     }
     url.searchParams.set("state", request.state);
 
@@ -172,10 +177,6 @@ export class FableBroker {
       verifier = pair.verifier;
       url.searchParams.set("code_challenge", pair.challenge);
       url.searchParams.set("code_challenge_method", "S256");
-    } else {
-      // Provider does PKCE against the desktop-supplied challenge.
-      url.searchParams.set("code_challenge", request.codeChallenge);
-      url.searchParams.set("code_challenge_method", request.codeChallengeMethod);
     }
 
     // Store the single-use pending exchange keyed by the desktop state.
@@ -221,6 +222,7 @@ export class FableBroker {
     // the immutable profile is not re-resolved inside each of them.
     const profile = providerProfile(provider);
     this.requireConfigured(provider, profile);
+    rejectDuplicateCallbackParams(query, ["code", "state", "error"]);
 
     const error = query.get("error");
     if (error) {
@@ -365,7 +367,7 @@ export class FableBroker {
 
   private requireConfigured(provider: BrokerProviderId, profile?: ProviderProfile): void {
     const resolved = profile ?? providerProfile(provider);
-    if (!this.env[resolved.clientIdEnv] || !this.env[resolved.clientSecretEnv]) {
+    if (!isProfileConfigured(resolved, this.env)) {
       throw new BrokerContractError(
         "configuration-required",
         `${resolved.label} is not configured on this broker.`,
@@ -421,6 +423,18 @@ function validateDesktopRedirect(value: string, allowed: Set<string>): void {
   const exact = allowed.has(redirect.toString());
   if ((!loopback && !exact) || redirect.username || redirect.password || redirect.search || redirect.hash) {
     throw new BrokerContractError("invalid-request", "Desktop redirect URI is not allowed.", false);
+  }
+}
+
+function rejectDuplicateCallbackParams(query: URLSearchParams, keys: readonly string[]): void {
+  for (const key of keys) {
+    if (query.getAll(key).length > 1) {
+      throw new BrokerContractError(
+        "invalid-request",
+        "Authorization callback contains duplicate parameters.",
+        false
+      );
+    }
   }
 }
 

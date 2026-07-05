@@ -555,7 +555,7 @@ export interface ConnectorAuthRequest {
   redirectUri?: string;
   /** Authorization callback URL, or the provider-returned code when completing OAuth. */
   callbackUrl?: string;
-  /** Optional incremental subset of the connector's declared OAuth scopes. */
+  /** Optional declared scope set for an explicit reconnect; active grants come from the provider response. */
   requestedScopes?: string[];
 }
 
@@ -565,6 +565,52 @@ export interface ConnectorAuthResult {
   authorizationUrl?: string;
   account?: ConnectorAccountSummary;
   message: string;
+}
+
+// ---------------------------------------------------------------------------
+// Optional Fable cloud identity.
+//
+// This is not connector OAuth and not the confidential auth broker. It is a
+// future-facing, optional identity surface for cloud/team features. These wire
+// types are intentionally secret-free: React receives only status, short-lived
+// expiry metadata, and display identity. Refresh/session credentials remain in
+// the Rust OS-keyring boundary.
+// ---------------------------------------------------------------------------
+
+export type IdentityAuthState =
+  | "disabled"
+  | "signed-out"
+  | "signed-in"
+  | "offline"
+  | "refreshing"
+  | "revoked"
+  | "needs-organization"
+  | "error";
+
+export interface IdentityOrganization {
+  id: string;
+  name?: string;
+  slug?: string;
+  role?: string;
+}
+
+export interface IdentitySummary {
+  userId: string;
+  displayName?: string;
+  email?: string;
+  organization?: IdentityOrganization;
+}
+
+export interface IdentityStatus {
+  enabled: boolean;
+  state: IdentityAuthState;
+  message: string;
+  issuer?: string;
+  audience?: string;
+  scopes: string[];
+  expiresAt?: string;
+  identity?: IdentitySummary;
+  organizationRequired?: boolean;
 }
 
 export interface ConnectorTokenSet {
@@ -780,7 +826,12 @@ export interface PersistedAgentRun {
  * the native-API providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) speak
  * their HTTP/SSE APIs directly — with Fable owning the entire agent loop.
  */
-export type BackendType = "codex-app-server" | "acp" | "copilot-sdk" | "native-api";
+export type BackendType =
+  | "codex-app-server"
+  | "acp"
+  | "copilot-sdk"
+  | "native-api"
+  | "local-loopback";
 
 /**
  * Resolved auth state for a backend instance. Fail-closed states declare no
@@ -791,6 +842,10 @@ export type BackendType = "codex-app-server" | "acp" | "copilot-sdk" | "native-a
  *   - `sign-in-required` — a provider-owned login (Codex CLI, ACP, Copilot)
  *     is installed but not signed in; Fable never shows a token field here.
  *   - `install-required` — the provider's real runtime (CLI/SDK) is missing.
+ *   - `start-required` — the provider runtime is installed but its local
+ *     service is not listening.
+ *   - `download-required` — the local runtime is reachable but has no local
+ *     generation model installed. Fable never downloads a model automatically.
  *   - `connecting` — a verification round-trip is in flight (UI-only; never
  *     persisted by the boundary).
  *   - `expired` — a credential/login was valid before but is no longer.
@@ -809,6 +864,8 @@ export type BackendAuthState =
   | "needs-auth"
   | "sign-in-required"
   | "install-required"
+  | "start-required"
+  | "download-required"
   | "connecting"
   | "expired"
   | "unsupported"
@@ -828,6 +885,8 @@ export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
   "needs-auth",
   "sign-in-required",
   "install-required",
+  "start-required",
+  "download-required",
   "connecting",
   "expired",
   "unsupported",
@@ -847,13 +906,15 @@ export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
  * union makes a missing/duplicate state a *type* error; the runtime check makes
  * a parity drift between this list and `BACKEND_AUTH_FAIL_CLOSED_STATES` a load-
  * time failure instead of silent dedupe. Mirrors `BACKEND_AUTH_STATES` in the
- * Rust `models.rs` vocabulary (11 distinct values).
+ * Rust `models.rs` vocabulary (13 distinct values).
  */
 export const BACKEND_AUTH_STATE_VALUES = [
   "connected",
   "needs-auth",
   "sign-in-required",
   "install-required",
+  "start-required",
+  "download-required",
   "connecting",
   "expired",
   "unsupported",
@@ -869,6 +930,8 @@ const _BACKEND_AUTH_STATE_EXHAUSTIVE: Record<BackendAuthState, true> = {
   "needs-auth": true,
   "sign-in-required": true,
   "install-required": true,
+  "start-required": true,
+  "download-required": true,
   connecting: true,
   expired: true,
   unsupported: true,

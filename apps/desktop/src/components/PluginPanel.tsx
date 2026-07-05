@@ -300,16 +300,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
   const healthSummary = connector.health?.summary ?? connector.healthSummary;
   const setupMessage = connector.setupMessage;
 
-  // 1. Syncing
-  if (status === "connected" && healthState === "unknown") {
-    return {
-      label: "Syncing",
-      className: "syncing",
-      summary: `Verifying connection with ${connector.name}...`
-    };
-  }
-
-  // 2. Permission Limited (missing required scopes)
+  // 1. Permission Limited (missing required scopes)
   const hasMissingRequiredScopes = connector.scopes?.some((scope) => scope.required && !scope.granted) ?? false;
   const isStale = healthSummary.toLowerCase().includes("missing required") || healthSummary.toLowerCase().includes("stale");
   if (status === "connected" && (hasMissingRequiredScopes || isStale)) {
@@ -317,6 +308,15 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
       label: "Permission Limited",
       className: "permission-limited",
       summary: `${connector.name} is missing required scopes or permissions.`
+    };
+  }
+
+  // 2. Syncing
+  if (status === "connected" && healthState === "unknown") {
+    return {
+      label: "Syncing",
+      className: "syncing",
+      summary: `Verifying connection with ${connector.name}...`
     };
   }
 
@@ -366,10 +366,13 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     healthSummary.toLowerCase().includes("configuration");
 
   if (status === "unconfigured" || (isUnconfigured && hasConfigMsg)) {
+    const summary = connector.authMode === "oauth-pkce"
+      ? setupMessage ?? `${connector.name} requires a desktop OAuth client configuration.`
+      : `${connector.name} is not configured on the Fable auth broker.`;
     return {
       label: "Configuration Required",
       className: "configuration-required",
-      summary: `${connector.name} is not configured on the Fable auth broker.`
+      summary
     };
   }
 

@@ -1,26 +1,27 @@
 # Auth broker contract
 
-## Status: implemented foundation; not production-ready
+## Status: staging-prepared; not production-ready
 
 This repository contains the portable TypeScript auth broker in `apps/broker`. The auth broker is buildable and configured targeting Cloudflare Workers (`src/worker.ts` + `wrangler.jsonc`) as the primary host. 
 
 The broker targets Cloudflare Workers but is not deployed or production-ready in
-this repository. The default storage backend is process-local memory for local
-determinism. Durable Object classes, Worker bindings, migrations, encryption
-helpers, and contract tests exist for pending authorization state, one-time
-handoffs, and rate limiting behind `FABLE_BROKER_STORAGE_BACKEND=durable`; that
-mode still requires a deployed Worker, Durable Object bindings, and
-`FABLE_BROKER_STORE_ENCRYPTION_KEY`. Until an operator deploys the broker and
-registers its callback URLs in each provider console (including a GitHub OAuth
-App and Vercel Integration), confidential-client connectors fail closed with
-`configuration-required`.
+this repository. Local/default development keeps pending authorization,
+one-time handoff, and rate-limit stores in process-local memory. The staging and
+production Wrangler environments are now declared with Durable Object storage by
+default; staging is ready for Cloudflare dry-run and manual secret/DNS setup.
+Until an operator deploys staging, registers callback URLs in each provider
+console, and completes live provider certification, confidential-client
+connectors fail closed with `configuration-required`.
+
+Staging operations are documented in
+[Auth broker staging deployment runbook](./auth-broker-staging-runbook.md).
 
 The broker core (routing, CORS, rate limiting, contract validation, the
 confidential OAuth lifecycle, and all redacted error handling) is
 runtime-neutral: it uses only the Web Crypto API and standard
 `Request`/`Response`, and both transports delegate to one shared
 `src/router.ts`. Provider-specific differences (token/identity/revoke endpoint
-shapes, PKCE mode, identity normalization) are isolated in
+shapes, PKCE mode, refresh/revoke support, scope serialization, and identity normalization) are isolated in
 `src/provider-profiles.ts`.
 
 The implemented version-1 browser protocol is authoritative: `authorize`
@@ -71,9 +72,12 @@ directly with the provider APIs.
   redeems the single-use handoff ticket for the token set and normalized account
   identity.
 - **Token refresh** - `POST /oauth/{provider}/refresh`: rotate an expiring
-  access token using the refresh token and confidential client credentials.
-- **Revocation** - `POST /oauth/{provider}/revoke`: revoke the access/refresh
-  token at the provider during a desktop disconnect.
+  access token only for providers whose documented OAuth flow returns refresh
+  tokens. Providers without refresh support fail closed with `needs-auth`.
+- **Revocation** - `POST /oauth/{provider}/revoke`: revoke or delete the token
+  at the provider only when that provider documents a matching endpoint. Providers
+  without a remote revoke endpoint return local success so desktop disconnect can
+  still remove local credentials.
 - **Identity resolution (internal)**: resolve the connected account's stable ID,
   display name, handle, email, workspace, and avatar during callback handling.
   There is no public identity route.
@@ -81,6 +85,23 @@ directly with the provider APIs.
 The desktop resolves exactly the OAuth routes above from the broker base URL via
 `resolve_broker_endpoints` in `connector_auth.rs`. No connector data route is
 derivable.
+
+## Provider protocol matrix
+
+The broker intentionally does **not** claim uniform OAuth behavior across
+providers:
+
+| Provider | Flow | PKCE | Refresh | Remote revoke/disconnect | Notable setup |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| GitHub | OAuth App web flow | S256 supported | No for OAuth Apps | `DELETE /applications/{client_id}/token` | `repo` is broad read/write OAuth scope; GitHub App is the future fine-grained alternative. |
+| Vercel | Integration REST API install flow | Not documented | Not documented | No generic revoke endpoint | Requires `FABLE_BROKER_VERCEL_INTEGRATION_SLUG`; team installs require live validation. |
+| Linear | OAuth 2.0 app | S256 supported | Yes | `POST /oauth/revoke` form body | Authorization URL is `https://linear.app/oauth/authorize`; scopes are comma-separated. |
+| Notion | Public connection OAuth | Not documented for this flow | Yes | Not enabled in this broker until live semantics are certified | Authorization includes `owner=user`; token/refresh use HTTP Basic auth plus JSON and `Notion-Version`. |
+| Slack | OAuth v2 confidential app | Not used for confidential broker flow | No unless token rotation is separately enabled | `auth.revoke` | Current single-token model uses bot token scopes only; global `search:read` requires a future user-token path. |
+
+The desktop still stores only provider tokens in the OS credential boundary, and
+the broker still holds only provider client secrets and short-lived pending
+state/handoff material.
 
 ### The broker MUST NOT do
 
@@ -125,14 +146,31 @@ For production, the broker is configured by `apps/broker/wrangler.jsonc` and
 deployed with Wrangler. The Worker entrypoint is `apps/broker/src/worker.ts`;
 the Node HTTP wrapper is not imported by the Worker bundle.
 
-The checked-in Worker config currently sets:
+The checked-in Worker config declares three environments:
+
+- `local` / default: memory storage for deterministic Worker dev.
+- `staging`: Durable Object storage for pending exchanges, one-time handoffs,
+  and rate limits.
+- `production`: declared for review only; do not deploy until provider
+  certification and the remaining broker security gates are complete.
+
+The base Worker config currently sets:
 
 - `name`: `fable-auth-broker`
 - `main`: `src/worker.ts`
 - `compatibility_date`: `2026-06-30`
 - `observability.enabled`: `true`
 - `FABLE_BROKER_RATE_LIMIT_PER_MINUTE`: `60`
-- required secret binding: `FABLE_BROKER_PUBLIC_URL`
+- `FABLE_BROKER_STORAGE_BACKEND`: `memory` for default/local
+
+The staging and production environments override
+`FABLE_BROKER_STORAGE_BACKEND=durable` and bind:
+
+- `BROKER_PENDING` (`BrokerPending`)
+- `BROKER_HANDOFF` (`BrokerHandoff`)
+- `BROKER_RATELIMIT` (`BrokerRateLimit`)
+
+The Durable Object migration tag is `v1-broker-ephemeral`.
 
 The Worker intentionally does not enable `nodejs_compat`; shared broker code
 uses Web platform APIs (`fetch`, `Request`, `Response`, Web Crypto) so the
@@ -141,26 +179,32 @@ Worker path does not depend on Node's HTTP server, `Buffer`, or `node:crypto`.
 ### Secret management
 
 Confidential client configuration from provider consoles must never be committed
-to repository files. Register production values in the Cloudflare Worker
-environment using Wrangler:
+to repository files. Register staging values in the Cloudflare Worker
+environment using Wrangler. `FABLE_BROKER_PUBLIC_URL`,
+`FABLE_BROKER_ENVIRONMENT`, `FABLE_BROKER_STORAGE_BACKEND`, and
+`FABLE_BROKER_RATE_LIMIT_PER_MINUTE` are non-secret vars; provider credentials
+and `FABLE_BROKER_STORE_ENCRYPTION_KEY` are secrets.
 
 ```bash
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_PUBLIC_URL
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_GITHUB_CLIENT_ID
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_CLIENT_ID
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_LINEAR_CLIENT_ID
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_NOTION_CLIENT_ID
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_NOTION_CLIENT_SECRET
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_SLACK_CLIENT_ID
-pnpm --filter @fable/broker wrangler secret put FABLE_BROKER_SLACK_CLIENT_SECRET
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_STORE_ENCRYPTION_KEY --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_GITHUB_CLIENT_ID --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_VERCEL_CLIENT_ID --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_VERCEL_INTEGRATION_SLUG --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_LINEAR_CLIENT_ID --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_NOTION_CLIENT_ID --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_NOTION_CLIENT_SECRET --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_SLACK_CLIENT_ID --env staging
+pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_SLACK_CLIENT_SECRET --env staging
 ```
 
 Provider client IDs are not OAuth secrets, but they are environment-specific
 broker configuration. Keep them out of committed files; use Worker env bindings
-or secrets.
+or secrets. Providers are disabled by omission: when a provider's required
+credential pair is missing, that provider fails closed with
+`configuration-required`.
 
 ## Local development steps
 
@@ -193,13 +237,15 @@ or secrets.
 | Variable | Scope | Description |
 | :--- | :--- | :--- |
 | `FABLE_BROKER_PUBLIC_URL` | Public var / Worker secret binding | The public base URL of the broker, for example `https://fable-auth-broker.workers.dev/`. Required by the Worker. |
+| `FABLE_BROKER_ENVIRONMENT` | Public var | `local`, `staging`, or `production`. Staging/production fail closed unless durable storage is selected. |
+| `FABLE_BROKER_STORAGE_BACKEND` | Public var | `memory` for local/dev only; `durable` for Cloudflare staging and production. |
+| `FABLE_BROKER_STORE_ENCRYPTION_KEY` | Worker secret | 32-byte unpadded base64url key used to encrypt durable PKCE verifier and handoff payload rows. Required when storage backend is `durable`. |
 | `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` | Public var | Comma-separated list of allowed non-loopback desktop redirect URLs. Optional. |
 | `FABLE_BROKER_RATE_LIMIT_PER_MINUTE` | Public var | Rate limit threshold per peer and route. Defaults to `60`. |
-| `FABLE_BROKER_STORAGE_BACKEND` | Public var | `memory` by default; set to `durable` only for Worker deployments with Durable Object bindings. |
-| `FABLE_BROKER_STORE_ENCRYPTION_KEY` | Secret | Required only when `FABLE_BROKER_STORAGE_BACKEND=durable`; 32-byte base64url root secret for broker ephemeral-store encryption. |
 | `FABLE_BROKER_PORT` / `FABLE_BROKER_HOST` | Public var | Bind settings for the local Node.js fallback server. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_ID` | Secret/config | Client ID registered in the provider developer console. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET` | Secret | Confidential client secret registered in the provider developer console. |
+| `FABLE_BROKER_VERCEL_INTEGRATION_SLUG` | Config/secret | Vercel Integration URL slug used to build `https://vercel.com/integrations/<slug>/new`. Required for Vercel only. |
 
 Replace `<PROVIDER>` with `GITHUB`, `VERCEL`, `LINEAR`, `NOTION`, or `SLACK`.
 
@@ -340,9 +386,18 @@ provider diagnostic):
   never appears in the response.
 - **`revoke`** — revokes at the provider; HTTP 404 / unknown-token is treated as
   success (already revoked). Non-404 failures map the same way as refresh. The
-  revoked token never appears in the response. GitHub's token-grant revocation
+  revoked token never appears in the response. GitHub's token deletion
   endpoint is keyed by client id; the `{clientId}` placeholder is substituted
   with the configured confidential client id before the call.
+
+Current provider-specific correction: refresh is implemented only for providers
+whose selected OAuth flow documents refresh tokens (Linear and Notion). GitHub
+OAuth App, Vercel Integration, and default Slack OAuth v2 installs fail closed
+with `needs-auth` on refresh. GitHub revocation now uses
+`DELETE /applications/{client_id}/token` with HTTP Basic app authentication and
+an `access_token` JSON body. Vercel Integration and Notion remote revocation are
+treated as unsupported in this broker until live semantics are certified;
+desktop disconnect still removes local credentials.
 
 OAuth error responses are safe to show and log: every response is built from the
 broker's own redacted messages, and the logger redacts token/secret-shaped
@@ -352,13 +407,20 @@ bodies are never logged.
 
 ## Current deployment limitation
 
-The implemented foundation defaults to memory storage, which is suitable for
-local development and single-process tests. Cloudflare Worker durable mode is
-implemented with Durable Object classes and bindings, but has not been deployed
-or validated against live provider OAuth flows in this repository. Before
-external production use, operators still need to enable durable mode, configure
-the encryption secret, deploy the Worker, register provider callbacks, and run
-live non-production OAuth validation.
+The repository contains Durable Object bindings, encrypted durable-store code,
+and explicit staging/production Wrangler environments. Batch 4 does not perform
+a live staging deployment unless Cloudflare login, DNS, and staging secrets are
+already available. Before external production use on Cloudflare, staging must
+complete the runbook, provider callback URLs must be registered, live provider
+flows must be certified, and the Durable Object migration state must be reviewed
+in the target account.
+
+Security review also flagged broker contract work that remains outside this
+batch: bind handoff redemption to a desktop-held proof, sender-bind refresh and
+revoke (or replace raw refresh-token POSTs with broker-issued handles), and bind
+connector approvals to the account active at execution time. Do not deploy the
+broker for external users until those contract changes are designed, implemented,
+and reviewed.
 
 ## Provider OAuth callback URL guidance
 
@@ -377,3 +439,15 @@ Examples:
 
 Replace `<your-broker-domain>` with the Cloudflare Workers public origin or a
 custom HTTPS domain bound to the Worker.
+
+## Official protocol references
+
+- GitHub OAuth Apps: https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+- GitHub OAuth application REST endpoints: https://docs.github.com/en/rest/apps/oauth-applications?apiVersion=2022-11-28
+- Vercel Integrations REST API OAuth exchange: https://vercel.com/docs/integrations/create-integration/vercel-api-integrations
+- Vercel Sign in with Vercel authorization server reference: https://vercel.com/docs/sign-in-with-vercel/authorization-server-api
+- Linear OAuth 2.0 authentication: https://linear.app/developers/oauth-2-0-authentication
+- Notion public connection authorization: https://developers.notion.com/guides/get-started/authorization
+- Notion create/refresh/revoke token references: https://developers.notion.com/reference/create-a-token
+- Slack OAuth v2 installation: https://docs.slack.dev/authentication/installing-with-oauth/
+- Slack token rotation, PKCE, and revocation references: https://docs.slack.dev/authentication/using-token-rotation/

@@ -24,6 +24,7 @@ import type {
   BackendAuthState,
   BackendProvider,
   CustomApprovalSettings,
+  IdentityStatus,
   RemoteControlStatusSnapshot,
   VoiceCapability
 } from "@fable/protocol";
@@ -125,6 +126,7 @@ export function SettingsPage({
               onProfileChange={onProfileChange}
               onStatus={setStatus}
             />
+            <IdentitySettingsView runtime={runtime} onStatus={setStatus} />
             <AppearanceSettingsView
               theme={theme}
               onThemeChange={onThemeChange}
@@ -166,6 +168,7 @@ const PROVIDER_PRIORITY = [
   "cursor",
   "copilot",
   "grok",
+  "ollama",
   "openai",
   "anthropic",
   "gemini",
@@ -193,8 +196,8 @@ function ProviderAccessView({
   // in flight; surface it as the pending provider id so the row shows a spinner.
   const pendingProviderId = runtime.backendStatus?.match(/Connecting (\S+?)[\u2026.]?/)?.[1];
 
-  // Native-API (key) providers are connectable here. Subscription/CLI providers
-  // (codex/cursor/copilot/grok) report provider-owned runtime state.
+  // Native-API (key) providers are connectable here. Subscription/CLI/local
+  // providers report provider-owned or externally managed runtime state.
   const nativeProviders = useMemo(
     () =>
       providers
@@ -224,16 +227,16 @@ function ProviderAccessView({
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          Connect API-key providers to run Fable&rsquo;s agent loop directly. Subscription and
-          CLI-backed providers use their installed provider runtime.
+          Connect API-key providers to run Fable&rsquo;s agent loop directly. Subscription,
+          CLI-backed, and local model providers use their own installed runtime.
         </p>
       </div>
 
       <div className="provider-access-groups" aria-label="Provider access">
         <section className="provider-access-group" aria-labelledby="subscription-providers-title">
           <div className="provider-access-group__heading">
-            <strong id="subscription-providers-title">Subscriptions</strong>
-            <span>Use an existing provider subscription or installed CLI.</span>
+            <strong id="subscription-providers-title">Installed runtimes</strong>
+            <span>Use an existing provider subscription, installed CLI, or local model service.</span>
           </div>
           <div className="provider-access-list">
             {subscriptionProviders.length > 0 ? (
@@ -628,7 +631,9 @@ function SubscriptionProviderSetupModal({
               <p>
                 {installRequired && provider.installHint
                   ? provider.installHint
-                  : "Use the provider's own app, CLI, or sign-in before Fable can use this runtime."}
+                  : provider.backendType === "local-loopback"
+                    ? "Fable detects this local service automatically. Start Ollama and pull a model in Ollama before running local prompts."
+                    : "Use the provider's own app, CLI, or sign-in before Fable can use this runtime."}
               </p>
             </section>
             <section>
@@ -694,7 +699,9 @@ function SubscriptionProviderRow({
             <span className="provider-access-caps provider-access-caps--muted">
               {installRequired && provider.installHint
                 ? provider.installHint
-                : "Requires the provider's real runtime to be connected first."}
+                : provider.backendType === "local-loopback"
+                  ? stateViewFor(provider.authState).hint ?? "Requires a running local model service."
+                  : "Requires the provider's real runtime to be connected first."}
             </span>
           )}
         </div>
@@ -708,7 +715,7 @@ function SubscriptionProviderRow({
         {authLabel}
       </span>
 
-      <span className="provider-access-row__action" title="Subscription providers use their provider-owned runtime and auth.">
+      <span className="provider-access-row__action" title="These providers use their own installed runtime and auth.">
         <span>{capabilityBearing ? "Manage" : "View setup"}</span>
       </span>
     </article>
@@ -1653,6 +1660,133 @@ function ProfileSettingsView({
             </button>
           </div>
         </footer>
+      </article>
+    </div>
+  );
+}
+
+function identityStatusLabel(status: IdentityStatus) {
+  switch (status.state) {
+    case "signed-in":
+      return "Connected";
+    case "signed-out":
+      return "Signed out";
+    case "offline":
+      return "Offline";
+    case "revoked":
+      return "Signed out";
+    case "needs-organization":
+      return "Choose organization";
+    case "error":
+      return "Unavailable";
+    default:
+      return "Disabled";
+  }
+}
+
+function IdentitySettingsView({
+  runtime,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  onStatus: (message: string) => void;
+}) {
+  const status = runtime.identityStatus;
+  const identity = status.identity;
+  const organization = identity?.organization;
+  const canSignIn = status.enabled && status.state !== "signed-in";
+  const canRefresh = status.enabled && status.state !== "disabled";
+  const canSignOut = status.enabled && Boolean(identity);
+
+  const runIdentityAction = async (action: () => Promise<void>) => {
+    await action();
+    onStatus("Cloud identity updated.");
+  };
+
+  return (
+    <div className="settings-page__body">
+      <article className="profile-clean-card settings-open-section">
+        <div className="profile-clean-card__identity">
+          <span className="settings-panel__icon" aria-hidden="true">
+            <UserCircle size={21} />
+          </span>
+          <div className="profile-identity-copy">
+            <strong>Fable cloud identity</strong>
+            <small>
+              {identityStatusLabel(status)}. {status.message}
+            </small>
+          </div>
+        </div>
+
+        <div className="profile-clean-card__content">
+          <section className="profile-section" aria-labelledby="cloud-identity-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <ShieldCheck size={19} />
+              </span>
+              <span>
+                <strong id="cloud-identity-title">Optional account</strong>
+                <small>Separate from connector OAuth, model keys, and the auth broker.</small>
+              </span>
+            </div>
+
+            {identity ? (
+              <div className="settings-local-storage">
+                <strong>{identity.displayName ?? identity.email ?? identity.userId}</strong>
+                <span>{identity.email ?? identity.userId}</span>
+                {organization ? (
+                  <span>
+                    Organization: {organization.name ?? organization.slug ?? organization.id}
+                  </span>
+                ) : status.organizationRequired ? (
+                  <span>Organization required for team features.</span>
+                ) : null}
+                {status.expiresAt ? <span>Session check expires {status.expiresAt}</span> : null}
+              </div>
+            ) : (
+              <p className="settings-status" role="status">
+                {status.enabled
+                  ? "No cloud identity is active on this device."
+                  : "Cloud identity is disabled until Clerk configuration is present."}
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "14px" }}>
+              {canSignIn ? (
+                <button
+                  type="button"
+                  className="button button--primary"
+                  onClick={() => void runIdentityAction(runtime.signInIdentity)}
+                  disabled={runtime.identityPending}
+                >
+                  {runtime.identityPending ? <Spinner size={14} /> : null}
+                  <span>Sign in</span>
+                </button>
+              ) : null}
+              {canRefresh ? (
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => void runIdentityAction(runtime.refreshIdentity)}
+                  disabled={runtime.identityPending}
+                >
+                  {runtime.identityPending ? <Spinner size={14} /> : <ArrowClockwise size={14} />}
+                  <span>Refresh</span>
+                </button>
+              ) : null}
+              {canSignOut ? (
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => void runIdentityAction(runtime.signOutIdentity)}
+                  disabled={runtime.identityPending}
+                >
+                  <span>Sign out</span>
+                </button>
+              ) : null}
+            </div>
+          </section>
+        </div>
       </article>
     </div>
   );

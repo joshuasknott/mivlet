@@ -30,7 +30,8 @@ const ENV: BrokerEnv = {
   FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
   FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
   FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
-  FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret"
+  FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret",
+  FABLE_BROKER_VERCEL_INTEGRATION_SLUG: "fable-vercel"
 };
 
 /** A fetch that serves canned token/identity/revoke responses for a provider. */

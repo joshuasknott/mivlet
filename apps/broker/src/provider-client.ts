@@ -74,19 +74,22 @@ export async function exchangeCode(
   const profile = profileOf(options);
   const fetcher = options.fetch ?? globalThis.fetch;
   const body = new URLSearchParams({
-    grant_type: "authorization_code",
     code: params.code,
     client_id: options.credentials.clientId,
     client_secret: options.credentials.clientSecret,
     redirect_uri: params.redirectUri
   });
+  if (profile.tokenRequestStyle !== "form-without-grant-type") {
+    body.set("grant_type", "authorization_code");
+  }
   if (params.verifier) {
     body.set("code_verifier", params.verifier);
   }
-  const json = await postForm(
+  const json = await postTokenRequest(
     fetcher,
     options.provider,
-    profile.tokenEndpoint,
+    profile,
+    options.credentials,
     body
   );
   const tokens = tokenSetFrom(json, options.clock ?? systemClockNow);
@@ -99,6 +102,13 @@ export async function refreshTokens(
   refreshToken: string
 ): Promise<ConnectorTokenSet> {
   const profile = profileOf(options);
+  if (!profile.supportsRefresh) {
+    throw new BrokerOAuthError(
+      "needs-auth",
+      `${profile.label} does not support refresh for this OAuth flow.`,
+      false
+    );
+  }
   const fetcher = options.fetch ?? globalThis.fetch;
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -106,10 +116,11 @@ export async function refreshTokens(
     client_id: options.credentials.clientId,
     client_secret: options.credentials.clientSecret
   });
-  const json = await postForm(
+  const json = await postTokenRequest(
     fetcher,
     options.provider,
-    profile.tokenEndpoint,
+    profile,
+    options.credentials,
     body
   );
   const refreshed = tokenSetFrom(json, options.clock ?? systemClockNow);
@@ -127,16 +138,33 @@ export async function revokeToken(
   hint?: "access_token" | "refresh_token"
 ): Promise<void> {
   const profile = profileOf(options);
+  if (profile.revocationStyle === "none") {
+    return;
+  }
   const fetcher = options.fetch ?? globalThis.fetch;
+  const endpoint = resolveEndpoint(profile.revocationEndpoint, options.credentials);
+  if (profile.revocationStyle === "github-oauth-app") {
+    const response = await fetcher(endpoint, {
+      method: "DELETE",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/vnd.github+json",
+        authorization: basicAuth(options.credentials) ?? ""
+      },
+      body: JSON.stringify({ access_token: token })
+    });
+    if (!response.ok && response.status !== 404) {
+      throw await errorFromResponse(options.provider, response, "revocation");
+    }
+    return;
+  }
   const body = new URLSearchParams({ token });
   if (hint) body.set("token_type_hint", hint);
-  // Vercel/Linear want Basic auth for revocation; Slack wants the token in-body.
-  // Basic auth (client id:secret) is used by GitHub. We send both the body and
+  // Linear uses Basic auth for revocation; Slack wants the token in-body.
+  // We send both the body and
   // basic auth — providers ignore what they don't use, and the secret is only
-  // sent to the provider revocation endpoint over TLS. GitHub's grant endpoint
-  // is keyed by client id; resolveEndpoint substitutes the {clientId} placeholder.
-  const auth = basicAuth(options.credentials);
-  const endpoint = resolveEndpoint(profile.revocationEndpoint, options.credentials);
+  // sent to the provider revocation endpoint over TLS.
+  const auth = options.provider === "slack" ? undefined : basicAuth(options.credentials);
   const response = await fetcher(endpoint, {
     method: "POST",
     headers: {
@@ -169,7 +197,7 @@ export async function resolveIdentity(
       headers: {
         "content-type": "application/json",
         accept: "application/json",
-        authorization: `${tokens.tokenType} ${tokens.accessToken}`
+        authorization: `${authorizationScheme(options.provider, tokens.tokenType)} ${tokens.accessToken}`
       },
       body: JSON.stringify({
         query: "query { viewer { id name email avatarUrl organization { id name urlKey } } }"
@@ -184,7 +212,8 @@ export async function resolveIdentity(
     method: "GET",
     headers: {
       accept: "application/json",
-      authorization: `${tokens.tokenType} ${tokens.accessToken}`
+      authorization: `${authorizationScheme(options.provider, tokens.tokenType)} ${tokens.accessToken}`,
+      ...(options.provider === "notion" ? { "notion-version": NOTION_VERSION } : {})
     }
   });
   if (!response.ok) {
@@ -215,19 +244,17 @@ function profileOf(options: BrokerProviderClientOptions): ProviderProfile {
   return options.profile ?? providerProfile(options.provider);
 }
 
-async function postForm(
+async function postTokenRequest(
   fetcher: BrokerFetch,
   provider: BrokerProviderId,
-  endpoint: string,
+  profile: ProviderProfile,
+  credentials: ProviderCredentials,
   body: URLSearchParams
 ): Promise<Record<string, unknown>> {
-  const response = await fetcher(endpoint, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      accept: "application/json"
-    },
-    body: body.toString()
+  const init = tokenRequestInit(profile, credentials, body);
+  const response = await fetcher(profile.tokenEndpoint, {
+    ...init,
+    method: "POST"
   });
   if (!response.ok) {
     throw await errorFromResponse(provider, response, "token exchange");
@@ -253,6 +280,37 @@ async function postForm(
     );
   }
   return json as Record<string, unknown>;
+}
+
+function tokenRequestInit(
+  profile: ProviderProfile,
+  credentials: ProviderCredentials,
+  body: URLSearchParams
+): RequestInit {
+  if (profile.tokenRequestStyle === "json-basic") {
+    const payload: Record<string, string> = {};
+    for (const [key, value] of body.entries()) {
+      if (key !== "client_id" && key !== "client_secret" && key !== "code_verifier") {
+        payload[key] = value;
+      }
+    }
+    return {
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        authorization: basicAuth(credentials) ?? "",
+        "notion-version": NOTION_VERSION
+      },
+      body: JSON.stringify(payload)
+    };
+  }
+  return {
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json"
+    },
+    body: body.toString()
+  };
 }
 
 async function ensureSlackOk(
@@ -325,6 +383,7 @@ function tokenSetFrom(
   }
   const expiresIn = numberOr(json, "expires_in");
   const scopeRaw = stringOr(json, "scope");
+  const scopeArray = arrayOfStrings(json, "scope");
   // Slack nests tokens under authed_user / access_token at top level; handle both.
   const refreshToken =
     stringOr(json, "refresh_token") ??
@@ -332,17 +391,25 @@ function tokenSetFrom(
   return {
     accessToken,
     refreshToken,
-    tokenType: stringOr(json, "token_type") ?? "Bearer",
+    tokenType: authorizationSchemeFromTokenType(stringOr(json, "token_type")),
     expiresAt: expiresIn
       ? new Date(clock.nowMs() + expiresIn * 1000).toISOString()
       : undefined,
-    scopes: scopeRaw ? scopeRaw.split(/[\s,]+/).filter(Boolean) : []
+    scopes: scopeArray ?? (scopeRaw ? scopeRaw.split(/[\s,]+/).filter(Boolean) : [])
   };
 }
 
 function basicAuth(credentials: ProviderCredentials): string | undefined {
   if (!credentials.clientId || !credentials.clientSecret) return undefined;
   return `Basic ${base64String(`${credentials.clientId}:${credentials.clientSecret}`)}`;
+}
+
+function authorizationScheme(provider: BrokerProviderId, tokenType: string): string {
+  return provider === "slack" ? "Bearer" : authorizationSchemeFromTokenType(tokenType);
+}
+
+function authorizationSchemeFromTokenType(tokenType: string | undefined): string {
+  return tokenType && tokenType.toLowerCase() !== "bot" ? tokenType : "Bearer";
 }
 
 function profileLabel(provider: BrokerProviderId): string {
@@ -371,6 +438,12 @@ function numberOr(value: Record<string, unknown>, key: string): number | undefin
   const candidate = value[key];
   return typeof candidate === "number" ? candidate : undefined;
 }
+function arrayOfStrings(value: Record<string, unknown>, key: string): string[] | undefined {
+  const candidate = value[key];
+  if (!Array.isArray(candidate)) return undefined;
+  const strings = candidate.filter((item): item is string => typeof item === "string" && Boolean(item));
+  return strings.length ? strings : undefined;
+}
 async function safeJson(response: Response): Promise<unknown> {
   try {
     return await response.json();
@@ -378,3 +451,5 @@ async function safeJson(response: Response): Promise<unknown> {
     return undefined;
   }
 }
+
+const NOTION_VERSION = "2026-03-11";

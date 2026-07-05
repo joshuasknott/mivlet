@@ -48,3 +48,12 @@
 - CI for lint, type, Rust, unit, integration, E2E, and security checks.
 - Done: local Windows MSI and NSIS build.
 - Next: signing, release notes, updater flow, and macOS/Linux preparation.
+
+## Milestone 6: Optional Cloud Team Workspaces
+
+- Done: decide the first shared-workspace backend architecture. Batch 6 selected
+  Clerk + Convex while preserving encrypted local SQLite as solo authority.
+- Next: implement the Batch 7A local outbox/cursor skeleton, Convex schema and
+  authorization tests, and config-gated device linking.
+- Next: implement the Batch 7B vertical slice for one shared collaboration
+  record with realtime updates, offline queueing, idempotency, and tombstones.

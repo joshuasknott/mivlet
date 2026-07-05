@@ -27,6 +27,7 @@ export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 export { createNativeApiBackend } from "./adapters/native-api";
 export { createCodexBackend } from "./adapters/codex";
 export { resolveAcpBackend } from "./adapters/acp";
+export { createLocalLoopbackBackend } from "./adapters/local-loopback";
 export {
   ACP_PROVIDERS,
   detectAcpRuntime,

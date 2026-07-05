@@ -90,10 +90,10 @@ export function createVercelAdapter(options: VercelAdapterOptions): ConnectorAda
   const auth = oauthClient({
     ...options, connectorId: "vercel",
     authorizationEndpoint: new URL("oauth/vercel/authorize", broker).toString(),
-    tokenEndpoint: new URL("oauth/vercel/token", broker).toString(),
-    identityEndpoint: new URL("oauth/vercel/identity", broker).toString(),
+    handoffEndpoint: new URL("oauth/vercel/handoff", broker).toString(),
+    refreshEndpoint: new URL("oauth/vercel/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/vercel/revoke", broker).toString(),
-    scopes: ["user:read", "team:read", "project:read", "deployment:read", "deployment:write"]
+    scopes: ["user", "team", "project", "deployment"]
   });
   const http = new ProviderHttpClient("vercel", options.apiBaseUrl ?? "https://api.vercel.com/", options.fetch);
   return {

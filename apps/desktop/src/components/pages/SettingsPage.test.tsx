@@ -20,6 +20,16 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     backendProviders: [],
     connectedBackendIds: [],
     backendStatus: null,
+    identityStatus: {
+      enabled: false,
+      state: "disabled",
+      message: "Optional Fable cloud identity is not configured.",
+      scopes: []
+    },
+    identityPending: false,
+    signInIdentity: vi.fn().mockResolvedValue(undefined),
+    refreshIdentity: vi.fn().mockResolvedValue(undefined),
+    signOutIdentity: vi.fn().mockResolvedValue(undefined),
     modelDiscoveryByProvider: {},
     workflowRuns: [],
     schedulerQueue: [],
@@ -56,6 +66,23 @@ const nativeProvider = (over: Partial<BackendProvider> = {}): BackendProvider =>
   capabilities: [],
   models: [],
   ...over
+});
+
+describe("Settings -> General identity", () => {
+  it("shows optional cloud identity as disabled when Clerk is not configured", () => {
+    render(
+      <SettingsPage
+        runtime={stubRuntime()}
+        theme="dark"
+        onThemeChange={() => {}}
+        activeTab="general"
+        workspaceName="Fable"
+      />
+    );
+
+    expect(screen.getByText("Fable cloud identity")).toBeTruthy();
+    expect(screen.getByText(/cloud identity is disabled until clerk configuration is present/i)).toBeTruthy();
+  });
 });
 
 describe("Settings -> Approvals", () => {

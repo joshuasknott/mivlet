@@ -221,8 +221,8 @@ describe("backend auth-state vocabulary parity", () => {
     expect(BACKEND_AUTH_STATE_PARITY).toBe(true);
   });
 
-  it("matches the Rust boundary's 11 distinct auth states", () => {
+  it("matches the Rust boundary's 13 distinct auth states", () => {
     // Mirrors BACKEND_AUTH_STATES in apps/desktop/src-tauri/src/models.rs.
-    expect(BACKEND_AUTH_STATE_VALUES).toHaveLength(11);
+    expect(BACKEND_AUTH_STATE_VALUES).toHaveLength(13);
   });
 });

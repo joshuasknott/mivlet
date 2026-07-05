@@ -82,6 +82,12 @@ const NATIVE_API_CAPS: CapabilitySet = [
   "cancellation"
 ];
 
+const LOCAL_LOOPBACK_CAPS: CapabilitySet = [
+  "streaming",
+  "model-availability",
+  "cancellation"
+];
+
 /** Empty set returned for any fail-closed auth state. */
 const NO_CAPS: CapabilitySet = [];
 
@@ -120,6 +126,8 @@ export function resolveCapabilities(
       return [...COPILOT_CAPS];
     case "native-api":
       return [...NATIVE_API_CAPS];
+    case "local-loopback":
+      return [...LOCAL_LOOPBACK_CAPS];
     default:
       return [...NO_CAPS];
   }

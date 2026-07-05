@@ -8,37 +8,77 @@
     "head_sampling_rate": 1
   },
   "vars": {
+    "FABLE_BROKER_ENVIRONMENT": "local",
     "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
-    // Storage backend for ephemeral OAuth state. Default "memory" keeps local/Node
-    // deterministic. Set to "durable" only in Worker deployments after wiring secret.
+    // Local/default Worker development keeps memory storage for deterministic tests.
+    // Staging and production envs below override this to "durable".
     "FABLE_BROKER_STORAGE_BACKEND": "memory"
   },
-  "secrets": {
-    "required": [
-      "FABLE_BROKER_PUBLIC_URL"
-      // FABLE_BROKER_STORE_ENCRYPTION_KEY is required when FABLE_BROKER_STORAGE_BACKEND=durable.
-      // It is a 32-byte base64url CSPRNG secret. Never commit; set via wrangler secret put.
-    ]
-  },
 
-  // Durable Object bindings for pending OAuth exchanges, single-use handoffs,
-  // and per-route/peer rate limiting. One DO instance per high-entropy key.
-  // These are declared here (and migrations) WITHOUT creating resources.
-  // The classes are implemented in src/durable-stores.ts and exported for the runtime.
-  "durable_objects": {
-    "bindings": [
-      { "name": "BROKER_PENDING", "class_name": "BrokerPending" },
-      { "name": "BROKER_HANDOFF", "class_name": "BrokerHandoff" },
-      { "name": "BROKER_RATELIMIT", "class_name": "BrokerRateLimit" }
-    ]
-  },
+  "env": {
+    "local": {
+      "name": "fable-auth-broker-local",
+      "vars": {
+        "FABLE_BROKER_ENVIRONMENT": "local",
+        "FABLE_BROKER_PUBLIC_URL": "http://127.0.0.1:8788/",
+        "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+        "FABLE_BROKER_STORAGE_BACKEND": "memory"
+      }
+    },
 
-  // Migration to introduce the three broker ephemeral DO classes.
-  // Applied via `wrangler deploy` or `wrangler migrations` (not executed here).
-  "migrations": [
-    {
-      "tag": "v1-broker-ephemeral",
-      "new_sqlite_classes": ["BrokerPending", "BrokerHandoff", "BrokerRateLimit"]
+    "staging": {
+      "name": "fable-auth-broker-staging",
+      "vars": {
+        "FABLE_BROKER_ENVIRONMENT": "staging",
+        "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+        "FABLE_BROKER_STORAGE_BACKEND": "durable"
+        // FABLE_BROKER_PUBLIC_URL is environment-specific non-secret config.
+        // Set it at deploy time with --var FABLE_BROKER_PUBLIC_URL:<https origin>
+        // or replace this comment with the staging HTTPS origin once DNS is final.
+      },
+      // Durable Object bindings for pending OAuth exchanges, single-use handoffs,
+      // and per-route/peer rate limiting. One DO instance per high-entropy key.
+      "durable_objects": {
+        "bindings": [
+          { "name": "BROKER_PENDING", "class_name": "BrokerPending" },
+          { "name": "BROKER_HANDOFF", "class_name": "BrokerHandoff" },
+          { "name": "BROKER_RATELIMIT", "class_name": "BrokerRateLimit" }
+        ]
+      },
+      // Migration to introduce the three broker ephemeral DO classes.
+      // Applied by staging deploy; production has the same declaration below.
+      "migrations": [
+        {
+          "tag": "v1-broker-ephemeral",
+          "new_sqlite_classes": ["BrokerPending", "BrokerHandoff", "BrokerRateLimit"]
+        }
+      ]
+    },
+
+    "production": {
+      "name": "fable-auth-broker-production",
+      "vars": {
+        "FABLE_BROKER_ENVIRONMENT": "production",
+        "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+        "FABLE_BROKER_STORAGE_BACKEND": "durable"
+        // Production is declared for review only in Batch 4. Do not deploy or
+        // route traffic until provider certification and the remaining broker
+        // security gates are complete.
+      },
+      // Production is declared but not deployed in Batch 4.
+      "durable_objects": {
+        "bindings": [
+          { "name": "BROKER_PENDING", "class_name": "BrokerPending" },
+          { "name": "BROKER_HANDOFF", "class_name": "BrokerHandoff" },
+          { "name": "BROKER_RATELIMIT", "class_name": "BrokerRateLimit" }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1-broker-ephemeral",
+          "new_sqlite_classes": ["BrokerPending", "BrokerHandoff", "BrokerRateLimit"]
+        }
+      ]
     }
-  ]
+  }
 }

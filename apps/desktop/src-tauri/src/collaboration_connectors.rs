@@ -311,18 +311,13 @@ async fn search_slack(
             .map(str::to_string);
         (value, values, next)
     } else {
-        let value = slack_call(
-            "search.messages",
-            token,
-            &[("query", request.query.clone()), ("count", limit)],
-        )
-        .await?;
-        let values = value
-            .pointer("/messages/matches")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        (value, values, None)
+        return Err(error(
+            "permission-denied",
+            "slack",
+            "Slack message search requires a user-token scope that the broker does not request yet.",
+            false,
+            None,
+        ));
     };
     drop(value);
     let items = values.iter().filter_map(slack_item).collect();

@@ -3,7 +3,7 @@ import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "
 import { ProviderHttpClient, oauthClient, page, type FetchLike, type JsonObject, type OAuthClientOptions } from "./http";
 
 const slackCapabilities: Array<[string, "read" | "write", boolean]> = [
-  ["slack.channels.list", "read", false], ["slack.messages.search", "read", false], ["slack.history.read", "read", false],
+  ["slack.channels.list", "read", false], ["slack.history.read", "read", false],
   ["slack.thread.read", "read", false], ["slack.users.list", "read", false], ["slack.message.post", "write", true],
   ["slack.reply.post", "write", true], ["slack.message.update", "write", true], ["slack.message.delete", "write", true],
   ["slack.reaction.add", "write", true], ["slack.reaction.remove", "write", true]
@@ -32,7 +32,7 @@ export function createSlackAdapter(options: SlackAdapterOptions): ConnectorAdapt
     scopes: [
       "channels:read", "groups:read", "im:read", "mpim:read",
       "channels:history", "groups:history",
-      "users:read", "search:read", "chat:write", "reactions:write"
+      "users:read", "chat:write", "reactions:write"
     ]
   });
   const http = new ProviderHttpClient("slack", options.apiBaseUrl ?? "https://slack.com/api/", options.fetch);
@@ -50,7 +50,6 @@ export function createSlackAdapter(options: SlackAdapterOptions): ConnectorAdapt
 async function readSlack(http: ProviderHttpClient, request: ConnectorRequest, tokens: ConnectorTokenSet): Promise<ConnectorPage<JsonObject>> {
   const i = request.input; let method: string; let input: Record<string, unknown>;
   if (request.capability === "slack.channels.list") [method, input] = ["conversations.list", { limit: i.limit ?? 200, cursor: request.cursor, types: i.types ?? "public_channel,private_channel" }];
-  else if (request.capability === "slack.messages.search") [method, input] = ["search.messages", { query: required(i, "query"), count: i.limit ?? 100, page: i.page ?? 1 }];
   else if (request.capability === "slack.history.read") [method, input] = ["conversations.history", { channel: required(i, "channel"), limit: i.limit ?? 100, cursor: request.cursor, oldest: i.oldest, latest: i.latest }];
   else if (request.capability === "slack.thread.read") [method, input] = ["conversations.replies", { channel: required(i, "channel"), ts: required(i, "ts"), limit: i.limit ?? 100, cursor: request.cursor }];
   else if (request.capability === "slack.users.list") [method, input] = ["users.list", { limit: i.limit ?? 200, cursor: request.cursor }];

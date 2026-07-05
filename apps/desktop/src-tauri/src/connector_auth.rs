@@ -411,7 +411,6 @@ fn start_with_store(
         authorization
             .query_pairs_mut()
             .append_pair("access_type", "offline")
-            .append_pair("include_granted_scopes", "true")
             .append_pair("prompt", "consent");
     }
     let pending = PendingOAuth {
@@ -928,15 +927,16 @@ async fn complete_with_store(
         .ok()
         .flatten()
         .and_then(|encoded| serde_json::from_str::<StoredTokenSet>(&encoded).ok());
-    let mut granted_scopes: Vec<String> = response
-        .scope
-        .map(|scope| scope.split_whitespace().map(str::to_string).collect())
-        .unwrap_or_else(|| pending.scopes.clone());
-    if let Some(previous) = previous.as_ref() {
-        granted_scopes.extend(previous.scopes.iter().cloned());
-        granted_scopes.sort();
-        granted_scopes.dedup();
-    }
+    let granted_scopes: Vec<String> = match response.scope.as_deref() {
+        Some(scope) => scope.split_whitespace().map(str::to_string).collect(),
+        // Public installed-app tokens must not inherit historical grants:
+        // Google's token response is the active credential's scope truth.
+        None if !pending.brokered => Vec::new(),
+        // Brokered providers are outside the Google installed-app path. Keep
+        // their declared scope fallback for legacy broker responses that omit
+        // the optional scope field.
+        None => pending.scopes.clone(),
+    };
     let tokens = StoredTokenSet {
         access_token: response.access_token,
         refresh_token: response
@@ -1568,6 +1568,11 @@ pub(crate) async fn refresh_connection(
         .map(|seconds| now_epoch().saturating_add(seconds));
     if let Some(scopes) = refreshed.scope {
         tokens.scopes = scopes.split_whitespace().map(str::to_string).collect();
+    } else if !tokens.brokered {
+        // A public installed-app refresh without a scope field proves no
+        // active grants. Preserve the refresh token, but fail closed for all
+        // scope-gated operations until Google returns scope truth again.
+        tokens.scopes.clear();
     }
     NativeConnectorSecretStore
         .set(
@@ -1748,6 +1753,11 @@ mod tests {
                 .map(|value| value.as_ref()),
             Some("S256")
         );
+        assert_eq!(
+            query.get("access_type").map(|value| value.as_ref()),
+            Some("offline")
+        );
+        assert!(!query.contains_key("include_granted_scopes"));
         let pending = store.get(&pending_key("fixture", state)).unwrap().unwrap();
         assert!(pending.contains("\"verifier\""));
         assert!(!result.authorization_url.unwrap().contains("verifier"));
@@ -1832,7 +1842,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn incremental_oauth_preserves_refresh_token_and_consumes_state() {
+    async fn public_pkce_reauth_preserves_refresh_token_without_merging_historical_scopes() {
         let store = MemoryStore::default();
         let token_endpoint = mock_json_server(
             r#"{"access_token":"new-access","token_type":"Bearer","expires_in":3600,"scope":"items.write","account":{"id":"account-1","displayName":"Test account","email":"test@example.com"}}"#,
@@ -1874,7 +1884,7 @@ mod tests {
             .unwrap();
         assert_eq!(account.id, "account-1");
         assert_eq!(tokens.refresh_token.as_deref(), Some("keep-refresh"));
-        assert_eq!(tokens.scopes, vec!["items.read", "items.write"]);
+        assert_eq!(tokens.scopes, vec!["items.write"]);
         assert!(store
             .get(&pending_key("fixture", &state))
             .unwrap()
@@ -1886,6 +1896,38 @@ mod tests {
                 .code,
             "invalid-request"
         );
+    }
+
+    #[tokio::test]
+    async fn public_pkce_completion_without_scope_records_no_active_grants() {
+        let store = MemoryStore::default();
+        let token_endpoint = mock_json_server(
+            r#"{"access_token":"new-access","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600,"account":{"id":"account-1","displayName":"Test account","email":"test@example.com"}}"#,
+        )
+        .await;
+        let mut config = fixture_config();
+        config.token_endpoint = Some(token_endpoint);
+        config.scopes = vec!["items.read".to_string()];
+        let started =
+            start_with_store("fixture", "http://127.0.0.1:43123/callback", config, &store).unwrap();
+        let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
+        let state = authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let callback = format!("http://127.0.0.1:43123/callback?code=code&state={state}");
+        let (tokens, account, credential_ref) = complete_with_store("fixture", &callback, &store)
+            .await
+            .unwrap();
+
+        assert_eq!(account.id, "account-1");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("new-refresh"));
+        assert!(tokens.scopes.is_empty());
+        let stored = store.get(&credential_ref).unwrap().unwrap();
+        let stored_tokens: StoredTokenSet = serde_json::from_str(&stored).unwrap();
+        assert!(stored_tokens.scopes.is_empty());
     }
 
     #[tokio::test]

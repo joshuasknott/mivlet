@@ -28,7 +28,18 @@ describe("backend registry", () => {
   it("surfaces the runtime providers plus the native API providers", () => {
     const providers = listBackendProviders();
     expect(providers.map((provider) => provider.id).sort()).toEqual(
-      ["anthropic", "codex", "copilot", "cursor", "gemini", "grok", "openai", "openrouter", "xai"].sort()
+      [
+        "anthropic",
+        "codex",
+        "copilot",
+        "cursor",
+        "gemini",
+        "grok",
+        "ollama",
+        "openai",
+        "openrouter",
+        "xai"
+      ].sort()
     );
   });
 
@@ -59,7 +70,7 @@ describe("backend registry", () => {
   it("exposes the canonical provider id list", () => {
     expect(BACKEND_PROVIDER_IDS).toEqual([
       "codex", "cursor", "copilot", "grok",
-      "openai", "anthropic", "gemini", "xai", "openrouter"
+      "ollama", "openai", "anthropic", "gemini", "xai", "openrouter"
     ]);
   });
 });
@@ -69,6 +80,8 @@ describe("fail-closed capability resolution", () => {
     "needs-auth",
     "sign-in-required",
     "install-required",
+    "start-required",
+    "download-required",
     "connecting",
     "expired",
     "unsupported",

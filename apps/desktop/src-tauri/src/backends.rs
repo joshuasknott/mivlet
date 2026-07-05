@@ -100,6 +100,8 @@ const NATIVE_API_CAPS: &[&str] = &[
     "cancellation",
 ];
 
+const LOCAL_LOOPBACK_CAPS: &[&str] = &["streaming", "model-availability", "cancellation"];
+
 const CATALOG: &[BackendCatalogEntry] = &[
     BackendCatalogEntry {
         id: "codex",
@@ -140,6 +142,15 @@ const CATALOG: &[BackendCatalogEntry] = &[
         install_hint: "Requires the Grok CLI. Install it, then connect.",
         models: &[("grok-default", "Grok")],
         capabilities: ACP_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "ollama",
+        backend_type: "local-loopback",
+        label: "Ollama",
+        description: "Use an externally managed Ollama service on 127.0.0.1. Fable never bundles models or downloads them automatically.",
+        install_hint: "Install Ollama, start its local service, then pull a model with Ollama before returning to Fable.",
+        models: &[],
+        capabilities: LOCAL_LOOPBACK_CAPS,
     },
     // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
@@ -409,6 +420,13 @@ fn resolve_auth_state<S: BackendCredentialStore>(provider_id: &str, store: &S) -
         return "connected".to_string();
     }
 
+    let is_local_loopback = entry
+        .map(|entry| entry.backend_type == "local-loopback")
+        .unwrap_or(false);
+    if is_local_loopback {
+        return "unavailable".to_string();
+    }
+
     let is_acp = entry
         .map(|entry| entry.backend_type == "acp")
         .unwrap_or(false);
@@ -429,6 +447,7 @@ fn build_provider(entry: &'static BackendCatalogEntry, auth_state: String) -> Ba
             id: (*id).to_string(),
             label: (*label).to_string(),
             available,
+            capabilities: None,
         });
     }
 

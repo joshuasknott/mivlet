@@ -14,12 +14,14 @@ import { resolveCodexProvider } from "./codex";
 import { resolveCopilotProvider } from "./copilot";
 import { resolveAcpProvider } from "./acp";
 import { resolveNativeProvider } from "./native";
+import { resolveOllamaProvider } from "./local";
 
 export const BACKEND_PROVIDER_IDS = [
   "codex",
   "cursor",
   "copilot",
   "grok",
+  "ollama",
   "openai",
   "anthropic",
   "gemini",
@@ -43,6 +45,7 @@ export function listBackendProviders(): BackendProvider[] {
     resolveAcpProvider("cursor", "install-required"),
     resolveCopilotProvider("needs-auth"),
     resolveAcpProvider("grok", "install-required"),
+    resolveOllamaProvider("unavailable"),
     resolveNativeProvider("openai", "needs-auth"),
     resolveNativeProvider("anthropic", "needs-auth"),
     resolveNativeProvider("gemini", "needs-auth"),
@@ -60,3 +63,4 @@ export {
   resolveGrokProvider
 } from "./acp";
 export { resolveNativeProvider, NATIVE_BACKEND_TYPE } from "./native";
+export { resolveOllamaProvider, LOCAL_LOOPBACK_BACKEND_TYPE } from "./local";

@@ -23,6 +23,7 @@ import type {
 } from "@fable/protocol";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
+import { streamOllamaEvents } from "./ollama";
 import { streamOpenAiEvents } from "./openai-compat";
 import { registeredToolSpecs } from "./tools";
 import { lookupTool } from "./tools";
@@ -61,6 +62,8 @@ export interface RunAgentLoopOptions {
   maxToolCalls?: number;
   /** Maximum characters returned to model context by one tool. */
   maxToolOutputCharacters?: number;
+  /** Whether this provider/model should receive tool schemas at all. */
+  toolsEnabled?: boolean;
 }
 
 export const MAX_TOOL_ARGUMENT_CHARACTERS = 64_000;
@@ -96,6 +99,7 @@ function streamFor(
 ): (transport: HttpTransport, request: NativeCompletionRequest) => AsyncIterable<BackendAgentEvent> {
   if (providerId === "anthropic") return streamAnthropicEvents;
   if (providerId === "gemini") return streamGeminiEvents;
+  if (providerId === "ollama") return streamOllamaEvents;
   return streamOpenAiEvents; // openai, xai, openrouter share this path
 }
 
@@ -124,7 +128,7 @@ export async function* runAgentLoop(
   request: NativeCompletionRequest,
   options: RunAgentLoopOptions
 ): AsyncIterable<BackendAgentEvent> {
-  const tools = registeredToolSpecs();
+  const tools = options.toolsEnabled === false ? [] : registeredToolSpecs();
   const maxTurns = options.maxTurns ?? 8;
   const permissionMode = options.permissionMode ?? "full-access";
   const execute = permissionGatedExecutor(options.execute, permissionMode);

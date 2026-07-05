@@ -32,6 +32,7 @@ const ENV: BrokerEnv = {
   FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
   FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
   FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret",
+  FABLE_BROKER_VERCEL_INTEGRATION_SLUG: "fable-vercel",
   FABLE_BROKER_LINEAR_CLIENT_ID: "ln-id",
   FABLE_BROKER_LINEAR_CLIENT_SECRET: "ln-secret",
   FABLE_BROKER_NOTION_CLIENT_ID: "nt-id",
@@ -138,12 +139,33 @@ describe("broker authorize", () => {
     expect(response.authorizationUrl).not.toContain("secret");
   });
 
-  it("uses the broker verifier for broker-pkce providers (not the desktop challenge)", async () => {
+  it("uses the Vercel integration installation URL without undocumented PKCE or scope params", async () => {
     const { broker } = makeBroker("vercel", providerFetch("vercel"));
     const { response } = await broker.authorize(authorizeRequest("vercel", "s2"));
     const url = new URL(response.authorizationUrl);
-    expect(url.searchParams.get("code_challenge")).not.toBe("desktop-challenge");
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.origin + url.pathname).toBe("https://vercel.com/integrations/fable-vercel/new");
+    expect(url.searchParams.get("code_challenge")).toBeNull();
+    expect(url.searchParams.get("code_challenge_method")).toBeNull();
+    expect(url.searchParams.get("scope")).toBeNull();
+  });
+
+  it("serializes provider-specific authorization parameters", async () => {
+    const { broker: linear } = makeBroker("linear", providerFetch("linear"));
+    const linearAuth = new URL((await linear.authorize(authorizeRequest("linear", "linear-auth"))).response.authorizationUrl);
+    expect(linearAuth.origin + linearAuth.pathname).toBe("https://linear.app/oauth/authorize");
+    expect(linearAuth.searchParams.get("scope")).toBe("read,write,issues:create,comments:create");
+    expect(linearAuth.searchParams.get("code_challenge")).not.toBe("desktop-challenge");
+
+    const { broker: notion } = makeBroker("notion", providerFetch("notion"));
+    const notionAuth = new URL((await notion.authorize(authorizeRequest("notion", "notion-auth"))).response.authorizationUrl);
+    expect(notionAuth.searchParams.get("owner")).toBe("user");
+    expect(notionAuth.searchParams.get("code_challenge")).toBeNull();
+
+    const { broker: slack } = makeBroker("slack", providerFetch("slack"));
+    const slackAuth = new URL((await slack.authorize(authorizeRequest("slack", "slack-auth"))).response.authorizationUrl);
+    expect(slackAuth.searchParams.get("scope")).toBe("channels:read,groups:read,channels:history,groups:history,im:read,mpim:read,users:read,chat:write,reactions:write");
+    expect(slackAuth.searchParams.get("scope")).not.toContain("search:read");
+    expect(slackAuth.searchParams.get("code_challenge")).toBeNull();
   });
 
   it("rejects an unknown provider and an unsupported contract version", async () => {
@@ -271,22 +293,74 @@ describe("broker callback + handoff", () => {
     await expect(unavailable.callback("github", new URLSearchParams({ code: "c", state: "n3" })))
       .rejects.toMatchObject({ error: "provider-unavailable", retryable: true });
   });
+
+  it("uses provider-specific token exchange request shapes", async () => {
+    for (const provider of ["github", "vercel", "linear", "notion", "slack"] as BrokerProviderId[]) {
+      const fetch = providerFetch(provider);
+      const { broker } = makeBroker(provider, fetch);
+      await broker.authorize(authorizeRequest(provider, `shape-${provider}`));
+      await broker.callback(provider, new URLSearchParams({ code: "provider-code", state: `shape-${provider}` }));
+      const tokenCall = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
+        .find(([url]) => url === providerProfile(provider).tokenEndpoint);
+      expect(tokenCall, `${provider} token call`).toBeTruthy();
+      const [, init] = tokenCall!;
+      const body = String(init.body);
+
+      if (provider === "notion") {
+        expect(init.headers).toMatchObject({
+          "content-type": "application/json",
+          "notion-version": "2026-03-11"
+        });
+        expect(String((init.headers as Record<string, string>).authorization)).toMatch(/^Basic /);
+        const parsed = JSON.parse(body);
+        expect(parsed).toMatchObject({
+          grant_type: "authorization_code",
+          code: "provider-code",
+          redirect_uri: "http://127.0.0.1:8788/oauth/notion/callback"
+        });
+        expect(parsed.client_secret).toBeUndefined();
+        expect(parsed.code_verifier).toBeUndefined();
+        const identityCall = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
+          .find(([url]) => url === providerProfile("notion").identityEndpoint);
+        expect(identityCall?.[1].headers).toMatchObject({ "notion-version": "2026-03-11" });
+      } else {
+        const params = new URLSearchParams(body);
+        expect(params.get("code")).toBe("provider-code");
+        expect(params.get("redirect_uri")).toBe(`http://127.0.0.1:8788/oauth/${provider}/callback`);
+        if (provider === "vercel") {
+          expect(params.get("grant_type")).toBeNull();
+          expect(params.get("code_verifier")).toBeNull();
+        } else if (provider === "github" || provider === "linear") {
+          expect(params.get("grant_type")).toBe("authorization_code");
+          expect(params.get("code_verifier")).toBeTruthy();
+        } else if (provider === "slack") {
+          expect(params.get("grant_type")).toBe("authorization_code");
+          expect(params.get("code_verifier")).toBeNull();
+        }
+      }
+    }
+  });
+
+  it("rejects duplicate callback parameters before consuming state", async () => {
+    const { broker } = makeBroker("github", providerFetch("github"));
+    await broker.authorize(authorizeRequest("github", "dupe"));
+    await expect(broker.callback("github", new URLSearchParams("code=a&code=b&state=dupe")))
+      .rejects.toMatchObject({ error: "invalid-request" });
+    await expect(broker.callback("github", new URLSearchParams({ code: "ok", state: "dupe" })))
+      .resolves.toBeTruthy();
+  });
 });
 
 describe("broker refresh + revoke", () => {
-  it("rotates a token through the confidential client", async () => {
-    const fetch = providerFetch("github");
-    const { broker } = makeBroker("github", fetch);
-    const refreshed = await broker.refresh({
-      contractVersion: BROKER_CONTRACT_VERSION, provider: "github", refreshToken: "old-refresh"
-    });
-    expect(refreshed.tokens.accessToken).toBe("provider-access-token");
-    // The refresh request carried the secret to the provider only.
-    const call = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
-      .find(([url]) => url === providerProfile("github").tokenEndpoint);
-    expect(call).toBeTruthy();
-    expect(String(call![1].body)).toContain("client_secret=gh-secret");
-    expect(String(call![1].body)).toContain("grant_type=refresh_token");
+  it("rejects refresh for non-refreshable OAuth App / integration flows", async () => {
+    for (const provider of ["github", "vercel", "slack"] as BrokerProviderId[]) {
+      const fetch = providerFetch(provider);
+      const { broker } = makeBroker(provider, fetch);
+      await expect(broker.refresh({
+        contractVersion: BROKER_CONTRACT_VERSION, provider, refreshToken: "old-refresh"
+      })).rejects.toMatchObject({ error: "needs-auth", retryable: false });
+      expect((fetch as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(0);
+    }
   });
 
   it("maps refresh failure to needs-auth (non-retryable)", async () => {
@@ -305,11 +379,12 @@ describe("broker refresh + revoke", () => {
     });
     expect(result.revoked).toBe(true);
     const calls = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls;
-    // GitHub's grant endpoint is keyed by client id; the {clientId} placeholder
+    // GitHub's token endpoint is keyed by client id; the {clientId} placeholder
     // must be substituted with the configured confidential client id (gh-id).
-    const call = calls.find(([url]) => url === "https://api.github.com/applications/gh-id/grant");
+    const call = calls.find(([url]) => url === "https://api.github.com/applications/gh-id/token");
     expect(call).toBeTruthy();
-    expect(String(call![1].body)).toContain("token=provider-refresh-token");
+    expect(call![1].method).toBe("DELETE");
+    expect(JSON.parse(String(call![1].body))).toEqual({ access_token: "provider-refresh-token" });
     // The placeholder must NEVER reach the provider verbatim.
     expect(calls.some(([url]) => url.includes("{clientId}"))).toBe(false);
   });
@@ -355,5 +430,26 @@ describe("broker provider coverage", () => {
     expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Fable Notion", workspace: "Fable Notion" });
     expect(providerProfile("linear").normalizeIdentity(identityFor("linear"))).toMatchObject({ id: "linear-id", displayName: "Linear User", workspace: "Fable Linear" });
     expect(providerProfile("slack").scopes).toEqual(expect.arrayContaining(["channels:history", "groups:history"]));
+  });
+
+  it("parses legacy Linear array scopes without dropping granted-scope metadata", async () => {
+    const { broker } = makeBroker("linear", providerFetch("linear", {
+      token: {
+        access_token: "linear-access",
+        refresh_token: "linear-refresh",
+        token_type: "Bearer",
+        expires_in: 86399,
+        scope: ["read", "write"]
+      }
+    }));
+    await broker.authorize(authorizeRequest("linear", "linear-array-scope"));
+    const { redirect } = await broker.callback("linear", new URLSearchParams({ code: "c", state: "linear-array-scope" }));
+    const redeemed = await broker.redeem({
+      contractVersion: BROKER_CONTRACT_VERSION,
+      provider: "linear",
+      handoff: redirect.searchParams.get("handoff")!,
+      state: "linear-array-scope"
+    });
+    expect(redeemed.tokens.scopes).toEqual(["read", "write"]);
   });
 });

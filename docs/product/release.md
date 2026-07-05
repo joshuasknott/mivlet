@@ -48,8 +48,9 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
   processes when installed and signed in. GitHub Copilot remains cataloged but
   not runnable until its SDK adapter lands. None of these paths require a Fable
   cloud account or expose provider-owned subscription tokens to React state.
-- Convex is optional. `VITE_CONVEX_URL` can enable hosted/realtime features, but
-  it is not required for the local desktop workspace.
+- Convex is optional. Batch 6 selected Clerk + Convex for future shared
+  workspaces, but no shared-workspace schema or sync implementation ships yet.
+  `VITE_CONVEX_URL` is not required for the local desktop workspace.
 - Local model execution is still planned and disabled in onboarding.
 
 ## Known limits
@@ -71,6 +72,8 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 - Complete provider-console setup, callback registration, OAuth consent review,
   and live non-production validation for each external connector.
 - Complete multi-workspace UI account switching on top of the schema v5 workspace isolation already present in storage.
+- Implement and review the Clerk + Convex shared-workspace sync contract before
+  enabling team workspaces for external users.
 - Add release signing, updater channels, download/legal pages, and platform
   packaging beyond Windows.
 - Add platform CI coverage for macOS Keychain and Linux Secret Service.
