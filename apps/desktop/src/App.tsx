@@ -15,6 +15,7 @@ import { useShellRuntime } from "./hooks/useShellRuntime";
 import { useNativeAgent } from "./hooks/useNativeAgent";
 import { useScheduledAgent } from "./hooks/useScheduledAgent";
 import { useVoice } from "./hooks/useVoice";
+import { FableQueryProvider } from "./lib/query-client";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
@@ -62,7 +63,7 @@ const ApprovalPanel = lazy(() =>
  * views.
  */
 
-export function App() {
+function AppShell() {
   // The shared approval gate: the shell's grant/deny decisions resolve it, and
   // the agent-loop executor awaits it. Created once before the hooks so both
   // useShellRuntime (dispatch on grant/deny) and useNativeAgent (executor awaits
@@ -821,5 +822,13 @@ export function App() {
         </div>
       ) : null}
     </main>
+  );
+}
+
+export function App() {
+  return (
+    <FableQueryProvider>
+      <AppShell />
+    </FableQueryProvider>
   );
 }

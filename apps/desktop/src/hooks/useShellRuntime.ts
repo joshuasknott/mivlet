@@ -79,7 +79,6 @@ import {
   resolveCapabilities,
   searchFixtureConnector,
   searchKnowledgeSources,
-  missedOccurrences,
   nextOccurrence,
   shapeWorkflowNotification,
   executeCommand,
@@ -124,16 +123,13 @@ import {
   listRuntimeConnectorAccounts,
   listRuntimeBackends,
   listRuntimeBackendModels,
+  listRuntimeWorkflowRuns,
   loadRuntimeActionHistory,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
-  listRuntimeSchedulerJobs,
-  listRuntimeSchedulerQueue,
-  listRuntimeWorkflowRuns,
-  listRuntimeWorkflowDefinitions,
   loadRuntimeIdentityStatus,
   listenRuntimeSchedulerRunRequest,
   enqueueRuntimeJobRun,
@@ -165,6 +161,7 @@ import {
   verifyRuntimeBackend,
   wireToWorkflowRun
 } from "../runtime";
+import { useRuntimeSchedules } from "./useRuntimeSchedules";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
   utilityItems
@@ -579,6 +576,10 @@ export interface ShellRuntime {
   refreshSchedulerQueue: () => void;
   /** True once persisted scheduled jobs have been hydrated from the Rust store. */
   schedulesReady: boolean;
+  /** Error from the schedule hydration query, if Rust could not load the domain. */
+  scheduleLoadError: string | null;
+  /** Retry the schedule hydration query without depending on network state. */
+  retryScheduleLoad: () => void;
   /** Versioned workflow definitions, for linking runs to their source workflow. */
   workflowDefinitions: WorkflowDefinition[];
   /**
@@ -745,11 +746,66 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [schedules, setSchedules] = useState<Schedule[]>(initialState.schedules);
   const [goals, setGoals] = useState<WorkspaceGoal[]>(initialState.goals);
   const [plans, setPlans] = useState<WorkspacePlan[]>(initialState.plans);
-  const [scheduledJobs, setScheduledJobs] = useState<ScheduledJob[]>([]);
-  /** True once the initial scheduler-job hydration from the Rust store completes. */
-  const [schedulesReady, setSchedulesReady] = useState(false);
-  const [workflowDefinitions, setWorkflowDefinitions] = useState<WorkflowDefinition[]>([]);
-  const [workflowRuns, setWorkflowRuns] = useState<WorkflowRun[]>([]);
+  const {
+    scheduledJobs: runtimeScheduledJobs,
+    setScheduledJobs,
+    schedulesReady,
+    scheduleLoadError,
+    retryScheduleLoad,
+    workflowDefinitions,
+    setWorkflowDefinitions,
+    workflowRuns,
+    setWorkflowRuns,
+    schedulerQueue,
+    setSchedulerQueue,
+    invalidateSchedules
+  } = useRuntimeSchedules();
+  const scheduledJobs = useMemo<ScheduledJob[]>(() => {
+    if (hasTauriRuntime() || runtimeScheduledJobs.length > 0 || schedules.length === 0) {
+      return runtimeScheduledJobs;
+    }
+    const runtimeIds = new Set(runtimeScheduledJobs.map((job) => job.id));
+    const previewJobs = schedules
+      .filter((schedule) => !runtimeIds.has(schedule.id))
+      .map((schedule) => {
+        const [hour = "9", minute = "0"] = schedule.time.split(":");
+        const createdAt = schedule.createdAt;
+        const trigger: ScheduleTrigger = {
+          kind: "recurring",
+          rule: {
+            frequency: "weekly",
+            interval: 1,
+            byWeekday: [schedule.day],
+            hour: Number(hour),
+            minute: Number(minute),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+          }
+        };
+        const job: ScheduledJob = {
+          id: schedule.id,
+          schemaVersion: 1,
+          name: schedule.name,
+          description: schedule.description,
+          workflowDefinitionId: `workflow-${schedule.id}`,
+          trigger,
+          missedRunPolicy: "run-once",
+          status: schedule.enabled ? "active" : "paused",
+          nextRunAt: "",
+          lastRunAt: "",
+          lastRunId: "",
+          execution: {
+            policy: "current-default",
+            backendId: "",
+            modelId: "",
+            permissionMode: initialState.permissionMode
+          },
+          createdAt,
+          updatedAt: createdAt
+        };
+        return job;
+      });
+    return [...runtimeScheduledJobs, ...previewJobs];
+  }, [initialState.permissionMode, runtimeScheduledJobs, schedules]);
   const [pendingWorkflowRuns, setPendingWorkflowRuns] = useState<
     Array<{
       runId: string;
@@ -762,9 +818,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       execution?: ScheduledExecutionRoute;
     }>
   >([]);
-  // The durable scheduler queue (Rust authority). Loaded on mount so the
-  // Schedules UI can surface queued/running/blocked-auth/cancelled states.
-  const [schedulerQueue, setSchedulerQueue] = useState<SchedulerQueueEntry[]>([]);
   // Run ids awaiting a queue acknowledgement after a retry. Tracked separately
   // from workflowRuns so the detail view can show a pending control without
   // mutating the authoritative run record before the queue confirms.
@@ -1029,55 +1082,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       JSON.stringify(notificationHistory.slice(0, 200))
     );
   }, [notificationHistory]);
-
-  useEffect(() => {
-    let active = true;
-    void Promise.all([
-      listRuntimeSchedulerJobs(),
-      listRuntimeSchedulerQueue(),
-      listRuntimeWorkflowDefinitions(),
-      listRuntimeWorkflowRuns()
-    ]).then(([jobs, queue, definitions, runs]) => {
-      if (!active) return;
-      if (queue) setSchedulerQueue(queue);
-      if (jobs) {
-        const now = new Date();
-        const recoveredJobs = jobs.map((job) => {
-          if (job.status !== "active") return job;
-          const previous = new Date(job.lastRunAt || job.createdAt);
-          const missed = missedOccurrences(job.trigger, previous, now, job.missedRunPolicy);
-          for (const occurrence of missed) {
-            const scheduledAt = occurrence.toISOString();
-            void enqueueRuntimeJobRun(
-              job.id,
-              `workflow-run-${toSlug(job.id)}-${toSlug(scheduledAt)}`,
-              scheduledAt
-            ).catch(() => undefined);
-          }
-          const nextRunAt = nextOccurrence(job.trigger, now)?.toISOString() ?? "";
-          const recovered = { ...job, nextRunAt, updatedAt: now.toISOString() };
-          if (nextRunAt) {
-            void enqueueRuntimeJobRun(
-              job.id,
-              `workflow-run-${toSlug(job.id)}-${toSlug(nextRunAt)}`,
-              nextRunAt
-            ).catch(() => undefined);
-          }
-          void saveRuntimeScheduledJob(recovered);
-          return recovered;
-        });
-        setScheduledJobs(recoveredJobs);
-      }
-      if (definitions) setWorkflowDefinitions(definitions);
-      if (runs) {
-        setWorkflowRuns(runs.map(wireToWorkflowRun));
-      }
-      setSchedulesReady(true);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -2880,8 +2884,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       return [{ ...derived, id, name, description, enabled: true, createdAt: now.toISOString() }, ...current];
     });
     void (async () => {
-      await saveRuntimeWorkflowDefinition(definition);
-      await saveRuntimeScheduledJob(job);
+      const definitionWrite = saveRuntimeWorkflowDefinition(definition);
+      const jobWrite = saveRuntimeScheduledJob(job);
+      await definitionWrite;
+      await jobWrite;
       if (job.nextRunAt) {
         await enqueueRuntimeJobRun(
           job.id,
@@ -2889,9 +2895,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           job.nextRunAt
         );
       }
-    })().catch((error) => {
-      setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule.");
-    });
+    })()
+      .then(() => void invalidateSchedules())
+      .catch((error) => {
+        setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule.");
+      });
     setLastAction(`Schedule created: ${name}`);
     return job;
   };
@@ -3058,9 +3066,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
             updatedJob.nextRunAt
           );
         }
-      })().catch((error) => {
-        setLastAction(error instanceof Error ? error.message : "Fable could not update the schedule.");
-      });
+      })()
+        .then(() => void invalidateSchedules())
+        .catch((error) => {
+          setLastAction(error instanceof Error ? error.message : "Fable could not update the schedule.");
+        });
     }
     setLastAction(`${job.name} ${job.status === "active" ? "paused" : "resumed"}`);
   };
@@ -3134,8 +3144,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       current.map((entry) => (entry.id === jobId ? job : entry))
     );
     void (async () => {
-      await saveRuntimeWorkflowDefinition(definition);
-      await saveRuntimeScheduledJob(job);
+      const definitionWrite = saveRuntimeWorkflowDefinition(definition);
+      const jobWrite = saveRuntimeScheduledJob(job);
+      await definitionWrite;
+      await jobWrite;
       if (job.nextRunAt) {
         await enqueueRuntimeJobRun(
           job.id,
@@ -3143,9 +3155,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           job.nextRunAt
         );
       }
-    })().catch((error) => {
-      setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule update.");
-    });
+    })()
+      .then(() => void invalidateSchedules())
+      .catch((error) => {
+        setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule update.");
+      });
     setLastAction(`Schedule updated: ${name}`);
   };
 
@@ -3161,7 +3175,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
     setSchedules((current) => current.filter((entry) => entry.id !== job.id));
     setScheduledJobs((current) => current.filter((entry) => entry.id !== job.id));
-    void deleteRuntimeScheduledJob(job.id);
+    void deleteRuntimeScheduledJob(job.id).then(() => void invalidateSchedules());
     setLastAction(`Schedule deleted: ${job.name}`);
   };
 
@@ -3258,6 +3272,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const runId = `workflow-run-${toSlug(job.id)}-${Date.now()}`;
     void enqueueRuntimeJobRun(job.id, runId, now).then((queued) => {
       if (!queued) queueWorkflowRun(job.id, runId);
+      void invalidateSchedules();
     }).catch((error) => {
       setLastAction(error instanceof Error ? error.message : "Fable could not queue that run.");
     });
@@ -3320,7 +3335,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           updatedJob.id,
           `workflow-run-${toSlug(updatedJob.id)}-${toSlug(nextRunAt)}`,
           nextRunAt
-        ).catch(() => undefined);
+        ).then(() => void invalidateSchedules()).catch(() => undefined);
       }
     }
     void saveRuntimeWorkflowRun(completed);
@@ -3386,6 +3401,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
             )
           );
           if (cancelledRun) void saveRuntimeWorkflowRun(cancelledRun);
+          void invalidateSchedules();
         }
       })
       .catch((error) => {
@@ -3398,9 +3414,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   /** Refresh the scheduler queue from the Rust authority (poll on demand). */
   const refreshSchedulerQueue = () => {
-    void listRuntimeSchedulerQueue().then((queue) => {
-      if (queue) setSchedulerQueue(queue);
-    });
+    void invalidateSchedules();
   };
 
   /**
@@ -3465,6 +3479,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       .then((queued) => {
         if (!queued) queueWorkflowRun(job.id, retryRunId);
         setLastAction(`Retrying ${job.name}.`);
+        void invalidateSchedules();
       })
       .catch((error) => {
         setLastAction(
@@ -3603,6 +3618,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     cancelScheduledRun,
     refreshSchedulerQueue,
     schedulesReady,
+    scheduleLoadError,
+    retryScheduleLoad: () => void retryScheduleLoad(),
     workflowDefinitions,
     refreshWorkflowRuns,
     retryingRunIds,

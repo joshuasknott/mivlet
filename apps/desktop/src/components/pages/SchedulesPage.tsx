@@ -50,6 +50,8 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         connectors={runtime.connectorManifests}
         definitions={runtime.workflowDefinitions}
         loading={!runtime.schedulesReady && runtime.scheduledJobs.length === 0}
+        loadError={runtime.scheduleLoadError}
+        onRetryLoad={runtime.retryScheduleLoad}
         onCreate={runtime.createScheduleFromTrigger}
         onEdit={runtime.editScheduleFromTrigger}
         onToggle={runtime.toggleSchedule}

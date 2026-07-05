@@ -23,7 +23,8 @@ const runtimeMocks = vi.hoisted(() => ({
   agentRuns: [] as PersistedAgentRun[],
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
-  savedScheduledJobs: [] as unknown[]
+  savedScheduledJobs: [] as unknown[],
+  savedWorkflowDefinitions: [] as unknown[]
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -61,7 +62,9 @@ vi.mock("./runtime", () => ({
     runtimeMocks.savedScheduledJobs.length ? [...runtimeMocks.savedScheduledJobs] : null
   ),
   listRuntimeSchedulerQueue: vi.fn(async () => null),
-  listRuntimeWorkflowDefinitions: vi.fn(async () => null),
+  listRuntimeWorkflowDefinitions: vi.fn(async () =>
+    runtimeMocks.savedWorkflowDefinitions.length ? [...runtimeMocks.savedWorkflowDefinitions] : null
+  ),
   listRuntimeWorkflowRuns: vi.fn(async () => null),
   listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
   listenRuntimeSchedulerCancelRequest: vi.fn(async () => null),
@@ -103,7 +106,14 @@ vi.mock("./runtime", () => ({
     ];
     return null;
   }),
-  saveRuntimeWorkflowDefinition: vi.fn(async () => null),
+  saveRuntimeWorkflowDefinition: vi.fn(async (definition: unknown) => {
+    const record = definition as { id: string };
+    runtimeMocks.savedWorkflowDefinitions = [
+      ...runtimeMocks.savedWorkflowDefinitions.filter((existing) => (existing as { id: string }).id !== record.id),
+      definition
+    ];
+    return null;
+  }),
   saveRuntimeWorkflowRun: vi.fn(async () => null),
   enqueueRuntimeJobRun: vi.fn(async () => null),
   reportRuntimeJobAttempt: vi.fn(async () => null),
@@ -222,6 +232,7 @@ describe("Fable home", () => {
     runtimeMocks.connectorOAuthCalls = [];
     runtimeMocks.agentRuns = [];
     runtimeMocks.savedScheduledJobs = [];
+    runtimeMocks.savedWorkflowDefinitions = [];
     connectRuntimeBackendSpy.mockClear();
     vi.mocked(listRuntimeConnectorStatuses).mockReset();
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
@@ -1201,6 +1212,7 @@ describe("Fable home", () => {
     await user.type(screen.getByLabelText(/schedule description/i), "Survives reload.");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
     expect(await screen.findByText("Persisted digest")).toBeInTheDocument();
+    await waitFor(() => expect(runtimeMocks.savedScheduledJobs).toHaveLength(1));
     first.unmount();
 
     // Second session: the schedule is recovered from the durable store.

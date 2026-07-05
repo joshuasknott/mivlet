@@ -63,8 +63,10 @@ export function SchedulePanel({
   connectors = [],
   definitions = [],
   loading = false,
+  loadError = null,
   isCreateModalOpen = false,
   onRequestCloseCreateModal,
+  onRetryLoad,
   onCreate,
   onEdit,
   onToggle,
@@ -81,8 +83,10 @@ export function SchedulePanel({
   definitions?: WorkflowDefinition[];
   /** True while persisted jobs are being hydrated from the Rust store. */
   loading?: boolean;
+  loadError?: string | null;
   isCreateModalOpen?: boolean;
   onRequestCloseCreateModal?: () => void;
+  onRetryLoad?: () => void;
   onCreate: (input: {
     name: string;
     description: string;
@@ -279,7 +283,17 @@ export function SchedulePanel({
         </div>
       )}
 
-      {loading ? (
+      {loadError ? (
+        <div className="page-loading page-loading--error" role="alert">
+          <WarningCircle size={16} aria-hidden="true" />
+          <span>Could not load schedules.</span>
+          {onRetryLoad ? (
+            <button type="button" onClick={onRetryLoad}>
+              Retry
+            </button>
+          ) : null}
+        </div>
+      ) : loading ? (
         <div className="page-loading" role="status" aria-live="polite">
           <Spinner size={16} aria-hidden="true" />
           <span>Loading schedules…</span>

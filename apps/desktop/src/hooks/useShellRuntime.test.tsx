@@ -1,10 +1,12 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook as rtlRenderHook, waitFor } from "@testing-library/react";
+import type { PropsWithChildren } from "react";
 import type { ApprovalAuditEntry, ApprovalRequest } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtime from "../runtime";
 import { useShellRuntime } from "./useShellRuntime";
 import { STORAGE_KEY, LEGACY_STORAGE_KEYS } from "../lib/constants";
 import type { PersistedShellState } from "../lib/types";
+import { FableQueryProvider } from "../lib/query-client";
 
 /**
  * Isolated unit coverage for useShellRuntime's pure orchestration logic. All
@@ -76,6 +78,14 @@ vi.mock("../runtime", async (importOriginal) => {
     startRuntimeConnectorAuth: vi.fn(async () => null)
   };
 });
+
+function renderHook<Result>(callback: () => Result) {
+  return rtlRenderHook(callback, {
+    wrapper: ({ children }: PropsWithChildren) => (
+      <FableQueryProvider>{children}</FableQueryProvider>
+    )
+  });
+}
 
 /** A low-risk read-only approval — resolves without confirmation. */
 function lowRiskApproval(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest {
