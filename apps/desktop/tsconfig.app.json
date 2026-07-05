@@ -21,8 +21,10 @@
     "baseUrl": ".",
     "paths": {
       "@fable/protocol": ["../../packages/protocol/src/index.ts"],
-      "@fable/connectors": ["../../packages/connectors/src/index.ts"]
+      "@fable/connectors": ["../../packages/connectors/src/index.ts"],
+      "@fable/knowledge": ["../../packages/knowledge/src/index.ts"]
     }
   },
-  "include": ["src", "../../packages/protocol/src", "../../packages/connectors/src"]
+  "include": ["src", "../../packages/protocol/src", "../../packages/connectors/src", "../../packages/knowledge/src"],
+  "exclude": ["../../packages/knowledge/src/**/*.test.ts"]
 }

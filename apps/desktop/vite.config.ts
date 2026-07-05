@@ -7,7 +7,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@fable/protocol": fileURLToPath(new URL("../../packages/protocol/src/index.ts", import.meta.url)),
-      "@fable/connectors": fileURLToPath(new URL("../../packages/connectors/src/index.ts", import.meta.url))
+      "@fable/connectors": fileURLToPath(new URL("../../packages/connectors/src/index.ts", import.meta.url)),
+      "@fable/knowledge": fileURLToPath(new URL("../../packages/knowledge/src/index.ts", import.meta.url))
     }
   },
   clearScreen: false,
