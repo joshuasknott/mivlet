@@ -1,12 +1,13 @@
-# Auth broker staging deployment runbook
+# Auth broker live-certification deployment runbook
 
-Status: Batch 4 staging preparation. This runbook prepares an isolated
-Cloudflare staging Worker for the confidential OAuth broker. It does not enable
-production and does not require live provider credentials for local validation.
+Status: live-certification staging. This runbook prepares the Cloudflare Worker
+used for Batch 5 provider certification of the confidential OAuth broker. It
+does not enable production.
 
 ## Deployment boundary
 
-- Staging Worker name: `fable-auth-broker-staging`.
+- Live-certification Worker name: `fable-auth-broker`.
+- Public origin: `https://fable-auth-broker.joshhknott.workers.dev/`.
 - Production Worker name is declared as `fable-auth-broker-production` for review
   only. Do not deploy production in Batch 4.
 - The broker remains a confidential OAuth broker only. Do not add connector API,
@@ -23,7 +24,7 @@ Set these as Wrangler vars or Cloudflare dashboard Worker variables:
 | `FABLE_BROKER_ENVIRONMENT` | `staging` |
 | `FABLE_BROKER_STORAGE_BACKEND` | `durable` |
 | `FABLE_BROKER_RATE_LIMIT_PER_MINUTE` | `60` unless explicitly changed |
-| `FABLE_BROKER_PUBLIC_URL` | The final HTTPS staging origin, trailing slash recommended |
+| `FABLE_BROKER_PUBLIC_URL` | `https://fable-auth-broker.joshhknott.workers.dev/` |
 | `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` | Optional exact HTTPS desktop callbacks; loopback callbacks are built in |
 
 `FABLE_BROKER_PUBLIC_URL` is not an OAuth secret, but it is
@@ -41,7 +42,6 @@ Set these with `wrangler secret put --env staging`. Never commit real values.
 | `FABLE_BROKER_GITHUB_CLIENT_SECRET` | Staging GitHub OAuth App client secret |
 | `FABLE_BROKER_VERCEL_CLIENT_ID` | Staging Vercel integration client id |
 | `FABLE_BROKER_VERCEL_CLIENT_SECRET` | Staging Vercel integration client secret |
-| `FABLE_BROKER_VERCEL_INTEGRATION_SLUG` | Staging Vercel integration slug |
 | `FABLE_BROKER_LINEAR_CLIENT_ID` | Staging Linear OAuth client id |
 | `FABLE_BROKER_LINEAR_CLIENT_SECRET` | Staging Linear OAuth client secret |
 | `FABLE_BROKER_NOTION_CLIENT_ID` | Staging Notion OAuth client id |
@@ -69,7 +69,7 @@ corepack pnpm --filter @fable/protocol build
 corepack pnpm --filter @fable/connectors build
 corepack pnpm --filter @fable/broker typecheck
 corepack pnpm --filter @fable/broker test
-corepack pnpm --filter @fable/broker exec wrangler deploy --config wrangler.jsonc --env staging --dry-run --keep-vars --var FABLE_BROKER_PUBLIC_URL:https://staging-auth-broker.example.invalid/
+corepack pnpm --filter @fable/broker exec wrangler deploy --config wrangler.jsonc --env staging --dry-run --keep-vars --var FABLE_BROKER_PUBLIC_URL:https://fable-auth-broker.joshhknott.workers.dev/
 ```
 
 The dry-run bundles the staging env but does not upload. It validates the Worker
@@ -88,14 +88,13 @@ deploying. If multiple accounts are available, add the selected account id to
 `apps/broker/wrangler.jsonc` only after confirming it is not sensitive for this
 repo, or pass the account selection through the Wrangler session.
 
-## DNS and custom domain setup
+## DNS and callback setup
 
-1. Choose the staging origin, for example
-   `https://staging-auth-broker.fable.example/`.
-2. In Cloudflare, bind that custom domain to `fable-auth-broker-staging`.
-3. Register provider callback URLs exactly:
-   `https://<staging-origin>/oauth/<provider>/callback`.
-4. Keep production provider apps separate from staging provider apps.
+1. Use the existing live-certification origin
+   `https://fable-auth-broker.joshhknott.workers.dev/`.
+2. Register provider callback URLs exactly:
+   `https://fable-auth-broker.joshhknott.workers.dev/oauth/<provider>/callback`.
+3. Keep production provider apps separate from these certification provider apps.
 
 Do not deploy with a placeholder `FABLE_BROKER_PUBLIC_URL`.
 
@@ -110,7 +109,7 @@ v1-broker-ephemeral:
   BrokerRateLimit
 ```
 
-The migration is applied by the first real staging deploy for that environment.
+The migration is applied by the first real durable deploy for that environment.
 Rollback can move Worker code to an older version, but Durable Object class
 migrations are not generally undone. The stored rows are ephemeral and expire in
 about 60 seconds, but the class declarations remain account state.
@@ -125,7 +124,6 @@ wrangler secret put FABLE_BROKER_GITHUB_CLIENT_ID --env staging
 wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET --env staging
 wrangler secret put FABLE_BROKER_VERCEL_CLIENT_ID --env staging
 wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET --env staging
-wrangler secret put FABLE_BROKER_VERCEL_INTEGRATION_SLUG --env staging
 wrangler secret put FABLE_BROKER_LINEAR_CLIENT_ID --env staging
 wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET --env staging
 wrangler secret put FABLE_BROKER_NOTION_CLIENT_ID --env staging
@@ -144,7 +142,7 @@ After local validation and secret setup:
 ```bash
 corepack pnpm --filter @fable/protocol build
 corepack pnpm --filter @fable/connectors build
-corepack pnpm --filter @fable/broker exec wrangler deploy --config wrangler.jsonc --env staging --keep-vars --var FABLE_BROKER_PUBLIC_URL:https://<staging-origin>/
+corepack pnpm --filter @fable/broker exec wrangler deploy --config wrangler.jsonc --env staging --keep-vars --var FABLE_BROKER_PUBLIC_URL:https://fable-auth-broker.joshhknott.workers.dev/
 ```
 
 `--keep-vars` prevents Wrangler from deleting dashboard-managed staging vars
@@ -153,7 +151,7 @@ that are intentionally absent from source.
 ## Smoke checks
 
 ```bash
-curl -fsS https://<staging-origin>/healthz
+curl -fsS https://fable-auth-broker.joshhknott.workers.dev/healthz
 ```
 
 Expected with no provider credentials: HTTP 200 with an empty `providers` list.
@@ -178,7 +176,7 @@ or provider content.
 Review:
 
 ```bash
-wrangler tail fable-auth-broker-staging --env staging
+wrangler tail fable-auth-broker --env staging
 ```
 
 Search logs and analytics exports for:

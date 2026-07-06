@@ -32,7 +32,6 @@ const ENV: BrokerEnv = {
   FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
   FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
   FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret",
-  FABLE_BROKER_VERCEL_INTEGRATION_SLUG: "fable-vercel",
   FABLE_BROKER_LINEAR_CLIENT_ID: "ln-id",
   FABLE_BROKER_LINEAR_CLIENT_SECRET: "ln-secret",
   FABLE_BROKER_NOTION_CLIENT_ID: "nt-id",
@@ -139,14 +138,16 @@ describe("broker authorize", () => {
     expect(response.authorizationUrl).not.toContain("secret");
   });
 
-  it("uses the Vercel integration installation URL without undocumented PKCE or scope params", async () => {
+  it("uses Vercel's OAuth authorization endpoint with explicit scopes and PKCE", async () => {
     const { broker } = makeBroker("vercel", providerFetch("vercel"));
     const { response } = await broker.authorize(authorizeRequest("vercel", "s2"));
     const url = new URL(response.authorizationUrl);
-    expect(url.origin + url.pathname).toBe("https://vercel.com/integrations/fable-vercel/new");
-    expect(url.searchParams.get("code_challenge")).toBeNull();
-    expect(url.searchParams.get("code_challenge_method")).toBeNull();
-    expect(url.searchParams.get("scope")).toBeNull();
+    expect(url.origin + url.pathname).toBe("https://api.vercel.com/oauth/authorize");
+    expect(url.searchParams.get("client_id")).toBe("vc-id");
+    expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:8788/oauth/vercel/callback");
+    expect(url.searchParams.get("scope")).toBe("user:read team:read project:read deployment:read deployment:write");
+    expect(url.searchParams.get("code_challenge")).toBeTruthy();
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
   it("serializes provider-specific authorization parameters", async () => {
@@ -329,7 +330,7 @@ describe("broker callback + handoff", () => {
         expect(params.get("redirect_uri")).toBe(`http://127.0.0.1:8788/oauth/${provider}/callback`);
         if (provider === "vercel") {
           expect(params.get("grant_type")).toBeNull();
-          expect(params.get("code_verifier")).toBeNull();
+          expect(params.get("code_verifier")).toBeTruthy();
         } else if (provider === "github" || provider === "linear") {
           expect(params.get("grant_type")).toBe("authorization_code");
           expect(params.get("code_verifier")).toBeTruthy();
@@ -387,6 +388,27 @@ describe("broker refresh + revoke", () => {
     expect(JSON.parse(String(call![1].body))).toEqual({ access_token: "provider-refresh-token" });
     // The placeholder must NEVER reach the provider verbatim.
     expect(calls.some(([url]) => url.includes("{clientId}"))).toBe(false);
+  });
+
+  it("sends GitHub API headers on identity and revocation calls", async () => {
+    const fetch = providerFetch("github");
+    const { broker } = makeBroker("github", fetch);
+    await broker.authorize(authorizeRequest("github", "github-headers"));
+    await broker.callback("github", new URLSearchParams({ code: "c", state: "github-headers" }));
+    await broker.revoke({
+      contractVersion: BROKER_CONTRACT_VERSION, provider: "github", token: "provider-refresh-token"
+    });
+    const calls = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls;
+    const identityCall = calls.find(([url]) => url === "https://api.github.com/user");
+    const revokeCall = calls.find(([url]) => url === "https://api.github.com/applications/gh-id/token");
+    expect(identityCall?.[1].headers).toMatchObject({
+      "user-agent": "fable-auth-broker",
+      "x-github-api-version": "2022-11-28"
+    });
+    expect(revokeCall?.[1].headers).toMatchObject({
+      "user-agent": "fable-auth-broker",
+      "x-github-api-version": "2022-11-28"
+    });
   });
 });
 

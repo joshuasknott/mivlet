@@ -27,14 +27,15 @@
     },
 
     "staging": {
-      "name": "fable-auth-broker-staging",
+      "name": "fable-auth-broker",
       "vars": {
         "FABLE_BROKER_ENVIRONMENT": "staging",
         "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
         "FABLE_BROKER_STORAGE_BACKEND": "durable"
         // FABLE_BROKER_PUBLIC_URL is environment-specific non-secret config.
-        // Set it at deploy time with --var FABLE_BROKER_PUBLIC_URL:<https origin>
-        // or replace this comment with the staging HTTPS origin once DNS is final.
+        // The live certification broker uses:
+        // https://fable-auth-broker.joshhknott.workers.dev/
+        // Keep provider callback URLs matched to that origin.
       },
       // Durable Object bindings for pending OAuth exchanges, single-use handoffs,
       // and per-route/peer rate limiting. One DO instance per high-entropy key.
@@ -46,7 +47,8 @@
         ]
       },
       // Migration to introduce the three broker ephemeral DO classes.
-      // Applied by staging deploy; production has the same declaration below.
+      // Applied by the first durable deploy to the live certification Worker;
+      // production has the same declaration below.
       "migrations": [
         {
           "tag": "v1-broker-ephemeral",

@@ -94,7 +94,7 @@ providers:
 | Provider | Flow | PKCE | Refresh | Remote revoke/disconnect | Notable setup |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | GitHub | OAuth App web flow | S256 supported | No for OAuth Apps | `DELETE /applications/{client_id}/token` | `repo` is broad read/write OAuth scope; GitHub App is the future fine-grained alternative. |
-| Vercel | Integration REST API install flow | Not documented | Not documented | No generic revoke endpoint | Requires `FABLE_BROKER_VERCEL_INTEGRATION_SLUG`; team installs require live validation. |
+| Vercel | OAuth authorization-server flow | S256 supported | Not documented | No generic revoke endpoint | Uses the Vercel OAuth client id/secret directly; team installs require live validation. |
 | Linear | OAuth 2.0 app | S256 supported | Yes | `POST /oauth/revoke` form body | Authorization URL is `https://linear.app/oauth/authorize`; scopes are comma-separated. |
 | Notion | Public connection OAuth | Not documented for this flow | Yes | Not enabled in this broker until live semantics are certified | Authorization includes `owner=user`; token/refresh use HTTP Basic auth plus JSON and `Notion-Version`. |
 | Slack | OAuth v2 confidential app | Not used for confidential broker flow | No unless token rotation is separately enabled | `auth.revoke` | Current single-token model uses bot token scopes only; global `search:read` requires a future user-token path. |
@@ -191,7 +191,6 @@ pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_GITHUB_CLIENT_
 pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_GITHUB_CLIENT_SECRET --env staging
 pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_VERCEL_CLIENT_ID --env staging
 pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_VERCEL_CLIENT_SECRET --env staging
-pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_VERCEL_INTEGRATION_SLUG --env staging
 pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_LINEAR_CLIENT_ID --env staging
 pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_LINEAR_CLIENT_SECRET --env staging
 pnpm --filter @fable/broker exec wrangler secret put FABLE_BROKER_NOTION_CLIENT_ID --env staging
@@ -245,7 +244,6 @@ credential pair is missing, that provider fails closed with
 | `FABLE_BROKER_PORT` / `FABLE_BROKER_HOST` | Public var | Bind settings for the local Node.js fallback server. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_ID` | Secret/config | Client ID registered in the provider developer console. |
 | `FABLE_BROKER_<PROVIDER>_CLIENT_SECRET` | Secret | Confidential client secret registered in the provider developer console. |
-| `FABLE_BROKER_VERCEL_INTEGRATION_SLUG` | Config/secret | Vercel Integration URL slug used to build `https://vercel.com/integrations/<slug>/new`. Required for Vercel only. |
 
 Replace `<PROVIDER>` with `GITHUB`, `VERCEL`, `LINEAR`, `NOTION`, or `SLACK`.
 

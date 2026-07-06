@@ -149,6 +149,7 @@ export async function revokeToken(
       headers: {
         "content-type": "application/json",
         accept: "application/vnd.github+json",
+        ...githubApiHeaders(),
         authorization: basicAuth(options.credentials) ?? ""
       },
       body: JSON.stringify({ access_token: token })
@@ -212,6 +213,7 @@ export async function resolveIdentity(
     method: "GET",
     headers: {
       accept: "application/json",
+      ...githubApiHeaders(options.provider),
       authorization: `${authorizationScheme(options.provider, tokens.tokenType)} ${tokens.accessToken}`,
       ...(options.provider === "notion" ? { "notion-version": NOTION_VERSION } : {})
     }
@@ -402,6 +404,14 @@ function tokenSetFrom(
 function basicAuth(credentials: ProviderCredentials): string | undefined {
   if (!credentials.clientId || !credentials.clientSecret) return undefined;
   return `Basic ${base64String(`${credentials.clientId}:${credentials.clientSecret}`)}`;
+}
+
+function githubApiHeaders(provider: BrokerProviderId = "github"): Record<string, string> {
+  if (provider !== "github") return {};
+  return {
+    "user-agent": "fable-auth-broker",
+    "x-github-api-version": "2022-11-28"
+  };
 }
 
 function authorizationScheme(provider: BrokerProviderId, tokenType: string): string {

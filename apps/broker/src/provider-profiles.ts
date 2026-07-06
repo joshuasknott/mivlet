@@ -96,16 +96,14 @@ const GITHUB_PROFILE: ProviderProfile = {
 
 const VERCEL_PROFILE: ProviderProfile = {
   label: "Vercel",
-  authorizationEndpoint: `https://vercel.com/integrations/${"{vercelIntegrationSlug}"}/new`,
+  authorizationEndpoint: "https://api.vercel.com/oauth/authorize",
   tokenEndpoint: "https://api.vercel.com/v2/oauth/access_token",
   revocationEndpoint: "",
   identityEndpoint: "https://api.vercel.com/v2/user",
-  scopes: ["user", "team", "project", "deployment"],
-  requiredEnv: ["FABLE_BROKER_VERCEL_INTEGRATION_SLUG"],
+  scopes: ["user:read", "team:read", "project:read", "deployment:read", "deployment:write"],
   clientIdEnv: "FABLE_BROKER_VERCEL_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_VERCEL_CLIENT_SECRET",
-  pkce: "none",
-  scopeParameter: "omit",
+  pkce: "broker-pkce",
   supportsRefresh: false,
   tokenRequestStyle: "form-without-grant-type",
   revocationStyle: "none",
@@ -302,16 +300,10 @@ export function isProfileConfigured(profile: ProviderProfile, env: BrokerEnv): b
 
 export function resolveAuthorizationEndpoint(
   profile: ProviderProfile,
-  env: BrokerEnv,
+  _env: BrokerEnv,
   credentials: ProviderCredentials
 ): string {
-  let endpoint = resolveEndpoint(profile.authorizationEndpoint, credentials);
-  if (endpoint.includes("{vercelIntegrationSlug}")) {
-    const slug = env.FABLE_BROKER_VERCEL_INTEGRATION_SLUG;
-    if (!slug) throw new Error("Vercel integration slug is not configured on the broker.");
-    endpoint = endpoint.replaceAll("{vercelIntegrationSlug}", encodeURIComponent(slug));
-  }
-  return endpoint;
+  return resolveEndpoint(profile.authorizationEndpoint, credentials);
 }
 
 function identityError(provider: string): Error {
