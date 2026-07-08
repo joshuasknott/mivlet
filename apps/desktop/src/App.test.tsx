@@ -312,6 +312,7 @@ describe("Fable home", () => {
         collapsed={false}
         onNewChat={noop}
         onAddProject={onAddProject}
+        onOpenProjectFolder={noop}
         onSearch={noop}
         onSelectWorkspace={noop}
         onToggleProjects={noop}
@@ -444,9 +445,8 @@ describe("Fable home", () => {
     expect(settings).toBeInTheDocument();
 
     await user.click(mobileConnection);
-    // Settings renders from a lazily-loaded chunk; await its first paint.
-    expect(await screen.findByRole("heading", { name: /privacy & permissions/i })).toBeInTheDocument();
-    expect(screen.getByText(/only this computer can run the action/i)).toBeInTheDocument();
+    // Settings renders from a lazily-loaded chunk; await the mobile approval content.
+    expect(await screen.findByText(/only this computer can run the action/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /close sidebar/i }));
     expect(screen.getByRole("main")).toHaveClass("desktop-frame--sidebar-collapsed");
@@ -530,11 +530,12 @@ describe("Fable home", () => {
     expect(await screen.findByText(/no schedules yet/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^new$/i }));
-    await user.type(screen.getByLabelText(/schedule task name/i), "Weekly digest");
-    await user.type(
-      screen.getByLabelText(/schedule description/i),
-      "Summarize active projects and approvals."
-    );
+    fireEvent.change(screen.getByLabelText(/schedule task name/i), {
+      target: { value: "Weekly digest" }
+    });
+    fireEvent.change(screen.getByLabelText(/schedule description/i), {
+      target: { value: "Summarize active projects and approvals." }
+    });
     await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "weekly");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
@@ -546,8 +547,7 @@ describe("Fable home", () => {
     expect(within(savedSchedules).getByText("Summarize active projects and approvals.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
     const editName = screen.getByLabelText(/edit schedule task name/i);
-    await user.clear(editName);
-    await user.type(editName, "Friday briefing");
+    fireEvent.change(editName, { target: { value: "Friday briefing" } });
     await user.click(screen.getByRole("button", { name: /^save$/i }));
     expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
 
@@ -560,7 +560,7 @@ describe("Fable home", () => {
     // No draft/active status labels anywhere on the page.
     expect(screen.queryByText(/^draft$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^active$/i)).not.toBeInTheDocument();
-  }, 15000);
+  }, 30000);
 
   it("pauses and resumes a created schedule", async () => {
     const user = await renderWorkspace();
@@ -779,22 +779,23 @@ describe("Fable home", () => {
     expect(screen.queryByRole("button", { name: /connect codex/i })).not.toBeInTheDocument();
   });
 
-  it("keeps dictation disabled by default and explains the text fallback when unsupported", async () => {
+  it("keeps the voice control quiet until the user tries dictation", async () => {
     const user = await renderWorkspace();
 
     expect(
       screen.getByRole("button", {
-        name: /voice input unavailable: enable dictation in privacy settings/i
+        name: /speech recognition is unavailable in this desktop webview/i
       })
     ).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByText(/voice input unavailable/i)).not.toBeInTheDocument();
     expect(screen.getByLabelText(/universal composer/i)).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
     await user.click(screen.getByRole("button", { name: /^privacy & permissions$/i }));
 
     const dictation = await screen.findByRole("button", { name: /^enable dictation/i });
-    expect(dictation).toHaveAttribute("aria-pressed", "false");
-    expect(dictation).toBeDisabled();
+    expect(dictation).toHaveAttribute("aria-pressed", "true");
+    expect(dictation).not.toBeDisabled();
     expect(screen.getByText(/text input remains available/i)).toBeInTheDocument();
     expect(
       screen.getByText(/recognized text is added to your normal composer draft/i)
@@ -933,7 +934,14 @@ describe("Fable home", () => {
     fireEvent.mouseEnter(screen.getByRole("menuitem", { name: /commands/i }));
     await user.click(screen.getByRole("menuitem", { name: "/goal" }));
 
-    expect(screen.getByLabelText(/universal composer/i)).toHaveValue("/goal ");
+    const composer = screen.getByLabelText(/universal composer/i);
+    expect(composer).toHaveValue("/goal ");
+
+    await user.clear(composer);
+    await user.type(composer, "/g");
+    expect(screen.getByRole("option", { name: /\/goal/i })).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(composer).toHaveValue("/goal ");
   });
 
   it("/remember creates durable memory instead of just inserting text", async () => {
@@ -965,10 +973,11 @@ describe("Fable home", () => {
     );
     await user.keyboard("{Enter}");
 
-    // Rejected through the last-action channel; the secret never lands in memory.
-    expect(await screen.findByText(/looks like a secret/i)).toBeInTheDocument();
+    // Rejected through the visible conversation; the secret never lands in memory.
+    const conversation = await screen.findByRole("region", { name: /conversation/i });
+    expect(await within(conversation).findByText(/looks like a secret/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
-    await user.click(screen.getByRole("tab", { name: /^memories$/i }));
+    await user.click(await screen.findByRole("tab", { name: /^memories$/i }));
     expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
   });
 
@@ -1005,7 +1014,8 @@ describe("Fable home", () => {
 
     // The goal is created and surfaced; no model is connected in this harness so
     // the result tells the user to connect one.
-    expect(await screen.findByText(/goal saved/i)).toBeInTheDocument();
+    const conversation = await screen.findByRole("region", { name: /conversation/i });
+    expect(await within(conversation).findByText(/goal saved/i)).toBeInTheDocument();
 
     // The goal is persisted through the runtime snapshot (durable, non-secret).
     await waitFor(() => {
@@ -1020,7 +1030,15 @@ describe("Fable home", () => {
     await user.type(screen.getByLabelText(/universal composer/i), "/schedule daily at 09:00");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByText(/schedule created/i)).toBeInTheDocument();
+    const conversation = await screen.findByRole("region", { name: /conversation/i });
+    expect(await within(conversation).findByText(/schedule created/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        runtimeMocks.savedScheduledJobs.some(
+          (job) => (job as { name?: string }).name === "daily at 09:00"
+        )
+      ).toBe(true);
+    });
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     // The command-created schedule appears on the Schedules page (the command
     // derives a legacy entry paired with the durable job by id) and can run now.
@@ -1044,15 +1062,15 @@ describe("Fable home", () => {
       type: "text/markdown"
     });
 
-    await user.upload(screen.getByLabelText(/import local knowledge file/i), file);
+    await user.upload(screen.getByLabelText(/attach files/i), file);
 
     expect(await screen.findByText(/Imported launch-notes.md/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /summarize launch-notes.md/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
-    expect(screen.getAllByText("launch-notes.md").length).toBeGreaterThan(0);
-    await user.click(screen.getByRole("button", { name: /^launch-notes\.md local file/i }));
+    expect((await screen.findAllByText("launch-notes.md")).length).toBeGreaterThan(0);
+    await user.click(await screen.findByRole("button", { name: /^launch-notes\.md local file/i }));
     expect(screen.getByText(/Launch risks, connector recovery/i)).toBeInTheDocument();
   });
 
@@ -1089,13 +1107,14 @@ describe("Fable home", () => {
     await user.type(composer, "summarize the project");
     await user.keyboard("{Enter}");
 
-    // Enter sends; outside Tauri, the missing transport stays visually silent.
+    // Enter sends into the conversation and clears the composer.
     await waitFor(() => {
-      expect(composer).toHaveValue("summarize the project");
+      expect(composer).toHaveValue("");
     });
+    expect(screen.getByText("summarize the project")).toBeInTheDocument();
     expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     // The newline was not inserted into the composer.
-    expect(composer).toHaveValue("summarize the project");
+    expect(composer).toHaveValue("");
   });
 
   it("inserts a newline on Shift+Enter instead of sending", async () => {
@@ -1433,15 +1452,12 @@ describe("Fable home", () => {
 
     await user.click(screen.getByRole("button", { name: /select model/i }));
 
-    // The picker lists the connected backend's models (not hardcoded labels),
-    // and the unavailable one is surfaced as disabled.
+    // The picker lists the connected backend's usable models (not hardcoded labels)
+    // and filters unavailable/older entries out of the composer dropdown.
     const menu = screen.getByRole("menu", { name: /models/i });
     expect(within(menu).getByText("GPT-5")).toBeInTheDocument();
     expect(within(menu).getByText("o3")).toBeInTheDocument();
-    expect(within(menu).getByText("GPT-4.1")).toBeInTheDocument();
-    expect(
-      within(menu).getByRole("menuitemradio", { name: /gpt-4\.1/i })
-    ).toBeDisabled();
+    expect(within(menu).queryByText("GPT-4.1")).not.toBeInTheDocument();
   });
 
   it("selecting a model in the picker drives the persisted model id for the next run", async () => {

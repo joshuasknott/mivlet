@@ -52,6 +52,15 @@ export type PendingApprovalConfirmation = {
   modification?: ApprovalModification;
 };
 
+export interface ComposerAttachment {
+  id: string;
+  name: string;
+  type: string;
+  sizeBytes: number;
+  previewUrl?: string;
+  status?: string;
+}
+
 export interface PersistedShellState {
   activeItem: string;
   composerValue: string;

@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useMemo, useState } from "react";
 import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { Books } from "@phosphor-icons/react/dist/csr/Books";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -14,9 +14,10 @@ import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
 import { Terminal } from "@phosphor-icons/react/dist/csr/Terminal";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
+import { ACCEPTED_COMPOSER_ATTACHMENTS } from "../lib/constants";
 import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
 import type { VoiceStatus } from "../hooks/useVoice";
+import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
@@ -76,7 +77,9 @@ export function Composer({
   onSelectPermissionLabel,
   inThread = false,
   connectedConnectors = [],
-  knowledgeSources = []
+  knowledgeSources = [],
+  attachments = [],
+  onRemoveAttachment
 }: {
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -115,6 +118,8 @@ export function Composer({
   inThread?: boolean;
   connectedConnectors?: { id: string; name: string; status: string }[];
   knowledgeSources?: { id: string; title: string; provenance: string; connectorId?: string }[];
+  attachments?: ComposerAttachment[];
+  onRemoveAttachment?: (attachmentId: string) => void;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
   const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | "commands" | null>(null);
@@ -127,6 +132,11 @@ export function Composer({
     if (addMenuOpen) onToggleAddMenu();
     if (permissionsOpen) onTogglePermissions();
     setActiveSubmenu(null);
+  };
+  const openSubmenu = (submenu: "connectors" | "knowledge" | "commands") => {
+    if (submenu === "connectors" && connectedConnectors.length === 0) return;
+    if (submenu === "knowledge" && knowledgeSources.length === 0) return;
+    setActiveSubmenu(submenu);
   };
 
   const isNewThread = !inThread;
@@ -159,27 +169,118 @@ export function Composer({
           ? "Try dictation again"
           : "Start dictation"
         : voiceMessage;
+  const showVoiceFeedback =
+    voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
+  const currentToken = useMemo(() => {
+    const match = composerValue.match(/(^|\s)([\/@][^\s]*)$/);
+    if (!match) return null;
+    return {
+      token: match[2],
+      start: composerValue.length - match[2].length
+    };
+  }, [composerValue]);
+  const composerSuggestions = useMemo(() => {
+    if (!currentToken) return [];
+    const query = currentToken.token.toLowerCase();
+    if (query.startsWith("/")) {
+      return COMMANDS.filter((command) => command.startsWith(query)).map((command) => ({
+        id: command,
+        label: command,
+        description:
+          command === "/goal"
+            ? "Create a goal"
+            : command === "/schedule"
+              ? "Create a schedule"
+              : command === "/remember"
+                ? "Save memory"
+                : "Create a plan",
+        value: command
+      }));
+    }
+    if (query.startsWith("@")) {
+      return connectedConnectors
+        .map((connector) => {
+          const mention = `@${connector.id}`;
+          return {
+            id: connector.id,
+            label: mention,
+            description: connector.name,
+            value: mention
+          };
+        })
+        .filter((connector) => connector.label.toLowerCase().startsWith(query));
+    }
+    return [];
+  }, [connectedConnectors, currentToken]);
+  const applyComposerSuggestion = (value: string) => {
+    if (!currentToken) return;
+    const next = `${composerValue.slice(0, currentToken.start)}${value} `;
+    onComposerChange(next);
+    window.requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      composerRef.current?.setSelectionRange(next.length, next.length);
+    });
+  };
 
   return (
-    <form
-      className={`composer-glow ${menuPlacementClass}`}
-      onSubmit={onSubmit}
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && voiceCancelable) {
-          event.preventDefault();
-          onCancelVoice();
-        }
-      }}
-    >
-      <input
-        ref={fileInputRef}
-        className="sr-only"
-        type="file"
-        accept={ACCEPTED_LOCAL_KNOWLEDGE_FILES}
-        aria-label="Import local knowledge file"
-        onChange={onFileChange}
-      />
-      <div className="composer">
+    <>
+      {attachments.length > 0 ? (
+        <div className={`composer-attachments ${isNewThread ? "composer-attachments--new-thread" : "composer-attachments--in-thread"}`}>
+          {attachments.map((attachment) => (
+            <div className="composer-attachment" key={attachment.id}>
+              {attachment.previewUrl ? (
+                <a
+                  className="composer-attachment__preview"
+                  href={attachment.previewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Open ${attachment.name} preview`}
+                >
+                  <img src={attachment.previewUrl} alt="" />
+                </a>
+              ) : (
+                <span className="composer-attachment__icon" aria-hidden="true">
+                  <FileArrowUp size={14} />
+                </span>
+              )}
+              <span className="composer-attachment__body">
+                <strong title={attachment.name}>{attachment.name}</strong>
+                {attachment.status ? <small>{attachment.status}</small> : null}
+              </span>
+              {onRemoveAttachment ? (
+                <button
+                  type="button"
+                  className="composer-attachment__remove"
+                  onClick={() => onRemoveAttachment(attachment.id)}
+                  aria-label={`Remove ${attachment.name}`}
+                >
+                  <X size={12} weight="bold" />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <form
+        className={`composer-glow ${menuPlacementClass}`}
+        onSubmit={onSubmit}
+        onKeyDown={(event) => {
+          if (event.key === "Escape" && voiceCancelable) {
+            event.preventDefault();
+            onCancelVoice();
+          }
+        }}
+      >
+        <input
+          ref={fileInputRef}
+          className="sr-only"
+          type="file"
+          accept={ACCEPTED_COMPOSER_ATTACHMENTS}
+          multiple
+          aria-label="Attach files"
+          onChange={onFileChange}
+        />
+        <div className="composer">
         <div className="composer-field">
           <textarea
             ref={composerRef}
@@ -187,6 +288,15 @@ export function Composer({
             value={composerValue}
             onChange={(event) => onComposerChange(event.target.value)}
             onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              if (
+                composerSuggestions.length > 0 &&
+                (event.key === "Tab" ||
+                  (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing))
+              ) {
+                event.preventDefault();
+                applyComposerSuggestion(composerSuggestions[0].value);
+                return;
+              }
               // Enter sends; Shift+Enter (and IME composition) insert a newline.
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
@@ -197,6 +307,21 @@ export function Composer({
             aria-label="Universal composer"
             rows={1}
           />
+          {composerSuggestions.length > 0 ? (
+            <div className="composer-suggestions" role="listbox" aria-label="Composer suggestions">
+              {composerSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  role="option"
+                  onClick={() => applyComposerSuggestion(suggestion.value)}
+                >
+                  <strong>{suggestion.label}</strong>
+                  <small>{suggestion.description}</small>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="composer-controls">
@@ -226,24 +351,28 @@ export function Composer({
 
                   <div
                     className={`composer-menu-item-wrapper${activeSubmenu === "connectors" ? " is-active" : ""}`}
-                    onMouseEnter={() => {
-                      if (connectedConnectors.length > 0) {
-                        setActiveSubmenu("connectors");
-                      }
-                    }}
+                    onPointerEnter={() => openSubmenu("connectors")}
+                    onMouseEnter={() => openSubmenu("connectors")}
+                    onPointerLeave={() => setActiveSubmenu(null)}
                     onMouseLeave={() => setActiveSubmenu(null)}
+                    onFocus={() => {
+                      openSubmenu("connectors");
+                    }}
                   >
                     <button
                       type="button"
                       role="menuitem"
                       disabled={connectedConnectors.length === 0}
-                      onClick={() => onOpenTool("Connectors")}
-                      className="composer-menu-item"
-                      onMouseEnter={() => {
+                      onClick={() => {
                         if (connectedConnectors.length > 0) {
-                          setActiveSubmenu("connectors");
+                          openSubmenu("connectors");
+                        } else {
+                          onOpenTool("Connectors");
                         }
                       }}
+                      className="composer-menu-item"
+                      onPointerEnter={() => openSubmenu("connectors")}
+                      onMouseEnter={() => openSubmenu("connectors")}
                     >
                       <PlugsConnected size={18} />
                       <span>
@@ -265,7 +394,7 @@ export function Composer({
                             type="button"
                             role="menuitem"
                             onClick={() => {
-                              const prompt = `Use ${connector.name} to `;
+                              const prompt = `Use @${connector.id} to `;
                               onComposerChange(prompt);
                               composerRef.current?.focus();
                               onToggleAddMenu();
@@ -284,11 +413,9 @@ export function Composer({
 
                   <div
                     className={`composer-menu-item-wrapper${activeSubmenu === "knowledge" ? " is-active" : ""}`}
-                    onMouseEnter={() => {
-                      if (knowledgeSources.length > 0) {
-                        setActiveSubmenu("knowledge");
-                      }
-                    }}
+                    onPointerEnter={() => openSubmenu("knowledge")}
+                    onMouseEnter={() => openSubmenu("knowledge")}
+                    onPointerLeave={() => setActiveSubmenu(null)}
                     onMouseLeave={() => setActiveSubmenu(null)}
                   >
                     <button
@@ -297,11 +424,8 @@ export function Composer({
                       disabled={knowledgeSources.length === 0}
                       onClick={() => onOpenTool("Knowledge")}
                       className="composer-menu-item"
-                      onMouseEnter={() => {
-                        if (knowledgeSources.length > 0) {
-                          setActiveSubmenu("knowledge");
-                        }
-                      }}
+                      onPointerEnter={() => openSubmenu("knowledge")}
+                      onMouseEnter={() => openSubmenu("knowledge")}
                     >
                       <Books size={18} />
                       <span>
@@ -344,18 +468,17 @@ export function Composer({
 
                   <div
                     className={`composer-menu-item-wrapper${activeSubmenu === "commands" ? " is-active" : ""}`}
-                    onMouseEnter={() => {
-                      setActiveSubmenu("commands");
-                    }}
+                    onPointerEnter={() => openSubmenu("commands")}
+                    onMouseEnter={() => openSubmenu("commands")}
+                    onPointerLeave={() => setActiveSubmenu(null)}
                     onMouseLeave={() => setActiveSubmenu(null)}
                   >
                     <button
                       type="button"
                       role="menuitem"
                       className="composer-menu-item"
-                      onMouseEnter={() => {
-                        setActiveSubmenu("commands");
-                      }}
+                      onPointerEnter={() => openSubmenu("commands")}
+                      onMouseEnter={() => openSubmenu("commands")}
                     >
                       <Terminal size={18} />
                       <span>
@@ -528,25 +651,32 @@ export function Composer({
           </div>
         </div>
 
-        <div
-          className="voice-feedback"
-          data-state={voiceStatus}
-          aria-live="polite"
-          aria-atomic="true"
-        >
-          <span className="voice-feedback__indicator" aria-hidden="true" />
-          <span id="dictation-status">{voiceMessage}</span>
-          {voiceTerminal ? (
-            <button type="button" onClick={onDismissVoice}>
-              Dismiss
-            </button>
-          ) : null}
-        </div>
+        {showVoiceFeedback ? (
+          <div
+            className="voice-feedback"
+            data-state={voiceStatus}
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="voice-feedback__indicator" aria-hidden="true" />
+            <span id="dictation-status">{voiceMessage}</span>
+            {voiceTerminal ? (
+              <button type="button" onClick={onDismissVoice}>
+                Dismiss
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <span id="dictation-status" className="sr-only">
+            {voiceMessage}
+          </span>
+        )}
         <span id="dictation-disclosure" className="sr-only">
           {voiceDisclosure}
         </span>
         {importStatus ? <div className="composer-status" role="status">{importStatus}</div> : null}
       </div>
-    </form>
+      </form>
+    </>
   );
 }

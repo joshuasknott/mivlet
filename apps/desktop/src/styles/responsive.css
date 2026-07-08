@@ -335,8 +335,7 @@
   }
 
   .voice-actions {
-    grid-template-columns: 44px 44px;
-    width: 94px;
+    width: 44px;
   }
 
   .voice-actions .composer-chip {

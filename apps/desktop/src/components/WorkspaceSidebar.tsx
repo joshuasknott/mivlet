@@ -48,6 +48,7 @@ export function WorkspaceSidebar({
   collapsed,
   onNewChat,
   onAddProject,
+  onOpenProjectFolder,
   onSearch,
   onSelectWorkspace,
   onToggleProjects,
@@ -83,6 +84,7 @@ export function WorkspaceSidebar({
   collapsed: boolean;
   onNewChat: () => void;
   onAddProject: () => void;
+  onOpenProjectFolder: () => void;
   onSearch: () => void;
   onSelectWorkspace: () => void;
   onToggleProjects: () => void;
@@ -108,6 +110,7 @@ export function WorkspaceSidebar({
   onNavigateForward?: () => void;
 }) {
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
+  const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [chatFlyoutOpen, setChatFlyoutOpen] = useState(false);
   const [chatHistoryModalOpen, setChatHistoryModalOpen] = useState(false);
   const [chatHistorySearch, setChatHistorySearch] = useState("");
@@ -421,14 +424,43 @@ export function WorkspaceSidebar({
                     </span>
                   </span>
                 )}
-                <button
-                  type="button"
-                  className="nav-group-add"
-                  aria-label="Add project"
-                  onClick={onAddProject}
-                >
-                  <Plus size={13} weight="bold" />
-                </button>
+                <div className="nav-group-add-wrap">
+                  <button
+                    type="button"
+                    className="nav-group-add"
+                    aria-label="Add project"
+                    aria-expanded={projectCreateOpen}
+                    onClick={() => setProjectCreateOpen((open) => !open)}
+                  >
+                    <Plus size={13} weight="bold" />
+                  </button>
+                  {projectCreateOpen ? (
+                    <div className="project-create-menu" role="menu" aria-label="Add project">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setProjectCreateOpen(false);
+                          onOpenProjectFolder();
+                        }}
+                      >
+                        <FolderOpen size={15} />
+                        <span>Open folder</span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setProjectCreateOpen(false);
+                          onAddProject();
+                        }}
+                      >
+                        <NotePencil size={15} />
+                        <span>Start from scratch</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
               {hasProjects && expandedCollections.projects ? (
                 <div className="project-list">

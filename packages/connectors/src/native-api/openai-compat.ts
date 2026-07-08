@@ -27,6 +27,7 @@ interface OpenAiChoiceDelta {
 interface OpenAiChunk {
   choices?: Array<{ delta?: OpenAiChoiceDelta; finish_reason?: string | null }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
+  error?: { message?: string };
 }
 
 /** Shape a normalized request into the OpenAI chat-completions body. */
@@ -91,7 +92,7 @@ function parseOpenAiStreamLine(
   } catch {
     return [{ type: "error", message: "Unparseable OpenAI chunk." }];
   }
-  if (chunk && typeof chunk === "object" && "error" in (chunk as any)) {
+  if (chunk?.error) {
     return [{ type: "error", message: "Provider error." }];
   }
   const events: BackendAgentEvent[] = [];
@@ -173,7 +174,7 @@ export function parseOpenAiLine(
   } catch {
     return [{ type: "error", message: "Unparseable OpenAI chunk." }];
   }
-  if (chunk && typeof chunk === "object" && "error" in (chunk as any)) {
+  if (chunk?.error) {
     return [{ type: "error", message: "Provider error." }];
   }
 

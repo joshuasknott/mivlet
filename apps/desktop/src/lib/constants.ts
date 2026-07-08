@@ -30,6 +30,14 @@ export const ACCEPTED_LOCAL_KNOWLEDGE_FILES = SUPPORTED_LOCAL_FILE_EXTENSIONS.ma
   (extension) => `.${extension}`
 ).join(",");
 
+export const ACCEPTED_COMPOSER_ATTACHMENTS = [
+  ACCEPTED_LOCAL_KNOWLEDGE_FILES,
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif"
+].join(",");
+
 export const utilityItems = [
   { label: "Departments", icon: GitBranch },
   { label: "Connectors", icon: PuzzlePiece },

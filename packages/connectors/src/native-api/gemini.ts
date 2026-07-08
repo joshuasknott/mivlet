@@ -25,6 +25,7 @@ interface GeminiChunk {
     finishReason?: string;
   }>;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  error?: { message?: string };
 }
 
 /** Shape a normalized request into the Gemini generateContent body. */
@@ -94,7 +95,7 @@ export function parseGeminiLine(
   } catch {
     return [{ type: "error", message: "Unparseable Gemini chunk." }];
   }
-  if (chunk && typeof chunk === "object" && "error" in (chunk as any)) {
+  if (chunk?.error) {
     return [{ type: "error", message: "Provider error." }];
   }
 

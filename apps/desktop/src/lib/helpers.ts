@@ -81,6 +81,15 @@ export function readFileAsText(file: File) {
   });
 }
 
+export function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Fable could not preview that file."));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function toSlug(value: string) {
   return value
     .toLowerCase()

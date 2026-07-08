@@ -151,6 +151,29 @@ export function catalogueCapabilities(
 }
 
 /**
+ * Conservative execution ceilings for generation models returned by a live
+ * provider list but not yet present in the curated catalogue. Rust filters the
+ * list-models response down to generation-capable ids first; these defaults let
+ * newly released chat models run while keeping token/tool assumptions modest.
+ */
+export function defaultDiscoveredCapabilities(
+  providerId: string
+): ModelCapabilities | undefined {
+  if (!["openai", "anthropic", "gemini", "xai", "openrouter"].includes(providerId)) {
+    return undefined;
+  }
+  return {
+    contextWindow: 128_000,
+    maxOutputTokens: 4_096,
+    streaming: true,
+    tools: false,
+    vision: false,
+    reasoning: false,
+    structuredOutput: false
+  };
+}
+
+/**
  * Resolve the capabilities to use for a run. Prefers the model entry's own
  * capabilities (set from discovery metadata) and falls back to the curated
  * catalogue. Returns `undefined` when neither source knows the model.

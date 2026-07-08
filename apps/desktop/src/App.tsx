@@ -23,6 +23,54 @@ import { CitationResults, DirectiveCards } from "./components/workspace-cards";
 import { tabs as settingsTabs } from "./components/pages/settings-tabs";
 import type { SettingsTab } from "./components/pages/settings-tabs";
 
+type ConversationMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
+function messageId(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function parsedModelVersion(modelId: string, prefix: string) {
+  const match = modelId.toLowerCase().match(new RegExp(`^${prefix}-?(\\d+)(?:\\.(\\d+))?`));
+  if (!match) return null;
+  return Number(match[1]) * 100 + Number(match[2] ?? 0);
+}
+
+function composerModelsFor(providerId: string | undefined, models: { id: string; label: string; available: boolean }[]) {
+  const available = models.filter((model) => model.available);
+  if (available.length === 0) return [];
+  if (providerId === "openai") {
+    const hasGpt5 = available.some((model) => model.id.toLowerCase().startsWith("gpt-5"));
+    if (hasGpt5) {
+      const preferred = available.filter((model) => {
+        const id = model.id.toLowerCase();
+        return id.startsWith("gpt-5") || /^o[3-9]/.test(id);
+      });
+      if (preferred.length > 0) return preferred;
+    }
+    const hasGpt4 = available.some((model) => model.id.toLowerCase().startsWith("gpt-4"));
+    if (hasGpt4) {
+      return available.filter((model) => !model.id.toLowerCase().startsWith("gpt-3.5"));
+    }
+  }
+  if (providerId === "gemini") {
+    const versioned = available
+      .map((model) => ({ model, version: parsedModelVersion(model.id, "gemini") }))
+      .filter((entry): entry is { model: (typeof available)[number]; version: number } => entry.version !== null);
+    const maxVersion = Math.max(...versioned.map((entry) => entry.version), 0);
+    if (maxVersion > 0) {
+      const preferred = versioned
+        .filter((entry) => entry.version === maxVersion)
+        .map((entry) => entry.model);
+      if (preferred.length > 0) return preferred;
+    }
+  }
+  return available.slice(0, 24);
+}
+
 // Standalone pages are code-split: each is only rendered when navigated to, so
 // loading them lazily keeps the initial workspace bundle small. Named exports
 // are adapted to the lazy() default-export contract via `.then`. Suspense
@@ -72,6 +120,9 @@ function AppShell() {
   const approvalGate = useMemo(() => createApprovalGate(), []);
   const runtime = useShellRuntime({ approvalGate });
   const [profile, setProfile] = useState(profileFixture);
+  const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+  const activeAssistantMessageId = useRef<string | null>(null);
+  const projectFolderInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceName = `${profile.name.split(" ")[0]}'s Fable`;
   // Re-sync the shell's standing grants into the gate so session/rule grants
   // auto-satisfy matching tool calls without re-prompting.
@@ -117,7 +168,7 @@ function AppShell() {
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
 
   const voice = useVoice(voiceProvider, addDictationToComposer, {
-    disabled: !runtime.voiceEnabled,
+    disabled: false,
     onCancel: focusComposerAfterVoice
   });
 
@@ -227,6 +278,47 @@ function AppShell() {
       ),
     [runtime.connectorManifests]
   );
+  const composerModels = useMemo(
+    () => composerModelsFor(runtime.connectedAgentBackend?.id, runtime.selectableModels),
+    [runtime.connectedAgentBackend?.id, runtime.selectableModels]
+  );
+  const resolvedComposerModelId = useMemo(() => {
+    if (
+      runtime.selectedModelId &&
+      composerModels.some((model) => model.id === runtime.selectedModelId)
+    ) {
+      return runtime.selectedModelId;
+    }
+    return composerModels[0]?.id ?? runtime.resolvedSelectedModelId;
+  }, [composerModels, runtime.resolvedSelectedModelId, runtime.selectedModelId]);
+
+  const appendConversationMessage = (role: ConversationMessage["role"], content: string) => {
+    const id = messageId(role);
+    setConversationMessages((current) => [...current, { id, role, content }]);
+    return id;
+  };
+
+  useEffect(() => {
+    const assistantId = activeAssistantMessageId.current;
+    if (!assistantId) return;
+    const fallback =
+      agent.state.status === "awaiting-approval"
+        ? "Waiting for approval."
+        : agent.state.running
+          ? "Working..."
+          : agent.state.lastError
+            ? agent.state.lastError
+            : "";
+    const content = agent.state.transcript || fallback;
+    setConversationMessages((current) =>
+      current.map((message) =>
+        message.id === assistantId ? { ...message, content } : message
+      )
+    );
+    if (!agent.state.running && agent.state.status !== "streaming" && agent.state.status !== "awaiting-approval") {
+      activeAssistantMessageId.current = null;
+    }
+  }, [agent.state.lastError, agent.state.running, agent.state.status, agent.state.transcript]);
 
   // Recoverable runs scoped to the active thread. Hoisted + memoized so the
   // agent panel does not re-filter the full recoverable list on every render
@@ -266,6 +358,22 @@ function AppShell() {
     }
   };
 
+  const renderConversation = () => {
+    if (conversationMessages.length === 0) return null;
+    return (
+      <section className="conversation-feed" aria-label="Conversation">
+        {conversationMessages.map((message) => (
+          <article
+            key={message.id}
+            className={`conversation-message conversation-message--${message.role}`}
+          >
+            <p>{message.content}</p>
+          </article>
+        ))}
+      </section>
+    );
+  };
+
   const renderChatContext = () => {
     const visibleAgentError = agent.state.noTransport ? null : agent.state.lastError;
 
@@ -279,7 +387,7 @@ function AppShell() {
                 type="button"
                 className={`connector-pill connector-pill--${connector.id}`}
                 onClick={() => {
-                  const prompt = `Use ${connector.name} to `;
+                  const prompt = `Use @${connector.id} to `;
                   runtime.setComposerValue(prompt);
                   runtime.focusComposer(prompt);
                 }}
@@ -326,8 +434,7 @@ function AppShell() {
             onUseDirective={runtime.useDirective}
           />
         ) : null}
-        {agent.state.transcript ||
-        agent.state.usage ||
+        {agent.state.usage ||
         visibleAgentError ||
         agent.state.running ||
         visibleRecoverableRuns.length > 0 ? (
@@ -338,14 +445,17 @@ function AppShell() {
                   {run.status === "interrupted" ? "Interrupted" : "Failed"} run · {run.model}
                   {run.transcript ? ` · ${run.transcript.slice(0, 120)}` : ""}
                 </p>
-                <button type="button" onClick={() => void agent.retry(run)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    activeAssistantMessageId.current = appendConversationMessage("assistant", "Working...");
+                    void agent.retry(run);
+                  }}
+                >
                   Retry from prompt
                 </button>
               </div>
             ))}
-            {agent.state.transcript ? (
-              <p className="agent-panel__transcript">{agent.state.transcript}</p>
-            ) : null}
             {agent.state.usage ? (
               <p className="agent-panel__usage">
                 {agent.state.usage.inputTokens} in · {agent.state.usage.outputTokens} out · $
@@ -389,9 +499,9 @@ function AppShell() {
   // model selection actually changes.
   const modelChipLabel = useMemo(
     () =>
-      runtime.selectableModels.find((model) => model.id === runtime.resolvedSelectedModelId)?.label ??
+      composerModels.find((model) => model.id === resolvedComposerModelId)?.label ??
       "Select model",
-    [runtime.selectableModels, runtime.resolvedSelectedModelId]
+    [composerModels, resolvedComposerModelId]
   );
 
   // Settings nav search filter. Memoized (and kept above the onboarding early
@@ -411,6 +521,9 @@ function AppShell() {
    * through to the normal prompt path unchanged.
    */
   async function submitComposerText(rawText: string) {
+    const submitted = rawText.trim();
+    if (!submitted) return;
+    appendConversationMessage("user", submitted);
     const outcome = parseComposerText(rawText);
     if (outcome.status === "command") {
       const result = await runtime.runFableCommand(outcome.request);
@@ -418,12 +531,13 @@ function AppShell() {
       // as ordinary prompt text. A follow-up prompt (if any) is submitted
       // through the same agent path as a normal prompt.
       runtime.setComposerValue("");
+      appendConversationMessage("assistant", result.message);
       if (result.status === "ok" && result.followUpPrompt) {
-        runPrompt(result.followUpPrompt);
+        runPrompt(result.followUpPrompt, { appendUserMessage: false });
       }
       return;
     }
-    runPrompt(rawText);
+    runPrompt(submitted, { appendUserMessage: false });
   }
 
   function focusComposerAfterVoice() {
@@ -446,29 +560,36 @@ function AppShell() {
     });
   }
 
-  function runPrompt(rawPrompt: string) {
+  function runPrompt(rawPrompt: string, options: { appendUserMessage?: boolean } = {}) {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
+    if (options.appendUserMessage !== false) {
+      appendConversationMessage("user", prompt);
+    }
+    runtime.setComposerValue("");
     const nativeConnected = runtime.connectedAgentBackend;
     if (!nativeConnected) {
       runtime.submitPrompt(prompt);
+      runtime.setComposerValue("");
       return;
     }
     const validation = validateModelSelection(
       nativeConnected.id,
-      runtime.resolvedSelectedModelId,
+      resolvedComposerModelId,
       runtime.selectableModels,
       2048
     );
     if (!validation.ok) {
       agent.reportError(validation.error ?? "The selected model cannot run.");
+      appendConversationMessage("assistant", validation.error ?? "The selected model cannot run.");
       return;
     }
     const request = buildAgentRequest({
-      model: runtime.resolvedSelectedModelId,
+      model: resolvedComposerModelId,
       prompt,
       maxTokens: validation.maxTokens
     });
+    activeAssistantMessageId.current = appendConversationMessage("assistant", "Working...");
     cancelRequestedRef.current = false;
     void runtime.assembleKnowledgeContext(prompt).then((contextPrefix) =>
       agent.run(request, contextPrefix || undefined, runtime.permissionMode)
@@ -592,11 +713,20 @@ function AppShell() {
         onNavigateBack={() => navigateHistory(-1)}
         onNavigateForward={() => navigateHistory(1)}
         onCloseSettings={closeSettingsModal}
-        onNewChat={runtime.startNewChat}
+        onNewChat={() => {
+          activeAssistantMessageId.current = null;
+          setConversationMessages([]);
+          runtime.startNewChat();
+        }}
         onAddProject={() => {
           runtime.setActiveItem("new-thread");
-          runtime.setLastAction("New project ready");
-          runtime.focusComposer("Create a project for ");
+          runtime.setLastAction("New project from scratch ready");
+          runtime.focusComposer("Start a new project from scratch: ");
+        }}
+        onOpenProjectFolder={() => {
+          runtime.setActiveItem("new-thread");
+          runtime.setLastAction("Choose a project folder");
+          projectFolderInputRef.current?.click();
         }}
         onSearch={() => {
           runtime.setLastAction("Search ready");
@@ -648,6 +778,28 @@ function AppShell() {
           runtime.setLastAction(`${page} selected`);
         }}
       />
+      <input
+        ref={(node) => {
+          projectFolderInputRef.current = node;
+          node?.setAttribute("webkitdirectory", "");
+          node?.setAttribute("directory", "");
+        }}
+        className="sr-only"
+        type="file"
+        multiple
+        aria-label="Open project folder"
+        onChange={(event) => {
+          const firstFile = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          const folderName =
+            firstFile?.webkitRelativePath.split("/")[0] ||
+            firstFile?.name ||
+            "selected folder";
+          const prompt = `Open the ${folderName} folder as a project: `;
+          runtime.focusComposer(prompt);
+          runtime.setLastAction(`Project folder selected: ${folderName}`);
+        }}
+      />
 
       <section className="workspace" aria-label="Fable workspace">
         {runtime.activePage && !isSettingsActive ? (
@@ -656,6 +808,7 @@ function AppShell() {
           </div>
         ) : (
           <div className="workspace-center workspace-center--composer">
+            {renderConversation()}
             <Composer
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
@@ -694,11 +847,11 @@ function AppShell() {
                 runtime.setLastAction(`${tool} selected`);
               }}
               onRunCommand={runtime.runCommand}
-              onFileChange={runtime.handleLocalKnowledgeFileChange}
+              onFileChange={runtime.handleComposerAttachmentChange}
 
               importStatus={runtime.importStatus}
-              models={runtime.selectableModels}
-              selectedModelId={runtime.resolvedSelectedModelId}
+              models={composerModels}
+              selectedModelId={resolvedComposerModelId}
               selectedModelLabel={modelChipLabel}
               onSelectModel={runtime.selectModel}
               permissionLabel={runtime.permissionLabel}
@@ -707,6 +860,8 @@ function AppShell() {
               inThread={!!runtime.activeThread}
               connectedConnectors={connectedConnectorCards}
               knowledgeSources={runtime.workspaceKnowledgeSources}
+              attachments={runtime.composerAttachments}
+              onRemoveAttachment={runtime.removeComposerAttachment}
             />
 
             {renderChatContext()}

@@ -215,7 +215,7 @@ describe("Fable persistence secret boundary", () => {
     expect(serialized).not.toContain('"apiKey"');
   });
 
-  it("keeps dictation opt-in conservative and never adds audio or transcript fields", () => {
+  it("defaults dictation to available while preserving explicit opt-out and no audio fields", () => {
     const snapshot = shellStateToRuntimeSnapshot(defaultState);
     expect(snapshot.voiceEnabled).toBe(false);
     expect(JSON.stringify(snapshot)).not.toMatch(/"audio"|"transcript"/i);
@@ -226,18 +226,24 @@ describe("Fable persistence secret boundary", () => {
         legacySnapshot as typeof snapshot,
         { ...defaultState, voiceEnabled: true }
       ).voiceEnabled
-    ).toBe(false);
+    ).toBe(true);
 
     expect(
       shellStateFromRuntimeSnapshot(
         { ...snapshot, voiceEnabled: "true" as never },
         { ...defaultState, voiceEnabled: true }
       ).voiceEnabled
-    ).toBe(false);
+    ).toBe(true);
 
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ ...defaultState, voiceEnabled: "false" })
+    );
+    expect(readPersistedShellState({ ...defaultState, voiceEnabled: true }).voiceEnabled).toBe(true);
+
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...defaultState, voiceEnabled: false })
     );
     expect(readPersistedShellState({ ...defaultState, voiceEnabled: true }).voiceEnabled).toBe(false);
   });

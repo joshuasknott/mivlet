@@ -60,7 +60,7 @@ describe("mergeDiscoveredModels", () => {
     expect(merged.every((m) => m.available === false)).toBe(true);
   });
 
-  it("surfaces but disables a newly discovered id whose execution capabilities are unknown", () => {
+  it("enables a newly discovered generation id with conservative default capabilities", () => {
     const merged = mergeDiscoveredModels({
       providerId: "openai",
       catalogueModels,
@@ -69,9 +69,14 @@ describe("mergeDiscoveredModels", () => {
       discoveryRan: true
     });
     const future = merged.find((m) => m.id === "gpt-6-future");
-    expect(future?.available).toBe(false);
+    expect(future?.available).toBe(true);
     expect(future?.label).toBe("gpt-6-future");
-    expect(future?.capabilities).toBeUndefined();
+    expect(future?.capabilities).toMatchObject({
+      contextWindow: 128_000,
+      maxOutputTokens: 4_096,
+      streaming: true,
+      tools: false
+    });
   });
 
   it("respects an explicit unavailable flag from discovery (e.g. Gemini embeddings)", () => {

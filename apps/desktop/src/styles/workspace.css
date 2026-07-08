@@ -116,6 +116,49 @@ kbd {
   width: min(100% - 48px, 1040px);
 }
 
+.conversation-feed {
+  display: grid;
+  gap: 12px;
+  width: min(100%, 840px);
+  margin: 0 auto 18px;
+}
+
+.conversation-message {
+  display: flex;
+  width: 100%;
+}
+
+.conversation-message p {
+  max-width: min(720px, 86%);
+  margin: 0;
+  padding: 12px 14px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  font-size: var(--text-14);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.conversation-message--user {
+  justify-content: flex-end;
+}
+
+.conversation-message--user p {
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.conversation-message--assistant {
+  justify-content: flex-start;
+}
+
+.conversation-message--assistant p {
+  background: var(--surface-raised);
+}
+
 .hero {
   display: flex;
   flex-direction: column;

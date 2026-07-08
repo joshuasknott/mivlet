@@ -81,6 +81,7 @@ import {
   searchKnowledgeSources,
   nextOccurrence,
   shapeWorkflowNotification,
+  SUPPORTED_LOCAL_FILE_EXTENSIONS,
   executeCommand,
   evaluatePermissionPolicy,
   DEFAULT_CUSTOM_APPROVAL_SETTINGS,
@@ -173,12 +174,14 @@ import {
   type PendingApprovalConfirmation,
   type PersistedShellState,
   type Schedule,
-  type Weekday
+  type Weekday,
+  type ComposerAttachment
 } from "../lib/types";
 import {
   importedSourceDirective,
   mergeKnowledgeSources,
   prependAuditEntry,
+  readFileAsDataUrl,
   readFileAsText,
   toSlug
 } from "../lib/helpers";
@@ -207,7 +210,7 @@ import type { ModelDiscoveryOutcome } from "../lib/backend-state";
 const defaultShellState: PersistedShellState = {
   activeItem: "new-chat",
   composerValue: "",
-  voiceEnabled: false,
+  voiceEnabled: true,
   approvalAudit: [],
   dismissedApprovalIds: [],
   approvalRules: [],
@@ -416,6 +419,7 @@ export interface ShellRuntime {
   toolPickerOpen: boolean;
   commandOpen: boolean;
   importStatus: string | null;
+  composerAttachments: ComposerAttachment[];
   knowledgeCitations: KnowledgeCitation[];
   knowledgeSearchMode: string;
   composerRef: React.MutableRefObject<HTMLTextAreaElement | null>;
@@ -423,7 +427,9 @@ export interface ShellRuntime {
   folderInputRef: React.MutableRefObject<HTMLInputElement | null>;
   submitComposer: (event: FormEvent) => void;
   submitPrompt: (prompt: string) => void;
+  removeComposerAttachment: (attachmentId: string) => void;
   handleLocalKnowledgeFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  handleComposerAttachmentChange: (event: ChangeEvent<HTMLInputElement>) => void;
   handleLocalKnowledgeFolderChange: (event: ChangeEvent<HTMLInputElement>) => void;
   triggerFolderImport: () => void;
   focusComposer: (value: string) => void;
@@ -839,6 +845,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [knowledgeCitations, setKnowledgeCitations] = useState<KnowledgeCitation[]>([]);
   const [knowledgeSearchMode, setKnowledgeSearchMode] = useState("lexical-fallback");
   const [importStatus, setImportStatus] = useState<string | null>(null);
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
   const [connectorManifests, setConnectorManifests] =
     useState<ConnectorManifest[]>(connectors);
   const [connectorAccounts, setConnectorAccounts] = useState<Record<string, ConnectorAccountOption[]>>({});
@@ -1511,7 +1518,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const triggerAttach = () => {
-    setImportStatus("Choose a text, Markdown, JSON, CSV, or YAML file.");
+    setImportStatus("Choose files or images to attach.");
     fileInputRef.current?.click();
   };
 
@@ -1572,6 +1579,76 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setLastAction(message);
       return false;
     }
+  };
+
+  const supportedKnowledgeExtensions = useMemo(
+    () => new Set(SUPPORTED_LOCAL_FILE_EXTENSIONS.map((extension) => extension.toLowerCase())),
+    []
+  );
+
+  const attachmentIdFor = (file: File) =>
+    `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${toSlug(file.name)}`;
+
+  const isKnowledgeAttachment = (file: File) => {
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    return Boolean(extension && supportedKnowledgeExtensions.has(extension));
+  };
+
+  const updateComposerAttachment = (id: string, patch: Partial<ComposerAttachment>) => {
+    setComposerAttachments((current) =>
+      current.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...patch } : attachment
+      )
+    );
+  };
+
+  const addComposerAttachment = async (file: File) => {
+    const id = attachmentIdFor(file);
+    const attachment: ComposerAttachment = {
+      id,
+      name: file.name,
+      type: file.type,
+      sizeBytes: file.size,
+      status: file.type.startsWith("image/") ? "Previewing" : "Attached"
+    };
+    setComposerAttachments((current) => [attachment, ...current].slice(0, 12));
+
+    if (file.type.startsWith("image/")) {
+      try {
+        const previewUrl = await readFileAsDataUrl(file);
+        updateComposerAttachment(id, { previewUrl, status: "Attached" });
+      } catch (error) {
+        updateComposerAttachment(id, {
+          status: error instanceof Error ? error.message : "Preview unavailable"
+        });
+      }
+      setImportStatus(`${file.name} attached.`);
+      return;
+    }
+
+    if (isKnowledgeAttachment(file)) {
+      updateComposerAttachment(id, { status: "Indexing" });
+      const imported = await importLocalKnowledgeFile(file);
+      updateComposerAttachment(id, {
+        status: imported ? "Imported as knowledge" : "Attached"
+      });
+      return;
+    }
+
+    setImportStatus(`${file.name} attached.`);
+  };
+
+  const handleComposerAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    if (files.length === 0) return;
+    void Promise.all(files.map((file) => addComposerAttachment(file)));
+  };
+
+  const removeComposerAttachment = (attachmentId: string) => {
+    setComposerAttachments((current) =>
+      current.filter((attachment) => attachment.id !== attachmentId)
+    );
   };
 
   const handleLocalKnowledgeFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -3525,6 +3602,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     toolPickerOpen,
     commandOpen,
     importStatus,
+    composerAttachments,
     knowledgeCitations,
     knowledgeSearchMode,
     composerRef,
@@ -3532,7 +3610,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     folderInputRef,
     submitComposer,
     submitPrompt,
+    removeComposerAttachment,
     handleLocalKnowledgeFileChange,
+    handleComposerAttachmentChange,
     handleLocalKnowledgeFolderChange,
     focusComposer,
     useDirective,

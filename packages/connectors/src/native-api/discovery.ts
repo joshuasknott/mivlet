@@ -17,7 +17,7 @@
  */
 
 import type { BackendModel, ModelCapabilities } from "@fable/protocol";
-import { catalogueCapabilities } from "./model-catalogue";
+import { catalogueCapabilities, defaultDiscoveredCapabilities } from "./model-catalogue";
 
 /** A model id the provider's list-models endpoint returned. */
 export interface DiscoveredModel {
@@ -70,8 +70,12 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
       available:
         model.available &&
         (model.capabilities !== undefined ||
-          catalogueCapabilities(providerId, model.id) !== undefined),
-      capabilities: model.capabilities ?? catalogueCapabilities(providerId, model.id)
+          catalogueCapabilities(providerId, model.id) !== undefined ||
+          defaultDiscoveredCapabilities(providerId) !== undefined),
+      capabilities:
+        model.capabilities ??
+        catalogueCapabilities(providerId, model.id) ??
+        defaultDiscoveredCapabilities(providerId)
     });
   }
 

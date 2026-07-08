@@ -342,6 +342,47 @@
   background: var(--surface-raised);
 }
 
+.nav-group-add-wrap {
+  position: relative;
+}
+
+.project-create-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 3px;
+  min-width: 178px;
+  padding: 6px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-2);
+}
+
+.project-create-menu button {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 8px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-1);
+  font-size: var(--text-13);
+  text-align: left;
+}
+
+.project-create-menu button:hover,
+.project-create-menu button:focus-visible {
+  background: var(--surface-hover);
+  outline: none;
+}
+
 .nav-group-heading:hover {
   color: var(--ink);
   background: var(--surface-raised);

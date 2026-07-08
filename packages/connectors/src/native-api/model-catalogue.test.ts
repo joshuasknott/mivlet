@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BackendModel } from "@fable/protocol";
 import {
   catalogueCapabilities,
+  defaultDiscoveredCapabilities,
   MAX_TOKENS_DEFAULT,
   resolveModelCapabilities,
   validateModelForRun
@@ -40,6 +41,18 @@ describe("catalogueCapabilities", () => {
         expect(catalogueCapabilities(provider, id), `${provider}/${id}`).toBeDefined();
       }
     }
+  });
+});
+
+describe("defaultDiscoveredCapabilities", () => {
+  it("provides conservative defaults for known native providers only", () => {
+    expect(defaultDiscoveredCapabilities("openai")).toMatchObject({
+      contextWindow: 128_000,
+      maxOutputTokens: 4_096,
+      streaming: true,
+      tools: false
+    });
+    expect(defaultDiscoveredCapabilities("made-up")).toBeUndefined();
   });
 });
 
