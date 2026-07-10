@@ -32,10 +32,12 @@ const limits = Object.entries(manifest.limits ?? {}).sort(([left], [right]) => l
 if (!limits.length) fail("missing required numeric limits");
 for (const [name, value] of limits) {
   if (!Number.isSafeInteger(value) || value < 1) fail(`limit ${name} must be a positive integer`);
-  if (spine.ArtifactsAndRoutines[name] !== value) fail(`limit ${name} differs from the manifest`);
+  const owners = Object.entries(spine).filter(([, family]) => family?.[name] !== undefined);
+  if (owners.length !== 1) fail(`limit ${name} must be exported by exactly one family`);
+  if (owners[0][1][name] !== value) fail(`limit ${name} differs from the manifest`);
 }
 
-const requiredFamilies = ["Identity", "Connections", "Missions", "ArtifactsAndRoutines"];
+const requiredFamilies = ["Identity", "Connections", "Missions", "Conversations", "ArtifactsAndRoutines"];
 if (!Array.isArray(manifest.families) || manifest.families.length !== requiredFamilies.length) fail("missing required family");
 const suppliedFamilies = manifest.families.map(({ name }) => name);
 if (new Set(suppliedFamilies).size !== suppliedFamilies.length || requiredFamilies.some((name) => !suppliedFamilies.includes(name))) {
