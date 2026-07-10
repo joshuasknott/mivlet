@@ -961,85 +961,95 @@ CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace ON workflow_run(workspace_
 CREATE INDEX IF NOT EXISTS idx_workflow_run_definition ON workflow_run(workspace_id, definition_id);
 CREATE INDEX IF NOT EXISTS idx_workflow_run_status ON workflow_run(status);
 
--- Optional shared workspace sync skeleton. These rows are local runtime state
--- and pending encrypted payloads, not portable solo archive content.
+-- Local Fable control-plane mirror. Convex remains canonical; these records
+-- only support display, offline authorization facts, and replay-safe sync.
+CREATE TABLE IF NOT EXISTS fable_internal_user_mirror (
+  internal_user_id TEXT PRIMARY KEY, status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,
+  display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '',
+  email_hint TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fable_workspace_mirror (
+  fable_workspace_id TEXT PRIMARY KEY,
+  local_workspace_id TEXT NOT NULL UNIQUE REFERENCES workspace(id) ON DELETE CASCADE,
+  status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, policy_revision INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fable_membership_mirror (
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL, internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
+  role TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+  PRIMARY KEY (fable_workspace_id, member_id), UNIQUE (fable_workspace_id, internal_user_id)
+);
+CREATE TABLE IF NOT EXISTS fable_device_mirror (
+  device_id TEXT PRIMARY KEY, internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
+  status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'desktop',
+  label TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fable_workspace_device_mirror (
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL REFERENCES fable_device_mirror(device_id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
+  PRIMARY KEY (fable_workspace_id, device_id)
+);
+CREATE TABLE IF NOT EXISTS cloud_workspace_link_legacy_clerk_org (
+  local_workspace_id TEXT PRIMARY KEY, clerk_org_id TEXT NOT NULL, migrated_at TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT 'v7 compatibility only; not an authorization or tenancy key'
+);
 CREATE TABLE IF NOT EXISTS cloud_workspace_link (
   local_workspace_id TEXT PRIMARY KEY REFERENCES workspace(id) ON DELETE CASCADE,
-  cloud_workspace_id TEXT NOT NULL,
-  clerk_org_id TEXT NOT NULL,
-  role TEXT NOT NULL,
-  sync_state TEXT NOT NULL,
-  linked_device_id TEXT NOT NULL,
-  last_accepted_revision INTEGER NOT NULL DEFAULT 0,
-  linked_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  fable_workspace_id TEXT NOT NULL UNIQUE REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
+  member_id TEXT NOT NULL, device_id TEXT NOT NULL, role TEXT NOT NULL, sync_state TEXT NOT NULL,
+  last_accepted_revision INTEGER NOT NULL DEFAULT 0, linked_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  FOREIGN KEY (fable_workspace_id, member_id) REFERENCES fable_membership_mirror(fable_workspace_id, member_id),
+  FOREIGN KEY (fable_workspace_id, device_id) REFERENCES fable_workspace_device_mirror(fable_workspace_id, device_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_workspace_link_cloud
-  ON cloud_workspace_link(cloud_workspace_id);
-CREATE INDEX IF NOT EXISTS idx_cloud_workspace_link_state
-  ON cloud_workspace_link(sync_state);
-
+CREATE INDEX IF NOT EXISTS idx_cloud_workspace_link_state ON cloud_workspace_link(sync_state);
 CREATE TABLE IF NOT EXISTS cloud_sync_cursor (
   local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  device_id TEXT NOT NULL,
-  last_pulled_revision INTEGER NOT NULL DEFAULT 0,
-  last_realtime_sequence INTEGER NOT NULL DEFAULT 0,
-  last_successful_sync_at TEXT NOT NULL DEFAULT '',
-  PRIMARY KEY (local_workspace_id, device_id)
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL, last_pulled_revision INTEGER NOT NULL DEFAULT 0,
+  last_realtime_sequence INTEGER NOT NULL DEFAULT 0, last_successful_sync_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (local_workspace_id, device_id), UNIQUE (fable_workspace_id, device_id)
 );
-
 CREATE TABLE IF NOT EXISTS cloud_mutation_outbox (
-  local_mutation_id TEXT PRIMARY KEY,
-  idempotency_key TEXT NOT NULL UNIQUE,
+  local_mutation_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
   local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  cloud_workspace_id TEXT NOT NULL,
-  device_id TEXT NOT NULL,
-  client_mutation_id TEXT NOT NULL,
-  base_revision INTEGER NOT NULL,
-  record_type TEXT NOT NULL,
-  record_id TEXT NOT NULL,
-  operation TEXT NOT NULL,
-  status TEXT NOT NULL,
-  attempt_count INTEGER NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  internal_user_id TEXT NOT NULL, member_id TEXT NOT NULL, device_id TEXT NOT NULL,
+  client_mutation_id TEXT NOT NULL, base_revision INTEGER NOT NULL, accepted_revision INTEGER NOT NULL DEFAULT 0,
+  record_type TEXT NOT NULL, record_id TEXT NOT NULL, operation TEXT NOT NULL, status TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT '', attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  UNIQUE (fable_workspace_id, device_id, client_mutation_id)
 );
-CREATE INDEX IF NOT EXISTS idx_cloud_outbox_workspace_status
-  ON cloud_mutation_outbox(local_workspace_id, status, created_at);
-CREATE INDEX IF NOT EXISTS idx_cloud_outbox_cloud_workspace
-  ON cloud_mutation_outbox(cloud_workspace_id, status);
-
+CREATE INDEX IF NOT EXISTS idx_cloud_outbox_workspace_status ON cloud_mutation_outbox(local_workspace_id, status, created_at);
 CREATE TABLE IF NOT EXISTS cloud_record_shadow (
   local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  cloud_workspace_id TEXT NOT NULL,
-  record_type TEXT NOT NULL,
-  record_id TEXT NOT NULL,
-  server_revision INTEGER NOT NULL,
-  content_fingerprint TEXT NOT NULL,
-  deleted_at TEXT NOT NULL DEFAULT '',
-  conflict_id TEXT NOT NULL DEFAULT '',
-  updated_at TEXT NOT NULL,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL, record_id TEXT NOT NULL, server_revision INTEGER NOT NULL,
+  sync_state TEXT NOT NULL DEFAULT 'accepted', content_fingerprint TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT '', conflict_id TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
   PRIMARY KEY (local_workspace_id, record_type, record_id)
 );
-CREATE INDEX IF NOT EXISTS idx_cloud_shadow_workspace_revision
-  ON cloud_record_shadow(local_workspace_id, server_revision);
-
+CREATE INDEX IF NOT EXISTS idx_cloud_shadow_workspace_revision ON cloud_record_shadow(local_workspace_id, server_revision);
 CREATE TABLE IF NOT EXISTS cloud_conflict (
-  id TEXT PRIMARY KEY,
-  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  cloud_workspace_id TEXT NOT NULL,
-  local_mutation_id TEXT NOT NULL,
-  record_type TEXT NOT NULL,
-  record_id TEXT NOT NULL,
-  reason_code TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  id TEXT PRIMARY KEY, local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  local_mutation_id TEXT NOT NULL, record_type TEXT NOT NULL, record_id TEXT NOT NULL,
+  base_revision INTEGER NOT NULL DEFAULT 0, server_revision INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NOT NULL DEFAULT '', reason_code TEXT NOT NULL, created_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace
-  ON cloud_conflict(local_workspace_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace ON cloud_conflict(local_workspace_id, created_at);
+CREATE TABLE IF NOT EXISTS cloud_record_tombstone (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL, record_id TEXT NOT NULL, deleted_at TEXT NOT NULL,
+  server_revision INTEGER NOT NULL, accepted_at TEXT NOT NULL,
+  PRIMARY KEY (local_workspace_id, record_type, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_tombstone_workspace_revision ON cloud_record_tombstone(local_workspace_id, server_revision);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (

@@ -2654,28 +2654,58 @@ mod tests {
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         a.transaction(|tx| {
             tx.execute(
+                "INSERT INTO fable_internal_user_mirror
+                   (internal_user_id,status,revision,updated_at)
+                 VALUES ('user-a','active',7,'t');",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO fable_workspace_mirror
+                   (fable_workspace_id,local_workspace_id,status,revision,policy_revision,updated_at)
+                 VALUES ('cloud-ws-secret','default','active',7,0,'t');",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO fable_membership_mirror
+                   (fable_workspace_id,member_id,internal_user_id,role,status,revision,updated_at)
+                 VALUES ('cloud-ws-secret','member-a','user-a','owner','active',7,'t');",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO fable_device_mirror
+                   (device_id,internal_user_id,status,revision,updated_at)
+                 VALUES ('device-a','user-a','active',7,'t');",
+                [],
+            )?;
+            tx.execute(
+                "INSERT INTO fable_workspace_device_mirror
+                   (fable_workspace_id,device_id,member_id,status,revision,updated_at)
+                 VALUES ('cloud-ws-secret','device-a','member-a','active',7,'t');",
+                [],
+            )?;
+            tx.execute(
                 "INSERT INTO cloud_workspace_link (
-                   local_workspace_id, cloud_workspace_id, clerk_org_id, role,
-                   sync_state, linked_device_id, last_accepted_revision, linked_at, updated_at
-                 ) VALUES ('default','cloud-ws-secret','org-a','owner','active','device-a',7,'t','t');",
+                   local_workspace_id, fable_workspace_id, internal_user_id, member_id,
+                   device_id, role, sync_state, last_accepted_revision, linked_at, updated_at
+                 ) VALUES ('default','cloud-ws-secret','user-a','member-a','device-a','owner','active',7,'t','t');",
                 [],
             )?;
             tx.execute(
                 "INSERT INTO cloud_sync_cursor (
-                   local_workspace_id, device_id, last_pulled_revision,
+                   local_workspace_id, fable_workspace_id, device_id, last_pulled_revision,
                    last_realtime_sequence, last_successful_sync_at
-                 ) VALUES ('default','device-a',7,1,'t');",
+                 ) VALUES ('default','cloud-ws-secret','device-a',7,1,'t');",
                 [],
             )?;
             let sealed = a.seal_json_owned(&serde_json::json!({"name":"Shared"}), "cloud_mutation_outbox:m1")?;
             tx.execute(
                 "INSERT INTO cloud_mutation_outbox (
                    local_mutation_id, idempotency_key, local_workspace_id,
-                   cloud_workspace_id, device_id, client_mutation_id, base_revision,
+                   fable_workspace_id, internal_user_id, member_id, device_id, client_mutation_id, base_revision,
                    record_type, record_id, operation, status, attempt_count,
                    created_at, updated_at, payload, payload_nonce
                  ) VALUES ('m1','cloud-ws-secret:device-a:c1','default','cloud-ws-secret',
-                   'device-a','c1',7,'project','p1','update','queued',0,'t','t',?1,?2);",
+                   'user-a','member-a','device-a','c1',7,'project','p1','update','pending',0,'t','t',?1,?2);",
                 rusqlite::params![sealed.ciphertext, sealed.nonce],
             )?;
             Ok(())
@@ -2693,11 +2723,17 @@ mod tests {
         let json = serde_json::to_string(&manifest).unwrap();
         import_workspace(&b, &json, ImportOptions::default()).unwrap();
         for table in [
+            "fable_internal_user_mirror",
+            "fable_workspace_mirror",
+            "fable_membership_mirror",
+            "fable_device_mirror",
+            "fable_workspace_device_mirror",
             "cloud_workspace_link",
             "cloud_sync_cursor",
             "cloud_mutation_outbox",
             "cloud_record_shadow",
             "cloud_conflict",
+            "cloud_record_tombstone",
         ] {
             assert_eq!(count(&b, table), 0, "{table} must not import cloud state");
         }

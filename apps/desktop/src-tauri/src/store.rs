@@ -622,10 +622,17 @@ pub fn delete_local_data(
                  DELETE FROM workflow_definition;
                  DELETE FROM workflow_run;
                  DELETE FROM cloud_conflict;
+                 DELETE FROM cloud_record_tombstone;
                  DELETE FROM cloud_record_shadow;
                  DELETE FROM cloud_mutation_outbox;
                  DELETE FROM cloud_sync_cursor;
                  DELETE FROM cloud_workspace_link;
+                 DELETE FROM cloud_workspace_link_legacy_clerk_org;
+                 DELETE FROM fable_workspace_device_mirror;
+                 DELETE FROM fable_membership_mirror;
+                 DELETE FROM fable_device_mirror;
+                 DELETE FROM fable_internal_user_mirror;
+                 DELETE FROM fable_workspace_mirror;
                  DELETE FROM model_config;
                  DELETE FROM draft;
                  DELETE FROM connector_cache;

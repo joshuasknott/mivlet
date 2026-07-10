@@ -134,7 +134,6 @@ pub struct EnqueueMutationInput {
 pub fn upsert_link(conn: &Connection, input: &LinkWorkspaceInput, now: &str) -> Result<()> {
     validate_workspace_id(&input.local_workspace_id)?;
     DataScope::workspace(input.local_workspace_id.clone())?.ensure_exists(conn)?;
-    DataScope::workspace(input.local_workspace_id.clone())?.ensure_exists(conn)?;
     validate_id(&input.fable_workspace_id, "Fable workspace")?;
     validate_id(&input.internal_user_id, "Internal user")?;
     validate_id(&input.member_id, "Member")?;
@@ -168,6 +167,38 @@ pub fn upsert_link(conn: &Connection, input: &LinkWorkspaceInput, now: &str) -> 
         return Err(StoreError::Invalid(
             "A Fable workspace mirror is already bound to another local workspace.".into(),
         ));
+    }
+    let existing_fable_workspace = conn
+        .query_row(
+            "SELECT fable_workspace_id FROM fable_workspace_mirror WHERE local_workspace_id=?1;",
+            [&input.local_workspace_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    if existing_fable_workspace
+        .as_deref()
+        .is_some_and(|existing| existing != input.fable_workspace_id)
+    {
+        let has_link: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM cloud_workspace_link WHERE local_workspace_id=?1);",
+            [&input.local_workspace_id],
+            |row| row.get(0),
+        )?;
+        if has_link
+            || !existing_fable_workspace
+                .as_deref()
+                .is_some_and(|id| id.starts_with("legacy-workspace:"))
+        {
+            return Err(StoreError::Invalid(
+                "This local workspace is already bound to another Fable workspace mirror.".into(),
+            ));
+        }
+        // A migration-created unlinked placeholder is not cloud tenancy. It is
+        // safe to replace once with the authoritative Fable workspace id.
+        conn.execute(
+            "DELETE FROM fable_workspace_mirror WHERE local_workspace_id=?1;",
+            [&input.local_workspace_id],
+        )?;
     }
     // These are a display/offline-authorization mirror only. Convex is still
     // canonical; local writes never fabricate an authority revision.

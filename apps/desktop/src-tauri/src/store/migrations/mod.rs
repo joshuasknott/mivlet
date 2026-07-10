@@ -51,7 +51,7 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // Existing rows are backfilled lazily by the store on first read.
             5 => apply_v5_to_v6(conn)?,
             // 6 -> 7: add local cloud-team sync cache/outbox tables.
-            6 => conn.execute_batch(crate::store::schema::SCHEMA_V6_TO_V7)?,
+            6 => apply_v6_to_v7(conn)?,
             // 7 -> 8: replace the Clerk-organization-shaped local sync cache
             // with Fable-owned identity, membership, workspace, and device
             // mirrors. The SQL rebuild is data-preserving and runs inside the
@@ -246,6 +246,19 @@ fn apply_v7_to_v8(conn: &Connection) -> super::Result<()> {
         return Ok(());
     }
     conn.execute_batch(crate::store::schema::SCHEMA_V7_TO_V8)?;
+    Ok(())
+}
+
+fn apply_v6_to_v7(conn: &Connection) -> super::Result<()> {
+    // Fresh databases receive the complete current (v8) DDL before migration
+    // bookkeeping runs. Do not replay v7's Clerk-shaped index definitions over
+    // the v8 table; an actual v6 database has no cloud link table yet.
+    if table_exists(conn, "cloud_workspace_link")?
+        && table_has_column(conn, "cloud_workspace_link", "fable_workspace_id")?
+    {
+        return Ok(());
+    }
+    conn.execute_batch(crate::store::schema::SCHEMA_V6_TO_V7)?;
     Ok(())
 }
 
@@ -529,6 +542,21 @@ mod tests {
     fn conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_V1).unwrap();
+        conn
+    }
+
+    fn v7_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             CREATE TABLE workspace (
+               id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+             );
+             INSERT INTO workspace VALUES ('default', 'Default', 'now', 'now');",
+        )
+        .unwrap();
+        conn.execute_batch(crate::store::schema::SCHEMA_V6_TO_V7)
+            .unwrap();
         conn
     }
 
@@ -962,33 +990,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tables, 5);
-        conn.execute(
-            "INSERT INTO cloud_workspace_link (
-               local_workspace_id, cloud_workspace_id, clerk_org_id, role,
-               sync_state, linked_device_id, last_accepted_revision, linked_at, updated_at
-             ) VALUES ('default','cloud-ws','org','owner','active','device',0,'now','now');",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO cloud_sync_cursor (
-               local_workspace_id, device_id, last_pulled_revision,
-               last_realtime_sequence, last_successful_sync_at
-             ) VALUES ('default','device',0,0,'');",
-            [],
-        )
-        .unwrap();
+        assert!(table_has_column(&conn, "cloud_workspace_link", "fable_workspace_id").unwrap());
+        assert!(table_exists(&conn, "fable_workspace_mirror").unwrap());
     }
 
     #[test]
     fn v7_to_v8_preserves_sync_rows_and_quarantines_clerk_org_tenancy() {
-        let conn = conn();
-        conn.execute(
-            "INSERT INTO workspace (id, name, created_at, updated_at)
-             VALUES ('default', 'Default', 'now', 'now');",
-            [],
-        )
-        .unwrap();
+        let conn = v7_conn();
         conn.execute_batch(
             r#"
             INSERT INTO cloud_workspace_link (
@@ -1053,13 +1061,7 @@ mod tests {
 
     #[test]
     fn v7_to_v8_rolls_back_completely_when_outer_migration_fails() {
-        let mut conn = conn();
-        conn.execute(
-            "INSERT INTO workspace (id, name, created_at, updated_at)
-             VALUES ('default', 'Default', 'now', 'now');",
-            [],
-        )
-        .unwrap();
+        let mut conn = v7_conn();
         conn.execute(
             "INSERT INTO cloud_workspace_link VALUES
              ('default','fable-ws','org-legacy','owner','active','device-a',0,'now','now');",
