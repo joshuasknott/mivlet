@@ -5,10 +5,21 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./domains/*": {
+      "types": "./dist/domains/*.d.ts",
+      "import": "./dist/domains/*.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check:spine-parity": "pnpm build && node scripts/check-spine-parity.mjs"
+    "check:compatibility": "pnpm build && node dist/compatibility-regression.js && node scripts/check-domain-exports.mjs",
+    "check:spine-parity": "pnpm build && node scripts/check-spine-parity.mjs && node dist/compatibility-regression.js && node scripts/check-domain-exports.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.2"
