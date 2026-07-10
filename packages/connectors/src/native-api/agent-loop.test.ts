@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
-import { FixtureTransport, SequencedFixtureTransport } from "./transport";
+import { FixtureTransport, SequencedFixtureTransport, type HttpTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { runAgentLoop, type ToolExecutor } from "./agent-loop";
 
@@ -28,6 +28,26 @@ async function collect(iter: AsyncIterable<BackendAgentEvent>): Promise<BackendA
 }
 
 describe("runAgentLoop", () => {
+  it("does not advertise Fable tools to a model that explicitly lacks tool support", async () => {
+    const captured: NativeCompletionRequest[] = [];
+    const transport: HttpTransport = {
+      async *stream(request) {
+        captured.push(request);
+        yield 'data: {"choices":[{"finish_reason":"stop"}]}';
+      }
+    };
+
+    await collect(
+      runAgentLoop(
+        transport,
+        { ...baseRequest, providerId: "perplexity", model: "sonar" },
+        { execute: echoExecutor }
+      )
+    );
+
+    expect(captured[0]?.tools).toEqual([]);
+  });
+
   it("streams text deltas then done for a no-tool turn", async () => {
     const transport = new FixtureTransport([
       'data: {"choices":[{"delta":{"content":"Hi"}}]}',

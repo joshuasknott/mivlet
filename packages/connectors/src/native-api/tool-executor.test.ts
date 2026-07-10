@@ -276,8 +276,10 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
   it("(d) a session grant auto-satisfies a matching call without re-prompting", async () => {
     const gate = createApprovalGate();
     gate.addStandingGrant(grant("g1")); // service+action+mode match the read-file approval
+    const approval = approvalFor("c1", "read-file");
 
-    const decision = await gate.waitForDecision(approvalFor("c1", "read-file"));
+    expect(gate.register(approval)).toBe(false);
+    const decision = await gate.waitForDecision(approval);
     expect(decision).toBe("granted");
     // No pending entry was created (auto-satisfied, never blocked).
     expect(gate.pendingCount()).toBe(0);
@@ -383,7 +385,8 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
     // The shell registers a pending call when the tool-call event arrives (before
     // the loop calls execute), so a grant that races the executor still resolves.
     const gate = createApprovalGate();
-    gate.register(approvalFor("c1", "read-file"));
+    expect(gate.register(approvalFor("c1", "read-file"))).toBe(true);
+    expect(gate.register(approvalFor("c1", "read-file"))).toBe(false);
     expect(gate.pendingCount()).toBe(1);
     // A grant issued before anyone awaits still resolves the eventual waiter.
     gate.resolveGrant("c1");

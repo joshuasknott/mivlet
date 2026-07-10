@@ -72,7 +72,16 @@ and does not introduce a competing production database or secret store.
 Fable owns the native API agent loop while preserving provider-specific wire formats:
 
 - TypeScript shapes OpenAI-compatible, Anthropic, and Gemini messages, incrementally parses text, usage, and tool calls, and feeds tool results into the next model turn.
-- Rust owns provider credentials, HTTP/TLS egress, status classification, bounded retry/backoff, SSE relay, and in-flight cancellation. Provider keys never cross into JavaScript.
+- Fixed native profiles cover OpenAI, Anthropic, Gemini, xAI, OpenRouter,
+  DeepSeek, Z.AI, MiniMax, Alibaba Model Studio, Fireworks AI, Hugging Face,
+  Kimi Code, Moonshot, Mistral, Meta Llama API, Perplexity, Tencent TokenHub, Xiaomi MiMo,
+  Groq, Together AI, and Cerebras. Ollama supplies the local loopback path;
+  Custom supplies a validated OpenAI-compatible base URL, explicit model ID, and optional bearer key.
+- Rust owns provider credentials and custom endpoint configuration, HTTP/TLS
+  egress, status classification, bounded retry/backoff, SSE relay, and
+  in-flight cancellation. Once submitted, stored provider keys are never
+  returned from Rust to JavaScript. Custom endpoints require HTTPS except for
+  HTTP on a loopback host.
 - Each run is journaled in `agent-runs.json` without credentials. Checkpoints
   include the active thread plus bounded user, assistant, and tool exchanges.
   Interrupted runs surface in chat and can be explicitly retried from the
@@ -85,12 +94,19 @@ Fable owns the native API agent loop while preserving provider-specific wire for
   - **Critical risk**: Actions that cannot be undone, such as sending messages or deleting resources. Fable requires typing a confirmation phrase to run them.
 - Token usage comes from provider responses. Displayed cost is explicitly an estimate from Fable's maintained rate table when the provider does not return cost; Fable does not invent subscription quota or balance data.
 
-Native API credentials are BYOK. Codex app-server and ACP providers are
-separate adapters, not the foundation: Codex owns its app-server auth/process
-protocol, and Cursor/Grok own auth in their ACP CLIs. Fable maps those streams
-into the provider-neutral `AgentBackend` contract without reading subscription
-tokens. GitHub Copilot remains cataloged until its SDK execution adapter lands.
-The native API path does not reinterpret consumer subscriptions as API access.
+Remote native API credentials are BYOK; Ollama uses a local connection marker
+and Custom may omit its bearer key for an unauthenticated compatible endpoint.
+Codex app-server and ACP providers are separate adapters, not the foundation:
+Codex owns its app-server auth/process protocol, while Cursor, GitHub Copilot,
+Grok Build, OpenCode, Kimi, and Mistral Vibe own authentication in their ACP
+CLIs. Fable maps those streams into the provider-neutral `AgentBackend`
+contract without reading or persisting provider-owned session tokens. The
+native API path does not reinterpret consumer subscriptions as API access.
+
+Vertex AI, Amazon Bedrock, and Azure AI/Foundry IAM are not dedicated runtime
+adapters. Custom can target a compatible endpoint only when ordinary optional
+Bearer authentication is sufficient; it does not implement cloud IAM,
+SigV4/request signing, service accounts, or provider-specific regional routing.
 
 ## Schedules And Commands
 
@@ -137,10 +153,11 @@ claiming a live connection.
 
 Native API providers use bounded dynamic model discovery with explicit success,
 empty, unsupported, offline, and failed outcomes. Discovery filters
-non-generation models and cannot enable models with unknown execution
-capabilities. The curated catalogue remains the truthful fallback when
-discovery cannot run; live account entitlement validation still depends on the
-provider response.
+explicitly non-generation models. Compatible discovered generation models can
+be selected without first appearing in Fable's curated catalogue. The curated
+catalogue remains the fallback when discovery cannot run or the provider does
+not expose a compatible model-list endpoint; live account entitlement
+validation still depends on the provider response.
 
 See [Native Agent Runtime](native-runtime.md) for discovery, recovery, retry,
 limits, and tool-safety contracts.

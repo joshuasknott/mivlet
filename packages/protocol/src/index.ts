@@ -878,7 +878,13 @@ export interface PersistedAgentRun {
   /** Prior interrupted/failed run when this run is an explicit retry. */
   parentRunId?: string;
   turn: number;
-  usage?: { inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    costEstimated?: boolean;
+    costUnknown?: boolean;
+  };
   pendingApprovalIds: string[];
   recoverable: boolean;
   retryCount: number;
@@ -888,11 +894,11 @@ export interface PersistedAgentRun {
 }
 
 /**
- * The transport a backend speaks. Codex reaches its app-server, Cursor and
- * Grok share a generic ACP (stdio/JSON-RPC) adapter, Copilot uses its SDK, and
- * the native-API providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) speak
- * their HTTP/SSE APIs directly — with Fable owning the entire agent loop.
+ * The transport a backend speaks. Codex reaches its app-server, provider-owned
+ * coding CLIs share a generic ACP (stdio/JSON-RPC) adapter, and native-API
+ * providers speak their HTTP/SSE APIs directly with Fable owning the loop.
  */
+/** `copilot-sdk` is retained only for persisted-data compatibility; live Copilot uses ACP. */
 export type BackendType =
   | "codex-app-server"
   | "acp"
@@ -2332,7 +2338,15 @@ export type BackendAgentEvent =
       approval: ApprovalRequest;
     }
   | { type: "tool-result"; callId: string; ok: boolean; output: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd: number; costEstimated?: boolean }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      costUsd: number;
+      costEstimated?: boolean;
+      /** True when the provider supplied no cost and Fable has no trusted rate. */
+      costUnknown?: boolean;
+    }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | {
       type: "error";
@@ -2356,8 +2370,8 @@ export type BackendAgentEvent =
 // ACP, Copilot SDK, and future local/subscription runtimes each implement one
 // contract: run a prompt turn (streaming events), request tools/approvals,
 // cancel, and expose models/capabilities. Native-API is the first concrete
-// adapter — not the foundation. The other backends remain metadata-only until
-// their adapter lands; the factory returns null for them.
+// adapter — not the foundation. Backends without a live adapter fail closed;
+// GitHub Copilot is live through the generic ACP family.
 //
 // HARD SECRET INVARIANT: none of these types carry a key, token, or credential.
 // Auth lives behind the Rust boundary or a provider-owned auth cache. An

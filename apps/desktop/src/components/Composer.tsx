@@ -16,9 +16,11 @@ import { Terminal } from "@phosphor-icons/react/dist/csr/Terminal";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_COMPOSER_ATTACHMENTS } from "../lib/constants";
 import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
+import type { ProviderModelOption } from "../lib/provider-models";
 import type { VoiceStatus } from "../hooks/useVoice";
 import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
+import { ProviderIcon } from "./ProviderIcon";
 
 const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
 
@@ -103,8 +105,8 @@ export function Composer({
   onRunCommand: (command: string) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   importStatus?: string | null;
-  /** Models the connected backend exposes (id + label + availability). */
-  models: { id: string; label: string; available: boolean }[];
+  /** Provider-aware choices across every connected runnable backend. */
+  models: ProviderModelOption[];
   /** Currently selected model id, or "" when none is selected/available. */
   selectedModelId: string;
   /** Label to show on the model chip when a model is selected. */
@@ -127,6 +129,7 @@ export function Composer({
     PERMISSION_PRESENTATION[permissionLabel as keyof typeof PERMISSION_PRESENTATION];
   const visiblePermissionLabel = activePermissionPresentation?.label ?? permissionLabel;
   const ActivePermissionIcon = activePermissionPresentation?.icon ?? ShieldCheck;
+  const selectedModel = models.find((model) => model.id === selectedModelId);
 
   const closeExternalMenus = () => {
     if (addMenuOpen) onToggleAddMenu();
@@ -577,6 +580,11 @@ export function Composer({
                   setModelOpen((open) => !open);
                 }}
               >
+                {selectedModel ? (
+                  <span className="composer-model__provider" aria-hidden="true">
+                    <ProviderIcon provider={selectedModel.providerId} size={16} />
+                  </span>
+                ) : null}
                 <span>{selectedModelLabel}</span>
                 <CaretDown size={16} weight="bold" />
               </button>
@@ -593,6 +601,7 @@ export function Composer({
                           type="button"
                           role="menuitemradio"
                           aria-checked={selectedModelId === option.id}
+                          aria-label={`${option.providerLabel} ${option.label}${disabled ? ", unavailable" : ""}`}
                           disabled={disabled}
                           onClick={() => {
                             if (disabled) return;
@@ -600,8 +609,10 @@ export function Composer({
                             setModelOpen(false);
                           }}
                         >
+                          <span className="composer-model-menu__provider" aria-hidden="true">
+                            <ProviderIcon provider={option.providerId} size={18} />
+                          </span>
                           <strong>{option.label}</strong>
-                          {disabled ? <small>Unavailable</small> : null}
                         </button>
                       );
                     })

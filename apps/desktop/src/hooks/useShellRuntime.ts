@@ -9,7 +9,6 @@ import type {
   BrowserSessionState,
   BackendAuthState,
   BackendCapability,
-  BackendConsequentialEvent,
   BackendProvider,
   BackendVerifyOutcome,
   BackendVerifyResult,
@@ -96,9 +95,14 @@ import {
   DEFAULT_PERMISSION_LABEL,
   isApprovalPresetLabel,
   permissionLabelFor,
-  permissionModeFor,
-  resolveSelectedModel
+  permissionModeFor
 } from "../lib/agent-run";
+import {
+  modelsForProvider,
+  providerModelOptions,
+  resolveProviderModelOption,
+  type ProviderModelOption
+} from "../lib/provider-models";
 import {
   chatThreads,
   connectors,
@@ -147,7 +151,6 @@ import {
   executeRuntimeConnectorAction,
   prepareRuntimeConnectorAction,
   promoteRuntimeKnowledgeSourceToMemory,
-  recordRuntimeBackendEvent,
   refreshRuntimeConnectorHealth,
   resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
@@ -236,7 +239,7 @@ const ALLOW_PREVIEW_FALLBACKS =
 const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   enabled: false,
   state: "disabled",
-  message: "Optional Fable cloud identity is not configured.",
+  message: "Fable account setup is not configured.",
   scopes: []
 };
 
@@ -622,6 +625,8 @@ export interface ShellRuntime {
     secret: string
   ) => Promise<BackendVerifyResult>;
   disconnectBackend: (providerId: string) => Promise<void>;
+  /** Re-probe provider-owned runtimes after an install or sign-in completes. */
+  refreshBackendProviders: () => Promise<BackendProvider[] | null>;
   /**
    * Per-provider model-discovery lifecycle (idle/loading/success/empty/offline/
    * unsupported/failed). A runtime condition layered on top of auth state: a
@@ -636,20 +641,18 @@ export interface ShellRuntime {
    * outside the Tauri runtime (preview/fixture mode).
    */
   refreshModels: (providerId: string) => Promise<void>;
-  /**
-   * The connected agent backend that drives the agent run, if any. Today only a
-   * native-API backend can be connected + streaming, so this is equivalent to
-   * the legacy `connectedNativeBackend`; it is named for the provider-neutral
-   * `AgentBackend` contract so future adapters (Codex/ACP/Copilot) naturally
-   * take over when they connect. Drives the composer's model picker and the run
-   * path. Undefined when no backend is connected (the composer falls back to
-   * knowledge search).
-   */
+  /** All connected backends Fable can actually run, in provider registry order. */
+  connectedAgentBackends: BackendProvider[];
+  /** The backend owning the selected model and therefore the next interactive run. */
   connectedAgentBackend: BackendProvider | undefined;
-  /** Models the composer's model picker may offer (from the connected backend). */
+  /** Active backend models using their provider wire ids. */
   selectableModels: BackendProvider["models"];
-  /** The model id that should drive the next agent run (re-validated). */
+  /** Provider-aware choices shown by the composer across every connected backend. */
+  modelOptions: ProviderModelOption[];
+  /** The provider model id that should drive the next agent run (re-validated). */
   resolvedSelectedModelId: string;
+  /** The collision-safe picker id corresponding to `resolvedSelectedModelId`. */
+  resolvedModelOptionId: string;
   /** Persisted model selection (raw; prefer resolvedSelectedModelId at run time). */
   selectedModelId: string;
   selectModel: (modelId: string) => void;
@@ -665,9 +668,9 @@ export interface ShellRuntime {
     value: boolean
   ) => void;
   /**
-   * Record a native-API model tool call as an approval audit entry. Model tool
+   * Queue a backend-originated tool call for the shared approval UI. Model tool
    * calls never auto-execute — they surface here so the existing approval UI
-   * handles the grant/rule/deny decision before Fable dispatches the tool.
+   * calls are audited only after the user decides, before Fable dispatches the tool.
    */
   recordBackendToolCall: (event: {
     callId: string;
@@ -675,10 +678,12 @@ export interface ShellRuntime {
     arguments: string;
     approval: ApprovalRequest;
   }) => void;
+  /** Remove cancelled backend tool calls from the transient approval queue. */
+  clearBackendToolApprovals: () => void;
   /**
-   * Optional Fable cloud identity. This is separate from connector OAuth and
-   * from agent/backend credentials; it is never required for local files,
-   * schedules, memory, BYOK models, or solo workspaces.
+   * Fable account identity. It remains separate from connector OAuth and from
+   * agent/backend credentials while the configuration-gated foundation is
+   * being replaced by the required hosted sign-in flow.
    */
   identityStatus: IdentityStatus;
   identityPending: boolean;
@@ -739,6 +744,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     useState<IdentityStatus>(DEFAULT_IDENTITY_STATUS);
   const [identityPending, setIdentityPending] = useState(false);
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
+  const [backendToolApprovals, setBackendToolApprovals] = useState<ApprovalRequest[]>([]);
   const [actionHistory, setActionHistory] = useState<ActionHistoryEvent[]>([]);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(initialState.dismissedApprovalIds);
   const [approvalRules, setApprovalRules] = useState<ApprovalGrant[]>(initialState.approvalRules);
@@ -942,14 +948,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ]).filter((source) => !source.deletedAt),
     [connectorImportedSources, importedKnowledgeSources]
   );
-  // The connected agent backend that drives the run: connected + streaming AND
-  // a backend family Fable can actually drive today (hasRunnableAdapter). Native
-  // API, Codex app-server, and ACP are live adapter families; Copilot remains
-  // modeled but not runnable. The composer's model picker lists this backend's
-  // models.
-  const connectedAgentBackend = useMemo(
+  // Every runnable connection participates in the model picker. Selection owns
+  // routing: Fable no longer silently sends all prompts to the first connection.
+  const connectedAgentBackends = useMemo(
     () =>
-      backendProviders.find(
+      backendProviders.filter(
         (provider) =>
           provider.authState === "connected" &&
           provider.capabilities.includes("streaming") &&
@@ -958,30 +961,43 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ),
     [backendProviders]
   );
-  const selectableModels = useMemo(() => {
-    const catalogue = connectedAgentBackend?.models ?? [];
-    if (!connectedAgentBackend) return catalogue;
-    // Merge dynamic discovery with the curated catalogue so availability is
-    // truthful: discovered ids are available, catalogue-only ids become
-    // unavailable once discovery ran (and stay available offline). Outside
-    // Tauri, discovery never ran, so the catalogue fallback drives selection.
-    const discovery = discoveredModels[connectedAgentBackend.id];
-    if (!discovery) return catalogue;
-    return mergeDiscoveredModels({
-      providerId: connectedAgentBackend.id,
-      catalogueModels: catalogue,
-      discovered: discovery.models,
-      connected: connectedAgentBackend.authState === "connected",
-      discoveryRan: discovery.outcome === "success" || discovery.outcome === "empty"
-    });
-  }, [connectedAgentBackend, discoveredModels]);
-  // The persisted selection is re-validated against the connected backend's
-  // available models each render: keep it if still available, else fall back to
-  // the first available model (or "" when none is available).
-  const resolvedSelectedModelId = useMemo(
-    () => resolveSelectedModel(selectableModels, selectedModelId),
-    [selectableModels, selectedModelId]
+  const modelOptions = useMemo(
+    () =>
+      providerModelOptions(
+        connectedAgentBackends.map((provider) => {
+          const discovery = discoveredModels[provider.id];
+          const models = discovery
+            ? mergeDiscoveredModels({
+                providerId: provider.id,
+                catalogueModels: provider.models,
+                discovered: discovery.models,
+                connected: true,
+                discoveryRan:
+                  discovery.outcome === "success" || discovery.outcome === "empty"
+              })
+            : provider.models;
+          return { provider, models };
+        })
+      ),
+    [connectedAgentBackends, discoveredModels]
   );
+  const resolvedModelOption = useMemo(
+    () => resolveProviderModelOption(modelOptions, selectedModelId),
+    [modelOptions, selectedModelId]
+  );
+  const connectedAgentBackend = useMemo(
+    () =>
+      connectedAgentBackends.find(
+        (provider) => provider.id === resolvedModelOption?.providerId
+      ) ?? connectedAgentBackends[0],
+    [connectedAgentBackends, resolvedModelOption?.providerId]
+  );
+  const selectableModels = useMemo(
+    () => modelsForProvider(modelOptions, connectedAgentBackend?.id),
+    [modelOptions, connectedAgentBackend?.id]
+  );
+  const resolvedSelectedModelId = resolvedModelOption?.modelId ?? "";
+  const resolvedModelOptionId = resolvedModelOption?.id ?? "";
   const contextualDirectives = useMemo(
     () => [
       ...importedKnowledgeSources.slice(0, 2).map(importedSourceDirective),
@@ -991,10 +1007,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   );
   const openApprovals = useMemo(
     () =>
-      [...preparedConnectorActions.map((request) => request.approval), ...pendingApprovals].filter(
-        (approval) => !dismissedApprovalIds.includes(approval.id)
-      ),
-    [preparedConnectorActions, pendingApprovals, dismissedApprovalIds]
+      [
+        ...backendToolApprovals,
+        ...preparedConnectorActions.map((request) => request.approval),
+        ...pendingApprovals
+      ].filter((approval) => !dismissedApprovalIds.includes(approval.id)),
+    [backendToolApprovals, preparedConnectorActions, pendingApprovals, dismissedApprovalIds]
   );
   const memoryState = useMemo<MemoryControlState>(
     () => ({
@@ -1469,23 +1487,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     []
   );
 
-  // Auto-run discovery when the connected agent backend changes. Manual refresh
-  // reuses `runModelDiscovery` directly (see `refreshModels`).
+  // Auto-run discovery for every connected native API provider. Provider-owned
+  // runtimes expose their own fixed/default choices and are not sent through
+  // the Rust HTTP model-list command.
   useEffect(() => {
-    if (!connectedAgentBackend || connectedAgentBackend.authState !== "connected") {
-      return;
+    for (const provider of connectedAgentBackends) {
+      if (
+        provider.backendType === "native-api" &&
+        (modelDiscoveryByProvider[provider.id] ?? "idle") === "idle"
+      ) {
+        void runModelDiscovery(provider.id);
+      }
     }
-    const providerId = connectedAgentBackend.id;
-    let active = true;
-    void runModelDiscovery(providerId).then(() => {
-      // Completion is handled inside runModelDiscovery; this guard only
-      // suppresses work if the component unmounted/provider swapped.
-      void active;
-    });
-    return () => {
-      active = false;
-    };
-  }, [connectedAgentBackend?.id, connectedAgentBackend?.authState, runModelDiscovery]);
+  }, [connectedAgentBackends, modelDiscoveryByProvider, runModelDiscovery]);
 
   /**
    * Manual model refresh for Settings. Re-runs discovery for a connected
@@ -2382,14 +2396,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const refreshBackendProviders = async () => {
     const refreshed = await listRuntimeBackends();
     if (refreshed) {
-      setBackendProviders(refreshed);
+      const resolved = await mergeAcpProbeResults(refreshed);
+      setBackendProviders(resolved);
       setConnectedBackendIds(
-        refreshed
+        resolved
           .filter((provider) => provider.authState === "connected")
           .map((provider) => provider.id)
       );
+      return resolved;
     }
-    return refreshed;
+    return null;
   };
 
   const markProviderState = (providerId: string, authState: BackendProvider["authState"]) => {
@@ -2526,32 +2542,29 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setLastAction("Onboarding skipped (preview)");
   };
 
-  // Record a native-API model tool call as a backend consequential event. The
-  // model wanted to run a tool; Fable records it (never auto-executes) so the
-  // approval audit trail captures the request. The pre-shaped ApprovalRequest
-  // is available to route through the approval UI before any tool dispatch.
+  // Queue a backend-originated tool call until the user decides. This is
+  // deliberately transient: a pending executor cannot survive an app restart,
+  // and recording a deny/allow audit entry before a decision would be false.
   const recordBackendToolCall = (event: {
     callId: string;
     tool: string;
     arguments: string;
     approval: ApprovalRequest;
   }) => {
-    const consequential: BackendConsequentialEvent = {
-      providerId: event.approval.service,
-      service: event.approval.service,
-      action: event.approval.action,
-      mode: event.approval.mode,
-      riskLevel: event.approval.riskLevel,
-      dataUsed: event.approval.dataUsed,
-      consequence: event.approval.consequence,
-      backendPreapproved: false
-    };
-    void recordRuntimeBackendEvent(consequential, new Date().toISOString()).then((entry) => {
-      if (entry) {
-        setApprovalAudit((current) => prependAuditEntry(current, entry));
-      }
+    setBackendToolApprovals((current) => {
+      const existingIndex = current.findIndex(
+        (approval) => approval.id === event.approval.id
+      );
+      if (existingIndex < 0) return [...current, event.approval];
+      return current.map((approval, index) =>
+        index === existingIndex ? event.approval : approval
+      );
     });
     setLastAction(`Tool call from ${event.approval.service}: ${event.tool}`);
+  };
+
+  const clearBackendToolApprovals = () => {
+    setBackendToolApprovals([]);
   };
 
   // The onboarding gate: required unless explicitly dismissed or skipped.
@@ -2569,9 +2582,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // agent run; the approval preset maps its label onto a PermissionMode that
   // gates tool execution in the agent loop.
   const selectModel = (modelId: string) => {
-    setSelectedModelId(modelId);
-    const chosen = selectableModels.find((model) => model.id === modelId);
-    setLastAction(chosen ? `${chosen.label} selected` : "Model cleared");
+    const chosen = modelOptions.find(
+      (model) => model.id === modelId || model.modelId === modelId
+    );
+    setSelectedModelId(chosen?.id ?? "");
+    setLastAction(
+      chosen ? `${chosen.providerLabel} · ${chosen.label} selected` : "Model cleared"
+    );
   };
 
   const selectPermissionLabel = (label: string) => {
@@ -2698,6 +2715,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           gate.resolveGrant(approval.id);
         }
       }
+
+      setBackendToolApprovals((current) =>
+        current.filter((candidate) => candidate.id !== approval.id)
+      );
 
       clearApprovalInteraction();
       setLastAction(
@@ -3711,11 +3732,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     connectBackend,
     connectBackendWithVerify,
     disconnectBackend,
+    refreshBackendProviders,
     modelDiscoveryByProvider,
     refreshModels,
+    connectedAgentBackends,
     connectedAgentBackend,
     selectableModels,
+    modelOptions,
     resolvedSelectedModelId,
+    resolvedModelOptionId,
     selectedModelId,
     selectModel,
     permissionMode,
@@ -3729,6 +3754,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     signInIdentity,
     refreshIdentity,
     signOutIdentity,
+    clearBackendToolApprovals,
     dismissOnboarding,
     lastAction,
     mobileNavOpen,

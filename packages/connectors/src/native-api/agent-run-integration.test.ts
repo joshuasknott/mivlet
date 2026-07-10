@@ -89,6 +89,62 @@ describe("runAgentLoop context + model integration", () => {
     expect(sent.messages[0]).toEqual({ role: "user", content: "hi" });
     expect(sent.messages.some((message) => message.role === "system")).toBe(false);
   });
+
+  it("advertises Fable tools for a curated model with explicit tool support", async () => {
+    const transport = new CapturingTransport([
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ]);
+    const request: NativeCompletionRequest = {
+      providerId: "openai",
+      model: "gpt-5",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      maxTokens: 1024
+    };
+
+    await collect(runAgentLoop(transport, request, { execute: echoExecutor }));
+
+    expect(transport.seen[0].tools.length).toBeGreaterThan(0);
+  });
+
+  it("does not assume tool support for a newly discovered model", async () => {
+    const transport = new CapturingTransport([
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ]);
+    const request: NativeCompletionRequest = {
+      providerId: "openai",
+      model: "future-model-from-discovery",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      maxTokens: 1024
+    };
+
+    await collect(runAgentLoop(transport, request, { execute: echoExecutor }));
+
+    expect(transport.seen[0].tools).toEqual([]);
+  });
+
+  it("honors explicit model-level tool capability metadata", async () => {
+    const transport = new CapturingTransport([
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ]);
+    const request: NativeCompletionRequest = {
+      providerId: "custom",
+      model: "custom-model-with-tools",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [],
+      maxTokens: 1024
+    };
+
+    await collect(
+      runAgentLoop(transport, request, {
+        execute: echoExecutor,
+        modelSupportsTools: true
+      })
+    );
+
+    expect(transport.seen[0].tools.length).toBeGreaterThan(0);
+  });
 });
 
 describe("runAgentLoop permission-mode gating", () => {

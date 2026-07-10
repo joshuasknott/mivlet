@@ -19,6 +19,11 @@ const RATES: Record<string, Rate> = {
   openrouter: { inputPerMillion: 1.25, outputPerMillion: 10 }
 };
 
+/** Whether Fable has a reviewed public rate for this provider. */
+export function hasKnownPrice(providerId: string): boolean {
+  return providerId in RATES;
+}
+
 /** Compute the USD cost for a token count. Fail-safe to 0 for unknown providers. */
 export function priceFor(
   providerId: string,

@@ -11,7 +11,7 @@
 
 import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
-import { priceFor } from "./pricing";
+import { hasKnownPrice, priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
 import { extractPayload, splitLines } from "./transport";
 
@@ -126,7 +126,8 @@ export function parseGeminiLine(
       inputTokens: input,
       outputTokens: output,
       costUsd: priceFor(providerId, input, output),
-      costEstimated: true
+      costEstimated: true,
+      costUnknown: !hasKnownPrice(providerId)
     });
   }
   if (candidate?.finishReason) {

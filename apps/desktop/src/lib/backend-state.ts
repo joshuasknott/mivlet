@@ -38,7 +38,6 @@ export function authKindForProvider(provider: BackendProvider): BackendAuthKind 
       return "install-gated";
     case "codex-app-server":
     case "acp":
-    case "copilot-sdk":
       return "provider-login";
     default:
       return "provider-login";

@@ -58,7 +58,8 @@ async function* mapCodexEvents(
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
         costUsd: event.costUsd ?? 0,
-        costEstimated: event.costUsd === undefined
+        costEstimated: event.costUsd === undefined,
+        costUnknown: event.costUsd === undefined
       };
     } else if (event.type === "approval-request") {
       if (!capabilities.includes("tool-requests") || !capabilities.includes("approvals")) {

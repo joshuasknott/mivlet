@@ -1,35 +1,13 @@
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
-import { Key } from "@phosphor-icons/react/dist/csr/Key";
-import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
-import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { BackendProvider, BackendVerifyResult } from "@fable/protocol";
-import { authKindForProvider, stateViewFor } from "../../lib/backend-state";
-import { ProviderIcon } from "../ProviderIcon";
+import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 
 /**
- * Local-first AI-backend onboarding — rebuilt as ONE unified provider list.
- *
- * Honesty rules this component:
- *   - No fake account creation. The only step before choosing a backend is a
- *     local profile. Name/email are stored as shell state; the password field
- *     is intentionally UI-only and is neither read nor persisted.
- *   - Every provider appears in a single list with its real auth-state badge
- *     and exactly one context-correct action. There is no fake "Connect".
- *   - API-key providers (OpenAI, Anthropic, Gemini, xAI, OpenRouter) expand an
- *     inline secure key field. The key is read once from an uncontrolled
- *     input, handed to the verified connect path, then cleared from the DOM.
- *   - Provider-owned runtimes (Codex CLI, Cursor/Grok ACP, Copilot SDK) manage
- *     their OWN sign-in. They NEVER show a token field here. Their cards
- *     reflect the runtime state the boundary resolved and route to real setup.
- *   - Connector (workspace tools) setup is NOT part of onboarding. It is
- *     optional and lives on the real Connectors page (`onOpenConnectors`).
- *
- * Secrets are never held in React state: the key is read once from an
- * uncontrolled input, handed to the Rust credential boundary via
- * `onConnectWithVerify`, then cleared from the DOM field. Only the verify
- * OUTCOME (ready / auth-failed / offline / unsupported / failed) returns.
+ * Local-first onboarding. Provider selection uses the same provider-family
+ * catalogue and connection-method modal as Settings, so subscription, OAuth,
+ * API-key, CLI, and local access never drift into separate product flows.
  */
 export function OnboardingPage({
   providers,
@@ -37,166 +15,53 @@ export function OnboardingPage({
   status,
   onConnect,
   onConnectWithVerify,
+  onCheckConnection,
   onSkip,
-  onSubmitProfile,
-  onOpenConnectors
+  onSubmitProfile
 }: {
   providers: BackendProvider[];
   connectedBackendIds: string[];
   status: string | null;
-  /** Legacy fire-and-forget connect. Kept for back-compat; the verified path
-   *  is preferred and used when `onConnectWithVerify` is supplied. */
+  /** Legacy fire-and-forget connect used only when verification is unavailable. */
   onConnect?: (providerId: string, secret?: string) => void;
-  /** Verified connect path: stores the key, verifies it inside the Rust
-   *  boundary, and returns the outcome so useful errors can be shown. The
-   *  secret is handed to the boundary and never read back. */
+  /** Credentials cross directly into the verified Rust boundary. */
   onConnectWithVerify?: (
     providerId: string,
     secret: string
   ) => Promise<BackendVerifyResult>;
+  /** Re-probe a provider-owned CLI after the user completes its login flow. */
+  onCheckConnection?: (providerId: string) => void | Promise<void>;
   onSkip: () => void;
-  /** Apply the local profile (name/email) to shell state. No auth. */
   onSubmitProfile?: (name: string, email: string) => void;
-  /** Route to the real Connectors page for optional workspace-tool setup. */
+  /** Retained for App compatibility; provider setup no longer routes to connectors. */
   onOpenConnectors?: () => void;
 }) {
-  // Steps: a local profile, then the unified provider list.
-  const [step, setStep] = useState<"profile" | "providers">(providers.length === 0 ? "providers" : "profile");
+  const [step, setStep] = useState<"profile" | "providers">(
+    providers.length === 0 ? "providers" : "profile"
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
-
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
-  // The provider currently being verified, and the per-provider error message.
-  const [pendingProviderId, setPendingProviderId] = useState<string | null>(null);
-  const [providerError, setProviderError] = useState<Record<string, string>>({});
-
-  const [apiKeyChooserOpen, setApiKeyChooserOpen] = useState(false);
-  const lastActiveElementRef = useRef<HTMLElement | null>(null);
-
-  const keyInputRef = useRef<HTMLInputElement>(null);
-
   const hasAnyConnected = connectedBackendIds.length > 0;
 
-  const handleProfileSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    // The password input is deliberately not read or submitted; no account is created.
+  const handleProfileSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
     if (email.trim() && !/^\S+@\S+\.\S+$/.test(email)) {
       setValidationError("Enter a valid email, or leave it blank.");
       return;
     }
     setValidationError(null);
-    if (onSubmitProfile) {
-      onSubmitProfile(name.trim(), email.trim());
-    }
+    onSubmitProfile?.(name.trim(), email.trim());
     setStep("providers");
   };
 
-  // Clear any stale key/error when a provider finishes connecting.
-  useEffect(() => {
-    for (const id of connectedBackendIds) {
-      if (providerError[id]) {
-        setProviderError((current) => {
-          const next = { ...current };
-          delete next[id];
-          return next;
-        });
-      }
-    }
-    if (pendingProviderId && connectedBackendIds.includes(pendingProviderId)) {
-      setPendingProviderId(null);
-      setSelectedProviderId(null);
-      if (keyInputRef.current) {
-        keyInputRef.current.value = "";
-      }
-    }
-  }, [connectedBackendIds, pendingProviderId, providerError]);
-
-  const handleToggleProvider = (provider: BackendProvider, preserveReturnFocus = false) => {
-    if (pendingProviderId) return;
-    if (!preserveReturnFocus) {
-      lastActiveElementRef.current = document.activeElement as HTMLElement;
-    }
-    setSelectedProviderId(provider.id);
-    setProviderError((current) => {
-      const next = { ...current };
-      delete next[provider.id];
-      return next;
-    });
-    // Clear any value left in the shared uncontrolled input.
-    if (keyInputRef.current) {
-      keyInputRef.current.value = "";
-    }
-  };
-
-  const handleCloseModal = () => {
-    setSelectedProviderId(null);
-    setApiKeyChooserOpen(false);
-    setTimeout(() => {
-      lastActiveElementRef.current?.focus();
-    }, 0);
-  };
-
-  const handleOpenApiKeyChooser = () => {
-    lastActiveElementRef.current = document.activeElement as HTMLElement;
-    setApiKeyChooserOpen(true);
-  };
-
-  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
-  const apiKeyProviders = providers.filter((p) => authKindForProvider(p) === "api-key");
-  const accountProviders = providers.filter((p) => authKindForProvider(p) !== "api-key");
-
-  const handleConnect = async (provider: BackendProvider) => {
-    const secret = keyInputRef.current?.value.trim() ?? "";
-    if (!secret) {
-      setProviderError((current) => ({
-        ...current,
-        [provider.id]: "Enter an API key to connect."
-      }));
-      return;
-    }
-    setPendingProviderId(provider.id);
-    setProviderError((current) => {
-      const next = { ...current };
-      delete next[provider.id];
-      return next;
-    });
-    try {
-      const result = onConnectWithVerify
-        ? await onConnectWithVerify(provider.id, secret)
-        : (onConnect?.(provider.id, secret),
-          ({ providerId: provider.id, outcome: "ready" } as BackendVerifyResult));
-      // Clear the uncontrolled input immediately — the secret is now in the
-      // boundary and must not linger in the DOM.
-      if (keyInputRef.current) {
-        keyInputRef.current.value = "";
-      }
-      if (result.outcome === "auth-failed") {
-        setProviderError((current) => ({
-          ...current,
-          [provider.id]:
-            result.message ?? `${provider.label} rejected this key. Check the key and try again.`
-        }));
-      } else if (result.outcome !== "ready") {
-        // offline / unsupported / failed: keep the key stored, show a warning.
-        setProviderError((current) => ({
-          ...current,
-          [provider.id]:
-            result.message ??
-            `${provider.label} could not be verified right now. Your key is saved — try again in a moment.`
-        }));
-      }
-    } catch (error) {
-      if (keyInputRef.current) {
-        keyInputRef.current.value = "";
-      }
-      setProviderError((current) => ({
-        ...current,
-        [provider.id]: error instanceof Error ? error.message : `Could not connect ${provider.label}.`
-      }));
-    } finally {
-      setPendingProviderId(null);
-    }
+  const handleConnect = async (
+    providerId: string,
+    secret: string
+  ): Promise<BackendVerifyResult> => {
+    if (onConnectWithVerify) return onConnectWithVerify(providerId, secret);
+    onConnect?.(providerId, secret);
+    return { providerId, outcome: "ready" };
   };
 
   return (
@@ -208,7 +73,9 @@ export function OnboardingPage({
               className={step === "profile" ? "og-progress-step is-current" : "og-progress-step is-complete"}
               aria-current={step === "profile" ? "step" : undefined}
             >
-              <span aria-hidden="true">{step === "providers" ? <CheckCircle size={14} weight="fill" /> : "1"}</span>
+              <span aria-hidden="true">
+                {step === "providers" ? <CheckCircle size={14} weight="fill" /> : "1"}
+              </span>
               Local profile
             </li>
             <li
@@ -224,7 +91,7 @@ export function OnboardingPage({
           </p>
         </nav>
 
-        {step === "profile" && (
+        {step === "profile" ? (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <h1 id="onboarding-title">Set up your local Fable workspace</h1>
             <p className="og-lede">
@@ -241,7 +108,7 @@ export function OnboardingPage({
                   id="og-name"
                   placeholder="Josh Knott"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(event) => setName(event.target.value)}
                   autoComplete="name"
                 />
               </label>
@@ -253,7 +120,7 @@ export function OnboardingPage({
                   id="og-email"
                   placeholder="josh@example.com"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(event) => setEmail(event.target.value)}
                   autoComplete="email"
                 />
               </label>
@@ -268,14 +135,11 @@ export function OnboardingPage({
                 />
               </label>
 
-              {validationError && (
-                <p
-                  className="og-status og-status--error"
-                  role="alert"
-                >
+              {validationError ? (
+                <p className="og-status og-status--error" role="alert">
                   {validationError}
                 </p>
-              )}
+              ) : null}
 
               <button type="submit" className="og-submit button button--primary">
                 Continue
@@ -286,91 +150,20 @@ export function OnboardingPage({
               Skip onboarding (preview) <ArrowRight size={14} />
             </button>
           </section>
-        )}
-
-        {step === "providers" && (
+        ) : (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <h1 id="onboarding-title">Add a model provider</h1>
             <p className="og-lede">
-              Choose a provider account to start, or connect directly with an API key.
-              You can add or change providers later.
+              Choose the provider you already use. You can connect more providers later.
             </p>
 
             <div className="og-unified">
-              <div className="og-provider-sections">
-                <div className="og-provider-group">
-                  <h3 className="og-provider-group__heading">Use a provider account</h3>
-                  <div className="og-provider-grid og-provider-grid--account">
-                    {accountProviders.map((provider) => {
-                      const isConnected = connectedBackendIds.includes(provider.id);
-                      const view = stateViewFor(provider.authState);
-                      return (
-                        <article
-                          key={provider.id}
-                          className="og-provider-tile-wrapper"
-                          data-provider-id={provider.id}
-                        >
-                          <button
-                            type="button"
-                            className={`og-provider-tile og-provider--${isConnected ? "ready" : view.tone}`}
-                            onClick={() => handleToggleProvider(provider)}
-                            aria-label={`${provider.label}, ${isConnected ? "connected" : view.label}`}
-                          >
-                            <span className="og-provider-tile__logo">
-                              <ProviderIcon provider={provider.id} size={48} />
-                            </span>
-                            <span className="og-provider-tile__label">{provider.label}</span>
-                            {isConnected ? (
-                              <span className="og-provider-tile__status">Connected</span>
-                            ) : provider.authState !== "needs-auth" ? (
-                              <span className="og-provider-tile__status">
-                                {view.label}
-                              </span>
-                            ) : null}
-                          </button>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="og-api-key-divider">
-                  <span className="og-api-key-divider__label">Prefer direct provider access?</span>
-                  <button
-                    type="button"
-                    className="og-api-key-disclosure"
-                    onClick={handleOpenApiKeyChooser}
-                    aria-haspopup="dialog"
-                  >
-                    Add an API key
-                  </button>
-                </div>
-
-                {apiKeyChooserOpen ? (
-                  <ApiKeyProviderModal
-                    providers={apiKeyProviders}
-                    connectedBackendIds={connectedBackendIds}
-                    onClose={handleCloseModal}
-                    onSelect={(provider) => {
-                      setApiKeyChooserOpen(false);
-                      handleToggleProvider(provider, true);
-                    }}
-                  />
-                ) : null}
-              </div>
-
-              {selectedProvider ? (
-                <OnboardingProviderModal
-                  provider={selectedProvider}
-                  connected={connectedBackendIds.includes(selectedProvider.id)}
-                  pending={pendingProviderId === selectedProvider.id}
-                  error={providerError[selectedProvider.id]}
-                  keyInputRef={keyInputRef}
-                  onClose={handleCloseModal}
-                  onConnect={() => void handleConnect(selectedProvider)}
-                  onOpenConnectors={onOpenConnectors}
-                />
-              ) : null}
+              <ProviderCatalogue
+                providers={providers}
+                connectedBackendIds={connectedBackendIds}
+                onConnect={handleConnect}
+                onCheckConnection={onCheckConnection}
+              />
             </div>
 
             {status ? (
@@ -381,22 +174,9 @@ export function OnboardingPage({
 
             {hasAnyConnected ? (
               <div className="og-primary-cta">
-                <button
-                  type="button"
-                  className="og-primary-cta__start"
-                  onClick={onSkip}
-                >
+                <button type="button" className="og-primary-cta__start" onClick={onSkip}>
                   Start using Fable
                 </button>
-                {onOpenConnectors ? (
-                  <button
-                    type="button"
-                    className="og-primary-cta__secondary"
-                    onClick={onOpenConnectors}
-                  >
-                    Set up workspace connectors (optional)
-                  </button>
-                ) : null}
               </div>
             ) : (
               <button type="button" className="og-skip button button--ghost" onClick={onSkip}>
@@ -405,239 +185,7 @@ export function OnboardingPage({
             )}
           </section>
         )}
-
       </div>
     </main>
-  );
-}
-
-function ApiKeyProviderModal({
-  providers,
-  connectedBackendIds,
-  onClose,
-  onSelect
-}: {
-  providers: BackendProvider[];
-  connectedBackendIds: string[];
-  onClose: () => void;
-  onSelect: (provider: BackendProvider) => void;
-}) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  return (
-    <div
-      className="og-provider-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="og-api-key-modal-title"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <article className="og-provider-modal__panel og-provider-modal__panel--chooser">
-        <button
-          type="button"
-          className="og-provider-modal__close"
-          aria-label="Close API key provider selection"
-          onClick={onClose}
-        >
-          <X size={19} />
-        </button>
-        <header className="og-provider-modal__hero">
-          <span className="og-provider-modal__icon" aria-hidden="true">
-            <Key size={34} />
-          </span>
-          <h2 id="og-api-key-modal-title">Connect with an API key</h2>
-          <p>Choose the provider that issued your key. It will be stored securely on this device.</p>
-        </header>
-        <div className="og-provider-grid og-provider-grid--api">
-          {providers.map((provider, index) => {
-            const connected = connectedBackendIds.includes(provider.id);
-            const view = stateViewFor(provider.authState);
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                className={`og-provider-tile og-provider--${connected ? "ready" : view.tone}`}
-                aria-label={`${provider.label}, ${connected ? "connected" : view.label}`}
-                autoFocus={index === 0}
-                onClick={() => onSelect(provider)}
-              >
-                <span className="og-provider-tile__logo">
-                  <ProviderIcon provider={provider.id} size={44} />
-                </span>
-                <span className="og-provider-tile__label">{provider.label}</span>
-                <span className="og-provider-tile__status">
-                  {connected ? "Connected" : "Use API key"}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </article>
-    </div>
-  );
-}
-
-function OnboardingProviderModal({
-  provider,
-  connected,
-  pending,
-  error,
-  keyInputRef,
-  onClose,
-  onConnect,
-  onOpenConnectors
-}: {
-  provider: BackendProvider;
-  connected: boolean;
-  pending: boolean;
-  error?: string;
-  keyInputRef: React.RefObject<HTMLInputElement | null>;
-  onClose: () => void;
-  onConnect: () => void;
-  onOpenConnectors?: () => void;
-}) {
-  const kind = authKindForProvider(provider);
-  const view = stateViewFor(provider.authState);
-  const isApiKey = kind === "api-key";
-  const isLocalLoopback = provider.backendType === "local-loopback";
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      className="og-provider-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={`og-provider-modal-${provider.id}`}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <article className="og-provider-modal__panel">
-        <button
-          type="button"
-          className="og-provider-modal__close"
-          aria-label="Close provider setup"
-          autoFocus={connected}
-          onClick={onClose}
-        >
-          <X size={19} />
-        </button>
-        <header className="og-provider-modal__hero">
-          <span className="og-provider-modal__icon" aria-hidden="true">
-            <ProviderIcon provider={provider.id} size={54} />
-          </span>
-          <h2 id={`og-provider-modal-${provider.id}`}>{provider.label}</h2>
-          <p>{provider.description}</p>
-          <span className={`og-provider__badge og-provider__badge--${connected ? "ready" : view.tone}`}>
-            {connected ? <CheckCircle size={13} weight="fill" /> : null}
-            {connected ? "Connected" : view.label}
-          </span>
-        </header>
-
-        <div className="og-provider-modal__body">
-          {!connected && provider.authState !== "needs-auth" && (
-            <p
-              className={`og-provider__state-hint og-provider__state-hint--${view.tone}`}
-              aria-label={
-                provider.authState === "install-required"
-                  ? `${provider.label} install required`
-                  : undefined
-              }
-            >
-              {provider.authState === "install-required" && provider.installHint
-                ? provider.installHint
-                : view.hint}
-            </p>
-          )}
-
-          {error ? (
-            <p className="og-provider__state-hint og-provider__state-hint--danger" role="alert">
-              {error}
-            </p>
-          ) : null}
-
-          {connected ? (
-            <div className="og-provider-modal__action-area">
-              <button type="button" className="og-provider-modal__primary button" disabled>
-                Connected
-              </button>
-            </div>
-          ) : isApiKey ? (
-            <div className="og-provider__key-panel">
-              <label className="og-field">
-                <span>{provider.label} API key</span>
-                <input
-                  ref={keyInputRef}
-                  type="password"
-                  aria-label={`API key for ${provider.label.toLowerCase()}`}
-                  placeholder={`Enter your ${provider.label} API key`}
-                  disabled={pending}
-                  autoFocus
-                  autoComplete="off"
-                  spellCheck={false}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      void onConnect();
-                    }
-                  }}
-                />
-              </label>
-              <div className="og-provider__key-actions">
-                <button type="button" className="og-provider-modal__primary button button--primary" onClick={onConnect} disabled={pending}>
-                  {pending ? (
-                    <span className="og-provider-modal__pending">
-                      <Spinner className="og-spinner" size={14} /> Verifying...
-                    </span>
-                  ) : (
-                    "Add key & connect"
-                  )}
-                </button>
-                <span>
-                  <Key size={12} /> Stored on this device
-                </span>
-              </div>
-            </div>
-          ) : isLocalLoopback ? (
-            <div className="og-provider-modal__action-area">
-              <button type="button" className="og-provider-modal__primary button" disabled>
-                Detected automatically
-              </button>
-            </div>
-          ) : (
-            <div className="og-provider-modal__action-area">
-              <button
-                type="button"
-                className="og-provider-modal__primary button button--primary"
-                onClick={() => onOpenConnectors?.()}
-                disabled={!onOpenConnectors}
-                autoFocus
-              >
-                Set up
-              </button>
-            </div>
-          )}
-        </div>
-      </article>
-    </div>
   );
 }

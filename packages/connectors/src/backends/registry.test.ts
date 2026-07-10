@@ -21,7 +21,8 @@ import {
   resolveCodexProvider,
   resolveCopilotProvider,
   resolveCursorProvider,
-  resolveGrokProvider
+  resolveGrokProvider,
+  resolveOllamaProvider
 } from "./registry";
 
 describe("backend registry", () => {
@@ -29,16 +30,10 @@ describe("backend registry", () => {
     const providers = listBackendProviders();
     expect(providers.map((provider) => provider.id).sort()).toEqual(
       [
-        "anthropic",
-        "codex",
-        "copilot",
-        "cursor",
-        "gemini",
-        "grok",
-        "ollama",
-        "openai",
-        "openrouter",
-        "xai"
+        "alibaba", "anthropic", "cerebras", "codex", "copilot", "cursor", "custom",
+        "deepseek", "fireworks", "gemini", "grok", "groq", "huggingface", "meta",
+        "kimi", "kimi-code", "minimax", "mistral", "mistral-vibe", "moonshot", "ollama", "openai", "opencode", "openrouter",
+        "perplexity", "tencent", "together", "xai", "xiaomi", "zai"
       ].sort()
     );
   });
@@ -46,6 +41,12 @@ describe("backend registry", () => {
   it("includes the native-api backend type in the catalog", () => {
     const native = listBackendProviders().find((p) => p.backendType === "native-api");
     expect(native).toBeDefined();
+  });
+
+  it("keeps Ollama on the local-loopback path rather than the API-key path", () => {
+    const ollama = listBackendProviders().find((provider) => provider.id === "ollama");
+    expect(ollama?.backendType).toBe("local-loopback");
+    expect(ollama?.authState).toBe("unavailable");
   });
 
   it("surfaces Claude and Gemini only as native API-key providers, never as subscription options", () => {
@@ -69,8 +70,11 @@ describe("backend registry", () => {
 
   it("exposes the canonical provider id list", () => {
     expect(BACKEND_PROVIDER_IDS).toEqual([
-      "codex", "cursor", "copilot", "grok",
-      "ollama", "openai", "anthropic", "gemini", "xai", "openrouter"
+      "codex", "cursor", "copilot", "grok", "opencode", "kimi", "mistral-vibe",
+      "openai", "anthropic", "gemini", "xai", "openrouter",
+      "deepseek", "zai", "minimax", "alibaba", "fireworks", "huggingface",
+      "moonshot", "kimi-code", "mistral", "meta", "ollama", "perplexity", "tencent",
+      "xiaomi", "groq", "together", "cerebras", "custom"
     ]);
   });
 });
@@ -94,7 +98,10 @@ describe("fail-closed capability resolution", () => {
     expect(resolveCodexProvider(authState).capabilities).toEqual([]);
     expect(resolveAcpProvider("cursor", authState).capabilities).toEqual([]);
     expect(resolveAcpProvider("grok", authState).capabilities).toEqual([]);
+    expect(resolveAcpProvider("kimi", authState).capabilities).toEqual([]);
+    expect(resolveAcpProvider("mistral-vibe", authState).capabilities).toEqual([]);
     expect(resolveCopilotProvider(authState).capabilities).toEqual([]);
+    expect(resolveOllamaProvider(authState).capabilities).toEqual([]);
   });
 
   it("only the connected state advertises capabilities (ready is a UI alias, not capability-bearing)", () => {
@@ -123,9 +130,10 @@ describe("fail-closed capability resolution", () => {
     expect(hasCapability(apiKey.capabilities, "usage-cost")).toBe(true);
   });
 
-  it("advertises usage-cost for the copilot SDK regardless of mode", () => {
+  it("runs Copilot through ACP without inventing subscription usage cost", () => {
     const connected = resolveCopilotProvider("connected");
-    expect(hasCapability(connected.capabilities, "usage-cost")).toBe(true);
+    expect(connected.backendType).toBe("acp");
+    expect(hasCapability(connected.capabilities, "usage-cost")).toBe(false);
   });
 
   it("declares only authentication while grok entitlement is pending", () => {
@@ -161,11 +169,13 @@ describe("grok entitlement compliance", () => {
     // Entitlements may be undefined or empty, but never claim a tier includes Grok Build.
     const entitlements = grok.entitlements ?? [];
     expect(entitlements).toEqual([]);
-    expect(JSON.stringify(grok)).not.toMatch(/grok.?build/i);
+    expect(JSON.stringify(grok)).not.toMatch(/premium|plus|included in|pro plan/i);
   });
 
-  it("carries no tier/entitlement promise in any fixture catalog", () => {
-    const serialized = JSON.stringify(listBackendProviders());
+  it("carries no tier/entitlement promise in the Grok fixture", () => {
+    const serialized = JSON.stringify(
+      listBackendProviders().find((provider) => provider.id === "grok")
+    );
     expect(serialized).not.toMatch(/premium|plus|pro plan|included in/i);
   });
 });

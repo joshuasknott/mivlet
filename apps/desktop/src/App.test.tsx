@@ -463,10 +463,10 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
 
     const sidebar = screen.getByRole("complementary", { name: /workspace navigation/i });
-    expect(screen.getByRole("button", { name: /select workspace/i })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: /select workspace/i })).toHaveTextContent(
-      "Josh's Fable"
-    );
+    const workspaceSelector = within(sidebar).getByRole("button", { name: /select workspace/i });
+    expect(within(sidebar).getByRole("img", { name: /^fable$/i })).toBeInTheDocument();
+    expect(workspaceSelector).toHaveTextContent("Josh's Fable");
+    expect(workspaceSelector.closest(".workspace-switcher-container--top")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /approval preset/i }));
     const fullAccessOption = screen.getByRole("menuitemradio", { name: /full access/i });
     const fullAccessIconPath = fullAccessOption.querySelector("svg path")?.getAttribute("d");
@@ -758,24 +758,24 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
     await user.click(screen.getByRole("button", { name: /^providers$/i }));
 
-    expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Providers" })).toBeInTheDocument();
 
-    // The native API-key providers render from the real registry, each in the
-    // boundary-resolved needs-auth state (no fake "Connected" defaults).
-    const openaiCard = screen.getByText("OpenAI").closest("article");
-    expect(openaiCard).not.toBeNull();
+    // OpenAI and Codex are one provider family. Its modal presents the actual
+    // connection choices instead of splitting account and API-key sections.
+    const openaiTile = screen.getByRole("button", {
+      name: /openai \/ chatgpt, not connected/i
+    });
+    await user.click(openaiTile);
+    const providerDialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    expect(within(providerDialog).getByText("ChatGPT subscription")).toBeInTheDocument();
     expect(
-      within(openaiCard as HTMLElement).getByLabelText(/openai is needs api key/i)
+      within(providerDialog).getByText("ChatGPT subscription with a device code")
     ).toBeInTheDocument();
-    // No pre-existing fake connection: the "Connect" affordance is present.
-    expect(openaiCard).toHaveAccessibleName("Connect OpenAI");
+    expect(within(providerDialog).getByText("OpenAI API key")).toBeInTheDocument();
     // No "mock session" copy anywhere on the page.
     expect(screen.queryByText(/mock session/i)).not.toBeInTheDocument();
 
-    // The subscription/CLI provider (Codex) is gated: no fake one-click connect.
-    const codexCard = screen.getByText("Codex").closest("article");
-    expect(codexCard).not.toBeNull();
-    expect(codexCard).toHaveAccessibleName("View setup for Codex");
+    // Provider-owned sign-in is instructions/checking only; no fake one-click connect.
     expect(screen.queryByRole("button", { name: /connect codex/i })).not.toBeInTheDocument();
   });
 
@@ -833,13 +833,17 @@ describe("Fable home", () => {
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
     await user.click(screen.getByRole("button", { name: /^providers$/i }));
+    await screen.findByRole("heading", { name: "Providers" });
 
-    const anthropicCard = screen.getByText("Anthropic").closest("article");
-    expect(anthropicCard).not.toBeNull();
+    const anthropicTile = screen.getByRole("button", { name: /anthropic, not connected/i });
 
-    // Open the provider setup modal and submit the key through the boundary.
-    await user.click(anthropicCard as HTMLElement);
+    // Open the provider family, choose its API-key method, then submit through
+    // the credential boundary.
+    await user.click(anthropicTile);
     const providerDialog = screen.getByRole("dialog", { name: "Anthropic" });
+    await user.click(
+      within(providerDialog).getByRole("button", { name: /anthropic api key/i })
+    );
     const keyInput = within(providerDialog).getByLabelText(/api key for anthropic/i);
     await user.type(keyInput, "sk-ant-test-key");
 
@@ -870,12 +874,9 @@ describe("Fable home", () => {
         secret: "sk-ant-test-key"
       });
     });
-    expect(
-      await within(anthropicCard as HTMLElement).findByLabelText(/anthropic is connected/i)
-    ).toBeInTheDocument();
-    expect(
-      within(anthropicCard as HTMLElement).getByText(/streaming/i)
-    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(anthropicTile).toHaveAccessibleName(/anthropic, configured/i);
+    });
     // After connecting, the setup modal switches to Disconnect.
     expect(
       within(providerDialog).getByRole("button", { name: /disconnect/i })
@@ -908,10 +909,14 @@ describe("Fable home", () => {
     await skipOnboarding();
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
     await user.click(screen.getByRole("button", { name: /^providers$/i }));
+    await screen.findByRole("heading", { name: "Providers" });
 
-    const anthropicCard = screen.getByText("Anthropic").closest("article");
-    await user.click(anthropicCard as HTMLElement);
+    const anthropicTile = screen.getByRole("button", { name: /anthropic, not connected/i });
+    await user.click(anthropicTile);
     const providerDialog = screen.getByRole("dialog", { name: "Anthropic" });
+    await user.click(
+      within(providerDialog).getByRole("button", { name: /anthropic api key/i })
+    );
     const keyInput = within(providerDialog).getByLabelText(/api key for anthropic/i);
     await user.type(keyInput, "sk-bad");
     await user.click(
@@ -919,11 +924,17 @@ describe("Fable home", () => {
     );
 
     // The page status surfaces the rejection — never a fake "connected".
-    const status = await screen.findByRole("status");
+    expect(await within(providerDialog).findByRole("alert")).toHaveTextContent(
+      /rejected this key/i
+    );
     await waitFor(() => {
-      expect(status.textContent).toMatch(/rejected this key/i);
+      expect(
+        screen.getAllByRole("status").some((status) =>
+          /rejected this key/i.test(status.textContent ?? "")
+        )
+      ).toBe(true);
     });
-    expect(status.textContent).not.toMatch(/connected/i);
+    expect(anthropicTile).toHaveAccessibleName(/anthropic, not connected/i);
     verifySpy.mockRestore();
   });
 
@@ -1506,14 +1517,14 @@ describe("Fable home", () => {
     expect(screen.getByRole("button", { name: /select model/i })).toHaveTextContent("GPT-5");
 
     await user.click(screen.getByRole("button", { name: /select model/i }));
-    await user.click(screen.getByRole("menuitemradio", { name: /^o3$/i }));
+    await user.click(screen.getByRole("menuitemradio", { name: /^openai o3$/i }));
 
     // The chip now reflects the selection...
     expect(screen.getByRole("button", { name: /select model/i })).toHaveTextContent("o3");
     // ...and the persisted snapshot carries the chosen model id, which is what
     // the agent.run call site turns into request.model.
     await waitFor(() => {
-      expect(runtimeMocks.savedSnapshots.at(-1)?.selectedModelId).toBe("o3");
+      expect(runtimeMocks.savedSnapshots.at(-1)?.selectedModelId).toBe("openai::o3");
     });
   });
 
@@ -1718,13 +1729,13 @@ describe("Fable onboarding", () => {
     },
     {
       id: "copilot",
-      backendType: "copilot-sdk",
+      backendType: "acp",
       label: "GitHub Copilot",
-      description: "Copilot SDK",
+      description: "Copilot over ACP",
       authState: "needs-auth",
       capabilities: [],
       models: [{ id: "copilot-default", label: "Copilot default", available: false }],
-      installHint: "Requires the Copilot SDK."
+      installHint: "Requires the GitHub Copilot CLI."
     },
     {
       id: "grok",
@@ -1781,7 +1792,34 @@ describe("Fable onboarding", () => {
       description: "Reach many models through OpenRouter with an OpenRouter API key. Fable owns the agent loop.",
       authState: "needs-auth",
       capabilities: [],
-      models: [{ id: "openrouter:auto", label: "OpenRouter Auto", available: false }]
+      models: [{ id: "openrouter/auto", label: "OpenRouter Auto", available: false }]
+    },
+    {
+      id: "deepseek",
+      backendType: "native-api",
+      label: "DeepSeek",
+      description: "Reach DeepSeek models directly with a DeepSeek API key.",
+      authState: "needs-auth",
+      capabilities: [],
+      models: [{ id: "deepseek-v4-pro", label: "DeepSeek V4 Pro", available: false }]
+    },
+    {
+      id: "zai",
+      backendType: "native-api",
+      label: "Z.AI",
+      description: "Reach GLM models through the general Z.AI API.",
+      authState: "needs-auth",
+      capabilities: [],
+      models: [{ id: "glm-5.1", label: "GLM-5.1", available: false }]
+    },
+    {
+      id: "minimax",
+      backendType: "native-api",
+      label: "MiniMax",
+      description: "Reach MiniMax models with a MiniMax API key.",
+      authState: "needs-auth",
+      capabilities: [],
+      models: [{ id: "MiniMax-M2.7", label: "MiniMax M2.7", available: false }]
     }
   ];
 
@@ -1828,31 +1866,38 @@ describe("Fable onboarding", () => {
       .toBeInTheDocument();
   });
 
-  it("shows every provider in one unified list (single setup flow)", async () => {
+  it("shows featured provider families first, then one alphabetical list", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // Account/runtime providers are immediately visible:
-    for (const label of ["Codex", "Cursor", "GitHub Copilot", "Grok"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+    // Predominant provider families are immediately visible, independent of
+    // whether their connection method is an account, CLI, or API key.
+    for (const label of [
+      /openai \/ chatgpt,/i,
+      /anthropic,/i,
+      /google gemini,/i,
+      /github copilot,/i,
+      /xai,/i,
+      /deepseek,/i,
+      /z\.ai,/i
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
+    expect(screen.queryByRole("button", { name: /^cursor,/i })).not.toBeInTheDocument();
 
-    // API-key providers are not visible initially
-    for (const label of ["OpenAI", "Anthropic", "Gemini", "xAI", "OpenRouter"]) {
-      expect(screen.queryByText(label)).not.toBeInTheDocument();
-    }
+    await user.click(screen.getByRole("button", { name: /show all providers/i }));
 
-    // Activate disclosure
-    const disclosure = screen.getByRole("button", { name: /add an api key/i });
-    await user.click(disclosure);
-
-    // Now they should be visible!
-    for (const label of ["OpenAI", "Anthropic", "Gemini", "xAI", "OpenRouter"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-    }
+    // The expanded view replaces the featured grid and exposes search plus the
+    // alphabetized long tail, including provider-owned runtimes.
+    expect(screen.getByRole("searchbox", { name: /search providers/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^cursor,/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^minimax,/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^openrouter,/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /show all providers/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show featured providers/i })).toBeInTheDocument();
   });
 
   it("never shows a token field for provider-owned runtimes (subscription/CLI)", async () => {
@@ -1862,15 +1907,16 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // Click the Cursor tile to open the modal:
+    await user.click(screen.getByRole("button", { name: /show all providers/i }));
+
+    // Click the Cursor family, then choose its provider-owned connection method.
     const cursorTile = screen.getByRole("button", { name: /^cursor,/i });
     await user.click(cursorTile);
 
-    const modal = screen.getByRole("dialog");
+    const modal = screen.getByRole("dialog", { name: "Cursor" });
     expect(within(modal).getByRole("heading", { name: "Cursor" })).toBeInTheDocument();
-    expect(
-      within(modal).getByLabelText(/cursor install required/i)
-    ).toHaveTextContent(/cursor cli/i);
+    await user.click(within(modal).getByRole("button", { name: /cursor subscription/i }));
+    expect(within(modal).getByText(/requires the cursor cli/i)).toBeInTheDocument();
 
     // No token input:
     expect(
@@ -1885,16 +1931,25 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // Check Cursor modal:
+    await user.click(screen.getByRole("button", { name: /show all providers/i }));
+
+    // Check the Cursor provider-owned method:
     await user.click(screen.getByRole("button", { name: /^cursor,/i }));
-    const cursorModal = screen.getByRole("dialog");
-    expect(within(cursorModal).getByLabelText(/cursor install required/i)).toHaveTextContent(/cursor cli/i);
+    const cursorModal = screen.getByRole("dialog", { name: "Cursor" });
+    await user.click(
+      within(cursorModal).getByRole("button", { name: /cursor subscription/i })
+    );
+    expect(within(cursorModal).getByText(/requires the cursor cli/i)).toBeInTheDocument();
     await user.click(within(cursorModal).getByRole("button", { name: /close provider setup/i }));
 
-    // Check Grok modal:
-    await user.click(screen.getByRole("button", { name: /^grok,/i }));
-    const grokModal = screen.getByRole("dialog");
-    expect(within(grokModal).getByLabelText(/grok install required/i)).toHaveTextContent(/grok cli/i);
+    // Grok's CLI and xAI's API key are choices inside the same xAI family.
+    await user.click(screen.getByRole("button", { name: /^xai,/i }));
+    const grokModal = screen.getByRole("dialog", { name: "xAI" });
+    await user.click(
+      within(grokModal).getByRole("button", { name: /grok account in your browser/i })
+    );
+    expect(within(grokModal).getByText(/requires the grok cli/i)).toBeInTheDocument();
+    expect(within(grokModal).queryByLabelText(/api key for xai/i)).not.toBeInTheDocument();
   });
 
   it("clears the gate when a real capability-bearing runtime is connected", async () => {
@@ -1928,14 +1983,12 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // API-key providers are hidden initially. Activate disclosure:
-    await user.click(screen.getByRole("button", { name: /add an api key/i }));
+    // OpenAI is featured as one family regardless of connection method.
+    await user.click(screen.getByRole("button", { name: /openai \/ chatgpt,/i }));
 
-    // Click OpenAI tile:
-    await user.click(screen.getByRole("button", { name: /^openai,/i }));
-
-    // The modal is open. Expanding reveals a secure input — the key never enters React state.
-    const modal = screen.getByRole("dialog");
+    // Choosing the API-key method reveals a secure input — the key never enters React state.
+    const modal = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(modal).getByRole("button", { name: /openai api key/i }));
     expect(within(modal).getByLabelText(/api key for openai/i)).toBeInTheDocument();
   });
 
@@ -1946,18 +1999,28 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // Open disclosure to put API key text in DOM
-    await user.click(screen.getByRole("button", { name: /add an api key/i }));
-
-    const shell = screen.getByRole("heading", { name: /add a model provider/i });
-    const frame = shell.closest("main");
-    const text = frame?.textContent?.toLowerCase() ?? "";
+    await user.click(screen.getByRole("button", { name: /anthropic,/i }));
+    const anthropicModal = screen.getByRole("dialog", { name: "Anthropic" });
+    expect(
+      within(anthropicModal).getByRole("button", { name: /anthropic api key/i })
+    ).toBeInTheDocument();
+    const text = anthropicModal.textContent?.toLowerCase() ?? "";
     // No Claude.ai subscription login; no Google AI Pro/Ultra subscription reuse.
     expect(text).not.toMatch(/claude\.ai/);
     expect(text).not.toMatch(/google ai (pro|ultra)/);
     // The implemented direct API-key path is named, without future routing copy.
     expect(text).toMatch(/api key/);
     expect(text).not.toMatch(/vertex|bedrock/);
+
+    await user.click(
+      within(anthropicModal).getByRole("button", { name: /close provider setup/i })
+    );
+    await user.click(screen.getByRole("button", { name: /google gemini,/i }));
+    const geminiModal = screen.getByRole("dialog", { name: "Google Gemini" });
+    expect(
+      within(geminiModal).getByRole("button", { name: /gemini api key/i })
+    ).toBeInTheDocument();
+    expect(geminiModal).not.toHaveTextContent(/google ai (pro|ultra)/i);
   });
 
   it("connects a native API-key backend via the verified path and clears the gate", async () => {
@@ -1967,11 +2030,10 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // Open disclosure:
-    await user.click(screen.getByRole("button", { name: /add an api key/i }));
-
-    // Click OpenAI tile to open modal:
-    await user.click(screen.getByRole("button", { name: /^openai,/i }));
+    // Open the provider family and choose its API-key method.
+    await user.click(screen.getByRole("button", { name: /openai \/ chatgpt,/i }));
+    const modal = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(modal).getByRole("button", { name: /openai api key/i }));
 
     // Simulate the credential boundary resolving OpenAI to connected after the
     // store + verify call records the key.
@@ -1988,7 +2050,6 @@ describe("Fable onboarding", () => {
       ...failClosedBackends.filter((provider) => provider.id !== "openai")
     ];
 
-    const modal = screen.getByRole("dialog");
     const keyInput = within(modal).getByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-test-key");
     await user.click(within(modal).getByRole("button", { name: /add key & connect/i }));
@@ -2028,13 +2089,10 @@ describe("Fable onboarding", () => {
     await completeProfileStep(user);
     await screen.findByRole("heading", { name: /add a model provider/i });
 
-    // Open disclosure:
-    await user.click(screen.getByRole("button", { name: /add an api key/i }));
-
-    // Click OpenAI tile to open modal:
-    await user.click(screen.getByRole("button", { name: /^openai,/i }));
-
-    const modal = screen.getByRole("dialog");
+    // Open the provider family and choose its API-key method.
+    await user.click(screen.getByRole("button", { name: /openai \/ chatgpt,/i }));
+    const modal = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(modal).getByRole("button", { name: /openai api key/i }));
     const keyInput = within(modal).getByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-bad-key");
     await user.click(within(modal).getByRole("button", { name: /add key & connect/i }));

@@ -20,6 +20,7 @@ use std::time::Duration;
 use crate::backends::read_credential;
 use crate::models::BackendVerifyResult;
 use tauri::{AppHandle, Emitter};
+use url::{Host, Url};
 
 /// Which wire family a native provider speaks (selects endpoint + auth header).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +40,140 @@ pub fn provider_kind(provider_id: &str) -> ProviderKind {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OpenAiCompatProfile {
+    id: &'static str,
+    chat_endpoint: &'static str,
+    models_endpoint: Option<&'static str>,
+    auth_required: bool,
+}
+
+/// Fixed provider profiles. An absent models endpoint means credential
+/// verification and discovery are unsupported, while chat execution remains
+/// available through the curated model fallback.
+const OPENAI_COMPAT_PROFILES: &[OpenAiCompatProfile] = &[
+    OpenAiCompatProfile {
+        id: "openai",
+        chat_endpoint: "https://api.openai.com/v1/chat/completions",
+        models_endpoint: Some("https://api.openai.com/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "xai",
+        chat_endpoint: "https://api.x.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.x.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "openrouter",
+        chat_endpoint: "https://openrouter.ai/api/v1/chat/completions",
+        models_endpoint: Some("https://openrouter.ai/api/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "deepseek",
+        chat_endpoint: "https://api.deepseek.com/chat/completions",
+        models_endpoint: Some("https://api.deepseek.com/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "zai",
+        chat_endpoint: "https://api.z.ai/api/paas/v4/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "minimax",
+        chat_endpoint: "https://api.minimax.io/v1/chat/completions",
+        models_endpoint: Some("https://api.minimax.io/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "alibaba",
+        chat_endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "fireworks",
+        chat_endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "huggingface",
+        chat_endpoint: "https://router.huggingface.co/v1/chat/completions",
+        models_endpoint: Some("https://router.huggingface.co/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "moonshot",
+        chat_endpoint: "https://api.moonshot.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.moonshot.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "kimi-code",
+        chat_endpoint: "https://api.kimi.com/coding/v1/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "mistral",
+        chat_endpoint: "https://api.mistral.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.mistral.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "meta",
+        chat_endpoint: "https://api.llama.com/v1/chat/completions",
+        models_endpoint: Some("https://api.llama.com/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "perplexity",
+        chat_endpoint: "https://api.perplexity.ai/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "tencent",
+        chat_endpoint: "https://tokenhub-intl.tencentmaas.com/v1/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "xiaomi",
+        chat_endpoint: "https://api.xiaomimimo.com/v1/chat/completions",
+        models_endpoint: None,
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "groq",
+        chat_endpoint: "https://api.groq.com/openai/v1/chat/completions",
+        models_endpoint: Some("https://api.groq.com/openai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "together",
+        chat_endpoint: "https://api.together.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.together.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "cerebras",
+        chat_endpoint: "https://api.cerebras.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.cerebras.ai/v1/models"),
+        auth_required: true,
+    },
+];
+
+fn openai_compat_profile(provider_id: &str) -> Option<&'static OpenAiCompatProfile> {
+    OPENAI_COMPAT_PROFILES
+        .iter()
+        .find(|profile| profile.id == provider_id)
+}
+
 /// The provider-specific auth header. The key is never returned to JS — it is
 /// placed into this header here, then sent on the request.
 pub fn auth_header_for(provider_id: &str, key: &str) -> (String, String) {
@@ -53,13 +188,9 @@ pub fn auth_header_for(provider_id: &str, key: &str) -> (String, String) {
 /// Anthropic/Gemini under Vertex is a future extension; API-key hosts ship now.
 pub fn endpoint_for(provider_id: &str) -> String {
     match provider_kind(provider_id) {
-        ProviderKind::OpenAiCompat if provider_id == "xai" => {
-            "https://api.x.ai/v1/chat/completions".to_string()
-        }
-        ProviderKind::OpenAiCompat if provider_id == "openrouter" => {
-            "https://openrouter.ai/api/v1/chat/completions".to_string()
-        }
-        ProviderKind::OpenAiCompat => "https://api.openai.com/v1/chat/completions".to_string(),
+        ProviderKind::OpenAiCompat => openai_compat_profile(provider_id)
+            .map(|profile| profile.chat_endpoint.to_string())
+            .unwrap_or_default(),
         ProviderKind::Anthropic => "https://api.anthropic.com/v1/messages".to_string(),
         ProviderKind::Gemini => {
             "https://generativelanguage.googleapis.com/v1beta/models/streamGenerateContent"
@@ -82,6 +213,138 @@ pub fn endpoint_for_model(provider_id: &str, model: &str) -> Result<String, Stri
     Ok(format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
     ))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CustomProviderCredential {
+    version: u8,
+    kind: String,
+    base_url: String,
+    model_id: String,
+    api_key: Option<String>,
+}
+
+#[derive(Clone)]
+struct ResolvedProviderConnection {
+    chat_endpoint: String,
+    models_endpoint: Option<String>,
+    auth_header: Option<(String, String)>,
+}
+
+fn normalize_custom_base_url(raw: &str) -> Result<String, String> {
+    if raw.len() > 2_048 {
+        return Err("Custom provider base URL is too long.".to_string());
+    }
+    if raw.is_empty() || raw.chars().any(char::is_control) {
+        return Err("Custom provider base URL is invalid.".to_string());
+    }
+    let parsed = Url::parse(raw).map_err(|_| "Custom provider base URL is invalid.".to_string())?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Custom provider base URL cannot contain user information.".to_string());
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("Custom provider base URL cannot contain a query or fragment.".to_string());
+    }
+    let host = parsed
+        .host()
+        .ok_or_else(|| "Custom provider base URL needs a host.".to_string())?;
+    match parsed.scheme() {
+        "https" => {}
+        "http" => {
+            let loopback = match host {
+                Host::Domain(domain) => domain == "localhost",
+                Host::Ipv4(address) => address.is_loopback(),
+                Host::Ipv6(address) => address.is_loopback(),
+            };
+            if !loopback {
+                return Err(
+                    "Custom provider HTTP URLs are allowed only on the local loopback host."
+                        .to_string(),
+                );
+            }
+        }
+        _ => return Err("Custom provider base URL must use HTTP or HTTPS.".to_string()),
+    }
+    Ok(parsed.as_str().trim_end_matches('/').to_string())
+}
+
+fn parse_custom_provider_credential(secret: &str) -> Result<CustomProviderCredential, String> {
+    let value: serde_json::Value = serde_json::from_str(secret)
+        .map_err(|_| "Custom provider credential has an invalid shape.".to_string())?;
+    if value
+        .get("apiKey")
+        .is_some_and(|api_key| !api_key.is_string())
+    {
+        return Err("Custom provider API key must be a string when present.".to_string());
+    }
+    let mut credential: CustomProviderCredential = serde_json::from_value(value)
+        .map_err(|_| "Custom provider credential has an invalid shape.".to_string())?;
+    if credential.version != 1 || credential.kind != "openai-compatible" {
+        return Err("Custom provider credential version or kind is unsupported.".to_string());
+    }
+    credential.base_url = normalize_custom_base_url(&credential.base_url)?;
+    credential.model_id = credential.model_id.trim().to_string();
+    if credential.model_id.is_empty()
+        || credential.model_id.len() > 256
+        || credential.model_id.chars().any(char::is_control)
+    {
+        return Err("Custom provider model ID is invalid.".to_string());
+    }
+    if let Some(api_key) = credential.api_key.as_deref() {
+        if api_key.is_empty() || api_key.chars().any(char::is_control) {
+            return Err("Custom provider API key is invalid.".to_string());
+        }
+    }
+    Ok(credential)
+}
+
+/// Validate structured native credentials before they enter the secure store.
+/// Fixed remote providers accept opaque API keys; custom endpoints use a
+/// validated configuration envelope.
+pub(crate) fn validate_native_credential(provider_id: &str, secret: &str) -> Result<(), String> {
+    match provider_id {
+        "custom" => parse_custom_provider_credential(secret).map(|_| ()),
+        _ => Ok(()),
+    }
+}
+
+fn resolve_provider_connection(
+    provider_id: &str,
+    credential: &str,
+    model: &str,
+) -> Result<ResolvedProviderConnection, String> {
+    if provider_id == "custom" {
+        let custom = parse_custom_provider_credential(credential)?;
+        if model != "model-discovery" && model != custom.model_id {
+            return Err(
+                "The selected model is not configured for this custom provider.".to_string(),
+            );
+        }
+        return Ok(ResolvedProviderConnection {
+            chat_endpoint: format!("{}/chat/completions", custom.base_url),
+            // A chat-compatible endpoint is not required to expose GET /models.
+            // Fable uses the explicit, user-configured model ID instead.
+            models_endpoint: None,
+            auth_header: custom
+                .api_key
+                .map(|key| ("Authorization".to_string(), format!("Bearer {key}"))),
+        });
+    }
+
+    let chat_endpoint = endpoint_for_model(provider_id, model)?;
+    if chat_endpoint.is_empty() {
+        return Err("Provider is not registered for native API egress.".to_string());
+    }
+    let models_endpoint = models_endpoint_for(provider_id).ok();
+    let auth_required = openai_compat_profile(provider_id)
+        .map(|profile| profile.auth_required)
+        .unwrap_or(true);
+    Ok(ResolvedProviderConnection {
+        chat_endpoint,
+        models_endpoint,
+        auth_header: auth_required.then(|| auth_header_for(provider_id, credential)),
+    })
 }
 
 /// Additional headers a provider requires beyond auth (e.g. anthropic-version).
@@ -168,13 +431,39 @@ fn require_key(provider_id: &str) -> Result<String, String> {
 /// copy must never say "rejected" — it directs the user to add a key. Pure so
 /// the boundary copy contract is unit-tested without a socket.
 pub fn missing_key_message(provider_id: &str) -> String {
-    format!("Add an {provider_id} API key to connect.")
+    match provider_id {
+        "custom" => "Add a custom OpenAI-compatible endpoint to connect.".to_string(),
+        _ => format!("Add an {provider_id} API key to connect."),
+    }
 }
 
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "gemini", "xai", "openrouter"];
+const NATIVE_PROVIDER_IDS: [&str; 22] = [
+    "openai",
+    "anthropic",
+    "gemini",
+    "xai",
+    "openrouter",
+    "deepseek",
+    "zai",
+    "minimax",
+    "alibaba",
+    "fireworks",
+    "huggingface",
+    "moonshot",
+    "kimi-code",
+    "mistral",
+    "meta",
+    "perplexity",
+    "tencent",
+    "xiaomi",
+    "groq",
+    "together",
+    "cerebras",
+    "custom",
+];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,9 +550,10 @@ pub async fn stream_backend_completion(
     if request.body.to_string().len() > 2 * 1024 * 1024 {
         return Err("Native provider request body exceeds the supported limit.".to_string());
     }
-    let key = require_key(&request.provider_id)?;
-    let (auth_name, auth_value) = auth_header_for(&request.provider_id, &key);
-    let url = endpoint_for_model(&request.provider_id, &request.model)?;
+    let credential = require_key(&request.provider_id)?;
+    let connection =
+        resolve_provider_connection(&request.provider_id, &credential, &request.model)?;
+    let url = connection.chat_endpoint;
     let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
 
     crate::ensure_rustls_provider();
@@ -284,10 +574,10 @@ pub async fn stream_backend_completion(
     let mut completed = false;
 
     for attempt in 0..MAX_ATTEMPTS {
-        let mut req = client
-            .post(&url)
-            .header(&auth_name, &auth_value)
-            .json(&request.body);
+        let mut req = client.post(&url).json(&request.body);
+        if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
+            req = req.header(auth_name.as_str(), auth_value.as_str());
+        }
         for (name, value) in extra_headers(&request.provider_id) {
             req = req.header(name, value);
         }
@@ -527,13 +817,12 @@ const MAX_DISCOVERY_PAGES: usize = 10;
 /// The list-models endpoint for a provider. Pure helper (unit-tested).
 pub fn models_endpoint_for(provider_id: &str) -> Result<String, String> {
     match provider_kind(provider_id) {
-        ProviderKind::OpenAiCompat if provider_id == "xai" => {
-            Ok("https://api.x.ai/v1/models".to_string())
-        }
-        ProviderKind::OpenAiCompat if provider_id == "openrouter" => {
-            Ok("https://openrouter.ai/api/v1/models".to_string())
-        }
-        ProviderKind::OpenAiCompat => Ok("https://api.openai.com/v1/models".to_string()),
+        ProviderKind::OpenAiCompat => openai_compat_profile(provider_id)
+            .and_then(|profile| profile.models_endpoint)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                "Provider does not expose a compatible model-list endpoint.".to_string()
+            }),
         ProviderKind::Anthropic => Ok("https://api.anthropic.com/v1/models".to_string()),
         // Gemini models are enumerated under /v1beta/models; the API key stays
         // in the x-goog-api-key header owned by this Rust boundary.
@@ -677,8 +966,8 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     if !NATIVE_PROVIDER_IDS.contains(&provider_id.as_str()) {
         return Err("Provider is not registered for native API model discovery.".to_string());
     }
-    let key = match require_key(&provider_id) {
-        Ok(key) => key,
+    let credential = match require_key(&provider_id) {
+        Ok(credential) => credential,
         Err(_) => {
             // Discovery without a stored key is a configuration gap, not a
             // provider/runtime failure. Keep the outcome actionable: the user
@@ -686,14 +975,32 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
             return Ok(ModelDiscoveryResult {
                 outcome: "failed",
                 models: Vec::new(),
-                message: Some(format!(
-                    "Add an {provider_id} API key before discovering models."
-                )),
+                message: Some(missing_key_message(&provider_id)),
             });
         }
     };
-    let url = models_endpoint_for(&provider_id)?;
-    let (auth_name, auth_value) = auth_header_for(&provider_id, &key);
+    if provider_id == "custom" {
+        let custom = parse_custom_provider_credential(&credential)?;
+        return Ok(ModelDiscoveryResult {
+            outcome: "success",
+            models: vec![DiscoveredModel {
+                id: custom.model_id,
+                available: true,
+            }],
+            message: Some("Using the model ID configured for this custom endpoint.".to_string()),
+        });
+    }
+    let connection = resolve_provider_connection(&provider_id, &credential, "model-discovery")?;
+    let Some(url) = connection.models_endpoint.clone() else {
+        return Ok(ModelDiscoveryResult {
+            outcome: "unsupported",
+            models: Vec::new(),
+            message: Some(
+                "This provider does not expose a compatible model-list endpoint; using curated models."
+                    .to_string(),
+            ),
+        });
+    };
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
@@ -706,7 +1013,10 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     let mut seen = HashSet::new();
 
     for _page in 0..MAX_DISCOVERY_PAGES {
-        let mut request = client.get(&url).header(&auth_name, &auth_value);
+        let mut request = client.get(&url);
+        if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
+            request = request.header(auth_name.as_str(), auth_value.as_str());
+        }
         if let Some(cursor_value) = cursor.as_deref() {
             let key = if provider_kind(&provider_id) == ProviderKind::Gemini {
                 "pageToken"
@@ -820,8 +1130,8 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
         });
     }
 
-    let key = match require_key(&provider_id) {
-        Ok(key) => key,
+    let credential = match require_key(&provider_id) {
+        Ok(credential) => credential,
         Err(_) => {
             // No credential is stored. This is a configuration-state gap, not a
             // key the provider rejected, so the message must not say "rejected".
@@ -835,8 +1145,18 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
         }
     };
 
-    let url = models_endpoint_for(&provider_id)?;
-    let (auth_name, auth_value) = auth_header_for(&provider_id, &key);
+    let connection =
+        resolve_provider_connection(&provider_id, &credential, "credential-verification")?;
+    let Some(url) = connection.models_endpoint.clone() else {
+        return Ok(BackendVerifyResult {
+            provider_id,
+            outcome: "unsupported".to_string(),
+            message: Some(
+                "This provider does not expose a compatible credential-verification endpoint. The saved connection can still use curated models."
+                    .to_string(),
+            ),
+        });
+    };
 
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -844,7 +1164,10 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
         .build()
         .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
 
-    let mut request = client.get(&url).header(&auth_name, &auth_value);
+    let mut request = client.get(&url);
+    if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
+        request = request.header(auth_name.as_str(), auth_value.as_str());
+    }
     for (name, value) in extra_headers(&provider_id) {
         request = request.header(name, value);
     }
@@ -942,6 +1265,183 @@ mod transport_policy_tests {
     }
 
     #[test]
+    fn fixed_openai_compatible_endpoints_match_provider_profiles() {
+        let expected = [
+            ("deepseek", "https://api.deepseek.com/chat/completions"),
+            ("zai", "https://api.z.ai/api/paas/v4/chat/completions"),
+            ("minimax", "https://api.minimax.io/v1/chat/completions"),
+            (
+                "alibaba",
+                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+            ),
+            (
+                "fireworks",
+                "https://api.fireworks.ai/inference/v1/chat/completions",
+            ),
+            (
+                "huggingface",
+                "https://router.huggingface.co/v1/chat/completions",
+            ),
+            ("moonshot", "https://api.moonshot.ai/v1/chat/completions"),
+            (
+                "kimi-code",
+                "https://api.kimi.com/coding/v1/chat/completions",
+            ),
+            ("mistral", "https://api.mistral.ai/v1/chat/completions"),
+            ("meta", "https://api.llama.com/v1/chat/completions"),
+            ("perplexity", "https://api.perplexity.ai/chat/completions"),
+            (
+                "tencent",
+                "https://tokenhub-intl.tencentmaas.com/v1/chat/completions",
+            ),
+            ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
+            ("groq", "https://api.groq.com/openai/v1/chat/completions"),
+            ("together", "https://api.together.ai/v1/chat/completions"),
+            ("cerebras", "https://api.cerebras.ai/v1/chat/completions"),
+        ];
+        for (provider_id, endpoint) in expected {
+            assert_eq!(endpoint_for(provider_id), endpoint, "{provider_id}");
+        }
+    }
+
+    #[test]
+    fn native_allowlist_and_fixed_profile_table_are_complete_and_unique() {
+        let native: HashSet<&str> = NATIVE_PROVIDER_IDS.into_iter().collect();
+        assert_eq!(native.len(), NATIVE_PROVIDER_IDS.len());
+        let profiled: HashSet<&str> = OPENAI_COMPAT_PROFILES
+            .iter()
+            .map(|profile| profile.id)
+            .collect();
+        assert_eq!(profiled.len(), OPENAI_COMPAT_PROFILES.len());
+        let expected_profiled: HashSet<&str> = native
+            .iter()
+            .copied()
+            .filter(|id| !matches!(*id, "anthropic" | "gemini" | "custom"))
+            .collect();
+        assert_eq!(profiled, expected_profiled);
+    }
+
+    #[test]
+    fn compatible_model_list_endpoints_are_exact_and_unsupported_ones_fail_closed() {
+        let expected = [
+            ("deepseek", "https://api.deepseek.com/models"),
+            ("minimax", "https://api.minimax.io/v1/models"),
+            ("huggingface", "https://router.huggingface.co/v1/models"),
+            ("moonshot", "https://api.moonshot.ai/v1/models"),
+            ("mistral", "https://api.mistral.ai/v1/models"),
+            ("meta", "https://api.llama.com/v1/models"),
+            ("groq", "https://api.groq.com/openai/v1/models"),
+            ("together", "https://api.together.ai/v1/models"),
+            ("cerebras", "https://api.cerebras.ai/v1/models"),
+        ];
+        for (provider_id, endpoint) in expected {
+            assert_eq!(
+                models_endpoint_for(provider_id).unwrap(),
+                endpoint,
+                "{provider_id}"
+            );
+        }
+        for provider_id in [
+            "zai",
+            "alibaba",
+            "fireworks",
+            "kimi-code",
+            "perplexity",
+            "tencent",
+            "xiaomi",
+        ] {
+            assert!(models_endpoint_for(provider_id).is_err(), "{provider_id}");
+        }
+    }
+
+    fn custom_secret(base_url: &str, api_key: Option<&str>) -> String {
+        let mut value = serde_json::json!({
+            "version": 1,
+            "kind": "openai-compatible",
+            "baseUrl": base_url,
+            "modelId": "example-chat",
+        });
+        if let Some(api_key) = api_key {
+            value["apiKey"] = serde_json::Value::String(api_key.to_string());
+        }
+        serde_json::to_string(&value).unwrap()
+    }
+
+    #[test]
+    fn custom_provider_appends_routes_and_uses_optional_bearer_auth() {
+        let with_key = custom_secret("https://models.example.com/v1/", Some("secret-key"));
+        let connection = resolve_provider_connection("custom", &with_key, "example-chat").unwrap();
+        assert_eq!(
+            connection.chat_endpoint,
+            "https://models.example.com/v1/chat/completions"
+        );
+        assert!(connection.models_endpoint.is_none());
+        assert_eq!(
+            connection.auth_header,
+            Some(("Authorization".to_string(), "Bearer secret-key".to_string()))
+        );
+
+        let without_key = custom_secret("https://models.example.com/v1", None);
+        let connection =
+            resolve_provider_connection("custom", &without_key, "example-chat").unwrap();
+        assert!(connection.auth_header.is_none());
+        assert!(resolve_provider_connection("custom", &without_key, "other-model").is_err());
+    }
+
+    #[test]
+    fn custom_provider_http_is_limited_to_exact_loopback_hosts() {
+        for allowed in [
+            "http://localhost:8000/v1",
+            "http://127.0.0.1:8000/v1",
+            "http://127.42.0.7:8000/v1",
+            "http://[::1]:8000/v1",
+        ] {
+            assert!(
+                parse_custom_provider_credential(&custom_secret(allowed, None)).is_ok(),
+                "{allowed} should be accepted"
+            );
+        }
+
+        for rejected in [
+            "http://example.com/v1",
+            "http://10.0.0.8/v1",
+            "http://localhost.evil.example/v1",
+            "http://127.0.0.1.evil.example/v1",
+            "http://user@localhost:8000/v1",
+        ] {
+            assert!(
+                parse_custom_provider_credential(&custom_secret(rejected, None)).is_err(),
+                "{rejected} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn custom_provider_rejects_unsafe_url_components_and_non_exact_json() {
+        for rejected in [
+            "ftp://models.example.com/v1",
+            "https://user:pass@models.example.com/v1",
+            "https://models.example.com/v1?token=secret",
+            "https://models.example.com/v1#fragment",
+        ] {
+            assert!(parse_custom_provider_credential(&custom_secret(rejected, None)).is_err());
+        }
+
+        let extra_field = r#"{"version":1,"kind":"openai-compatible","baseUrl":"https://models.example.com/v1","modelId":"example-chat","extra":true}"#;
+        assert!(parse_custom_provider_credential(extra_field).is_err());
+        let wrong_version = r#"{"version":2,"kind":"openai-compatible","baseUrl":"https://models.example.com/v1","modelId":"example-chat"}"#;
+        assert!(parse_custom_provider_credential(wrong_version).is_err());
+        let wrong_kind = r#"{"version":1,"kind":"anthropic","baseUrl":"https://models.example.com/v1","modelId":"example-chat"}"#;
+        assert!(parse_custom_provider_credential(wrong_kind).is_err());
+        let null_key = r#"{"version":1,"kind":"openai-compatible","baseUrl":"https://models.example.com/v1","modelId":"example-chat","apiKey":null}"#;
+        assert!(parse_custom_provider_credential(null_key).is_err());
+        let missing_model =
+            r#"{"version":1,"kind":"openai-compatible","baseUrl":"https://models.example.com/v1"}"#;
+        assert!(parse_custom_provider_credential(missing_model).is_err());
+        assert!(parse_custom_provider_credential("not-json").is_err());
+    }
+
+    #[test]
     fn parses_openai_style_data_array_into_ids() {
         let body = serde_json::json!({
             "data": [
@@ -1027,14 +1527,14 @@ mod transport_policy_tests {
     fn missing_key_message_directs_the_user_to_add_a_key() {
         // A missing key is a configuration-state gap, not a provider rejection.
         // The copy must never imply the key was "rejected" or "invalid".
-        for provider_id in ["openai", "anthropic", "gemini", "xai", "openrouter"] {
+        for provider_id in NATIVE_PROVIDER_IDS {
             let message = missing_key_message(provider_id);
             assert!(
-                message.contains("Add an"),
-                "missing-key message should direct the user to add a key: {message}"
+                message.starts_with("Add") || message.starts_with("Connect"),
+                "missing-credential message should direct the user to connect: {message}"
             );
             assert!(
-                message.contains(provider_id),
+                message.to_ascii_lowercase().contains(provider_id),
                 "missing-key message should name the provider: {message}"
             );
             assert!(

@@ -21,11 +21,17 @@ export {
   type AcpNotification,
   type AcpError
 } from "./protocol";
-export { normalizeAcpNotification } from "./events";
+export {
+  ACP_PERMISSION_TOOL,
+  buildAcpPermissionToolCall,
+  finishReasonForAcpStopReason,
+  normalizeAcpNotification
+} from "./events";
 export {
   type AcpTransport,
   type AcpTransportFactory,
   type AcpTransportProvider,
+  type AcpInboundFrame,
   type AcpReply
 } from "./transport";
 export { runAcpSession, type AcpSessionOptions } from "./session";

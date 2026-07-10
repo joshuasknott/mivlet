@@ -30,4 +30,18 @@ describe("ProviderIcon", () => {
     expect(container.querySelector("svg")).toBeInTheDocument();
     expect(container.querySelector("[data-provider-brand]")).not.toBeInTheDocument();
   });
+
+  it.each([
+    ["deepseek", "deepseek"],
+    ["minimax", "minimax"],
+    ["z-ai", "zai"],
+    ["qwen", "alibaba"],
+    ["moonshot", "kimi"],
+    ["kimi-code", "kimi"],
+    ["mistral-vibe", "mistral"],
+    ["opencode", "opencode"]
+  ])("maps %s to its provider-family icon", (provider, family) => {
+    const { container } = render(<ProviderIcon provider={provider} />);
+    expect(container.querySelector(`[data-provider-brand="${family}"]`)).toBeInTheDocument();
+  });
 });

@@ -45,6 +45,8 @@ pub const AUTOMATION_STATUSES: [&str; 3] = ["draft", "active", "paused"];
 pub const SCHEDULE_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
+// `copilot-sdk` remains a recognized legacy snapshot value; no catalog entry
+// uses it now that GitHub Copilot runs through the live ACP adapter.
 pub const BACKEND_TYPES: [&str; 5] = [
     "codex-app-server",
     "acp",
@@ -103,17 +105,37 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 10] = [
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 30] = [
     "codex",
     "cursor",
     "copilot",
     "grok",
-    "ollama",
+    "opencode",
+    "kimi",
+    "mistral-vibe",
     "openai",
     "anthropic",
     "gemini",
     "xai",
     "openrouter",
+    "deepseek",
+    "zai",
+    "minimax",
+    "alibaba",
+    "fireworks",
+    "huggingface",
+    "moonshot",
+    "kimi-code",
+    "mistral",
+    "meta",
+    "ollama",
+    "perplexity",
+    "tencent",
+    "xiaomi",
+    "groq",
+    "together",
+    "cerebras",
+    "custom",
 ];
 /// Marker that backend credential storage is pre-release. Now that the OS
 /// keychain is wired (`backends::KeyringStore`, with an in-memory fallback),
@@ -582,6 +604,9 @@ pub struct BackendModel {
     pub id: String,
     pub label: String,
     pub available: bool,
+    /// Optional per-model capability ceiling. Present only when the runtime has
+    /// inspected that specific model (for example, Ollama's local `/api/show`)
+    /// and can state it truthfully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<serde_json::Value>,
 }

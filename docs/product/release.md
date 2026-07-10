@@ -1,6 +1,8 @@
 # Release Readiness
 
-Last updated: 2026-06-29.
+Last updated: 2026-07-10.
+
+> **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. The current Clerk/Convex implementation is still a config-gated foundation, so the repository must not be presented as having completed that account requirement.
 
 ## Runnable paths
 
@@ -28,11 +30,12 @@ Expected local Windows build outputs:
 - `apps/desktop/src-tauri/target/release/bundle/msi/Fable_0.1.0_x64_en-US.msi`
 - `apps/desktop/src-tauri/target/release/bundle/nsis/Fable_0.1.0_x64-setup.exe`
 
-The core desktop workspace does not require a hosted Fable account. It can run
-with local files, drafts, approvals, memory controls, schedules, action history,
-runtime snapshots, and API-key providers. API keys for OpenAI-compatible, Anthropic,
-Gemini, xAI, and OpenRouter providers are handed to the Rust credential
-boundary and are not stored in React state, snapshots, logs, or JSON metadata.
+The current desktop runtime contains local-first encrypted storage and a
+config-gated Clerk identity boundary. The target product requires hosted Fable
+sign-in before normal use; completing that gate, workspace membership, and
+account recovery is a release prerequisite. Provider keys remain separate from
+Fable identity and are handed to the Rust credential boundary rather than
+stored in React state, snapshots, logs, or JSON metadata.
 
 ## Gated paths
 
@@ -43,15 +46,14 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
 - Google connectors are independent desktop public clients. They require
   `FABLE_GOOGLE_OAUTH_CLIENT_ID`, enabled Google APIs, consent configuration,
   test users while unpublished, and any verification required by Google.
-- Codex runs through the local `codex app-server` process when the Codex CLI is
-  installed and authenticated. Cursor and Grok run through their ACP CLI
-  processes when installed and signed in. GitHub Copilot remains cataloged but
-  not runnable until its SDK adapter lands. None of these paths require a Fable
-  cloud account or expose provider-owned subscription tokens to React state.
-- Convex is optional. Batch 6 selected Clerk + Convex for future shared
-  workspaces, but no shared-workspace schema or sync implementation ships yet.
-  `VITE_CONVEX_URL` is not required for the local desktop workspace.
-- Local model execution is still planned and disabled in onboarding.
+- Codex runs through the local `codex app-server` process. Cursor, GitHub
+  Copilot, Grok Build, OpenCode, Kimi, and Mistral Vibe use their installed ACP
+  runtimes and provider-owned sign-in. Live account coverage remains unverified.
+- Clerk + Convex now have a schema, policy tests, device/outbox foundations,
+  and config-gated desktop commands. The product vertical slice for mandatory
+  account onboarding and multi-person workspaces is still incomplete.
+- Ollama runs only through an existing literal-loopback service. Fable does not
+  install Ollama, download models, or store an Ollama credential.
 
 ## Known limits
 
@@ -71,8 +73,9 @@ boundary and are not stored in React state, snapshots, logs, or JSON metadata.
   external users.
 - Complete provider-console setup, callback registration, OAuth consent review,
   and live non-production validation for each external connector.
-- Complete multi-workspace UI account switching on top of the schema v5 workspace isolation already present in storage.
-- Implement and review the Clerk + Convex shared-workspace sync contract before
+- Complete mandatory Clerk account onboarding, recovery, sign-out, device
+  revocation, and hosted session policy.
+- Complete and review the Clerk + Convex shared-workspace vertical slice before
   enabling team workspaces for external users.
 - Add release signing, updater channels, download/legal pages, and platform
   packaging beyond Windows.

@@ -32,9 +32,33 @@
   gap: 2px;
 }
 
-.sidebar-top-row--controls {
-  grid-template-columns: auto 28px;
-  justify-content: end;
+.sidebar-brand {
+  position: relative;
+  display: block;
+  width: 32px;
+  height: 32px;
+  overflow: hidden;
+}
+
+.sidebar-brand__mark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 54px;
+  height: 54px;
+  max-width: none;
+  object-fit: contain;
+  background: transparent;
+  filter: brightness(0) saturate(100%);
+  transform: translate(-50%, -50%);
+}
+
+.sidebar-top-row > .sidebar-minimize {
+  grid-column: 3;
+}
+
+.desktop-frame[data-theme="dark"] .sidebar-brand__mark {
+  filter: none;
 }
 
 .sidebar-minimize {
@@ -593,11 +617,16 @@
   margin-top: 16px;
 }
 
+.sidebar-footer-area {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 .sidebar-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 18px;
   padding: 8px 12px 6px;
   border-top: 0;
 }
@@ -767,6 +796,31 @@
   width: 100%;
 }
 
+.workspace-switcher-container--top {
+  overflow: hidden;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.workspace-switcher-container--top .workspace-switcher--workspace {
+  min-height: 44px;
+  padding: 0 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.workspace-switcher-container--top .workspace-switcher__caret {
+  transition: transform 140ms ease;
+}
+
+.workspace-switcher-container--open .workspace-switcher__caret {
+  transform: rotate(180deg);
+}
+
 .workspace-dropdown {
   position: absolute;
   top: 100%;
@@ -786,6 +840,21 @@
   box-shadow: var(--shadow-2);
   backdrop-filter: var(--glass-filter);
   animation: workspaceDropdownFadeIn 120ms ease-out;
+}
+
+.workspace-switcher-container--top .workspace-dropdown {
+  position: static;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: 5px 6px 6px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 @keyframes workspaceDropdownFadeIn {

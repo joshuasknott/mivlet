@@ -21,7 +21,11 @@
  */
 
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
-import type { ApprovalGate, ToolExecutor } from "@fable/connectors";
+import {
+  ACP_PERMISSION_TOOL,
+  type ApprovalGate,
+  type ToolExecutor
+} from "@fable/connectors";
 import { executeRuntimeToolCall, type RuntimeToolResult } from "../runtime";
 
 /**
@@ -35,6 +39,13 @@ export function createDesktopToolExecutor(gate: ApprovalGate): ToolExecutor {
     const decision = await gate.waitForDecision(approval);
     if (decision !== "granted") {
       throw new Error(`Tool call denied: ${approval.action}.`);
+    }
+    // ACP agents execute their own tools. This reserved approval-only action
+    // must never cross into Rust's Fable-owned tool dispatcher (which would
+    // duplicate the side effect). Resolving here tells the ACP session that the
+    // existing gate granted one permission; it then selects only `allow_once`.
+    if (approval.action.split(/\s+/)[0] === ACP_PERMISSION_TOOL) {
+      return "ACP permission granted once.";
     }
     return runOnDesktop(approval, args);
   };

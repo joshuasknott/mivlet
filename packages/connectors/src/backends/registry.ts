@@ -13,20 +13,40 @@ import type { BackendProvider } from "@fable/protocol";
 import { resolveCodexProvider } from "./codex";
 import { resolveCopilotProvider } from "./copilot";
 import { resolveAcpProvider } from "./acp";
-import { resolveNativeProvider } from "./native";
 import { resolveOllamaProvider } from "./local";
+import { resolveNativeProvider } from "./native";
 
 export const BACKEND_PROVIDER_IDS = [
   "codex",
   "cursor",
   "copilot",
   "grok",
-  "ollama",
+  "opencode",
+  "kimi",
+  "mistral-vibe",
   "openai",
   "anthropic",
   "gemini",
   "xai",
-  "openrouter"
+  "openrouter",
+  "deepseek",
+  "zai",
+  "minimax",
+  "alibaba",
+  "fireworks",
+  "huggingface",
+  "moonshot",
+  "kimi-code",
+  "mistral",
+  "meta",
+  "ollama",
+  "perplexity",
+  "tencent",
+  "xiaomi",
+  "groq",
+  "together",
+  "cerebras",
+  "custom"
 ] as const;
 export type BackendProviderId = (typeof BACKEND_PROVIDER_IDS)[number];
 export type { AcpProviderId } from "./fixtures";
@@ -43,14 +63,34 @@ export function listBackendProviders(): BackendProvider[] {
   return [
     resolveCodexProvider("needs-auth"),
     resolveAcpProvider("cursor", "install-required"),
-    resolveCopilotProvider("needs-auth"),
+    resolveCopilotProvider("install-required"),
     resolveAcpProvider("grok", "install-required"),
-    resolveOllamaProvider("unavailable"),
+    resolveAcpProvider("opencode", "install-required"),
+    resolveAcpProvider("kimi", "install-required"),
+    resolveAcpProvider("mistral-vibe", "install-required"),
     resolveNativeProvider("openai", "needs-auth"),
     resolveNativeProvider("anthropic", "needs-auth"),
     resolveNativeProvider("gemini", "needs-auth"),
     resolveNativeProvider("xai", "needs-auth"),
-    resolveNativeProvider("openrouter", "needs-auth")
+    resolveNativeProvider("openrouter", "needs-auth"),
+    resolveNativeProvider("deepseek", "needs-auth"),
+    resolveNativeProvider("zai", "needs-auth"),
+    resolveNativeProvider("minimax", "needs-auth"),
+    resolveNativeProvider("alibaba", "needs-auth"),
+    resolveNativeProvider("fireworks", "needs-auth"),
+    resolveNativeProvider("huggingface", "needs-auth"),
+    resolveNativeProvider("moonshot", "needs-auth"),
+    resolveNativeProvider("kimi-code", "needs-auth"),
+    resolveNativeProvider("mistral", "needs-auth"),
+    resolveNativeProvider("meta", "needs-auth"),
+    resolveOllamaProvider("unavailable"),
+    resolveNativeProvider("perplexity", "needs-auth"),
+    resolveNativeProvider("tencent", "needs-auth"),
+    resolveNativeProvider("xiaomi", "needs-auth"),
+    resolveNativeProvider("groq", "needs-auth"),
+    resolveNativeProvider("together", "needs-auth"),
+    resolveNativeProvider("cerebras", "needs-auth"),
+    resolveNativeProvider("custom", "needs-auth")
   ];
 }
 
@@ -60,7 +100,10 @@ export { resolveCopilotProvider } from "./copilot";
 export {
   resolveAcpProvider,
   resolveCursorProvider,
-  resolveGrokProvider
+  resolveGrokProvider,
+  resolveOpenCodeProvider,
+  resolveKimiProvider,
+  resolveMistralVibeProvider
 } from "./acp";
 export { resolveNativeProvider, NATIVE_BACKEND_TYPE } from "./native";
 export { resolveOllamaProvider, LOCAL_LOOPBACK_BACKEND_TYPE } from "./local";

@@ -468,20 +468,7 @@ describe("useShellRuntime — audit prepend + dedupe", () => {
     expect(result.current.approvalAudit[1].requestId).toBe("a");
   });
 
-  it("replaces an existing audit entry for the same entry id (dedupe by id)", async () => {
-    // prependAuditEntry dedupes by the audit ENTRY id, not the requestId. The
-    // runtime-backed tool-call path (recordBackendToolCall) returns a fixed
-    // entry from the Rust boundary, so replaying it keeps a stable id and the
-    // shell must replace, not duplicate.
-    const fixedEntry: ApprovalAuditEntry = {
-      id: "tool-call-fixed-entry",
-      requestId: "native-tool-1",
-      decision: "once",
-      decidedAt: "2026-06-27T00:00:00.000Z",
-      note: "Recorded backend tool call"
-    };
-    vi.mocked(runtime.recordRuntimeBackendEvent).mockResolvedValue(fixedEntry);
-
+  it("queues a backend tool call once without inventing a pre-decision audit", async () => {
     const { result } = renderHook(() => useShellRuntime());
     const approval = lowRiskApproval();
 
@@ -493,10 +480,11 @@ describe("useShellRuntime — audit prepend + dedupe", () => {
         approval
       });
     });
-    await waitFor(() => expect(result.current.approvalAudit.length).toBe(1));
+    await waitFor(() => expect(result.current.openApprovals).toContainEqual(approval));
+    expect(result.current.approvalAudit).toHaveLength(0);
 
-    // A second identical tool call returns the SAME entry id: it must replace,
-    // not append, keeping the audit at one entry.
+    // A replayed event with the same approval id updates rather than duplicates
+    // the waiting card.
     act(() => {
       result.current.recordBackendToolCall({
         callId: "call_2",
@@ -505,15 +493,9 @@ describe("useShellRuntime — audit prepend + dedupe", () => {
         approval
       });
     });
-    // A second identical tool call returns the SAME entry id: it must replace,
-    // not append, keeping exactly one matching entry.
-    await waitFor(() => {
-      expect(
-        result.current.approvalAudit.filter((e) => e.id === "tool-call-fixed-entry").length
-      ).toBe(1);
-    });
-
-    vi.mocked(runtime.recordRuntimeBackendEvent).mockResolvedValue(null);
+    expect(
+      result.current.openApprovals.filter((candidate) => candidate.id === approval.id)
+    ).toHaveLength(1);
   });
 });
 
@@ -846,6 +828,15 @@ describe("useShellRuntime — tool-call approval grant/deny dispatch", () => {
     const approval = toolCallApproval("native-read-file");
     // Register the pending tool call on the gate (as onToolCall would).
     gate.register(approval);
+    act(() => {
+      result.current.recordBackendToolCall({
+        callId: "read-file",
+        tool: "read-file",
+        arguments: '{"path":"README.md"}',
+        approval
+      });
+    });
+    await waitFor(() => expect(result.current.openApprovals).toContainEqual(approval));
     let decision: string | undefined;
     void gate.waitForDecision(approval).then((d) => (decision = d));
 
@@ -853,6 +844,9 @@ describe("useShellRuntime — tool-call approval grant/deny dispatch", () => {
       result.current.requestApprovalDecision(approval, "once");
     });
     await waitFor(() => expect(decision).toBe("granted"));
+    await waitFor(() =>
+      expect(result.current.openApprovals.some((candidate) => candidate.id === approval.id)).toBe(false)
+    );
 
     // The grant was also recorded as audit (the existing behavior is preserved).
     expect(result.current.approvalAudit.length).toBe(1);

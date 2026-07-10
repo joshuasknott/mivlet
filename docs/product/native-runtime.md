@@ -1,30 +1,66 @@
 # Native Agent Runtime
 
-Fable's native API path supports OpenAI-compatible, Anthropic, and Gemini wire formats while keeping provider credentials inside the Rust boundary.
+Fable's native path supports OpenAI-compatible, Anthropic, and Gemini wire
+formats. Rust owns credential persistence, endpoint policy, HTTP/TLS egress,
+timeouts, retries, streaming, and cancellation. TypeScript owns the bounded
+multi-round agent loop and provider request/response shaping.
 
 ## Setup and Credentials
 
-All native providers are **Bring Your Own Key (BYOK)**. The desktop runtime manages credentials through a keyring-backed secure storage boundary on the user's OS, with an in-memory fallback for headless or test environments.
-- **Key Storage**: Raw API keys never cross the Rust-to-JavaScript boundary and are never exposed to the frontend React application.
-- **Header Injection**: The credentials are looked up inside Rust immediately prior to HTTP egress and are injected directly into the provider-specific HTTP headers.
-- **Validation**: Stored keys are validated by hit-testing the provider's model list endpoint. 
+- Remote fixed profiles use a user-supplied API key. After submission, the key
+  is stored through the OS keyring boundary (with an in-memory test/headless
+  fallback), is never returned to the frontend, and is injected into request
+  headers only inside Rust.
+- Ollama is the local exception: Fable stores only a local connection marker
+  and connects to the existing loopback service at `localhost:11434`. Fable
+  does not install Ollama or download/manage models.
+- Custom stores a versioned OpenAI-compatible base URL, explicit model ID, and
+  optional bearer key in the same secure credential record. HTTPS is required for remote hosts;
+  plain HTTP is accepted only for `localhost` or another loopback address.
+  User information, query strings, and fragments are rejected in the base URL.
+- Credential verification calls a bounded model-list endpoint where the
+  provider exposes one. Providers without a compatible list endpoint return an
+  explicit `unsupported` discovery state and continue with curated models; this
+  is not evidence that a key or account entitlement was validated.
 
-## Implemented Provider Capability Matrix
+## Implemented Provider Catalog
 
-The following matrix documents the exact features implemented in the codebase for each native provider.
+"Implemented" below means the endpoint profile, credential boundary, request
+shaping, streaming path, and tests exist in the repository. No live provider
+credentials, paid plans, regional availability, or billing behavior were
+externally validated in this checkout.
 
-| Feature / Capability | OpenAI | Anthropic | Gemini | xAI | OpenRouter | Notes |
-| :--- | :---: | :---: | :---: | :---: | :---: | :--- |
-| **Chat / Completion** | Yes | Yes | Yes | Yes | Yes | The agent loop is run and owned by Fable; model inference uses the selected provider. |
-| **Streaming** | Yes | Yes | Yes | Yes | Yes | Enabled via Server-Sent Events (SSE) or JSON-per-line. |
-| **Model Listing / Discovery** | Yes | Yes | Yes | Yes | Yes | Dynamic query of provider models. Bounded to 1,000 models, 4MB, 10 pages. |
-| **Tool / Function Support** | Yes | Yes | Yes | Yes | Yes | Maps Fable tools into provider formats. Approval-gated execution. |
-| **Attachments / Files** | **No** | **No** | **No** | **No** | **No** | Input format is text/tools only. Multi-modal payloads are not supported. |
-| **Connect Timeout** | 20s | 20s | 20s | 20s | 20s | Hard timeout for establishing a connection to the API. |
-| **Read / Stream Timeout** | 90s | 90s | 90s | 90s | 90s | Hard timeout for waiting for stream chunks / response data. |
-| **Retries & Backoff** | Yes | Yes | Yes | Yes | Yes | Up to 3 attempts. Retries only rate limits (429) & server errors (5xx). |
-| **Cancellation** | Yes | Yes | Yes | Yes | Yes | Active HTTP request is dropped immediately when cancelled. |
-| **Credential Validation** | Yes | Yes | Yes | Yes | Yes | Bounded list-models GET request (15s connect, 20s total timeout). |
+| Provider | Runtime profile | Connection | Model discovery |
+| --- | --- | --- | --- |
+| OpenAI | OpenAI-compatible | API key | Dynamic |
+| Anthropic | Anthropic Messages | API key | Dynamic |
+| Gemini | Google AI Gemini | API key | Dynamic |
+| xAI | OpenAI-compatible | API key | Dynamic |
+| OpenRouter | OpenAI-compatible | API key | Dynamic |
+| DeepSeek | OpenAI-compatible | API key | Dynamic |
+| Z.AI | OpenAI-compatible | API key | Curated fallback |
+| MiniMax | OpenAI-compatible | API key | Dynamic |
+| Alibaba Model Studio | OpenAI-compatible | API key | Curated fallback |
+| Fireworks AI | OpenAI-compatible | API key | Curated fallback |
+| Hugging Face | OpenAI-compatible router | API token | Dynamic |
+| Kimi Code membership | OpenAI-compatible coding endpoint | Membership API key | Fixed `kimi-for-coding` model |
+| Moonshot (Kimi API) | OpenAI-compatible | API key | Dynamic |
+| Mistral AI | OpenAI-compatible | API key | Dynamic |
+| Meta Llama API | OpenAI-compatible | API key; availability-limited | Dynamic when account access exists |
+| Ollama | OpenAI-compatible loopback | Existing local service; no API key | Dynamic from local service |
+| Perplexity | OpenAI-compatible | API key | Curated fallback |
+| Tencent TokenHub | OpenAI-compatible | API key | Curated fallback |
+| Xiaomi MiMo | OpenAI-compatible | API key | Curated fallback |
+| Groq | OpenAI-compatible | API key | Dynamic |
+| Together AI | OpenAI-compatible | API key | Dynamic |
+| Cerebras | OpenAI-compatible | API key | Dynamic |
+| Custom | OpenAI-compatible | Validated base URL, model ID, optional bearer key | Explicit configured model ID |
+
+All three wire profiles implement text completion, streaming, approval-gated
+tool/function calls, bounded retries, and cancellation. The native payload path
+does not yet support image/file attachments. OpenAI-compatible providers can
+still differ in model naming and tool-call behavior, so repository conformance
+tests are not a substitute for live-provider validation.
 
 ## Local Loopback Runtime
 
@@ -41,23 +77,24 @@ prompts still run without tools.
 
 ## Settings provider UX states
 
-The Settings -> Providers view reflects real runtime state instead of optimistic
-copy. Each connected API-key provider row carries a per-provider model-discovery
-lifecycle layered on top of its auth state:
+Settings and onboarding use one provider-first catalogue rather than separate
+subscription and API-key sections. The initial view shows a small featured set;
+Show all replaces it with an alphabetical, searchable catalogue. Selecting a
+provider opens its implemented connection methods (for example, a provider-owned
+CLI and/or API key) in one modal. The model picker stays minimal: provider logo
+plus model name.
 
-- `loading` - a spinner; the Refresh/Retry control is disabled mid-flight.
-- `success` - the connected badge reads "Connected"; models are shown.
-- `empty` - the account surfaced no usable models; the hint points at the plan
-  or billing, never at the key.
-- `offline` / `failed` - "connected but degraded": the key is fine, the model
-  list just could not be confirmed. Recoverable via the per-row Refresh action,
-  which re-runs discovery without reconnecting.
-- `unsupported` - the provider exposes no model list; the user picks manually.
+The view avoids treating key presence as live proof: direct API, local, and
+custom methods read **Configured**, while provider-owned CLI sessions can read
+**Connected** after their runtime probe succeeds. Model discovery still tracks
+`loading`, `success`, `empty`, `offline`, `failed`, and `unsupported` internally;
+the merged picker uses live results or curated/explicit fallbacks. Settings can
+refresh models, but the provider tile does not yet expose that full lifecycle.
 
-Connect outcomes distinguish a **missing** key ("No API key stored... add a key",
-signalled by the boundary's missing-key message) from a **rejected** key ("key
-was rejected or has expired"). Transient outcomes never mention the key, and no
-secret or stack trace is surfaced.
+For fixed remote API-key methods, connect outcomes distinguish a **missing** key
+("No API key stored... add a key", signalled by the boundary's missing-key
+message) from a **rejected** key ("key was rejected or has expired"). Transient
+outcomes never mention the key, and no secret or stack trace is surfaced.
 
 ## Runs and recovery
 
@@ -70,7 +107,7 @@ replays a prior tool result or side effect.
 Terminal states are exclusive: completed, cancelled, failed, or interrupted.
 Provider/parser errors cannot subsequently overwrite a run as completed.
 Provider token counts are retained as reported. Dollar cost is labelled
-estimated because it is calculated from Fable's maintained price table.
+estimated only where Fable has a maintained rate; otherwise the UI says cost is unknown.
 
 ## Tool safety
 
@@ -86,52 +123,38 @@ interrupted stream or completed tool side effect is not replayed automatically.
 
 ## External requirements
 
-Live execution requires a user-supplied API key in OS secure storage and
-provider network access. Tests use fixtures and mocks; they do not validate
-provider account entitlements or live billing.
+Remote execution requires provider network access and the applicable
+user-supplied credential. Ollama requires its local server to be running.
+Custom requires an endpoint that implements the expected OpenAI-compatible
+`/chat/completions` route; its explicit model ID removes any `/models` requirement. Tests use fixtures
+and mocks; they do not validate provider account entitlements or live billing.
 
-## Provider Details
+## Provider-specific boundaries
 
-### OpenAI
-- **Endpoint**: `https://api.openai.com/v1/chat/completions` (Completion) and `https://api.openai.com/v1/models` (Discovery).
-- **Credentials**: Stored under the service identifier `openai` as a Bearer token: `Authorization: Bearer <key>`.
-- **Wire Format**: Chat Completions JSON. Uses `max_completion_tokens` for reasoning models (`o1`/`gpt-5`) and `max_tokens` for other models.
-- **Model Listing**: Filters out non-generation models (e.g. `embedding`, `moderation`, `whisper`, `tts-`, `dall-e`, `image`, `realtime`, `audio`).
-
-### Anthropic
-- **Endpoint**: `https://api.anthropic.com/v1/messages` (Completion) and `https://api.anthropic.com/v1/models` (Discovery).
-- **Credentials**: Stored under the service identifier `anthropic` as `x-api-key: <key>`.
-- **Headers**: Injects the required `anthropic-version: 2023-06-01` header on all requests.
-- **Streaming Parser**: Stateful SSE parser. Streams tool input as incremental `input_json_delta` fragments which are buffered by block index and parsed when the content block closes.
-- **Tool Mapping**: Transforms Fable tool schemas to `tools` blocks using `input_schema` properties. Delivers results as content blocks with `tool_result` type.
-- **Limitations**: Vertex AI and Amazon Bedrock routing are reserved as future extensions; direct API-key egress is the only implemented path.
-
-### Gemini
-- **Endpoint**: Google AI API endpoint: `https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse` (Completion) and `https://generativelanguage.googleapis.com/v1beta/models` (Discovery).
-- **Credentials**: Stored under the service identifier `gemini` as `x-goog-api-key: <key>`.
-- **Wire Format**: Gemini generateContent format. Streams JSON-per-line (not SSE `data:` frames).
-- **Tool Mapping**: Transforms tool schemas into a single element array of `tools` containing `functionDeclarations`. Parses candidate parts containing `functionCall`.
-- **Limitations**:
-  - Model ID contains strict character checks in Rust: must be alphanumeric and may only contain `-._` characters.
-  - Vertex regional endpoint routing is cataloged but not active. Direct Google AI API-key egress is the only active path.
-  - No support for Google AI Pro/Ultra subscriber session reuse (terms forbid third-party OAuth access).
-
-### xAI
-- **Endpoint**: `https://api.x.ai/v1/chat/completions` (Completion) and `https://api.x.ai/v1/models` (Discovery).
-- **Credentials**: Stored under the service identifier `xai` as `Authorization: Bearer <key>`.
-- **Wire Format**: OpenAI-compatible Chat Completions.
-- **Entitlements**: Grok Build entitlements are never promised or assumed in preview/fixture data; they are resolved post-login only.
-
-### OpenRouter
-- **Endpoint**: `https://openrouter.ai/api/v1/chat/completions` (Completion) and `https://openrouter.ai/api/v1/models` (Discovery).
-- **Credentials**: Stored under the service identifier `openrouter` as `Authorization: Bearer <key>`.
-- **Wire Format**: OpenAI-compatible Chat Completions.
+- OpenAI-compatible fixed profiles use provider-specific fixed HTTPS endpoints
+  and bearer authentication. Anthropic uses `x-api-key` plus
+  `anthropic-version: 2023-06-01`. Gemini uses `x-goog-api-key` and a validated
+  model ID in the Google AI `streamGenerateContent` route.
+- xAI API-key execution and Grok Build ACP execution are separate connection
+  methods. Grok's provider-owned CLI login does not turn a consumer session
+  into an xAI API key.
+- Kimi Code membership API-key execution, Moonshot platform API-key execution,
+  and Kimi ACP execution are separate methods. Mistral API-key execution and Mistral Vibe ACP execution are
+  separate methods.
+- No consumer Anthropic or Gemini subscription session is imported. Native
+  access for those providers is API-key only.
+- Meta's hosted Llama API profile is present, but availability depends on Meta
+  granting the account access; Fable does not claim general availability.
+- Vertex AI, Amazon Bedrock, and Azure AI/Foundry IAM are not dedicated
+  integrations. Custom may work with an OpenAI-compatible endpoint that accepts
+  its optional bearer-auth contract, but Custom does not provide service-account
+  auth, SigV4/request signing, managed identity, or regional cloud routing.
 
 ## Limitations & Constraints
 
 1. **No Multimodal payload / Attachments**: The native agent loop does not support uploading file or image attachments to LLM completions. The composer's file import feature works exclusively by parsing, chunking, and querying files locally via Fable's lexical retrieval engine.
-2. **Curated Model Fallbacks**: If model discovery fails due to an offline, unsupported, or server error state, Fable retains its curated fallback catalog rather than falling back to an empty selection.
-3. **Usage Costs**: Metrics for `usage-cost` are calculated on-the-fly against Fable's internal price table since native API keys are metered directly at the provider side.
+2. **Curated Model Fallbacks**: If model discovery fails due to an offline, unsupported, or server error state, Fable retains its curated fallback catalog rather than falling back to an empty selection. Compatible discovered generation models need not already exist in the curated catalogue.
+3. **Usage Costs**: Metrics use Fable's reviewed rate table only where one exists. Other providers show token counts with cost marked unknown instead of a fabricated zero.
 
 ## Failure States & Error Handling
 

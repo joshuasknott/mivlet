@@ -8,16 +8,37 @@ import {
 } from "./acp-providers";
 
 describe("ACP_PROVIDERS definitions", () => {
-  it("declares cursor and grok with their executable specs", () => {
-    expect(Object.keys(ACP_PROVIDERS).sort()).toEqual(["cursor", "grok"]);
-    expect(ACP_PROVIDERS.cursor.executable).toBe("cursor");
-    expect(ACP_PROVIDERS.cursor.authProbeArgs).toContain("agent");
-    expect(ACP_PROVIDERS.grok.executable).toBe("grok");
+  it("declares every live ACP provider with its mandatory launch command", () => {
+    expect(Object.keys(ACP_PROVIDERS).sort()).toEqual([
+      "copilot",
+      "cursor",
+      "grok",
+      "kimi",
+      "mistral-vibe",
+      "opencode"
+    ]);
+    expect(ACP_PROVIDERS.cursor.executableCandidates).toEqual(["agent", "cursor-agent"]);
+    expect(ACP_PROVIDERS.cursor.launchArgs).toEqual(["acp"]);
+    expect(ACP_PROVIDERS.copilot.launchArgs).toEqual(["--acp", "--stdio"]);
+    expect(ACP_PROVIDERS.grok.launchArgs).toEqual([
+      "--no-auto-update",
+      "agent",
+      "stdio"
+    ]);
+    expect(ACP_PROVIDERS.opencode.launchArgs).toEqual(["acp"]);
+    expect(ACP_PROVIDERS.kimi.launchArgs).toEqual(["acp"]);
+    expect(ACP_PROVIDERS["mistral-vibe"].executableCandidates).toEqual(["vibe-acp"]);
+    expect(ACP_PROVIDERS["mistral-vibe"].launchArgs).toEqual([]);
   });
 
   it("carries no bundled secret and no redistribution claim", () => {
     for (const def of Object.values(ACP_PROVIDERS)) {
-      expect(def.executable.length).toBeGreaterThan(0);
+      expect(def.executableCandidates.length).toBeGreaterThan(0);
+      // `vibe-acp` is itself the ACP entry point, so it intentionally takes no
+      // mandatory launch arguments. Every other runtime has at least one.
+      if (def.executableCandidates[0] !== "vibe-acp") {
+        expect(def.launchArgs.length).toBeGreaterThan(0);
+      }
       // auth probe args must not contain a token
       const joined = def.authProbeArgs.join(" ");
       expect(joined.toLowerCase()).not.toContain("token");

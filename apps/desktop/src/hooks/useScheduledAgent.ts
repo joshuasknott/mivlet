@@ -72,6 +72,15 @@ export interface UseScheduledAgentOptions {
   execute: ToolExecutor;
   /** Connected connector ids used by workflow prerequisite checks. */
   connectedConnectorIds?: string[];
+  /** Surface every model- or workflow-originated tool call for user approval. */
+  onToolApproval: (event: {
+    callId: string;
+    tool: string;
+    arguments: string;
+    approval: ApprovalRequest;
+  }) => void;
+  /** Clear gate-backed approval cards when a scheduled run is cancelled. */
+  onCancelApprovals: () => void;
   /** Callback when a run finishes; the shell reports the outcome to the Rust queue. */
   onComplete: (
     runId: string,
@@ -132,6 +141,7 @@ export function useScheduledAgent(
         cancelRef.current = true;
         abortRef.current?.abort();
         void cancelRuntimeCompletion(runId);
+        optionsRef.current.onCancelApprovals();
       }
     }).then((unlisten) => {
       dispose = unlisten;
@@ -173,9 +183,7 @@ export function useScheduledAgent(
             maxTokens: 1024,
             execute: optionsRef.current.execute,
             shouldCancel: () => cancelRef.current,
-            onToolCall: () => {
-              // Agent tool calls use the shared approval gate.
-            }
+            onToolCall: (event) => optionsRef.current.onToolApproval(event)
           });
           if (result.status === "completed") return result.transcript;
           if (result.status === "cancelled") {
@@ -243,7 +251,14 @@ export function useScheduledAgent(
                 requestedAt,
                 decisions: ["once", "modify", "deny"]
               };
-              return optionsRef.current.execute(approval, JSON.stringify(step.arguments));
+              const serializedArguments = JSON.stringify(step.arguments);
+              optionsRef.current.onToolApproval({
+                callId: approval.id,
+                tool: step.tool,
+                arguments: serializedArguments,
+                approval
+              });
+              return optionsRef.current.execute(approval, serializedArguments);
             }
           }
         );

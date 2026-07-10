@@ -21,6 +21,7 @@ import type {
   NativeMessage,
   PermissionMode
 } from "@fable/protocol";
+import { catalogueCapabilities } from "./model-catalogue";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
 import { streamOllamaEvents } from "./ollama";
@@ -39,6 +40,12 @@ export type ToolExecutor = (approval: ApprovalRequest, args: string) => Promise<
 
 export interface RunAgentLoopOptions {
   execute: ToolExecutor;
+  /**
+   * Explicit model-level tool support resolved by the owning backend. When it
+   * is absent, the loop falls back to the curated model catalogue. Unknown is
+   * intentionally not treated as support.
+   */
+  modelSupportsTools?: boolean;
   /** Cooperative cancellation hook, checked between events. */
   shouldCancel?: () => boolean;
   /** Max turns before the loop stops (safety). */
@@ -100,7 +107,7 @@ function streamFor(
   if (providerId === "anthropic") return streamAnthropicEvents;
   if (providerId === "gemini") return streamGeminiEvents;
   if (providerId === "ollama") return streamOllamaEvents;
-  return streamOpenAiEvents; // openai, xai, openrouter share this path
+  return streamOpenAiEvents; // Every supported OpenAI-compatible provider shares this path.
 }
 
 function transportErrorEvent(error: unknown): Extract<BackendAgentEvent, { type: "error" }> {
@@ -128,7 +135,13 @@ export async function* runAgentLoop(
   request: NativeCompletionRequest,
   options: RunAgentLoopOptions
 ): AsyncIterable<BackendAgentEvent> {
-  const tools = options.toolsEnabled === false ? [] : registeredToolSpecs();
+  // The native loop owns Fable's tool catalogue, but it must only advertise it
+  // when tool support is known. A newly discovered model with no capability
+  // metadata stays runnable for plain chat without being assumed tool-capable.
+  const modelSupportsTools =
+    options.modelSupportsTools ??
+    catalogueCapabilities(request.providerId, request.model)?.tools;
+  const tools = options.toolsEnabled === false || modelSupportsTools !== true ? [] : registeredToolSpecs();
   const maxTurns = options.maxTurns ?? 8;
   const permissionMode = options.permissionMode ?? "full-access";
   const execute = permissionGatedExecutor(options.execute, permissionMode);

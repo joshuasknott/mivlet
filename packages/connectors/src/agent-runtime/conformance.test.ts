@@ -77,10 +77,24 @@ function mockCodexDeps(handle: MockCodexAppServer | null): BackendDeps {
   };
 }
 
-const okAcpResponder: ScriptedResponder = (req) =>
-  ["initialize", "session/new", "session/prompt", "session/close"].includes(req.method)
-    ? { result: {} }
-    : { error: { code: -32601, message: "not found" } };
+const okAcpResponder: ScriptedResponder = (req) => {
+  switch (req.method) {
+    case "initialize":
+      return {
+        result: {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: []
+        }
+      };
+    case "session/new":
+      return { result: { sessionId: "conformance-session" } };
+    case "session/prompt":
+      return { result: { stopReason: "end_turn" } };
+    default:
+      return { error: { code: -32601, message: "not found" } };
+  }
+};
 
 describe("AgentBackend Conformance Tests", () => {
   // ==========================================
@@ -150,9 +164,16 @@ describe("AgentBackend Conformance Tests", () => {
     });
 
     it("ensures ACP errors containing keys are redacted", async () => {
-      const transport = new FakeAcpTransport(okAcpResponder);
-      transport.queueError("CLI token=sk-12345678901234567890abc123 expired");
-      transport.queueClose();
+      const transport = new FakeAcpTransport((req) =>
+        req.method === "session/prompt"
+          ? {
+              error: {
+                code: -32000,
+                message: "CLI token=sk-12345678901234567890abc123 expired"
+              }
+            }
+          : okAcpResponder(req)
+      );
       const backend = resolveAcpBackend(mockAcpProvider(), {
         createTransport: () => null,
         createAcpTransport: () => transport
@@ -256,9 +277,11 @@ describe("AgentBackend Conformance Tests", () => {
           events: [{ type: "error", message: "Codex connection unavailable." }]
         }))
       );
-      const acpTransport = new FakeAcpTransport(okAcpResponder);
-      acpTransport.queueError("ACP provider overloaded.");
-      acpTransport.queueClose();
+      const acpTransport = new FakeAcpTransport((req) =>
+        req.method === "session/prompt"
+          ? { error: { code: -32000, message: "ACP provider overloaded." } }
+          : okAcpResponder(req)
+      );
       const acp = resolveAcpBackend(mockAcpProvider(), {
         createTransport: () => null,
         createAcpTransport: () => acpTransport
@@ -338,7 +361,14 @@ describe("AgentBackend Conformance Tests", () => {
       expect(events).toEqual([
         { type: "text-delta", text: "Part 1" },
         { type: "text-delta", text: "Part 2" },
-        { type: "usage", inputTokens: 5, outputTokens: 10, costUsd: 0, costEstimated: true },
+        {
+          type: "usage",
+          inputTokens: 5,
+          outputTokens: 10,
+          costUsd: 0,
+          costEstimated: true,
+          costUnknown: true
+        },
         { type: "done", finishReason: "stop" }
       ]);
     });

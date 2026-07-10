@@ -1,135 +1,120 @@
 import { describe, expect, it } from "vitest";
-import type { BackendAgentEvent } from "@fable/protocol";
-import { buildToolApproval } from "../../../native-api/approvals";
 import { notification } from "./protocol-fakes";
-import { normalizeAcpNotification } from "./events";
+import {
+  ACP_PERMISSION_TOOL,
+  buildAcpPermissionToolCall,
+  finishReasonForAcpStopReason,
+  normalizeAcpNotification
+} from "./events";
 
-const providerId = "cursor";
+const update = (value: Record<string, unknown>) =>
+  notification("session/update", { sessionId: "s-1", update: value });
 
-describe("normalizeAcpNotification → BackendAgentEvent", () => {
-  it("maps an assistant text message to a text-delta", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/message", { content: "hello" })
-    );
-    expect(event).toEqual({ type: "text-delta", text: "hello" });
+describe("ACP v1 session/update normalization", () => {
+  it("maps an agent message chunk to a text delta", () => {
+    expect(
+      normalizeAcpNotification(
+        "cursor",
+        update({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "hello" }
+        })
+      )
+    ).toEqual({ type: "text-delta", text: "hello" });
   });
 
-  it("concatenates multi-part text content", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/message", { parts: [{ type: "text", text: "foo " }, { type: "text", text: "bar" }] })
-    );
-    expect(event).toEqual({ type: "text-delta", text: "foo bar" });
+  it("maps completed and failed tool-call updates to results", () => {
+    expect(
+      normalizeAcpNotification(
+        "cursor",
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call-1",
+          status: "completed",
+          rawOutput: { changed: true }
+        })
+      )
+    ).toEqual({
+      type: "tool-result",
+      callId: "call-1",
+      ok: true,
+      output: JSON.stringify({ changed: true })
+    });
+    expect(
+      normalizeAcpNotification(
+        "cursor",
+        update({
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call-2",
+          status: "failed",
+          rawOutput: "boom"
+        })
+      )
+    ).toMatchObject({ type: "tool-result", callId: "call-2", ok: false });
   });
 
-  it("maps a tool call notification to a tool-call event with an approval", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("tool/call", {
-        callId: "call-1",
-        tool: "read-file",
-        arguments: JSON.stringify({ path: "a.txt" })
-      })
-    );
-    expect(event?.type).toBe("tool-call");
-    if (event?.type === "tool-call") {
-      expect(event.callId).toBe("call-1");
-      expect(event.tool).toBe("read-file");
-      expect(event.arguments).toBe(JSON.stringify({ path: "a.txt" }));
-      // approval is built via the shared buildToolApproval (byte-compatible with native-API)
-      expect(event.approval).toEqual(buildToolApproval("cursor", "read-file", JSON.stringify({ path: "a.txt" })));
-    }
-  });
-
-  it("maps a tool result notification to a tool-result event", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("tool/result", { callId: "call-1", ok: true, output: "file contents" })
-    );
-    expect(event).toEqual({ type: "tool-result", callId: "call-1", ok: true, output: "file contents" });
-  });
-
-  it("maps a failed tool result (ok false) through", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("tool/result", { callId: "call-2", ok: false, output: "boom" })
-    );
-    expect(event).toEqual({ type: "tool-result", callId: "call-2", ok: false, output: "boom" });
-  });
-
-  it("maps a usage notification to a usage event", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/usage", { inputTokens: 10, outputTokens: 20, costUsd: 0.01 })
-    );
-    expect(event).toEqual({ type: "usage", inputTokens: 10, outputTokens: 20, costUsd: 0.01 });
-  });
-
-  it("defaults costUsd to 0 and marks cost estimated when the CLI omits cost", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/usage", { inputTokens: 5, outputTokens: 7 })
-    );
-    if (event?.type === "usage") {
-      expect(event.costUsd).toBe(0);
-      expect(event.costEstimated).toBe(true);
-    } else {
-      expect.fail("expected a usage event");
-    }
-  });
-
-  it("maps a done notification to a done event with the stop finish reason", () => {
-    const event = normalizeAcpNotification(providerId, notification("session/done", {}));
-    expect(event).toEqual({ type: "done", finishReason: "stop" });
-  });
-
-  it("maps a done notification with stopReason length to a length finish", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/done", { stopReason: "length" })
-    );
-    expect(event).toEqual({ type: "done", finishReason: "length" });
-  });
-
-  it("maps a tool-calls stopReason to the tool-calls finish", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/done", { stopReason: "tool-calls" })
-    );
-    expect(event).toEqual({ type: "done", finishReason: "tool-calls" });
-  });
-
-  it("maps an error notification to an error event", () => {
-    const event = normalizeAcpNotification(
-      providerId,
-      notification("session/error", { message: "model overloaded" })
-    );
-    expect(event).toEqual({
-      type: "error",
-      message: "model overloaded",
-      code: "provider-unavailable",
-      retryable: true
+  it("maps ACP usage updates without inventing subscription cost", () => {
+    expect(
+      normalizeAcpNotification(
+        "grok",
+        update({ sessionUpdate: "usage_update", used: 42, size: 128 })
+      )
+    ).toEqual({
+      type: "usage",
+      inputTokens: 42,
+      outputTokens: 0,
+      costUsd: 0,
+      costEstimated: true,
+      costUnknown: true
     });
   });
 
-  it("returns null for an unknown notification method (forward-compatible)", () => {
-    expect(normalizeAcpNotification(providerId, notification("future/method", {}))).toBeNull();
-  });
-
-  it("returns null for a malformed tool/call (missing callId)", () => {
+  it("ignores unknown and malformed update variants", () => {
     expect(
-      normalizeAcpNotification(providerId, notification("tool/call", { tool: "read-file" }))
+      normalizeAcpNotification("cursor", update({ sessionUpdate: "plan" }))
     ).toBeNull();
-  });
-
-  it("returns null for a session/message with no extractable text", () => {
-    expect(normalizeAcpNotification(providerId, notification("session/message", {}))).toBeNull();
     expect(
-      normalizeAcpNotification(providerId, notification("session/message", { parts: [] }))
+      normalizeAcpNotification("cursor", notification("legacy/message", {}))
     ).toBeNull();
   });
 });
 
-/** Helper to keep the discriminated union narrowed for type-only checks. */
-export type { BackendAgentEvent };
+describe("ACP permission approvals", () => {
+  it("builds an approval-only Fable request for a provider tool", () => {
+    const result = buildAcpPermissionToolCall("copilot", "session-1", 9, {
+      toolCallId: "tool-1",
+      title: "Edit src/app.ts",
+      kind: "edit",
+      rawInput: { path: "src/app.ts" }
+    });
+    expect(result).not.toBeNull();
+    expect(result?.approval.action.startsWith(ACP_PERMISSION_TOOL)).toBe(true);
+    expect(result?.approval.mode).toBe("full-access");
+    expect(result?.approval.riskLevel).toBe("high");
+    expect(result?.approval.decisions).toEqual(["once", "modify", "deny"]);
+    expect(result?.approval.consequence).toContain("Fable only returns the permission decision");
+  });
+
+  it("treats unknown tool kinds as critical full-access and rejects malformed ids", () => {
+    const unknown = buildAcpPermissionToolCall("opencode", "s", "r", {
+      toolCallId: "tool-2",
+      title: "Mystery action",
+      kind: "future_kind"
+    });
+    expect(unknown?.approval.riskLevel).toBe("critical");
+    expect(unknown?.approval.mode).toBe("full-access");
+    expect(
+      buildAcpPermissionToolCall("opencode", "s", "r", {
+        toolCallId: "bad\ncall",
+        title: "bad"
+      })
+    ).toBeNull();
+  });
+});
+
+describe("ACP prompt completion", () => {
+  it("maps end_turn and max_tokens stop reasons", () => {
+    expect(finishReasonForAcpStopReason("end_turn")).toBe("stop");
+    expect(finishReasonForAcpStopReason("max_tokens")).toBe("length");
+  });
+});

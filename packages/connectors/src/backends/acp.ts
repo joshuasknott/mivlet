@@ -65,3 +65,12 @@ export const resolveCursorProvider = (authState: BackendProvider["authState"]) =
 
 export const resolveGrokProvider = (authState: BackendProvider["authState"]) =>
   resolveAcpProvider("grok", authState);
+
+export const resolveOpenCodeProvider = (authState: BackendProvider["authState"]) =>
+  resolveAcpProvider("opencode", authState);
+
+export const resolveKimiProvider = (authState: BackendProvider["authState"]) =>
+  resolveAcpProvider("kimi", authState);
+
+export const resolveMistralVibeProvider = (authState: BackendProvider["authState"]) =>
+  resolveAcpProvider("mistral-vibe", authState);

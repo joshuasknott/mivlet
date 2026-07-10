@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { BackendProvider, BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
+import type {
+  BackendProvider,
+  BackendAgentEvent,
+  NativeCompletionRequest
+} from "@fable/protocol";
 import { FixtureTransport, SequencedFixtureTransport } from "../native-api/transport";
 import { readFixture } from "../native-api/fixtures-loader";
-import type { HttpTransport } from "../native-api/transport";
 import {
   resolveAgentBackend,
   hasRunnableAdapter,
@@ -58,7 +61,7 @@ function acpProvider(): BackendProvider {
   };
 }
 
-/** Copilot provider — metadata-only. */
+/** Copilot provider — live ACP family, but not yet authenticated. */
 function connectedAcpProvider(): BackendProvider {
   return {
     id: "cursor",
@@ -79,43 +82,27 @@ function connectedAcpProvider(): BackendProvider {
   };
 }
 
-function localProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
+function copilotProvider(): BackendProvider {
+  return {
+    id: "copilot",
+    backendType: "acp",
+    label: "Copilot",
+    description: "Copilot ACP CLI",
+    authState: "needs-auth",
+    capabilities: [],
+    models: []
+  };
+}
+
+function localProvider(): BackendProvider {
   return {
     id: "ollama",
     backendType: "local-loopback",
     label: "Ollama",
-    description: "Local Ollama",
+    description: "Local Ollama service",
     authState: "connected",
     capabilities: ["streaming", "model-availability", "cancellation"],
-    models: [
-      {
-        id: "llama3.2",
-        label: "llama3.2",
-        available: true,
-        capabilities: {
-          contextWindow: 4096,
-          maxOutputTokens: 2048,
-          streaming: true,
-          tools: false,
-          vision: false,
-          reasoning: false,
-          structuredOutput: true
-        }
-      }
-    ],
-    ...overrides
-  };
-}
-
-function copilotProvider(): BackendProvider {
-  return {
-    id: "copilot",
-    backendType: "copilot-sdk",
-    label: "Copilot",
-    description: "Copilot SDK",
-    authState: "needs-auth",
-    capabilities: [],
-    models: []
+    models: [{ id: "llama3.2", label: "Llama 3.2", available: true }]
   };
 }
 
@@ -161,14 +148,14 @@ async function collect(iter: AsyncIterable<BackendAgentEvent>): Promise<BackendA
 }
 
 describe("hasRunnableAdapter", () => {
-  it("returns true for native-api, Codex app-server, ACP, and local loopback", () => {
+  it("returns true for every executable backend family", () => {
     expect(hasRunnableAdapter("native-api")).toBe(true);
     expect(hasRunnableAdapter("codex-app-server")).toBe(true);
     expect(hasRunnableAdapter("acp")).toBe(true);
     expect(hasRunnableAdapter("local-loopback")).toBe(true);
   });
 
-  it("returns false for metadata-only backend families until their adapter lands", () => {
+  it("keeps the legacy copilot-sdk family non-runnable", () => {
     expect(hasRunnableAdapter("copilot-sdk")).toBe(false);
   });
 
@@ -228,6 +215,11 @@ describe("resolveAgentBackend dispatch", () => {
     expect(backend?.capabilities).toContain("streaming");
   });
 
+  it("returns null for Copilot until its ACP CLI is authenticated", () => {
+    const backend = resolveAgentBackend(copilotProvider(), fixtureDeps([]));
+    expect(backend).toBeNull();
+  });
+
   it("returns a local loopback backend when the local transport is wired", () => {
     const backend = resolveAgentBackend(localProvider(), {
       ...fixtureDeps([]),
@@ -238,103 +230,6 @@ describe("resolveAgentBackend dispatch", () => {
     });
     expect(backend).not.toBeNull();
     expect(backend?.providerId).toBe("ollama");
-  });
-
-  it("does not advertise tools to a local model without tool capabilities", async () => {
-    const requests: NativeCompletionRequest[] = [];
-    const transport: HttpTransport = {
-      async *stream(request) {
-        requests.push(request);
-        yield '{"message":{"role":"assistant","content":"ok"},"done":false}';
-        yield '{"message":{"role":"assistant","content":""},"done":true}';
-      }
-    };
-    const backend = resolveAgentBackend(localProvider(), {
-      createTransport: () => null,
-      createLocalModelTransport: () => ({
-        transport,
-        cancel: async () => {}
-      })
-    });
-
-    await collect(
-      backend?.run(
-        {
-          ...baseRunRequest,
-          tools: [{ name: "read_file", description: "Read a file", parameters: "{}" }]
-        },
-        { execute: async () => "ok" }
-      ) as AsyncIterable<BackendAgentEvent>
-    );
-
-    expect(requests[0]?.tools).toEqual([]);
-  });
-
-  it("does not advertise tools to a selected local model when only another model supports tools", async () => {
-    const requests: NativeCompletionRequest[] = [];
-    const transport: HttpTransport = {
-      async *stream(request) {
-        requests.push(request);
-        yield '{"message":{"role":"assistant","content":"ok"},"done":false}';
-        yield '{"message":{"role":"assistant","content":""},"done":true}';
-      }
-    };
-    const backend = resolveAgentBackend(
-      localProvider({
-        capabilities: ["streaming", "model-availability", "cancellation", "tool-requests", "approvals"],
-        models: [
-          {
-            id: "plain",
-            label: "plain",
-            available: true,
-            capabilities: {
-              contextWindow: 4096,
-              maxOutputTokens: 2048,
-              streaming: true,
-              tools: false,
-              vision: false,
-              reasoning: false,
-              structuredOutput: true
-            }
-          },
-          {
-            id: "tool-model",
-            label: "tool-model",
-            available: true,
-            capabilities: {
-              contextWindow: 4096,
-              maxOutputTokens: 2048,
-              streaming: true,
-              tools: true,
-              vision: false,
-              reasoning: false,
-              structuredOutput: true
-            }
-          }
-        ]
-      }),
-      {
-        createTransport: () => null,
-        createLocalModelTransport: () => ({
-          transport,
-          cancel: async () => {}
-        })
-      }
-    );
-
-    await collect(
-      backend?.run(
-        { ...baseRunRequest, model: "plain" },
-        { execute: async () => "ok" }
-      ) as AsyncIterable<BackendAgentEvent>
-    );
-
-    expect(requests[0]?.tools).toEqual([]);
-  });
-
-  it("returns null for Copilot (metadata-only until its adapter lands)", () => {
-    const backend = resolveAgentBackend(copilotProvider(), fixtureDeps([]));
-    expect(backend).toBeNull();
   });
 
   it("returns null for undefined provider", () => {
@@ -628,6 +523,56 @@ describe("createNativeApiBackend", () => {
       { type: "done", finishReason: "error" }
     ]);
   });
+
+  it.each([
+    ["explicitly tool-capable", true, true],
+    ["explicitly not tool-capable", false, false]
+  ])(
+    "honors %s model metadata when advertising Fable tools",
+    async (_label, tools, expectTools) => {
+      let sentToolCount = -1;
+      const backend = createNativeApiBackend(
+        nativeProvider({
+          models: [
+            {
+              id: "future-model",
+              label: "Future model",
+              available: true,
+              capabilities: {
+                contextWindow: 128_000,
+                maxOutputTokens: 8_192,
+                streaming: true,
+                tools,
+                vision: false,
+                reasoning: false,
+                structuredOutput: false
+              }
+            }
+          ]
+        }),
+        {
+          createTransport: () => ({
+            transport: {
+              async *stream(request: NativeCompletionRequest): AsyncIterable<string> {
+                sentToolCount = request.tools.length;
+                yield 'data: {"choices":[{"finish_reason":"stop"}]}';
+              }
+            },
+            cancel: async () => {}
+          })
+        }
+      );
+
+      await collect(
+        backend?.run(
+          { ...baseRunRequest, model: "future-model" },
+          { execute: async () => "ok" }
+        ) as AsyncIterable<BackendAgentEvent>
+      );
+
+      expect(sentToolCount > 0).toBe(expectTools);
+    }
+  );
 
   it("listModels() returns unsupported when discovery is not wired", async () => {
     const backend = createNativeApiBackend(nativeProvider(), {

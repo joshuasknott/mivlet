@@ -1,5 +1,5 @@
 /**
- * ACP `AgentBackend` adapter — Cursor and Grok.
+ * ACP `AgentBackend` adapter for every catalog-declared ACP CLI.
  *
  * Implements the provider-neutral {@link AgentBackend} contract for the ACP
  * (Agent Client Protocol) family: a user-installed CLI speaks JSON-RPC over
@@ -45,7 +45,7 @@ function isRunnableAcp(provider: BackendProvider): boolean {
 }
 
 /**
- * Build the ACP agent backend for a connected Cursor/Grok provider.
+ * Build the ACP agent backend for a connected ACP provider.
  *
  * @param provider The connected ACP BackendProvider (cursor or grok).
  * @param deps Injected ACP transport factory (+ optional model discovery).
@@ -76,6 +76,7 @@ export function resolveAcpBackend(
     return runAcpSession(transport, provider.id, request, {
       execute: options.execute,
       shouldCancel: options.shouldCancel,
+      contextPrefix: options.contextPrefix,
       maxTurns: options.maxTurns,
       maxToolCalls: options.maxToolCalls,
       maxToolOutputCharacters: options.maxToolOutputCharacters

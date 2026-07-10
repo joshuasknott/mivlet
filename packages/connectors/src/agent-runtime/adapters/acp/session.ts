@@ -1,75 +1,169 @@
-/**
- * ACP session lifecycle: drive one prompt turn over an {@link AcpTransport} and
- * yield Fable's universal {@link BackendAgentEvent} stream.
- *
- * This is the provider-neutral ACP orchestration. It speaks JSON-RPC over the
- * injected transport (never spawns a process), orchestrates:
- *   initialize → session/new → session/prompt → (streamed notifications) →
- *   session/close,
- * and normalizes the CLI's streamed events. Tool calls route through Fable's
- * shared approval queue: each `tool/call` is yielded as a `tool-call` event
- * carrying a pre-shaped `ApprovalRequest`, and only after the shell's
- * `execute()` runs is the result sent back to the CLI as a `tool/result` frame.
- *
- * The same tool-safety bounds the native-API loop applies are enforced here:
- * max tool calls per run, max tool output characters, argument size, callId
- * shape validation, and replayed/reused callId rejection. Unknown tools are
- * fail-closed via `buildToolApproval`.
- *
- * SECRET INVARIANT: this module holds no key, no token. Auth is CLI-owned; the
- * transport owns the process + auth broker on the Rust side.
- */
+/** Drive one ACP v1 prompt turn over an injected stdio/JSON-RPC transport. */
 
-import type {
-  AgentRunRequest,
-  BackendAgentEvent
-} from "@fable/protocol";
+import type { AgentRunRequest, BackendAgentEvent } from "@fable/protocol";
 import type { AgentRunOptions } from "../../contract";
 import {
   MAX_TOOL_ARGUMENT_CHARACTERS,
   MAX_TOOL_CALLS_PER_RUN,
   MAX_TOOL_OUTPUT_CHARACTERS
 } from "../../../native-api/agent-loop";
-import type { AcpRequest } from "./protocol";
-import type { AcpTransport } from "./transport";
-import { normalizeAcpNotification } from "./events";
 import { normalizeBackendErrorEvent } from "../../utils/errors";
 import { redactSecretsFromString } from "../../utils/redact";
+import { isAcpRequest, type AcpRequest } from "./protocol";
+import type { AcpInboundFrame, AcpReply, AcpTransport } from "./transport";
+import {
+  buildAcpPermissionToolCall,
+  finishReasonForAcpStopReason,
+  normalizeAcpNotification
+} from "./events";
 
-/** The ACP protocol version Fable advertises during initialize. */
-const ACP_PROTOCOL_VERSION = "2025-06-01";
+/** ACP uses a single integer major protocol version. */
+const ACP_PROTOCOL_VERSION = 1;
 
-/** Valid callId characters (mirrors the native loop's callId contract). */
-const CALL_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-const MAX_CALL_ID_CHARACTERS = 160;
+type JsonObject = Record<string, unknown>;
 
-/** Truncate tool output before it re-enters model context (safety bound). */
-function boundedToolOutput(output: string, limit: number): string {
-  return output.length > limit ? `${output.slice(0, limit)}…` : output;
+function object(value: unknown): JsonObject | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
 }
 
-/** Options the ACP session honors (a subset of the contract's AgentRunOptions). */
+/** Options honored by the ACP session adapter. */
 export interface AcpSessionOptions {
-  /** Executes an approved tool; the session sends the result back to the CLI. */
+  /** Approval-only execution seam for ACP permission requests. */
   execute: AgentRunOptions["execute"];
-  /** Cooperative cancellation hook, checked between streamed events. */
   shouldCancel?: () => boolean;
-  /** Max tool calls across the whole run (default: the native loop's cap). */
+  contextPrefix?: string;
   maxToolCalls?: number;
-  /** Max characters returned to model context by one tool. */
   maxToolOutputCharacters?: number;
-  /** Max turns (tool rounds) before the session stops. */
   maxTurns?: number;
 }
 
+function errorEvent(message: string): Extract<BackendAgentEvent, { type: "error" }> {
+  return normalizeBackendErrorEvent({
+    type: "error",
+    message: redactSecretsFromString(message)
+  });
+}
+
+function replyError(reply: Extract<AcpReply, { ok: false }>): BackendAgentEvent {
+  return errorEvent(reply.error.message || "ACP request failed.");
+}
+
+function sessionIdFrom(result: unknown): string | null {
+  const value = object(result)?.sessionId;
+  return typeof value === "string" && value.length > 0 && value.length <= 512
+    ? value
+    : null;
+}
+
+function promptText(request: AgentRunRequest, contextPrefix?: string): string {
+  const messages = request.messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content.trim())
+    .filter(Boolean);
+  const current = messages.at(-1) ?? "";
+  return [contextPrefix?.trim(), current].filter(Boolean).join("\n\n");
+}
+
+interface AuthMethod {
+  id: string;
+}
+
+function authMethods(result: unknown): AuthMethod[] {
+  const raw = object(result)?.authMethods;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry) => object(entry)?.id)
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .map((id) => ({ id }));
+}
+
+function orderedAuthMethods(providerId: string, methods: AuthMethod[]): AuthMethod[] {
+  if (providerId !== "grok") return methods.slice(0, 1);
+  // Grok's official ACP integration offers cached login and XAI_API_KEY auth.
+  // Try the cached desktop login first, then the environment-backed key.
+  const preference = ["cached_token", "xai.api_key"];
+  return [...methods].sort((a, b) => {
+    const ai = preference.indexOf(a.id);
+    const bi = preference.indexOf(b.id);
+    return (ai < 0 ? preference.length : ai) - (bi < 0 ? preference.length : bi);
+  });
+}
+
+async function authenticateIfAdvertised(
+  transport: AcpTransport,
+  providerId: string,
+  initializeResult: unknown,
+  requestFor: (method: string, params: unknown) => AcpRequest,
+  required: boolean
+): Promise<AcpReply | null> {
+  if (providerId !== "grok" && !required) return null;
+  const methods = orderedAuthMethods(providerId, authMethods(initializeResult));
+  if (methods.length === 0) return null;
+
+  let lastFailure: AcpReply | null = null;
+  for (const method of methods) {
+    const reply = await transport.request(
+      requestFor("authenticate", {
+        methodId: method.id,
+        _meta: { headless: true }
+      })
+    );
+    if (reply.ok) return reply;
+    lastFailure = reply;
+  }
+  return lastFailure;
+}
+
+function isAuthenticationError(reply: Extract<AcpReply, { ok: false }>): boolean {
+  const diagnostic = JSON.stringify(reply.error).toLowerCase();
+  return /auth_required|authentication required|not authenticated|not logged in|sign[ -]?in|login|unauthorized/.test(
+    diagnostic
+  );
+}
+
+interface PermissionOption {
+  optionId: string;
+  kind: string;
+}
+
+function permissionOptions(value: unknown): PermissionOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    const option = object(candidate);
+    return typeof option?.optionId === "string" && typeof option.kind === "string"
+      ? [{ optionId: option.optionId, kind: option.kind }]
+      : [];
+  });
+}
+
+function permissionOutcome(options: PermissionOption[], granted: boolean): unknown {
+  const desiredKind = granted ? "allow_once" : "reject_once";
+  const selected = options.find((option) => option.kind === desiredKind);
+  return selected
+    ? { outcome: "selected", optionId: selected.optionId }
+    : { outcome: "cancelled" };
+}
+
+async function sendRequestError(
+  transport: AcpTransport,
+  request: AcpRequest,
+  code: number,
+  message: string
+): Promise<void> {
+  await transport.send({
+    jsonrpc: "2.0",
+    id: request.id,
+    error: { code, message }
+  });
+}
+
 /**
- * Run one ACP prompt turn, yielding {@link BackendAgentEvent}s in order.
- *
- * Sends the protocol handshake + session lifecycle over the transport, then
- * consumes the streamed notification frames, normalizing each into the universal
- * event surface. Tool calls are routed through `execute` and their results sent
- * back. The turn ends on `session/done`, `session/error`, cancellation, or a
- * safety cap; `session/close` + `close()` always run in the finally block.
+ * Run one prompt turn using the ACP v1 lifecycle:
+ * initialize -> optional authenticate -> session/new -> session/prompt.
+ * `session/prompt` resolves only at end-of-turn, so inbound updates and
+ * permission requests are consumed concurrently while that request is pending.
  */
 export async function* runAcpSession(
   transport: AcpTransport,
@@ -77,174 +171,259 @@ export async function* runAcpSession(
   request: AgentRunRequest,
   options: AcpSessionOptions
 ): AsyncIterable<BackendAgentEvent> {
-  const maxToolCalls = options.maxToolCalls ?? MAX_TOOL_CALLS_PER_RUN;
+  const maxPermissionRequests = Math.min(
+    options.maxToolCalls ?? MAX_TOOL_CALLS_PER_RUN,
+    options.maxTurns ?? MAX_TOOL_CALLS_PER_RUN
+  );
   const maxToolOutputCharacters =
     options.maxToolOutputCharacters ?? MAX_TOOL_OUTPUT_CHARACTERS;
-  const maxTurns = options.maxTurns ?? 8;
-  const seenCallIds = new Set<string>();
-  let toolCallCount = 0;
-  let turn = 0;
-  let cancelled = false;
-  let errored: string | null = null;
+  let requestSequence = 0;
+  let sessionId: string | null = null;
+  let permissionCount = 0;
+  let cancellationSent = false;
+  const seenPermissionCallIds = new Set<string>();
+
+  const requestFor = (method: string, params: unknown): AcpRequest => ({
+    jsonrpc: "2.0",
+    id: `fable-${++requestSequence}`,
+    method,
+    params
+  });
 
   try {
-    // 1. initialize — negotiate protocol version + the CLI's capabilities.
-    const initReply = await transport.request(
-      acpRequest("initialize", { protocolVersion: ACP_PROTOCOL_VERSION, client: "fable" })
-    );
-    if (!initReply.ok) {
-      yield normalizeBackendErrorEvent({ type: "error", message: initReply.error.message });
-      return;
-    }
-
-    // 2. session/new — open a session bound to the requested model.
-    const newReply = await transport.request(
-      acpRequest("session/new", { model: request.model })
-    );
-    if (!newReply.ok) {
-      yield normalizeBackendErrorEvent({ type: "error", message: newReply.error.message });
-      return;
-    }
-
-    // 3. session/prompt — submit the user turn. The CLI replies when the prompt
-    //    is accepted, then streams notifications until the turn completes.
-    const userMessages = request.messages.filter((m) => m.role === "user");
-    const promptReply = await transport.request(
-      acpRequest("session/prompt", {
-        model: request.model,
-        messages: userMessages,
-        tools: request.tools,
-        maxTokens: request.maxTokens
+    const initialize = await transport.request(
+      requestFor("initialize", {
+        protocolVersion: ACP_PROTOCOL_VERSION,
+        clientCapabilities: {},
+        clientInfo: { name: "fable", title: "Fable", version: "1" }
       })
     );
-    if (!promptReply.ok) {
-      yield normalizeBackendErrorEvent({ type: "error", message: promptReply.error.message });
+    if (!initialize.ok) {
+      yield replyError(initialize);
+      return;
+    }
+    if (object(initialize.result)?.protocolVersion !== ACP_PROTOCOL_VERSION) {
+      yield errorEvent("The ACP agent negotiated an unsupported protocol version.");
       return;
     }
 
-    // 4. Consume the streamed notification frames.
-    for await (const notification of transport.frames()) {
-      if (options.shouldCancel?.() === true) {
-        cancelled = true;
-        break;
+    const authentication = await authenticateIfAdvertised(
+      transport,
+      providerId,
+      initialize.result,
+      requestFor,
+      false
+    );
+    if (authentication && !authentication.ok) {
+      yield replyError(authentication);
+      return;
+    }
+
+    let newSession = await transport.request(
+      requestFor("session/new", {
+        cwd: transport.cwd,
+        mcpServers: []
+      })
+    );
+    if (
+      !newSession.ok &&
+      providerId !== "grok" &&
+      isAuthenticationError(newSession) &&
+      authMethods(initialize.result).length > 0
+    ) {
+      const retryAuthentication = await authenticateIfAdvertised(
+        transport,
+        providerId,
+        initialize.result,
+        requestFor,
+        true
+      );
+      if (retryAuthentication && !retryAuthentication.ok) {
+        yield replyError(retryAuthentication);
+        return;
       }
+      newSession = await transport.request(
+        requestFor("session/new", { cwd: transport.cwd, mcpServers: [] })
+      );
+    }
+    if (!newSession.ok) {
+      yield replyError(newSession);
+      return;
+    }
+    sessionId = sessionIdFrom(newSession.result);
+    if (!sessionId) {
+      yield errorEvent("The ACP agent returned an invalid session id.");
+      return;
+    }
 
-      const event = normalizeAcpNotification(providerId, notification);
-      if (!event) continue;
+    const text = promptText(request, options.contextPrefix);
+    if (!text) {
+      yield errorEvent("The ACP prompt is empty.");
+      return;
+    }
 
-      if (event.type === "tool-call") {
-        // Validate the callId before routing through the approval queue.
-        const callId = event.callId;
-        if (
-          callId.length === 0 ||
-          callId.length > MAX_CALL_ID_CHARACTERS ||
-          !CALL_ID_PATTERN.test(callId)
-        ) {
-          errored = `ACP tool call has a malformed call id.`;
-          yield normalizeBackendErrorEvent({ type: "error", message: errored });
-          break;
-        }
-        if (seenCallIds.has(callId)) {
-          errored = `ACP tool call id ${callId} was replayed; refusing.`;
-          yield normalizeBackendErrorEvent({ type: "error", message: errored });
-          break;
-        }
-        if (event.arguments.length > MAX_TOOL_ARGUMENT_CHARACTERS) {
-          errored = `ACP tool call ${callId} arguments exceed the supported size.`;
-          yield normalizeBackendErrorEvent({ type: "error", message: errored });
-          break;
-        }
-        if (toolCallCount >= maxToolCalls) {
-          errored = `ACP run exceeded its tool-call cap (${maxToolCalls}).`;
-          yield normalizeBackendErrorEvent({ type: "error", message: errored });
-          break;
-        }
-        if (turn >= maxTurns) {
-          errored = `ACP run exceeded its turn cap (${maxTurns}).`;
-          yield normalizeBackendErrorEvent({ type: "error", message: errored });
-          break;
-        }
-        seenCallIds.add(callId);
-        toolCallCount += 1;
-        turn += 1;
+    const promptReply = transport.request(
+      requestFor("session/prompt", {
+        sessionId,
+        prompt: [{ type: "text", text }]
+      })
+    );
+    const iterator = transport.frames()[Symbol.asyncIterator]();
+    let nextFrame = iterator.next();
 
-        // Yield the tool-call so the shell routes it through the approval queue.
-        yield event;
-
-        // Execute the approved tool and send the result back to the CLI.
-        let ok = true;
-        let output = "";
-        try {
-          output = boundedToolOutput(
-            await options.execute(event.approval, event.arguments),
-            maxToolOutputCharacters
-          );
-        } catch (error) {
-          ok = false;
-          output = redactSecretsFromString(
-            error instanceof Error ? error.message : "Tool execution failed."
-          );
-        }
-        const toolResultEvent: BackendAgentEvent = {
-          type: "tool-result",
-          callId,
-          ok,
-          output
-        };
-        yield toolResultEvent;
+    while (true) {
+      if (options.shouldCancel?.() === true) {
         await transport.send({
           jsonrpc: "2.0",
-          method: "tool/result",
-          params: { callId, ok, output }
+          method: "session/cancel",
+          params: { sessionId }
         });
-        continue;
-      }
-
-      if (event.type === "error") {
-        errored = event.message;
-        yield event;
-        break;
-      }
-      if (event.type === "done") {
-        yield event;
+        cancellationSent = true;
+        yield { type: "cancelled" };
         return;
       }
 
-      // text-delta, usage: forward as-is.
+      const raced = await Promise.race([
+        nextFrame.then((value) => ({ kind: "frame" as const, value })),
+        promptReply.then((reply) => ({ kind: "prompt" as const, reply }))
+      ]);
+
+      if (raced.kind === "prompt") {
+        if (!raced.reply.ok) {
+          yield replyError(raced.reply);
+          return;
+        }
+        const stopReason = object(raced.reply.result)?.stopReason;
+        yield { type: "done", finishReason: finishReasonForAcpStopReason(stopReason) };
+        return;
+      }
+
+      if (raced.value.done) {
+        if (options.shouldCancel?.() === true) {
+          yield { type: "cancelled" };
+        } else {
+          yield errorEvent("The ACP process closed before the prompt completed.");
+        }
+        return;
+      }
+      const frame: AcpInboundFrame = raced.value.value;
+      nextFrame = iterator.next();
+
+      if (!isAcpRequest(frame)) {
+        const event = normalizeAcpNotification(providerId, frame);
+        if (!event) continue;
+        if (event.type === "tool-result" && event.output.length > maxToolOutputCharacters) {
+          yield { ...event, output: `${event.output.slice(0, maxToolOutputCharacters)}…` };
+        } else {
+          yield event;
+        }
+        continue;
+      }
+
+      if (frame.method !== "session/request_permission") {
+        await sendRequestError(transport, frame, -32601, "Method not supported by Fable.");
+        continue;
+      }
+
+      const params = object(frame.params);
+      if (!params || params.sessionId !== sessionId) {
+        await transport.send({
+          jsonrpc: "2.0",
+          id: frame.id,
+          result: { outcome: { outcome: "cancelled" } }
+        });
+        continue;
+      }
+      const permission = buildAcpPermissionToolCall(
+        providerId,
+        sessionId,
+        frame.id,
+        params.toolCall
+      );
+      const choices = permissionOptions(params.options);
+      // Fable never upgrades a one-time user decision to a standing provider
+      // grant. If the agent does not offer `allow_once`, cancel without asking.
+      if (!choices.some((choice) => choice.kind === "allow_once")) {
+        await transport.send({
+          jsonrpc: "2.0",
+          id: frame.id,
+          result: { outcome: { outcome: "cancelled" } }
+        });
+        continue;
+      }
+      if (!permission || permission.arguments.length > MAX_TOOL_ARGUMENT_CHARACTERS) {
+        await transport.send({
+          jsonrpc: "2.0",
+          id: frame.id,
+          result: { outcome: permissionOutcome(choices, false) }
+        });
+        continue;
+      }
+      if (seenPermissionCallIds.has(permission.callId)) {
+        await transport.send({
+          jsonrpc: "2.0",
+          id: frame.id,
+          result: { outcome: permissionOutcome(choices, false) }
+        });
+        yield errorEvent("The ACP agent replayed a permission request; Fable refused it.");
+        return;
+      }
+      if (permissionCount >= maxPermissionRequests) {
+        await transport.send({
+          jsonrpc: "2.0",
+          id: frame.id,
+          result: { outcome: permissionOutcome(choices, false) }
+        });
+        yield errorEvent(`ACP run exceeded its permission-request cap (${maxPermissionRequests}).`);
+        return;
+      }
+
+      permissionCount += 1;
+      seenPermissionCallIds.add(permission.callId);
+      const event: Extract<BackendAgentEvent, { type: "tool-call" }> = {
+        type: "tool-call",
+        callId: permission.callId,
+        tool: "acp-permission",
+        arguments: permission.arguments,
+        approval: permission.approval
+      };
       yield event;
-    }
 
-    if (cancelled) {
-      yield { type: "cancelled" };
-    } else if (errored) {
-      // The error event was already yielded; nothing terminal to add.
-      return;
-    } else {
-      // The stream ended without an explicit done/error (CLI closed stdout).
-      yield { type: "done", finishReason: "stop" };
+      let granted = false;
+      try {
+        await options.execute(event.approval, event.arguments);
+        granted = true;
+      } catch {
+        granted = false;
+      }
+      await transport.send({
+        jsonrpc: "2.0",
+        id: frame.id,
+        result: { outcome: permissionOutcome(choices, granted) }
+      });
+      if (!granted) {
+        yield {
+          type: "tool-result",
+          callId: event.callId,
+          ok: false,
+          output: "Permission denied."
+        };
+      }
     }
+  } catch (error) {
+    yield errorEvent(
+      error instanceof Error ? error.message : "Fable could not communicate with the ACP agent."
+    );
   } finally {
-    // 5. Always close the session + transport, even on error/cancel.
-    await transport.send(acpNotification("session/close", {})).catch(() => {
-      /* best-effort: the CLI may already be gone */
-    });
-    await transport.close().catch(() => {
-      /* best-effort shutdown */
-    });
+    if (sessionId && options.shouldCancel?.() === true && !cancellationSent) {
+      await transport
+        .send({
+          jsonrpc: "2.0",
+          method: "session/cancel",
+          params: { sessionId }
+        })
+        .catch(() => undefined);
+    }
+    await transport.close().catch(() => undefined);
   }
-}
-
-/** Build a JSON-RPC request with a generated id. */
-function acpRequest(method: string, params: unknown): AcpRequest {
-  return {
-    jsonrpc: "2.0",
-    id: `fable-${method}-${Math.random().toString(36).slice(2, 10)}`,
-    method,
-    params
-  };
-}
-
-/** Build a JSON-RPC notification (no id). */
-function acpNotification(method: string, params: unknown) {
-  return { jsonrpc: "2.0" as const, method, params };
 }

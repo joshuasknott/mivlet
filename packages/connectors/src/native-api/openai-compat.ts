@@ -11,7 +11,7 @@
 
 import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
-import { priceFor } from "./pricing";
+import { hasKnownPrice, priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
 import { extractPayload, splitLines } from "./transport";
 
@@ -73,10 +73,42 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
 
 interface OpenAiStreamState {
   toolCalls: Map<number, { index: number; id?: string; name: string; arguments: string }>;
+  /** MiniMax's OpenAI-compatible stream reports cumulative `delta.content`. */
+  minimaxContent: string;
 }
 
 function newOpenAiStreamState(): OpenAiStreamState {
-  return { toolCalls: new Map() };
+  return { toolCalls: new Map(), minimaxContent: "" };
+}
+
+/**
+ * Most OpenAI-compatible providers send an incremental text fragment in each
+ * `delta.content`. MiniMax is the documented exception: every frame contains
+ * the full text accumulated so far. Emit only its unseen suffix so downstream
+ * transcript concatenation does not repeat the already-rendered prefix.
+ */
+function textDeltaForProvider(
+  providerId: string,
+  content: string,
+  state: OpenAiStreamState
+): string {
+  if (providerId !== "minimax") return content;
+
+  const previous = state.minimaxContent;
+  if (content.startsWith(previous)) {
+    state.minimaxContent = content;
+    return content.slice(previous.length);
+  }
+
+  // A shorter repeated snapshot can arrive around provider-side buffering.
+  // It contains no new text, so do not replay it into the transcript.
+  if (previous.startsWith(content)) return "";
+
+  // The provider departed from its cumulative contract. Preserve the frame
+  // rather than silently dropping user-visible text; the normal path above is
+  // the one MiniMax documents and the one covered by the stream invariant.
+  state.minimaxContent = content;
+  return content;
 }
 
 function parseOpenAiStreamLine(
@@ -97,7 +129,10 @@ function parseOpenAiStreamLine(
   }
   const events: BackendAgentEvent[] = [];
   const choice = chunk.choices?.[0];
-  if (choice?.delta?.content) events.push({ type: "text-delta", text: choice.delta.content });
+  if (choice?.delta?.content) {
+    const text = textDeltaForProvider(providerId, choice.delta.content, state);
+    if (text) events.push({ type: "text-delta", text });
+  }
   for (const fragment of choice?.delta?.tool_calls ?? []) {
     const buffered = state.toolCalls.get(fragment.index) ?? {
       index: fragment.index,
@@ -117,7 +152,8 @@ function parseOpenAiStreamLine(
       inputTokens: input,
       outputTokens: output,
       costUsd: priceFor(providerId, input, output),
-      costEstimated: true
+      costEstimated: true,
+      costUnknown: !hasKnownPrice(providerId)
     });
   }
   if (choice?.finish_reason) {
@@ -196,7 +232,8 @@ export function parseOpenAiLine(
       inputTokens: input,
       outputTokens: output,
       costUsd: priceFor(providerId, input, output),
-      costEstimated: true
+      costEstimated: true,
+      costUnknown: !hasKnownPrice(providerId)
     });
   }
   if (choice?.finish_reason) {

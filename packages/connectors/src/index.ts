@@ -118,6 +118,9 @@ export {
   resolveCopilotProvider,
   resolveCursorProvider,
   resolveGrokProvider,
+  resolveKimiProvider,
+  resolveMistralVibeProvider,
+  resolveOpenCodeProvider,
   resolveNativeProvider,
   resolveOllamaProvider,
   NATIVE_BACKEND_TYPE,
@@ -132,8 +135,7 @@ export type {
   BackendProviderId,
   NativeProviderId
 } from "./backends/registry";
-export type { CopilotAuthMode } from "./backends/fixtures";
-export { COPILOT_AUTH_MODES } from "./backends/copilot";
+export { COPILOT_AUTH_MODES, type CopilotAuthMode } from "./backends/copilot";
 
 // native-API agent loop (pure shaping + orchestration; the transport seam
 // injects egress — Rust owns the key + HTTP/SSE in production). No network, no
@@ -184,9 +186,8 @@ export { buildContextPrefix } from "./native-api/memory-context";
 
 // provider-neutral agent-runtime contract. One interface every backend family
 // (native-API, Codex, ACP, Copilot) implements; the shell resolves one
-// AgentBackend per run via resolveAgentBackend. Native-API and ACP (Cursor/Grok)
-// have live adapters; Codex and Copilot remain metadata-only until their
-// adapters land. No secret crosses this boundary — auth lives behind the Rust
+// AgentBackend per run via resolveAgentBackend. Native-API, Codex, and ACP
+// (including Copilot) have live adapters. No secret crosses this boundary — auth lives behind the Rust
 // boundary / provider-owned auth caches (CLI-owned for ACP).
 export {
   resolveAgentBackend,
@@ -228,6 +229,7 @@ export {
   isAcpRequest,
   isAcpResponse,
   isAcpNotification,
+  ACP_PERMISSION_TOOL,
   MAX_ACP_FRAME_CHARACTERS,
   type AcpFrame,
   type AcpRequest,
@@ -237,6 +239,7 @@ export {
   type AcpTransport,
   type AcpTransportFactory,
   type AcpTransportProvider,
+  type AcpInboundFrame,
   type AcpReply
 } from "./agent-runtime/adapters/acp/index";
 export {

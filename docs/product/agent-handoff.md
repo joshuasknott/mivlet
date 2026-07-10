@@ -4,23 +4,39 @@ This document serves as a guide for future agent worktrees to quickly locate the
 
 ## 1. Provider Runtimes
 
-Fable supports four types of backend execution providers, defined under `packages/connectors/src/backends/` and implemented in `apps/desktop/src-tauri/src/`:
+Fable supports three runtime adapter families, defined under
+`packages/connectors/src/backends/` and implemented in
+`apps/desktop/src-tauri/src/`:
 
-- **Native BYOK API (OpenAI, Anthropic, Gemini, xAI, OpenRouter)**
+- **Native API, local, and custom providers**
+  - Fixed profiles: OpenAI, Anthropic, Gemini, xAI, OpenRouter, DeepSeek,
+    Z.AI, MiniMax, Alibaba Model Studio, Fireworks AI, Hugging Face, Kimi Code, Moonshot,
+    Mistral, Meta Llama API, Perplexity, Tencent TokenHub, Xiaomi MiMo, Groq,
+    Together AI, and Cerebras.
+  - Ollama is the local loopback profile. Custom is a validated
+    OpenAI-compatible base URL with an explicit model ID and optional bearer key.
   - Fable manages the full multi-round loop here.
-  - TS shaping: [packages/connectors/src/native-api/agent-loop.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/native-api/agent-loop.ts)
-  - Rust keyring egress & cancellation: [apps/desktop/src-tauri/src/native_api.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/native_api.rs)
-- **ACP Providers (Cursor, Grok)**
-  - Speaks JSON-RPC over stdio with an external CLI.
-  - TS registry & adapter: [packages/connectors/src/backends/acp.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/backends/acp.ts)
-  - Rust stdio runner: [apps/desktop/src-tauri/src/acp_process.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/acp_process.rs)
+  - TS shaping: [`packages/connectors/src/native-api/agent-loop.ts`](../../packages/connectors/src/native-api/agent-loop.ts)
+  - Rust credential egress, endpoint policy, discovery, and cancellation: [`apps/desktop/src-tauri/src/native_api.rs`](../../apps/desktop/src-tauri/src/native_api.rs)
+- **ACP providers (Cursor, GitHub Copilot, Grok Build, OpenCode, Kimi, Mistral Vibe)**
+  - Speaks Agent Client Protocol JSON-RPC over stdio with an allowlisted
+    external CLI command. Authentication remains provider-owned.
+  - TS registry: [`packages/connectors/src/backends/acp.ts`](../../packages/connectors/src/backends/acp.ts)
+  - TS transport: [`packages/connectors/src/agent-runtime/adapters/acp/transport.ts`](../../packages/connectors/src/agent-runtime/adapters/acp/transport.ts)
+  - Rust stdio runner/probe: [`apps/desktop/src-tauri/src/acp_process.rs`](../../apps/desktop/src-tauri/src/acp_process.rs)
 - **Codex app-server**
-  - Speaks ChatGPT socket/CLI protocols.
-  - TS registry: [packages/connectors/src/backends/codex.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/backends/codex.ts)
-  - Rust app-server driver: [apps/desktop/src-tauri/src/codex_app_server.rs](file:///c:/Users/Josh/Projects/fable/apps/desktop/src-tauri/src/codex_app_server.rs)
-- **GitHub Copilot**
-  - Modeled/cataloged, but **not runnable** (no execution adapter implementation exists yet).
-  - TS registry: [packages/connectors/src/backends/copilot.ts](file:///c:/Users/Josh/Projects/fable/packages/connectors/src/backends/copilot.ts)
+  - Speaks the Codex app-server JSON-RPC protocol over the local Codex CLI.
+    ChatGPT/API-key login state stays in the Codex CLI; Fable records only the
+    coarse auth state returned by the CLI status probe.
+  - TS registry: [`packages/connectors/src/backends/codex.ts`](../../packages/connectors/src/backends/codex.ts)
+  - Rust app-server driver: [`apps/desktop/src-tauri/src/codex_app_server.rs`](../../apps/desktop/src-tauri/src/codex_app_server.rs)
+
+The provider catalogue and model fixtures live in
+[`packages/connectors/src/backends/fixtures.ts`](../../packages/connectors/src/backends/fixtures.ts).
+Do not add a provider as a connected/runnable state unless its native endpoint
+profile or CLI adapter exists. Meta's hosted Llama API is availability-limited.
+Vertex AI, Amazon Bedrock, and Azure AI/Foundry IAM do not have dedicated
+adapters; Custom does not implement their IAM/signing schemes.
 
 ## 2. Connectors
 

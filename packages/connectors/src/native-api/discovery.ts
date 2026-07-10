@@ -2,9 +2,10 @@
  * Merge dynamic model discovery with the curated fallback catalogue.
  *
  * Truth rules (the core of "model availability is truthful"):
- *   - A model the provider's list-models endpoint returned is `available: true`
- *     (the adapter can execute it). Its capabilities come from the catalogue
- *     where known, else `undefined` (unknown — never fabricated).
+ *   - A generation model returned by the provider is `available: true`. Its
+ *     optional capability detail comes from the catalogue where known. A new
+ *     model remains runnable with conservative request defaults rather than
+ *     waiting for a Fable release; unknown capabilities are never fabricated.
  *   - When discovery ran successfully (even if it returned nothing extra), a
  *     catalogue-only id the provider did NOT list is `available: false` — we do
  *     not advertise an executable model the provider did not surface.
@@ -16,14 +17,15 @@
  * GET; this module only merges the result with the catalogue. Fixture-testable.
  */
 
-import type { BackendModel, ModelCapabilities } from "@fable/protocol";
-import { catalogueCapabilities, defaultDiscoveredCapabilities } from "./model-catalogue";
+import type { BackendModel } from "@fable/protocol";
+import { catalogueCapabilities } from "./model-catalogue";
 
 /** A model id the provider's list-models endpoint returned. */
 export interface DiscoveredModel {
   id: string;
   available: boolean;
-  capabilities?: ModelCapabilities;
+  /** Optional provider-reported capabilities, used only when the runtime can substantiate them. */
+  capabilities?: BackendModel["capabilities"];
 }
 
 export type DiscoveryOutcome = "success" | "unsupported" | "offline" | "failed" | "empty";
@@ -64,18 +66,15 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
   for (const model of discovered) {
     if (seen.has(model.id)) continue;
     seen.add(model.id);
+    const capabilities = model.capabilities ?? catalogueCapabilities(providerId, model.id);
     out.push({
       id: model.id,
       label: catalogueModels.find((entry) => entry.id === model.id)?.label ?? model.id,
-      available:
-        model.available &&
-        (model.capabilities !== undefined ||
-          catalogueCapabilities(providerId, model.id) !== undefined ||
-          defaultDiscoveredCapabilities(providerId) !== undefined),
-      capabilities:
-        model.capabilities ??
-        catalogueCapabilities(providerId, model.id) ??
-        defaultDiscoveredCapabilities(providerId)
+      // Local loopback models are only selectable after their own probe has
+      // substantiated capabilities. Other providers may still expose a newly
+      // discovered plain-chat model without assuming tool support.
+      available: model.available && (providerId !== "ollama" || capabilities !== undefined),
+      capabilities
     });
   }
 

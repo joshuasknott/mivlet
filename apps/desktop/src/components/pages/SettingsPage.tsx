@@ -1,12 +1,9 @@
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
-import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
-import { Key } from "@phosphor-icons/react/dist/csr/Key";
 import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
 import { Moon } from "@phosphor-icons/react/dist/csr/Moon";
-import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
@@ -15,27 +12,14 @@ import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
-import { WarningCircle } from "@phosphor-icons/react/dist/csr/WarningCircle";
-import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import type {
   ActionHistoryEvent,
-  BackendAuthState,
-  BackendProvider,
   CustomApprovalSettings,
-  IdentityStatus,
   RemoteControlStatusSnapshot,
   VoiceCapability
 } from "@fable/protocol";
-import { providerCapabilityLabels } from "../../lib/backend-capabilities";
-import {
-  connectResultCopy,
-  isDiscoveryDegraded,
-  modelDiscoveryView,
-  stateViewFor
-} from "../../lib/backend-state";
-import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
 import {
   CUSTOM_APPROVAL_SECTION,
   CUSTOM_APPROVAL_TOGGLE_ORDER,
@@ -44,7 +28,7 @@ import {
 } from "../../lib/approval-copy";
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
 import { getRuntimeRemoteControlStatus } from "../../runtime";
-import { ProviderIcon } from "../ProviderIcon";
+import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { profileFixture } from "../../data/workspace";
@@ -160,27 +144,72 @@ export function SettingsPage({
   );
 }
 
-// Display order for providers in the Settings -> Providers list. Hoisted to
-// module scope so the comparator and the lists derived from it don't get
-// reallocated on every render.
-const PROVIDER_PRIORITY = [
-  "codex",
-  "cursor",
-  "copilot",
-  "grok",
-  "ollama",
-  "openai",
-  "anthropic",
-  "gemini",
-  "xiai",
-  "openrouter"
-];
+function IdentitySettingsView({
+  runtime,
+  onStatus
+}: {
+  runtime: ShellRuntime;
+  onStatus: (message: string) => void;
+}) {
+  const identity = runtime.identityStatus.identity;
+  const canSignIn = runtime.identityStatus.enabled && runtime.identityStatus.state !== "signed-in";
+  const canRefresh = runtime.identityStatus.enabled && runtime.identityStatus.state !== "disabled";
 
-function byProviderPriority(a: BackendProvider, b: BackendProvider) {
-  const aPriority = PROVIDER_PRIORITY.indexOf(a.id);
-  const bPriority = PROVIDER_PRIORITY.indexOf(b.id);
-  return (aPriority === -1 ? Number.MAX_SAFE_INTEGER : aPriority) -
-    (bPriority === -1 ? Number.MAX_SAFE_INTEGER : bPriority);
+  return (
+    <article className="profile-clean-card settings-open-section">
+      <div className="profile-clean-card__content">
+        <section className="profile-section" aria-labelledby="fable-account-title">
+          <div className="profile-section__heading">
+            <span className="settings-panel__icon" aria-hidden="true">
+              <ShieldCheck size={19} />
+            </span>
+            <span>
+              <strong id="fable-account-title">Fable account</strong>
+              <small>{runtime.identityStatus.message}</small>
+            </span>
+          </div>
+          <p>
+            {identity
+              ? `${identity.displayName ?? identity.email ?? identity.userId}${identity.organization ? ` · ${identity.organization.name ?? identity.organization.slug ?? identity.organization.id}` : ""}`
+              : "Account sign-in is configured through Clerk and remains separate from provider and connector credentials."}
+          </p>
+          <div className="profile-action-row">
+            {canSignIn ? (
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={runtime.identityPending}
+                onClick={() => void runtime.signInIdentity().then(() => onStatus("Fable account updated."))}
+              >
+                {runtime.identityPending ? <Spinner size={14} /> : null}
+                Sign in
+              </button>
+            ) : null}
+            {canRefresh ? (
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled={runtime.identityPending}
+                onClick={() => void runtime.refreshIdentity().then(() => onStatus("Fable account refreshed."))}
+              >
+                <ArrowClockwise size={14} /> Refresh
+              </button>
+            ) : null}
+            {identity ? (
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled={runtime.identityPending}
+                onClick={() => void runtime.signOutIdentity().then(() => onStatus("Fable account signed out."))}
+              >
+                Sign out
+              </button>
+            ) : null}
+          </div>
+        </section>
+      </div>
+    </article>
+  );
 }
 
 function ProviderAccessView({
@@ -190,92 +219,33 @@ function ProviderAccessView({
   runtime: ShellRuntime;
   onStatus: (message: string) => void;
 }) {
-  const providers = runtime.backendProviders;
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
-  // The runtime emits "Connecting <providerId>…" while a connect/disconnect is
-  // in flight; surface it as the pending provider id so the row shows a spinner.
-  const pendingProviderId = runtime.backendStatus?.match(/Connecting (\S+?)[\u2026.]?/)?.[1];
-
-  // Native-API (key) providers are connectable here. Subscription/CLI/local
-  // providers report provider-owned or externally managed runtime state.
-  const nativeProviders = useMemo(
-    () =>
-      providers
-        .filter((provider) => provider.backendType === "native-api")
-        .sort(byProviderPriority),
-    [providers]
-  );
-  const subscriptionProviders = useMemo(
-    () =>
-      providers
-        .filter((provider) => provider.backendType !== "native-api")
-        .sort(byProviderPriority),
-    [providers]
-  );
-  const selectedProvider = providers.find((provider) => provider.id === selectedProviderId);
-  const selectedConnected = selectedProvider
-    ? runtime.connectedBackendIds.includes(selectedProvider.id)
-    : false;
-  const selectedPending = selectedProvider
-    ? pendingProviderId === selectedProvider.id
-    : false;
-  const selectedDiscoveryState = selectedProvider
-    ? runtime.modelDiscoveryByProvider[selectedProvider.id] ?? "idle"
-    : "idle";
-
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          Connect API-key providers to run Fable&rsquo;s agent loop directly. Subscription,
-          CLI-backed, and local model providers use their own installed runtime.
+          Choose a provider, then pick the connection method that matches the account you already
+          use. You can connect more than one.
         </p>
       </div>
 
-      <div className="provider-access-groups" aria-label="Provider access">
-        <section className="provider-access-group" aria-labelledby="subscription-providers-title">
-          <div className="provider-access-group__heading">
-            <strong id="subscription-providers-title">Installed runtimes</strong>
-            <span>Use an existing provider subscription, installed CLI, or local model service.</span>
-          </div>
-          <div className="provider-access-list">
-            {subscriptionProviders.length > 0 ? (
-              subscriptionProviders.map((provider) => (
-                <SubscriptionProviderRow
-                  key={provider.id}
-                  provider={provider}
-                  onOpen={() => setSelectedProviderId(provider.id)}
-                />
-              ))
-            ) : (
-              <p className="provider-access-empty">No subscription providers are registered.</p>
-            )}
-          </div>
-        </section>
-
-        <section className="provider-access-group" aria-labelledby="api-key-providers-title">
-          <div className="provider-access-group__heading">
-            <strong id="api-key-providers-title">API keys</strong>
-            <span>Connect directly with a key stored on this device.</span>
-          </div>
-          <div className="provider-access-list">
-            {nativeProviders.length > 0 ? (
-              nativeProviders.map((provider) => (
-                <NativeProviderRow
-                  key={provider.id}
-                  provider={provider}
-                  connected={runtime.connectedBackendIds.includes(provider.id)}
-                  pending={pendingProviderId === provider.id}
-                  discoveryState={runtime.modelDiscoveryByProvider[provider.id] ?? "idle"}
-                  onOpen={() => setSelectedProviderId(provider.id)}
-                />
-              ))
-            ) : (
-              <p className="provider-access-empty">No API-key providers are registered.</p>
-            )}
-          </div>
-        </section>
-      </div>
+      <ProviderCatalogue
+        providers={runtime.backendProviders}
+        connectedBackendIds={runtime.connectedBackendIds}
+        onConnect={(providerId, secret) => runtime.connectBackendWithVerify(providerId, secret)}
+        onDisconnect={async (providerId) => {
+          await runtime.disconnectBackend(providerId);
+          onStatus(`${providerId} disconnected.`);
+        }}
+        onRefreshModels={async (providerId) => {
+          await runtime.refreshModels(providerId);
+          onStatus(`${providerId} model refresh finished. Check the provider status for the result.`);
+        }}
+        onCheckConnection={async (providerId) => {
+          await runtime.refreshBackendProviders();
+          onStatus(`${providerId} connection checked.`);
+        }}
+        onStatus={onStatus}
+      />
 
       <div className="settings-local-storage">
         <span aria-hidden="true">
@@ -284,466 +254,14 @@ function ProviderAccessView({
         <div>
           <strong>Local storage</strong>
           <p>
-            Credentials are held by Fable&rsquo;s local credential boundary and never leave this
-            device. Fable only ever sees auth state and capabilities &mdash; never your keys.
+            API keys are stored in Fable&rsquo;s local credential boundary and never enter the
+            interface or Fable&rsquo;s cloud. They are sent only to the selected provider when Fable
+            makes a request.
           </p>
         </div>
       </div>
-
-      {selectedProvider ? (
-        selectedProvider.backendType === "native-api" ? (
-          <NativeProviderSetupModal
-            provider={selectedProvider}
-            connected={selectedConnected}
-            pending={selectedPending}
-            discoveryState={selectedDiscoveryState}
-            onStatus={onStatus}
-            onClose={() => setSelectedProviderId(null)}
-            onConnect={(providerId, secret) =>
-              void runtime
-                .connectBackendWithVerify(providerId, secret)
-                .then((result) => {
-                  const missingKey = isMissingKeyMessage(result.message);
-                  onStatus(
-                    connectResultCopy(result.outcome, {
-                      missingKey,
-                      detail: result.message
-                    }).message
-                  );
-                })
-            }
-            onDisconnect={(providerId) =>
-              void runtime.disconnectBackend(providerId).then(() => {
-                onStatus(`${providerId} disconnected.`);
-              })
-            }
-            onRefreshModels={(providerId) =>
-              void runtime.refreshModels(providerId).then(() => {
-                onStatus(`${providerId} models refreshed.`);
-              })
-            }
-          />
-        ) : (
-          <SubscriptionProviderSetupModal
-            provider={selectedProvider}
-            onClose={() => setSelectedProviderId(null)}
-          />
-        )
-      ) : null}
     </div>
   );
-}
-
-/**
- * A native-API (key) provider row. Connect/disconnect crosses the Rust
- * credential boundary via runtime.connectBackend/disconnectBackend. The API
- * key lives only in the uncontrolled input field; it is read once at submit and
- * passed straight to the boundary, then cleared — it never enters React state.
- */
-function NativeProviderRow({
-  provider,
-  connected,
-  pending,
-  discoveryState,
-  onOpen
-}: {
-  provider: BackendProvider;
-  connected: boolean;
-  pending: boolean;
-  /** Per-provider model-discovery lifecycle (idle when discovery hasn't run). */
-  discoveryState: ModelDiscoveryOutcome;
-  onOpen: () => void;
-}) {
-  const capabilities = providerCapabilityLabels(provider);
-  const availableModels = provider.models.filter((model) => model.available);
-  const authLabel = authStateLabel(provider.authState, "native-api");
-  const capabilityBearing = connected && capabilities.length > 0;
-  // Model-discovery UI is only meaningful for a connected provider: it reflects
-  // runtime model-list health layered on top of a verified key. Before connect
-  // the catalogue copy ("Connect to see available models") still drives.
-  const discoveryActive = connected && discoveryState !== "idle";
-  const discoveryView = modelDiscoveryView(discoveryState);
-  const discoveryDegraded = connected && isDiscoveryDegraded(discoveryState);
-  const discoveryLoading = discoveryState === "loading";
-
-  return (
-    <article
-      className={`provider-access-row provider-access-row--native${
-        connected ? " provider-access-row--connected" : ""
-      }`}
-      data-provider-id={provider.id}
-      role="button"
-      aria-label={connected ? `Manage ${provider.label}` : `Connect ${provider.label}`}
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-    >
-      <span className="provider-access-row__icon" aria-hidden="true">
-        <ProviderIcon provider={provider.id} size={23} />
-      </span>
-
-      <div className="provider-access-row__body">
-        <div className="provider-access-row__name">
-          <strong>{provider.label}</strong>
-          <span>{provider.description}</span>
-        </div>
-
-        <div className="provider-access-row__meta">
-          {capabilities.length > 0 ? (
-            <span className="provider-access-caps">{capabilities.slice(0, 4).join(" · ")}</span>
-          ) : (
-            <span className="provider-access-caps provider-access-caps--muted">
-              No capabilities until connected
-            </span>
-          )}
-          {availableModels.length > 0 ? (
-            <span className="provider-access-models">
-              {availableModels.slice(0, 3).map((model) => model.label).join(" · ")}
-              {availableModels.length > 3 ? ` · +${availableModels.length - 3} more` : ""}
-            </span>
-          ) : provider.models.length > 0 ? (
-            <span className="provider-access-models provider-access-models--muted">
-              {connected
-                ? // Connected but the account surfaced no usable models.
-                  "No models available on this account"
-                : // Not connected yet: this is a configuration gap, not an
-                  // account problem — point the user at connecting first.
-                  "Connect to see available models"}
-            </span>
-          ) : null}
-          {discoveryLoading ? (
-            <span className="provider-access-models provider-access-models--loading">
-              <Spinner size={12} /> {discoveryView.label}
-            </span>
-          ) : null}
-        </div>
-
-        {/* Model-discovery runtime health: shown only when connected so the row
-            reflects the real model-list state instead of an optimistic
-            "connected". Degraded (empty/offline/failed/unsupported) is
-            recoverable — the Refresh action in the row footer re-runs discovery. */}
-        {discoveryActive && !discoveryLoading && (discoveryDegraded || availableModels.length === 0) ? (
-          <p
-            className={`provider-access-discovery provider-access-discovery--${discoveryView.tone}`}
-            role="status"
-          >
-            {discoveryView.hint}
-          </p>
-        ) : null}
-
-      </div>
-
-      <span
-        className={`provider-access-state provider-access-state--${provider.authState}`}
-        aria-label={`${provider.label} is ${authLabel}`}
-      >
-        {capabilityBearing || provider.authState === "connected" ? (
-          <CheckCircle size={14} weight="fill" />
-        ) : (
-          <WarningCircle size={14} />
-        )}
-        {authLabel}
-      </span>
-
-      <span className="provider-access-row__action">
-        <span>{connected ? "Manage" : pending ? "Connecting" : "Connect"}</span>
-      </span>
-    </article>
-  );
-}
-
-function NativeProviderSetupModal({
-  provider,
-  connected,
-  pending,
-  discoveryState,
-  onStatus,
-  onClose,
-  onConnect,
-  onDisconnect,
-  onRefreshModels
-}: {
-  provider: BackendProvider;
-  connected: boolean;
-  pending: boolean;
-  discoveryState: ModelDiscoveryOutcome;
-  onStatus: (message: string) => void;
-  onClose: () => void;
-  onConnect: (providerId: string, secret: string) => void;
-  onDisconnect: (providerId: string) => void;
-  onRefreshModels: (providerId: string) => void;
-}) {
-  const keyInputRef = useRef<HTMLInputElement>(null);
-  const capabilities = providerCapabilityLabels(provider);
-  const availableModels = provider.models.filter((model) => model.available);
-  const authLabel = authStateLabel(provider.authState, "native-api");
-  const discoveryView = modelDiscoveryView(discoveryState);
-  const discoveryDegraded = connected && isDiscoveryDegraded(discoveryState);
-  const discoveryLoading = discoveryState === "loading";
-
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    const secret = keyInputRef.current?.value.trim() ?? "";
-    if (!secret) {
-      onStatus("Enter an API key to connect.");
-      return;
-    }
-    onConnect(provider.id, secret);
-    if (keyInputRef.current) {
-      keyInputRef.current.value = "";
-    }
-  };
-
-  return (
-    <div className="provider-setup-modal" role="dialog" aria-modal="true" aria-labelledby={`provider-setup-${provider.id}`}>
-      <article className="provider-setup-modal__panel">
-        <header className="provider-setup-modal__header">
-          <span className="provider-access-row__icon" aria-hidden="true">
-            <ProviderIcon provider={provider.id} size={28} />
-          </span>
-          <div>
-            <h2 id={`provider-setup-${provider.id}`}>{provider.label}</h2>
-            <p>{provider.description}</p>
-          </div>
-          <button type="button" className="provider-setup-modal__close" aria-label="Close provider setup" onClick={onClose}>
-            <X size={17} />
-          </button>
-        </header>
-
-        <div className="provider-setup-modal__body">
-          <span className={`provider-access-state provider-access-state--${provider.authState}`}>
-            {connected ? <CheckCircle size={14} weight="fill" /> : <WarningCircle size={14} />}
-            {authLabel}
-          </span>
-
-          <div className="provider-setup-modal__meta">
-            <section>
-              <strong>Capabilities</strong>
-              <p>{capabilities.length > 0 ? capabilities.slice(0, 4).join(" / ") : "Connect to load capabilities."}</p>
-            </section>
-            <section>
-              <strong>Models</strong>
-              <p>
-                {availableModels.length > 0
-                  ? availableModels.slice(0, 4).map((model) => model.label).join(" / ")
-                  : connected
-                    ? "No models available on this account"
-                    : "Connect to see available models"}
-              </p>
-            </section>
-          </div>
-
-          {connected && discoveryState !== "idle" ? (
-            <p className={`provider-access-discovery provider-access-discovery--${discoveryView.tone}`}>
-              {discoveryLoading ? "Checking available models." : discoveryView.hint}
-            </p>
-          ) : null}
-
-          {!connected ? (
-            <form className="provider-access-key-form provider-access-key-form--modal" onSubmit={handleSubmit}>
-              <label className="provider-access-key-form__field">
-                <span>{provider.label} API key</span>
-                <input
-                  ref={keyInputRef}
-                  type="password"
-                  aria-label={`API key for ${provider.label.toLowerCase()}`}
-                  placeholder={`Enter your ${provider.label} API key`}
-                  autoComplete="off"
-                  spellCheck={false}
-                  disabled={pending}
-                />
-              </label>
-              <button type="submit" className="provider-access-key-form__submit" disabled={pending}>
-                {pending ? (
-                  <span className="provider-access-key-form__pending">
-                    <Spinner size={14} /> Connecting...
-                  </span>
-                ) : (
-                  "Add key & connect"
-                )}
-              </button>
-            </form>
-          ) : null}
-        </div>
-
-        {connected ? (
-          <footer className="provider-setup-modal__actions">
-            <button
-              type="button"
-              className="provider-access-row__refresh"
-              onClick={() => onRefreshModels(provider.id)}
-              disabled={pending || discoveryLoading}
-              aria-label={`Refresh models for ${provider.label}`}
-            >
-              {discoveryLoading ? <Spinner size={12} /> : <ArrowClockwise size={12} />}
-              {discoveryDegraded ? "Retry models" : "Refresh models"}
-            </button>
-            <button type="button" onClick={() => onDisconnect(provider.id)} disabled={pending}>
-              Disconnect
-            </button>
-          </footer>
-        ) : null}
-      </article>
-    </div>
-  );
-}
-
-function SubscriptionProviderSetupModal({
-  provider,
-  onClose
-}: {
-  provider: BackendProvider;
-  onClose: () => void;
-}) {
-  const capabilities = providerCapabilityLabels(provider);
-  const capabilityBearing = provider.authState === "connected" && capabilities.length > 0;
-  const authLabel = authStateLabel(provider.authState, provider.backendType);
-  const installRequired = provider.authState === "install-required";
-
-  return (
-    <div className="provider-setup-modal" role="dialog" aria-modal="true" aria-labelledby={`provider-setup-${provider.id}`}>
-      <article className="provider-setup-modal__panel">
-        <header className="provider-setup-modal__header">
-          <span className="provider-access-row__icon" aria-hidden="true">
-            <ProviderIcon provider={provider.id} size={28} />
-          </span>
-          <div>
-            <h2 id={`provider-setup-${provider.id}`}>{provider.label}</h2>
-            <p>{provider.description}</p>
-          </div>
-          <button type="button" className="provider-setup-modal__close" aria-label="Close provider setup" onClick={onClose}>
-            <X size={17} />
-          </button>
-        </header>
-        <div className="provider-setup-modal__body">
-          <span className={`provider-access-state provider-access-state--${provider.authState}`}>
-            {capabilityBearing ? <CheckCircle size={14} weight="fill" /> : <Plugs size={14} />}
-            {authLabel}
-          </span>
-          <div className="provider-setup-modal__meta">
-            <section>
-              <strong>Setup</strong>
-              <p>
-                {installRequired && provider.installHint
-                  ? provider.installHint
-                  : provider.backendType === "local-loopback"
-                    ? "Fable detects this local service automatically. Start Ollama and pull a model in Ollama before running local prompts."
-                    : "Use the provider's own app, CLI, or sign-in before Fable can use this runtime."}
-              </p>
-            </section>
-            <section>
-              <strong>Capabilities</strong>
-              <p>{capabilityBearing ? capabilities.slice(0, 4).join(" / ") : "Available after the provider runtime is ready."}</p>
-            </section>
-          </div>
-        </div>
-      </article>
-    </div>
-  );
-}
-
-/**
- * A subscription/CLI provider row. It is never one-click connectable from
- * Settings: unless the runtime reports it connected and capability-bearing, the
- * row states what is required (CLI install, sign-in) and exposes no fake token
- * entry field.
- */
-function SubscriptionProviderRow({
-  provider,
-  onOpen
-}: {
-  provider: BackendProvider;
-  onOpen: () => void;
-}) {
-  const capabilities = providerCapabilityLabels(provider);
-  const capabilityBearing = provider.authState === "connected" && capabilities.length > 0;
-  const authLabel = authStateLabel(provider.authState, provider.backendType);
-  const installRequired = provider.authState === "install-required";
-
-  return (
-    <article
-      className={`provider-access-row provider-access-row--subscription${
-        capabilityBearing ? " provider-access-row--connected" : ""
-      }`}
-      data-provider-id={provider.id}
-      role="button"
-      aria-label={capabilityBearing ? `Manage ${provider.label}` : `View setup for ${provider.label}`}
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpen();
-        }
-      }}
-    >
-      <span className="provider-access-row__icon" aria-hidden="true">
-        <ProviderIcon provider={provider.id} size={23} />
-      </span>
-
-      <div className="provider-access-row__body">
-        <div className="provider-access-row__name">
-          <strong>{provider.label}</strong>
-          <span>{provider.description}</span>
-        </div>
-
-        <div className="provider-access-row__meta">
-          {capabilityBearing ? (
-            <span className="provider-access-caps">{capabilities.slice(0, 4).join(" · ")}</span>
-          ) : (
-            <span className="provider-access-caps provider-access-caps--muted">
-              {installRequired && provider.installHint
-                ? provider.installHint
-                : provider.backendType === "local-loopback"
-                  ? stateViewFor(provider.authState).hint ?? "Requires a running local model service."
-                  : "Requires the provider's real runtime to be connected first."}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <span
-        className={`provider-access-state provider-access-state--${provider.authState}`}
-        aria-label={`${provider.label} is ${authLabel}`}
-      >
-        {capabilityBearing ? <CheckCircle size={14} weight="fill" /> : <Plugs size={14} />}
-        {authLabel}
-      </span>
-
-      <span className="provider-access-row__action" title="These providers use their own installed runtime and auth.">
-        <span>{capabilityBearing ? "Manage" : "View setup"}</span>
-      </span>
-    </article>
-  );
-}
-
-/** Human label for a backend's resolved auth state. */
-function authStateLabel(
-  authState: BackendAuthState,
-  _backendType: BackendProvider["backendType"]
-): string {
-  if (authState === "needs-auth") {
-    return "Needs API key";
-  }
-  return stateViewFor(authState).label;
-}
-
-/**
- * Recognize the Rust boundary's "no key stored" message. The boundary returns
- * `auth-failed` for both a missing key and a rejected key; its
- * `missing_key_message` ("Add an {provider} API key to connect.") is the only
- * signal that distinguishes them. Matching the signature (rather than exact
- * text) stays robust if the provider id wording changes. Pure, no secrets.
- */
-function isMissingKeyMessage(message: string | undefined): boolean {
-  if (!message) return false;
-  const lower = message.toLowerCase();
-  return lower.startsWith("add an") && lower.includes("api key to connect");
 }
 
 function PrivacySettingsView({
@@ -1660,133 +1178,6 @@ function ProfileSettingsView({
             </button>
           </div>
         </footer>
-      </article>
-    </div>
-  );
-}
-
-function identityStatusLabel(status: IdentityStatus) {
-  switch (status.state) {
-    case "signed-in":
-      return "Connected";
-    case "signed-out":
-      return "Signed out";
-    case "offline":
-      return "Offline";
-    case "revoked":
-      return "Signed out";
-    case "needs-organization":
-      return "Choose organization";
-    case "error":
-      return "Unavailable";
-    default:
-      return "Disabled";
-  }
-}
-
-function IdentitySettingsView({
-  runtime,
-  onStatus
-}: {
-  runtime: ShellRuntime;
-  onStatus: (message: string) => void;
-}) {
-  const status = runtime.identityStatus;
-  const identity = status.identity;
-  const organization = identity?.organization;
-  const canSignIn = status.enabled && status.state !== "signed-in";
-  const canRefresh = status.enabled && status.state !== "disabled";
-  const canSignOut = status.enabled && Boolean(identity);
-
-  const runIdentityAction = async (action: () => Promise<void>) => {
-    await action();
-    onStatus("Cloud identity updated.");
-  };
-
-  return (
-    <div className="settings-page__body">
-      <article className="profile-clean-card settings-open-section">
-        <div className="profile-clean-card__identity">
-          <span className="settings-panel__icon" aria-hidden="true">
-            <UserCircle size={21} />
-          </span>
-          <div className="profile-identity-copy">
-            <strong>Fable cloud identity</strong>
-            <small>
-              {identityStatusLabel(status)}. {status.message}
-            </small>
-          </div>
-        </div>
-
-        <div className="profile-clean-card__content">
-          <section className="profile-section" aria-labelledby="cloud-identity-title">
-            <div className="profile-section__heading">
-              <span className="settings-panel__icon" aria-hidden="true">
-                <ShieldCheck size={19} />
-              </span>
-              <span>
-                <strong id="cloud-identity-title">Optional account</strong>
-                <small>Separate from connector OAuth, model keys, and the auth broker.</small>
-              </span>
-            </div>
-
-            {identity ? (
-              <div className="settings-local-storage">
-                <strong>{identity.displayName ?? identity.email ?? identity.userId}</strong>
-                <span>{identity.email ?? identity.userId}</span>
-                {organization ? (
-                  <span>
-                    Organization: {organization.name ?? organization.slug ?? organization.id}
-                  </span>
-                ) : status.organizationRequired ? (
-                  <span>Organization required for team features.</span>
-                ) : null}
-                {status.expiresAt ? <span>Session check expires {status.expiresAt}</span> : null}
-              </div>
-            ) : (
-              <p className="settings-status" role="status">
-                {status.enabled
-                  ? "No cloud identity is active on this device."
-                  : "Cloud identity is disabled until Clerk configuration is present."}
-              </p>
-            )}
-
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginTop: "14px" }}>
-              {canSignIn ? (
-                <button
-                  type="button"
-                  className="button button--primary"
-                  onClick={() => void runIdentityAction(runtime.signInIdentity)}
-                  disabled={runtime.identityPending}
-                >
-                  {runtime.identityPending ? <Spinner size={14} /> : null}
-                  <span>Sign in</span>
-                </button>
-              ) : null}
-              {canRefresh ? (
-                <button
-                  type="button"
-                  className="button button--secondary"
-                  onClick={() => void runIdentityAction(runtime.refreshIdentity)}
-                  disabled={runtime.identityPending}
-                >
-                  {runtime.identityPending ? <Spinner size={14} /> : <ArrowClockwise size={14} />}
-                  <span>Refresh</span>
-                </button>
-              ) : null}
-              {canSignOut ? (
-                <button
-                  type="button"
-                  className="button button--secondary"
-                  onClick={() => void runIdentityAction(runtime.signOutIdentity)}
-                  disabled={runtime.identityPending}
-                >
-                  <span>Sign out</span>
-                </button>
-              ) : null}
-            </div>
-          </section>
-        </div>
       </article>
     </div>
   );

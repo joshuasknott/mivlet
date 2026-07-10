@@ -9,6 +9,26 @@ interface ProviderIconProps {
 export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
   const providerId = provider.toLowerCase();
   const gradientId = useId().replaceAll(":", "");
+  const assetFamily = (() => {
+    if (providerId === "deepseek") return "deepseek";
+    if (providerId === "minimax") return "minimax";
+    if (["zai", "z-ai", "z.ai", "zhipu", "glm"].includes(providerId)) return "zai";
+    if (["kimi", "kimi-code", "moonshot"].includes(providerId)) return "kimi";
+    if (providerId === "opencode") return "opencode";
+    return null;
+  })();
+  if (assetFamily) {
+    return (
+      <img
+        src={`/provider-icons/${assetFamily}.svg`}
+        width={size}
+        height={size}
+        alt=""
+        aria-hidden="true"
+        data-provider-brand={assetFamily}
+      />
+    );
+  }
   const brandColor: Record<string, string> = {
     codex: "#3941FF",
     openai: "var(--provider-monochrome)",
@@ -19,7 +39,9 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
     copilot: "#8534F3",
     grok: "var(--provider-monochrome)",
     ollama: "var(--provider-monochrome)",
-    groq: "#F55036"
+    groq: "#F55036",
+    alibaba: "#FF6A00",
+    mistral: "#F7A600"
   };
 
   switch (providerId) {
@@ -132,6 +154,16 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
           <path d="M256.867 16.007c-92.47-.84-167.997 71.999-168.861 162.741-.84 90.767 73.319 164.926 165.789 165.766h58.08V282.93h-55.008c-57.767.672-105.118-44.784-105.79-101.519-.696-56.687 45.623-103.15 103.39-103.822h2.4c57.767 0 104.59 45.96 104.758 102.67v151.318c0 56.207-46.655 101.998-103.75 102.694a104.988 104.988 0 01-72.79-30.047l-44.424 43.63c30.983 30.432 72.599 47.712 116.038 48.144h2.208c91.27-1.344 164.59-73.99 165.093-163.581V176.42c-2.232-89.302-76.39-160.413-167.133-160.413z" />
         </svg>
       );
+
+    // Mistral and Alibaba currently use a neutral icon-library glyph until a
+    // redistributable source mark is available.
+    case "alibaba":
+    case "qwen":
+    case "dashscope":
+      return <Cube size={size} color={brandColor.alibaba} weight="duotone" data-provider-brand="alibaba" aria-hidden="true" />;
+    case "mistral":
+    case "mistral-vibe":
+      return <Cube size={size} color={brandColor.mistral} weight="duotone" data-provider-brand="mistral" aria-hidden="true" />;
 
     default:
       return <Cube size={size} />;

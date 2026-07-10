@@ -4,8 +4,8 @@
  * One interface, every backend family. The shell resolves one AgentBackend per
  * run and consumes its `BackendAgentEvent` stream uniformly — it never branches
  * on provider ids or `BackendType`. Native API, Codex app-server, and ACP
- * (Cursor/Grok) have concrete adapters; Copilot SDK remains modeled until its
- * execution adapter lands.
+ * providers have concrete adapters; GitHub Copilot runs through the generic
+ * ACP adapter rather than a provider-specific SDK path.
  *
  * The contract is deliberately minimal and shaped to match the seams the
  * native-API loop already proved out:
@@ -108,7 +108,7 @@ export interface BackendDeps {
     handlers: CodexAppServerHandlers
   ) => CodexAppServerHandle | null;
   /**
-   * Build the stdio/JSON-RPC transport for a connected ACP (Cursor/Grok)
+   * Build the stdio/JSON-RPC transport for a connected ACP CLI provider
    * backend, or null when there is no egress path. The desktop supplies a
    * Tauri-bound factory that owns the CLI child process on the Rust side; tests
    * inject a scripted fake. Holds no secret because auth is CLI-owned.
@@ -203,7 +203,7 @@ export interface CodexAppServerHandle {
 /**
  * Resolve a `BackendProvider` to a live `AgentBackend`, or null when the backend
  * family has no execution path yet (not connected, no streaming capability, or a
- * metadata-only backend such as Copilot before its adapter lands).
+ * backend whose runtime adapter has not landed).
  *
  * Provided here as a type for the factory return; the concrete dispatch lives in
  * `factory.ts`.

@@ -1,5 +1,5 @@
 /**
- * Provider-specific ACP definitions: Cursor and Grok.
+ * Provider-specific ACP executable definitions.
  *
  * This is the ONLY place a concrete provider's executable discovery and
  * capability declarations live. The generic ACP protocol handling
@@ -39,8 +39,10 @@ export type AcpCliProbe = (providerId: AcpProviderId) => Promise<AcpCliProbeOutc
 
 /** A provider's executable discovery spec. */
 export interface AcpProviderDefinition {
-  /** The CLI executable name (probed for availability; never bundled). */
-  executable: string;
+  /** Allowed CLI executable names, in discovery order (never bundled). */
+  executableCandidates: readonly string[];
+  /** Mandatory arguments used every time the ACP server is launched. */
+  launchArgs: readonly string[];
   /** Args passed to the executable to probe auth state (no secrets). */
   authProbeArgs: readonly string[];
   /**
@@ -56,14 +58,42 @@ export interface AcpProviderDefinition {
  */
 export const ACP_PROVIDERS: Record<AcpProviderId, AcpProviderDefinition> = {
   cursor: {
-    executable: "cursor",
-    authProbeArgs: ["agent", "status"],
+    executableCandidates: ["agent", "cursor-agent"],
+    launchArgs: ["acp"],
+    authProbeArgs: ["status"],
+    entitlementsPending: false
+  },
+  copilot: {
+    executableCandidates: ["copilot"],
+    launchArgs: ["--acp", "--stdio"],
+    authProbeArgs: ["version"],
     entitlementsPending: false
   },
   grok: {
-    executable: "grok",
-    authProbeArgs: ["status"],
+    executableCandidates: ["grok"],
+    launchArgs: ["--no-auto-update", "agent", "stdio"],
+    authProbeArgs: ["--no-auto-update", "models"],
     entitlementsPending: true
+  },
+  opencode: {
+    executableCandidates: ["opencode"],
+    launchArgs: ["acp"],
+    authProbeArgs: ["models"],
+    entitlementsPending: false
+  },
+  kimi: {
+    executableCandidates: ["kimi"],
+    launchArgs: ["acp"],
+    // Kimi's ACP `authenticate` method validates its provider-owned login.
+    authProbeArgs: [],
+    entitlementsPending: false
+  },
+  "mistral-vibe": {
+    executableCandidates: ["vibe-acp"],
+    launchArgs: [],
+    // Vibe's browser/API-key setup remains entirely provider-owned.
+    authProbeArgs: [],
+    entitlementsPending: false
   }
 };
 

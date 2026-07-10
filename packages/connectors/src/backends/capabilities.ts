@@ -53,18 +53,6 @@ const ACP_CAPS: CapabilitySet = [
   "cancellation"
 ];
 
-const COPILOT_CAPS: CapabilitySet = [
-  "authentication",
-  "threads",
-  "streaming",
-  "tool-requests",
-  "approvals",
-  "file-changes",
-  "model-availability",
-  "cancellation",
-  "usage-cost"
-];
-
 /**
  * Native-API providers declare the full capability set when connected: Fable owns
  * the loop, so it honors streaming, tool-requests + approvals, file-changes,
@@ -122,8 +110,6 @@ export function resolveCapabilities(
       return withUsageCost ? [...CODEX_API_KEY_CAPS] : [...CODEX_SUBSCRIPTION_CAPS];
     case "acp":
       return [...ACP_CAPS];
-    case "copilot-sdk":
-      return [...COPILOT_CAPS];
     case "native-api":
       return [...NATIVE_API_CAPS];
     case "local-loopback":

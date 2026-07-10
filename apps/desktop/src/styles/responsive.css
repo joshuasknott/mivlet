@@ -87,11 +87,25 @@
   }
 
   .sidebar-top-row {
-    grid-template-columns: minmax(0, 1fr) 36px;
+    grid-template-columns: minmax(0, 1fr);
     width: 100%;
   }
 
+  .sidebar-history-controls,
+  .sidebar-top-row > .sidebar-minimize {
+    display: none;
+  }
+
+  .sidebar-brand {
+    width: 32px;
+    height: 32px;
+  }
+
   .workspace-switcher {
+    display: none;
+  }
+
+  .workspace-switcher-container--top {
     display: none;
   }
 
@@ -119,7 +133,14 @@
     background: var(--surface-hover);
   }
 
+  .sidebar-footer-area {
+    display: contents;
+  }
+
   .sidebar-footer {
+    position: absolute;
+    top: 13px;
+    right: 12px;
     display: block;
     width: 68px;
     padding: 0;

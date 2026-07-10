@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BackendModel } from "@fable/protocol";
+import { nativeFixtures } from "../backends/fixtures";
 import {
   catalogueCapabilities,
   defaultDiscoveredCapabilities,
@@ -18,6 +19,18 @@ describe("catalogueCapabilities", () => {
     expect(caps?.tools).toBe(true);
   });
 
+  it("pins the fixed Kimi Code membership model capabilities", () => {
+    expect(catalogueCapabilities("kimi-code", "kimi-for-coding")).toEqual({
+      contextWindow: 262_144,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: true,
+      reasoning: true,
+      structuredOutput: false
+    });
+  });
+
   it("returns undefined for an unknown model (never fabricated)", () => {
     expect(catalogueCapabilities("openai", "no-such-model")).toBeUndefined();
   });
@@ -29,16 +42,12 @@ describe("catalogueCapabilities", () => {
   it("covers every native fixture model id", () => {
     // Every model surfaced in the native fixtures must have a curated entry, so
     // the fallback catalogue is truthful for the models the UI advertises.
-    const expected: Record<string, string[]> = {
-      openai: ["gpt-5.2", "gpt-5", "gpt-4.1"],
-      anthropic: ["claude-sonnet-4-6", "claude-opus-4-8"],
-      gemini: ["gemini-3.5-flash", "gemini-2.5-pro"],
-      xai: ["grok-4"],
-      openrouter: ["openrouter:auto", "openrouter:claude"]
-    };
-    for (const [provider, ids] of Object.entries(expected)) {
-      for (const id of ids) {
-        expect(catalogueCapabilities(provider, id), `${provider}/${id}`).toBeDefined();
+    for (const fixture of nativeFixtures) {
+      for (const model of fixture.models) {
+        expect(
+          catalogueCapabilities(fixture.providerId, model.id),
+          `${fixture.providerId}/${model.id}`
+        ).toBeDefined();
       }
     }
   });
@@ -109,14 +118,15 @@ describe("validateModelForRun", () => {
     expect(result.error).toMatch(/not available/i);
   });
 
-  it("rejects an available model whose execution capabilities are unknown", () => {
+  it("allows a live discovered model whose detailed capabilities are unknown", () => {
     const result = validateModelForRun(
       "openai",
       "future-model",
       [{ id: "future-model", label: "Future", available: true }]
     );
-    expect(result.ok).toBe(false);
-    expect(result.error).toMatch(/unknown execution capabilities/i);
+    expect(result.ok).toBe(true);
+    expect(result.capabilities).toBeUndefined();
+    expect(result.maxTokens).toBe(MAX_TOKENS_DEFAULT);
   });
 
   it("clamps maxTokens to the model's output ceiling", () => {

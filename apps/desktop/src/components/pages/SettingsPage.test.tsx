@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ActionHistoryEvent, BackendProvider } from "@fable/protocol";
 import { SettingsPage } from "./SettingsPage";
@@ -23,7 +23,7 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     identityStatus: {
       enabled: false,
       state: "disabled",
-      message: "Optional Fable cloud identity is not configured.",
+      message: "Fable account setup is not configured.",
       scopes: []
     },
     identityPending: false,
@@ -42,6 +42,7 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     refreshWorkflowRuns: vi.fn().mockResolvedValue(undefined),
     connectBackendWithVerify: vi.fn(),
     disconnectBackend: vi.fn(),
+    refreshBackendProviders: vi.fn().mockResolvedValue([]),
     refreshModels: vi.fn(),
     refreshConnector: vi.fn(),
     disconnectConnector: vi.fn(),
@@ -69,7 +70,7 @@ const nativeProvider = (over: Partial<BackendProvider> = {}): BackendProvider =>
 });
 
 describe("Settings -> General identity", () => {
-  it("shows optional cloud identity as disabled when Clerk is not configured", () => {
+  it("shows the Fable account configuration state when Clerk is not configured", () => {
     render(
       <SettingsPage
         runtime={stubRuntime()}
@@ -80,8 +81,8 @@ describe("Settings -> General identity", () => {
       />
     );
 
-    expect(screen.getByText("Fable cloud identity")).toBeTruthy();
-    expect(screen.getByText(/cloud identity is disabled until clerk configuration is present/i)).toBeTruthy();
+    expect(screen.getByText("Fable account")).toBeTruthy();
+    expect(screen.getByText("Fable account setup is not configured.")).toBeTruthy();
   });
 });
 
@@ -152,187 +153,77 @@ function renderProviders(runtime: ShellRuntime) {
   );
 }
 
-/** Provider rows are keyed by data-provider-id (not data-testid). */
-function providerRow(id: string): HTMLElement {
-  const el = document.querySelector(`[data-provider-id="${id}"]`);
-  if (!el) throw new Error(`No provider row for ${id}`);
-  return el as HTMLElement;
-}
+describe("Settings -> Providers", () => {
+  it("renders one provider-first catalogue with grouped connection methods", () => {
+    const codex: BackendProvider = {
+      id: "codex",
+      backendType: "codex-app-server",
+      label: "Codex",
+      description: "ChatGPT subscription",
+      authState: "sign-in-required",
+      capabilities: [],
+      models: []
+    };
+    renderProviders(stubRuntime({ backendProviders: [codex, nativeProvider()] }));
 
-describe("Settings → Providers UX states", () => {
-  it("shows 'Needs API key' for a connected-missing provider (missing key)", () => {
-    const provider = nativeProvider({ authState: "needs-auth" });
-    renderProviders(
-      stubRuntime({
-        backendProviders: [provider],
-        connectedBackendIds: [],
-        backendStatus: null,
-        modelDiscoveryByProvider: {},
-        connectBackendWithVerify: vi.fn(),
-        disconnectBackend: vi.fn(),
-        refreshModels: vi.fn()
-      })
-    );
+    expect(screen.queryByText("Subscriptions")).toBeNull();
+    expect(screen.queryByText("API keys")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
 
-    const row = providerRow("openai");
-    expect(row.textContent).toMatch(/needs api key/i);
-    // Not connected: no Refresh models affordance yet.
-    expect(screen.queryByLabelText(/refresh models for openai/i)).toBeNull();
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    expect(dialog).toHaveTextContent("ChatGPT subscription");
+    expect(dialog).toHaveTextContent("ChatGPT subscription with a device code");
+    expect(dialog).toHaveTextContent("OpenAI API key");
   });
 
-  it("renders connected + capability-bearing with a model refresh affordance", () => {
-    const provider = nativeProvider({
-      authState: "connected",
-      capabilities: ["streaming", "threads"],
-      models: [{ id: "gpt-4o", label: "GPT-4o", available: true }]
-    });
-    const refresh = vi.fn().mockResolvedValue(undefined);
+  it("submits API keys through the verified boundary without keeping them in UI state", async () => {
+    const connect = vi.fn(async () => ({ providerId: "openai", outcome: "ready" as const }));
     renderProviders(
       stubRuntime({
-        backendProviders: [provider],
-        connectedBackendIds: ["openai"],
-        backendStatus: null,
-        modelDiscoveryByProvider: { openai: "success" },
-        connectBackendWithVerify: vi.fn(),
-        disconnectBackend: vi.fn(),
-        refreshModels: refresh
+        backendProviders: [nativeProvider()],
+        connectBackendWithVerify: connect
       })
     );
 
-    expect(providerRow("openai").textContent).toMatch(/connected/i);
-    fireEvent.click(screen.getByRole("button", { name: /manage openai/i }));
-    const refreshBtn = screen.getByLabelText(/refresh models for openai/i);
-    fireEvent.click(refreshBtn);
-    expect(refresh).toHaveBeenCalledWith("openai");
-  });
-
-  it("shows a refresh spinner and disables retry while discovery is loading", () => {
-    const provider = nativeProvider({ authState: "connected" });
-    const refresh = vi.fn();
-    renderProviders(
-      stubRuntime({
-        backendProviders: [provider],
-        connectedBackendIds: ["openai"],
-        backendStatus: null,
-        modelDiscoveryByProvider: { openai: "loading" },
-        connectBackendWithVerify: vi.fn(),
-        disconnectBackend: vi.fn(),
-        refreshModels: refresh
-      })
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /manage openai/i }));
-    const refreshBtn = screen.getByLabelText(
-      /refresh models for openai/i
-    ) as HTMLButtonElement;
-    expect(refreshBtn.disabled).toBe(true);
-    expect(providerRow("openai").textContent).toMatch(/refreshing models/i);
-  });
-
-  it("surfaces a recoverable, non-alarming hint when discovery failed (degraded)", () => {
-    const provider = nativeProvider({ authState: "connected" });
-    renderProviders(
-      stubRuntime({
-        backendProviders: [provider],
-        connectedBackendIds: ["openai"],
-        backendStatus: null,
-        modelDiscoveryByProvider: { openai: "offline" },
-        connectBackendWithVerify: vi.fn(),
-        disconnectBackend: vi.fn(),
-        refreshModels: vi.fn()
-      })
-    );
-
-    const row = providerRow("openai").textContent ?? "";
-    // Degraded is recoverable: the hint must reassure the key is fine and offer retry.
-    expect(row).toMatch(/your key is fine/i);
-    expect(row.toLowerCase()).toMatch(/refresh|retry|try again/);
-    // The refresh button becomes "Retry" for a degraded provider.
-    fireEvent.click(screen.getByRole("button", { name: /manage openai/i }));
-    expect(screen.getByRole("button", { name: /refresh models for openai/i })).toBeTruthy();
-  });
-
-  it("does not blame the key for an empty model list (account, not auth)", () => {
-    const provider = nativeProvider({ authState: "connected" });
-    renderProviders(
-      stubRuntime({
-        backendProviders: [provider],
-        connectedBackendIds: ["openai"],
-        backendStatus: null,
-        modelDiscoveryByProvider: { openai: "empty" },
-        connectBackendWithVerify: vi.fn(),
-        disconnectBackend: vi.fn(),
-        refreshModels: vi.fn()
-      })
-    );
-
-    const row = providerRow("openai").textContent ?? "";
-    // Empty is an account/plan condition, not a key problem.
-    expect(row.toLowerCase()).not.toMatch(/key (was |is )?(rejected|invalid|wrong)/);
-  });
-
-  it("distinguishes a missing key from a rejected key in the connect status", async () => {
-    const provider = nativeProvider({ authState: "needs-auth" });
-    const { rerender } = renderProviders(
-      stubRuntime({
-        backendProviders: [provider],
-        connectedBackendIds: [],
-        backendStatus: null,
-        modelDiscoveryByProvider: {},
-        connectBackendWithVerify: vi.fn(async () => ({
-          providerId: "openai",
-          outcome: "auth-failed" as const,
-          // The Rust boundary's missing_key_message signature.
-          message: "Add an openai API key to connect."
-        })),
-        disconnectBackend: vi.fn(),
-        refreshModels: vi.fn()
-      })
-    );
-
-    // Reveal the key form, enter a key, and submit. The key input is
-    // uncontrolled on purpose; set the DOM value directly like a user.
-    fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI" }));
-    const keyInput = screen.getByLabelText(/api key for openai/i) as HTMLInputElement;
-    keyInput.value = "sk-test";
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
+    const keyInput = within(dialog).getByLabelText(/api key for openai \/ chatgpt/i) as HTMLInputElement;
+    fireEvent.change(keyInput, { target: { value: "sk-settings-secret" } });
     fireEvent.submit(keyInput.closest("form")!);
 
-    // Missing key: the status must read as a configuration gap, NOT a rejected
-    // key — it should not say "rejected"/"invalid"/"expired".
-    const status = await screen.findByRole("status");
-    expect(status.textContent?.toLowerCase()).toMatch(/no api key stored|add a key/);
-    expect(status.textContent?.toLowerCase()).not.toMatch(/reject|invalid|expired/);
+    await waitFor(() => expect(connect).toHaveBeenCalledWith("openai", "sk-settings-secret"));
+    expect(keyInput.value).toBe("");
+    expect(dialog).not.toHaveTextContent("sk-settings-secret");
+  });
 
-    // Now a rejected key must read the opposite.
-    rerender(
-      <SettingsPage
-        runtime={stubRuntime({
-          backendProviders: [provider],
-          connectedBackendIds: [],
-          backendStatus: null,
-          modelDiscoveryByProvider: {},
-          connectBackendWithVerify: vi.fn(async () => ({
-            providerId: "openai",
-            outcome: "auth-failed" as const,
-            message: "401 Unauthorized"
-          })),
-          disconnectBackend: vi.fn(),
-          refreshModels: vi.fn()
-        })}
-        theme="dark"
-        onThemeChange={() => {}}
-        activeTab="providers"
-        workspaceName="Fable"
-      />
+  it("shows exact provider-owned login commands and rechecks the runtime", async () => {
+    const refreshBackends = vi.fn().mockResolvedValue([]);
+    const codex: BackendProvider = {
+      id: "codex",
+      backendType: "codex-app-server",
+      label: "Codex",
+      description: "ChatGPT subscription",
+      authState: "sign-in-required",
+      capabilities: [],
+      models: []
+    };
+    renderProviders(
+      stubRuntime({
+        backendProviders: [codex],
+        refreshBackendProviders: refreshBackends
+      })
     );
-    fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI" }));
-    const keyInput2 = screen.getByLabelText(/api key for openai/i) as HTMLInputElement;
-    keyInput2.value = "sk-bad";
-    fireEvent.submit(keyInput2.closest("form")!);
-    const rejectedStatus = await screen.findByRole("status");
-    expect(rejectedStatus.textContent?.toLowerCase()).toMatch(/reject|expired/);
+
+    fireEvent.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    fireEvent.click(within(dialog).getByRole("button", { name: /ChatGPT subscription Use/ }));
+    expect(dialog).toHaveTextContent("codex login");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Check connection" }));
+    await waitFor(() => expect(refreshBackends).toHaveBeenCalledTimes(1));
   });
 });
+
 
 describe("Settings → Privacy UX states", () => {
   const googleConnector = {
@@ -357,7 +248,7 @@ describe("Settings → Privacy UX states", () => {
     );
   }
 
-  it("renders privacy settings controls and lists active connectors", () => {
+  it("renders privacy settings controls and lists active connectors", async () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     const disconnect = vi.fn().mockResolvedValue(undefined);
     const exportMemory = vi.fn().mockResolvedValue(undefined);
@@ -378,6 +269,9 @@ describe("Settings → Privacy UX states", () => {
     expect(screen.getByText("Google Drive")).toBeTruthy();
     expect(screen.getByText("Active: user@example.com")).toBeTruthy();
     expect(screen.getByLabelText("Toggle personal memory")).toBeTruthy();
+    expect(
+      await screen.findByText("Live mobile approvals are not available outside the desktop runtime.")
+    ).toBeTruthy();
   });
 
   it("handles connector resync and disconnect", async () => {

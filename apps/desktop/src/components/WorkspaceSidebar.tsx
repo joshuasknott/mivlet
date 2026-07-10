@@ -183,7 +183,25 @@ export function WorkspaceSidebar({
     <aside className="sidebar" aria-label="Workspace navigation">
       <div className="sidebar-header">
         {isSettingsActive ? (
-          <div className="sidebar-top-row">
+          <>
+            <div className="sidebar-top-row">
+              <span className="sidebar-brand">
+                <img
+                  className="sidebar-brand__mark"
+                  src="/brand/fable-tech-dragon-transparent.png"
+                  alt="Fable"
+                />
+              </span>
+              <button
+                type="button"
+                className="sidebar-minimize"
+                aria-label="Close sidebar"
+                aria-pressed="false"
+                onClick={onToggleCollapsed}
+              >
+                <SidebarSimple size={18} />
+              </button>
+            </div>
             <button
               type="button"
               className="workspace-switcher settings-back-button"
@@ -195,19 +213,17 @@ export function WorkspaceSidebar({
                 Back
               </span>
             </button>
-            <button
-              type="button"
-              className="sidebar-minimize"
-              aria-label="Close sidebar"
-              aria-pressed="false"
-              onClick={onToggleCollapsed}
-            >
-              <SidebarSimple size={18} />
-            </button>
-          </div>
+          </>
         ) : (
           <>
-            <div className="sidebar-top-row sidebar-top-row--controls">
+            <div className="sidebar-top-row">
+              <span className="sidebar-brand">
+                <img
+                  className="sidebar-brand__mark"
+                  src="/brand/fable-tech-dragon-transparent.png"
+                  alt="Fable"
+                />
+              </span>
               <div className="sidebar-history-controls" aria-label="Navigation history">
                 <button
                   type="button"
@@ -236,23 +252,25 @@ export function WorkspaceSidebar({
                 <SidebarSimple size={18} />
               </button>
             </div>
-            <div className="workspace-switcher-container" ref={dropdownRef}>
+            <div
+              className={`workspace-switcher-container workspace-switcher-container--top${workspaceDropdownOpen ? " workspace-switcher-container--open" : ""}`}
+              ref={dropdownRef}
+            >
               <button
                 type="button"
                 className="workspace-switcher workspace-switcher--workspace"
                 aria-label="Select workspace"
+                aria-expanded={workspaceDropdownOpen}
                 onClick={() => {
                   setWorkspaceDropdownOpen(!workspaceDropdownOpen);
                   onSelectWorkspace();
                 }}
               >
-                <span className="workspace-switcher__name">
-                  {workspaceName}
-                </span>
+                <span className="workspace-switcher__name">{workspaceName}</span>
                 <CaretDown size={12} className="workspace-switcher__caret" />
               </button>
 
-              {workspaceDropdownOpen && (
+              {workspaceDropdownOpen ? (
                 <div className="workspace-dropdown" role="menu">
                   <div className="workspace-dropdown__item workspace-dropdown__item--active">
                     <span className="workspace-dropdown__name">{workspaceName}</span>
@@ -271,7 +289,7 @@ export function WorkspaceSidebar({
                     <span>Workspace settings</span>
                   </button>
                 </div>
-              )}
+              ) : null}
             </div>
           </>
         )}
@@ -590,39 +608,41 @@ export function WorkspaceSidebar({
         </>
       )}
 
-      <div className="sidebar-footer">
-        <div className="sidebar-footer__identity">
-          <span className="avatar" aria-hidden="true">
-            {profile?.photoUrl ? (
-              <img src={profile.photoUrl} alt="" />
-            ) : (
-              profile?.photoInitials ||
-              (profile?.name
-                ? profile.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
-                : "J")
-            )}
-          </span>
-          <strong className="sidebar-footer__name">{profile?.name || "Josh"}</strong>
-        </div>
-        <div className="sidebar-footer__actions">
-          <button
-            type="button"
-            className="sidebar-footer__action"
-            onClick={() => onAccountMenu("settings")}
-            aria-label="Settings"
-            title="Settings"
-          >
-            <Gear size={18} />
-          </button>
-          <button
-            type="button"
-            className="sidebar-footer__action"
-            onClick={onOpenMobileConnection}
-            aria-label="Mobile connection"
-            title="Mobile connection"
-          >
-            <DeviceMobile size={18} />
-          </button>
+      <div className="sidebar-footer-area">
+        <div className="sidebar-footer">
+          <div className="sidebar-footer__identity">
+            <span className="avatar" aria-hidden="true">
+              {profile?.photoUrl ? (
+                <img src={profile.photoUrl} alt="" />
+              ) : (
+                profile?.photoInitials ||
+                (profile?.name
+                  ? profile.name.split(" ").map((n: string) => n[0]).join("").toUpperCase().slice(0, 2)
+                  : "J")
+              )}
+            </span>
+            <strong className="sidebar-footer__name">{profile?.name || "Josh"}</strong>
+          </div>
+          <div className="sidebar-footer__actions">
+            <button
+              type="button"
+              className="sidebar-footer__action"
+              onClick={() => onAccountMenu("settings")}
+              aria-label="Settings"
+              title="Settings"
+            >
+              <Gear size={18} />
+            </button>
+            <button
+              type="button"
+              className="sidebar-footer__action"
+              onClick={onOpenMobileConnection}
+              aria-label="Mobile connection"
+              title="Mobile connection"
+            >
+              <DeviceMobile size={18} />
+            </button>
+          </div>
         </div>
       </div>
 

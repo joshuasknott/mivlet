@@ -21,6 +21,9 @@
 
 import type { AcpError, AcpFrame, AcpNotification, AcpRequest } from "./protocol";
 
+/** Frames initiated by the agent: notifications and server-to-client requests. */
+export type AcpInboundFrame = AcpNotification | AcpRequest;
+
 /**
  * A request-response reply. The transport correlates the response to the
  * request id; the session treats `ok: false` as a recoverable protocol error
@@ -37,12 +40,14 @@ export type AcpReply =
  * interface keeps the adapter fixture-testable.
  */
 export interface AcpTransport {
+  /** Absolute workspace directory supplied to `session/new`. */
+  readonly cwd: string;
   /** Send a frame to the CLI's stdin (fire-and-forget; no reply awaited). */
   send(frame: AcpFrame): Promise<void>;
   /** Send a request frame and await the matching JSON-RPC response. */
   request(req: AcpRequest): Promise<AcpReply>;
-  /** Streamed notification frames the CLI emits on stdout. */
-  frames(): AsyncIterable<AcpNotification>;
+  /** Streamed agent notifications and server-to-client requests. */
+  frames(): AsyncIterable<AcpInboundFrame>;
   /** Best-effort shutdown of the underlying process. */
   close(): Promise<void>;
 }

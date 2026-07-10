@@ -1,5 +1,7 @@
 # Open-Source & Preview Product Disclaimer — Source Text
 
+> **Not for publication.** Fable's open-source decision is deferred and there is no committed license in this repository. This historical draft must not be used in product, marketing, legal, or release copy until a future explicit licensing decision replaces it.
+
 ```yaml
 legal_status: DRAFT — LEGAL REVIEW REQUIRED
 document_id: fable-open-source-disclaimer

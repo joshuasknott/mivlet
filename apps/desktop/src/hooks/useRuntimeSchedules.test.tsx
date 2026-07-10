@@ -78,6 +78,7 @@ describe("useRuntimeSchedules", () => {
     vi.mocked(runtime.listRuntimeSchedulerJobs).mockResolvedValue([makeJob()]);
     const { result } = renderHook(() => useRuntimeSchedules(), { wrapper });
 
+    await waitFor(() => expect(runtime.listRuntimeSchedulerJobs).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.scheduledJobs).toHaveLength(1));
 
     expect(result.current.scheduledJobs[0].name).toBe("Daily digest");

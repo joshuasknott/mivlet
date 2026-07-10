@@ -22,6 +22,8 @@ use tauri::{AppHandle, Emitter};
 #[serde(rename_all = "camelCase")]
 pub struct CodexCliStatus {
     pub(crate) installed: bool,
+    pub(crate) authenticated: bool,
+    pub(crate) auth_method: Option<String>,
     pub(crate) executable_path: Option<String>,
     pub(crate) version: Option<String>,
     pub(crate) message: Option<String>,
@@ -166,6 +168,8 @@ pub fn codex_cli_status() -> CodexCliStatus {
     let Some(path) = find_codex_executable() else {
         return CodexCliStatus {
             installed: false,
+            authenticated: false,
+            auth_method: None,
             executable_path: None,
             version: None,
             message: Some("Codex CLI was not found on PATH.".to_string()),
@@ -185,11 +189,42 @@ pub fn codex_cli_status() -> CodexCliStatus {
         })
         .filter(|value| !value.is_empty());
 
+    // `codex login status` exposes only whether the provider-owned session is
+    // usable and its broad login kind. Fable never reads auth.json or tokens.
+    let login = codex_command(&path).args(["login", "status"]).output().ok();
+    let authenticated = login.as_ref().is_some_and(|output| output.status.success());
+    let login_copy = login
+        .as_ref()
+        .map(|output| {
+            format!(
+                "{} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .to_ascii_lowercase()
+        })
+        .unwrap_or_default();
+    let auth_method = if !authenticated {
+        None
+    } else if login_copy.contains("api key") {
+        Some("api-key".to_string())
+    } else if login_copy.contains("chatgpt") {
+        Some("chatgpt".to_string())
+    } else {
+        Some("provider-login".to_string())
+    };
+
     CodexCliStatus {
         installed: true,
+        authenticated,
+        auth_method,
         executable_path: Some(path.display().to_string()),
         version,
-        message: None,
+        message: if authenticated {
+            None
+        } else {
+            Some("Codex CLI is installed but not signed in.".to_string())
+        },
     }
 }
 
@@ -586,6 +621,8 @@ mod tests {
     fn cli_status_shape_never_contains_token_fields() {
         let status = CodexCliStatus {
             installed: false,
+            authenticated: false,
+            auth_method: None,
             executable_path: None,
             version: None,
             message: Some("missing".to_string()),

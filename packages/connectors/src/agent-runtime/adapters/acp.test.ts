@@ -22,10 +22,18 @@ function acpProvider(overrides: Partial<BackendProvider> = {}): BackendProvider 
   };
 }
 
-const okResponder: ScriptedResponder = (req) =>
-  ["initialize", "session/new", "session/prompt", "session/close"].includes(req.method)
-    ? { result: {} }
-    : { error: { code: -32601, message: "not found" } };
+const okResponder: ScriptedResponder = (req) => {
+  if (req.method === "initialize") {
+    return { result: { protocolVersion: 1, authMethods: [] } };
+  }
+  if (req.method === "session/new") {
+    return { result: { sessionId: "session-1" } };
+  }
+  if (req.method === "session/prompt") {
+    return { result: { stopReason: "end_turn" } };
+  }
+  return { error: { code: -32601, message: "not found" } };
+};
 
 const baseRunRequest: AgentRunRequest = {
   model: "cursor-default",
@@ -100,10 +108,20 @@ describe("resolveAcpBackend", () => {
     expect(backend?.providerId).toBe("cursor");
 
     // Pre-seed the scripted stream; run() drains it over the transport.
-    transport.queueNotification("session/message", { content: "Hello" });
-    transport.queueNotification("session/message", { content: " there" });
-    transport.queueDone();
-    transport.queueClose();
+    transport.queueNotification("session/update", {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Hello" }
+      }
+    });
+    transport.queueNotification("session/update", {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: " there" }
+      }
+    });
 
     const iter = backend?.run(baseRunRequest, { execute: async () => "ok" });
     expect(iter).not.toBeNull();
@@ -122,8 +140,6 @@ describe("resolveAcpBackend", () => {
       createTransport: () => null,
       createAcpTransport: factory
     });
-    transport.queueDone();
-    transport.queueClose();
     await collect(backend?.run(baseRunRequest, { execute: async () => "ok" })!);
     await expect(backend?.cancel("run-1")).resolves.toBeUndefined();
   });

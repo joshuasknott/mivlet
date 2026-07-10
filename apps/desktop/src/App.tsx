@@ -16,6 +16,7 @@ import { useNativeAgent } from "./hooks/useNativeAgent";
 import { useScheduledAgent } from "./hooks/useScheduledAgent";
 import { useVoice } from "./hooks/useVoice";
 import { FableQueryProvider } from "./lib/query-client";
+import type { ProviderModelOption } from "./lib/provider-models";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { Composer } from "./components/Composer";
 import { ConnectorIcon } from "./components/ConnectorIcon";
@@ -39,8 +40,13 @@ function parsedModelVersion(modelId: string, prefix: string) {
   return Number(match[1]) * 100 + Number(match[2] ?? 0);
 }
 
-function composerModelsFor(providerId: string | undefined, models: { id: string; label: string; available: boolean }[]) {
-  const available = models.filter((model) => model.available);
+function composerModelsFor(
+  providerId: string | undefined,
+  models: ProviderModelOption[]
+): ProviderModelOption[] {
+  const available = models.filter(
+    (model) => model.available && (!providerId || model.providerId === providerId)
+  );
   if (available.length === 0) return [];
   if (providerId === "openai") {
     const hasGpt5 = available.some((model) => model.id.toLowerCase().startsWith("gpt-5"));
@@ -138,6 +144,15 @@ function AppShell() {
     () => createDesktopToolExecutor(approvalGate),
     [approvalGate]
   );
+  const queueToolApproval = (
+    event: Parameters<typeof runtime.recordBackendToolCall>[0]
+  ) => {
+    // Exact standing grants do not need another card. Fresh requests are
+    // registered before the executor awaits, so an immediate decision is safe.
+    if (approvalGate.register(event.approval)) {
+      runtime.recordBackendToolCall(event);
+    }
+  };
   // Cooperative cancellation: a cancel flag the agent hook's shouldCancel reads.
   // The cancel() path flips it true so an in-flight loop bails between events;
   // the real-Rust cancel (cancelRuntimeCompletion) still drops the socket. This
@@ -145,6 +160,7 @@ function AppShell() {
   const cancelRequestedRef = useRef(false);
   const agent = useNativeAgent({
     providers: runtime.backendProviders,
+    activeProviderId: runtime.connectedAgentBackend?.id,
     models: runtime.selectableModels,
     threadId: runtime.activeThread?.id ?? runtime.activeItem,
     execute: executor,
@@ -157,13 +173,9 @@ function AppShell() {
       // Tear down any tool-call still awaiting approval on the shared gate so a
       // cancelled-but-never-granted call does not linger for the session.
       approvalGate.cancelPending();
+      runtime.clearBackendToolApprovals();
     },
-    onToolCall: (event) => {
-      // Route model tool calls into Fable's existing approval queue + register
-      // the pending call on the shared gate so a later grant can dispatch it.
-      approvalGate.register(event.approval);
-      void runtime.recordBackendToolCall(event);
-    }
+    onToolCall: queueToolApproval
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
 
@@ -197,6 +209,11 @@ function AppShell() {
     providers: runtime.backendProviders,
     connectedConnectorIds,
     execute: executor,
+    onToolApproval: queueToolApproval,
+    onCancelApprovals: () => {
+      approvalGate.cancelPending();
+      runtime.clearBackendToolApprovals();
+    },
     onComplete: (runId, result, workflowRun) => {
       runtime.completeWorkflowRun(
         runId,
@@ -279,18 +296,28 @@ function AppShell() {
     [runtime.connectorManifests]
   );
   const composerModels = useMemo(
-    () => composerModelsFor(runtime.connectedAgentBackend?.id, runtime.selectableModels),
-    [runtime.connectedAgentBackend?.id, runtime.selectableModels]
+    () => composerModelsFor(runtime.connectedAgentBackend?.id, runtime.modelOptions),
+    [runtime.connectedAgentBackend?.id, runtime.modelOptions]
   );
-  const resolvedComposerModelId = useMemo(() => {
+  // The picker stores provider-qualified ids (for example `openai::gpt-5`),
+  // while the agent backend must receive the provider's original model id
+  // (`gpt-5`). Keep the two values distinct so model selection stays collision
+  // safe without sending the UI key to a provider.
+  const resolvedComposerModelOptionId = useMemo(() => {
     if (
       runtime.selectedModelId &&
       composerModels.some((model) => model.id === runtime.selectedModelId)
     ) {
       return runtime.selectedModelId;
     }
-    return composerModels[0]?.id ?? runtime.resolvedSelectedModelId;
-  }, [composerModels, runtime.resolvedSelectedModelId, runtime.selectedModelId]);
+    return composerModels[0]?.id ?? runtime.resolvedModelOptionId;
+  }, [composerModels, runtime.resolvedModelOptionId, runtime.selectedModelId]);
+  const resolvedComposerModelId = useMemo(
+    () =>
+      composerModels.find((model) => model.id === resolvedComposerModelOptionId)?.modelId ??
+      runtime.resolvedSelectedModelId,
+    [composerModels, resolvedComposerModelOptionId, runtime.resolvedSelectedModelId]
+  );
 
   const appendConversationMessage = (role: ConversationMessage["role"], content: string) => {
     const id = messageId(role);
@@ -458,9 +485,12 @@ function AppShell() {
             ))}
             {agent.state.usage ? (
               <p className="agent-panel__usage">
-                {agent.state.usage.inputTokens} in · {agent.state.usage.outputTokens} out · $
-                {agent.state.usage.costUsd.toFixed(6)}
-                {agent.state.usage.costEstimated ? " estimated" : ""}
+                {agent.state.usage.inputTokens} in · {agent.state.usage.outputTokens} out · {" "}
+                {agent.state.usage.costUnknown
+                  ? "cost unknown"
+                  : `$${agent.state.usage.costUsd.toFixed(6)}${
+                      agent.state.usage.costEstimated ? " estimated" : ""
+                    }`}
               </p>
             ) : null}
             {agent.state.running ? (
@@ -499,9 +529,9 @@ function AppShell() {
   // model selection actually changes.
   const modelChipLabel = useMemo(
     () =>
-      composerModels.find((model) => model.id === resolvedComposerModelId)?.label ??
+      composerModels.find((model) => model.id === resolvedComposerModelOptionId)?.label ??
       "Select model",
-    [composerModels, resolvedComposerModelId]
+    [composerModels, resolvedComposerModelOptionId]
   );
 
   // Settings nav search filter. Memoized (and kept above the onboarding early
@@ -640,6 +670,9 @@ function AppShell() {
           onConnectWithVerify={(providerId, secret) =>
             runtime.connectBackendWithVerify(providerId, secret)
           }
+          onCheckConnection={async () => {
+            await runtime.refreshBackendProviders();
+          }}
           onSkip={runtime.dismissOnboarding}
           onSubmitProfile={(name, email) => {
             setProfile((current) => ({
@@ -851,7 +884,7 @@ function AppShell() {
 
               importStatus={runtime.importStatus}
               models={composerModels}
-              selectedModelId={resolvedComposerModelId}
+              selectedModelId={resolvedComposerModelOptionId}
               selectedModelLabel={modelChipLabel}
               onSelectModel={runtime.selectModel}
               permissionLabel={runtime.permissionLabel}

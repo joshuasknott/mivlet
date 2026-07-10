@@ -115,9 +115,9 @@ const CATALOGUE: Record<string, Record<string, ModelCapabilities>> = {
   },
   openrouter: {
     // OpenRouter routes to upstream models, so the catalogue only records the
-    // synthetic routing aliases surfaced in the fixtures. Real upstream limits
+    // official automatic router surfaced in the fixtures. Real upstream limits
     // are honored from discovery when available; these are conservative.
-    "openrouter:auto": {
+    "openrouter/auto": {
       contextWindow: 128_000,
       maxOutputTokens: 16_384,
       streaming: true,
@@ -125,13 +125,165 @@ const CATALOGUE: Record<string, Record<string, ModelCapabilities>> = {
       vision: false,
       reasoning: false,
       structuredOutput: false
+    }
+  },
+  deepseek: {
+    "deepseek-v4-pro": {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 384_000,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
     },
-    "openrouter:claude": {
+    "deepseek-v4-flash": {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 384_000,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  zai: {
+    "glm-5.1": {
       contextWindow: 200_000,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  minimax: {
+    "MiniMax-M2.7": {
+      contextWindow: 204_800,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    },
+    "MiniMax-M2.7-highspeed": {
+      contextWindow: 204_800,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  alibaba: {
+    "qwen3.7-plus": {
+      contextWindow: 1_000_000,
       maxOutputTokens: 64_000,
       streaming: true,
       tools: true,
       vision: true,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  fireworks: {
+    "accounts/fireworks/models/deepseek-v3p1": {
+      contextWindow: 128_000,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  moonshot: {
+    "kimi-k2.6": {
+      contextWindow: 256_000,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: true,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  "kimi-code": {
+    "kimi-for-coding": {
+      contextWindow: 262_144,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: true,
+      reasoning: true,
+      structuredOutput: false
+    }
+  },
+  perplexity: {
+    sonar: {
+      contextWindow: 128_000,
+      maxOutputTokens: 8_192,
+      streaming: true,
+      tools: false,
+      vision: false,
+      reasoning: false,
+      structuredOutput: false
+    }
+  },
+  tencent: {
+    hy3: {
+      contextWindow: 256_000,
+      maxOutputTokens: 128_000,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  xiaomi: {
+    "mimo-v2.5-pro": {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 128_000,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  groq: {
+    "openai/gpt-oss-120b": {
+      contextWindow: 131_072,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  together: {
+    "openai/gpt-oss-20b": {
+      contextWindow: 131_072,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: true,
+      structuredOutput: true
+    }
+  },
+  cerebras: {
+    "gpt-oss-120b": {
+      contextWindow: 131_072,
+      maxOutputTokens: 32_768,
+      streaming: true,
+      tools: true,
+      vision: false,
       reasoning: true,
       structuredOutput: true
     }
@@ -203,9 +355,10 @@ export interface ModelValidation {
 }
 
 /**
- * Validate a model selection before a run starts. Fail-closed: an empty,
- * unknown, or unavailable model — or one whose catalogue/discovery entry says
- * it cannot stream — rejects with a normalized error rather than being sent.
+ * Validate a model selection before a run starts. Empty, unknown-to-the-live-
+ * provider, unavailable, and explicitly non-streaming models are rejected.
+ * Newly discovered generation models without curated metadata are allowed with
+ * conservative request defaults; richer capabilities remain unknown.
  *
  * @param providerId  The native provider id.
  * @param modelId     The model id the run would use.
@@ -240,8 +393,7 @@ export function validateModelForRun(
   const capabilities = resolveModelCapabilities(providerId, model);
   if (!capabilities) {
     return {
-      ok: false,
-      error: `Model "${modelId}" has unknown execution capabilities and cannot run safely.`,
+      ok: true,
       maxTokens: requestedMaxTokens
     };
   }

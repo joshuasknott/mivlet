@@ -9,10 +9,9 @@
 
 import type {
   AcpFrame,
-  AcpNotification,
   AcpRequest
 } from "./protocol";
-import type { AcpReply, AcpTransport } from "./transport";
+import type { AcpInboundFrame, AcpReply, AcpTransport } from "./transport";
 
 /** A scripted response to a request: return a result or an error. */
 export type ScriptedResponder = (
@@ -21,7 +20,7 @@ export type ScriptedResponder = (
 
 /** A queued streamed item: either a notification frame or an end-of-stream marker. */
 type PendingItem =
-  | { kind: "frame"; frame: AcpNotification }
+  | { kind: "frame"; frame: AcpInboundFrame }
   | { kind: "close" };
 
 /**
@@ -29,12 +28,17 @@ type PendingItem =
  * requests are answered synchronously by the scripted responder.
  */
 export class FakeAcpTransport implements AcpTransport {
+  readonly cwd = "/workspace";
   private readonly responder: ScriptedResponder;
   private readonly queued: PendingItem[] = [];
   private readonly sent: AcpFrame[] = [];
   private closed = false;
+  private pendingPromptReply: {
+    reply: AcpReply;
+    resolve: (reply: AcpReply) => void;
+  } | null = null;
   /** Resolves the next waiter when a notification is queued or the stream ends. */
-  private notifyWaiter: ((value: AcpNotification | undefined) => void) | null = null;
+  private notifyWaiter: ((value: AcpInboundFrame | undefined) => void) | null = null;
 
   constructor(responder: ScriptedResponder = () => ({ result: {} })) {
     this.responder = responder;
@@ -45,9 +49,22 @@ export class FakeAcpTransport implements AcpTransport {
     return this.sent;
   }
 
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   /** Queue a streamed notification for the next `frames()` consumer. */
   queueNotification(method: string, params: unknown): void {
     this.queued.push({ kind: "frame", frame: { jsonrpc: "2.0", method, params } });
+    this.kickWaiter();
+  }
+
+  /** Queue a server-to-client request such as `session/request_permission`. */
+  queueRequest(id: string | number, method: string, params: unknown): void {
+    this.queued.push({
+      kind: "frame",
+      frame: { jsonrpc: "2.0", id, method, params }
+    });
     this.kickWaiter();
   }
 
@@ -78,18 +95,27 @@ export class FakeAcpTransport implements AcpTransport {
   async request(req: AcpRequest): Promise<AcpReply> {
     this.sent.push(req);
     const outcome = this.responder(req);
-    if ("error" in outcome) {
-      return { ok: false, error: outcome.error };
+    const reply: AcpReply =
+      "error" in outcome
+        ? { ok: false, error: outcome.error }
+        : { ok: true, result: outcome.result };
+    // ACP `session/prompt` completes at end-turn, after streamed updates and
+    // permission requests. Defer its fake response until the seeded inbound
+    // queue is drained so tests model the real ordering.
+    if (req.method === "session/prompt" && this.queued.length > 0) {
+      return new Promise<AcpReply>((resolve) => {
+        this.pendingPromptReply = { reply, resolve };
+      });
     }
-    return { ok: true, result: outcome.result };
+    return reply;
   }
 
-  frames(): AsyncIterable<AcpNotification> {
+  frames(): AsyncIterable<AcpInboundFrame> {
     const self = this;
     return {
       [Symbol.asyncIterator]() {
         return {
-          async next(): Promise<IteratorResult<AcpNotification>> {
+          async next(): Promise<IteratorResult<AcpInboundFrame>> {
             const value = await self.takeNext();
             if (value === undefined) return { done: true, value: undefined };
             return { done: false, value };
@@ -104,15 +130,16 @@ export class FakeAcpTransport implements AcpTransport {
     this.kickWaiter();
   }
 
-  private takeNext(): Promise<AcpNotification | undefined> {
+  private takeNext(): Promise<AcpInboundFrame | undefined> {
     const next = this.queued.shift();
     if (next) {
+      if (this.queued.length === 0) this.releasePromptReplySoon();
       return Promise.resolve(next.kind === "frame" ? next.frame : undefined);
     }
     if (this.closed) {
       return Promise.resolve(undefined);
     }
-    return new Promise<AcpNotification | undefined>((resolve) => {
+    return new Promise<AcpInboundFrame | undefined>((resolve) => {
       this.notifyWaiter = resolve;
     });
   }
@@ -123,9 +150,17 @@ export class FakeAcpTransport implements AcpTransport {
     if (!waiter) return;
     const next = this.queued.shift();
     if (next) {
+      if (this.queued.length === 0) this.releasePromptReplySoon();
       waiter(next.kind === "frame" ? next.frame : undefined);
     } else if (this.closed) {
       waiter(undefined);
     }
+  }
+
+  private releasePromptReplySoon(): void {
+    const pending = this.pendingPromptReply;
+    if (!pending) return;
+    this.pendingPromptReply = null;
+    void Promise.resolve().then(() => pending.resolve(pending.reply));
   }
 }

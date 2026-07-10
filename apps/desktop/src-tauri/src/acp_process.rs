@@ -1,6 +1,6 @@
 //! ACP (Agent Client Protocol) child-process boundary.
 //!
-//! Rust owns the CLI child process for ACP providers (Cursor, Grok). A CLI is
+//! Rust owns the CLI child process for catalog-declared ACP providers. A CLI is
 //! spawned here with piped stdio; its stdout is read line-by-line and each
 //! newline-delimited JSON-RPC frame is emitted on the Tauri event channel
 //! `arden://acp/<sessionId>`. The TypeScript adapter writes request frames back
@@ -8,8 +8,8 @@
 //! `close_acp_process`. **A CLI is never spawned from JavaScript** — this is
 //! the sole process boundary, mirroring `native_api.rs` for HTTP egress.
 //!
-//! Auth is provider-owned: the CLI holds its own credentials (Cursor/Grok
-//! subscription login). Fable never collects, stores, or passes a subscription
+//! Auth is provider-owned: each CLI holds its own credentials. Fable never
+//! collects, stores, or passes a subscription
 //! token. The probe (`detect_acp_cli`) runs the CLI's status command and maps
 //! its outcome to a truthful auth-state vocabulary — it never reads a secret.
 //!
@@ -27,6 +27,7 @@ use std::{
     collections::HashMap,
     process::Stdio,
     sync::{Mutex, OnceLock},
+    time::Duration,
 };
 
 use tauri::{AppHandle, Emitter};
@@ -34,32 +35,111 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
     sync::mpsc,
+    time::timeout,
 };
 
-/// A catalog-declared ACP executable. The executable name is only used to spawn
-/// / probe through this boundary; it is never bundled or redistributed.
-pub(crate) struct AcpExecutable {
-    /// The provider id this executable serves (cursor / grok).
-    provider_id: &'static str,
-    /// The CLI executable name looked up on PATH.
+#[derive(Clone, Copy)]
+enum AcpProbeKind {
+    Command,
+    SessionHandshake,
+}
+
+/// One allowed command form for a provider. Cursor has used both `agent` and
+/// `cursor-agent`; every other provider currently has one executable name.
+pub(crate) struct AcpCommand {
     executable: &'static str,
-    /// Args passed to the executable to probe auth state (no secrets).
+    /// Mandatory arguments owned by this allowlist. JavaScript cannot omit or
+    /// replace them.
+    launch_args: &'static [&'static str],
+    /// Official, non-secret readiness probe arguments.
     auth_probe_args: &'static [&'static str],
+    probe_kind: AcpProbeKind,
+}
+
+/// A catalog-declared ACP provider and its allowed executable candidates.
+pub(crate) struct AcpExecutable {
+    provider_id: &'static str,
+    commands: &'static [AcpCommand],
 }
 
 /// The catalog of ACP executables. Mirrors the TypeScript `ACP_PROVIDERS`; kept
 /// here so Rust can validate the provider id and resolve the executable without
 /// trusting a caller-supplied path (which could be an arbitrary binary).
+const CURSOR_COMMANDS: &[AcpCommand] = &[
+    AcpCommand {
+        executable: "agent",
+        launch_args: &["acp"],
+        auth_probe_args: &["status"],
+        probe_kind: AcpProbeKind::Command,
+    },
+    AcpCommand {
+        executable: "cursor-agent",
+        launch_args: &["acp"],
+        auth_probe_args: &["status"],
+        probe_kind: AcpProbeKind::Command,
+    },
+];
+const COPILOT_COMMANDS: &[AcpCommand] = &[AcpCommand {
+    executable: "copilot",
+    launch_args: &["--acp", "--stdio"],
+    // Copilot has no secret-safe account-status command, so the probe performs
+    // a bounded ACP initialize + session/new handshake instead.
+    auth_probe_args: &[],
+    probe_kind: AcpProbeKind::SessionHandshake,
+}];
+const GROK_COMMANDS: &[AcpCommand] = &[AcpCommand {
+    executable: "grok",
+    launch_args: &["--no-auto-update", "agent", "stdio"],
+    auth_probe_args: &["--no-auto-update", "models"],
+    probe_kind: AcpProbeKind::Command,
+}];
+const OPENCODE_COMMANDS: &[AcpCommand] = &[AcpCommand {
+    executable: "opencode",
+    launch_args: &["acp"],
+    auth_probe_args: &["models"],
+    probe_kind: AcpProbeKind::Command,
+}];
+const KIMI_COMMANDS: &[AcpCommand] = &[AcpCommand {
+    executable: "kimi",
+    launch_args: &["acp"],
+    // Kimi exposes its login state through ACP `authenticate`; probing the
+    // protocol avoids reading its provider-owned token.
+    auth_probe_args: &[],
+    probe_kind: AcpProbeKind::SessionHandshake,
+}];
+const MISTRAL_VIBE_COMMANDS: &[AcpCommand] = &[AcpCommand {
+    executable: "vibe-acp",
+    launch_args: &[],
+    // Vibe owns browser/API-key setup. ACP negotiation is its supported IDE
+    // integration boundary and is the only status signal Fable consumes.
+    auth_probe_args: &[],
+    probe_kind: AcpProbeKind::SessionHandshake,
+}];
+
 const ACP_EXECUTABLES: &[AcpExecutable] = &[
     AcpExecutable {
         provider_id: "cursor",
-        executable: "cursor",
-        auth_probe_args: &["agent", "status"],
+        commands: CURSOR_COMMANDS,
+    },
+    AcpExecutable {
+        provider_id: "copilot",
+        commands: COPILOT_COMMANDS,
     },
     AcpExecutable {
         provider_id: "grok",
-        executable: "grok",
-        auth_probe_args: &["status"],
+        commands: GROK_COMMANDS,
+    },
+    AcpExecutable {
+        provider_id: "opencode",
+        commands: OPENCODE_COMMANDS,
+    },
+    AcpExecutable {
+        provider_id: "kimi",
+        commands: KIMI_COMMANDS,
+    },
+    AcpExecutable {
+        provider_id: "mistral-vibe",
+        commands: MISTRAL_VIBE_COMMANDS,
     },
 ];
 
@@ -144,6 +224,7 @@ pub struct SpawnAcpProcessRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SpawnedAcpProcess {
     pub session_id: String,
+    pub cwd: String,
 }
 
 /// The outcome of probing a CLI's auth state. Mirrors the TypeScript
@@ -178,29 +259,38 @@ pub async fn spawn_acp_process(
     let spec = acp_executable_for(&request.provider_id)
         .ok_or_else(|| format!("{} is not a registered ACP provider.", request.provider_id))?;
 
-    for arg in &request.extra_args {
-        if arg.len() > 4_096 {
-            return Err("ACP launch argument exceeds the supported length.".to_string());
-        }
+    if !request.extra_args.is_empty() {
+        return Err("Custom ACP launch arguments are not supported.".to_string());
     }
 
-    let mut command = Command::new(spec.executable);
-    command
-        .args(&request.extra_args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        // The CLI must not inherit Fable's stdio handles.
-        ;
-
-    let mut child = command.spawn().map_err(|err| {
-        // A missing executable is the common case (CLI not installed).
-        if err.kind() == std::io::ErrorKind::NotFound {
-            format!("The {} CLI is not installed.", spec.executable)
-        } else {
-            format!("Fable could not start the {} CLI.", spec.executable)
+    let workspace_root = crate::tools::resolve_workspace_root(&app)?;
+    let cwd = workspace_root.to_string_lossy().to_string();
+    let mut started: Option<(Child, &'static str)> = None;
+    for candidate in spec.commands {
+        let mut command = Command::new(candidate.executable);
+        command
+            .args(candidate.launch_args)
+            .current_dir(&workspace_root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        match command.spawn() {
+            Ok(child) => {
+                started = Some((child, candidate.executable));
+                break;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                return Err(format!(
+                    "Fable could not start the {} CLI.",
+                    candidate.executable
+                ));
+            }
         }
-    })?;
+    }
+    let Some((mut child, _executable)) = started else {
+        return Err(format!("The {} CLI is not installed.", request.provider_id));
+    };
 
     let stdout = child
         .stdout
@@ -293,7 +383,7 @@ pub async fn spawn_acp_process(
             },
         );
 
-    Ok(SpawnedAcpProcess { session_id })
+    Ok(SpawnedAcpProcess { session_id, cwd })
 }
 
 /// Write a single JSON-RPC frame to the CLI's stdin (newline appended). The
@@ -356,6 +446,193 @@ pub async fn close_acp_process(session_id: String) -> Result<bool, String> {
     Ok(true)
 }
 
+fn classify_probe_error(error: &serde_json::Value) -> AcpCliProbeResult {
+    let diagnostic = error.to_string().to_ascii_lowercase();
+    if diagnostic.contains("forbidden")
+        || diagnostic.contains("access denied")
+        || diagnostic.contains("401")
+        || diagnostic.contains("403")
+    {
+        AcpCliProbeResult::AuthFailed
+    } else if diagnostic.contains("auth_required")
+        || diagnostic.contains("authrequired")
+        || diagnostic.contains("authentication required")
+        || diagnostic.contains("not authenticated")
+        || diagnostic.contains("not logged in")
+        || diagnostic.contains("sign in")
+        || diagnostic.contains("login")
+        || diagnostic.contains("unauthorized")
+    {
+        AcpCliProbeResult::SignedOut
+    } else {
+        AcpCliProbeResult::Unavailable
+    }
+}
+
+async fn read_probe_response(
+    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    expected_id: i64,
+) -> Result<serde_json::Value, ()> {
+    timeout(Duration::from_secs(6), async {
+        loop {
+            let line = lines.next_line().await.map_err(|_| ())?.ok_or(())?;
+            if line.len() > MAX_ACP_LINE_CHARACTERS {
+                continue;
+            }
+            let value: serde_json::Value = serde_json::from_str(&line).map_err(|_| ())?;
+            if value.get("id").and_then(serde_json::Value::as_i64) == Some(expected_id) {
+                return Ok(value);
+            }
+            // Notifications are legal while a request is pending; ignore them.
+        }
+    })
+    .await
+    .map_err(|_| ())?
+}
+
+/// Copilot documents no reliable status command. Probe it by negotiating ACP
+/// v1 and creating an empty session, bounded by a timeout and killed afterward.
+/// This validates auth without sending a prompt or exposing any credential.
+async fn probe_acp_session(candidate: &AcpCommand) -> AcpCliProbeResult {
+    let cwd = match std::env::current_dir()
+        .ok()
+        .and_then(|path| crate::paths::harden_workspace_root(&path).ok())
+    {
+        Some(path) => path,
+        None => return AcpCliProbeResult::Unavailable,
+    };
+    let mut command = Command::new(candidate.executable);
+    command
+        .args(candidate.launch_args)
+        .current_dir(&cwd)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return AcpCliProbeResult::NotInstalled;
+        }
+        Err(_) => return AcpCliProbeResult::Unavailable,
+    };
+    let mut stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => return AcpCliProbeResult::Unavailable,
+    };
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => return AcpCliProbeResult::Unavailable,
+    };
+    let mut lines = BufReader::new(stdout).lines();
+
+    let result = async {
+        let initialize = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": 1,
+                "clientCapabilities": {},
+                "clientInfo": { "name": "fable", "title": "Fable", "version": "1" }
+            }
+        });
+        if stdin
+            .write_all(format!("{initialize}\n").as_bytes())
+            .await
+            .is_err()
+        {
+            return AcpCliProbeResult::Unavailable;
+        }
+        let initialized = match read_probe_response(&mut lines, 1).await {
+            Ok(value) => value,
+            Err(_) => return AcpCliProbeResult::Unavailable,
+        };
+        if let Some(error) = initialized.get("error") {
+            return classify_probe_error(error);
+        }
+        if initialized
+            .pointer("/result/protocolVersion")
+            .and_then(serde_json::Value::as_i64)
+            != Some(1)
+        {
+            return AcpCliProbeResult::Unavailable;
+        }
+
+        let auth_method = initialized
+            .pointer("/result/authMethods")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|methods| {
+                methods.iter().find_map(|method| {
+                    method
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|id| !id.is_empty())
+                })
+            });
+        if let Some(method_id) = auth_method {
+            let authenticate = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "authenticate",
+                "params": {
+                    "methodId": method_id,
+                    "_meta": { "headless": true }
+                }
+            });
+            if stdin
+                .write_all(format!("{authenticate}\n").as_bytes())
+                .await
+                .is_err()
+            {
+                return AcpCliProbeResult::Unavailable;
+            }
+            let authenticated = match read_probe_response(&mut lines, 2).await {
+                Ok(value) => value,
+                Err(_) => return AcpCliProbeResult::Unavailable,
+            };
+            if let Some(error) = authenticated.get("error") {
+                return classify_probe_error(error);
+            }
+        }
+
+        let session = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/new",
+            "params": { "cwd": cwd.to_string_lossy(), "mcpServers": [] }
+        });
+        if stdin
+            .write_all(format!("{session}\n").as_bytes())
+            .await
+            .is_err()
+        {
+            return AcpCliProbeResult::Unavailable;
+        }
+        let created = match read_probe_response(&mut lines, 3).await {
+            Ok(value) => value,
+            Err(_) => return AcpCliProbeResult::Unavailable,
+        };
+        if let Some(error) = created.get("error") {
+            return classify_probe_error(error);
+        }
+        if created
+            .pointer("/result/sessionId")
+            .and_then(serde_json::Value::as_str)
+            .is_some()
+        {
+            AcpCliProbeResult::Connected
+        } else {
+            AcpCliProbeResult::Unavailable
+        }
+    }
+    .await;
+
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+    result
+}
+
 /// Probe a provider's CLI to detect its install/auth state. Runs the provider's
 /// status command and maps the outcome to the truthful probe vocabulary. Never
 /// reads a secret — only the exit code + whether the executable exists.
@@ -364,20 +641,32 @@ pub async fn detect_acp_cli(provider_id: String) -> Result<AcpCliProbeResult, St
     let spec = acp_executable_for(&provider_id)
         .ok_or_else(|| format!("{} is not a registered ACP provider.", provider_id))?;
 
-    let output = Command::new(spec.executable)
-        .args(spec.auth_probe_args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
-
-    let output = match output {
-        Ok(output) => output,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(AcpCliProbeResult::NotInstalled);
+    let mut discovered = None;
+    for candidate in spec.commands {
+        if matches!(candidate.probe_kind, AcpProbeKind::SessionHandshake) {
+            match probe_acp_session(candidate).await {
+                AcpCliProbeResult::NotInstalled => continue,
+                outcome => return Ok(outcome),
+            }
         }
-        Err(_) => return Ok(AcpCliProbeResult::Unavailable),
+        let output = Command::new(candidate.executable)
+            .args(candidate.auth_probe_args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await;
+        match output {
+            Ok(output) => {
+                discovered = Some(output);
+                break;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => return Ok(AcpCliProbeResult::Unavailable),
+        }
+    }
+    let Some(output) = discovered else {
+        return Ok(AcpCliProbeResult::NotInstalled);
     };
 
     // Exit 0 ⇒ signed in (connected); non-zero with an auth marker ⇒ signed out
@@ -386,16 +675,26 @@ pub async fn detect_acp_cli(provider_id: String) -> Result<AcpCliProbeResult, St
     if output.status.success() {
         return Ok(AcpCliProbeResult::Connected);
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
-    if stderr.contains("sign in")
-        || stderr.contains("sign-in")
-        || stderr.contains("not authenticated")
-        || stderr.contains("login")
-        || stderr.contains("unauthorized")
+    let diagnostic = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+    .to_ascii_lowercase();
+    if diagnostic.contains("sign in")
+        || diagnostic.contains("sign-in")
+        || diagnostic.contains("not authenticated")
+        || diagnostic.contains("not logged in")
+        || diagnostic.contains("login required")
+        || diagnostic.contains("unauthorized")
     {
         return Ok(AcpCliProbeResult::SignedOut);
     }
-    if stderr.contains("forbidden") || stderr.contains("denied") || stderr.contains("401") {
+    if diagnostic.contains("forbidden")
+        || diagnostic.contains("access denied")
+        || diagnostic.contains("401")
+        || diagnostic.contains("403")
+    {
         return Ok(AcpCliProbeResult::AuthFailed);
     }
     Ok(AcpCliProbeResult::Unavailable)
@@ -406,13 +705,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_cursor_and_grok_executables() {
+    fn resolves_all_acp_executables_with_mandatory_launch_args() {
         let cursor = acp_executable_for("cursor").expect("cursor");
-        assert_eq!(cursor.executable, "cursor");
-        assert_eq!(cursor.auth_probe_args, ["agent", "status"]);
+        assert_eq!(cursor.commands[0].executable, "agent");
+        assert_eq!(cursor.commands[0].launch_args, ["acp"]);
+        assert_eq!(cursor.commands[1].executable, "cursor-agent");
+
+        let copilot = acp_executable_for("copilot").expect("copilot");
+        assert_eq!(copilot.commands[0].executable, "copilot");
+        assert_eq!(copilot.commands[0].launch_args, ["--acp", "--stdio"]);
+
         let grok = acp_executable_for("grok").expect("grok");
-        assert_eq!(grok.executable, "grok");
-        assert_eq!(grok.auth_probe_args, ["status"]);
+        assert_eq!(grok.commands[0].executable, "grok");
+        assert_eq!(
+            grok.commands[0].launch_args,
+            ["--no-auto-update", "agent", "stdio"]
+        );
+
+        let opencode = acp_executable_for("opencode").expect("opencode");
+        assert_eq!(opencode.commands[0].executable, "opencode");
+        assert_eq!(opencode.commands[0].launch_args, ["acp"]);
+
+        let kimi = acp_executable_for("kimi").expect("kimi");
+        assert_eq!(kimi.commands[0].executable, "kimi");
+        assert_eq!(kimi.commands[0].launch_args, ["acp"]);
+
+        let mistral = acp_executable_for("mistral-vibe").expect("mistral-vibe");
+        assert_eq!(mistral.commands[0].executable, "vibe-acp");
+        assert!(mistral.commands[0].launch_args.is_empty());
     }
 
     #[test]

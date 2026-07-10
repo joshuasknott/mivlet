@@ -72,18 +72,6 @@ const ACP_CAPS: &[&str] = &[
     "cancellation",
 ];
 
-const COPILOT_CAPS: &[&str] = &[
-    "authentication",
-    "threads",
-    "streaming",
-    "tool-requests",
-    "approvals",
-    "file-changes",
-    "model-availability",
-    "cancellation",
-    "usage-cost",
-];
-
 /// Native-API providers declare the full capability set when connected: Fable
 /// owns the loop, so it honors streaming, tool-requests + approvals, file
 /// changes, usage-cost (metered against the API key), model availability, and
@@ -100,6 +88,8 @@ const NATIVE_API_CAPS: &[&str] = &[
     "cancellation",
 ];
 
+/// Local runtimes are reachable only through an explicitly configured literal
+/// loopback service. They never accept or retain an API key in Fable.
 const LOCAL_LOOPBACK_CAPS: &[&str] = &["streaming", "model-availability", "cancellation"];
 
 const CATALOG: &[BackendCatalogEntry] = &[
@@ -122,25 +112,52 @@ const CATALOG: &[BackendCatalogEntry] = &[
         label: "Cursor",
         description: "Reaches your Cursor subscription over ACP (stdio/JSON-RPC) using your installed Cursor CLI.",
         install_hint: "Requires the Cursor CLI. Install it, then connect.",
-        models: &[("cursor-default", "Cursor default"), ("cursor-composer", "Cursor composer")],
+        models: &[("cursor-default", "Cursor default")],
         capabilities: ACP_CAPS,
     },
     BackendCatalogEntry {
         id: "copilot",
-        backend_type: "copilot-sdk",
+        backend_type: "acp",
         label: "GitHub Copilot",
-        description: "Reaches Copilot through its SDK. Supports subscriber, OAuth app, automation token, and BYOK auth.",
-        install_hint: "Requires the Copilot SDK to be available in this build.",
-        models: &[("copilot-default", "Copilot default"), ("copilot-claude", "Copilot + Claude")],
-        capabilities: COPILOT_CAPS,
+        description: "Reaches Copilot over ACP using the installed GitHub Copilot CLI and its existing login or token configuration.",
+        install_hint: "Requires GitHub Copilot CLI. Install it and run copilot login.",
+        models: &[("copilot-default", "Copilot default")],
+        capabilities: ACP_CAPS,
     },
     BackendCatalogEntry {
         id: "grok",
         backend_type: "acp",
-        label: "Grok",
+        label: "Grok Build",
         description: "Reaches your Grok account over ACP (stdio/JSON-RPC) using your installed Grok CLI. Entitlements are checked after login.",
         install_hint: "Requires the Grok CLI. Install it, then connect.",
         models: &[("grok-default", "Grok")],
+        capabilities: ACP_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "opencode",
+        backend_type: "acp",
+        label: "OpenCode",
+        description: "Uses your installed OpenCode agent over ACP, including the providers and models already configured in OpenCode.",
+        install_hint: "Requires the OpenCode CLI. Install it and configure at least one provider.",
+        models: &[("opencode-default", "OpenCode default")],
+        capabilities: ACP_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "kimi",
+        backend_type: "acp",
+        label: "Kimi Code",
+        description: "Uses your Kimi Code subscription through the official Kimi ACP runtime and its provider-owned device login.",
+        install_hint: "Requires Kimi Code CLI. Install it and run kimi login.",
+        models: &[("kimi-default", "Kimi default")],
+        capabilities: ACP_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "mistral-vibe",
+        backend_type: "acp",
+        label: "Mistral Vibe",
+        description: "Uses your configured Mistral Vibe account or API profile through the official Vibe ACP runtime.",
+        install_hint: "Requires Mistral Vibe. Install it and run vibe --setup.",
+        models: &[("mistral-vibe-default", "Vibe default")],
         capabilities: ACP_CAPS,
     },
     BackendCatalogEntry {
@@ -154,7 +171,8 @@ const CATALOG: &[BackendCatalogEntry] = &[
     },
     // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
-    // API-key only; compliance copy names only the implemented auth path.
+    // Direct API credentials, plus explicit local/custom exceptions; compliance
+    // copy names only the implemented connection path.
     BackendCatalogEntry {
         id: "openai",
         backend_type: "native-api",
@@ -207,10 +225,166 @@ const CATALOG: &[BackendCatalogEntry] = &[
         label: "OpenRouter",
         description: "Reach many models through OpenRouter with an OpenRouter API key. Fable owns the agent loop.",
         install_hint: "",
+        models: &[("openrouter/auto", "OpenRouter Auto")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "deepseek",
+        backend_type: "native-api",
+        label: "DeepSeek",
+        description: "Reach DeepSeek models directly with a DeepSeek API key.",
+        install_hint: "",
         models: &[
-            ("openrouter:auto", "OpenRouter Auto"),
-            ("openrouter:claude", "OpenRouter Claude"),
+            ("deepseek-v4-pro", "DeepSeek V4 Pro"),
+            ("deepseek-v4-flash", "DeepSeek V4 Flash"),
         ],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "zai",
+        backend_type: "native-api",
+        label: "Z.AI",
+        description: "Reach GLM models through the general Z.AI API.",
+        install_hint: "",
+        models: &[("glm-5.1", "GLM-5.1")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "minimax",
+        backend_type: "native-api",
+        label: "MiniMax",
+        description: "Reach MiniMax text and coding models with a MiniMax API key.",
+        install_hint: "",
+        models: &[
+            ("MiniMax-M2.7", "MiniMax M2.7"),
+            ("MiniMax-M2.7-highspeed", "MiniMax M2.7 Highspeed"),
+        ],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "alibaba",
+        backend_type: "native-api",
+        label: "Alibaba Cloud",
+        description: "Reach Qwen models through Alibaba Cloud Model Studio's international API.",
+        install_hint: "",
+        models: &[("qwen3.7-plus", "Qwen 3.7 Plus")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "fireworks",
+        backend_type: "native-api",
+        label: "Fireworks AI",
+        description: "Reach serverless and deployed models through Fireworks AI.",
+        install_hint: "",
+        models: &[("accounts/fireworks/models/deepseek-v3p1", "DeepSeek V3.1")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "huggingface",
+        backend_type: "native-api",
+        label: "Hugging Face",
+        description: "Reach models routed by Hugging Face Inference Providers.",
+        install_hint: "",
+        models: &[],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "moonshot",
+        backend_type: "native-api",
+        label: "Moonshot AI",
+        description: "Reach Kimi models through the Moonshot AI platform API.",
+        install_hint: "",
+        models: &[("kimi-k2.6", "Kimi K2.6")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "kimi-code",
+        backend_type: "native-api",
+        label: "Kimi Code",
+        description: "Use a Kimi Code membership API key through Kimi's official coding endpoint.",
+        install_hint: "",
+        models: &[("kimi-for-coding", "Kimi for Coding")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "mistral",
+        backend_type: "native-api",
+        label: "Mistral AI",
+        description: "Reach Mistral models directly with a Mistral API key.",
+        install_hint: "",
+        models: &[],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "meta",
+        backend_type: "native-api",
+        label: "Meta Llama",
+        description: "Reach models available to your Meta Llama API account.",
+        install_hint: "",
+        models: &[],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "perplexity",
+        backend_type: "native-api",
+        label: "Perplexity",
+        description: "Reach Perplexity Sonar through its OpenAI-compatible API.",
+        install_hint: "",
+        models: &[("sonar", "Sonar")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "tencent",
+        backend_type: "native-api",
+        label: "Tencent TokenHub",
+        description: "Reach models through Tencent TokenHub's international endpoint.",
+        install_hint: "",
+        models: &[("hy3", "Hy3")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "xiaomi",
+        backend_type: "native-api",
+        label: "Xiaomi MiMo",
+        description: "Reach MiMo models through Xiaomi's API platform.",
+        install_hint: "",
+        models: &[("mimo-v2.5-pro", "MiMo V2.5 Pro")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "groq",
+        backend_type: "native-api",
+        label: "Groq",
+        description: "Reach supported models through Groq's low-latency inference API.",
+        install_hint: "",
+        models: &[("openai/gpt-oss-120b", "GPT OSS 120B")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "together",
+        backend_type: "native-api",
+        label: "Together AI",
+        description: "Reach open and partner models through Together AI.",
+        install_hint: "",
+        models: &[("openai/gpt-oss-20b", "GPT OSS 20B")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "cerebras",
+        backend_type: "native-api",
+        label: "Cerebras",
+        description: "Reach supported models through Cerebras Inference.",
+        install_hint: "",
+        models: &[("gpt-oss-120b", "GPT OSS 120B")],
+        capabilities: NATIVE_API_CAPS,
+    },
+    BackendCatalogEntry {
+        id: "custom",
+        backend_type: "native-api",
+        label: "Custom provider",
+        description: "Connect an OpenAI-compatible base URL and model ID with an optional API key.",
+        install_hint: "HTTPS is required except for loopback development endpoints.",
+        models: &[],
         capabilities: NATIVE_API_CAPS,
     },
 ];
@@ -491,12 +665,83 @@ fn build_provider(entry: &'static BackendCatalogEntry, auth_state: String) -> Ba
     }
 }
 
+/// Apply the provider-owned Codex CLI install/auth status without exposing its
+/// executable path or any token-bearing data. The version is normalized and
+/// the auth method is reduced to a controlled label before it reaches UI copy.
+pub(crate) fn apply_codex_cli_status(
+    provider: &mut BackendProvider,
+    status: &crate::codex_app_server::CodexCliStatus,
+) {
+    let version = status
+        .version
+        .as_deref()
+        .map(normalize_spaces)
+        .filter(|value| !value.is_empty())
+        .map(|value| truncate_characters(&value, 120));
+    let auth_label = match status.auth_method.as_deref() {
+        Some("chatgpt") => Some("ChatGPT"),
+        Some("api-key") => Some("API key"),
+        Some("provider-login") => Some("Provider login"),
+        _ => None,
+    };
+
+    if !status.installed {
+        provider.auth_state = "install-required".to_string();
+        provider.capabilities.clear();
+        for model in &mut provider.models {
+            model.available = false;
+        }
+        return;
+    }
+
+    if !status.authenticated {
+        provider.auth_state = "sign-in-required".to_string();
+        provider.capabilities.clear();
+        for model in &mut provider.models {
+            model.available = false;
+        }
+        provider.install_hint = Some(match version {
+            Some(version) => format!("Codex CLI {version} - sign in required"),
+            None => "Codex CLI installed - sign in required".to_string(),
+        });
+        return;
+    }
+
+    provider.auth_state = "connected".to_string();
+    provider.capabilities = CODEX_CAPS
+        .iter()
+        .filter(|cap| BACKEND_CAPABILITIES.contains(cap))
+        .take(MAX_BACKEND_CAPABILITIES)
+        .map(|cap| (*cap).to_string())
+        .collect();
+    for model in &mut provider.models {
+        model.available = true;
+    }
+    provider.install_hint = match (version, auth_label) {
+        (Some(version), Some(auth)) => Some(format!("Codex CLI {version} - {auth}")),
+        (Some(version), None) => Some(format!("Codex CLI {version}")),
+        (None, Some(auth)) => Some(format!("Codex CLI - {auth}")),
+        (None, None) => Some("Codex CLI".to_string()),
+    };
+}
+
 /// Compile-time assertion that the hardcoded catalog only uses recognized
 /// backend-type and capability vocabulary values. Panicking here (at first
 /// use) is correct: a bad catalog value is a programming error, not runtime
 /// data.
 fn validate_catalog_vocabulary() {
+    let mut ids = BTreeSet::new();
     for entry in CATALOG {
+        assert!(
+            ids.insert(entry.id),
+            "duplicate backend provider id {}",
+            entry.id
+        );
+        assert!(
+            SUPPORTED_BACKEND_PROVIDER_IDS.contains(&entry.id),
+            "catalog provider {} is not in the supported provider vocabulary",
+            entry.id
+        );
         assert!(
             BACKEND_TYPES.contains(&entry.backend_type),
             "catalog backend type {} is not in the vocabulary",
@@ -510,6 +755,11 @@ fn validate_catalog_vocabulary() {
             );
         }
     }
+    assert_eq!(
+        ids.len(),
+        SUPPORTED_BACKEND_PROVIDER_IDS.len(),
+        "backend catalog and supported provider vocabulary differ"
+    );
 }
 
 /// The persisted connected-backends manifest: provider ids only, no secrets.
@@ -599,6 +849,7 @@ pub(crate) fn store_credential_into<S: BackendCredentialStore>(
         ));
     }
     let secret = validate_backend_secret(&request.secret)?;
+    crate::native_api::validate_native_credential(&provider_id, &secret)?;
 
     log_pre_release_warning_once();
     store.set(&provider_id, &secret)?;
@@ -751,25 +1002,7 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
     let mut providers = list_providers_from(&CredentialStores, &path)?;
     if let Some(codex) = providers.iter_mut().find(|provider| provider.id == "codex") {
         let status = crate::codex_app_server::codex_cli_status();
-        if status.installed {
-            codex.auth_state = "connected".to_string();
-            codex.capabilities = CODEX_CAPS
-                .iter()
-                .filter(|cap| BACKEND_CAPABILITIES.contains(cap))
-                .take(MAX_BACKEND_CAPABILITIES)
-                .map(|cap| (*cap).to_string())
-                .collect();
-            for model in &mut codex.models {
-                model.available = true;
-            }
-            codex.install_hint = status.version.map(|version| format!("Codex CLI {version}"));
-        } else {
-            codex.auth_state = "install-required".to_string();
-            codex.capabilities.clear();
-            for model in &mut codex.models {
-                model.available = false;
-            }
-        }
+        apply_codex_cli_status(codex, &status);
     }
     Ok(providers)
 }

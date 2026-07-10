@@ -2,8 +2,8 @@
  * Runs a provider-neutral `AgentBackend` and routes its events into the shell.
  *
  * The hook resolves the connected backend to an `AgentBackend` via
- * `resolveAgentBackend` (native API, Codex app-server, and ACP have live
- * adapters; Copilot remains metadata-only). It then runs the backend, consuming
+ * `resolveAgentBackend` (native API, Codex app-server, and provider-owned ACP
+ * runtimes all have live adapters). It then runs the backend, consuming
  * the universal `BackendAgentEvent` stream, and:
  *   - accumulates text deltas into the agent transcript
  *   - pushes tool-call approvals into the shell's approval queue (via onToolCall)
@@ -58,6 +58,7 @@ export interface NativeAgentState {
     outputTokens: number;
     costUsd: number;
     costEstimated?: boolean;
+    costUnknown?: boolean;
   } | null;
   running: boolean;
   lastError: string | null;
@@ -69,6 +70,8 @@ export interface NativeAgentState {
 
 export interface UseNativeAgentOptions {
   providers: BackendProvider[];
+  /** Provider selected by the combined model picker. */
+  activeProviderId?: string;
   /** Truthfully selectable models after dynamic discovery/catalogue merging. */
   models?: BackendModel[];
   /** Active chat/thread identifier used to durably associate completed exchanges. */
@@ -165,12 +168,13 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       resolveAgentBackend(
         options.providers.find(
           (provider) =>
+            (!options.activeProviderId || provider.id === options.activeProviderId) &&
             provider.authState === "connected" &&
             provider.capabilities.includes("streaming")
         ),
         deps
       ),
-    [options.providers, deps]
+    [options.providers, options.activeProviderId, deps]
   );
 
   const run = useCallback(
@@ -311,7 +315,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
                 costUsd: event.costUsd,
-                costEstimated: event.costEstimated
+                costEstimated: event.costEstimated,
+                costUnknown: event.costUnknown
               }
             }));
             persisted = {
@@ -320,7 +325,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
                 costUsd: event.costUsd,
-                costEstimated: event.costEstimated
+                costEstimated: event.costEstimated,
+                costUnknown: event.costUnknown
               },
               updatedAt: new Date().toISOString()
             };
@@ -458,11 +464,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         return;
       }
       const model = modelsRef.current.find((candidate) => candidate.id === runToRetry.model);
-      if (!model?.available || model.capabilities?.streaming !== true) {
+      if (!model?.available || model.capabilities?.streaming === false) {
         setState((current) => ({
           ...current,
           lastError:
-            "This run cannot be retried because its model is unavailable or its capabilities are unknown."
+            "This run cannot be retried because its model is unavailable or cannot stream."
+        }));
+        return;
+      }
+      if (backend?.providerId !== runToRetry.providerId) {
+        setState((current) => ({
+          ...current,
+          lastError: "Select the run's original provider before retrying it."
         }));
         return;
       }

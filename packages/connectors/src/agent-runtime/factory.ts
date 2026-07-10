@@ -2,8 +2,8 @@
  * The `AgentBackend` factory: resolves a `BackendProvider` to a live agent
  * backend (or null) by dispatching on `backendType`.
  *
- * Today `native-api`, Codex app-server, and ACP return live backends. Copilot
- * is metadata-only (its adapter returns null until landed). The factory also
+ * Today `native-api`, Codex app-server, and ACP return live backends. GitHub
+ * Copilot is one of the ACP providers. The factory also
  * returns null for any backend that is not connected or lacks the `streaming`
  * capability — so the shell's "is there a backend to drive a run?" predicate is
  * preserved by construction.
@@ -17,7 +17,6 @@ import type { AgentBackend, BackendDeps } from "./contract";
 import { createNativeApiBackend } from "./adapters/native-api";
 import { resolveCodexBackend } from "./adapters/codex";
 import { resolveAcpBackend } from "./adapters/acp";
-import { resolveCopilotBackend } from "./adapters/copilot";
 import { createLocalLoopbackBackend } from "./adapters/local-loopback";
 
 /** A backend must be connected AND report streaming to be runnable. */
@@ -31,8 +30,8 @@ function isRunnable(provider: BackendProvider): boolean {
  * True when a backend family has a *live* adapter the factory can resolve today.
  *
  * This is the provider-neutral "can Fable actually drive a run on this backend
- * right now?" predicate. Native API, Codex, and ACP return true; Copilot is
- * metadata-only until its adapter lands. The shell uses this to
+ * right now?" predicate. Native API, Codex, and ACP return true. The legacy
+ * `copilot-sdk` value remains non-runnable; live Copilot is typed as ACP. The shell uses this to
  * decide whether the composer drives the agent loop vs. the knowledge-search
  * fallback — preserving the legacy native-API-only behavior while keeping the
  * contract ready for future adapters (flip a backend type here once it ships).
@@ -72,11 +71,8 @@ export function resolveAgentBackend(
       // ACP providers own auth in their CLIs; Fable maps the JSON-RPC stream.
       return resolveAcpBackend(provider, deps);
     case "local-loopback":
-      // Externally managed literal-loopback runtimes such as Ollama.
+      // User-managed local services such as Ollama only use literal loopback.
       return createLocalLoopbackBackend(provider, deps);
-    case "copilot-sdk":
-      // Metadata-only until the Copilot SDK adapter lands.
-      return resolveCopilotBackend(provider, deps);
     default:
       // Unknown backend type: fail-closed (no execution path).
       return null;

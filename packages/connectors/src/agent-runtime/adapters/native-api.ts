@@ -2,8 +2,8 @@
  * Native-API `AgentBackend` adapter.
  *
  * This is one adapter among equals — it implements the provider-neutral
- * {@link AgentBackend} contract for the native-API family (OpenAI, Anthropic,
- * Gemini, xAI, OpenRouter). Fable owns the full agent loop here (request
+ * {@link AgentBackend} contract for direct model APIs (OpenAI, Anthropic,
+ * Gemini, xAI, OpenRouter, and the wider OpenAI-compatible catalogue). Fable owns the full agent loop here (request
  * shaping, streaming, tool-call/approval routing), delegating only the HTTP/SSE
  * egress to the injected {@link HttpTransport} (the Rust boundary in production,
  * a `FixtureTransport` in tests). The provider-id wire-family dispatch stays
@@ -25,6 +25,7 @@ import type {
 } from "@fable/protocol";
 import { runAgentLoop, type ToolExecutor } from "../../native-api/agent-loop";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
+import { resolveModelCapabilities } from "../../native-api/model-catalogue";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 
@@ -84,6 +85,8 @@ export function createNativeApiBackend(
     // The contract's execute signature matches the loop's ToolExecutor exactly;
     // the cast is structural and safe (both are (approval, args) => Promise<string>).
     const execute = options.execute as ToolExecutor;
+    const selectedModel = provider.models.find((model) => model.id === request.model);
+    const modelCapabilities = resolveModelCapabilities(provider.id, selectedModel);
     const nativeRequest: NativeCompletionRequest = {
       providerId: provider.id,
       model: request.model,
@@ -93,6 +96,7 @@ export function createNativeApiBackend(
     };
     const eventStream = runAgentLoop(handle.transport, nativeRequest, {
       execute,
+      modelSupportsTools: modelCapabilities?.tools,
       shouldCancel: options.shouldCancel,
       contextPrefix: options.contextPrefix,
       permissionMode: options.permissionMode,

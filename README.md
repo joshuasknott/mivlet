@@ -1,8 +1,11 @@
 # Fable
 
-Fable is an open-source AI workspace for real work. It lets you chat with your computer, delegate tasks across your tools and files, and stay in control at every step.
+Fable is an AI workspace for real work. It brings providers, tools, knowledge,
+approvals, projects, and repeatable work into one human-controlled product.
 
-Local-first and private by default, Fable is built for people who want powerful AI assistance without giving up ownership of their work.
+Fable is designed around hosted Fable identity, local secure execution, and
+optional depth. Its current Clerk/Convex implementation is a foundation rather
+than a completed hosted-account experience; this repository is not a release.
 
 ## Current Slice
 
@@ -15,10 +18,11 @@ Local-first and private by default, Fable is built for people who want powerful 
 - Approval flow with once/session/rule/modify/deny decisions and audit history.
 - Local recovery for composer drafts, pinned sources, schedule definitions, and approval audit.
 - Protocol types for approvals, memory, connector health, directives, and runtime snapshots.
-- Native API-key agent path for OpenAI-compatible, Anthropic, Gemini, xAI, and OpenRouter providers, with keys held by the local credential boundary.
-- Local Ollama runtime path via an explicitly trusted loopback service on a literal loopback IP; Fable does not bundle, start, or download models.
+- Provider-first model setup: choose a provider, then choose one of its implemented connection methods. Submitted native API credentials are stored behind the local Rust credential boundary; provider-owned CLI sessions stay inside their own CLI.
+- Native execution across OpenAI-compatible, Anthropic, and Gemini wire formats for OpenAI, Anthropic, Gemini, xAI, OpenRouter, DeepSeek, Z.AI, MiniMax, Alibaba Model Studio, Fireworks AI, Hugging Face, Kimi Code, Moonshot, Mistral, Meta Llama API, Perplexity, Tencent TokenHub, Xiaomi MiMo, Groq, Together AI, Cerebras, and custom endpoints.
+- Local Ollama execution through an explicitly trusted literal-loopback service; Fable does not bundle, start, download, or credential local models.
 - First-wave connector boundaries with explicit fixture previews, Google public-client PKCE support, and broker-gated confidential connectors that fail closed until configured.
-- Optional Fable cloud identity is modeled as a Clerk public-client PKCE spike; missing Clerk configuration keeps the account feature disabled and local-first use available.
+- Clerk identity and Convex workspace-sync foundations exist but are config-gated. Completing mandatory account onboarding and multi-person workspace behaviour is a planned milestone, not a completed claim.
 
 ## Feature Status Matrix
 
@@ -28,16 +32,16 @@ Local-first and private by default, Fable is built for people who want powerful 
 | **Local Knowledge Ingestion** | **Implemented (Live)** | Text, MD, CSV, JSON, YAML import with path-escape safety, structure-aware chunking, hybrid RRF k=60 retrieval |
 | **Local Approvals & Memory** | **Implemented (Live)** | Once/session/rule grants, high-risk confirm, memory editing & promotion, lifecycle disables/deletes/forgets, SQLite composite key isolation (schema v5) |
 | **Schedules & Automations** | **Implemented (Live)** | Local scheduler tick loop, leases, queueing, and headless prompt execution (persisted in encrypted SQLite) |
-| **BYOK Native APIs** | **Implemented (Live)** | OpenAI, Anthropic, Gemini, xAI, and OpenRouter backend model execution using local keyring credentials |
+| **Native APIs, Local & Custom** | **Functional; provider-gated** | OpenAI, Anthropic, Gemini, xAI, OpenRouter, DeepSeek, Z.AI, MiniMax, Alibaba Model Studio, Fireworks AI, Hugging Face, Kimi Code, Moonshot, Mistral, Meta Llama API, Perplexity, Tencent TokenHub, Xiaomi MiMo, Groq, Together AI, Cerebras, custom OpenAI-compatible endpoints, and external Ollama. Remote providers require user credentials; live account entitlements have not been externally validated. |
 | **Google Connectors** | **Functional (Gated)** | Google Drive, Gmail, and Calendar read/write via loopback PKCE; requires user Google Cloud Console config |
-| **ACP/Codex Providers** | **Functional (Gated)** | Cursor, Grok, and Codex run via local stdio JSON-RPC or CLI app-server if installed and authenticated |
-| **Local Model Execution** | **Functional (Gated)** | Ollama can run through a trusted `127.0.0.1` loopback service when the user installs/starts Ollama and pulls a model; no bundled model runtime or downloads |
+| **ACP/Codex Providers** | **Functional (Gated)** | Codex app-server plus Cursor, GitHub Copilot, Grok Build, OpenCode, Kimi, and Mistral Vibe ACP runtimes run only when their local CLI is installed and authenticated. Fable does not read provider-owned session tokens. |
+| **Local Model Execution** | **Functional (Gated)** | Ollama can run through a trusted literal-loopback service when the user installs/starts Ollama and pulls a model; no bundled runtime, downloads, or credential. |
 | **Confidential Connectors** | **Functional (Gated)** | Brokered adapters and fail-closed lifecycle states are implemented for GitHub, Vercel, Notion, Slack, and Linear; deployment, provider configuration, and live OAuth validation remain external |
 | **Optional Cloud Identity** | **Spike (Config-gated)** | Clerk public-client PKCE boundary, keyring storage, and disabled/missing-config status surface exist; production enablement needs live Clerk validation and cloud/team verifier work |
 | **Browser Preview Mode** | **Preview/fixture-only; transport deferred** | Permission architecture, session derivation, and audit redaction implemented; live browser transport deferred |
 | **Mobile Remote Control** | **Local status surface; transport deferred** | Settings reports the native local status honestly. No socket, live pairing, mobile app, or remote execution path is enabled. |
 | **Voice Dictation** | **Preview/Stub** | Composer voice toggle changes UI status; no audio capture or transcription pipeline |
-| **GitHub Copilot Execution** | **Planned (Missing)** | Cataloged in provider list, but execution adapter/runner is not implemented |
+| **Hosted Fable Account & Team Workspaces** | **Foundation only** | Clerk identity and Convex sync foundations exist; mandatory hosted account onboarding and multi-person workspace product flows remain incomplete. |
 | **Signing, Updater, Multi-OS** | **Planned (Missing)** | Unsigned Windows preview build only; macOS/Linux packaging and updater channels are deferred |
 
 ## Brand

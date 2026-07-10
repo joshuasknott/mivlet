@@ -411,7 +411,7 @@ fn disabled_status() -> IdentityStatus {
     IdentityStatus {
         enabled: false,
         state: "disabled".to_string(),
-        message: "Optional Fable cloud identity is not configured.".to_string(),
+        message: "Fable account setup is not configured.".to_string(),
         issuer: None,
         audience: None,
         scopes: Vec::new(),

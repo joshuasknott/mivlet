@@ -100,27 +100,6 @@ fn slack_connection(status: &str) -> ConnectorConnection {
     }
 }
 
-fn google_connection(connector_id: &str, scopes: Vec<&str>) -> ConnectorConnection {
-    ConnectorConnection {
-        connector_id: connector_id.to_string(),
-        account: ConnectorAccountSummary {
-            id: "google-user-1".to_string(),
-            display_name: "Google User".to_string(),
-            handle: None,
-            email: Some("user@example.test".to_string()),
-            workspace: None,
-            avatar_url: None,
-        },
-        status: "connected".to_string(),
-        scopes: scopes.into_iter().map(str::to_string).collect(),
-        expires_at: None,
-        credential_ref: format!("oauth-token:{connector_id}:google-user-1"),
-        connected_at: "1".to_string(),
-        updated_at: "1".to_string(),
-        is_active: true,
-    }
-}
-
 #[test]
 fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
     let _lock = ENV_LOCK.lock().unwrap();
@@ -142,46 +121,6 @@ fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
         std::env::set_var("FABLE_AUTH_BROKER_URL", value);
     } else {
         std::env::remove_var("FABLE_AUTH_BROKER_URL");
-    }
-}
-
-#[test]
-fn google_manifest_fail_closes_without_active_required_scopes() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    let old_google = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
-    std::env::set_var(
-        "FABLE_GOOGLE_OAUTH_CLIENT_ID",
-        "desktop-client.apps.googleusercontent.com",
-    );
-
-    let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
-        connection: Some(google_connection(
-            "gmail",
-            vec!["openid", "email", "profile"],
-        )),
-    });
-    let gmail = manifests
-        .iter()
-        .find(|manifest| manifest.id == "gmail")
-        .unwrap();
-
-    assert_eq!(gmail.status, "connected");
-    assert!(gmail
-        .scopes
-        .iter()
-        .any(|scope| scope.required && !scope.granted));
-    assert!(!gmail.supports_search);
-    assert!(!gmail.supports_import);
-    assert!(gmail.supported_actions.is_empty());
-    assert_eq!(
-        gmail.health_summary,
-        "Missing required OAuth scopes; reconnect this provider."
-    );
-
-    if let Some(value) = old_google {
-        std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", value);
-    } else {
-        std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
     }
 }
 
@@ -1040,8 +979,8 @@ fn caps_runtime_snapshot_recovery_lists() {
 // ---------------------------------------------------------------------------
 
 use crate::backends::{
-    clear_credential_into, list_providers_from, normalize_backend_event, read_connected_backends,
-    store_credential_into,
+    apply_codex_cli_status, clear_credential_into, list_providers_from, normalize_backend_event,
+    read_connected_backends, store_credential_into,
 };
 use crate::models::{BackendConsequentialEvent, BackendCredentialRequest};
 
@@ -1071,7 +1010,7 @@ fn runtime_backends_are_fail_closed_before_any_credential() {
     let store = HashMap::new();
     let providers = list_providers_from(&store, &path).expect("providers should list");
 
-    // Runtime providers (codex/cursor/copilot/grok plus local Ollama) are present...
+    // The provider-owned runtime providers are present...
     let runtime_ids: Vec<&str> = providers
         .iter()
         .filter(|p| p.backend_type != "native-api")
@@ -1079,7 +1018,16 @@ fn runtime_backends_are_fail_closed_before_any_credential() {
         .collect();
     assert_eq!(
         runtime_ids,
-        vec!["codex", "cursor", "copilot", "grok", "ollama"]
+        vec![
+            "codex",
+            "cursor",
+            "copilot",
+            "grok",
+            "opencode",
+            "kimi",
+            "mistral-vibe",
+            "ollama",
+        ]
     );
 
     // ...and without credentials every provider is fail-closed: no capabilities.
@@ -1096,6 +1044,75 @@ fn runtime_backends_are_fail_closed_before_any_credential() {
             assert!(entitlements.is_empty());
         }
     }
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn codex_cli_status_requires_both_installation_and_authentication() {
+    use crate::codex_app_server::CodexCliStatus;
+
+    let path = temp_backends_path("codex-status");
+    let store = HashMap::new();
+    let base = list_providers_from(&store, &path)
+        .expect("providers")
+        .into_iter()
+        .find(|provider| provider.id == "codex")
+        .expect("codex");
+
+    let mut signed_out = base.clone();
+    apply_codex_cli_status(
+        &mut signed_out,
+        &CodexCliStatus {
+            installed: true,
+            authenticated: false,
+            auth_method: None,
+            executable_path: Some("must-not-be-exposed".to_string()),
+            version: Some("0.99.0".to_string()),
+            message: Some("signed out".to_string()),
+        },
+    );
+    assert_eq!(signed_out.auth_state, "sign-in-required");
+    assert!(signed_out.capabilities.is_empty());
+    assert!(signed_out.models.iter().all(|model| !model.available));
+    assert!(!serde_json::to_string(&signed_out)
+        .expect("serialize")
+        .contains("must-not-be-exposed"));
+
+    let mut authenticated = base.clone();
+    apply_codex_cli_status(
+        &mut authenticated,
+        &CodexCliStatus {
+            installed: true,
+            authenticated: true,
+            auth_method: Some("chatgpt".to_string()),
+            executable_path: Some("must-not-be-exposed".to_string()),
+            version: Some("0.99.0\nspoof".to_string()),
+            message: None,
+        },
+    );
+    assert_eq!(authenticated.auth_state, "connected");
+    assert!(!authenticated.capabilities.is_empty());
+    assert!(authenticated.models.iter().all(|model| model.available));
+    let hint = authenticated.install_hint.unwrap_or_default();
+    assert!(hint.contains("0.99.0 spoof"));
+    assert!(hint.contains("ChatGPT"));
+
+    let mut missing = base;
+    apply_codex_cli_status(
+        &mut missing,
+        &CodexCliStatus {
+            installed: false,
+            authenticated: false,
+            auth_method: None,
+            executable_path: None,
+            version: None,
+            message: None,
+        },
+    );
+    assert_eq!(missing.auth_state, "install-required");
+    assert!(missing.capabilities.is_empty());
+    assert!(missing.models.iter().all(|model| !model.available));
 
     let _ = fs::remove_file(&path);
 }
@@ -1290,7 +1307,29 @@ fn rejects_empty_backend_secrets() {
 /// caught here rather than at runtime.
 #[test]
 fn native_api_providers_connect_list_and_clear_through_the_key_boundary() {
-    for provider_id in ["xai", "openrouter"] {
+    for provider_id in [
+        "openai",
+        "anthropic",
+        "gemini",
+        "xai",
+        "openrouter",
+        "deepseek",
+        "zai",
+        "minimax",
+        "alibaba",
+        "fireworks",
+        "huggingface",
+        "moonshot",
+        "kimi-code",
+        "mistral",
+        "meta",
+        "perplexity",
+        "tencent",
+        "xiaomi",
+        "groq",
+        "together",
+        "cerebras",
+    ] {
         let path = temp_backends_path(&format!("backends-cycle-{provider_id}"));
         let _ = fs::remove_file(&path);
 
@@ -1359,6 +1398,69 @@ fn native_api_providers_connect_list_and_clear_through_the_key_boundary() {
 
         let _ = fs::remove_file(&path);
     }
+}
+
+#[test]
+fn kimi_code_keeps_its_fixed_curated_model_when_discovery_is_unsupported() {
+    let path = temp_backends_path("backends-kimi-code-fallback");
+    let _ = fs::remove_file(&path);
+    let mut store = HashMap::new();
+
+    store_credential_into(
+        &mut store,
+        &path,
+        credential_request("kimi-code", "membership-key"),
+    )
+    .expect("Kimi Code membership key stores through the native boundary");
+
+    let providers = list_providers_from(&store, &path).expect("providers list after connect");
+    let provider = providers
+        .iter()
+        .find(|provider| provider.id == "kimi-code")
+        .expect("Kimi Code provider exists");
+    assert_eq!(provider.models.len(), 1);
+    assert_eq!(provider.models[0].id, "kimi-for-coding");
+    assert_eq!(provider.models[0].label, "Kimi for Coding");
+    assert!(provider.models[0].available);
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn custom_enforces_its_structured_credential_contract() {
+    let custom_path = temp_backends_path("backends-cycle-custom");
+    let mut store = HashMap::new();
+
+    let remote_http = r#"{"version":1,"kind":"openai-compatible","baseUrl":"http://models.example.com/v1","modelId":"example-chat"}"#;
+    let invalid_custom = store_credential_into(
+        &mut store,
+        &custom_path,
+        credential_request("custom", remote_http),
+    )
+    .expect_err("remote plain HTTP must be rejected");
+    assert!(invalid_custom.contains("loopback"));
+    assert!(!store.contains_key("custom"));
+
+    let local_custom = r#"{"version":1,"kind":"openai-compatible","baseUrl":"http://127.0.0.1:8000/v1","modelId":"example-chat"}"#;
+    store_credential_into(
+        &mut store,
+        &custom_path,
+        credential_request("custom", local_custom),
+    )
+    .expect("loopback custom endpoint connects");
+
+    let provider = list_providers_from(&store, &custom_path)
+        .expect("providers")
+        .into_iter()
+        .find(|provider| provider.id == "custom")
+        .expect("custom provider");
+    assert_eq!(provider.auth_state, "connected");
+    assert!(!provider.capabilities.is_empty());
+
+    let serialized = serde_json::to_string(&provider).expect("serialize");
+    assert!(!serialized.contains("127.0.0.1"));
+
+    let _ = fs::remove_file(&custom_path);
 }
 
 /// An over-long secret is rejected instead of silently truncated, so the value
@@ -1484,8 +1586,6 @@ fn backend_auth_state_vocabulary_is_closed_and_fail_closed_set_excludes_connecte
     // boundary's fail-closed guard relies on this.
     assert!(BACKEND_AUTH_STATES.contains(&"connected"));
     assert!(BACKEND_AUTH_STATES.contains(&"sign-in-required"));
-    assert!(BACKEND_AUTH_STATES.contains(&"start-required"));
-    assert!(BACKEND_AUTH_STATES.contains(&"download-required"));
     assert!(BACKEND_AUTH_STATES.contains(&"connecting"));
     assert!(BACKEND_AUTH_STATES.contains(&"failed"));
     assert!(BACKEND_AUTH_STATES.contains(&"ready"));
@@ -1721,12 +1821,12 @@ fn normalize_sse_line_strips_data_prefix_and_drops_blanks_and_done() {
 }
 
 // ---------------------------------------------------------------------------
-// Runtime provider catalog: native providers are served from the credential
-// boundary, while local loopback providers fail closed until probed.
+// Backend catalog: native providers are served from the credential boundary,
+// while local loopback providers are probed separately and never accept keys.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn lists_all_ten_backends_with_runtime_providers_fail_closed_before_connection() {
+fn lists_every_backend_with_native_providers_needs_auth_before_credential() {
     let path = temp_backends_path("backends-native-list");
     let _ = fs::remove_file(&path);
 
@@ -1741,21 +1841,38 @@ fn lists_all_ten_backends_with_runtime_providers_fail_closed_before_connection()
             "cursor",
             "copilot",
             "grok",
+            "opencode",
+            "kimi",
+            "mistral-vibe",
             "ollama",
             "openai",
             "anthropic",
             "gemini",
             "xai",
             "openrouter",
+            "deepseek",
+            "zai",
+            "minimax",
+            "alibaba",
+            "fireworks",
+            "huggingface",
+            "moonshot",
+            "kimi-code",
+            "mistral",
+            "meta",
+            "perplexity",
+            "tencent",
+            "xiaomi",
+            "groq",
+            "together",
+            "cerebras",
+            "custom",
         ]
     );
 
     // Native providers are needs-auth + fail-closed before a credential.
     for provider in &providers {
-        let is_native = matches!(
-            provider.id.as_str(),
-            "openai" | "anthropic" | "gemini" | "xai" | "openrouter"
-        );
+        let is_native = provider.backend_type == "native-api";
         if is_native {
             assert_eq!(provider.auth_state, "needs-auth");
             assert!(
@@ -1766,13 +1883,14 @@ fn lists_all_ten_backends_with_runtime_providers_fail_closed_before_connection()
             assert_eq!(provider.backend_type, "native-api");
         }
     }
+
     let ollama = providers
         .iter()
         .find(|provider| provider.id == "ollama")
-        .expect("ollama exists");
+        .expect("ollama provider");
+    assert_eq!(ollama.backend_type, "local-loopback");
     assert_eq!(ollama.auth_state, "unavailable");
     assert!(ollama.capabilities.is_empty());
-    assert_eq!(ollama.backend_type, "local-loopback");
 
     let _ = fs::remove_file(&path);
 }

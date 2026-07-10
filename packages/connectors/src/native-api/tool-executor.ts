@@ -71,8 +71,12 @@ export interface ApprovalGate {
  * approval UI unblocks the tool call the agent loop is awaiting.
  */
 export interface ToolApprovalGate extends ApprovalGate {
-  /** Register a pending tool call (keyed by its approval id) before the executor awaits. */
-  register(approval: ApprovalRequest): void;
+  /**
+   * Register a pending tool call before the executor awaits. Returns true only
+   * when the shell needs to surface a fresh approval; exact standing grants and
+   * duplicate pending requests return false.
+   */
+  register(approval: ApprovalRequest): boolean;
   /** Drive a pending call to "granted" (the executor proceeds). */
   resolveGrant(approvalId: string): void;
   /** Drive a pending call to "denied" (the executor refuses). */
@@ -129,11 +133,15 @@ export class ProductionApprovalGate implements ApprovalGate {
   }
 
   /** Register a pending call (keyed by approval id) before the executor awaits. */
-  register(approval: ApprovalRequest): void {
-    if (this.pending.has(approval.id)) return;
+  register(approval: ApprovalRequest): boolean {
+    if (this.standingGrants.some((grant) => grantMatches(grant, approval))) {
+      return false;
+    }
+    if (this.pending.has(approval.id)) return false;
     // Create a deferred with no resolver yet; waitForDecision wires the promise
     // (and adopts an early resolution from `settled` if one is waiting).
     this.pending.set(approval.id, { approval });
+    return true;
   }
 
   /** Grant a pending call by approval id (drives its waiter to "granted"). */

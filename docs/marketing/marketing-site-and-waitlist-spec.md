@@ -1,11 +1,13 @@
 # Fable Marketing Site & Privacy-Conscious Waitlist — Implementation Specification
 
-**Status:** Draft for implementation  
+**Status:** Superseded for public use — retain only as historical implementation reference.
 **Branch target:** `grok/overnight-waitlist-spec`  
 **Last audited against product evidence:** 2026-07-03  
 **Evidence sources:** `docs/product/status.md`, `docs/product/connectors.md`, `docs/product/release.md`, `docs/brand.md`, `docs/connectors/auth-broker.md`, `README.md`
 
 This document is the implementation-grade specification for a public marketing site and a separate privacy-conscious waitlist service. It does **not** authorize implementation of the desktop app, auth broker deployment, domain registration, or external resource creation in this task.
+
+> **Decision override (2026-07-10):** Do not use this document for public copy until it is rewritten. Fable is now planned as a hosted-account product with a mandatory Clerk-backed Fable identity; team workspaces are multi-person environments; an open-source release remains undecided; and no public release is authorised. The authoritative product order is `docs/product/master-build-plan.md`.
 
 **Related artifacts:** [Documentation index](./README.md) · [Waitlist API schema](./waitlist-api.schema.json) · [Legal drafts](./legal/) (`DRAFT — LEGAL REVIEW REQUIRED`)
 

@@ -731,13 +731,13 @@ describe("useNativeAgent", () => {
     {
       name: "openrouter (openai-compat shaper)",
       providerId: "openrouter",
-      model: "openrouter:auto",
+      model: "openrouter/auto",
       lines: [
         'data: {"choices":[{"delta":{"content":"hi"}}]}',
         'data: {"choices":[{"finish_reason":"stop"}]}'
       ],
       expectBody: (body: Record<string, unknown>) => {
-        expect(body.model).toBe("openrouter:auto");
+        expect(body.model).toBe("openrouter/auto");
         expect(body.stream).toBe(true);
         expect(Array.isArray(body.messages)).toBe(true);
       }
@@ -785,6 +785,36 @@ describe("useNativeAgent", () => {
       expect(result.current.state.lastError).toBeNull();
     }
   );
+
+  it("routes through the provider selected by the combined model picker", async () => {
+    installDesktopRuntime();
+    mocks.lines = [
+      'data: {"choices":[{"delta":{"content":"selected"}}]}',
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ];
+    const xai: BackendProvider = {
+      ...connectedOpenAiProvider(),
+      id: "xai",
+      label: "xAI",
+      models: [{ id: "grok-4", label: "Grok 4", available: true }]
+    };
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider(), xai],
+        activeProviderId: "xai"
+      })
+    );
+
+    await act(async () => {
+      await result.current.run({ ...baseRequest, model: "grok-4" });
+    });
+
+    expect(mocks.streamRequests).toHaveLength(1);
+    expect(mocks.streamRequests[0]).toMatchObject({
+      providerId: "xai",
+      model: "grok-4"
+    });
+  });
 
   it("provider errors surface into lastError through the transport control channel", async () => {
     installDesktopRuntime();

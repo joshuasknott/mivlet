@@ -1028,6 +1028,8 @@ export async function listenRuntimeLocalModelEvents(
 
 export interface RuntimeCodexStatus {
   installed: boolean;
+  authenticated: boolean;
+  authMethod?: "chatgpt" | "api-key" | "provider-login";
   executablePath?: string;
   version?: string;
   message?: string;
@@ -1069,7 +1071,11 @@ export async function getRuntimeCodexStatus() {
   try {
     return await invoke<RuntimeCodexStatus>("codex_cli_status");
   } catch {
-    return { installed: false, message: "Fable could not inspect the Codex CLI." };
+    return {
+      installed: false,
+      authenticated: false,
+      message: "Fable could not inspect the Codex CLI."
+    };
   }
 }
 
@@ -1135,7 +1141,7 @@ export async function listenRuntimeCodexEvents(
 // ---------------------------------------------------------------------------
 // ACP (Agent Client Protocol) CLI process bridge.
 //
-// Rust owns the CLI child process for ACP providers (Cursor, Grok): it spawns
+// Rust owns the CLI child process for catalog-declared ACP providers: it spawns
 // the provider's CLI with piped stdio, emits each stdout line on
 // `arden://acp/<sessionId>`, writes stdin frames on command, and kills the
 // child on close. Auth is provider-owned, so Fable never collects a subscription
@@ -1150,6 +1156,8 @@ export interface RuntimeSpawnAcpProcessRequest {
 
 export interface RuntimeSpawnedAcpProcess {
   sessionId: string;
+  /** Canonical workspace directory the Rust boundary assigned to the child. */
+  cwd: string;
 }
 
 export async function spawnRuntimeAcpProcess(request: RuntimeSpawnAcpProcessRequest) {

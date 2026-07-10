@@ -1,137 +1,241 @@
 /**
- * Normalize ACP (Agent Client Protocol) notifications into Fable's universal
- * {@link BackendAgentEvent} stream.
+ * Normalize ACP v1 `session/update` notifications into Fable's universal
+ * event stream and shape ACP permission requests for Fable's approval queue.
  *
- * This is the provider-neutral mapping layer: the CLI's JSON-RPC notifications
- * become the same events the native-API loop emits, so `useNativeAgent` and the
- * shell's event handling stay byte-for-byte unchanged. The tool-call approval
- * is built with the **same** `buildToolApproval` the native path uses, so ACP
- * tool calls route through Fable's approval queue identically.
- *
- * Forward-compatible: an unknown notification method yields `null` so a new CLI
- * method can never break the run — the session loop simply ignores it. A
- * malformed notification (missing required fields) also yields `null`.
+ * ACP agents execute their own tools. Fable therefore never sends a synthetic
+ * tool result or re-executes the action. Instead, a `session/request_permission`
+ * request becomes an approval-only tool call; after the user decides, the
+ * session replies with an ACP `allow_once`/`reject_once` option.
  */
 
-import type { BackendAgentEvent } from "@fable/protocol";
-import { buildToolApproval } from "../../../native-api/approvals";
-import { normalizeBackendErrorEvent } from "../../utils/errors";
+import type {
+  ApprovalRequest,
+  ApprovalRiskLevel,
+  BackendAgentEvent,
+  PermissionMode
+} from "@fable/protocol";
 import type { AcpNotification } from "./protocol";
 
-/** A best-effort extraction of assistant text from a message's params. */
-function extractText(params: unknown): string | null {
-  if (!params || typeof params !== "object") return null;
-  const obj = params as Record<string, unknown>;
+export const ACP_PERMISSION_TOOL = "acp-permission";
 
-  // Simple form: { content: "..." }
-  if (typeof obj.content === "string" && obj.content.length > 0) {
-    return obj.content;
+type JsonObject = Record<string, unknown>;
+
+function object(value: unknown): JsonObject | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : null;
+}
+
+function finiteNumber(...values: unknown[]): number {
+  const value = values.find(
+    (candidate): candidate is number =>
+      typeof candidate === "number" && Number.isFinite(candidate)
+  );
+  return value === undefined ? 0 : Math.max(0, Math.trunc(value));
+}
+
+function boundedString(value: unknown, limit = 16_384): string {
+  if (typeof value === "string") return value.slice(0, limit);
+  if (value === undefined || value === null) return "";
+  try {
+    return JSON.stringify(value).slice(0, limit);
+  } catch {
+    return "";
   }
+}
 
-  // Structured parts form: { parts: [{ type: "text", text }, ...] }
-  if (Array.isArray(obj.parts)) {
-    const joined = obj.parts
-      .filter((part): part is { type: string; text: string } => {
-        if (!part || typeof part !== "object") return false;
-        const p = part as Record<string, unknown>;
-        return p.type === "text" && typeof p.text === "string";
-      })
-      .map((part) => part.text)
-      .join("");
-    return joined.length > 0 ? joined : null;
+function extractContentText(value: unknown): string | null {
+  if (typeof value === "string") return value.length > 0 ? value : null;
+  const content = object(value);
+  if (!content) return null;
+  if (content.type === "text" && typeof content.text === "string") {
+    return content.text.length > 0 ? content.text : null;
   }
-
   return null;
 }
 
-function asNumber(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : 0;
+/** Map an ACP prompt result's stop reason into Fable's closed vocabulary. */
+export function finishReasonForAcpStopReason(
+  stopReason: unknown
+): Extract<BackendAgentEvent, { type: "done" }>["finishReason"] {
+  if (stopReason === "max_tokens" || stopReason === "max_output_tokens") {
+    return "length";
+  }
+  if (stopReason === "refusal" || stopReason === "error") return "error";
+  return "stop";
 }
 
 /**
- * Map a single notification to a {@link BackendAgentEvent}, or null when the
- * notification is unknown, irrelevant, or malformed.
- *
- * @param providerId The ACP provider id (cursor/grok) — used for the approval.
- * @param frame The notification to normalize.
+ * Normalize a standard ACP v1 `session/update` notification. Unknown update
+ * variants are ignored for forward compatibility.
  */
 export function normalizeAcpNotification(
-  providerId: string,
+  _providerId: string,
   frame: AcpNotification
 ): BackendAgentEvent | null {
-  const params = frame.params;
-  switch (frame.method) {
-    case "session/message": {
-      const text = extractText(params);
+  if (frame.method !== "session/update") return null;
+  const params = object(frame.params);
+  const update = object(params?.update);
+  if (!update || typeof update.sessionUpdate !== "string") return null;
+
+  switch (update.sessionUpdate) {
+    case "agent_message_chunk": {
+      const text = extractContentText(update.content);
       return text === null ? null : { type: "text-delta", text };
     }
 
-    case "tool/call": {
-      if (!params || typeof params !== "object") return null;
-      const obj = params as Record<string, unknown>;
-      const callId = typeof obj.callId === "string" ? obj.callId : null;
-      const tool = typeof obj.tool === "string" ? obj.tool : null;
-      if (!callId || !tool) return null;
-      const args = typeof obj.arguments === "string" ? obj.arguments : "";
-      // Reuse the native-API approval builder so ACP tool calls are
-      // byte-compatible (same decisions, consequence wording, fail-closed
-      // behavior for unregistered tools).
-      const approval = buildToolApproval(providerId, tool, args);
-      return { type: "tool-call", callId, tool, arguments: args, approval };
-    }
-
-    case "tool/result": {
-      if (!params || typeof params !== "object") return null;
-      const obj = params as Record<string, unknown>;
-      const callId = typeof obj.callId === "string" ? obj.callId : null;
-      if (!callId) return null;
-      const ok = obj.ok !== false; // default to success unless explicitly false
-      const output = typeof obj.output === "string" ? obj.output : "";
-      return { type: "tool-result", callId, ok, output };
-    }
-
-    case "session/usage": {
-      if (!params || typeof params !== "object") return null;
-      const obj = params as Record<string, unknown>;
-      // CLIs (subscription-backed) rarely report cost; when absent, label the
-      // cost as estimated (mirrors the native loop's cost-estimate convention).
-      const hasCost = typeof obj.costUsd === "number" && Number.isFinite(obj.costUsd);
+    case "usage_update": {
+      const cost = object(update.cost);
+      const currency =
+        typeof cost?.currency === "string" ? cost.currency.toUpperCase() : null;
+      const exactUsd =
+        currency === "USD" && typeof cost?.amount === "number"
+          ? cost.amount
+          : typeof update.costUsd === "number"
+            ? update.costUsd
+            : null;
       return {
         type: "usage",
-        inputTokens: asNumber(obj.inputTokens),
-        outputTokens: asNumber(obj.outputTokens),
-        costUsd: hasCost ? (obj.costUsd as number) : 0,
-        costEstimated: hasCost ? undefined : true
+        inputTokens: finiteNumber(
+          update.inputTokens,
+          update.input_tokens,
+          update.used
+        ),
+        outputTokens: finiteNumber(update.outputTokens, update.output_tokens),
+        costUsd: exactUsd ?? 0,
+        costEstimated: exactUsd === null ? true : undefined,
+        costUnknown: exactUsd === null ? true : undefined
       };
     }
 
-    case "session/done": {
-      const stopReason =
-        params && typeof params === "object"
-          ? (params as Record<string, unknown>).stopReason
-          : undefined;
-      const finishReason =
-        stopReason === "length"
-          ? "length"
-          : stopReason === "tool-calls"
-            ? "tool-calls"
-            : "stop";
-      return { type: "done", finishReason };
-    }
-
-    case "session/error": {
-      const message =
-        params && typeof params === "object"
-          ? (params as Record<string, unknown>).message
-          : undefined;
-      return normalizeBackendErrorEvent({
-        type: "error",
-        message: typeof message === "string" && message.length > 0 ? message : "ACP session error."
-      });
+    case "tool_call_update": {
+      const callId =
+        typeof update.toolCallId === "string" ? update.toolCallId : null;
+      if (!callId) return null;
+      if (update.status !== "completed" && update.status !== "failed") {
+        return null;
+      }
+      return {
+        type: "tool-result",
+        callId,
+        ok: update.status === "completed",
+        output: boundedString(update.rawOutput ?? update.content)
+      };
     }
 
     default:
-      // Unknown notification method: ignore (forward-compatible, never raise).
       return null;
   }
+}
+
+export interface AcpPermissionToolCall {
+  callId: string;
+  arguments: string;
+  approval: ApprovalRequest;
+}
+
+function permissionLevel(kind: unknown): {
+  mode: PermissionMode;
+  riskLevel: ApprovalRiskLevel;
+} {
+  switch (kind) {
+    case "read":
+    case "search":
+    case "think":
+      return { mode: "read-only", riskLevel: "low" };
+    case "fetch":
+      return { mode: "read-only", riskLevel: "medium" };
+    case "edit":
+    case "move":
+      return { mode: "full-access", riskLevel: "high" };
+    case "delete":
+    case "execute":
+    case "switch_mode":
+    case "other":
+    default:
+      return { mode: "full-access", riskLevel: "critical" };
+  }
+}
+
+function safeId(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+}
+
+function previewInput(rawInput: unknown): string[] {
+  const input = object(rawInput);
+  if (!input) {
+    const preview = boundedString(rawInput, 240);
+    return preview ? [`input: ${preview}`] : [];
+  }
+  return Object.entries(input)
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${boundedString(value, 180)}`);
+}
+
+/**
+ * Shape an ACP ToolCall from `session/request_permission` into a one-time
+ * Fable approval. The reserved tool name tells the desktop executor to await
+ * the existing approval gate without executing a second copy of the action.
+ */
+export function buildAcpPermissionToolCall(
+  providerId: string,
+  sessionId: string,
+  requestId: string | number,
+  toolCallValue: unknown
+): AcpPermissionToolCall | null {
+  const toolCall = object(toolCallValue);
+  if (!toolCall || typeof toolCall.toolCallId !== "string") return null;
+
+  const rawCallId = toolCall.toolCallId;
+  if (
+    rawCallId.length === 0 ||
+    rawCallId.length > 512 ||
+    /[\u0000-\u001f\u007f]/.test(rawCallId)
+  ) {
+    return null;
+  }
+
+  const title =
+    typeof toolCall.title === "string" && toolCall.title.trim().length > 0
+      ? toolCall.title.trim().slice(0, 160)
+      : "provider tool action";
+  const kind = typeof toolCall.kind === "string" ? toolCall.kind : "other";
+  const { mode, riskLevel } = permissionLevel(kind);
+  const dataUsed = [`kind: ${kind}`, `action: ${title}`, ...previewInput(toolCall.rawInput)].slice(
+    0,
+    6
+  );
+  const idSuffix =
+    safeId(`${sessionId}-${String(requestId)}-${rawCallId}`) || "request";
+  const action = `${ACP_PERMISSION_TOOL} ${title}`.slice(0, 160);
+  const argumentsJson = JSON.stringify({
+    toolCallId: rawCallId,
+    title,
+    kind,
+    rawInput: toolCall.rawInput ?? null
+  });
+
+  return {
+    callId: rawCallId,
+    arguments: argumentsJson,
+    approval: {
+      id: `acp-${safeId(providerId) || "provider"}-${idSuffix}`.slice(0, 120),
+      service: providerId,
+      action,
+      mode,
+      riskLevel,
+      dataUsed,
+      consequence: `Allow ${providerId} to run “${title}” once. The provider executes the action; Fable only returns the permission decision.`,
+      requestedAt: new Date().toISOString(),
+      decisions: ["once", "modify", "deny"],
+      confirmationPhrase:
+        mode === "full-access" && (riskLevel === "high" || riskLevel === "critical")
+          ? `approve ${providerId} action`
+          : undefined
+    }
+  };
 }

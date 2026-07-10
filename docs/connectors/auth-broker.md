@@ -130,9 +130,13 @@ paths (`connector_api.rs`, `google.rs`, `collaboration_connectors.rs`,
 
 These guarantees hold whether or not a broker is deployed:
 
-- **API-key agent providers** (openai, anthropic, gemini, xai, openrouter) store
-  their key in OS secure storage and call the provider directly. No broker
-  dependency.
+- **Native API providers** store their key or custom endpoint configuration in
+  OS secure storage and call the inference provider directly. This includes
+  OpenAI, Anthropic, Gemini, xAI, OpenRouter, DeepSeek, Z.AI, MiniMax, Alibaba
+  Model Studio, Fireworks AI, Hugging Face, Kimi Code, Moonshot, Mistral, Meta Llama API,
+  Perplexity, Tencent TokenHub, Xiaomi MiMo, Groq, Together AI, Cerebras, and
+  Custom. Ollama calls the local loopback service without an API key. None has
+  an auth-broker dependency.
 - **Local Files, memory, approvals, and the runtime snapshot** are entirely
   local and have no external auth.
 

@@ -280,6 +280,14 @@
   font-weight: 500;
 }
 
+.composer-model > .composer-model__provider {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+}
+
 .composer-permissions-card {
   gap: 8px;
   padding: 0 12px;
@@ -447,7 +455,22 @@
 }
 
 .composer-model-menu {
-  min-width: 190px;
+  min-width: 220px;
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+}
+
+.composer-model-menu button {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.composer-model-menu__provider {
+  display: inline-flex;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
 }
 
 .composer-control-anchor--model .composer-menu {

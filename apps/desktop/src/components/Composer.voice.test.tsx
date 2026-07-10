@@ -36,7 +36,16 @@ function propsFor(
     onOpenTool: vi.fn(),
     onRunCommand: vi.fn(),
     onFileChange: vi.fn(),
-    models: [{ id: "test", label: "Test", available: true }],
+    models: [
+      {
+        id: "test",
+        modelId: "test",
+        providerId: "openai",
+        providerLabel: "OpenAI",
+        label: "Test",
+        available: true
+      }
+    ],
     selectedModelId: "test",
     selectedModelLabel: "Test",
     onSelectModel: vi.fn(),
