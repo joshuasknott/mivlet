@@ -401,9 +401,19 @@ fn test_prevention_of_cross_workspace_export() {
                 let sealed = store.seal_payload(b"{}", &format!("thread:{thread_id}"))?;
                 tx.execute(
                     "INSERT INTO thread
-                   (id, project_id, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, 'now', 'now', ?3, ?4);",
-                    rusqlite::params![thread_id, project_id, sealed.ciphertext, sealed.nonce],
+                   (id, workspace_id, project_id, created_at, updated_at, payload, payload_nonce)
+                 VALUES (?1, ?2, ?3, 'now', 'now', ?4, ?5);",
+                    rusqlite::params![
+                        thread_id,
+                        if project_id == "alpha-project" {
+                            "alpha"
+                        } else {
+                            "default"
+                        },
+                        project_id,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
                 )?;
             }
             Ok(())

@@ -906,7 +906,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_parent_cascades_referential_children() {
+    fn deleting_project_keeps_its_thread_as_a_standalone_conversation() {
         let store = Store::open_in_memory(vault()).unwrap();
         let sealed = store.seal_payload(b"{}", "project:p").unwrap();
         let thread = store.seal_payload(b"{}", "thread:t").unwrap();
@@ -930,6 +930,6 @@ mod tests {
                     .map_err(StoreError::from)
             })
             .unwrap();
-        assert_eq!(count, 0);
+        assert_eq!(count, 1);
     }
 }
