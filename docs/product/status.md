@@ -6,7 +6,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 > **Document boundary:** [Product Blueprint](vision.md) defines the approved final state. [Master Build Plan](master-build-plan.md) is the ordered execution tracker. This file reports current implementation facts only.
 
-> **Approved workspace direction:** Fable requires a Clerk-backed account, but Clerk supplies identity/session only. Fable owns internal users, workspaces, memberships, and authorization. One workspace model supports one or many members; there is no separate Personal Home, Team Workspace type, Fable Organization layer, or Clerk Organization tenancy. The existing Clerk and Convex code below is a config-gated foundation, not fulfilment of that direction.
+> **Approved workspace direction:** Fable requires a Clerk-backed account, but Clerk supplies identity/session only. Fable owns internal users, workspaces, memberships, and authorization. One workspace model supports one or many members; there is no separate Personal Home, Team Workspace type, Fable Organization layer, or Clerk Organization tenancy. The implementation remains configuration-gated until live Clerk and Convex validation is performed.
 
 ## Repo Shape
 
@@ -18,9 +18,9 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Implemented
 
-- Product spine (**Wave 0C foundation implemented**): accepted ADRs and `@fable/protocol` contracts govern the ontology, identity/workspace tenancy, and SQLite/Convex authority split. Clerk now supplies authentication facts only. Convex owns stable internal users, external identity links, workspaces, memberships, invitations, devices, and hosted authorization. Encrypted SQLite schema v8 mirrors the Fable control plane and carries workspace-scoped outbox, cursor, shadow, conflict, and tombstone envelopes through a forward-only v7 migration. Product-spine parity, migration rollback/data-preservation, identity ambiguity, device/member binding, and cross-workspace isolation checks are integrated. Live account onboarding and the hosted sync adapter remain later product slices.
+- Account and workspace (**Wave 1A implementation complete; live validation open**): accepted ADRs and `@fable/protocol` contracts govern identity and tenancy. Clerk supplies authentication facts only; Convex owns stable internal users, identity links, workspaces, memberships, invitations, devices, and hosted authorization. Encrypted SQLite schema v10 stores the per-account workspace directory, active selection, device mirror, and workspace-scoped sync state. The native adapter bootstraps an initial workspace idempotently, reconciles and creates workspaces, switches isolated runtime scope, and revokes account devices without exposing bearer tokens or arbitrary hosted calls to React.
 - Structural boundaries (**Wave 0D implemented**): the desktop `App` is now a small query-provider/composition entry over typed shell modules; agent/approval/voice wiring, lazy routes, model selection, and workspace presentation have explicit seams. `useShellRuntime` retains its stable facade while public types, default/preview policy, and backend normalization live in focused modules with regression tests. The Rust scheduler keeps its public command facade while state, events, pure transitions, persistence, orchestration, and tests are separated. The legacy protocol root is a compatibility barrel over account/cloud, approvals, agent-runtime, scheduling/workflow, and remote-control domains; executable checks preserve root/direct-domain exports and Spine parity.
-- Desktop shell: local-profile onboarding, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
+- Desktop shell: Clerk account and provider onboarding, verified account display, workspace creation/switching, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
 - Composer: supports text entry, slash command insertion, local file import, opt-in browser dictation where the runtime exposes speech recognition, model selection, permission selection, and native-agent submit path when a connected native backend exists.
 - Protocol package: defines approvals, memory, connectors, backend providers, runtime snapshots, native agent events, native tool specs, and tool-call request shapes.
 - Local file import: supports `txt`, `md`, `markdown`, `json`, `csv`, `yaml`, and `yml`; rejects empty files, unsupported extensions, changed file sizes, and files over 2 MB; imported files are untrusted local knowledge with a 6,000-character preview.
@@ -42,8 +42,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   (default `http://127.0.0.1:11434`). Fable does not bundle Ollama, start it,
   pull models, or broaden webview/network egress. Prompt and response payloads
   are not logged; action history records provider/model/request status only.
-- Clerk identity: a public-client PKCE foundation exists behind a missing-configuration gate. Credentials and pending PKCE state use a dedicated identity keyring service; React receives only secret-free issuer/subject, opaque session/authentication references, timestamps, and verified display attributes. Clerk organization claims neither grant nor block Fable access. Mandatory sign-in, recovery, global product gating, and live identity reconciliation are not yet complete.
-- Cloud/team backend: Convex is the canonical hosted control plane for Fable-owned users, identity links, workspaces, memberships, invitations, roles, devices, and shared-project authorization. The schema and policy fail closed on ambiguous identities, inactive membership/workspace/device state, cross-workspace access, conflicting authority bindings, last-owner changes, stale revisions, replay/idempotency conflicts, and tombstone resurrection. SQLite v8 provides the encrypted local mirror and sync envelopes; the live Convex network adapter and user-visible shared-workspace journey remain incomplete.
+- Clerk identity: the native public-client PKCE path enforces mandatory account gating, recovery, sign-out, configuration drift, expiry, revocation, issuer, audience, authorized-party, and signing-key validation. Credentials and pending PKCE state use a dedicated identity keyring service; React receives only secret-free verified account data and opaque references. Clerk organization claims neither grant nor block Fable access. Production credentials and a real live session have not been validated in this checkout.
+- Cloud/team backend: Convex is the canonical hosted control plane for Fable-owned users, identity links, workspaces, memberships, invitations, roles, devices, and shared-project authorization. The native boundary exposes only explicit account/workspace operations. Hosted policy and the SQLite v10 mirror fail closed on ambiguous identity, inactive authority, cross-workspace access, privilege inversion, stale/conflicting revisions, replay conflicts, removed memberships, and tombstone resurrection. Deployment and live network validation remain open.
 - Agent recovery: run checkpoints persist active-thread user, assistant, and
   tool exchanges. Interrupted runs surface in chat and retry as new child runs
   from the durable user prompt without replaying tool effects.
@@ -78,17 +78,17 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
 | Local Ollama Runtime | **Functional but gated** | Live loopback streaming is available only when the user installs Ollama, starts its local service on a literal loopback IP, and pulls a generation model. Real-runtime smoke testing is opt-in. |
 | Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth, lifecycle states, and provider adapters exist. Notion, Slack, and Linear expose authenticated reads and approval-gated writes; GitHub's implemented live surface is read-only. Durable atomic handoff storage, production deployment, provider secrets, callback registration, and live OAuth validation are still missing. |
-| Fable Cloud Identity (Clerk) | **Foundation; config-gated** | Rust/keyring boundary, system-browser PKCE flow, status surface, and ADR exist. Mandatory sign-in, live claim validation, account recovery, callback policy, and release gating remain incomplete. |
+| Fable Cloud Identity (Clerk) | **Implemented; live-validation gated** | Native PKCE, mandatory sign-in, recovery, expiry/revocation, strict claim/config validation, workspace bootstrap/switching, and account device revocation are implemented. Production configuration and a live session are not validated. |
 | Browser Preview Mode | **Preview/fixture-only; transport deferred** | Purely synthetic fixture responses. Browser permission policy architecture, session derivation, and audit redaction are implemented; headless browser transport and live execution are deferred. |
 | Mobile Remote Control | **Local status surface; transport deferred** | Protocol metadata, trust checks, and native status commands exist. Settings reports that live LAN transport and pairing are unavailable; no socket, mobile app, hosted account, or remote execution authority exists. |
 | Schedules & Workflows SQLite migration | **Finished** | In Batch 9, schedules, queue entries, workflow definitions, and workflow runs were fully migrated from legacy JSON files into encrypted SQLite tables. |
 | GitHub Copilot Execution | **Functional but gated** | Uses the installed provider-owned ACP runtime and requires its own authenticated CLI session. |
 | Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
-| Native voice providers, Convex collaboration | **Foundation only** | Dictation currently depends on the host Web Speech API; no native realtime voice product exists. Convex has schema, policy tests, and local sync foundations, but lacks a complete shared-workspace user journey. |
+| Native voice providers, Convex collaboration | **Mixed** | Dictation still depends on the host Web Speech API. Convex now has an explicit native account/workspace adapter and visible workspace journey; multi-member collaboration and live deployment validation remain later work. |
 
 ## Partially Implemented Or Preview-Only
 
-- Onboarding currently collects a local display profile and provider selection. It does not yet enforce hosted Fable account creation/sign-in; that is now a required implementation gap.
+- Browser preview uses an explicit synthetic identity/workspace fixture. The Tauri path requires a Fable account and then one provider; it no longer offers a local profile, password, or skip route.
 - The API-key path can hand native backend secrets to the Rust credential boundary, but subscription provider paths are represented as backend catalog states and install/setup flows, not proven live provider integrations.
 - Browser preview can mark API-key backends as locally connected for testability. Connector reads remain explicitly fixture-backed and do not become live connections.
 - Connector search/import in browser preview uses explicitly labeled synthetic fixture behavior.
@@ -98,7 +98,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
   disable, and forget controls.
 - Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back. The schedules are backed by encrypted SQLite tables.
 - Voice dictation is opt-in and available only when the host browser/webview exposes a Web Speech API. Unsupported runtimes preserve normal text entry; there is no native offline speech provider.
-- Convex is config-gated via `VITE_CONVEX_URL`; its schema and policy/sync foundations exist, but collaboration is not yet an end-to-end product feature.
+- The native Convex account/workspace adapter is configuration-gated. Existing hosted devices can be listed and revoked; automatic registration of the current device is deferred until Fable has a genuine public-key/proof-of-possession contract.
 
 ## Not Implemented Yet
 
@@ -110,7 +110,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, schedules, workflows, and knowledge structures. Backend and connector credentials remain separately handled by OS secure storage.
 - No bundled local model runtime, model download flow, model license UI, or live Ollama smoke evidence in the default suite. Ollama remains a user-installed trusted loopback integration.
-- No production-enabled mandatory hosted Fable account or complete team workspace authority. Clerk still needs live validation, account recovery, and product gating; Convex still needs the shared-workspace vertical slice.
+- No production Clerk/Convex configuration or externally validated live Fable account session exists in this checkout. Multi-member invitations and collaboration remain a later vertical slice.
 - No signed release, updater channel, macOS packaging, or Linux packaging. Release docs identify the Windows preview build path and unsigned distribution gaps.
 - No product website, legal pages, downloads page, or public release pipeline in the audited files.
 
@@ -118,7 +118,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 - External connectors look close in the UI but remain gated by provider setup and credentials. GitHub now has a brokered live read path in code, but product messaging must keep production deployment and read-only limits clear.
 - Local model execution now exists through Ollama but depends on a user-managed local service and model installation; Fable must keep avoiding bundled downloads or broader egress until those are intentionally designed.
-- Mandatory Clerk identity must remain separate from connector OAuth and provider credentials; production team/cloud use is blocked until live Clerk validation, account gating, and server-side verifier work land.
+- Mandatory Clerk identity remains separate from connector OAuth and provider credentials. Production cloud use is blocked on real Clerk/Convex configuration and live end-to-end validation, not on additional client-side account gating.
 - Backup restoration requires the database and matching OS-secure master key; external recovery UI polish remains future work.
 - Scheduled work still depends on a connected runnable backend and user approval gates for consequential actions; live account coverage was not externally validated in this checkout.
 

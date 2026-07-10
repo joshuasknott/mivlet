@@ -10,8 +10,8 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 | Phase | Outcome | State |
 |---|---|---|
-| 0. Product spine | One ontology, authority model, and shared contract foundation | In progress |
-| 1. Essential Fable | Account + provider + durable conversation | Not started |
+| 0. Product spine | One ontology, authority model, and shared contract foundation | Complete |
+| 1. Essential Fable | Account + provider + durable conversation | In progress |
 | 2. Work context | Workspaces, projects, context, memory, and artifacts | Not started |
 | 3. Connection fabric | Native connections and MCP satisfy portable capabilities | Not started |
 | 4. Dynamic missions | Fable sizes, plans, routes, and supervises work | Not started |
@@ -66,10 +66,10 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 ### Wave 1A - Account and workspace
 
 - [ ] Complete Clerk production configuration and live claim/session validation.
-- [ ] Complete sign-in, onboarding, sign-out, expiry, recovery, and device revocation.
-- [ ] Create the initial workspace automatically and idempotently.
-- [ ] Support multiple isolated workspaces and switching.
-- [ ] Keep minimum onboarding to account plus provider.
+- [x] Complete sign-in, onboarding, sign-out, expiry, recovery, and device revocation.
+- [x] Create the initial workspace automatically and idempotently.
+- [x] Support multiple isolated workspaces and switching.
+- [x] Keep minimum onboarding to account plus provider.
 
 ### Wave 1B - Durable chat
 
