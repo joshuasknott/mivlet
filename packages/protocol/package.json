@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check:spine-parity": "npm run build && node scripts/check-spine-parity.mjs"
+    "check:spine-parity": "pnpm build && node scripts/check-spine-parity.mjs"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

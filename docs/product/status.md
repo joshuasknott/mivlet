@@ -18,7 +18,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Implemented
 
-- Product spine decisions (**Contract defined**): the canonical ontology, Fable-owned identity/workspace tenancy model, and per-record SQLite/Convex authority matrix are recorded in accepted Wave 0A documents. The current schemas and runtime still contain the legacy gaps catalogued in `product-spine-inventory.md`; Wave 0B/0C implementation has not landed.
+- Product spine (**Contract defined**): accepted ADRs define the ontology and Fable-owned identity/workspace tenancy model; the authority matrix assigns SQLite/Convex ownership; the `@fable/protocol` `Spine` namespace defines identity, Connection/capability, mission/run, artifact/handoff, and routine/trigger contracts. A checked TypeScript/Rust vocabulary manifest and staged migration strategy are integrated. Current schemas and runtime still contain the legacy gaps catalogued in `product-spine-inventory.md`; Wave 0C implementation has not landed.
 - Desktop shell: local-profile onboarding, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
 - Composer: supports text entry, slash command insertion, local file import, opt-in browser dictation where the runtime exposes speech recognition, model selection, permission selection, and native-agent submit path when a connected native backend exists.
 - Protocol package: defines approvals, memory, connectors, backend providers, runtime snapshots, native agent events, native tool specs, and tool-call request shapes.
@@ -129,6 +129,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `docs/adr/2026-07-10-product-ontology.md`
 - `docs/adr/2026-07-10-identity-workspace-tenancy.md`
 - `docs/architecture/record-authority-matrix.md`
+- `docs/architecture/product-spine-migration-strategy.md`
 - `README.md`
 - `package.json`
 - `.github/workflows/ci.yml`
@@ -168,6 +169,13 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - `apps/desktop/src-tauri/src/clerk_identity.rs`
 - `apps/desktop/src-tauri/src/tools.rs`
 - `packages/protocol/src/index.ts`
+- `packages/protocol/src/spine/primitives.ts`
+- `packages/protocol/src/spine/identity.ts`
+- `packages/protocol/src/spine/connections.ts`
+- `packages/protocol/src/spine/missions.ts`
+- `packages/protocol/src/spine/artifacts-routines.ts`
+- `packages/protocol/scripts/check-spine-parity.mjs`
+- `apps/desktop/src-tauri/src/product_spine_parity.rs`
 - `packages/connectors/src/index.ts`
 - `packages/connectors/src/local-files.ts`
 - `packages/connectors/src/knowledge-search.ts`

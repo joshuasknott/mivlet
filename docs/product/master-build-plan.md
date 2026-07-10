@@ -36,11 +36,11 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 0B - Canonical contracts
 
-- [ ] Define internal user, workspace, membership, and authorization contracts.
-- [ ] Define Connection, provider-route, capability, and capability-grant contracts.
-- [ ] Define mission, plan, worker, run, and run-event contracts.
-- [ ] Define artifact, handoff, routine, and trigger contracts.
-- [ ] Add TypeScript/Rust parity checks and the legacy migration strategy.
+- [x] Define [internal user, workspace, membership, and authorization contracts](../../packages/protocol/src/spine/identity.ts).
+- [x] Define [Connection, provider-route, capability, and capability-grant contracts](../../packages/protocol/src/spine/connections.ts).
+- [x] Define [mission, plan, worker, run, and run-event contracts](../../packages/protocol/src/spine/missions.ts).
+- [x] Define [artifact, handoff, routine, and trigger contracts](../../packages/protocol/src/spine/artifacts-routines.ts).
+- [x] Add [TypeScript/Rust parity checks](../../packages/protocol/spine-parity-manifest.json) and the [legacy migration strategy](../architecture/product-spine-migration-strategy.md).
 
 ### Wave 0C - Tenancy and authority
 
