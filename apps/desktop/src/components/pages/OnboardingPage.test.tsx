@@ -70,7 +70,7 @@ describe("OnboardingPage account and provider journey", () => {
         ...signedOut,
         state: "signed-in",
         authentication: {
-          issuer: "https://accounts.fable.test", subject: "user-1", authenticationEventRef: "event-1", sessionRef: "session-1",
+          provider: "clerk", normalizedIssuer: "https://accounts.fable.test", subject: "user-1", authenticationEventRef: "event-1", sessionRef: "session-1",
           authenticatedAt: "2026-07-10T12:00:00Z", expiresAt: "2026-07-11T12:00:00Z", verifiedAttributes: [],
           verifiedDisplayAttributes: { displayName: "Ari" }
         }

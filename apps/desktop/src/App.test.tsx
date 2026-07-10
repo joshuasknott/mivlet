@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { BackendProvider, ConnectorManifest, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
+import type { AccountWorkspaceStatus, BackendProvider, ConnectorManifest, IdentityStatus, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
@@ -24,7 +24,49 @@ const runtimeMocks = vi.hoisted(() => ({
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
   savedScheduledJobs: [] as unknown[],
-  savedWorkflowDefinitions: [] as unknown[]
+  savedWorkflowDefinitions: [] as unknown[],
+  identityStatus: {
+    enabled: true,
+    state: "signed-in",
+    message: "Test account signed in.",
+    scopes: [],
+    authentication: {
+      provider: "clerk",
+      normalizedIssuer: "https://accounts.fable.test",
+      subject: "test-user",
+      authenticationEventRef: "test-auth",
+      sessionRef: "test-session",
+      authenticatedAt: "2026-07-10T12:00:00Z",
+      expiresAt: "2026-07-11T12:00:00Z",
+      verifiedAttributes: []
+    }
+  } as IdentityStatus,
+  accountStatus: {
+    configured: true,
+    state: "ready",
+    message: "Test workspace ready.",
+    accountBound: true,
+    workspaces: [{
+      fableWorkspaceId: "test-workspace",
+      localWorkspaceId: "test-local-workspace",
+      name: "Test workspace",
+      workspaceStatus: "active",
+      workspaceRevision: 1,
+      policyRevision: 1,
+      memberId: "test-member",
+      role: "owner",
+      membershipStatus: "active",
+      membershipRevision: 1,
+      updatedAt: "2026-07-10T12:00:00Z"
+    }],
+    activeWorkspace: {
+      localWorkspaceId: "test-local-workspace",
+      fableWorkspaceId: "test-workspace",
+      name: "Test workspace",
+      source: "hosted"
+    },
+    devices: []
+  } as AccountWorkspaceStatus
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -80,7 +122,18 @@ vi.mock("./runtime", () => ({
   loadRuntimeActionHistory: vi.fn(async () => null),
   loadRuntimeApprovalAudit: vi.fn(async () => null),
   loadRuntimeApprovalRules: vi.fn(async () => null),
-  loadRuntimeIdentityStatus: vi.fn(async () => null),
+  loadRuntimeIdentityStatus: vi.fn(async () =>
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+      ? runtimeMocks.identityStatus
+      : null
+  ),
+  loadRuntimeAccountWorkspaceStatus: vi.fn(async () => runtimeMocks.accountStatus),
+  reconcileRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
+  createRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
+  selectRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
+  revokeRuntimeAccountDevice: vi.fn(async () => runtimeMocks.accountStatus),
+  clearRuntimeAccountWorkspaceSession: vi.fn(async () => null),
+  beginRuntimeIdentityRecovery: vi.fn(async () => runtimeMocks.identityStatus),
   loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
   loadRuntimeMemoryState: vi.fn(async () => null),
   loadRuntimeSnapshot: vi.fn(
@@ -180,11 +233,26 @@ vi.mock("./runtime", () => ({
 import * as runtimeModule from "./runtime";
 const connectRuntimeBackendSpy = vi.mocked(runtimeModule.connectRuntimeBackend);
 
-/** Render App and clear the onboarding gate by skipping in preview mode. */
+/** Re-render with an unrelated connected preview provider to open Settings. */
 async function skipOnboarding() {
-  const user = userEvent.setup();
-  const skip = await screen.findByRole("button", { name: /skip onboarding/i });
-  await user.click(skip);
+  const connectedGemini: BackendProvider = {
+    id: "gemini",
+    backendType: "native-api",
+    label: "Gemini",
+    description: "Gemini test provider",
+    authState: "connected",
+    capabilities: ["authentication", "threads", "streaming"],
+    models: [{ id: "gemini-test", label: "Gemini Test", available: true }]
+  };
+  runtimeMocks.backends = [
+    ...(runtimeMocks.backends ?? []),
+    ...((runtimeMocks.backends ?? []).some((provider) => provider.id === connectedGemini.id)
+      ? []
+      : [connectedGemini])
+  ];
+  cleanup();
+  render(<App />);
+  await screen.findByLabelText(/universal composer/i);
 }
 
 /** Install window.__TAURI_INTERNALS__ so the agent hook sees a desktop runtime. */
@@ -519,7 +587,7 @@ describe("Fable home", () => {
     const sidebar = screen.getByRole("complementary", { name: /workspace navigation/i });
     const workspaceSelector = within(sidebar).getByRole("button", { name: /select workspace/i });
     expect(within(sidebar).getByRole("img", { name: /^fable$/i })).toBeInTheDocument();
-    expect(workspaceSelector).toHaveTextContent("Josh's Fable");
+    expect(workspaceSelector).toHaveTextContent("Preview workspace");
     expect(workspaceSelector.closest(".workspace-switcher-container--top")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /approval preset/i }));
     const fullAccessOption = screen.getByRole("menuitemradio", { name: /full access/i });
@@ -2093,10 +2161,7 @@ describe("Fable onboarding", () => {
     expect(keyInput).toHaveValue("");
     expect(window.localStorage.getItem("fable.shell.v1") ?? "").not.toContain("sk-test-key");
 
-    // With a connected provider, the primary "Start using Fable" CTA appears.
-    const startBtn = await screen.findByRole("button", { name: /start using fable/i });
-    await user.click(startBtn);
-
+    // A verified provider completes the minimum journey immediately.
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
