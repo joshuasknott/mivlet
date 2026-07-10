@@ -2,7 +2,7 @@
 import { parseComposerText } from "@fable/connectors";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { chatThreads, connectors, projects } from "../data/workspace";
+import { connectors, projects } from "../data/workspace";
 import { utilityItems } from "../lib/constants";
 import {
   buildAgentRequest,
@@ -64,9 +64,12 @@ export function ChatWorkspace() {
   // useShellRuntime (dispatch on grant/deny) and useNativeAgent (executor awaits
   // it) share the same instance â€” a grant in the approval UI drives the tool call
   // the loop is currently blocked on.
-  const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice });
-  const { runtime, agent, voice, scheduledActive, resetCancellation } = controller;
+  const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
+  const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
+  const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const draftHydrationKey = useRef<string | null>(null);
   const activeAssistantMessageId = useRef<string | null>(null);
   const boundWorkspaceId =
     runtime.accountWorkspaceStatus.accountBound &&
@@ -219,6 +222,60 @@ export function ChatWorkspace() {
     setConversationMessages((current) => [...current, { id, role, content }]);
     return id;
   };
+
+  const durableThreads = useMemo(
+    () => durableConversation.state.threads.map((thread) => ({
+      id: thread.id,
+      title: thread.title,
+      kind: thread.projectId ? "project" as const : "chat" as const,
+      description: thread.projectId ? "Project conversation" : "Workspace conversation",
+      updatedAt: thread.updatedAt,
+      pinnedContextIds: []
+    })),
+    [durableConversation.state.threads]
+  );
+
+  useEffect(() => {
+    const hydrated = durableConversation.state.conversation;
+    if (!selectedConversationThreadId || !hydrated || hydrated.thread.id !== selectedConversationThreadId) {
+      if (!selectedConversationThreadId) setConversationMessages([]);
+      return;
+    }
+    setConversationMessages(hydrated.messages.map(({ message, currentRevision }) => ({
+      id: message.id,
+      role: message.kind === "user" ? "user" : "assistant",
+      content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content
+    })));
+  }, [durableConversation.state.conversation, selectedConversationThreadId]);
+
+  useEffect(() => {
+    if (durableConversation.state.loading) return;
+    if (draftHydrationKey.current === durableConversation.draftKey) return;
+    draftHydrationKey.current = durableConversation.draftKey;
+    runtime.setComposerValue(durableConversation.state.draft?.content ?? "");
+  }, [durableConversation.draftKey, durableConversation.state.draft, durableConversation.state.loading, runtime.setComposerValue]);
+
+  useEffect(() => {
+    if (draftHydrationKey.current !== durableConversation.draftKey) return;
+    const timer = window.setTimeout(() => {
+      if (runtime.composerValue) void durableConversation.saveDraft(runtime.composerValue);
+      else void durableConversation.deleteDraft();
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [durableConversation.deleteDraft, durableConversation.draftKey, durableConversation.saveDraft, runtime.composerValue]);
+
+  useEffect(() => {
+    if (!pendingPrompt || !selectedConversationThreadId) return;
+    const prompt = pendingPrompt;
+    setPendingPrompt(null);
+    runPrompt(prompt, { appendUserMessage: false });
+  }, [pendingPrompt, selectedConversationThreadId]);
+
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !agent.state.running) void durableConversation.refresh();
+    wasRunning.current = agent.state.running;
+  }, [agent.state.running, durableConversation.refresh]);
 
   useEffect(() => {
     const assistantId = activeAssistantMessageId.current;
@@ -429,7 +486,19 @@ export function ChatWorkspace() {
    */
   async function submitComposerText(rawText: string) {
     const submitted = rawText.trim();
-    if (!submitted) return;
+    if (!submitted || agent.state.running || pendingPrompt) return;
+    if (!selectedConversationThreadId) {
+      const thread = await durableConversation.createThread({
+        authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "current-member" as never },
+        title: submitted.slice(0, 72)
+      });
+      await durableConversation.deleteDraft();
+      setSelectedConversationThreadId(thread.id);
+      runtime.setActiveItem(thread.id);
+      setConversationMessages([{ id: messageId("user"), role: "user", content: submitted }]);
+      setPendingPrompt(submitted);
+      return;
+    }
     appendConversationMessage("user", submitted);
     const outcome = parseComposerText(rawText);
     if (outcome.status === "command") {
@@ -611,7 +680,7 @@ export function ChatWorkspace() {
         expandedCollections={expandedCollections}
         expandedProjects={expandedProjects}
         projects={projects}
-        chatThreads={chatThreads}
+        chatThreads={durableThreads}
         mobileNavOpen={runtime.mobileNavOpen}
         collapsed={sidebarCollapsed}
         loadingItemIds={loadingItemIds}
@@ -624,6 +693,7 @@ export function ChatWorkspace() {
         onNavigateForward={() => navigateHistory(1)}
         onCloseSettings={closeSettingsModal}
         onNewChat={() => {
+          setSelectedConversationThreadId(undefined);
           activeAssistantMessageId.current = null;
           setConversationMessages([]);
           runtime.startNewChat();
@@ -686,7 +756,12 @@ export function ChatWorkspace() {
           runtime.setMobileNavOpen(false);
           runtime.setLastAction("Workspace settings opened");
         }}
-        onSelectThread={(thread) => runtime.openThread(thread, "chat")}
+        onSelectThread={(thread) => {
+          setSelectedConversationThreadId(thread.id);
+          activeAssistantMessageId.current = null;
+          setConversationMessages([]);
+          runtime.openThread(thread, "chat");
+        }}
         onAccountMenu={(item) => {
           if (item === "logout") {
             void runtime.signOutIdentity();
@@ -737,7 +812,7 @@ export function ChatWorkspace() {
               onSubmit={(event) => {
                 event.preventDefault();
                 const text = runtime.composerValue;
-                if (!text.trim()) return;
+                if (!text.trim() || agent.state.running || pendingPrompt) return;
                 void submitComposerText(text);
               }}
               voiceStatus={voice.state.status}
@@ -777,7 +852,7 @@ export function ChatWorkspace() {
               permissionLabel={runtime.permissionLabel}
               permissionProfiles={PERMISSION_PROFILES}
               onSelectPermissionLabel={runtime.selectPermissionLabel}
-              inThread={!!runtime.activeThread}
+              inThread={!!selectedConversationThreadId}
               connectedConnectors={connectedConnectorCards}
               knowledgeSources={runtime.workspaceKnowledgeSources}
               attachments={runtime.composerAttachments}

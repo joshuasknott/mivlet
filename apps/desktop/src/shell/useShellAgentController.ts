@@ -7,7 +7,7 @@ import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
 
-export function useShellAgentController({ onDictation, onVoiceCancel }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void }) {
+export function useShellAgentController({ onDictation, onVoiceCancel, threadId }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void; threadId?: string }) {
   const approvalGate = useMemo(() => createApprovalGate(), []);
   const runtime = useShellRuntime({ approvalGate });
   const cancelRequestedRef = useRef(false);
@@ -15,8 +15,8 @@ export function useShellAgentController({ onDictation, onVoiceCancel }: { onDict
   const executor = useMemo(() => createDesktopToolExecutor(approvalGate), [approvalGate]);
   const queueToolApproval = (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => { if (approvalGate.register(event.approval)) runtime.recordBackendToolCall(event); };
   const cancelApprovals = () => { approvalGate.cancelPending(); runtime.clearBackendToolApprovals(); };
-  const durableConversation = useDurableConversation({ workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId, threadId: runtime.activeThread?.id });
-  const agent = useNativeAgent({ providers: runtime.backendProviders, activeProviderId: runtime.connectedAgentBackend?.id, models: runtime.selectableModels, threadId: runtime.activeThread?.id, createDurableRunWriter: createDesktopDurableRunWriter, execute: executor, shouldCancel: () => cancelRequestedRef.current, onCancel: () => { cancelRequestedRef.current = true; cancelApprovals(); }, onToolCall: queueToolApproval });
+  const durableConversation = useDurableConversation({ workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId, threadId });
+  const agent = useNativeAgent({ providers: runtime.backendProviders, activeProviderId: runtime.connectedAgentBackend?.id, models: runtime.selectableModels, threadId, createDurableRunWriter: createDesktopDurableRunWriter, execute: executor, shouldCancel: () => cancelRequestedRef.current, onCancel: () => { cancelRequestedRef.current = true; cancelApprovals(); }, onToolCall: queueToolApproval });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
   const voice = useVoice(voiceProvider, onDictation, { disabled: false, onCancel: onVoiceCancel });
   useEffect(() => { if (!runtime.isChatView) voice.reset(); }, [runtime.isChatView, voice.reset]);
