@@ -68,9 +68,13 @@ export function ChatWorkspace() {
   const { runtime, agent, voice, scheduledActive, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const activeAssistantMessageId = useRef<string | null>(null);
-  const conversationWorkspaceId = useRef(
-    runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
-  );
+  const boundWorkspaceId =
+    runtime.accountWorkspaceStatus.accountBound &&
+    (runtime.accountWorkspaceStatus.state === "ready" ||
+      runtime.accountWorkspaceStatus.state === "offline")
+      ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
+      : null;
+  const conversationWorkspaceId = useRef<string | null>(boundWorkspaceId);
   const projectFolderInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
   const verifiedProfile = useMemo(() => {
@@ -120,16 +124,36 @@ export function ChatWorkspace() {
   const [navigationIndex, setNavigationIndex] = useState(0);
 
   useEffect(() => {
-    const workspaceId = runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId;
-    if (conversationWorkspaceId.current !== workspaceId) {
+    if (boundWorkspaceId === null) {
+      if (conversationWorkspaceId.current === null) {
+        return;
+      }
+
       void agent.cancel();
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
       navigationHistory.current = [runtime.activeItem];
       setNavigationIndex(0);
-      conversationWorkspaceId.current = workspaceId;
+      conversationWorkspaceId.current = null;
+      return;
     }
-  }, [agent.cancel, runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId, runtime.activeItem]);
+
+    // Establishing the first authoritative workspace is hydration, not a switch.
+    // Clearing here would cancel recovery work started while account status loads.
+    if (conversationWorkspaceId.current === null) {
+      conversationWorkspaceId.current = boundWorkspaceId;
+      return;
+    }
+
+    if (conversationWorkspaceId.current !== boundWorkspaceId) {
+      void agent.cancel();
+      activeAssistantMessageId.current = null;
+      setConversationMessages([]);
+      navigationHistory.current = [runtime.activeItem];
+      setNavigationIndex(0);
+      conversationWorkspaceId.current = boundWorkspaceId;
+    }
+  }, [agent.cancel, boundWorkspaceId, runtime.activeItem]);
 
   useEffect(() => {
     if (navigationTarget.current === runtime.activeItem) {
