@@ -133,6 +133,7 @@ export function ChatWorkspace() {
       }
 
       void agent.cancel();
+      setSelectedConversationThreadId(undefined);
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
       navigationHistory.current = [runtime.activeItem];
@@ -150,6 +151,7 @@ export function ChatWorkspace() {
 
     if (conversationWorkspaceId.current !== boundWorkspaceId) {
       void agent.cancel();
+      setSelectedConversationThreadId(undefined);
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
       navigationHistory.current = [runtime.activeItem];
