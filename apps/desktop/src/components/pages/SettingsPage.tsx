@@ -10,10 +10,8 @@ import { Sparkle } from "@phosphor-icons/react/dist/csr/Sparkle";
 import { SquaresFour } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
-import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   ActionHistoryEvent,
   CustomApprovalSettings,
@@ -31,8 +29,6 @@ import { getRuntimeRemoteControlStatus } from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
-import { profileFixture } from "../../data/workspace";
-import type { ProfileFixture } from "../../data/workspace";
 
 // Re-export the eager-loadable tab metadata so the lazy-loaded page module
 // remains the single source of truth for existing direct importers. The
@@ -71,8 +67,6 @@ const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
  */
 export function SettingsPage({
   runtime,
-  profile = profileFixture,
-  onProfileChange,
   theme,
   onThemeChange,
   activeTab,
@@ -81,8 +75,6 @@ export function SettingsPage({
   titleId = "settings-title"
 }: {
   runtime: ShellRuntime;
-  profile?: ProfileFixture;
-  onProfileChange?: (profile: ProfileFixture) => void;
   theme: "light" | "dark";
   onThemeChange: (theme: "light" | "dark") => void;
   activeTab: SettingsTab;
@@ -105,11 +97,6 @@ export function SettingsPage({
           <ProviderAccessView runtime={runtime} onStatus={setStatus} />
         ) : activeTab === "general" ? (
           <>
-            <ProfileSettingsView
-              profile={profile}
-              onProfileChange={onProfileChange}
-              onStatus={setStatus}
-            />
             <IdentitySettingsView runtime={runtime} onStatus={setStatus} />
             <AppearanceSettingsView
               theme={theme}
@@ -153,8 +140,47 @@ function IdentitySettingsView({
 }) {
   const authentication = runtime.identityStatus.authentication;
   const display = authentication?.verifiedDisplayAttributes;
-  const canSignIn = runtime.identityStatus.enabled && runtime.identityStatus.state !== "signed-in";
-  const canRefresh = runtime.identityStatus.enabled && runtime.identityStatus.state !== "disabled";
+  const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null);
+  const [deviceToRevoke, setDeviceToRevoke] = useState<string | null>(null);
+  const identityState = runtime.identityStatus.state;
+  const workspaceState = runtime.accountWorkspaceStatus.state;
+  const needsRecovery = identityState === "expired" || identityState === "revoked" || workspaceState === "expired" || workspaceState === "revoked";
+  const canSignIn = runtime.identityStatus.enabled && !authentication && !needsRecovery;
+  const canRefresh = runtime.identityStatus.enabled && identityState !== "disabled";
+  const accountMessage = runtime.accountWorkspaceStatus.message || runtime.identityStatus.message;
+
+  const accountStateLabel = (() => {
+    if (!runtime.identityStatus.enabled || !runtime.accountWorkspaceStatus.configured) return "Configuration required";
+    if (needsRecovery) return identityState === "revoked" || workspaceState === "revoked" ? "Account access revoked" : "Session expired";
+    if (identityState === "offline" || workspaceState === "offline") return "Offline";
+    if (runtime.identityPending || runtime.accountWorkspacePending || identityState === "refreshing" || workspaceState === "bootstrapping") return "Checking your account";
+    if (identityState === "error" || workspaceState === "error") return "Account needs attention";
+    return authentication && workspaceState === "ready" ? "Ready" : "Signed out";
+  })();
+
+  const handle = async (action: () => Promise<void>, success: string) => {
+    try {
+      await action();
+      onStatus(success);
+    } catch {
+      onStatus("That didn’t work. Check your connection and try again.");
+    }
+  };
+
+  const confirmDeviceRemoval = async () => {
+    const device = runtime.accountWorkspaceStatus.devices.find((candidate) => candidate.deviceId === deviceToRevoke);
+    if (!device) return;
+    setRevokingDeviceId(device.deviceId);
+    try {
+      await runtime.revokeAccountDevice(device.deviceId);
+      onStatus(`${device.label} removed.`);
+      setDeviceToRevoke(null);
+    } catch {
+      onStatus("That device could not be removed. Try again.");
+    } finally {
+      setRevokingDeviceId(null);
+    }
+  };
 
   return (
     <article className="profile-clean-card settings-open-section">
@@ -166,32 +192,46 @@ function IdentitySettingsView({
             </span>
             <span>
               <strong id="fable-account-title">Fable account</strong>
-              <small>{runtime.identityStatus.message}</small>
+              <small>{accountStateLabel} · {accountMessage}</small>
             </span>
           </div>
           <p>
             {authentication
               ? display?.displayName ?? display?.email ?? authentication.subject
-              : "Account sign-in is configured through Clerk and remains separate from provider and connector credentials."}
+              : "Use your Fable account to open your workspace. Your password stays in the system browser."}
           </p>
           <div className="profile-action-row">
             {canSignIn ? (
               <button
                 type="button"
                 className="button button--primary"
-                disabled={runtime.identityPending}
-                onClick={() => void runtime.signInIdentity().then(() => onStatus("Fable account updated."))}
+                disabled={runtime.identityPending || runtime.accountWorkspacePending}
+                onClick={() => void handle(runtime.signInIdentity, "Fable sign-in started in your browser.")}
               >
                 {runtime.identityPending ? <Spinner size={14} /> : null}
                 Sign in
+              </button>
+            ) : null}
+            {needsRecovery ? (
+              <button
+                type="button"
+                className="button button--primary"
+                disabled={runtime.identityPending || runtime.accountWorkspacePending}
+                onClick={() => void handle(runtime.recoverIdentity, "Account recovery started in your browser.")}
+              >
+                {runtime.identityPending ? <Spinner size={14} /> : null}
+                Recover account
               </button>
             ) : null}
             {canRefresh ? (
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={runtime.identityPending}
-                onClick={() => void runtime.refreshIdentity().then(() => onStatus("Fable account refreshed."))}
+                disabled={runtime.identityPending || runtime.accountWorkspacePending}
+                onClick={() => void handle(async () => {
+                  await runtime.refreshIdentity();
+                  await runtime.reconcileAccountWorkspace();
+                }, "Fable account refreshed.")}
               >
                 <ArrowClockwise size={14} /> Refresh
               </button>
@@ -200,14 +240,60 @@ function IdentitySettingsView({
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={runtime.identityPending}
-                onClick={() => void runtime.signOutIdentity().then(() => onStatus("Fable account signed out."))}
+                disabled={runtime.identityPending || runtime.accountWorkspacePending}
+                onClick={() => void handle(runtime.signOutIdentity, "Fable account signed out.")}
               >
                 Sign out
               </button>
             ) : null}
           </div>
         </section>
+        <section className="profile-section" aria-labelledby="account-devices-title">
+          <div className="profile-section__heading">
+            <span className="settings-panel__icon" aria-hidden="true"><DeviceMobile size={19} /></span>
+            <span>
+              <strong id="account-devices-title">Your devices</strong>
+              <small>Remove a device if you no longer use it. Removed devices stay removed; reconnect from a new device if needed.</small>
+            </span>
+          </div>
+          {runtime.accountWorkspaceStatus.devices.length > 0 ? (
+            <div className="provider-access-list">
+              {runtime.accountWorkspaceStatus.devices.map((device) => (
+                <div className="provider-access-row" key={device.deviceId}>
+                  <span>
+                    <strong>{device.label}</strong>
+                    <small>{device.kind} · {device.status === "active" ? "Available" : device.status === "pending" ? "Waiting to finish setup" : "Removed"}</small>
+                  </span>
+                  {device.status !== "revoked" ? (
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      disabled={revokingDeviceId === device.deviceId || runtime.accountWorkspacePending}
+                      onClick={() => setDeviceToRevoke(device.deviceId)}
+                    >
+                      {revokingDeviceId === device.deviceId ? "Removing…" : "Remove device"}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : <p>No devices are available yet.</p>}
+        </section>
+        {deviceToRevoke ? (() => {
+          const device = runtime.accountWorkspaceStatus.devices.find((candidate) => candidate.deviceId === deviceToRevoke);
+          return device ? (
+            <section className="settings-confirmation" role="dialog" aria-modal="true" aria-labelledby="remove-device-title">
+              <strong id="remove-device-title">Remove {device.label}?</strong>
+              <p>This device will lose access to Fable. Removed devices stay removed; reconnect from a new device if needed.</p>
+              <div className="profile-action-row">
+                <button type="button" className="button button--secondary" autoFocus onClick={() => setDeviceToRevoke(null)}>Keep device</button>
+                <button type="button" className="button button--destructive" disabled={revokingDeviceId === device.deviceId} onClick={() => void confirmDeviceRemoval()}>
+                  {revokingDeviceId === device.deviceId ? "Removing…" : "Remove device"}
+                </button>
+              </div>
+            </section>
+          ) : null;
+        })() : null}
       </div>
     </article>
   );
@@ -1005,185 +1091,6 @@ function DictationPrivacySettings({
   );
 }
 
-function ProfileSettingsView({
-  profile,
-  onProfileChange,
-  onStatus
-}: {
-  profile: ProfileFixture;
-  onProfileChange?: (profile: ProfileFixture) => void;
-  onStatus: (message: string) => void;
-}) {
-  const [profileState, setProfileState] = useState(profile);
-  const [photoPreview, setPhotoPreview] = useState<string | undefined>(profile.photoUrl);
-  const photoInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (profile) {
-      setProfileState(profile);
-      setPhotoPreview(profile.photoUrl);
-    }
-  }, [profile]);
-
-  const initials = useMemo(() => {
-    const parts = profileState.name
-      .split(" ")
-      .map((part) => part.trim())
-      .filter(Boolean);
-
-    if (parts.length === 0) {
-      return profileState.photoInitials || "J";
-    }
-
-    return parts
-      .slice(0, 2)
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase();
-  }, [profileState.name, profileState.photoInitials]);
-
-  const handlePhotoUpload = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      const result = typeof reader.result === "string" ? reader.result : undefined;
-      setPhotoPreview(result);
-      setProfileState((current) => ({ ...current, photoUrl: result }));
-      onStatus(`${file.name} selected for this local profile.`);
-    });
-    reader.readAsDataURL(file);
-  };
-
-  const removePhoto = () => {
-    setPhotoPreview(undefined);
-    setProfileState((current) => ({ ...current, photoUrl: undefined }));
-    if (photoInputRef.current) {
-      photoInputRef.current.value = "";
-    }
-    onStatus("Profile photo removed locally.");
-  };
-
-  const saveProfile = () => {
-    const updated = { ...profileState, photoInitials: initials, photoUrl: photoPreview };
-    setProfileState(updated);
-    if (onProfileChange) {
-      onProfileChange(updated);
-    }
-    onStatus("Profile saved locally on this device.");
-  };
-
-  return (
-    <div className="settings-page__body">
-      <div className="settings-section-heading">
-        <p>Manage local display details for this workspace.</p>
-      </div>
-
-      <article className="profile-clean-card settings-open-section">
-        <div className="profile-clean-card__identity">
-          <div className="profile-photo" aria-hidden="true">
-            {photoPreview ? (
-              <img src={photoPreview} alt="" />
-            ) : (
-              <UserCircle size={58} weight="regular" />
-            )}
-          </div>
-          <div className="profile-identity-copy">
-            <strong>{profileState.name || "Josh"}</strong>
-            <small>{profileState.email || "josh@example.com"}</small>
-          </div>
-          <div className="profile-photo-buttons">
-            <input
-              ref={photoInputRef}
-              className="sr-only"
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              aria-label="Upload profile photo"
-              onChange={handlePhotoUpload}
-            />
-            <button type="button" onClick={() => photoInputRef.current?.click()}>
-              <UploadSimple size={16} />
-              <span>{photoPreview ? "Change photo" : "Upload photo"}</span>
-            </button>
-            <button
-              type="button"
-              className="profile-photo-buttons__danger button button--destructive"
-              onClick={removePhoto}
-              disabled={!photoPreview}
-            >
-              <Trash size={16} />
-              <span>Remove</span>
-            </button>
-          </div>
-        </div>
-
-        <div className="profile-clean-card__content">
-          <section className="profile-section" aria-labelledby="profile-details-title">
-            <div className="profile-section__heading">
-              <span className="settings-panel__icon" aria-hidden="true">
-                <UserCircle size={19} />
-              </span>
-              <span>
-                <strong id="profile-details-title">Profile details</strong>
-                <small>Name and email used for local display.</small>
-              </span>
-            </div>
-            <div className="settings-form-grid settings-form-grid--single">
-              <label className="settings-field">
-                <span>Name</span>
-                <input
-                  value={profileState.name}
-                  onChange={(event) =>
-                    setProfileState((current) => ({ ...current, name: event.target.value }))
-                  }
-                />
-              </label>
-              <label className="settings-field">
-                <span>Email</span>
-                <input
-                  type="email"
-                  value={profileState.email}
-                  onChange={(event) =>
-                    setProfileState((current) => ({ ...current, email: event.target.value }))
-                  }
-                />
-              </label>
-            </div>
-          </section>
-
-        </div>
-
-        <footer className="profile-clean-card__footer">
-          <div className="profile-action-row profile-action-row--end" style={{ width: "100%" }}>
-            <button
-              type="button"
-              className="profile-button button button--secondary"
-              onClick={() => {
-                setProfileState(profile || profileFixture);
-                setPhotoPreview((profile || profileFixture).photoUrl);
-                onStatus("Profile changes reset locally.");
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="profile-button profile-button--primary button button--primary"
-              aria-label="Save profile"
-              onClick={saveProfile}
-            >
-              Save changes
-            </button>
-          </div>
-        </footer>
-      </article>
-    </div>
-  );
-}
-
 function AppearanceSettingsView({
   theme,
   onThemeChange,
@@ -1244,12 +1151,6 @@ export function WorkspaceSettingsView({
   workspaceName: string;
   onStatus: (message: string) => void;
 }) {
-  const [name, setName] = useState(workspaceName);
-
-  const handleSave = () => {
-    onStatus(`Workspace settings saved locally.`);
-  };
-
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
@@ -1265,28 +1166,20 @@ export function WorkspaceSettingsView({
               </span>
               <span>
                 <strong id="workspace-details-title">Workspace details</strong>
-                <small>Workspace name and display settings.</small>
+                <small>This is the active workspace attached to your Fable account.</small>
               </span>
             </div>
-            <div className="settings-form-grid settings-form-grid--single">
-              <label className="settings-field">
-                <span>Workspace Name</span>
-                <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                />
-              </label>
-            </div>
+            <p>{workspaceName}</p>
           </section>
 
-          <section className="profile-section" aria-labelledby="workspace-team-title">
+          <section className="profile-section" aria-labelledby="workspace-access-title">
             <div className="profile-section__heading">
               <span className="settings-panel__icon" aria-hidden="true">
                 <UserCircle size={19} />
               </span>
               <span>
-                <strong id="workspace-team-title">
-                  Team Access
+                <strong id="workspace-access-title">
+                  Shared access
                   <span style={{
                     fontSize: "10px",
                     marginLeft: "6px",
@@ -1300,11 +1193,11 @@ export function WorkspaceSettingsView({
                     WIP
                   </span>
                 </strong>
-                <small>Share this workspace with your team.</small>
+                <small>Workspace invitations and shared access are coming soon.</small>
               </span>
             </div>
             <p className="profile-security-note" style={{ marginTop: "8px" }}>
-              <strong>Multi-user collaboration is in development.</strong> Soon you will be able to invite teammates, share agent configurations, and collaborate in real-time.
+              <strong>Shared work is in development.</strong> You’ll be able to invite people and work together here in a future update.
             </p>
           </section>
         </div>
@@ -1313,21 +1206,12 @@ export function WorkspaceSettingsView({
           <div className="profile-action-row profile-action-row--end" style={{ width: "100%" }}>
             <button
               type="button"
-              className="profile-button button button--secondary"
+              className="profile-button button button--primary"
               onClick={() => {
-                setName(workspaceName);
-                onStatus("Workspace settings reset locally.");
+                onStatus("Workspace details are managed from your Fable account.");
               }}
             >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="profile-button profile-button--primary button button--primary"
-              aria-label="Save workspace settings"
-              onClick={handleSave}
-            >
-              Save changes
+              Done
             </button>
           </div>
         </footer>

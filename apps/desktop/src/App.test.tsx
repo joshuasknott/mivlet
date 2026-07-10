@@ -355,6 +355,60 @@ describe("Fable home", () => {
     // (See connectedCodex above and other provider mocks using literal "threads".)
   });
 
+  it("switches between Fable workspaces and creates one from the sidebar", async () => {
+    const user = userEvent.setup();
+    const selectWorkspace = vi.fn().mockResolvedValue(undefined);
+    const createWorkspace = vi.fn().mockResolvedValue(undefined);
+    const noop = () => {};
+    render(
+      <WorkspaceSidebar
+        workspaceName="Research"
+        utilityItems={[]}
+        activeItem="new-chat"
+        expandedCollections={{ projects: false, chats: false }}
+        expandedProjects={{}}
+        projects={[]}
+        chatThreads={[]}
+        mobileNavOpen={false}
+        collapsed={false}
+        onNewChat={noop}
+        onAddProject={noop}
+        onOpenProjectFolder={noop}
+        onSearch={noop}
+        onSelectWorkspace={noop}
+        onToggleProjects={noop}
+        onToggleChats={noop}
+        onSelectUtility={noop}
+        onSelectProjectThread={noop}
+        onToggleProject={noop}
+        onToggleMobileNav={noop}
+        onToggleCollapsed={noop}
+        onOpenMobileConnection={noop}
+        onOpenWorkspaceSettings={noop}
+        onSelectThread={noop}
+        onAccountMenu={noop as any}
+        accountWorkspaces={[
+          { fableWorkspaceId: "workspace-research", localWorkspaceId: "local-research", name: "Research", workspaceStatus: "active", workspaceRevision: 1, policyRevision: 1, memberId: "member-1", role: "owner", membershipStatus: "active", membershipRevision: 1, updatedAt: "2026-07-10T12:00:00Z" },
+          { fableWorkspaceId: "workspace-writing", localWorkspaceId: "local-writing", name: "Writing", workspaceStatus: "active", workspaceRevision: 1, policyRevision: 1, memberId: "member-1", role: "owner", membershipStatus: "active", membershipRevision: 1, updatedAt: "2026-07-10T12:00:00Z" }
+        ]}
+        activeAccountWorkspaceId="workspace-research"
+        onSelectAccountWorkspace={selectWorkspace}
+        onCreateAccountWorkspace={createWorkspace}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Select workspace" }));
+    expect(screen.getByRole("menuitemradio", { name: /Research/ })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("menuitemradio", { name: /Writing/ }));
+    await waitFor(() => expect(selectWorkspace).toHaveBeenCalledWith("workspace-writing"));
+
+    await user.click(screen.getByRole("button", { name: "Select workspace" }));
+    await user.click(screen.getByRole("menuitem", { name: "Create workspace" }));
+    await user.type(screen.getByRole("textbox", { name: "Workspace name" }), "Planning");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(createWorkspace).toHaveBeenCalledWith("Planning"));
+  });
+
   it("shows first-wave connectors as minimal setup cards", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
@@ -700,18 +754,16 @@ describe("Fable home", () => {
     expect(screen.getByRole("button", { name: /^pause$/i })).toBeInTheDocument();
   }, 15000);
 
-  it("opens profile from the settings menu and edits local profile details", async () => {
+  it("opens account settings without offering a local profile editor", async () => {
     const user = await renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /^settings$/i }));
 
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText(/^name$/i));
-    await user.type(screen.getByLabelText(/^name$/i), "Joshua Knott");
-    await user.click(screen.getByRole("button", { name: /^save profile$/i }));
-
-    expect(screen.getByText(/profile saved locally/i)).toBeInTheDocument();
+    expect(screen.getByText("Fable account")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^name$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^save profile$/i })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "General" })).toBeInTheDocument();
   });
 
@@ -1830,48 +1882,28 @@ describe("Fable onboarding", () => {
     connectRuntimeBackendSpy.mockClear();
   });
 
-  const completeProfileStep = async (user: any) => {
-    expect(
-      await screen.findByRole("heading", { name: /set up your local fable workspace/i })
-    ).toBeInTheDocument();
-    // Password is a UI-only preview field; only name/email reach shell state.
-    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
-    await user.type(screen.getByLabelText(/^name$/i), "Josh");
-    await user.type(screen.getByLabelText(/^email$/i), "josh@example.com");
-    // The submit button is exactly "Continue" (the profile form's type=submit).
-    await user.click(screen.getByRole("button", { name: /^continue$/i }));
+  const showProviderStep = async () => {
+    expect(await screen.findByRole("heading", { name: /add a model provider/i })).toBeInTheDocument();
   };
 
-  it("gates the workspace behind the local-first onboarding shell", async () => {
-    const user = userEvent.setup();
+  it("gates the workspace behind account-first provider onboarding", async () => {
     render(<App />);
 
-    expect(
-      await screen.findByRole("heading", { name: /set up your local fable workspace/i })
-    ).toBeInTheDocument();
+    await showProviderStep();
     // The composer must NOT render until a backend is connected.
     expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
-    // The local profile step previews a password field without claiming account creation.
-    expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
-    expect(screen.queryByText(/create your fable account/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /continue without profile/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/skip onboarding/i)).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: /onboarding progress/i })).toHaveTextContent(
-      /step 1 of 2/i
+      /step 2 of 2/i
     );
-
-    // Proceed through the optional local profile to the unified provider list.
-    await completeProfileStep(user);
-
-    expect(await screen.findByRole("heading", { name: /add a model provider/i }))
-      .toBeInTheDocument();
   });
 
   it("shows featured provider families first, then one alphabetical list", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     // Predominant provider families are immediately visible, independent of
     // whether their connection method is an account, CLI, or API key.
@@ -1904,8 +1936,7 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     await user.click(screen.getByRole("button", { name: /show all providers/i }));
 
@@ -1928,8 +1959,7 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     await user.click(screen.getByRole("button", { name: /show all providers/i }));
 
@@ -1980,8 +2010,7 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     // OpenAI is featured as one family regardless of connection method.
     await user.click(screen.getByRole("button", { name: /openai \/ chatgpt,/i }));
@@ -1996,8 +2025,7 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     await user.click(screen.getByRole("button", { name: /anthropic,/i }));
     const anthropicModal = screen.getByRole("dialog", { name: "Anthropic" });
@@ -2027,8 +2055,7 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     // Open the provider family and choose its API-key method.
     await user.click(screen.getByRole("button", { name: /openai \/ chatgpt,/i }));
@@ -2086,8 +2113,7 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
 
     // Open the provider family and choose its API-key method.
     await user.click(screen.getByRole("button", { name: /openai \/ chatgpt,/i }));
@@ -2107,22 +2133,17 @@ describe("Fable onboarding", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await completeProfileStep(user);
-    const shell = await screen.findByRole("heading", { name: /add a model provider/i });
+    await showProviderStep();
+    const shell = screen.getByRole("heading", { name: /add a model provider/i });
     const frame = shell.closest("main");
     expect(frame?.textContent?.toLowerCase()).not.toMatch(/grok build.*included|premium.*grok/i);
   });
 
-  it("skips onboarding in preview and reaches the workspace", async () => {
-    const user = userEvent.setup();
+  it("does not render a preview skip control", async () => {
     render(<App />);
 
-    expect(
-      await screen.findByRole("heading", { name: /set up your local fable workspace/i })
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /skip onboarding/i }));
-
-    expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
+    await showProviderStep();
+    expect(screen.queryByRole("button", { name: /skip onboarding/i })).not.toBeInTheDocument();
   });
 });
 

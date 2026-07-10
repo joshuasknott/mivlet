@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import type { FormEvent } from "react";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -17,7 +18,7 @@ import { SignOut } from "@phosphor-icons/react/dist/csr/SignOut";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { Icon } from "@phosphor-icons/react/dist/lib/types";
-import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
+import type { AccountWorkspaceSummary, ProjectWorkspace, ThreadSummary } from "@fable/protocol";
 import type { SettingsTab } from "./pages/settings-tabs";
 
 /**
@@ -71,7 +72,12 @@ export function WorkspaceSidebar({
   canNavigateBack = false,
   canNavigateForward = false,
   onNavigateBack,
-  onNavigateForward
+  onNavigateForward,
+  accountWorkspaces = [],
+  activeAccountWorkspaceId,
+  workspacePending = false,
+  onSelectAccountWorkspace,
+  onCreateAccountWorkspace
 }: {
   workspaceName: string;
   utilityItems: readonly UtilityNavItem[];
@@ -108,8 +114,17 @@ export function WorkspaceSidebar({
   canNavigateForward?: boolean;
   onNavigateBack?: () => void;
   onNavigateForward?: () => void;
+  /** Fable-owned workspaces currently accessible to this account. */
+  accountWorkspaces?: AccountWorkspaceSummary[];
+  activeAccountWorkspaceId?: string;
+  workspacePending?: boolean;
+  onSelectAccountWorkspace?: (fableWorkspaceId: string) => void | Promise<void>;
+  onCreateAccountWorkspace?: (name: string) => void | Promise<void>;
 }) {
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
+  const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
+  const [workspaceError, setWorkspaceError] = useState("");
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [chatFlyoutOpen, setChatFlyoutOpen] = useState(false);
   const [chatHistoryModalOpen, setChatHistoryModalOpen] = useState(false);
@@ -136,6 +151,29 @@ export function WorkspaceSidebar({
     [chatThreads, normalizedChatSearch]
   );
   const recentChatThreads = useMemo(() => chatThreads.slice(0, 6), [chatThreads]);
+  const accessibleWorkspaces = useMemo(
+    () => accountWorkspaces.filter((workspace) => workspace.workspaceStatus === "active" && workspace.membershipStatus === "active"),
+    [accountWorkspaces]
+  );
+
+  const closeWorkspaceMenu = () => {
+    setWorkspaceDropdownOpen(false);
+    setWorkspaceCreateOpen(false);
+    setWorkspaceDraft("");
+    setWorkspaceError("");
+  };
+
+  const createWorkspace = async (event: FormEvent) => {
+    event.preventDefault();
+    const name = workspaceDraft.trim();
+    if (!name || !onCreateAccountWorkspace) return;
+    try {
+      await onCreateAccountWorkspace(name);
+      closeWorkspaceMenu();
+    } catch {
+      setWorkspaceError("Couldn’t create that workspace. Try again.");
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -272,16 +310,53 @@ export function WorkspaceSidebar({
 
               {workspaceDropdownOpen ? (
                 <div className="workspace-dropdown" role="menu">
-                  <div className="workspace-dropdown__item workspace-dropdown__item--active">
-                    <span className="workspace-dropdown__name">{workspaceName}</span>
-                  </div>
+                  {accessibleWorkspaces.length > 0 ? accessibleWorkspaces.map((workspace) => {
+                    const current = workspace.fableWorkspaceId === activeAccountWorkspaceId;
+                    return (
+                      <button
+                        key={workspace.fableWorkspaceId}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={current}
+                        disabled={workspacePending || current}
+                        className={`workspace-dropdown__item${current ? " workspace-dropdown__item--active" : ""}`}
+                        onClick={() => {
+                          if (!current) {
+                            void Promise.resolve(onSelectAccountWorkspace?.(workspace.fableWorkspaceId))
+                              .then(closeWorkspaceMenu)
+                              .catch(() => setWorkspaceError("Couldn’t switch workspaces. Try again."));
+                          }
+                        }}
+                      >
+                        <span className="workspace-dropdown__name">{workspace.name}</span>
+                        {current ? <span aria-label="Current workspace">Current</span> : null}
+                      </button>
+                    );
+                  }) : (
+                    <div className="workspace-dropdown__item"><span className="workspace-dropdown__name">{workspaceName}</span></div>
+                  )}
                   <div className="workspace-dropdown__divider" aria-hidden="true" />
+                  {workspaceCreateOpen ? (
+                    <form className="workspace-dropdown__create" onSubmit={(event) => void createWorkspace(event)} aria-label="Create workspace">
+                      <label>
+                        <span className="sr-only">Workspace name</span>
+                        <input autoFocus value={workspaceDraft} onChange={(event) => setWorkspaceDraft(event.target.value)} placeholder="Workspace name" disabled={workspacePending} />
+                      </label>
+                      <button type="submit" disabled={workspacePending || !workspaceDraft.trim()}>Create</button>
+                    </form>
+                  ) : (
+                    <button type="button" className="workspace-dropdown__settings-card" role="menuitem" disabled={workspacePending || !onCreateAccountWorkspace} onClick={() => setWorkspaceCreateOpen(true)}>
+                      <Plus size={15} />
+                      <span>Create workspace</span>
+                    </button>
+                  )}
+                  {workspaceError ? <p className="workspace-dropdown__error" role="alert">{workspaceError}</p> : null}
                   <button
                     type="button"
                     className="workspace-dropdown__settings-card"
                     role="menuitem"
                     onClick={() => {
-                      setWorkspaceDropdownOpen(false);
+                      closeWorkspaceMenu();
                       onOpenWorkspaceSettings();
                     }}
                   >

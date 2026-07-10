@@ -1124,6 +1124,36 @@
   background: var(--surface-hover);
 }
 
+.workspace-dropdown__create {
+  display: flex;
+  gap: 6px;
+  padding: 6px 4px;
+}
+
+.workspace-dropdown__create input {
+  min-width: 0;
+  width: 150px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.workspace-dropdown__create button {
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-1);
+  background: var(--accent);
+  color: var(--accent-ink, white);
+}
+
+.workspace-dropdown__error {
+  margin: 4px 8px;
+  color: var(--destructive);
+  font-size: var(--text-12);
+}
+
 .logout-button,
 .desktop-frame[data-theme="dark"] .logout-button {
   color: var(--destructive) !important;

@@ -27,9 +27,22 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
       scopes: []
     },
     identityPending: false,
+    accountWorkspaceStatus: {
+      configured: false,
+      state: "disabled",
+      message: "Fable account setup is not configured.",
+      accountBound: false,
+      workspaces: [],
+      activeWorkspace: { localWorkspaceId: "default", name: "Fable workspace", source: "legacy-default" },
+      devices: []
+    },
+    accountWorkspacePending: false,
     signInIdentity: vi.fn().mockResolvedValue(undefined),
+    recoverIdentity: vi.fn().mockResolvedValue(undefined),
     refreshIdentity: vi.fn().mockResolvedValue(undefined),
     signOutIdentity: vi.fn().mockResolvedValue(undefined),
+    reconcileAccountWorkspace: vi.fn().mockResolvedValue(undefined),
+    revokeAccountDevice: vi.fn().mockResolvedValue(undefined),
     modelDiscoveryByProvider: {},
     workflowRuns: [],
     schedulerQueue: [],
@@ -82,7 +95,45 @@ describe("Settings -> General identity", () => {
     );
 
     expect(screen.getByText("Fable account")).toBeTruthy();
-    expect(screen.getByText("Fable account setup is not configured.")).toBeTruthy();
+    expect(screen.getByText(/Fable account setup is not configured/)).toBeTruthy();
+  });
+
+  it("uses verified account details and can remove a device", async () => {
+    const revoke = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SettingsPage
+        runtime={stubRuntime({
+          identityStatus: {
+            enabled: true,
+            state: "signed-in",
+            message: "Signed in.",
+            scopes: [],
+            authentication: {
+              issuer: "https://accounts.fable.test", subject: "user-1", authenticationEventRef: "event-1", sessionRef: "session-1",
+              authenticatedAt: "2026-07-10T12:00:00Z", expiresAt: "2026-07-11T12:00:00Z", verifiedAttributes: [],
+              verifiedDisplayAttributes: { displayName: "Ari", email: "ari@example.test" }
+            }
+          },
+          accountWorkspaceStatus: {
+            configured: true, state: "ready", message: "Workspace ready.", accountBound: true, workspaces: [],
+            activeWorkspace: { localWorkspaceId: "local-1", name: "Ari's work", source: "hosted" },
+            devices: [{ deviceId: "device-1", kind: "desktop", label: "Ari's laptop", status: "active", registeredAt: "2026-07-10T12:00:00Z" }]
+          },
+          revokeAccountDevice: revoke
+        })}
+        theme="dark"
+        onThemeChange={() => {}}
+        activeTab="general"
+        workspaceName="Ari's work"
+      />
+    );
+
+    expect(screen.getByText("Ari")).toBeTruthy();
+    expect(screen.getByText("Ari's laptop")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove device" }));
+    expect(screen.getByRole("dialog", { name: "Remove Ari's laptop?" })).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove device" }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith("device-1"));
   });
 });
 

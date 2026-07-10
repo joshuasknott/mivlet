@@ -2,7 +2,7 @@
 import { parseComposerText } from "@fable/connectors";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { chatThreads, connectors, profileFixture, projects } from "../data/workspace";
+import { chatThreads, connectors, projects } from "../data/workspace";
 import { utilityItems } from "../lib/constants";
 import {
   buildAgentRequest,
@@ -66,11 +66,14 @@ export function ChatWorkspace() {
   // the loop is currently blocked on.
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice });
   const { runtime, agent, voice, scheduledActive, resetCancellation } = controller;
-  const [profile, setProfile] = useState(profileFixture);
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const activeAssistantMessageId = useRef<string | null>(null);
   const projectFolderInputRef = useRef<HTMLInputElement | null>(null);
-  const workspaceName = `${profile.name.split(" ")[0]}'s Fable`;
+  const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
+  const verifiedProfile = useMemo(() => {
+    const display = runtime.identityStatus.authentication?.verifiedDisplayAttributes;
+    return { name: display?.displayName ?? display?.email ?? "Fable account", email: display?.email ?? "" };
+  }, [runtime.identityStatus.authentication]);
   // Re-sync the shell's standing grants into the gate so session/rule grants
   // auto-satisfy matching tool calls without re-prompting.
   // The real executor: awaits the gate, then runs the granted tool through the
@@ -492,15 +495,31 @@ export function ChatWorkspace() {
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
 
-  // Onboarding gate: until one AI backend is connected (or the user skips in
-  // preview), render the three-path onboarding shell instead of the workspace.
-  if (runtime.onboardingRequired) {
+  // The account establishes the active workspace before provider setup.
+  // Preview runtimes report a synthetic ready account, so they enter the
+  // provider stage without a production-only bypass.
+  const accountWorkspaceUsable = runtime.accountWorkspaceStatus.state === "ready" ||
+    (runtime.accountWorkspaceStatus.state === "offline" && runtime.accountWorkspaceStatus.accountBound);
+  const identityUsable = runtime.identityStatus.state === "signed-in" ||
+    (runtime.identityStatus.state === "offline" && runtime.accountWorkspaceStatus.state === "offline" && runtime.accountWorkspaceStatus.accountBound);
+  const accountReady = identityUsable && accountWorkspaceUsable;
+  if (!accountReady || runtime.onboardingRequired) {
     return (
       <Suspense fallback={<div className="og-frame" aria-busy="true" />}>
         <OnboardingPage
           providers={runtime.backendProviders}
           connectedBackendIds={runtime.connectedBackendIds}
           status={runtime.backendStatus}
+          identityStatus={runtime.identityStatus}
+          identityPending={runtime.identityPending}
+          accountWorkspaceStatus={runtime.accountWorkspaceStatus}
+          accountWorkspacePending={runtime.accountWorkspacePending}
+          onSignIn={runtime.signInIdentity}
+          onRecover={runtime.recoverIdentity}
+          onRefreshAccount={async () => {
+            await runtime.refreshIdentity();
+            await runtime.reconcileAccountWorkspace();
+          }}
           onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
           onConnectWithVerify={(providerId, secret) =>
             runtime.connectBackendWithVerify(providerId, secret)
@@ -508,23 +527,7 @@ export function ChatWorkspace() {
           onCheckConnection={async () => {
             await runtime.refreshBackendProviders();
           }}
-          onSkip={runtime.dismissOnboarding}
-          onSubmitProfile={(name, email) => {
-            setProfile((current) => ({
-              ...current,
-              // Local profile only: apply name/email when provided. No auth and no
-              // account is created â€” these are local display fields.
-              ...(name ? { name } : {}),
-              ...(email ? { email } : {}),
-              photoInitials: (name || current.name)
-                .split(" ")
-                .map((n) => n[0])
-                .join("")
-                .toUpperCase()
-                .slice(0, 2)
-            }));
-          }}
-          onOpenConnectors={() => runtime.setActiveItem("Connectors")}
+          onComplete={runtime.dismissOnboarding}
         />
       </Suspense>
     );
@@ -565,7 +568,7 @@ export function ChatWorkspace() {
         workspaceName={workspaceName}
         utilityItems={utilityItems}
         activeItem={runtime.activeItem}
-        profile={profile}
+        profile={verifiedProfile}
         expandedCollections={expandedCollections}
         expandedProjects={expandedProjects}
         projects={projects}
@@ -601,6 +604,17 @@ export function ChatWorkspace() {
           runtime.focusComposer("Search ");
         }}
         onSelectWorkspace={() => runtime.setLastAction("Workspace selector ready")}
+        accountWorkspaces={runtime.accountWorkspaceStatus.workspaces}
+        activeAccountWorkspaceId={runtime.accountWorkspaceStatus.activeWorkspace.fableWorkspaceId}
+        workspacePending={runtime.accountWorkspacePending}
+        onSelectAccountWorkspace={async (fableWorkspaceId) => {
+          await runtime.selectAccountWorkspace(fableWorkspaceId);
+          runtime.setLastAction("Workspace switched");
+        }}
+        onCreateAccountWorkspace={async (name) => {
+          await runtime.createAccountWorkspace(name);
+          runtime.setLastAction("Workspace created");
+        }}
         onToggleProjects={() =>
           setExpandedCollections((current) => ({ ...current, projects: !current.projects }))
         }
@@ -636,7 +650,8 @@ export function ChatWorkspace() {
         onSelectThread={(thread) => runtime.openThread(thread, "chat")}
         onAccountMenu={(item) => {
           if (item === "logout") {
-            runtime.setLastAction("Log out selected");
+            void runtime.signOutIdentity();
+            runtime.setLastAction("Signing out of Fable account");
             return;
           }
 
@@ -782,8 +797,6 @@ export function ChatWorkspace() {
               <Suspense fallback={null}>
                 <SettingsPage
                   runtime={runtime}
-                  profile={profile}
-                  onProfileChange={setProfile}
                   theme={theme}
                   onThemeChange={setTheme}
                   activeTab={activeSettingsTab}
