@@ -1,263 +1,84 @@
 export type CloudRole = "owner" | "admin" | "editor" | "viewer";
-export type CloudStatus = "active" | "revoked";
-export type WorkspaceStatus = "active" | "disabled" | "deleted";
-export type CloudOperation = "create" | "update" | "delete";
 export type CloudRecordType = "project";
+export type CloudOperation = "create" | "update" | "delete";
 export type MutationResult =
   | { status: "accepted"; revision: number; recordType: CloudRecordType; recordId: string }
   | { status: "rejected"; code: string; message: string };
 
-export interface CloudIdentity {
-  subject: string;
-  orgId?: string;
-}
-
-export interface CloudWorkspace {
-  workspaceId: string;
-  clerkOrgId: string;
-  name: string;
-  status: WorkspaceStatus;
-  revision: number;
-}
-
-export interface CloudMembership {
-  workspaceId: string;
-  clerkUserId: string;
-  clerkOrgId: string;
-  role: CloudRole;
-  status: CloudStatus;
-}
-
-export interface CloudDevice {
-  workspaceId: string;
-  deviceId: string;
-  clerkUserId: string;
-  status: CloudStatus;
-}
-
-export interface CloudProject {
-  workspaceId: string;
-  projectId: string;
-  name: string;
-  revision: number;
-  deletedAt?: number;
-}
-
-export interface CloudTombstone {
-  workspaceId: string;
-  recordType: CloudRecordType;
-  recordId: string;
-  revision: number;
-  deletedAt: number;
-  actorDeviceId: string;
-}
-
-export interface CloudIdempotencyKey {
-  workspaceId: string;
-  deviceId: string;
-  clientMutationId: string;
-  idempotencyKey: string;
-  result: MutationResult;
-}
-
-export interface CloudState {
-  workspaces: CloudWorkspace[];
-  memberships: CloudMembership[];
-  devices: CloudDevice[];
-  projects: CloudProject[];
-  tombstones: CloudTombstone[];
-  idempotencyKeys: CloudIdempotencyKey[];
-}
-
-export interface OutboxMutationArgs {
-  workspaceId: string;
-  deviceId: string;
-  clientMutationId: string;
-  idempotencyKey: string;
-  baseRevision: number;
-  recordType: CloudRecordType;
-  recordId: string;
-  operation: CloudOperation;
-  payload?: { name?: string };
-}
+/** Trusted authentication facts. They identify a principal but grant no workspace access. */
+export interface CloudIdentity { provider: "clerk"; normalizedIssuer: string; subject: string }
+export interface CloudUser { internalUserId: string; status: "active" | "disabled" }
+export interface CloudIdentityLink { provider: "clerk"; normalizedIssuer: string; subject: string; internalUserId: string; status: "active" | "disabled" | "revoked" }
+export interface CloudWorkspace { workspaceId: string; name: string; status: "active" | "locked" | "deleted"; revision: number; policyRevision: number }
+export interface CloudMembership { memberId: string; workspaceId: string; internalUserId: string; role: CloudRole; status: "active" | "suspended" | "removed"; revision: number }
+export interface CloudDevice { deviceId: string; internalUserId: string; status: "active" | "revoked" }
+export interface CloudDeviceLink { workspaceId: string; deviceId: string; internalUserId: string; memberId: string; status: "active" | "revoked" }
+export interface CloudProject { workspaceId: string; projectId: string; name: string; revision: number; deletedAt?: number }
+export interface CloudTombstone { workspaceId: string; recordType: CloudRecordType; recordId: string; revision: number; deletedAt: number; actorDeviceId: string }
+export interface CloudIdempotencyKey { workspaceId: string; deviceId: string; clientMutationId: string; idempotencyKey: string; result: MutationResult }
+export interface CloudState { users: CloudUser[]; identityLinks: CloudIdentityLink[]; workspaces: CloudWorkspace[]; memberships: CloudMembership[]; devices: CloudDevice[]; deviceLinks: CloudDeviceLink[]; projects: CloudProject[]; tombstones: CloudTombstone[]; idempotencyKeys: CloudIdempotencyKey[] }
+export interface OutboxMutationArgs { workspaceId: string; deviceId: string; clientMutationId: string; idempotencyKey: string; baseRevision: number; recordType: CloudRecordType; recordId: string; operation: CloudOperation; payload?: { name?: string } }
 
 const WRITE_ROLES = new Set<CloudRole>(["owner", "admin", "editor"]);
 const MANAGE_ROLES = new Set<CloudRole>(["owner", "admin"]);
+const ASSIGNABLE: Record<CloudRole, readonly CloudRole[]> = { owner: ["owner", "admin", "editor", "viewer"], admin: ["admin", "editor", "viewer"], editor: [], viewer: [] };
 
-export class CloudPolicyError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string
-  ) {
-    super(message);
-  }
+export class CloudPolicyError extends Error { constructor(public readonly code: string, message: string, public readonly opaque = false) { super(message); } }
+export function requireIdentity(identity: CloudIdentity | null | undefined): CloudIdentity { if (!identity?.normalizedIssuer || !identity.subject) throw new CloudPolicyError("unauthenticated", "A validated external identity is required."); return identity; }
+export function resolveInternalUser(state: Pick<CloudState, "users" | "identityLinks">, identity: CloudIdentity | null | undefined) {
+  const external = requireIdentity(identity);
+  const link = state.identityLinks.find((x) => x.provider === external.provider && x.normalizedIssuer === external.normalizedIssuer && x.subject === external.subject);
+  if (!link) throw new CloudPolicyError("identity-link-not-found", "No Fable identity link is available.", true);
+  if (link.status !== "active") throw new CloudPolicyError("identity-link-inactive", "The Fable identity link is unavailable.", true);
+  const user = state.users.find((x) => x.internalUserId === link.internalUserId);
+  if (!user || user.status !== "active") throw new CloudPolicyError("internal-user-inactive", "The Fable account is unavailable.", true);
+  return { external, link, user };
 }
-
-export function requireIdentity(identity: CloudIdentity | null | undefined): CloudIdentity {
-  if (!identity?.subject) {
-    throw new CloudPolicyError("unauthenticated", "A valid Clerk identity is required.");
-  }
-  return identity;
+export function requireActiveMembership(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined, workspaceId: string) {
+  const resolved = resolveInternalUser(state, identity);
+  const workspace = state.workspaces.find((x) => x.workspaceId === workspaceId);
+  if (!workspace || workspace.status !== "active") throw new CloudPolicyError("workspace-unavailable", "The requested workspace is unavailable.", true);
+  const membership = state.memberships.find((x) => x.workspaceId === workspaceId && x.internalUserId === resolved.user.internalUserId);
+  if (!membership) throw new CloudPolicyError("membership-required", "Active Fable workspace membership is required.", true);
+  if (membership.status !== "active") throw new CloudPolicyError("membership-inactive", "Active Fable workspace membership is required.", true);
+  return { ...resolved, workspace, membership };
 }
-
-export function requireActiveMembership(
-  state: Pick<CloudState, "workspaces" | "memberships">,
-  identity: CloudIdentity | null | undefined,
-  workspaceId: string
-) {
-  const user = requireIdentity(identity);
-  const workspace = state.workspaces.find((candidate) => candidate.workspaceId === workspaceId);
-  if (!workspace || workspace.status !== "active") {
-    throw new CloudPolicyError("workspace-not-found", "The shared workspace is unavailable.");
-  }
-  if (workspace.clerkOrgId && user.orgId !== workspace.clerkOrgId) {
-    throw new CloudPolicyError("wrong-organization", "The Clerk organization does not match this workspace.");
-  }
-  const membership = state.memberships.find(
-    (candidate) => candidate.workspaceId === workspaceId && candidate.clerkUserId === user.subject
-  );
-  if (!membership || membership.status !== "active") {
-    throw new CloudPolicyError("membership-required", "Active Fable workspace membership is required.");
-  }
-  if (membership.clerkOrgId !== workspace.clerkOrgId) {
-    throw new CloudPolicyError("wrong-organization", "The membership organization does not match this workspace.");
-  }
-  return { user, workspace, membership };
-}
-
-export function requireCanRead(
-  state: Pick<CloudState, "workspaces" | "memberships">,
-  identity: CloudIdentity | null | undefined,
-  workspaceId: string
-) {
-  return requireActiveMembership(state, identity, workspaceId);
-}
-
+export function requireCanRead(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined, workspaceId: string) { return requireActiveMembership(state, identity, workspaceId); }
 export function requireCanWrite(state: CloudState, identity: CloudIdentity | null | undefined, args: OutboxMutationArgs) {
   const authz = requireActiveMembership(state, identity, args.workspaceId);
-  if (!WRITE_ROLES.has(authz.membership.role)) {
-    throw new CloudPolicyError("role-denied", "Viewer members cannot write shared workspace records.");
-  }
-  const device = state.devices.find(
-    (candidate) => candidate.workspaceId === args.workspaceId && candidate.deviceId === args.deviceId
-  );
-  if (!device || device.clerkUserId !== authz.user.subject || device.status !== "active") {
-    throw new CloudPolicyError("device-revoked", "This device is not linked for shared workspace writes.");
-  }
-  return { ...authz, device };
+  if (!WRITE_ROLES.has(authz.membership.role)) throw new CloudPolicyError("permission-denied", "This role cannot write shared workspace records.", true);
+  const device = state.devices.find((x) => x.deviceId === args.deviceId && x.internalUserId === authz.user.internalUserId);
+  const link = state.deviceLinks.find((x) => x.workspaceId === args.workspaceId && x.deviceId === args.deviceId && x.internalUserId === authz.user.internalUserId && x.memberId === authz.membership.memberId);
+  if (!device || device.status !== "active" || !link || link.status !== "active") throw new CloudPolicyError("device-inactive", "An active Fable device link is required.", true);
+  return { ...authz, device, link };
 }
-
-export function requireCanManageMembers(
-  state: Pick<CloudState, "workspaces" | "memberships">,
-  identity: CloudIdentity | null | undefined,
-  workspaceId: string
-) {
-  const authz = requireActiveMembership(state, identity, workspaceId);
-  if (!MANAGE_ROLES.has(authz.membership.role)) {
-    throw new CloudPolicyError("role-denied", "This role cannot manage workspace membership.");
-  }
-  return authz;
+export function requireCanManageMembers(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined, workspaceId: string) { const authz = requireActiveMembership(state, identity, workspaceId); if (!MANAGE_ROLES.has(authz.membership.role)) throw new CloudPolicyError("permission-denied", "This role cannot manage workspace membership.", true); return authz; }
+export function ensureRoleAssignment(actor: CloudRole, next: CloudRole) { if (!ASSIGNABLE[actor].includes(next)) throw new CloudPolicyError("role-assignment-denied", "This role cannot assign the requested role.", true); }
+export function ensureNotLastOwner(state: Pick<CloudState, "memberships">, membership: CloudMembership, nextRole = membership.role, nextStatus = membership.status) { if (membership.role !== "owner" || (nextRole === "owner" && nextStatus === "active")) return; const owners = state.memberships.filter((x) => x.workspaceId === membership.workspaceId && x.status === "active" && x.role === "owner" && x.memberId !== membership.memberId); if (!owners.length) throw new CloudPolicyError("last-active-owner", "A workspace must retain an active owner.", true); }
+export interface BootstrapState extends CloudState { bootstrapReceipts: { identity: string; key: string; fingerprint: string; result: BootstrapResult }[] }
+export type BootstrapResult = { status: "created" | "existing" | "conflict"; internalUserId?: string; workspaceId?: string; memberId?: string; code?: "idempotency-conflict" };
+export function bootstrapAccountToState(state: BootstrapState, identity: CloudIdentity, key: string, fingerprint = "") : BootstrapResult {
+  const principal = `${identity.provider}:${identity.normalizedIssuer}:${identity.subject}`; const receipt = state.bootstrapReceipts.find((x) => x.identity === principal && x.key === key); if (receipt) return receipt.fingerprint === fingerprint ? receipt.result : { status: "conflict", code: "idempotency-conflict" };
+  let link = state.identityLinks.find((x) => x.provider === identity.provider && x.normalizedIssuer === identity.normalizedIssuer && x.subject === identity.subject); let created = false;
+  if (!link) { const internalUserId = `usr-${state.users.length + 1}`; link = { ...identity, internalUserId, status: "active" }; state.users.push({ internalUserId, status: "active" }); state.identityLinks.push(link); created = true; }
+  let member = state.memberships.find((x) => x.internalUserId === link.internalUserId && x.status === "active"); if (!member) { const workspaceId = `ws-${state.workspaces.length + 1}`; member = { memberId: `member-${state.memberships.length + 1}`, workspaceId, internalUserId: link.internalUserId, role: "owner", status: "active", revision: 1 }; state.workspaces.push({ workspaceId, name: "Fable workspace", status: "active", revision: 0, policyRevision: 1 }); state.memberships.push(member); }
+  const result: BootstrapResult = { status: created ? "created" : "existing", internalUserId: link.internalUserId, workspaceId: member.workspaceId, memberId: member.memberId }; state.bootstrapReceipts.push({ identity: principal, key, fingerprint, result }); return result;
 }
-
-export function applyOutboxMutationToState(
-  state: CloudState,
-  identity: CloudIdentity | null | undefined,
-  args: OutboxMutationArgs,
-  now = Date.now()
-): MutationResult {
-  const expectedIdempotencyKey = `${args.workspaceId}:${args.deviceId}:${args.clientMutationId}`;
-  if (args.idempotencyKey !== expectedIdempotencyKey) {
-    throw new CloudPolicyError("bad-idempotency-key", "The idempotency key does not match the mutation namespace.");
-  }
-  const replay = state.idempotencyKeys.find(
-    (key) =>
-      key.workspaceId === args.workspaceId &&
-      key.deviceId === args.deviceId &&
-      key.clientMutationId === args.clientMutationId
-  );
-  if (replay) {
-    return replay.result;
-  }
-
-  const reject = (code: string, message: string): MutationResult => {
-    const result: MutationResult = { status: "rejected", code, message };
-    state.idempotencyKeys.push({
-      workspaceId: args.workspaceId,
-      deviceId: args.deviceId,
-      clientMutationId: args.clientMutationId,
-      idempotencyKey: args.idempotencyKey,
-      result
-    });
-    return result;
-  };
-
+export function applyOutboxMutationToState(state: CloudState, identity: CloudIdentity | null | undefined, args: OutboxMutationArgs, now = Date.now()): MutationResult {
+  const expected = `${args.workspaceId}:${args.deviceId}:${args.clientMutationId}`;
+  if (args.idempotencyKey !== expected) throw new CloudPolicyError("idempotency-conflict", "The idempotency key does not match the mutation namespace.", true);
+  const replay = state.idempotencyKeys.find((x) => x.workspaceId === args.workspaceId && x.deviceId === args.deviceId && x.clientMutationId === args.clientMutationId); if (replay) return replay.result;
+  const reject = (code: string, message: string) => { const result: MutationResult = { status: "rejected", code, message }; state.idempotencyKeys.push({ workspaceId: args.workspaceId, deviceId: args.deviceId, clientMutationId: args.clientMutationId, idempotencyKey: args.idempotencyKey, result }); return result; };
   try {
-    const { workspace } = requireCanWrite(state, identity, args);
-    const tombstone = state.tombstones.find(
-      (candidate) =>
-        candidate.workspaceId === args.workspaceId &&
-        candidate.recordType === args.recordType &&
-        candidate.recordId === args.recordId
-    );
-    if (tombstone && args.operation !== "delete") {
-      return reject("tombstoned", "Deleted shared records cannot be resurrected by stale updates.");
-    }
-
-    const existing = state.projects.find(
-      (candidate) => candidate.workspaceId === args.workspaceId && candidate.projectId === args.recordId
-    );
-    let result: MutationResult;
+    requireCanWrite(state, identity, args);
+    const tombstone = state.tombstones.find((x) => x.workspaceId === args.workspaceId && x.recordType === args.recordType && x.recordId === args.recordId);
+    if (tombstone && args.operation !== "delete") return reject("conflict", "The shared record is unavailable.");
+    const workspace = state.workspaces.find((x) => x.workspaceId === args.workspaceId)!;
+    const existing = state.projects.find((x) => x.workspaceId === args.workspaceId && x.projectId === args.recordId);
     const revision = workspace.revision + 1;
-    if (args.operation === "create") {
-      if (existing && !existing.deletedAt) {
-        return reject("duplicate-record", "The shared project already exists.");
-      }
-      state.projects.push({
-        workspaceId: args.workspaceId,
-        projectId: args.recordId,
-        name: args.payload?.name?.trim() || "Untitled project",
-        revision
-      });
-      result = { status: "accepted", revision, recordType: args.recordType, recordId: args.recordId };
-    } else if (args.operation === "update") {
-      if (!existing || existing.deletedAt) {
-        return reject("missing-record", "The shared project is unavailable.");
-      }
-      if (existing.revision !== args.baseRevision) {
-        return reject("stale-revision", "The shared project changed before this mutation was applied.");
-      }
-      existing.name = args.payload?.name?.trim() || existing.name;
-      existing.revision = revision;
-      result = { status: "accepted", revision, recordType: args.recordType, recordId: args.recordId };
-    } else {
-      if (!existing || existing.deletedAt) {
-        return reject("missing-record", "The shared project is unavailable.");
-      }
-      existing.deletedAt = now;
-      existing.revision = revision;
-      state.tombstones.push({
-        workspaceId: args.workspaceId,
-        recordType: args.recordType,
-        recordId: args.recordId,
-        revision,
-        deletedAt: now,
-        actorDeviceId: args.deviceId
-      });
-      result = { status: "accepted", revision, recordType: args.recordType, recordId: args.recordId };
-    }
-    workspace.revision = revision;
-    state.idempotencyKeys.push({
-      workspaceId: args.workspaceId,
-      deviceId: args.deviceId,
-      clientMutationId: args.clientMutationId,
-      idempotencyKey: args.idempotencyKey,
-      result
-    });
-    return result;
-  } catch (error) {
-    if (error instanceof CloudPolicyError) {
-      return reject(error.code, error.message);
-    }
-    throw error;
-  }
+    if (args.operation === "create") { if (existing && !existing.deletedAt) return reject("conflict", "The shared record is unavailable."); state.projects.push({ workspaceId: args.workspaceId, projectId: args.recordId, name: args.payload?.name?.trim() || "Untitled project", revision }); }
+    else if (args.operation === "update") { if (!existing || existing.deletedAt || existing.revision !== args.baseRevision) return reject("conflict", "The shared record is unavailable."); existing.name = args.payload?.name?.trim() || existing.name; existing.revision = revision; }
+    else { if (!existing || existing.deletedAt || existing.revision !== args.baseRevision) return reject("conflict", "The shared record is unavailable."); existing.deletedAt = now; existing.revision = revision; state.tombstones.push({ workspaceId: args.workspaceId, recordType: args.recordType, recordId: args.recordId, revision, deletedAt: now, actorDeviceId: args.deviceId }); }
+    workspace.revision = revision; const result: MutationResult = { status: "accepted", revision, recordType: args.recordType, recordId: args.recordId }; state.idempotencyKeys.push({ workspaceId: args.workspaceId, deviceId: args.deviceId, clientMutationId: args.clientMutationId, idempotencyKey: args.idempotencyKey, result }); return result;
+  } catch (error) { if (error instanceof CloudPolicyError) return reject(error.code, "The shared record is unavailable."); throw error; }
 }
