@@ -7,17 +7,19 @@ export type MutationResult =
 
 /** Trusted authentication facts. They identify a principal but grant no workspace access. */
 export interface CloudIdentity { provider: "clerk"; normalizedIssuer: string; subject: string }
-export interface CloudUser { internalUserId: string; status: "active" | "disabled" }
+export interface CloudUser { internalUserId: string; status: "active" | "disabled"; initialWorkspaceId?: string }
 export interface CloudIdentityLink { provider: "clerk"; normalizedIssuer: string; subject: string; internalUserId: string; status: "active" | "disabled" | "revoked" }
 export interface CloudWorkspace { workspaceId: string; name: string; status: "active" | "locked" | "deleted"; revision: number; policyRevision: number }
 export interface CloudMembership { memberId: string; workspaceId: string; internalUserId: string; role: CloudRole; status: "active" | "suspended" | "removed"; revision: number }
-export interface CloudDevice { deviceId: string; internalUserId: string; status: "active" | "revoked" }
-export interface CloudDeviceLink { workspaceId: string; deviceId: string; internalUserId: string; memberId: string; status: "active" | "revoked" }
+export interface CloudDevice { deviceId: string; internalUserId: string; kind?: "desktop" | "mobile" | "web"; label?: string; status: "pending" | "active" | "revoked"; registeredAt?: number; lastSeenAt?: number; revokedAt?: number }
+export interface CloudDeviceLink { workspaceId: string; deviceId: string; internalUserId: string; memberId: string; status: "pending" | "active" | "revoked"; revokedAt?: number }
 export interface CloudProject { workspaceId: string; projectId: string; name: string; revision: number; deletedAt?: number }
 export interface CloudTombstone { workspaceId: string; recordType: CloudRecordType; recordId: string; revision: number; deletedAt: number; actorDeviceId: string }
 export interface CloudIdempotencyKey { workspaceId: string; deviceId: string; clientMutationId: string; idempotencyKey: string; result: MutationResult }
 export interface CloudState { users: CloudUser[]; identityLinks: CloudIdentityLink[]; workspaces: CloudWorkspace[]; memberships: CloudMembership[]; devices: CloudDevice[]; deviceLinks: CloudDeviceLink[]; projects: CloudProject[]; tombstones: CloudTombstone[]; idempotencyKeys: CloudIdempotencyKey[] }
 export interface OutboxMutationArgs { workspaceId: string; deviceId: string; clientMutationId: string; idempotencyKey: string; baseRevision: number; recordType: CloudRecordType; recordId: string; operation: CloudOperation; payload?: { name?: string } }
+export interface AccessibleWorkspace { workspaceId: string; name: string; revision: number; policyRevision: number; memberId: string; role: CloudRole; membershipRevision: number }
+export interface AccountDeviceSummary { deviceId: string; kind: "desktop" | "mobile" | "web"; label: string; status: "pending" | "active" | "revoked"; registeredAt: number; lastSeenAt: number; revokedAt?: number }
 
 const WRITE_ROLES = new Set<CloudRole>(["owner", "admin", "editor"]);
 const MANAGE_ROLES = new Set<CloudRole>(["owner", "admin"]);
@@ -64,6 +66,36 @@ export function requireCanWrite(state: CloudState, identity: CloudIdentity | nul
 export function requireCanManageMembers(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined, workspaceId: string) { const authz = requireActiveMembership(state, identity, workspaceId); if (!MANAGE_ROLES.has(authz.membership.role)) throw new CloudPolicyError("permission-denied", "This role cannot manage workspace membership.", true); return authz; }
 export function ensureRoleAssignment(actor: CloudRole, next: CloudRole) { if (!ASSIGNABLE[actor].includes(next)) throw new CloudPolicyError("role-assignment-denied", "This role cannot assign the requested role.", true); }
 export function ensureNotLastOwner(state: Pick<CloudState, "memberships">, membership: CloudMembership, nextRole = membership.role, nextStatus = membership.status) { if (membership.role !== "owner" || (nextRole === "owner" && nextStatus === "active")) return; const owners = state.memberships.filter((x) => x.workspaceId === membership.workspaceId && x.status === "active" && x.role === "owner" && x.memberId !== membership.memberId); if (!owners.length) throw new CloudPolicyError("last-active-owner", "A workspace must retain an active owner.", true); }
+export function listAccessibleWorkspaces(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined): AccessibleWorkspace[] {
+  const { user } = resolveInternalUser(state, identity);
+  return state.memberships
+    .filter((membership) => membership.internalUserId === user.internalUserId && membership.status === "active")
+    .flatMap((membership) => {
+      const memberships = state.memberships.filter((candidate) => candidate.workspaceId === membership.workspaceId && candidate.internalUserId === user.internalUserId);
+      const workspaces = state.workspaces.filter((workspace) => workspace.workspaceId === membership.workspaceId && workspace.status === "active");
+      if (memberships.length !== 1 || workspaces.length !== 1) return [];
+      const workspace = workspaces[0];
+      return [{ workspaceId: workspace.workspaceId, name: workspace.name, revision: workspace.revision, policyRevision: workspace.policyRevision, memberId: membership.memberId, role: membership.role, membershipRevision: membership.revision }];
+    })
+    .sort((left, right) => left.workspaceId.localeCompare(right.workspaceId));
+}
+export function listAccountDevices(state: Pick<CloudState, "users" | "identityLinks" | "devices">, identity: CloudIdentity | null | undefined): AccountDeviceSummary[] {
+  const { user } = resolveInternalUser(state, identity);
+  return state.devices
+    .filter((device) => device.internalUserId === user.internalUserId && device.kind && device.label !== undefined && device.registeredAt !== undefined && device.lastSeenAt !== undefined)
+    .map((device) => ({ deviceId: device.deviceId, kind: device.kind!, label: device.label!, status: device.status, registeredAt: device.registeredAt!, lastSeenAt: device.lastSeenAt!, ...(device.revokedAt === undefined ? {} : { revokedAt: device.revokedAt }) }))
+    .sort((left, right) => left.deviceId.localeCompare(right.deviceId));
+}
+export function revokeAccountDeviceToState(state: Pick<CloudState, "users" | "identityLinks" | "devices" | "deviceLinks">, identity: CloudIdentity | null | undefined, deviceId: string, now = Date.now()) {
+  const { user } = resolveInternalUser(state, identity);
+  const devices = state.devices.filter((device) => device.deviceId === deviceId);
+  if (devices.length !== 1 || devices[0].internalUserId !== user.internalUserId) throw new CloudPolicyError("device-unavailable", "This device is unavailable.", true);
+  const device = devices[0];
+  const links = state.deviceLinks.filter((link) => link.deviceId === deviceId && link.internalUserId === user.internalUserId);
+  if (device.status !== "revoked") { device.status = "revoked"; device.revokedAt = now; }
+  for (const link of links) if (link.status !== "revoked") { link.status = "revoked"; link.revokedAt = now; }
+  return { deviceId, status: "revoked" as const, revokedWorkspaceLinks: links.length };
+}
 export interface BootstrapState extends CloudState { bootstrapReceipts: { identity: string; key: string; fingerprint: string; result: BootstrapResult }[] }
 export type BootstrapResult = { status: "created" | "existing" | "conflict"; internalUserId?: string; workspaceId?: string; memberId?: string; code?: "identity-link-conflict" | "idempotency-conflict" };
 export function bootstrapAccountToState(state: BootstrapState, identity: CloudIdentity, key: string, fingerprint = "") : BootstrapResult {
@@ -72,7 +104,10 @@ export function bootstrapAccountToState(state: BootstrapState, identity: CloudId
   if (links.length > 1) return { status: "conflict", code: "identity-link-conflict" };
   let link = links[0]; let created = false;
   if (!link) { const internalUserId = `usr-${state.users.length + 1}`; link = { ...identity, internalUserId, status: "active" }; state.users.push({ internalUserId, status: "active" }); state.identityLinks.push(link); created = true; }
-  let member = state.memberships.find((x) => x.internalUserId === link.internalUserId && x.status === "active"); if (!member) { const workspaceId = `ws-${state.workspaces.length + 1}`; member = { memberId: `member-${state.memberships.length + 1}`, workspaceId, internalUserId: link.internalUserId, role: "owner", status: "active", revision: 1 }; state.workspaces.push({ workspaceId, name: "Fable workspace", status: "active", revision: 0, policyRevision: 1 }); state.memberships.push(member); }
+  const user = state.users.find((candidate) => candidate.internalUserId === link!.internalUserId);
+  if (!user || user.status !== "active") return { status: "conflict", code: "identity-link-conflict" };
+  let member = user.initialWorkspaceId ? state.memberships.find((candidate) => candidate.workspaceId === user.initialWorkspaceId && candidate.internalUserId === user.internalUserId && candidate.status === "active" && candidate.role === "owner") : undefined;
+  if (!member) { const workspaceId = `ws-${state.workspaces.length + 1}`; member = { memberId: `member-${state.memberships.length + 1}`, workspaceId, internalUserId: link.internalUserId, role: "owner", status: "active", revision: 1 }; state.workspaces.push({ workspaceId, name: "Fable workspace", status: "active", revision: 0, policyRevision: 1 }); state.memberships.push(member); user.initialWorkspaceId = workspaceId; }
   const result: BootstrapResult = { status: created ? "created" : "existing", internalUserId: link.internalUserId, workspaceId: member.workspaceId, memberId: member.memberId }; state.bootstrapReceipts.push({ identity: principal, key, fingerprint, result }); return result;
 }
 export function applyOutboxMutationToState(state: CloudState, identity: CloudIdentity | null | undefined, args: OutboxMutationArgs, now = Date.now()): MutationResult {

@@ -14,7 +14,7 @@ const operation = v.union(v.literal("create"), v.literal("update"), v.literal("d
 export default defineSchema({
   internal_users: defineTable({
     internalUserId: v.string(), status: v.union(v.literal("active"), v.literal("disabled"), v.literal("pending-deletion"), v.literal("deleted")),
-    createdAt: v.number(), updatedAt: v.number(), revision: v.number()
+    initialWorkspaceId: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(), revision: v.number()
   }).index("by_internal_user", ["internalUserId"]),
   external_identity_links: defineTable({
     externalIdentityId: v.string(), provider: v.string(), normalizedIssuer: v.string(), subject: v.string(), internalUserId: v.string(),
@@ -39,10 +39,13 @@ export default defineSchema({
   }).index("by_device", ["deviceId"]).index("by_internal_user", ["internalUserId"]),
   workspace_device_links: defineTable({
     workspaceId: v.string(), deviceId: v.string(), internalUserId: v.string(), memberId: v.string(), status: deviceStatus, revision: v.number(), linkedAt: v.number(), revokedAt: v.optional(v.number())
-  }).index("by_workspace_device", ["workspaceId", "deviceId"]).index("by_workspace", ["workspaceId"]),
+  }).index("by_workspace_device", ["workspaceId", "deviceId"]).index("by_workspace", ["workspaceId"]).index("by_device", ["deviceId"]),
   bootstrap_idempotency: defineTable({
     provider: v.string(), normalizedIssuer: v.string(), subject: v.string(), idempotencyKey: v.string(), fingerprint: v.string(), result: v.any(), createdAt: v.number()
   }).index("by_identity_key", ["provider", "normalizedIssuer", "subject", "idempotencyKey"]),
+  workspace_creation_idempotency: defineTable({
+    internalUserId: v.string(), idempotencyKey: v.string(), fingerprint: v.string(), result: v.any(), createdAt: v.number()
+  }).index("by_user_key", ["internalUserId", "idempotencyKey"]),
   shared_projects: defineTable({
     workspaceId: v.string(), projectId: v.string(), name: v.string(), revision: v.number(), createdByInternalUserId: v.string(), createdByDeviceId: v.string(), createdAt: v.number(), updatedAt: v.number(), deletedAt: v.optional(v.number())
   }).index("by_workspace", ["workspaceId"]).index("by_workspace_record", ["workspaceId", "projectId"]).index("by_workspace_revision", ["workspaceId", "revision"]),
