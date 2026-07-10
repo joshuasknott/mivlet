@@ -84,6 +84,16 @@ const connectedCodex: BackendProvider = {
 };
 
 vi.mock("./runtime", () => ({
+  createRuntimeConversationThread: vi.fn(async () => null),
+  listRuntimeConversationThreads: vi.fn(async () => []),
+  getRuntimeConversationThread: vi.fn(async () => null),
+  updateRuntimeConversationThread: vi.fn(async () => null),
+  listRuntimeConversationMessages: vi.fn(async () => []),
+  appendRuntimeConversationMessage: vi.fn(async () => null),
+  reviseRuntimeConversationMessage: vi.fn(async () => null),
+  loadRuntimeConversationDraft: vi.fn(async () => null),
+  saveRuntimeConversationDraft: vi.fn(async (draft: unknown) => draft),
+  deleteRuntimeConversationDraft: vi.fn(async () => undefined),
   beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
     runtimeMocks.connectorOAuthCalls.push(request.connectorId);
     return null;
