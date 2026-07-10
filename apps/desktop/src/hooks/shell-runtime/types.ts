@@ -1,7 +1,7 @@
 import type * as React from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import type {
-  ActionHistoryEvent, ApprovalAuditEntry, ApprovalDecision, ApprovalGrant, ApprovalModification,
+  AccountWorkspaceStatus, ActionHistoryEvent, ApprovalAuditEntry, ApprovalDecision, ApprovalGrant, ApprovalModification,
   ApprovalRequest, BackendProvider, BackendVerifyResult, BrowserSessionState, ConnectorActionKind,
   ConnectorAccountOption, ConnectorManifest, ConnectorSearchItem, ConnectorSearchRequest,
   ConnectorSearchResult, CustomApprovalSettings, FableCommandRequest, FableCommandResult,
@@ -310,9 +310,16 @@ export interface ShellRuntime {
    */
   identityStatus: IdentityStatus;
   identityPending: boolean;
+  accountWorkspaceStatus: AccountWorkspaceStatus;
+  accountWorkspacePending: boolean;
   signInIdentity: () => Promise<void>;
+  recoverIdentity: () => Promise<void>;
   refreshIdentity: () => Promise<void>;
   signOutIdentity: () => Promise<void>;
+  reconcileAccountWorkspace: () => Promise<void>;
+  createAccountWorkspace: (name: string) => Promise<void>;
+  selectAccountWorkspace: (fableWorkspaceId: string) => Promise<void>;
+  revokeAccountDevice: (deviceId: string) => Promise<void>;
   /**
    * Inspectable action history (model calls, connector actions, tool/shell
    * actions, web actions, approvals, schedules, blocked policy decisions).
