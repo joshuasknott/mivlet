@@ -42,6 +42,7 @@ import {
   recoverRuntimeAgentRuns,
   saveRuntimeAgentRun
 } from "../runtime";
+import type { DurableRunWriter } from "../lib/conversation-runtime";
 
 /** True when the desktop (Tauri) runtime is present (drives the noTransport state). */
 function hasDesktopRuntime(): boolean {
@@ -100,6 +101,12 @@ export interface UseNativeAgentOptions {
    * boundary drop stay intact — this is the gate-teardown layer on top.
    */
   onCancel?: () => void;
+  /**
+   * Optional canonical transcript writer. The legacy run remains an in-flight
+   * recovery adapter; when a durable thread is active, lifecycle facts flow to
+   * this writer with stable per-run idempotency keys.
+   */
+  createDurableRunWriter?: (threadId: string, runId: string) => DurableRunWriter;
 }
 
 export function useNativeAgent(options: UseNativeAgentOptions) {
@@ -117,6 +124,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   // cancel map for native-API) using the requestId it captured from the transport.
   const activeBackendRef = useRef<AgentBackend | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const activePersistedRef = useRef<PersistedAgentRun | null>(null);
+  const activeWriterRef = useRef<DurableRunWriter | null>(null);
   const onToolCallRef = useRef(options.onToolCall);
   onToolCallRef.current = options.onToolCall;
   // The executor + cancellation hook are read live each run so App.tsx can wire
@@ -131,6 +140,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   threadIdRef.current = options.threadId;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
+  const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
+  createDurableRunWriterRef.current = options.createDurableRunWriter;
 
   useEffect(() => {
     void recoverRuntimeAgentRuns(new Date().toISOString()).then((runs) => {
@@ -185,6 +196,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       parentRunId?: string
     ) => {
       let persisted: PersistedAgentRun | null = null;
+      let terminalized = false;
+      if (activeRunIdRef.current) {
+        setState((current) => ({
+          ...current,
+          lastError: "Wait for the current response to finish before starting another one."
+        }));
+        return;
+      }
       if (!backend) {
         setState((current) => ({
           ...current,
@@ -208,6 +227,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         noTransport: false
       }));
       const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // Mark active before the first durable write so a second click cannot
+      // start an overlapping run while initial persistence is still pending.
+      activeRunIdRef.current = runId;
       const createdAt = new Date().toISOString();
       const initialExchanges: PersistedAgentExchange[] = request.messages
         .filter(
@@ -236,10 +258,35 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         createdAt,
         updatedAt: createdAt
       };
-      await saveRuntimeAgentRun(persisted);
+      activePersistedRef.current = persisted;
+      const durableWriter = threadIdRef.current
+        ? createDurableRunWriterRef.current?.(threadIdRef.current, runId) ?? null
+        : null;
+      activeWriterRef.current = durableWriter;
+      try {
+        // Persist the canonical user turn before egress. A retry supplies only
+        // its new user input, never a replay of already-completed tool work.
+        if (durableWriter) {
+          for (const exchange of initialExchanges.filter((entry) => entry.role === "user")) {
+            await durableWriter.record({ kind: "user", content: exchange.content });
+          }
+        }
+        await saveRuntimeAgentRun(persisted);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Could not save the conversation before it started.";
+        const failed = { ...persisted, status: "failed" as const, recoverable: true, error: message, updatedAt: new Date().toISOString() };
+        activePersistedRef.current = failed;
+        setState((current) => ({ ...current, running: false, status: "failed", lastError: message, recoverableRuns: [failed, ...current.recoverableRuns] }));
+        try { await saveRuntimeAgentRun(failed); } catch { /* persistence is already the reported terminal failure */ }
+        activeRunIdRef.current = null;
+        activePersistedRef.current = null;
+        activeWriterRef.current = null;
+        return;
+      }
       let lastPersistedTranscriptLength = 0;
       let lastPersistedAt = Date.now();
       const pendingApprovalByCall = new Map<string, string>();
+      const toolNameByCall = new Map<string, string>();
       // The shell resolves the visible approval preset (including Custom) down
       // to one PermissionMode before the run reaches this hook.
       const permissionMode: PermissionMode = requestedPermissionMode ?? "trusted-scope";
@@ -281,6 +328,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           running: false,
           status: "failed"
         }));
+        activeRunIdRef.current = null;
+        activePersistedRef.current = null;
+        activeWriterRef.current = null;
         return;
       }
       // Capture the active run's backend + id so cancel() reaches the egress
@@ -290,6 +340,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       activeRunIdRef.current = runId;
       try {
         for await (const event of eventStream) {
+          if (activePersistedRef.current?.status === "cancelled") {
+            persisted = activePersistedRef.current;
+            terminalized = true;
+            break;
+          }
           if (event.type === "text-delta") {
             setState((current) => ({ ...current, transcript: current.transcript + event.text }));
             const exchanges: PersistedAgentExchange[] = [...(persisted.exchanges ?? [])];
@@ -308,6 +363,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               exchanges,
               updatedAt: new Date().toISOString()
             };
+            if (durableWriter) await durableWriter.checkpointAssistant(persisted.transcript);
           } else if (event.type === "usage") {
             setState((current) => ({
               ...current,
@@ -333,6 +389,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           } else if (event.type === "tool-call") {
             onToolCallRef.current?.(event);
             pendingApprovalByCall.set(event.callId, event.approval.id);
+            toolNameByCall.set(event.callId, event.tool);
             persisted = {
               ...persisted,
               status: "awaiting-approval",
@@ -340,6 +397,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString()
             };
             setState((current) => ({ ...current, status: "awaiting-approval" }));
+            if (durableWriter) {
+              await durableWriter.record({ kind: "tool-call", content: `Tool requested: ${event.tool}`, callId: event.callId, toolName: event.tool });
+              // Historical evidence only: a recovered request must never become
+              // a new permit or standing grant after restart.
+              await durableWriter.record({ kind: "approval-request", content: `Approval requested for ${event.tool}.`, approvalRequestId: event.approval.id });
+            }
           } else if (event.type === "tool-result") {
             const completedApprovalId = pendingApprovalByCall.get(event.callId);
             pendingApprovalByCall.delete(event.callId);
@@ -362,6 +425,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString()
             };
             setState((current) => ({ ...current, status: "streaming" }));
+            if (durableWriter) await durableWriter.record({ kind: "tool-result", content: event.output, callId: event.callId, toolName: toolNameByCall.get(event.callId) ?? "unknown-tool", ok: event.ok });
+            toolNameByCall.delete(event.callId);
           } else if (event.type === "error") {
             // Classify so a configuration error (rejected/expired key) is
             // distinguishable from a runtime/provider failure. The structured
@@ -377,6 +442,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               error: described.message,
               updatedAt: new Date().toISOString()
             };
+            const terminalRun: PersistedAgentRun = { ...persisted, status: "failed", recoverable: true, pendingApprovalIds: [], updatedAt: new Date().toISOString() };
+            persisted = terminalRun;
+            terminalized = true;
+            if (durableWriter) await durableWriter.record({ kind: "error", content: described.message, code: event.code ?? "provider-error", retryable: event.retryable ?? true });
+            setState((current) => ({ ...current, running: false, status: "failed", recoverableRuns: [terminalRun, ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)] }));
           } else if (event.type === "done" || event.type === "cancelled") {
             const failed: boolean =
               event.type === "done" &&
@@ -391,6 +461,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString()
             };
             persisted = terminalRun;
+            terminalized = true;
+            if (durableWriter) {
+              await durableWriter.checkpointAssistant(terminalRun.transcript, true);
+              if (terminalStatus === "cancelled") await durableWriter.record({ kind: "interruption", content: "The response was stopped.", reason: "user-stop" });
+            }
             setState((current) => ({
               ...current,
               running: false,
@@ -410,9 +485,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             Date.now() - lastPersistedAt >= 1_000;
           if (terminalOrBoundary) {
             await saveRuntimeAgentRun(persisted);
+            activePersistedRef.current = persisted;
             lastPersistedTranscriptLength = persisted.transcript.length;
             lastPersistedAt = Date.now();
           }
+          if (terminalized) break;
+        }
+        if (!terminalized && persisted) {
+          const terminalRun: PersistedAgentRun = { ...persisted, status: "failed", recoverable: true, pendingApprovalIds: [], error: "The provider ended without a completion event.", updatedAt: new Date().toISOString() };
+          persisted = terminalRun;
+          if (durableWriter) await durableWriter.record({ kind: "error", content: terminalRun.error!, code: "provider-eof", retryable: true });
+          await saveRuntimeAgentRun(terminalRun);
+          setState((current) => ({ ...current, running: false, status: "failed", lastError: terminalRun.error!, recoverableRuns: [terminalRun, ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)] }));
         }
       } catch (error) {
         // A thrown BackendRuntimeError carries the structured code from the
@@ -430,6 +514,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           updatedAt: new Date().toISOString()
         };
         persisted = terminalRun;
+        if (durableWriter) {
+          await durableWriter.record(cancelled
+            ? { kind: "interruption", content: "The response was stopped.", reason: "user-stop" }
+            : { kind: "error", content: message, code: thrown.code ?? "transport-error", retryable: Boolean(thrown.retryable) });
+        }
         setState((current) => ({
           ...current,
           running: false,
@@ -442,10 +531,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)
               ]
         }));
-        await saveRuntimeAgentRun(persisted);
+        try { await saveRuntimeAgentRun(persisted); } catch { /* preserve the original terminal failure */ }
       } finally {
         activeBackendRef.current = null;
         activeRunIdRef.current = null;
+        activePersistedRef.current = null;
+        activeWriterRef.current = null;
       }
     },
     [backend]
@@ -505,6 +596,25 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     // cancelled-but-never-granted call (and its unresolved promise) does not
     // linger for the session. No-op when no onCancel is wired.
     onCancelRef.current?.();
+    const persisted = activePersistedRef.current;
+    if (persisted && persisted.status !== "cancelled") {
+      const terminalRun: PersistedAgentRun = {
+        ...persisted,
+        status: "cancelled",
+        recoverable: false,
+        pendingApprovalIds: [],
+        updatedAt: new Date().toISOString()
+      };
+      activePersistedRef.current = terminalRun;
+      try {
+        await activeWriterRef.current?.checkpointAssistant(terminalRun.transcript, true);
+        await activeWriterRef.current?.record({ kind: "interruption", content: "The response was stopped.", reason: "user-stop" });
+        await saveRuntimeAgentRun(terminalRun);
+      } catch {
+        // Cancellation is terminal even when a checkpoint cannot be written;
+        // the next scoped recovery can surface the adapter state safely.
+      }
+    }
     setState((current) => ({ ...current, running: false, status: "cancelled" }));
   }, []);
 

@@ -56,6 +56,7 @@ import type {
   CloudWorkspaceLinkState,
   AccountWorkspaceStatus
 } from "@fable/protocol";
+import type { Spine } from "@fable/protocol";
 
 interface ApprovalAuditRecordResponse {
   persisted: boolean;
@@ -289,6 +290,262 @@ export async function recoverRuntimeAgentRuns(recoveredAt: string) {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Durable conversations. These wrappers are intentionally narrow: scope is
+// always resolved here, never accepted from a caller. Browser preview has its
+// own explicit in-memory fixture rather than silently falling back to a
+// production-shaped local store.
+// ---------------------------------------------------------------------------
+
+type ConversationThread = Spine.Conversations.Thread;
+type ConversationMessage = Spine.Conversations.Message;
+type ConversationRevision = Spine.Conversations.MessageRevision;
+export type RuntimeConversationThreadCreate = Spine.Conversations.ThreadCreateInput;
+export type RuntimeConversationThreadUpdate = Spine.Conversations.ThreadUpdateInput;
+export type RuntimeConversationMessageAppend = Spine.Conversations.MessageAppendInput;
+export type RuntimeConversationMessageRevision = Spine.Conversations.MessageRevisionCreateInput;
+
+export interface RuntimeConversationMessageView {
+  message: ConversationMessage;
+  currentRevision: ConversationRevision;
+}
+
+export interface RuntimeConversationDraft {
+  draftKey: string;
+  threadId?: string;
+  content: string;
+  updatedAt: string;
+}
+
+interface PreviewConversationStore {
+  threads: ConversationThread[];
+  messages: RuntimeConversationMessageView[];
+  drafts: Map<string, RuntimeConversationDraft>;
+}
+
+const previewConversationStores = new Map<string, PreviewConversationStore>();
+
+function conversationScopeOrThrow() {
+  const scope = activeDataScope();
+  if (!scope) throw new Error("A selected workspace is required for conversations.");
+  return scope;
+}
+
+function previewConversationStore(workspaceId: string): PreviewConversationStore {
+  let store = previewConversationStores.get(workspaceId);
+  if (!store) {
+    store = { threads: [], messages: [], drafts: new Map() };
+    previewConversationStores.set(workspaceId, store);
+  }
+  return store;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function assertScopedConversationRecord(value: unknown, workspaceId: string, label: string): asserts value is Record<string, unknown> {
+  if (!isRecord(value) || value.workspaceId !== workspaceId || typeof value.id !== "string") {
+    throw new Error(`Malformed or cross-workspace ${label} response.`);
+  }
+}
+
+function assertThread(value: unknown, workspaceId: string): asserts value is ConversationThread {
+  assertScopedConversationRecord(value, workspaceId, "thread");
+  if (
+    typeof value.title !== "string" ||
+    (value.lifecycle !== "active" && value.lifecycle !== "archived") ||
+    !isRecord(value.messageHead) ||
+    typeof value.messageHead.lastSequence !== "number"
+  ) {
+    throw new Error("Malformed conversation thread response.");
+  }
+}
+
+function assertMessageView(value: unknown, workspaceId: string): asserts value is RuntimeConversationMessageView {
+  if (!isRecord(value) || !isRecord(value.message) || !isRecord(value.currentRevision)) {
+    throw new Error("Malformed conversation message response.");
+  }
+  assertScopedConversationRecord(value.message, workspaceId, "message");
+  assertScopedConversationRecord(value.currentRevision, workspaceId, "message revision");
+  if (
+    typeof value.message.threadId !== "string" ||
+    typeof value.message.sequence !== "number" ||
+    typeof value.currentRevision.threadId !== "string" ||
+    value.currentRevision.messageId !== value.message.id ||
+    value.currentRevision.threadId !== value.message.threadId ||
+    value.currentRevision.id !== value.message.currentRevisionId
+  ) {
+    throw new Error("Inconsistent conversation message response.");
+  }
+}
+
+function assertDraft(value: unknown, workspaceId: string): asserts value is RuntimeConversationDraft {
+  if (
+    !isRecord(value) ||
+    value.workspaceId !== undefined && value.workspaceId !== workspaceId ||
+    typeof value.draftKey !== "string" ||
+    typeof value.content !== "string" ||
+    typeof value.updatedAt !== "string" ||
+    (value.threadId !== undefined && typeof value.threadId !== "string")
+  ) {
+    throw new Error("Malformed or cross-workspace conversation draft response.");
+  }
+}
+
+function previewThread(input: RuntimeConversationThreadCreate, workspaceId: string): ConversationThread {
+  const now = new Date().toISOString();
+  const id = `thread-preview-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}` as never;
+  return {
+    id,
+    workspaceId: workspaceId as never,
+    authority: input.authorityScope.authority,
+    visibility: input.authorityScope.visibility,
+    ...(input.authorityScope.authority === "local" ? { ownerMemberId: input.authorityScope.ownerMemberId } : {}),
+    schemaVersion: 1,
+    revision: 0,
+    createdByInternalUserId: "preview-user" as never,
+    createdByDeviceId: "preview-device" as never,
+    createdAt: now,
+    updatedAt: now,
+    projectId: input.projectId,
+    title: input.title,
+    lifecycle: "active",
+    messageHead: { lastSequence: 0 }
+  } as ConversationThread;
+}
+
+export async function createRuntimeConversationThread(input: RuntimeConversationThreadCreate) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const thread = previewThread(input, scope.workspaceId);
+    previewConversationStore(scope.workspaceId).threads.push(thread);
+    return thread;
+  }
+  const result = await invoke<unknown>("conversation_create_thread", { input, ...scope });
+  assertThread(result, scope.workspaceId);
+  return result;
+}
+
+export async function listRuntimeConversationThreads(projectId?: string | null) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    return previewConversationStore(scope.workspaceId).threads.filter((thread) =>
+      projectId === undefined ? true : (thread.projectId ?? null) === projectId
+    );
+  }
+  // `projectId` is an optional thread filter, not a caller-supplied runtime
+  // scope. Strip the fixed `projectId: null` scope field before adding it.
+  const { projectId: _fixedProjectScope, ...workspaceScope } = scope;
+  const result = await invoke<unknown>("conversation_list_threads", { projectId, ...workspaceScope });
+  if (!Array.isArray(result)) throw new Error("Malformed conversation thread list response.");
+  result.forEach((thread) => assertThread(thread, scope.workspaceId));
+  return result;
+}
+
+export async function getRuntimeConversationThread(threadId: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    return previewConversationStore(scope.workspaceId).threads.find((thread) => thread.id === threadId) ?? null;
+  }
+  const result = await invoke<unknown>("conversation_get_thread", { threadId, ...scope });
+  if (result === null) return null;
+  assertThread(result, scope.workspaceId);
+  return result;
+}
+
+export async function updateRuntimeConversationThread(input: RuntimeConversationThreadUpdate) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const store = previewConversationStore(scope.workspaceId);
+    const index = store.threads.findIndex((thread) => thread.id === input.threadId);
+    if (index < 0) throw new Error("Conversation thread was not found in this workspace.");
+    const previous = store.threads[index];
+    const { projectId, ...changes } = input;
+    const next = { ...previous, ...changes, projectId: projectId === undefined ? previous.projectId : projectId ?? undefined, updatedAt: new Date().toISOString(), revision: previous.revision + 1 } as ConversationThread;
+    store.threads[index] = next;
+    return next;
+  }
+  const result = await invoke<unknown>("conversation_update_thread", { input, ...scope });
+  assertThread(result, scope.workspaceId);
+  return result;
+}
+
+export async function listRuntimeConversationMessages(threadId: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    return previewConversationStore(scope.workspaceId).messages.filter((view) => view.message.threadId === threadId);
+  }
+  const result = await invoke<unknown>("conversation_list_messages", { threadId, ...scope });
+  if (!Array.isArray(result)) throw new Error("Malformed conversation message list response.");
+  result.forEach((view) => assertMessageView(view, scope.workspaceId));
+  return result;
+}
+
+export async function appendRuntimeConversationMessage(input: RuntimeConversationMessageAppend) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const store = previewConversationStore(scope.workspaceId);
+    const thread = store.threads.find((candidate) => candidate.id === input.threadId);
+    if (!thread) throw new Error("Conversation thread was not found in this workspace.");
+    const revision = { ...input.initialRevision, id: input.initialRevision.revisionId, messageId: input.messageId, threadId: input.threadId, messageRevisionNumber: 1, baseMessageRevisionNumber: 0, workspaceId: scope.workspaceId as never, authority: thread.authority, visibility: thread.visibility, schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user" as never, createdAt: input.initialRevision.checkpointedAt, updatedAt: input.initialRevision.checkpointedAt } as unknown as ConversationRevision;
+    const message = { ...input, id: input.messageId, workspaceId: scope.workspaceId as never, authority: thread.authority, visibility: thread.visibility, schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user" as never, createdAt: input.initialRevision.checkpointedAt, updatedAt: input.initialRevision.checkpointedAt, currentRevisionId: revision.id, currentRevisionNumber: 1, currentRevisionState: revision.state } as unknown as ConversationMessage;
+    const view = { message, currentRevision: revision };
+    store.messages.push(view);
+    return view;
+  }
+  const result = await invoke<unknown>("conversation_append_message", { input, ...scope });
+  assertMessageView(result, scope.workspaceId);
+  return result;
+}
+
+export async function reviseRuntimeConversationMessage(input: RuntimeConversationMessageRevision) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const store = previewConversationStore(scope.workspaceId);
+    const index = store.messages.findIndex((view) => view.message.id === input.messageId && view.message.threadId === input.threadId);
+    if (index < 0) throw new Error("Conversation message was not found in this workspace.");
+    const previous = store.messages[index];
+    const revision = { ...input, id: input.revisionId, workspaceId: scope.workspaceId as never, authority: previous.message.authority, visibility: previous.message.visibility, schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user" as never, createdAt: input.checkpointedAt, updatedAt: input.checkpointedAt, messageRevisionNumber: previous.message.currentRevisionNumber + 1 } as unknown as ConversationRevision;
+    const message = { ...previous.message, currentRevisionId: revision.id, currentRevisionNumber: revision.messageRevisionNumber, currentRevisionState: revision.state, updatedAt: input.checkpointedAt } as ConversationMessage;
+    const view = { message, currentRevision: revision };
+    store.messages[index] = view;
+    return view;
+  }
+  const result = await invoke<unknown>("conversation_revise_message", { input, ...scope });
+  assertMessageView(result, scope.workspaceId);
+  return result;
+}
+
+export async function loadRuntimeConversationDraft(draftKey: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) return previewConversationStore(scope.workspaceId).drafts.get(draftKey) ?? null;
+  const result = await invoke<unknown>("conversation_load_draft", { draftKey, ...scope });
+  if (result === null) return null;
+  assertDraft(result, scope.workspaceId);
+  return result;
+}
+
+export async function saveRuntimeConversationDraft(draft: RuntimeConversationDraft) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    previewConversationStore(scope.workspaceId).drafts.set(draft.draftKey, { ...draft });
+    return draft;
+  }
+  const result = await invoke<unknown>("conversation_save_draft", { draft, ...scope });
+  assertDraft(result, scope.workspaceId);
+  return result;
+}
+
+export async function deleteRuntimeConversationDraft(draftKey: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    previewConversationStore(scope.workspaceId).drafts.delete(draftKey);
+    return;
+  }
+  await invoke<void>("conversation_delete_draft", { draftKey, ...scope });
 }
 
 export async function saveRuntimeMemoryState(state: MemoryControlState) {

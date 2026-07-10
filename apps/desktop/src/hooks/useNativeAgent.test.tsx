@@ -60,6 +60,7 @@ const mocks = vi.hoisted(() => ({
   // every executeRuntimeToolCall records its request and resolves with this result.
   toolRequests: [] as unknown[],
   savedRuns: [] as unknown[],
+  saveError: null as Error | null,
   recoveredRuns: [] as PersistedAgentRun[],
   toolResult: { ok: true, output: "Fetched body text from Rust." }
 }));
@@ -96,6 +97,7 @@ vi.mock("../runtime", () => ({
     return null;
   }),
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => {
+    if (mocks.saveError) throw mocks.saveError;
     mocks.savedRuns.push(run);
     return run;
   }),
@@ -164,6 +166,7 @@ function resetLineState() {
   mocks.cancelCalls = [];
   mocks.toolRequests = [];
   mocks.savedRuns = [];
+  mocks.saveError = null;
   mocks.recoveredRuns = [];
   mocks.toolResult = { ok: true, output: "Fetched body text from Rust." };
   listenCount = 0;
@@ -205,7 +208,10 @@ describe("useNativeAgent", () => {
         status: "interrupted",
         transcript: "partial",
         threadId: "thread-1",
-        exchanges: [{ role: "user", content: "Resume this safely" }],
+        exchanges: [
+          { role: "user", content: "Resume this safely" },
+          { role: "tool", content: "already wrote the file", toolCallId: "call-completed", toolName: "write-file", ok: true }
+        ],
         turn: 0,
         pendingApprovalIds: [],
         recoverable: true,
@@ -255,6 +261,9 @@ describe("useNativeAgent", () => {
       toolCallId: undefined,
       toolName: undefined
     });
+    // A retry starts a child attempt from the safe user turn; it does not replay
+    // a completed tool call from the parent as a new side effect.
+    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["user"]);
   });
 
   it("accumulates text-delta events into the transcript", async () => {
@@ -416,12 +425,54 @@ describe("useNativeAgent", () => {
     // cancel() read the in-flight cancelRef and signaled the Rust boundary.
     expect(mocks.cancelCalls.length).toBe(1);
     expect(result.current.state.running).toBe(false);
+    expect((mocks.savedRuns.at(-1) as PersistedAgentRun).status).toBe("cancelled");
 
     // Unblock the held-open run so it can settle without rejecting the suite.
     mocks.onLine?.("[DONE]");
     await act(async () => {
       await runPromise.catch(() => {});
     });
+  });
+
+  it("terminalizes a run when the provider reaches EOF without a terminal event", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("partial")];
+
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+    await act(async () => { await result.current.run(baseRequest); });
+
+    expect(result.current.state.status).toBe("failed");
+    expect(result.current.state.lastError).toContain("without a completion event");
+    expect((mocks.savedRuns.at(-1) as PersistedAgentRun).status).toBe("failed");
+  });
+
+  it("fails closed when initial durable-run persistence fails", async () => {
+    installDesktopRuntime();
+    mocks.saveError = new Error("disk full");
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+
+    await act(async () => { await result.current.run(baseRequest); });
+
+    expect(result.current.state.status).toBe("failed");
+    expect(result.current.state.lastError).toContain("disk full");
+    expect(mocks.streamCalls).toBe(0);
+  });
+
+  it("rejects an overlapping run while the active stream is pending", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("partial")];
+    mocks.emitDone = false;
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+    let first!: Promise<void>;
+    act(() => { first = result.current.run(baseRequest); });
+    await waitFor(() => expect(mocks.onLine).not.toBeNull());
+
+    await act(async () => { await result.current.run(baseRequest); });
+
+    expect(result.current.state.lastError).toContain("current response");
+    expect(mocks.streamCalls).toBe(1);
+    mocks.onLine?.("[DONE]");
+    await act(async () => { await first; });
   });
 
   it("maps Rust boundary cancellation to a cancelled terminal state", async () => {

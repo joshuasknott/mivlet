@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
 import {
   buildAgentRequest,
+  buildContinuationMessages,
   buildContextPrefixForRun,
   DEFAULT_PERMISSION_LABEL,
   findApprovalJargon,
@@ -122,6 +123,24 @@ describe("buildAgentRequest", () => {
       maxTokens: 1024
     });
     expect(request.model).toBe("claude-sonnet-4");
+  });
+});
+
+describe("buildContinuationMessages", () => {
+  it("uses only terminal user, assistant, and completed tool-result records", () => {
+    const messages = buildContinuationMessages([
+      { message: { kind: "approval", sequence: 1, detail: { phase: "request", approvalRequestId: "approval-1" } }, currentRevision: { state: "terminal", content: "Permit this" } },
+      { message: { kind: "user", sequence: 2 }, currentRevision: { state: "terminal", content: "Do the work" } },
+      { message: { kind: "tool", sequence: 3, detail: { phase: "call", toolCallId: "call-1", toolName: "write-file" } }, currentRevision: { state: "terminal", content: "write-file" } },
+      { message: { kind: "tool", sequence: 4, detail: { phase: "result", toolCallId: "call-1", toolName: "write-file", outcome: "succeeded" } }, currentRevision: { state: "terminal", content: "written" } },
+      { message: { kind: "error", sequence: 5, detail: { code: "offline", retryable: true } }, currentRevision: { state: "terminal", content: "offline" } },
+      { message: { kind: "assistant", sequence: 6 }, currentRevision: { state: "streaming", content: "partial" } }
+    ] as never);
+
+    expect(messages).toEqual([
+      { role: "user", content: "Do the work" },
+      { role: "tool", content: "written", toolCallId: "call-1", toolName: "write-file" }
+    ]);
   });
 });
 

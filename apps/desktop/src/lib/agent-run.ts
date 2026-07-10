@@ -13,7 +13,8 @@ import type {
   BackendModel,
   KnowledgeSource,
   MemoryRecord,
-  PermissionMode
+  PermissionMode,
+  Spine
 } from "@fable/protocol";
 import { buildContextPrefix, MAX_TOKENS_DEFAULT, validateModelForRun } from "@fable/connectors";
 
@@ -150,6 +151,30 @@ export function buildAgentRequest(input: BuildAgentRequestInput): AgentRunReques
     tools: [],
     maxTokens: input.maxTokens ?? MAX_TOKENS_DEFAULT
   };
+}
+
+/**
+ * Produce only replay-safe context from the canonical transcript. Presentation
+ * records (approval/error/interruption) never become model authority, hidden
+ * system/context prompts are never stored here, and tool *calls* are excluded
+ * because repeating them could suggest replaying a completed side effect.
+ */
+export function buildContinuationMessages(
+  views: readonly {
+    message: Spine.Conversations.Message;
+    currentRevision: Spine.Conversations.MessageRevision;
+  }[]
+): AgentRunRequest["messages"] {
+  const messages: AgentRunRequest["messages"] = [];
+  for (const { message, currentRevision } of [...views].sort((left, right) => left.message.sequence - right.message.sequence)) {
+    if (currentRevision.state !== "terminal" || !currentRevision.content) continue;
+    if (message.kind === "user" || message.kind === "assistant") {
+      messages.push({ role: message.kind, content: currentRevision.content });
+    } else if (message.kind === "tool" && message.detail.phase === "result") {
+      messages.push({ role: "tool", content: currentRevision.content, toolCallId: message.detail.toolCallId, toolName: message.detail.toolName });
+    }
+  }
+  return messages;
 }
 
 /**
