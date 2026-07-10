@@ -52,10 +52,10 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 0D - Structural cleanup
 
-- [ ] Split the highest-risk React application/shell module.
-- [ ] Split the highest-risk TypeScript runtime/hook module.
-- [ ] Split the highest-risk Rust runtime module.
-- [ ] Focus protocol/domain package boundaries and add regression coverage around moved behavior.
+- [x] Split the highest-risk React application/shell module.
+- [x] Split the highest-risk TypeScript runtime/hook module.
+- [x] Split the highest-risk Rust runtime module.
+- [x] Focus protocol/domain package boundaries and add regression coverage around moved behavior.
 
 **Phase 0 complete when:** one product model governs TypeScript, Rust, SQLite, Convex, and product copy; migrations and isolation tests pass; the minimum existing product still runs.
 
