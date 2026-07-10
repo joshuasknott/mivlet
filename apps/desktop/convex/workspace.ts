@@ -15,15 +15,24 @@ export const bootstrapAccount = mutationGeneric({
     const fingerprint = JSON.stringify({ initialWorkspaceName: args.initialWorkspaceName?.trim() || "Fable workspace", device: args.device });
     const replay = await ctx.db.query("bootstrap_idempotency").withIndex("by_identity_key", (q: any) => q.eq("provider", identity.provider).eq("normalizedIssuer", identity.normalizedIssuer).eq("subject", identity.subject).eq("idempotencyKey", args.idempotencyKey)).first();
     if (replay) { if (replay.fingerprint !== fingerprint) return { status: "conflict", code: "idempotency-conflict" }; return { ...(replay.result as object), idempotency: { key: args.idempotencyKey, replayed: true } }; }
-    let link = await ctx.db.query("external_identity_links").withIndex("by_external_identity", (q: any) => q.eq("provider", identity.provider).eq("normalizedIssuer", identity.normalizedIssuer).eq("subject", identity.subject)).first();
+    const links = await ctx.db.query("external_identity_links").withIndex("by_external_identity", (q: any) => q.eq("provider", identity.provider).eq("normalizedIssuer", identity.normalizedIssuer).eq("subject", identity.subject)).collect();
+    if (links.length > 1) return { status: "conflict", code: "identity-link-conflict" };
+    let link = links[0];
     let internalUserId: string; let created = false;
     if (!link) {
       internalUserId = opaqueId("usr"); const externalIdentityId = opaqueId("identity");
       await ctx.db.insert("internal_users", { internalUserId, status: "active", createdAt: now, updatedAt: now, revision: 1 });
       await ctx.db.insert("external_identity_links", { externalIdentityId, provider: identity.provider, normalizedIssuer: identity.normalizedIssuer, subject: identity.subject, internalUserId, status: "active", lastValidatedAt: now, createdAt: now, updatedAt: now, revision: 1 });
       created = true;
-    } else { if (link.status !== "active") return { status: "rejected", code: "identity-link-inactive" }; internalUserId = link.internalUserId; await ctx.db.patch(link._id, { lastValidatedAt: now, updatedAt: now, revision: link.revision + 1 }); }
-    let membership = await ctx.db.query("workspace_memberships").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", internalUserId)).first();
+    } else {
+      if (link.status !== "active") return { status: "rejected", code: "identity-link-inactive" };
+      const user = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", link.internalUserId)).first();
+      if (!user || user.status !== "active") return { status: "rejected", code: "internal-user-inactive" };
+      internalUserId = link.internalUserId;
+      await ctx.db.patch(link._id, { lastValidatedAt: now, updatedAt: now, revision: link.revision + 1 });
+    }
+    const memberships = await ctx.db.query("workspace_memberships").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", internalUserId)).collect();
+    let membership = memberships.find((candidate: any) => candidate.status === "active");
     let workspace: any;
     if (!membership) {
       const workspaceId = opaqueId("ws"); const memberId = opaqueId("member");
@@ -35,6 +44,7 @@ export const bootstrapAccount = mutationGeneric({
     if (args.device) {
       const existing = await ctx.db.query("account_devices").withIndex("by_device", (q: any) => q.eq("deviceId", args.device!.deviceId)).first();
       if (existing && existing.internalUserId !== internalUserId) return { status: "conflict", code: "identity-link-conflict" };
+      if (existing && existing.status === "revoked") return { status: "rejected", code: "device-inactive" };
       if (existing) await ctx.db.patch(existing._id, { status: "active", label: args.device.label, publicKey: args.device.publicKey, lastSeenAt: now, revision: existing.revision + 1 });
       else await ctx.db.insert("account_devices", { ...args.device, internalUserId, status: "active", revision: 1, registeredAt: now, lastSeenAt: now });
       const deviceLink = await ctx.db.query("workspace_device_links").withIndex("by_workspace_device", (q: any) => q.eq("workspaceId", membership.workspaceId).eq("deviceId", args.device!.deviceId)).first();

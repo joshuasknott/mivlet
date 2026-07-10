@@ -61,6 +61,7 @@ const SECRET_MARKERS: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct CloudWorkspaceLink {
     pub local_workspace_id: String,
+    #[serde(rename = "cloudWorkspaceId")]
     pub fable_workspace_id: String,
     pub internal_user_id: String,
     pub member_id: String,
@@ -89,6 +90,7 @@ pub struct CloudMutationOutboxRow {
     pub local_mutation_id: String,
     pub idempotency_key: String,
     pub local_workspace_id: String,
+    #[serde(rename = "cloudWorkspaceId")]
     pub fable_workspace_id: String,
     pub internal_user_id: String,
     pub member_id: String,
@@ -99,6 +101,7 @@ pub struct CloudMutationOutboxRow {
     pub record_type: String,
     pub record_id: String,
     pub operation: String,
+    #[serde(serialize_with = "serialize_public_outbox_status")]
     pub status: String,
     pub deleted_at: String,
     pub attempt_count: i64,
@@ -151,6 +154,91 @@ pub fn upsert_link(conn: &Connection, input: &LinkWorkspaceInput, now: &str) -> 
     if input.last_accepted_revision < 0 {
         return Err(StoreError::Invalid(
             "Cloud workspace revision cannot be negative.".into(),
+        ));
+    }
+    let existing_device_owner: Option<String> = conn
+        .query_row(
+            "SELECT internal_user_id FROM fable_device_mirror WHERE device_id=?1;",
+            [&input.device_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing_device_owner
+        .as_deref()
+        .is_some_and(|owner| owner != input.internal_user_id)
+    {
+        return Err(StoreError::Invalid(
+            "A Fable device is already bound to another internal user.".into(),
+        ));
+    }
+    let existing_member_owner: Option<String> = conn
+        .query_row(
+            "SELECT internal_user_id FROM fable_membership_mirror
+             WHERE fable_workspace_id=?1 AND member_id=?2;",
+            rusqlite::params![input.fable_workspace_id, input.member_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing_member_owner
+        .as_deref()
+        .is_some_and(|owner| owner != input.internal_user_id)
+    {
+        return Err(StoreError::Invalid(
+            "A Fable membership is already bound to another internal user.".into(),
+        ));
+    }
+    let existing_member_id: Option<String> = conn
+        .query_row(
+            "SELECT member_id FROM fable_membership_mirror
+             WHERE fable_workspace_id=?1 AND internal_user_id=?2;",
+            rusqlite::params![input.fable_workspace_id, input.internal_user_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing_member_id
+        .as_deref()
+        .is_some_and(|member| member != input.member_id)
+    {
+        return Err(StoreError::Invalid(
+            "An internal user is already bound to another Fable membership in this workspace."
+                .into(),
+        ));
+    }
+    let existing_device_member: Option<String> = conn
+        .query_row(
+            "SELECT member_id FROM fable_workspace_device_mirror
+             WHERE fable_workspace_id=?1 AND device_id=?2;",
+            rusqlite::params![input.fable_workspace_id, input.device_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing_device_member
+        .as_deref()
+        .is_some_and(|member| member != input.member_id)
+    {
+        return Err(StoreError::Invalid(
+            "A Fable device link is already bound to another membership.".into(),
+        ));
+    }
+    let existing_link: Option<(String, String, String, String)> = conn
+        .query_row(
+            "SELECT fable_workspace_id, internal_user_id, member_id, device_id
+             FROM cloud_workspace_link WHERE local_workspace_id=?1;",
+            [&input.local_workspace_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    if existing_link
+        .as_ref()
+        .is_some_and(|(workspace, user, member, device)| {
+            workspace != &input.fable_workspace_id
+                || user != &input.internal_user_id
+                || member != &input.member_id
+                || device != &input.device_id
+        })
+    {
+        return Err(StoreError::Invalid(
+            "The local cloud link is already bound to different Fable authority facts.".into(),
         ));
     }
     let existing_local_workspace = conn
@@ -598,6 +686,20 @@ fn value_contains_denied_marker(value: &Value) -> bool {
     }
 }
 
+fn serialize_public_outbox_status<S>(
+    status: &String,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(if status == "pending" {
+        "queued"
+    } else {
+        status
+    })
+}
+
 fn looks_denied(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
     SECRET_MARKERS.iter().any(|marker| lower.contains(marker))
@@ -663,6 +765,41 @@ mod tests {
     }
 
     #[test]
+    fn link_cannot_reassign_a_device_to_another_internal_user() {
+        let store = store();
+        store
+            .transaction(|tx| upsert_link(tx, &link(), "now"))
+            .unwrap();
+        let mut conflicting = link();
+        conflicting.local_workspace_id = "other-local".into();
+        conflicting.fable_workspace_id = "other-fable-ws".into();
+        conflicting.internal_user_id = "user-b".into();
+        conflicting.member_id = "member-b".into();
+        store
+            .transaction(|tx| {
+                crate::store::repos::workspace::upsert(
+                    tx,
+                    &conflicting.local_workspace_id,
+                    "Other",
+                    "later",
+                )?;
+                upsert_link(tx, &conflicting, "later")
+            })
+            .unwrap_err();
+        let owner: String = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT internal_user_id FROM fable_device_mirror WHERE device_id='device-a';",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(owner, "user-a");
+    }
+
+    #[test]
     fn enqueue_uses_stable_idempotency_key_and_encrypted_payload() {
         let store = store();
         store
@@ -680,6 +817,9 @@ mod tests {
         assert_eq!(rows[0].idempotency_key, "fable-ws:device-a:client-project");
         assert_eq!(rows[0].status, "pending");
         assert_eq!(rows[0].payload["name"], "Launch");
+        let public = serde_json::to_value(&rows[0]).unwrap();
+        assert_eq!(public["cloudWorkspaceId"], "fable-ws");
+        assert_eq!(public["status"], "queued");
     }
 
     #[test]

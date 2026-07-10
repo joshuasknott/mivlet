@@ -245,7 +245,35 @@ fn apply_v7_to_v8(conn: &Connection) -> super::Result<()> {
     if table_has_column(conn, "cloud_workspace_link", "fable_workspace_id")? {
         return Ok(());
     }
+    ensure_v7_sync_rows_have_links(conn)?;
     conn.execute_batch(crate::store::schema::SCHEMA_V7_TO_V8)?;
+    Ok(())
+}
+
+/// The v8 rebuild derives the Fable workspace and attribution for every sync
+/// envelope from its v7 workspace link. Refuse the migration when an orphaned
+/// cursor, outbox row, shadow, or conflict would otherwise be dropped by the
+/// INNER JOINs in `SCHEMA_V7_TO_V8`.
+fn ensure_v7_sync_rows_have_links(conn: &Connection) -> super::Result<()> {
+    for table in [
+        "cloud_sync_cursor",
+        "cloud_mutation_outbox",
+        "cloud_record_shadow",
+        "cloud_conflict",
+    ] {
+        let sql = format!(
+            "SELECT EXISTS(SELECT 1 FROM {table} AS legacy_row \
+             LEFT JOIN cloud_workspace_link AS link \
+               ON link.local_workspace_id = legacy_row.local_workspace_id \
+             WHERE link.local_workspace_id IS NULL);"
+        );
+        let orphaned: bool = conn.query_row(&sql, [], |row| row.get(0))?;
+        if orphaned {
+            return Err(super::StoreError::Invalid(format!(
+                "Cannot migrate v7 cloud sync state: {table} contains an orphaned workspace row."
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -1076,5 +1104,26 @@ mod tests {
 
         assert!(table_has_column(&conn, "cloud_workspace_link", "clerk_org_id").unwrap());
         assert!(!table_exists(&conn, "fable_workspace_mirror").unwrap());
+    }
+
+    #[test]
+    fn v7_to_v8_refuses_orphaned_sync_rows_without_mutating_the_v7_schema() {
+        let conn = v7_conn();
+        conn.execute(
+            "INSERT INTO cloud_sync_cursor VALUES ('default','device-a',4,9,'now');",
+            [],
+        )
+        .unwrap();
+
+        let err = apply(&conn, 7, 8).unwrap_err();
+        assert!(matches!(err, super::super::StoreError::Invalid(_)));
+        assert!(table_has_column(&conn, "cloud_workspace_link", "clerk_org_id").unwrap());
+        assert!(!table_exists(&conn, "fable_workspace_mirror").unwrap());
+        let cursor_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM cloud_sync_cursor;", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(cursor_count, 1);
     }
 }

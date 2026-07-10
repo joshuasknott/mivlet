@@ -24,10 +24,19 @@ const MANAGE_ROLES = new Set<CloudRole>(["owner", "admin"]);
 const ASSIGNABLE: Record<CloudRole, readonly CloudRole[]> = { owner: ["owner", "admin", "editor", "viewer"], admin: ["admin", "editor", "viewer"], editor: [], viewer: [] };
 
 export class CloudPolicyError extends Error { constructor(public readonly code: string, message: string, public readonly opaque = false) { super(message); } }
+export function ensureInvitationTarget(recipientStatus: string | undefined, invitationExists: boolean, membershipStatus: string | undefined) {
+  if (recipientStatus !== "active" || invitationExists || membershipStatus === "active") throw new CloudPolicyError("invitation-unavailable", "The invitation target is unavailable.", true);
+}
+export function ensureDeviceLink(device: { internalUserId: string; status: string } | undefined, link: { internalUserId: string; memberId: string; status: string } | undefined, internalUserId: string, memberId: string) {
+  if (device && (device.internalUserId !== internalUserId || device.status !== "active")) throw new CloudPolicyError("device-unavailable", "This device is unavailable.", true);
+  if (link && (link.internalUserId !== internalUserId || link.memberId !== memberId || link.status !== "active")) throw new CloudPolicyError("device-unavailable", "This device is unavailable.", true);
+}
 export function requireIdentity(identity: CloudIdentity | null | undefined): CloudIdentity { if (!identity?.normalizedIssuer || !identity.subject) throw new CloudPolicyError("unauthenticated", "A validated external identity is required."); return identity; }
 export function resolveInternalUser(state: Pick<CloudState, "users" | "identityLinks">, identity: CloudIdentity | null | undefined) {
   const external = requireIdentity(identity);
-  const link = state.identityLinks.find((x) => x.provider === external.provider && x.normalizedIssuer === external.normalizedIssuer && x.subject === external.subject);
+  const links = state.identityLinks.filter((x) => x.provider === external.provider && x.normalizedIssuer === external.normalizedIssuer && x.subject === external.subject);
+  if (links.length > 1) throw new CloudPolicyError("identity-link-conflict", "The Fable identity link is ambiguous.", true);
+  const link = links[0];
   if (!link) throw new CloudPolicyError("identity-link-not-found", "No Fable identity link is available.", true);
   if (link.status !== "active") throw new CloudPolicyError("identity-link-inactive", "The Fable identity link is unavailable.", true);
   const user = state.users.find((x) => x.internalUserId === link.internalUserId);
@@ -56,10 +65,12 @@ export function requireCanManageMembers(state: Pick<CloudState, "users" | "ident
 export function ensureRoleAssignment(actor: CloudRole, next: CloudRole) { if (!ASSIGNABLE[actor].includes(next)) throw new CloudPolicyError("role-assignment-denied", "This role cannot assign the requested role.", true); }
 export function ensureNotLastOwner(state: Pick<CloudState, "memberships">, membership: CloudMembership, nextRole = membership.role, nextStatus = membership.status) { if (membership.role !== "owner" || (nextRole === "owner" && nextStatus === "active")) return; const owners = state.memberships.filter((x) => x.workspaceId === membership.workspaceId && x.status === "active" && x.role === "owner" && x.memberId !== membership.memberId); if (!owners.length) throw new CloudPolicyError("last-active-owner", "A workspace must retain an active owner.", true); }
 export interface BootstrapState extends CloudState { bootstrapReceipts: { identity: string; key: string; fingerprint: string; result: BootstrapResult }[] }
-export type BootstrapResult = { status: "created" | "existing" | "conflict"; internalUserId?: string; workspaceId?: string; memberId?: string; code?: "idempotency-conflict" };
+export type BootstrapResult = { status: "created" | "existing" | "conflict"; internalUserId?: string; workspaceId?: string; memberId?: string; code?: "identity-link-conflict" | "idempotency-conflict" };
 export function bootstrapAccountToState(state: BootstrapState, identity: CloudIdentity, key: string, fingerprint = "") : BootstrapResult {
   const principal = `${identity.provider}:${identity.normalizedIssuer}:${identity.subject}`; const receipt = state.bootstrapReceipts.find((x) => x.identity === principal && x.key === key); if (receipt) return receipt.fingerprint === fingerprint ? receipt.result : { status: "conflict", code: "idempotency-conflict" };
-  let link = state.identityLinks.find((x) => x.provider === identity.provider && x.normalizedIssuer === identity.normalizedIssuer && x.subject === identity.subject); let created = false;
+  const links = state.identityLinks.filter((x) => x.provider === identity.provider && x.normalizedIssuer === identity.normalizedIssuer && x.subject === identity.subject);
+  if (links.length > 1) return { status: "conflict", code: "identity-link-conflict" };
+  let link = links[0]; let created = false;
   if (!link) { const internalUserId = `usr-${state.users.length + 1}`; link = { ...identity, internalUserId, status: "active" }; state.users.push({ internalUserId, status: "active" }); state.identityLinks.push(link); created = true; }
   let member = state.memberships.find((x) => x.internalUserId === link.internalUserId && x.status === "active"); if (!member) { const workspaceId = `ws-${state.workspaces.length + 1}`; member = { memberId: `member-${state.memberships.length + 1}`, workspaceId, internalUserId: link.internalUserId, role: "owner", status: "active", revision: 1 }; state.workspaces.push({ workspaceId, name: "Fable workspace", status: "active", revision: 0, policyRevision: 1 }); state.memberships.push(member); }
   const result: BootstrapResult = { status: created ? "created" : "existing", internalUserId: link.internalUserId, workspaceId: member.workspaceId, memberId: member.memberId }; state.bootstrapReceipts.push({ identity: principal, key, fingerprint, result }); return result;
