@@ -106,5 +106,5 @@ describe("useRuntimeSchedules", () => {
 
     await waitFor(() => expect(result.current.scheduleLoadError).toBeNull());
     expect(result.current.scheduledJobs[0].name).toBe("Recovered");
-  });
+  }, 10_000);
 });

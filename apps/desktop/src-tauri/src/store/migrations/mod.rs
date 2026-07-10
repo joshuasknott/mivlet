@@ -635,8 +635,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // 8 is the current registered version; 9 is one step beyond it.
-        let err = apply(&conn, 8, 9).unwrap_err();
+        // v10 is current; v10 -> v11 has no registered migration.
+        let err = apply(&conn, 10, 11).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
