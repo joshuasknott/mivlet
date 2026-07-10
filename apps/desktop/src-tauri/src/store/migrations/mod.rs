@@ -60,6 +60,8 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 8 -> 9: add the per-internal-user hosted workspace selection.
             // The historical local `default` workspace remains untouched.
             8 => apply_v8_to_v9(conn)?,
+            // 9 -> 10: retain secret-free hosted account-device observations.
+            9 => apply_v9_to_v10(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -259,6 +261,28 @@ fn apply_v8_to_v9(conn: &Connection) -> super::Result<()> {
     // migration harmless.
     if !table_exists(conn, "active_workspace_selection")? {
         conn.execute_batch(crate::store::schema::SCHEMA_V8_TO_V9)?;
+    }
+    Ok(())
+}
+
+fn apply_v9_to_v10(conn: &Connection) -> super::Result<()> {
+    if table_exists(conn, "fable_device_mirror")? {
+        let registered = table_has_column(conn, "fable_device_mirror", "registered_at")?;
+        let last_seen = table_has_column(conn, "fable_device_mirror", "last_seen_at")?;
+        let revoked = table_has_column(conn, "fable_device_mirror", "revoked_at")?;
+        if !registered && !last_seen && !revoked {
+            conn.execute_batch(crate::store::schema::SCHEMA_V9_TO_V10)?;
+        } else {
+            for (present, sql) in [
+                (registered, "ALTER TABLE fable_device_mirror ADD COLUMN registered_at TEXT NOT NULL DEFAULT '';"),
+                (last_seen, "ALTER TABLE fable_device_mirror ADD COLUMN last_seen_at TEXT;"),
+                (revoked, "ALTER TABLE fable_device_mirror ADD COLUMN revoked_at TEXT;"),
+            ] {
+                if !present {
+                    conn.execute_batch(sql)?;
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -1173,5 +1197,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn v9_to_v10_preserves_device_mirrors_with_safe_defaults_and_is_idempotent() {
+        let conn = v7_conn();
+        conn.execute(
+            "INSERT INTO cloud_workspace_link VALUES
+             ('default','fable-ws','org-legacy','owner','active','device-a',0,'now','now');",
+            [],
+        )
+        .unwrap();
+        apply(&conn, 7, 8).unwrap();
+        apply(&conn, 8, 9).unwrap();
+        conn.execute(
+            "INSERT INTO fable_device_mirror
+             (device_id, internal_user_id, status, revision, kind, label, updated_at)
+             VALUES ('device-b', 'legacy-user:device-a', 'active', 7, 'desktop', 'Desk', 'now');",
+            [],
+        )
+        .unwrap();
+
+        apply(&conn, 9, 10).unwrap();
+        apply(&conn, 9, 10).unwrap();
+
+        let row: (String, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT registered_at, last_seen_at, revoked_at
+                 FROM fable_device_mirror WHERE device_id='device-b';",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row, ("".into(), None, None));
     }
 }

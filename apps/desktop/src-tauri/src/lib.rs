@@ -5,6 +5,7 @@
 //! This crate root only declares those modules, registers the Tauri command
 //! handlers, and starts the in-process scheduler tick.
 
+mod account_workspace;
 mod acp_process;
 mod action_history;
 mod agent_runs;
@@ -183,6 +184,12 @@ pub fn run() {
             clerk_identity::identity_begin_recovery,
             clerk_identity::identity_refresh,
             clerk_identity::identity_sign_out,
+            account_workspace::account_workspace_status,
+            account_workspace::account_workspace_reconcile,
+            account_workspace::account_workspace_create,
+            account_workspace::account_workspace_select,
+            account_workspace::account_device_revoke,
+            account_workspace::account_workspace_clear_session,
             cloud_sync::cloud_sync_status,
             cloud_sync::cloud_sync_link_state,
             cloud_sync::cloud_sync_enqueue_shared_mutation,

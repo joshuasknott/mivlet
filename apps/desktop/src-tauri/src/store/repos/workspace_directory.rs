@@ -57,6 +57,32 @@ pub struct ActiveWorkspaceSelection {
     pub source: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDeviceMirrorUpsert {
+    pub device_id: String,
+    pub kind: String,
+    pub label: String,
+    pub status: String,
+    pub registered_at: String,
+    pub last_seen_at: Option<String>,
+    pub revoked_at: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountDeviceSummary {
+    pub device_id: String,
+    pub kind: String,
+    pub label: String,
+    pub status: String,
+    pub registered_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<String>,
+}
+
 struct ExistingWorkspaceMirror {
     name: String,
     status: String,
@@ -280,10 +306,62 @@ pub fn list_authoritative_summaries(
          JOIN workspace AS local ON local.id=w.local_workspace_id
          JOIN fable_internal_user_mirror AS u ON u.internal_user_id=m.internal_user_id
          WHERE m.internal_user_id=?1 AND u.status='active'
+           AND w.status='active' AND m.status='active'
          ORDER BY local.name COLLATE NOCASE, w.fable_workspace_id;",
     )?;
     let rows = stmt.query_map([internal_user_id], read_summary)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+/// Reconciles one account's active hosted inventory. Entries omitted from a
+/// freshly authenticated `listMine` response are retained for history but are
+/// no longer local authority: their membership is marked removed and any
+/// remembered selection is cleared in the same transaction.
+pub fn reconcile_active_workspace_inventory(
+    conn: &Connection,
+    internal_user_id: &str,
+    active_fable_workspace_ids: &[String],
+    observed_at: &str,
+) -> Result<()> {
+    let internal_user_id = normalize_id(internal_user_id, "Internal user")?;
+    if observed_at.trim().is_empty() {
+        return Err(StoreError::Invalid(
+            "Hosted inventory observation time is required.".into(),
+        ));
+    }
+    let mut active = std::collections::BTreeSet::new();
+    for fable_workspace_id in active_fable_workspace_ids {
+        normalize_id(fable_workspace_id, "Hosted workspace")?;
+        if !active.insert(fable_workspace_id) {
+            return Err(StoreError::Invalid(
+                "Hosted workspace inventory contains a duplicate id.".into(),
+            ));
+        }
+    }
+    let mut stmt = conn.prepare(
+        "SELECT fable_workspace_id FROM fable_membership_mirror
+         WHERE internal_user_id=?1 AND status <> 'removed';",
+    )?;
+    let missing = stmt
+        .query_map([internal_user_id.as_str()], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|workspace_id| !active.contains(workspace_id))
+        .collect::<Vec<_>>();
+    for workspace_id in missing {
+        conn.execute(
+            "UPDATE fable_membership_mirror
+             SET status='removed', updated_at=?1
+             WHERE internal_user_id=?2 AND fable_workspace_id=?3;",
+            rusqlite::params![observed_at, internal_user_id, workspace_id],
+        )?;
+        conn.execute(
+            "DELETE FROM active_workspace_selection
+             WHERE internal_user_id=?1 AND fable_workspace_id=?2;",
+            rusqlite::params![internal_user_id, workspace_id],
+        )?;
+    }
+    Ok(())
 }
 
 /// Returns `None` until the native authenticated-account adapter establishes
@@ -370,6 +448,125 @@ pub fn set_current_internal_user(
         rusqlite::params![internal_user_id, established_at],
     )?;
     Ok(())
+}
+
+/// Clears only the currently active native account binding. Remembered
+/// per-account selections deliberately remain for a later authenticated return.
+pub fn clear_current_internal_user(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM current_internal_user WHERE singleton=1;", [])?;
+    Ok(())
+}
+
+pub fn upsert_account_device_summaries(
+    conn: &Connection,
+    internal_user_id: &str,
+    devices: &[AccountDeviceMirrorUpsert],
+    observed_at: &str,
+) -> Result<()> {
+    let internal_user_id = normalize_id(internal_user_id, "Internal user")?;
+    if observed_at.trim().is_empty() {
+        return Err(StoreError::Invalid(
+            "Device observation time is required.".into(),
+        ));
+    }
+    let active: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM fable_internal_user_mirror WHERE internal_user_id=?1 AND status='active');",
+        [internal_user_id.as_str()],
+        |row| row.get(0),
+    )?;
+    if !active {
+        return Err(StoreError::Invalid(
+            "The authenticated internal user is unavailable.".into(),
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for device in devices {
+        normalize_id(&device.device_id, "Device")?;
+        if !seen.insert(&device.device_id)
+            || !["desktop", "mobile", "web"].contains(&device.kind.as_str())
+            || !["pending", "active", "revoked"].contains(&device.status.as_str())
+            || device.label.trim().is_empty()
+            || device.registered_at.trim().is_empty()
+        {
+            return Err(StoreError::Invalid(
+                "Hosted account device summary is invalid.".into(),
+            ));
+        }
+        if device.status != "revoked" && device.revoked_at.is_some() {
+            return Err(StoreError::Invalid(
+                "Hosted active device has a revocation time.".into(),
+            ));
+        }
+        let existing_owner = conn
+            .query_row(
+                "SELECT internal_user_id FROM fable_device_mirror WHERE device_id=?1;",
+                [&device.device_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if existing_owner
+            .as_deref()
+            .is_some_and(|owner| owner != internal_user_id)
+        {
+            return Err(StoreError::Invalid(
+                "A hosted account device is already bound to another internal user.".into(),
+            ));
+        }
+        conn.execute(
+            "INSERT INTO fable_device_mirror
+               (device_id, internal_user_id, status, revision, kind, label, registered_at, last_seen_at, revoked_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(device_id) DO UPDATE SET
+               status=excluded.status, kind=excluded.kind, label=excluded.label, registered_at=excluded.registered_at,
+               last_seen_at=excluded.last_seen_at, revoked_at=excluded.revoked_at,
+               updated_at=excluded.updated_at;",
+            rusqlite::params![device.device_id, internal_user_id, device.status, device.kind, device.label, device.registered_at, device.last_seen_at, device.revoked_at, observed_at],
+        )?;
+    }
+    // The account-scoped hosted list is authoritative. Missing local entries
+    // are fail-closed rather than treated as active offline authority.
+    let mut stmt = conn.prepare(
+        "SELECT device_id FROM fable_device_mirror WHERE internal_user_id=?1 AND status <> 'revoked';",
+    )?;
+    let existing = stmt
+        .query_map([internal_user_id.as_str()], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for device_id in existing
+        .into_iter()
+        .filter(|device_id| !seen.contains(device_id))
+    {
+        conn.execute(
+            "UPDATE fable_device_mirror
+             SET status='revoked', revoked_at=COALESCE(NULLIF(revoked_at, ''), ?1), updated_at=?1
+             WHERE device_id=?2;",
+            rusqlite::params![observed_at, device_id],
+        )?;
+    }
+    Ok(())
+}
+
+pub fn list_account_device_summaries_for_current_user(
+    conn: &Connection,
+) -> Result<Option<Vec<AccountDeviceSummary>>> {
+    let Some(internal_user_id) = current_internal_user_id(conn)? else {
+        return Ok(None);
+    };
+    let mut stmt = conn.prepare(
+        "SELECT device_id, kind, label, status, registered_at, last_seen_at, revoked_at
+         FROM fable_device_mirror WHERE internal_user_id=?1 ORDER BY device_id;",
+    )?;
+    let rows = stmt.query_map([internal_user_id], |row| {
+        Ok(AccountDeviceSummary {
+            device_id: row.get(0)?,
+            kind: row.get(1)?,
+            label: row.get(2)?,
+            status: row.get(3)?,
+            registered_at: row.get(4)?,
+            last_seen_at: row.get(5)?,
+            revoked_at: row.get(6)?,
+        })
+    })?;
+    Ok(Some(rows.collect::<rusqlite::Result<Vec<_>>>()?))
 }
 
 pub fn select_active_workspace_for_current_user(
@@ -848,6 +1045,119 @@ mod tests {
                 .unwrap()
                 .source,
             "hosted"
+        );
+        store
+            .transaction(|conn| clear_current_internal_user(conn))
+            .unwrap();
+        assert!(store
+            .with_conn(resolve_active_workspace_for_current_user)
+            .unwrap()
+            .is_none());
+        store
+            .transaction(|conn| set_current_internal_user(conn, "user-alpha", "later"))
+            .unwrap();
+        assert_eq!(
+            store
+                .with_conn(resolve_active_workspace_for_current_user)
+                .unwrap()
+                .unwrap()
+                .fable_workspace_id
+                .as_deref(),
+            Some("workspace-alpha")
+        );
+    }
+
+    #[test]
+    fn absent_hosted_inventory_removes_membership_clears_selection_and_rejects_reselect() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let alpha = summary("user-alpha", "workspace-alpha", "Alpha");
+        let beta = summary("user-alpha", "workspace-beta", "Beta");
+        store
+            .transaction(|conn| {
+                upsert_authoritative_summary(conn, &alpha)?;
+                upsert_authoritative_summary(conn, &beta)?;
+                set_current_internal_user(conn, "user-alpha", "now")?;
+                select_active_workspace_for_current_user(conn, "workspace-beta", "now")?;
+                reconcile_active_workspace_inventory(
+                    conn,
+                    "user-alpha",
+                    &["workspace-alpha".into()],
+                    "later",
+                )
+            })
+            .unwrap();
+
+        let visible = store
+            .with_conn(|conn| list_authoritative_summaries(conn, "user-alpha"))
+            .unwrap();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].fable_workspace_id, "workspace-alpha");
+        assert_eq!(
+            store
+                .with_conn(resolve_active_workspace_for_current_user)
+                .unwrap()
+                .unwrap()
+                .source,
+            "legacy-default"
+        );
+        assert!(store
+            .transaction(|conn| {
+                select_active_workspace_for_current_user(conn, "workspace-beta", "later")
+                    .map(|_| ())
+            })
+            .is_err());
+        assert_eq!(
+            store
+                .with_conn(|conn| {
+                    Ok(conn.query_row(
+                        "SELECT status FROM fable_membership_mirror
+                         WHERE internal_user_id='user-alpha' AND fable_workspace_id='workspace-beta';",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )?)
+                })
+                .unwrap(),
+            "removed"
+        );
+    }
+
+    #[test]
+    fn account_device_mirror_rejects_cross_user_rebinding() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let alpha = summary("user-alpha", "workspace-alpha", "Alpha");
+        let beta = summary("user-beta", "workspace-beta", "Beta");
+        let device = AccountDeviceMirrorUpsert {
+            device_id: "device-shared".into(),
+            kind: "desktop".into(),
+            label: "Desk".into(),
+            status: "active".into(),
+            registered_at: "2026-07-10T12:00:00Z".into(),
+            last_seen_at: None,
+            revoked_at: None,
+        };
+        store
+            .transaction(|conn| {
+                upsert_authoritative_summary(conn, &alpha)?;
+                upsert_authoritative_summary(conn, &beta)?;
+                upsert_account_device_summaries(conn, "user-alpha", &[device.clone()], "now")
+            })
+            .unwrap();
+        assert!(store
+            .transaction(|conn| {
+                upsert_account_device_summaries(conn, "user-beta", &[device], "later")
+            })
+            .is_err());
+        assert_eq!(
+            store
+                .with_conn(|conn| {
+                    Ok(conn.query_row(
+                        "SELECT internal_user_id FROM fable_device_mirror WHERE device_id='device-shared';",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )?)
+                })
+                .unwrap(),
+            "user-alpha"
         );
     }
 }

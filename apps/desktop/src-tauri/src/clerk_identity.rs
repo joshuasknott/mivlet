@@ -274,9 +274,9 @@ pub(crate) struct AccountAuthenticationFacts {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct IdentityStatus {
-    enabled: bool,
-    state: String,
-    message: String,
+    pub(crate) enabled: bool,
+    pub(crate) state: String,
+    pub(crate) message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     issuer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2047,9 +2047,33 @@ pub(crate) async fn call_convex(request: ConvexIdentityCallRequest) -> Result<Va
 
 #[tauri::command]
 pub async fn identity_status(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+    native_identity_status().await
+}
+
+pub(crate) async fn native_identity_status() -> Result<IdentityStatus, String> {
     status_with_store(&NativeIdentitySecretStore)
         .await
         .map_err(command_message)
+}
+
+/// Returns an opaque, stable idempotency namespace for the currently validated
+/// external principal. The issuer and subject never cross this native boundary.
+pub(crate) async fn native_bootstrap_idempotency_key() -> Result<String, String> {
+    let session = authenticated_session_with_store(&NativeIdentitySecretStore)
+        .await
+        .map_err(command_message)?;
+    let authentication = session.authentication.ok_or_else(|| {
+        "Fable account identity facts are unavailable; sign in again.".to_string()
+    })?;
+    let mut digest = Sha256::new();
+    digest.update(b"fable.account-workspace.bootstrap.v1\0");
+    digest.update(authentication.normalized_issuer.as_bytes());
+    digest.update(b"\0");
+    digest.update(authentication.subject.as_bytes());
+    Ok(format!(
+        "bootstrap_{}",
+        URL_SAFE_NO_PAD.encode(digest.finalize())
+    ))
 }
 
 #[tauri::command]
@@ -2078,7 +2102,16 @@ pub async fn identity_refresh(_app: tauri::AppHandle) -> Result<IdentityStatus, 
 pub async fn identity_sign_out(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
     // Configuration may have become invalid since sign-in. Local credential
     // removal must still happen before reporting that diagnostic.
-    sign_out_with_store(&NativeIdentitySecretStore, load_config).map_err(command_message)
+    let status =
+        sign_out_with_store(&NativeIdentitySecretStore, load_config).map_err(command_message)?;
+    if let Some(store) = crate::store::try_global() {
+        store
+            .transaction(|conn| {
+                crate::store::repos::workspace_directory::clear_current_internal_user(conn)
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(status)
 }
 
 #[cfg(test)]

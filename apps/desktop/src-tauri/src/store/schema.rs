@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 9;
+pub const CURRENT_SCHEMA_VERSION: u32 = 10;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -502,6 +502,15 @@ CREATE TABLE IF NOT EXISTS current_internal_user (
   internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
   established_at TEXT NOT NULL
 );
+"#;
+
+/// Forward schema step `v9 -> v10`: retains the secret-free account device
+/// inventory returned by the hosted authority so offline status can report a
+/// conservative snapshot without becoming a device-authorization grant.
+pub const SCHEMA_V9_TO_V10: &str = r#"
+ALTER TABLE fable_device_mirror ADD COLUMN registered_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE fable_device_mirror ADD COLUMN last_seen_at TEXT;
+ALTER TABLE fable_device_mirror ADD COLUMN revoked_at TEXT;
 "#;
 
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
@@ -1008,7 +1017,8 @@ CREATE TABLE IF NOT EXISTS fable_membership_mirror (
 CREATE TABLE IF NOT EXISTS fable_device_mirror (
   device_id TEXT PRIMARY KEY, internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
   status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'desktop',
-  label TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+  label TEXT NOT NULL DEFAULT '', registered_at TEXT NOT NULL DEFAULT '',
+  last_seen_at TEXT, revoked_at TEXT, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS fable_workspace_device_mirror (
   fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
