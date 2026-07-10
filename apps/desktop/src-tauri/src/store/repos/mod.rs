@@ -33,6 +33,7 @@ pub mod scheduler_queue;
 pub mod scope;
 pub mod workflow;
 pub mod workspace;
+pub mod workspace_directory;
 
 /// Helper: encrypt a JSON value into a sealed payload bound to `aad`.
 pub(crate) fn seal_json(

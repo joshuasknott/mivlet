@@ -57,6 +57,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // mirrors. The SQL rebuild is data-preserving and runs inside the
             // Store migration transaction.
             7 => apply_v7_to_v8(conn)?,
+            // 8 -> 9: add the per-internal-user hosted workspace selection.
+            // The historical local `default` workspace remains untouched.
+            8 => apply_v8_to_v9(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -247,6 +250,16 @@ fn apply_v7_to_v8(conn: &Connection) -> super::Result<()> {
     }
     ensure_v7_sync_rows_have_links(conn)?;
     conn.execute_batch(crate::store::schema::SCHEMA_V7_TO_V8)?;
+    Ok(())
+}
+
+fn apply_v8_to_v9(conn: &Connection) -> super::Result<()> {
+    // Fresh databases already receive this table through SCHEMA_V1. The
+    // explicit existence probe also makes a re-run after an interrupted
+    // migration harmless.
+    if !table_exists(conn, "active_workspace_selection")? {
+        conn.execute_batch(crate::store::schema::SCHEMA_V8_TO_V9)?;
+    }
     Ok(())
 }
 
@@ -1125,5 +1138,40 @@ mod tests {
             })
             .unwrap();
         assert_eq!(cursor_count, 1);
+    }
+
+    #[test]
+    fn v8_to_v9_adds_an_idempotent_selection_table_without_touching_mirrors() {
+        let conn = v7_conn();
+        conn.execute(
+            "INSERT INTO cloud_workspace_link VALUES
+             ('default','fable-ws','org-legacy','owner','active','device-a',0,'now','now');",
+            [],
+        )
+        .unwrap();
+        apply(&conn, 7, 8).unwrap();
+        let before: (String, String) = conn
+            .query_row(
+                "SELECT fable_workspace_id, internal_user_id
+                 FROM cloud_workspace_link WHERE local_workspace_id='default';",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        apply(&conn, 8, 9).unwrap();
+        apply(&conn, 8, 9).unwrap();
+
+        assert!(table_exists(&conn, "active_workspace_selection").unwrap());
+        assert!(table_exists(&conn, "current_internal_user").unwrap());
+        let after: (String, String) = conn
+            .query_row(
+                "SELECT fable_workspace_id, internal_user_id
+                 FROM cloud_workspace_link WHERE local_workspace_id='default';",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(after, before);
     }
 }

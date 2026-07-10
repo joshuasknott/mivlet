@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 8;
+pub const CURRENT_SCHEMA_VERSION: u32 = 9;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -477,6 +477,31 @@ CREATE TABLE IF NOT EXISTS cloud_record_tombstone (
   PRIMARY KEY (local_workspace_id, record_type, record_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_tombstone_workspace_revision ON cloud_record_tombstone(local_workspace_id, server_revision);
+"#;
+
+/// Forward schema step `v8 -> v9`: stores the one durable hosted-workspace
+/// selection for each internal user. The selection is deliberately separate
+/// from the legacy `default` workspace: local-first data keeps its existing
+/// owner until a signed-in user has selected an active hosted workspace.
+pub const SCHEMA_V8_TO_V9: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS active_workspace_selection (
+  internal_user_id TEXT PRIMARY KEY REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  selected_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_active_workspace_selection_workspace
+  ON active_workspace_selection(fable_workspace_id, local_workspace_id);
+
+-- Written only by the native authenticated-account bootstrap/adapter. IPC
+-- callers never supply this id, so it cannot become a tenancy boundary.
+CREATE TABLE IF NOT EXISTS current_internal_user (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+  established_at TEXT NOT NULL
+);
 "#;
 
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying
@@ -990,6 +1015,19 @@ CREATE TABLE IF NOT EXISTS fable_workspace_device_mirror (
   device_id TEXT NOT NULL REFERENCES fable_device_mirror(device_id) ON DELETE CASCADE,
   member_id TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL,
   PRIMARY KEY (fable_workspace_id, device_id)
+);
+CREATE TABLE IF NOT EXISTS active_workspace_selection (
+  internal_user_id TEXT PRIMARY KEY REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  selected_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_active_workspace_selection_workspace
+  ON active_workspace_selection(fable_workspace_id, local_workspace_id);
+CREATE TABLE IF NOT EXISTS current_internal_user (
+  singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+  established_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS cloud_workspace_link_legacy_clerk_org (
   local_workspace_id TEXT PRIMARY KEY, clerk_org_id TEXT NOT NULL, migrated_at TEXT NOT NULL,

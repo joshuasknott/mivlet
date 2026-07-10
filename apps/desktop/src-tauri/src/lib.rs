@@ -40,6 +40,7 @@ mod snapshot;
 mod store;
 pub mod tools;
 mod workflows;
+mod workspace_directory;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install
 /// the audited ring provider before constructing any native HTTP client.
@@ -186,6 +187,8 @@ pub fn run() {
             cloud_sync::cloud_sync_enqueue_shared_mutation,
             cloud_sync::cloud_sync_flush_outbox,
             cloud_sync::cloud_sync_pull_after_cursor,
+            workspace_directory::list_workspace_directory,
+            workspace_directory::select_active_workspace,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,
