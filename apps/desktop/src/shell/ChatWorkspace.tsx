@@ -243,12 +243,13 @@ export function ChatWorkspace() {
       if (!selectedConversationThreadId) setConversationMessages([]);
       return;
     }
+    if (hydrated.messages.length === 0 && (pendingPrompt || agent.state.running)) return;
     setConversationMessages(hydrated.messages.map(({ message, currentRevision }) => ({
       id: message.id,
       role: message.kind === "user" ? "user" : "assistant",
       content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content
     })));
-  }, [durableConversation.state.conversation, selectedConversationThreadId]);
+  }, [agent.state.running, durableConversation.state.conversation, pendingPrompt, selectedConversationThreadId]);
 
   useEffect(() => {
     if (durableConversation.state.loading) return;
@@ -270,7 +271,7 @@ export function ChatWorkspace() {
     if (!pendingPrompt || !selectedConversationThreadId) return;
     const prompt = pendingPrompt;
     setPendingPrompt(null);
-    runPrompt(prompt, { appendUserMessage: false });
+    void continueComposerSubmission(prompt);
   }, [pendingPrompt, selectedConversationThreadId]);
 
   const wasRunning = useRef(false);
@@ -502,7 +503,11 @@ export function ChatWorkspace() {
       return;
     }
     appendConversationMessage("user", submitted);
-    const outcome = parseComposerText(rawText);
+    void continueComposerSubmission(submitted);
+  }
+
+  async function continueComposerSubmission(submitted: string) {
+    const outcome = parseComposerText(submitted);
     if (outcome.status === "command") {
       const result = await runtime.runFableCommand(outcome.request);
       // Clear the composer so the command token doesn't also reach the model
