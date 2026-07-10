@@ -44,11 +44,11 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 0C - Tenancy and authority
 
-- [ ] Implement stable internal users mapped to Clerk identities.
-- [ ] Implement Fable-owned workspace membership and remove Clerk Organization coupling.
-- [ ] Enforce workspace isolation across local repositories and Convex policy.
-- [ ] Align the Convex schema, outbox, cursors, devices, conflicts, and tombstones with the authority matrix.
-- [ ] Migrate legacy data and terminology without data loss.
+- [x] Implement stable internal users mapped to Clerk identities.
+- [x] Implement Fable-owned workspace membership and remove Clerk Organization coupling.
+- [x] Enforce workspace isolation across local repositories and Convex policy.
+- [x] Align the Convex schema, outbox, cursors, devices, conflicts, and tombstones with the authority matrix.
+- [x] Migrate legacy data and terminology without data loss.
 
 ### Wave 0D - Structural cleanup
 
