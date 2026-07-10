@@ -151,7 +151,8 @@ function IdentitySettingsView({
   runtime: ShellRuntime;
   onStatus: (message: string) => void;
 }) {
-  const identity = runtime.identityStatus.identity;
+  const authentication = runtime.identityStatus.authentication;
+  const display = authentication?.verifiedDisplayAttributes;
   const canSignIn = runtime.identityStatus.enabled && runtime.identityStatus.state !== "signed-in";
   const canRefresh = runtime.identityStatus.enabled && runtime.identityStatus.state !== "disabled";
 
@@ -169,8 +170,8 @@ function IdentitySettingsView({
             </span>
           </div>
           <p>
-            {identity
-              ? `${identity.displayName ?? identity.email ?? identity.userId}${identity.organization ? ` · ${identity.organization.name ?? identity.organization.slug ?? identity.organization.id}` : ""}`
+            {authentication
+              ? display?.displayName ?? display?.email ?? authentication.subject
               : "Account sign-in is configured through Clerk and remains separate from provider and connector credentials."}
           </p>
           <div className="profile-action-row">
@@ -195,7 +196,7 @@ function IdentitySettingsView({
                 <ArrowClockwise size={14} /> Refresh
               </button>
             ) : null}
-            {identity ? (
+            {authentication ? (
               <button
                 type="button"
                 className="button button--secondary"
