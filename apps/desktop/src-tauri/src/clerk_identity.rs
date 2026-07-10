@@ -12,8 +12,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -25,7 +27,20 @@ const PENDING_MAX_AGE_SECONDS: u64 = 5 * 60;
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CALLBACK_BYTES: usize = 8192;
+#[allow(dead_code)] // Reserved for the focused native hosted-account adapter.
+const MAX_CONVEX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const CLOCK_SKEW_SECONDS: u64 = 60;
+
+const CLERK_CONFIG_KEYS: [&str; 8] = [
+    "FABLE_CLERK_ISSUER",
+    "FABLE_CLERK_OAUTH_CLIENT_ID",
+    "FABLE_CLERK_AUDIENCE",
+    "FABLE_CLERK_AUTHORIZED_PARTY",
+    "FABLE_CLERK_SCOPES",
+    "FABLE_CLERK_REQUEST_ORG",
+    "FABLE_CLERK_REQUIRE_ORG",
+    "FABLE_CLERK_ALLOWED_ORG_IDS",
+];
 
 #[derive(Debug, Clone)]
 struct IdentityError {
@@ -96,6 +111,42 @@ struct ClerkIdentityConfig {
     audience: String,
     authorized_party: Option<String>,
     scopes: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ConvexFunctionType {
+    Query,
+    Mutation,
+    Action,
+}
+
+#[allow(dead_code)] // Reserved for the focused native hosted-account adapter.
+impl ConvexFunctionType {
+    fn endpoint(self) -> &'static str {
+        match self {
+            Self::Query => "query",
+            Self::Mutation => "mutation",
+            Self::Action => "action",
+        }
+    }
+}
+
+#[allow(dead_code)] // Constructed only by focused native adapters, never IPC.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConvexIdentityCallRequest {
+    pub(crate) function_type: ConvexFunctionType,
+    pub(crate) function_path: String,
+    pub(crate) args: Value,
+}
+
+#[allow(dead_code)]
+#[derive(Serialize)]
+struct ConvexFunctionBody<'a> {
+    path: &'a str,
+    args: &'a Value,
+    format: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -241,8 +292,6 @@ struct LegacyIdentitySummary {
     user_id: String,
     #[serde(default)]
     display_name: Option<String>,
-    #[serde(default)]
-    email: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -318,15 +367,20 @@ fn normalize_issuer(raw: &str) -> Result<String, IdentityError> {
             false,
         )
     })?;
-    if url.scheme() != "https" {
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
         return Err(identity_error(
             "configuration-required",
-            "Clerk issuer must use HTTPS.",
+            "Clerk issuer must be an HTTPS origin without credentials, path, query, or fragment.",
             false,
         ));
     }
-    url.set_query(None);
-    url.set_fragment(None);
     let path = url.path().trim_end_matches('/').to_string();
     url.set_path(&path);
     Ok(url.to_string())
@@ -342,26 +396,63 @@ fn split_env_list(value: Option<String>) -> Vec<String> {
         .collect()
 }
 
-fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
-    let issuer = std::env::var("FABLE_CLERK_ISSUER").ok();
-    let client_id = std::env::var("FABLE_CLERK_OAUTH_CLIENT_ID").ok();
-    if issuer.is_none() && client_id.is_none() {
+fn load_config_from(
+    production: bool,
+    get: impl Fn(&str) -> Option<String>,
+) -> Result<Option<ClerkIdentityConfig>, IdentityError> {
+    let values = CLERK_CONFIG_KEYS
+        .into_iter()
+        .map(|key| (key, get(key)))
+        .collect::<BTreeMap<_, _>>();
+    let configured = values.values().any(|value| {
+        value
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+    });
+    if !configured {
         return Ok(None);
     }
-    let issuer = issuer.ok_or_else(|| {
-        identity_error(
-            "configuration-required",
-            "Clerk issuer is required to enable Fable cloud identity.",
-            false,
-        )
-    })?;
-    let client_id = client_id.ok_or_else(|| {
-        identity_error(
-            "configuration-required",
-            "Clerk OAuth client id is required to enable Fable cloud identity.",
-            false,
-        )
-    })?;
+    for legacy_key in [
+        "FABLE_CLERK_REQUEST_ORG",
+        "FABLE_CLERK_REQUIRE_ORG",
+        "FABLE_CLERK_ALLOWED_ORG_IDS",
+    ] {
+        if values
+            .get(legacy_key)
+            .and_then(|value| value.as_deref())
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            return Err(identity_error(
+                "configuration-required",
+                format!(
+                    "{legacy_key} is obsolete; Clerk Organizations cannot configure Fable tenancy."
+                ),
+                false,
+            ));
+        }
+    }
+    let issuer = values
+        .get("FABLE_CLERK_ISSUER")
+        .and_then(|value| value.clone())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            identity_error(
+                "configuration-required",
+                "Clerk issuer is required to enable Fable cloud identity.",
+                false,
+            )
+        })?;
+    let client_id = values
+        .get("FABLE_CLERK_OAUTH_CLIENT_ID")
+        .and_then(|value| value.clone())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            identity_error(
+                "configuration-required",
+                "Clerk OAuth client id is required to enable Fable cloud identity.",
+                false,
+            )
+        })?;
     let client_id = client_id.trim().to_string();
     if client_id.is_empty() {
         return Err(identity_error(
@@ -371,12 +462,24 @@ fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
         ));
     }
     let issuer = normalize_issuer(&issuer)?;
-    let audience = std::env::var("FABLE_CLERK_AUDIENCE")
-        .ok()
+    let audience = values
+        .get("FABLE_CLERK_AUDIENCE")
+        .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| client_id.clone());
-    let mut scopes = split_env_list(std::env::var("FABLE_CLERK_SCOPES").ok());
+        .or_else(|| (!production).then(|| client_id.clone()))
+        .ok_or_else(|| {
+            identity_error(
+                "configuration-required",
+                "Clerk audience must be explicit in production.",
+                false,
+            )
+        })?;
+    let mut scopes = split_env_list(
+        values
+            .get("FABLE_CLERK_SCOPES")
+            .and_then(|value| value.clone()),
+    );
     if scopes.is_empty() {
         scopes = vec!["openid".into(), "profile".into(), "email".into()];
     }
@@ -385,10 +488,18 @@ fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
             scopes.push(required.to_string());
         }
     }
-    let authorized_party = std::env::var("FABLE_CLERK_AUTHORIZED_PARTY")
-        .ok()
+    let authorized_party = values
+        .get("FABLE_CLERK_AUTHORIZED_PARTY")
+        .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
+    if production && authorized_party.is_none() {
+        return Err(identity_error(
+            "configuration-required",
+            "Clerk authorized party must be explicit in production.",
+            false,
+        ));
+    }
 
     Ok(Some(ClerkIdentityConfig {
         issuer,
@@ -397,6 +508,51 @@ fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
         authorized_party,
         scopes,
     }))
+}
+
+fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
+    load_config_from(!cfg!(debug_assertions), |key| std::env::var(key).ok())
+}
+
+fn load_convex_url_from(raw: Option<String>) -> Result<Url, IdentityError> {
+    let raw = raw
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            identity_error(
+                "configuration-required",
+                "Fable Convex URL is required for authenticated hosted calls.",
+                false,
+            )
+        })?;
+    let mut url = Url::parse(&raw).map_err(|_| {
+        identity_error(
+            "configuration-required",
+            "Fable Convex URL is invalid.",
+            false,
+        )
+    })?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err(identity_error(
+            "configuration-required",
+            "Fable Convex URL must be an HTTPS deployment origin without credentials, path, query, or fragment.",
+            false,
+        ));
+    }
+    url.set_path("");
+    Ok(url)
+}
+
+#[allow(dead_code)]
+fn load_convex_url() -> Result<Url, IdentityError> {
+    load_convex_url_from(std::env::var("FABLE_CONVEX_URL").ok())
 }
 
 fn disabled_status() -> IdentityStatus {
@@ -415,8 +571,7 @@ fn signed_out_status(config: &ClerkIdentityConfig) -> IdentityStatus {
     IdentityStatus {
         enabled: true,
         state: "signed-out".to_string(),
-        message: "Fable cloud identity is signed out; local workspace features remain available."
-            .to_string(),
+        message: "Fable account is signed out; sign in to continue.".to_string(),
         issuer: Some(config.issuer.clone()),
         audience: Some(config.audience.clone()),
         scopes: config.scopes.clone(),
@@ -443,10 +598,14 @@ fn session_status(
 fn status_from_error(config: &ClerkIdentityConfig, error: &IdentityError) -> IdentityStatus {
     IdentityStatus {
         enabled: true,
-        state: if error.code == "revoked" {
-            "revoked"
-        } else {
-            "error"
+        state: match error.code {
+            // The portable status vocabulary predates an explicit `expired`
+            // state. Keep that contract stable while making expiry distinct
+            // from revocation through signed-out state plus an explicit message.
+            "expired" => "signed-out",
+            "revoked" => "revoked",
+            "offline" => "offline",
+            _ => "error",
         }
         .to_string(),
         message: error.message.clone(),
@@ -495,6 +654,25 @@ fn clear_session(store: &dyn IdentitySecretStore) -> Result<(), IdentityError> {
         .map_err(|message| identity_error("unknown", message, false))
 }
 
+fn sign_out_with_store(
+    store: &dyn IdentitySecretStore,
+    load: impl FnOnce() -> Result<Option<ClerkIdentityConfig>, IdentityError>,
+) -> Result<IdentityStatus, IdentityError> {
+    clear_session(store)?;
+    let config = load()?;
+    Ok(match config {
+        Some(config) => signed_out_status(&config),
+        None => disabled_status(),
+    })
+}
+
+fn session_matches_config(session: &StoredSession, config: &ClerkIdentityConfig) -> bool {
+    session.issuer.trim_end_matches('/') == config.issuer.trim_end_matches('/')
+        && session.client_id == config.client_id
+        && session.audience == config.audience
+        && session.authorized_party == config.authorized_party
+}
+
 fn validate_url(endpoint: &str, label: &str) -> Result<(), IdentityError> {
     let url = Url::parse(endpoint).map_err(|_| {
         identity_error(
@@ -503,10 +681,17 @@ fn validate_url(endpoint: &str, label: &str) -> Result<(), IdentityError> {
             false,
         )
     })?;
-    if url.scheme() != "https" {
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
         return Err(identity_error(
             "configuration-required",
-            format!("Clerk {label} endpoint must use HTTPS."),
+            format!(
+                "Clerk {label} endpoint must be HTTPS and must not contain credentials or a fragment."
+            ),
             false,
         ));
     }
@@ -612,6 +797,13 @@ fn validate_claims(
     config: &ClerkIdentityConfig,
     now: u64,
 ) -> Result<(), IdentityError> {
+    if claims.sub.trim().is_empty() {
+        return Err(identity_error(
+            "invalid-token",
+            "Clerk token subject was missing.",
+            false,
+        ));
+    }
     if claims.iss.trim_end_matches('/') != config.issuer.trim_end_matches('/') {
         return Err(identity_error(
             "invalid-token",
@@ -645,7 +837,7 @@ fn validate_claims(
     }
     if claims.exp <= now.saturating_sub(CLOCK_SKEW_SECONDS) {
         return Err(identity_error(
-            "revoked",
+            "expired",
             "Fable cloud identity expired; sign in again.",
             false,
         ));
@@ -674,13 +866,20 @@ fn validate_claims(
 }
 
 fn decoding_key_for(header_kid: Option<&str>, jwks: &Jwks) -> Result<DecodingKey, IdentityError> {
+    let header_kid = header_kid.ok_or_else(|| {
+        identity_error(
+            "invalid-token",
+            "Clerk token did not identify a signing key.",
+            false,
+        )
+    })?;
     let key = jwks
         .keys
         .iter()
         .find(|key| {
             key.kty == "RSA"
                 && key.alg.as_deref().unwrap_or("RS256") == "RS256"
-                && header_kid.is_none_or(|kid| key.kid.as_deref() == Some(kid))
+                && key.kid.as_deref() == Some(header_kid)
         })
         .ok_or_else(|| {
             identity_error(
@@ -1096,11 +1295,7 @@ async fn exchange_code(
             )
         })?;
     if !response.status().is_success() {
-        return Err(identity_error(
-            "revoked",
-            "Clerk rejected the identity exchange; sign in again.",
-            false,
-        ));
+        return Err(exchange_rejection(response.status()));
     }
     response.json().await.map_err(|_| {
         identity_error(
@@ -1134,11 +1329,7 @@ async fn refresh_tokens(
             )
         })?;
     if !response.status().is_success() {
-        return Err(identity_error(
-            "revoked",
-            "Fable cloud identity was revoked or expired; sign in again.",
-            false,
-        ));
+        return Err(refresh_rejection(response.status()));
     }
     response.json().await.map_err(|_| {
         identity_error(
@@ -1149,12 +1340,58 @@ async fn refresh_tokens(
     })
 }
 
+fn exchange_rejection(status: reqwest::StatusCode) -> IdentityError {
+    identity_error(
+        "invalid-token",
+        format!(
+            "Clerk rejected the identity exchange (HTTP {}); start sign-in again.",
+            status.as_u16()
+        ),
+        status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS,
+    )
+}
+
+fn refresh_rejection(status: reqwest::StatusCode) -> IdentityError {
+    if matches!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST
+            | reqwest::StatusCode::UNAUTHORIZED
+            | reqwest::StatusCode::FORBIDDEN
+    ) {
+        return identity_error(
+            "revoked",
+            "Fable account session was revoked; sign in again.",
+            false,
+        );
+    }
+    identity_error(
+        "provider-error",
+        format!(
+            "Clerk could not refresh the Fable account session (HTTP {}).",
+            status.as_u16()
+        ),
+        status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS,
+    )
+}
+
 async fn session_from_tokens(
     config: ClerkIdentityConfig,
     metadata: &AuthorizationServerMetadata,
     current: Option<StoredSession>,
     tokens: TokenResponse,
 ) -> Result<StoredSession, IdentityError> {
+    if !tokens
+        .token_type
+        .as_deref()
+        .unwrap_or("Bearer")
+        .eq_ignore_ascii_case("bearer")
+    {
+        return Err(identity_error(
+            "invalid-token",
+            "Clerk returned an unsupported token type.",
+            false,
+        ));
+    }
     let jwks = fetch_jwks(&metadata.jwks_uri).await?;
     let access_claims = validate_jwt_with_jwks(&tokens.access_token, &config, &jwks)?;
     if let Some(id_token) = &tokens.id_token {
@@ -1163,6 +1400,26 @@ async fn session_from_tokens(
             return Err(identity_error(
                 "invalid-token",
                 "Clerk access and identity tokens named different subjects.",
+                false,
+            ));
+        }
+    }
+    if let Some(previous_subject) = current.as_ref().and_then(|session| {
+        session
+            .authentication
+            .as_ref()
+            .map(|authentication| authentication.subject.as_str())
+            .or_else(|| {
+                session
+                    .legacy_identity
+                    .as_ref()
+                    .map(|identity| identity.user_id.as_str())
+            })
+    }) {
+        if previous_subject != access_claims.sub {
+            return Err(identity_error(
+                "invalid-token",
+                "Clerk refresh changed the authenticated subject; recover the account session.",
                 false,
             ));
         }
@@ -1224,15 +1481,34 @@ async fn status_with_store(
     let Some(config) = load_config()? else {
         return Ok(disabled_status());
     };
-    let Some(mut session) = read_session(store)? else {
+    let session = match read_session(store) {
+        Ok(session) => session,
+        Err(error) if error.code == "revoked" => {
+            clear_session(store)?;
+            return Ok(status_from_error(&config, &error));
+        }
+        Err(error) => return Err(error),
+    };
+    let Some(mut session) = session else {
         return Ok(signed_out_status(&config));
     };
+    if !session_matches_config(&session, &config) {
+        clear_session(store)?;
+        return Ok(status_from_error(
+            &config,
+            &identity_error(
+                "configuration-required",
+                "Stored Fable identity does not match the active Clerk configuration; sign in again.",
+                false,
+            ),
+        ));
+    }
     let metadata = match discover_metadata(&config).await {
         Ok(metadata) => metadata,
         Err(error) if error.code == "offline" => {
             return Ok(session_status(
                 "offline",
-                "Fable cloud identity could not refresh while offline; local workspace features remain available.",
+                "Fable could not refresh the account session while offline.",
                 &session,
             ))
         }
@@ -1244,7 +1520,7 @@ async fn status_with_store(
             Err(error) if error.code == "offline" => {
                 return Ok(session_status(
                     "offline",
-                    "Fable cloud identity could not be verified while offline; local workspace features remain available.",
+                    "Fable could not verify the account session while offline.",
                     &session,
                 ))
             }
@@ -1291,7 +1567,11 @@ async fn status_with_store(
                     &session,
                 ));
             }
-            Err(error) if error.code == "revoked" => {}
+            Err(error) if error.code == "expired" => {}
+            Err(error) if error.code == "invalid-token" => {
+                clear_session(store)?;
+                return Ok(status_from_error(&config, &error));
+            }
             Err(error) => return Err(error),
         }
     }
@@ -1300,7 +1580,7 @@ async fn status_with_store(
         return Ok(status_from_error(
             &config,
             &identity_error(
-                "revoked",
+                "expired",
                 "Fable cloud identity expired; sign in again.",
                 false,
             ),
@@ -1311,7 +1591,7 @@ async fn status_with_store(
         Err(error) if error.code == "offline" => {
             return Ok(session_status(
                 "offline",
-                "Fable cloud identity could not refresh while offline; local workspace features remain available.",
+                "Fable could not refresh the account session while offline.",
                 &session,
             ))
         }
@@ -1321,7 +1601,15 @@ async fn status_with_store(
         }
         Err(error) => return Err(error),
     };
-    let refreshed = session_from_tokens(config.clone(), &metadata, Some(session), tokens).await?;
+    let refreshed =
+        match session_from_tokens(config.clone(), &metadata, Some(session), tokens).await {
+            Ok(session) => session,
+            Err(error) if error.code == "invalid-token" || error.code == "expired" => {
+                clear_session(store)?;
+                return Ok(status_from_error(&config, &error));
+            }
+            Err(error) => return Err(error),
+        };
     write_session(store, &refreshed)?;
     Ok(session_status(
         "signed-in",
@@ -1332,6 +1620,7 @@ async fn status_with_store(
 
 async fn begin_sign_in_with_store(
     store: &dyn IdentitySecretStore,
+    prompt: &str,
 ) -> Result<IdentityStatus, IdentityError> {
     let Some(config) = load_config()? else {
         return Ok(disabled_status());
@@ -1379,7 +1668,7 @@ async fn begin_sign_in_with_store(
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
         .append_pair("code_challenge_method", "S256")
-        .append_pair("prompt", "consent");
+        .append_pair("prompt", prompt);
 
     let pending = PendingClerkOAuth {
         state: state.clone(),
@@ -1492,7 +1781,7 @@ async fn complete_callback_with_store(
     if let Some(error) = parameters.get("error") {
         let _ = store.remove(&pending_key(state));
         return Err(identity_error(
-            "revoked",
+            "sign-in-cancelled",
             format!("Clerk sign-in did not complete: {error}."),
             false,
         ));
@@ -1585,6 +1874,180 @@ async fn complete_callback_with_store(
     ))
 }
 
+fn validate_convex_function_path(path: &str) -> Result<(), IdentityError> {
+    let valid_length = !path.is_empty() && path.len() <= 200;
+    let valid_characters = path.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'/' | b'.' | b':')
+    });
+    let mut parts = path.split(':');
+    let module = parts.next().unwrap_or_default();
+    let function = parts.next().unwrap_or_default();
+    if !valid_length
+        || !valid_characters
+        || module.is_empty()
+        || function.is_empty()
+        || parts.next().is_some()
+        || module.starts_with('/')
+        || module.ends_with('/')
+        || module
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        return Err(identity_error(
+            "invalid-request",
+            "Convex function path is invalid.",
+            false,
+        ));
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+async fn authenticated_session_with_store(
+    store: &dyn IdentitySecretStore,
+) -> Result<StoredSession, IdentityError> {
+    let status = status_with_store(store).await?;
+    if status.state != "signed-in" {
+        let code = match status.state.as_str() {
+            "offline" => "offline",
+            "revoked" => "revoked",
+            "signed-out" => "expired",
+            _ => "invalid-token",
+        };
+        return Err(identity_error(code, status.message, code == "offline"));
+    }
+    let session = read_session(store)?.ok_or_else(|| {
+        identity_error(
+            "expired",
+            "Fable account session is unavailable; sign in again.",
+            false,
+        )
+    })?;
+    if session.expires_at <= now_epoch() {
+        return Err(identity_error(
+            "expired",
+            "Fable account session expired; sign in again.",
+            false,
+        ));
+    }
+    Ok(session)
+}
+
+#[allow(dead_code)]
+async fn read_limited_json(response: reqwest::Response) -> Result<Value, IdentityError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_CONVEX_RESPONSE_BYTES as u64)
+    {
+        return Err(identity_error(
+            "invalid-response",
+            "Convex response exceeded Fable's size limit.",
+            false,
+        ));
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| {
+            identity_error(
+                "offline",
+                "Fable lost the Convex response connection.",
+                true,
+            )
+        })?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_CONVEX_RESPONSE_BYTES {
+            return Err(identity_error(
+                "invalid-response",
+                "Convex response exceeded Fable's size limit.",
+                false,
+            ));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&bytes).map_err(|_| {
+        identity_error(
+            "invalid-response",
+            "Convex returned an invalid JSON response.",
+            false,
+        )
+    })
+}
+
+#[allow(dead_code)]
+async fn call_convex_with_store(
+    store: &dyn IdentitySecretStore,
+    request: ConvexIdentityCallRequest,
+) -> Result<Value, IdentityError> {
+    let mut endpoint = load_convex_url()?;
+    validate_convex_function_path(&request.function_path)?;
+    if !request.args.is_object() {
+        return Err(identity_error(
+            "invalid-request",
+            "Convex function arguments must be an object.",
+            false,
+        ));
+    }
+    let session = authenticated_session_with_store(store).await?;
+    endpoint.set_path(&format!("/api/{}", request.function_type.endpoint()));
+    crate::ensure_rustls_provider();
+    let response = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| {
+            identity_error(
+                "unknown",
+                "Fable could not initialize the authenticated Convex request.",
+                false,
+            )
+        })?
+        .post(endpoint)
+        .bearer_auth(&session.access_token)
+        .json(&ConvexFunctionBody {
+            path: &request.function_path,
+            args: &request.args,
+            format: "json",
+        })
+        .send()
+        .await
+        .map_err(|_| {
+            identity_error(
+                "offline",
+                "Fable could not reach the hosted workspace service.",
+                true,
+            )
+        })?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        clear_session(store)?;
+        return Err(identity_error(
+            "revoked",
+            "The hosted service rejected the Fable account session; sign in again.",
+            false,
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(identity_error(
+            "hosted-request-failed",
+            format!(
+                "The hosted workspace service rejected the request (HTTP {}).",
+                response.status().as_u16()
+            ),
+            response.status().is_server_error(),
+        ));
+    }
+    read_limited_json(response).await
+}
+
+/// Credential-bearing Convex transport for focused native account/workspace
+/// adapters. This intentionally is not a Tauri command: renderer code must
+/// never choose arbitrary hosted functions under the user's account session.
+#[allow(dead_code)]
+pub(crate) async fn call_convex(request: ConvexIdentityCallRequest) -> Result<Value, String> {
+    call_convex_with_store(&NativeIdentitySecretStore, request)
+        .await
+        .map_err(command_message)
+}
+
 #[tauri::command]
 pub async fn identity_status(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
     status_with_store(&NativeIdentitySecretStore)
@@ -1594,7 +2057,15 @@ pub async fn identity_status(_app: tauri::AppHandle) -> Result<IdentityStatus, S
 
 #[tauri::command]
 pub async fn identity_begin_sign_in(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
-    begin_sign_in_with_store(&NativeIdentitySecretStore)
+    begin_sign_in_with_store(&NativeIdentitySecretStore, "consent")
+        .await
+        .map_err(command_message)
+}
+
+#[tauri::command]
+pub async fn identity_begin_recovery(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+    clear_session(&NativeIdentitySecretStore).map_err(command_message)?;
+    begin_sign_in_with_store(&NativeIdentitySecretStore, "login")
         .await
         .map_err(command_message)
 }
@@ -1608,12 +2079,9 @@ pub async fn identity_refresh(_app: tauri::AppHandle) -> Result<IdentityStatus, 
 
 #[tauri::command]
 pub async fn identity_sign_out(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
-    let config = load_config().map_err(command_message)?;
-    clear_session(&NativeIdentitySecretStore).map_err(command_message)?;
-    Ok(match config {
-        Some(config) => signed_out_status(&config),
-        None => disabled_status(),
-    })
+    // Configuration may have become invalid since sign-in. Local credential
+    // removal must still happen before reporting that diagnostic.
+    sign_out_with_store(&NativeIdentitySecretStore, load_config).map_err(command_message)
 }
 
 #[cfg(test)]
@@ -1670,6 +2138,82 @@ mod tests {
         }
     }
 
+    fn config_values(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn enabled_production_config_requires_explicit_security_fields() {
+        let incomplete = config_values(&[
+            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
+            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
+        ]);
+        let error = load_config_from(true, |key| incomplete.get(key).cloned()).unwrap_err();
+        assert_eq!(error.code, "configuration-required");
+        assert_eq!(
+            error.message,
+            "Clerk audience must be explicit in production."
+        );
+
+        let complete = config_values(&[
+            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
+            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
+            ("FABLE_CLERK_AUTHORIZED_PARTY", "client_123"),
+        ]);
+        let config = load_config_from(true, |key| complete.get(key).cloned())
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.audience, "fable-desktop");
+        assert_eq!(config.authorized_party.as_deref(), Some("client_123"));
+    }
+
+    #[test]
+    fn partial_or_obsolete_clerk_configuration_fails_closed() {
+        let partial = config_values(&[("FABLE_CLERK_AUDIENCE", "fable-desktop")]);
+        assert_eq!(
+            load_config_from(false, |key| partial.get(key).cloned())
+                .unwrap_err()
+                .message,
+            "Clerk issuer is required to enable Fable cloud identity."
+        );
+
+        let obsolete = config_values(&[
+            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
+            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("FABLE_CLERK_REQUIRE_ORG", "true"),
+        ]);
+        assert!(load_config_from(false, |key| obsolete.get(key).cloned())
+            .unwrap_err()
+            .message
+            .contains("Clerk Organizations cannot configure Fable tenancy"));
+    }
+
+    #[test]
+    fn configured_session_must_match_active_security_configuration() {
+        let config = test_config();
+        let mut session = StoredSession {
+            access_token: "access_secret".to_string(),
+            id_token: None,
+            refresh_token: None,
+            token_type: "Bearer".to_string(),
+            expires_at: now_epoch() + 3600,
+            scopes: config.scopes.clone(),
+            issuer: config.issuer.clone(),
+            audience: config.audience.clone(),
+            client_id: config.client_id.clone(),
+            authorized_party: config.authorized_party.clone(),
+            authentication: None,
+            legacy_identity: None,
+        };
+        assert!(session_matches_config(&session, &config));
+        session.audience = "stale-audience".to_string();
+        assert!(!session_matches_config(&session, &config));
+    }
+
     #[test]
     fn claim_validation_rejects_wrong_issuer_audience_and_azp() {
         let config = test_config();
@@ -1701,6 +2245,23 @@ mod tests {
                 .message,
             "Clerk token authorized party did not match configuration."
         );
+
+        let mut missing_subject = test_claims();
+        missing_subject.sub = "  ".to_string();
+        assert_eq!(
+            validate_claims(&missing_subject, &config, now)
+                .unwrap_err()
+                .message,
+            "Clerk token subject was missing."
+        );
+    }
+
+    #[test]
+    fn jwt_key_selection_requires_an_explicit_matching_kid() {
+        let error = decoding_key_for(None, &Jwks { keys: Vec::new() })
+            .err()
+            .expect("missing kid must fail");
+        assert_eq!(error.message, "Clerk token did not identify a signing key.");
     }
 
     #[test]
@@ -1712,7 +2273,7 @@ mod tests {
         expired.exp = now - 120;
         assert_eq!(
             validate_claims(&expired, &config, now).unwrap_err().code,
-            "revoked"
+            "expired"
         );
 
         let mut future = test_claims();
@@ -1807,8 +2368,23 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert_eq!(error.code, "revoked");
+        assert_eq!(error.code, "sign-in-cancelled");
         assert!(store.get(&key).unwrap().is_none());
+    }
+
+    #[test]
+    fn oauth_rejections_only_classify_session_failures_as_revoked() {
+        assert_eq!(
+            exchange_rejection(reqwest::StatusCode::BAD_REQUEST).code,
+            "invalid-token"
+        );
+        assert_eq!(
+            refresh_rejection(reqwest::StatusCode::BAD_REQUEST).code,
+            "revoked"
+        );
+        let transient = refresh_rejection(reqwest::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(transient.code, "provider-error");
+        assert!(transient.retryable);
     }
 
     #[test]
@@ -1847,6 +2423,55 @@ mod tests {
     }
 
     #[test]
+    fn expiry_and_revocation_have_distinct_secret_free_states() {
+        let config = test_config();
+        let expired = status_from_error(
+            &config,
+            &identity_error("expired", "Session expired; sign in again.", false),
+        );
+        let revoked = status_from_error(
+            &config,
+            &identity_error("revoked", "Session revoked; sign in again.", false),
+        );
+        assert_eq!(expired.state, "signed-out");
+        assert_eq!(revoked.state, "revoked");
+        assert!(expired.authentication.is_none());
+        assert!(revoked.authentication.is_none());
+    }
+
+    #[test]
+    fn convex_boundary_rejects_untrusted_destinations_paths_and_token_fields() {
+        assert!(load_convex_url_from(Some("https://example.convex.cloud".into())).is_ok());
+        for invalid in [
+            "http://example.convex.cloud",
+            "https://user:secret@example.convex.cloud",
+            "https://example.convex.cloud/untrusted",
+            "https://example.convex.cloud?redirect=elsewhere",
+        ] {
+            assert!(load_convex_url_from(Some(invalid.into())).is_err());
+        }
+
+        assert!(validate_convex_function_path("workspace:bootstrap").is_ok());
+        assert!(validate_convex_function_path("sync/pull:listAfter").is_ok());
+        for invalid in [
+            "",
+            "workspace",
+            "../workspace:bootstrap",
+            "workspace:run:again",
+        ] {
+            assert!(validate_convex_function_path(invalid).is_err());
+        }
+
+        let injected = serde_json::json!({
+            "functionType": "query",
+            "functionPath": "viewer:get",
+            "args": {},
+            "accessToken": "renderer_secret"
+        });
+        assert!(serde_json::from_value::<ConvexIdentityCallRequest>(injected).is_err());
+    }
+
+    #[test]
     fn legacy_session_org_display_fields_are_ignored_and_removed_on_rewrite() {
         let store = MemoryStore::default();
         let legacy = serde_json::json!({
@@ -1878,7 +2503,6 @@ mod tests {
         let mut session = read_session(&store).unwrap().unwrap();
         let legacy_identity = session.legacy_identity.as_ref().unwrap();
         assert_eq!(legacy_identity.user_id, "user_123");
-        assert_eq!(legacy_identity.email.as_deref(), Some("user@example.com"));
 
         let claims = test_claims();
         session.authentication = Some(authentication_from_claims(
@@ -1898,10 +2522,17 @@ mod tests {
     }
 
     #[test]
-    fn memory_store_removes_session_on_sign_out_path() {
+    fn sign_out_removes_session_even_when_configuration_is_invalid() {
         let store = MemoryStore::default();
         store.set(SESSION_KEY, "value").unwrap();
-        clear_session(&store).unwrap();
+        let result = sign_out_with_store(&store, || {
+            Err(identity_error(
+                "configuration-required",
+                "invalid production configuration",
+                false,
+            ))
+        });
+        assert_eq!(result.unwrap_err().code, "configuration-required");
         assert!(store.get(SESSION_KEY).unwrap().is_none());
     }
 }

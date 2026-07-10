@@ -180,6 +180,7 @@ pub fn run() {
             local_model::cancel_local_model_completion,
             clerk_identity::identity_status,
             clerk_identity::identity_begin_sign_in,
+            clerk_identity::identity_begin_recovery,
             clerk_identity::identity_refresh,
             clerk_identity::identity_sign_out,
             cloud_sync::cloud_sync_status,
