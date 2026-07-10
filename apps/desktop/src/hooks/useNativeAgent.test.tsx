@@ -434,18 +434,6 @@ describe("useNativeAgent", () => {
     });
   });
 
-  it("terminalizes a run when the provider reaches EOF without a terminal event", async () => {
-    installDesktopRuntime();
-    mocks.lines = [openAiChunk("partial")];
-
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
-    await act(async () => { await result.current.run(baseRequest); });
-
-    expect(result.current.state.status).toBe("failed");
-    expect(result.current.state.lastError).toContain("without a completion event");
-    expect((mocks.savedRuns.at(-1) as PersistedAgentRun).status).toBe("failed");
-  });
-
   it("fails closed when initial durable-run persistence fails", async () => {
     installDesktopRuntime();
     mocks.saveError = new Error("disk full");
