@@ -15,6 +15,7 @@ export type AccountSessionState =
   | "signed-in"
   | "offline"
   | "refreshing"
+  | "expired"
   | "revoked"
   | "error";
 
@@ -40,6 +41,58 @@ export interface IdentityStatus {
   audience?: string;
   scopes: string[];
   authentication?: AccountAuthenticationFacts;
+}
+
+export type AccountWorkspaceLifecycleState =
+  | "disabled"
+  | "signed-out"
+  | "bootstrapping"
+  | "ready"
+  | "offline"
+  | "expired"
+  | "revoked"
+  | "error";
+
+export interface AccountWorkspaceSummary {
+  fableWorkspaceId: string;
+  localWorkspaceId: string;
+  name: string;
+  workspaceStatus: "active" | "locked" | "pending-deletion" | "deleted";
+  workspaceRevision: number;
+  policyRevision: number;
+  memberId: string;
+  role: WorkspaceRole;
+  membershipStatus: "active" | "suspended" | "removed";
+  membershipRevision: number;
+  updatedAt: string;
+}
+
+export interface ActiveWorkspaceSelection {
+  localWorkspaceId: string;
+  fableWorkspaceId?: string;
+  name: string;
+  source: "hosted" | "legacy-default";
+}
+
+export interface AccountDeviceSummary {
+  deviceId: string;
+  kind: "desktop" | "mobile" | "web";
+  label: string;
+  status: "pending" | "active" | "revoked";
+  registeredAt: string;
+  lastSeenAt?: string;
+  revokedAt?: string;
+}
+
+/** Secret-free account/workspace state exposed by the focused native adapter. */
+export interface AccountWorkspaceStatus {
+  configured: boolean;
+  state: AccountWorkspaceLifecycleState;
+  message: string;
+  accountBound: boolean;
+  workspaces: AccountWorkspaceSummary[];
+  activeWorkspace: ActiveWorkspaceSelection;
+  devices: AccountDeviceSummary[];
 }
 
 export type CloudWorkspaceRole = WorkspaceRole;

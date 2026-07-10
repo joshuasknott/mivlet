@@ -599,10 +599,7 @@ fn status_from_error(config: &ClerkIdentityConfig, error: &IdentityError) -> Ide
     IdentityStatus {
         enabled: true,
         state: match error.code {
-            // The portable status vocabulary predates an explicit `expired`
-            // state. Keep that contract stable while making expiry distinct
-            // from revocation through signed-out state plus an explicit message.
-            "expired" => "signed-out",
+            "expired" => "expired",
             "revoked" => "revoked",
             "offline" => "offline",
             _ => "error",
@@ -2433,7 +2430,7 @@ mod tests {
             &config,
             &identity_error("revoked", "Session revoked; sign in again.", false),
         );
-        assert_eq!(expired.state, "signed-out");
+        assert_eq!(expired.state, "expired");
         assert_eq!(revoked.state, "revoked");
         assert!(expired.authentication.is_none());
         assert!(revoked.authentication.is_none());

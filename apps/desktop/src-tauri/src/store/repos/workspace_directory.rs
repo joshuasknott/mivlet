@@ -209,13 +209,19 @@ fn ensure_workspace_update_is_monotonic(
         ));
     }
     if input.workspace_revision == existing.revision
-        && (input.name != existing.name
-            || input.workspace_status != existing.status
-            || input.policy_revision != existing.policy_revision
-            || input.updated_at != existing.updated_at)
+        && (input.name != existing.name || input.workspace_status != existing.status)
     {
         return Err(StoreError::Invalid(
             "A conflicting hosted workspace summary has the same revision as the local mirror."
+                .into(),
+        ));
+    }
+    if input.workspace_revision == existing.revision
+        && input.policy_revision == existing.policy_revision
+        && input.updated_at != existing.updated_at
+    {
+        return Err(StoreError::Invalid(
+            "A conflicting hosted workspace replay has the same revisions as the local mirror."
                 .into(),
         ));
     }
