@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 7;
+pub const CURRENT_SCHEMA_VERSION: u32 = 8;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -302,6 +302,181 @@ CREATE TABLE IF NOT EXISTS cloud_conflict (
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace
   ON cloud_conflict(local_workspace_id, created_at);
+"#;
+
+/// Forward schema step `v7 -> v8`: makes the local shared-workspace cache a
+/// Fable-owned control-plane mirror. Convex remains canonical: this database
+/// caches only explicit attribution, authorization display state, and sync
+/// envelopes. Clerk organization ids are copied to a quarantined compatibility
+/// table and never participate in link lookup or authorization after upgrade.
+pub const SCHEMA_V7_TO_V8: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS fable_internal_user_mirror (
+  internal_user_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  display_name TEXT NOT NULL DEFAULT '',
+  avatar_url TEXT NOT NULL DEFAULT '',
+  email_hint TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fable_workspace_mirror (
+  fable_workspace_id TEXT PRIMARY KEY,
+  local_workspace_id TEXT NOT NULL UNIQUE REFERENCES workspace(id) ON DELETE CASCADE,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  policy_revision INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fable_membership_mirror (
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL,
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
+  role TEXT NOT NULL,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (fable_workspace_id, member_id),
+  UNIQUE (fable_workspace_id, internal_user_id)
+);
+CREATE TABLE IF NOT EXISTS fable_device_mirror (
+  device_id TEXT PRIMARY KEY,
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL DEFAULT 'desktop',
+  label TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS fable_workspace_device_mirror (
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL REFERENCES fable_device_mirror(device_id) ON DELETE CASCADE,
+  member_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (fable_workspace_id, device_id)
+);
+CREATE TABLE IF NOT EXISTS cloud_workspace_link_legacy_clerk_org (
+  local_workspace_id TEXT PRIMARY KEY,
+  clerk_org_id TEXT NOT NULL,
+  migrated_at TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT 'v7 compatibility only; not an authorization or tenancy key'
+);
+
+ALTER TABLE cloud_workspace_link RENAME TO cloud_workspace_link_v7;
+CREATE TABLE cloud_workspace_link (
+  local_workspace_id TEXT PRIMARY KEY REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL UNIQUE REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id),
+  member_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  sync_state TEXT NOT NULL,
+  last_accepted_revision INTEGER NOT NULL DEFAULT 0,
+  linked_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (fable_workspace_id, member_id) REFERENCES fable_membership_mirror(fable_workspace_id, member_id),
+  FOREIGN KEY (fable_workspace_id, device_id) REFERENCES fable_workspace_device_mirror(fable_workspace_id, device_id)
+);
+INSERT INTO cloud_workspace_link_legacy_clerk_org (local_workspace_id, clerk_org_id, migrated_at)
+  SELECT local_workspace_id, clerk_org_id, updated_at FROM cloud_workspace_link_v7;
+INSERT OR IGNORE INTO fable_internal_user_mirror (internal_user_id, status, revision, updated_at)
+  SELECT 'legacy-user:' || linked_device_id, 'active', last_accepted_revision, updated_at FROM cloud_workspace_link_v7;
+INSERT OR IGNORE INTO fable_workspace_mirror (fable_workspace_id, local_workspace_id, status, revision, policy_revision, updated_at)
+  SELECT cloud_workspace_id, local_workspace_id, 'active', last_accepted_revision, 0, updated_at FROM cloud_workspace_link_v7;
+INSERT OR IGNORE INTO fable_membership_mirror (fable_workspace_id, member_id, internal_user_id, role, status, revision, updated_at)
+  SELECT cloud_workspace_id, 'legacy-member:' || local_workspace_id, 'legacy-user:' || linked_device_id, role, 'active', last_accepted_revision, updated_at FROM cloud_workspace_link_v7;
+INSERT OR IGNORE INTO fable_device_mirror (device_id, internal_user_id, status, revision, updated_at)
+  SELECT linked_device_id, 'legacy-user:' || linked_device_id, 'active', last_accepted_revision, updated_at FROM cloud_workspace_link_v7;
+INSERT OR IGNORE INTO fable_workspace_device_mirror (fable_workspace_id, device_id, member_id, status, revision, updated_at)
+  SELECT cloud_workspace_id, linked_device_id, 'legacy-member:' || local_workspace_id, 'active', last_accepted_revision, updated_at FROM cloud_workspace_link_v7;
+INSERT INTO cloud_workspace_link (local_workspace_id, fable_workspace_id, internal_user_id, member_id, device_id, role, sync_state, last_accepted_revision, linked_at, updated_at)
+  SELECT local_workspace_id, cloud_workspace_id, 'legacy-user:' || linked_device_id, 'legacy-member:' || local_workspace_id, linked_device_id, role, sync_state, last_accepted_revision, linked_at, updated_at FROM cloud_workspace_link_v7;
+DROP TABLE cloud_workspace_link_v7;
+CREATE INDEX IF NOT EXISTS idx_cloud_workspace_link_state ON cloud_workspace_link(sync_state);
+INSERT OR IGNORE INTO fable_workspace_mirror (fable_workspace_id, local_workspace_id, status, revision, policy_revision, updated_at)
+  SELECT 'legacy-workspace:' || id, id, 'active', 0, 0, updated_at FROM workspace;
+
+ALTER TABLE cloud_sync_cursor RENAME TO cloud_sync_cursor_v7;
+CREATE TABLE cloud_sync_cursor (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  last_pulled_revision INTEGER NOT NULL DEFAULT 0,
+  last_realtime_sequence INTEGER NOT NULL DEFAULT 0,
+  last_successful_sync_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (local_workspace_id, device_id),
+  UNIQUE (fable_workspace_id, device_id)
+);
+INSERT INTO cloud_sync_cursor SELECT c.local_workspace_id, l.fable_workspace_id, c.device_id, c.last_pulled_revision, c.last_realtime_sequence, c.last_successful_sync_at FROM cloud_sync_cursor_v7 c JOIN cloud_workspace_link l ON l.local_workspace_id=c.local_workspace_id;
+DROP TABLE cloud_sync_cursor_v7;
+
+ALTER TABLE cloud_mutation_outbox RENAME TO cloud_mutation_outbox_v7;
+CREATE TABLE cloud_mutation_outbox (
+  local_mutation_id TEXT PRIMARY KEY,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  internal_user_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  client_mutation_id TEXT NOT NULL,
+  base_revision INTEGER NOT NULL,
+  accepted_revision INTEGER NOT NULL DEFAULT 0,
+  record_type TEXT NOT NULL,
+  record_id TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  status TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT '',
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  UNIQUE (fable_workspace_id, device_id, client_mutation_id)
+);
+INSERT INTO cloud_mutation_outbox (local_mutation_id, idempotency_key, local_workspace_id, fable_workspace_id, internal_user_id, member_id, device_id, client_mutation_id, base_revision, record_type, record_id, operation, status, attempt_count, created_at, updated_at, payload, payload_nonce)
+  SELECT o.local_mutation_id, l.fable_workspace_id || ':' || l.device_id || ':' || o.client_mutation_id, o.local_workspace_id, l.fable_workspace_id, l.internal_user_id, l.member_id, l.device_id, o.client_mutation_id, o.base_revision, o.record_type, o.record_id, o.operation, CASE WHEN o.status IN ('queued', 'flushing') THEN 'pending' ELSE o.status END, o.attempt_count, o.created_at, o.updated_at, o.payload, o.payload_nonce FROM cloud_mutation_outbox_v7 o JOIN cloud_workspace_link l ON l.local_workspace_id=o.local_workspace_id;
+DROP TABLE cloud_mutation_outbox_v7;
+CREATE INDEX IF NOT EXISTS idx_cloud_outbox_workspace_status ON cloud_mutation_outbox(local_workspace_id, status, created_at);
+
+ALTER TABLE cloud_record_shadow RENAME TO cloud_record_shadow_v7;
+CREATE TABLE cloud_record_shadow (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL, record_id TEXT NOT NULL, server_revision INTEGER NOT NULL,
+  sync_state TEXT NOT NULL DEFAULT 'accepted', content_fingerprint TEXT NOT NULL,
+  deleted_at TEXT NOT NULL DEFAULT '', conflict_id TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL,
+  PRIMARY KEY (local_workspace_id, record_type, record_id)
+);
+INSERT INTO cloud_record_shadow SELECT s.local_workspace_id, l.fable_workspace_id, s.record_type, s.record_id, s.server_revision, CASE WHEN s.conflict_id <> '' THEN 'conflict' ELSE 'accepted' END, s.content_fingerprint, s.deleted_at, s.conflict_id, s.updated_at FROM cloud_record_shadow_v7 s JOIN cloud_workspace_link l ON l.local_workspace_id=s.local_workspace_id;
+DROP TABLE cloud_record_shadow_v7;
+CREATE INDEX IF NOT EXISTS idx_cloud_shadow_workspace_revision ON cloud_record_shadow(local_workspace_id, server_revision);
+
+ALTER TABLE cloud_conflict RENAME TO cloud_conflict_v7;
+CREATE TABLE cloud_conflict (
+  id TEXT PRIMARY KEY, local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  local_mutation_id TEXT NOT NULL, record_type TEXT NOT NULL, record_id TEXT NOT NULL,
+  base_revision INTEGER NOT NULL DEFAULT 0, server_revision INTEGER NOT NULL DEFAULT 0,
+  deleted_at TEXT NOT NULL DEFAULT '', reason_code TEXT NOT NULL, created_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+);
+INSERT INTO cloud_conflict (id, local_workspace_id, fable_workspace_id, local_mutation_id, record_type, record_id, reason_code, created_at, payload, payload_nonce)
+  SELECT c.id, c.local_workspace_id, l.fable_workspace_id, c.local_mutation_id, c.record_type, c.record_id, c.reason_code, c.created_at, c.payload, c.payload_nonce FROM cloud_conflict_v7 c JOIN cloud_workspace_link l ON l.local_workspace_id=c.local_workspace_id;
+DROP TABLE cloud_conflict_v7;
+CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace ON cloud_conflict(local_workspace_id, created_at);
+CREATE TABLE IF NOT EXISTS cloud_record_tombstone (
+  local_workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  fable_workspace_id TEXT NOT NULL REFERENCES fable_workspace_mirror(fable_workspace_id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL, record_id TEXT NOT NULL, deleted_at TEXT NOT NULL,
+  server_revision INTEGER NOT NULL, accepted_at TEXT NOT NULL,
+  PRIMARY KEY (local_workspace_id, record_type, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_tombstone_workspace_revision ON cloud_record_tombstone(local_workspace_id, server_revision);
 "#;
 
 /// The full current DDL. Idempotent (`CREATE TABLE IF NOT EXISTS`) so applying

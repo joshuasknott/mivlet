@@ -52,6 +52,11 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             5 => apply_v5_to_v6(conn)?,
             // 6 -> 7: add local cloud-team sync cache/outbox tables.
             6 => conn.execute_batch(crate::store::schema::SCHEMA_V6_TO_V7)?,
+            // 7 -> 8: replace the Clerk-organization-shaped local sync cache
+            // with Fable-owned identity, membership, workspace, and device
+            // mirrors. The SQL rebuild is data-preserving and runs inside the
+            // Store migration transaction.
+            7 => apply_v7_to_v8(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -227,6 +232,20 @@ fn apply_v5_to_v6(conn: &Connection) -> super::Result<()> {
              ON connector_account(credential_ref) WHERE credential_ref <> '';",
         )?;
     }
+    Ok(())
+}
+
+fn apply_v7_to_v8(conn: &Connection) -> super::Result<()> {
+    // Minimal historical-schema fixtures can reach this step without the v7
+    // sync tables or workspace root. Production v7 databases always have both;
+    // keep those narrow fixtures useful without manufacturing partial mirrors.
+    if !table_exists(conn, "workspace")? || !table_exists(conn, "cloud_workspace_link")? {
+        return Ok(());
+    }
+    if table_has_column(conn, "cloud_workspace_link", "fable_workspace_id")? {
+        return Ok(());
+    }
+    conn.execute_batch(crate::store::schema::SCHEMA_V7_TO_V8)?;
     Ok(())
 }
 
@@ -523,8 +542,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // 7 is the current registered version; 8 is one step beyond it.
-        let err = apply(&conn, 7, 8).unwrap_err();
+        // 8 is the current registered version; 9 is one step beyond it.
+        let err = apply(&conn, 8, 9).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -959,5 +978,101 @@ mod tests {
             [],
         )
         .unwrap();
+    }
+
+    #[test]
+    fn v7_to_v8_preserves_sync_rows_and_quarantines_clerk_org_tenancy() {
+        let conn = conn();
+        conn.execute(
+            "INSERT INTO workspace (id, name, created_at, updated_at)
+             VALUES ('default', 'Default', 'now', 'now');",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch(
+            r#"
+            INSERT INTO cloud_workspace_link (
+              local_workspace_id, cloud_workspace_id, clerk_org_id, role,
+              sync_state, linked_device_id, last_accepted_revision, linked_at, updated_at
+            ) VALUES ('default','fable-ws','org-legacy','editor','active','device-a',4,'then','now');
+            INSERT INTO cloud_sync_cursor VALUES ('default','device-a',4,9,'now');
+            INSERT INTO cloud_mutation_outbox (
+              local_mutation_id,idempotency_key,local_workspace_id,cloud_workspace_id,device_id,
+              client_mutation_id,base_revision,record_type,record_id,operation,status,attempt_count,
+              created_at,updated_at,payload,payload_nonce
+            ) VALUES ('m1','old-key','default','fable-ws','device-a','client-a',4,'project','p1','delete','queued',2,'then','now',x'01',x'02');
+            INSERT INTO cloud_record_shadow VALUES ('default','fable-ws','project','p1',4,'fp','gone','c1','now');
+            INSERT INTO cloud_conflict VALUES ('c1','default','fable-ws','m1','project','p1','revision-conflict','now',x'03',x'04');
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 7, 8).unwrap();
+        apply(&conn, 7, 8).unwrap();
+
+        let link: (String, String, String, String) = conn
+            .query_row(
+                "SELECT fable_workspace_id, internal_user_id, member_id, device_id
+                 FROM cloud_workspace_link WHERE local_workspace_id='default';",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(link.0, "fable-ws");
+        assert_eq!(link.1, "legacy-user:device-a");
+        assert_eq!(link.2, "legacy-member:default");
+        assert_eq!(link.3, "device-a");
+        let legacy_org: String = conn
+            .query_row(
+                "SELECT clerk_org_id FROM cloud_workspace_link_legacy_clerk_org
+                 WHERE local_workspace_id='default';",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_org, "org-legacy");
+        let (status, fingerprint, deleted_at): (String, String, String) = conn
+            .query_row(
+                "SELECT status, (SELECT content_fingerprint FROM cloud_record_shadow WHERE record_id='p1'),
+                        (SELECT deleted_at FROM cloud_record_shadow WHERE record_id='p1')
+                 FROM cloud_mutation_outbox WHERE local_mutation_id='m1';",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "pending");
+        assert_eq!(fingerprint, "fp");
+        assert_eq!(deleted_at, "gone");
+        let mirrors: i64 = conn
+            .query_row("SELECT COUNT(*) FROM fable_workspace_mirror;", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(mirrors, 1);
+    }
+
+    #[test]
+    fn v7_to_v8_rolls_back_completely_when_outer_migration_fails() {
+        let mut conn = conn();
+        conn.execute(
+            "INSERT INTO workspace (id, name, created_at, updated_at)
+             VALUES ('default', 'Default', 'now', 'now');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cloud_workspace_link VALUES
+             ('default','fable-ws','org-legacy','owner','active','device-a',0,'now','now');",
+            [],
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        apply(&tx, 7, 8).unwrap();
+        let failure = tx.execute("INSERT INTO missing_table VALUES (1);", []);
+        assert!(failure.is_err());
+        tx.rollback().unwrap();
+
+        assert!(table_has_column(&conn, "cloud_workspace_link", "clerk_org_id").unwrap());
+        assert!(!table_exists(&conn, "fable_workspace_mirror").unwrap());
     }
 }

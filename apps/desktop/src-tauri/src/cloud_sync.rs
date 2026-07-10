@@ -202,7 +202,7 @@ pub fn cloud_sync_pull_after_cursor(workspace_id: String) -> Result<CloudSyncPul
         });
     };
     let cursor = store
-        .with_conn(|conn| repo::get_cursor(conn, &workspace_id, &link.linked_device_id))
+        .with_conn(|conn| repo::get_cursor(conn, &workspace_id, &link.device_id))
         .map_err(|error| error.to_string())?;
     Ok(CloudSyncPullResult {
         phase: if link.sync_state == "active" {
