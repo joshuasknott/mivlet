@@ -69,6 +69,7 @@ export function ChatWorkspace() {
   const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const draftHydrationKey = useRef<string | null>(null);
   const activeAssistantMessageId = useRef<string | null>(null);
   const boundWorkspaceId =
@@ -252,11 +253,11 @@ export function ChatWorkspace() {
   }, [agent.state.running, durableConversation.state.conversation, pendingPrompt, selectedConversationThreadId]);
 
   useEffect(() => {
-    if (durableConversation.state.loading) return;
+    if (durableConversation.state.loading || submissionInFlight) return;
     if (draftHydrationKey.current === durableConversation.draftKey) return;
     draftHydrationKey.current = durableConversation.draftKey;
     runtime.setComposerValue(durableConversation.state.draft?.content ?? "");
-  }, [durableConversation.draftKey, durableConversation.state.draft, durableConversation.state.loading, runtime.setComposerValue]);
+  }, [durableConversation.draftKey, durableConversation.state.draft, durableConversation.state.loading, runtime.setComposerValue, submissionInFlight]);
 
   useEffect(() => {
     if (draftHydrationKey.current !== durableConversation.draftKey) return;
@@ -271,7 +272,7 @@ export function ChatWorkspace() {
     if (!pendingPrompt || !selectedConversationThreadId) return;
     const prompt = pendingPrompt;
     setPendingPrompt(null);
-    void continueComposerSubmission(prompt);
+    void continueComposerSubmission(prompt).finally(() => setSubmissionInFlight(false));
   }, [pendingPrompt, selectedConversationThreadId]);
 
   const wasRunning = useRef(false);
@@ -491,6 +492,7 @@ export function ChatWorkspace() {
     const submitted = rawText.trim();
     if (!submitted || agent.state.running || pendingPrompt) return;
     if (!selectedConversationThreadId) {
+      setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
         authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "current-member" as never },
         title: submitted.slice(0, 72)
