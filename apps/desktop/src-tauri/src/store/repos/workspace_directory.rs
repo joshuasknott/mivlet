@@ -88,7 +88,6 @@ struct ExistingWorkspaceMirror {
     status: String,
     revision: i64,
     policy_revision: i64,
-    updated_at: String,
 }
 
 struct ExistingMembershipMirror {
@@ -97,7 +96,6 @@ struct ExistingMembershipMirror {
     role: String,
     status: String,
     revision: i64,
-    updated_at: String,
 }
 
 pub fn upsert_authoritative_summary(
@@ -208,7 +206,7 @@ fn ensure_workspace_update_is_monotonic(
 ) -> Result<()> {
     let existing = conn
         .query_row(
-            "SELECT local.name, w.status, w.revision, w.policy_revision, w.updated_at
+            "SELECT local.name, w.status, w.revision, w.policy_revision
              FROM fable_workspace_mirror AS w
              JOIN workspace AS local ON local.id=w.local_workspace_id
              WHERE w.fable_workspace_id=?1;",
@@ -219,7 +217,6 @@ fn ensure_workspace_update_is_monotonic(
                     status: row.get(1)?,
                     revision: row.get(2)?,
                     policy_revision: row.get(3)?,
-                    updated_at: row.get(4)?,
                 })
             },
         )
@@ -239,15 +236,6 @@ fn ensure_workspace_update_is_monotonic(
     {
         return Err(StoreError::Invalid(
             "A conflicting hosted workspace summary has the same revision as the local mirror."
-                .into(),
-        ));
-    }
-    if input.workspace_revision == existing.revision
-        && input.policy_revision == existing.policy_revision
-        && input.updated_at != existing.updated_at
-    {
-        return Err(StoreError::Invalid(
-            "A conflicting hosted workspace replay has the same revisions as the local mirror."
                 .into(),
         ));
     }
@@ -280,9 +268,7 @@ fn ensure_membership_update_is_monotonic(
         ));
     }
     if input.membership_revision == existing.revision
-        && (input.role != existing.role
-            || input.membership_status != existing.status
-            || input.updated_at != existing.updated_at)
+        && (input.role != existing.role || input.membership_status != existing.status)
     {
         return Err(StoreError::Invalid(
             "A conflicting hosted membership summary has the same revision as the local mirror."
@@ -695,7 +681,7 @@ fn existing_membership_for_user(
     internal_user_id: &str,
 ) -> Result<Option<ExistingMembershipMirror>> {
     conn.query_row(
-        "SELECT member_id, internal_user_id, role, status, revision, updated_at
+        "SELECT member_id, internal_user_id, role, status, revision
          FROM fable_membership_mirror
          WHERE fable_workspace_id=?1 AND internal_user_id=?2;",
         rusqlite::params![fable_workspace_id, internal_user_id],
@@ -711,7 +697,7 @@ fn existing_membership_by_id(
     member_id: &str,
 ) -> Result<Option<ExistingMembershipMirror>> {
     conn.query_row(
-        "SELECT member_id, internal_user_id, role, status, revision, updated_at
+        "SELECT member_id, internal_user_id, role, status, revision
          FROM fable_membership_mirror
          WHERE fable_workspace_id=?1 AND member_id=?2;",
         rusqlite::params![fable_workspace_id, member_id],
@@ -825,7 +811,6 @@ fn read_existing_membership(row: &rusqlite::Row<'_>) -> rusqlite::Result<Existin
         role: row.get(2)?,
         status: row.get(3)?,
         revision: row.get(4)?,
-        updated_at: row.get(5)?,
     })
 }
 
@@ -1014,6 +999,41 @@ mod tests {
                 .source,
             "hosted"
         );
+    }
+
+    #[test]
+    fn workspace_and_policy_revisions_can_advance_without_revising_membership() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let original = summary("user-alpha", "workspace-alpha", "Alpha");
+        store
+            .transaction(|conn| upsert_authoritative_summary(conn, &original).map(|_| ()))
+            .unwrap();
+
+        let mut workspace_changed = original.clone();
+        workspace_changed.workspace_revision += 1;
+        workspace_changed.updated_at = "2026-07-10T12:01:00Z".into();
+        store
+            .transaction(|conn| upsert_authoritative_summary(conn, &workspace_changed).map(|_| ()))
+            .unwrap();
+
+        let mut policy_changed = workspace_changed.clone();
+        policy_changed.policy_revision += 1;
+        policy_changed.updated_at = "2026-07-10T12:02:00Z".into();
+        store
+            .transaction(|conn| upsert_authoritative_summary(conn, &policy_changed).map(|_| ()))
+            .unwrap();
+
+        let current = store
+            .with_conn(|conn| list_authoritative_summaries(conn, "user-alpha"))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(
+            current.workspace_revision,
+            workspace_changed.workspace_revision
+        );
+        assert_eq!(current.policy_revision, policy_changed.policy_revision);
+        assert_eq!(current.membership_revision, original.membership_revision);
     }
 
     #[test]

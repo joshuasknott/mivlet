@@ -813,18 +813,41 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     // loaded for the prior scope before any new asynchronous hydration lands.
     // Preview is an intentional in-memory fixture, so retain its seeded data.
     if (hasTauriRuntime()) {
+      setActiveItem(defaultShellState.activeItem);
+      setRunHistoryJobId(null);
+      setComposerValue(defaultShellState.composerValue);
+      setToolPickerOpen(false);
+      setCommandOpen(false);
       setRuntimeSnapshotReady(false);
       setApprovalAudit([]);
       setActionHistory([]);
       setApprovalRules([]);
+      setBackendToolApprovals([]);
+      setDismissedApprovalIds([]);
+      setSessionApprovalGrants([]);
+      setEditingApprovalId(null);
+      setPendingApprovalConfirmation(null);
+      setApprovalConfirmationText("");
+      setSchedules([]);
+      setGoals([]);
+      setPlans([]);
+      setPinnedSourceIds([]);
       setImportedKnowledgeSources([]);
+      setImportStatus(null);
+      setComposerAttachments([]);
       setConnectorImportedSources([]);
+      setConnectorManifests(connectors);
       setConnectorAccounts({});
+      setConnectorStatus(null);
       setConnectorSearchResult(null);
       setPreparedConnectorActions([]);
       setKnowledgeCitations([]);
+      setKnowledgeSearchMode("lexical-fallback");
       setManagedMemoryRecords([]);
       setMemoryDisabled(false);
+      setEditingMemoryId(null);
+      setMemoryExportText("");
+      setKnowledgeExportText("");
       setPendingWorkflowRuns([]);
       setRetryingRunIds([]);
     }

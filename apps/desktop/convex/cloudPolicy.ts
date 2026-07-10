@@ -65,6 +65,10 @@ export function requireCanWrite(state: CloudState, identity: CloudIdentity | nul
 }
 export function requireCanManageMembers(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined, workspaceId: string) { const authz = requireActiveMembership(state, identity, workspaceId); if (!MANAGE_ROLES.has(authz.membership.role)) throw new CloudPolicyError("permission-denied", "This role cannot manage workspace membership.", true); return authz; }
 export function ensureRoleAssignment(actor: CloudRole, next: CloudRole) { if (!ASSIGNABLE[actor].includes(next)) throw new CloudPolicyError("role-assignment-denied", "This role cannot assign the requested role.", true); }
+export function ensureMemberManagement(actor: CloudRole, target: CloudRole, next: CloudRole) {
+  ensureRoleAssignment(actor, next);
+  if (actor === "admin" && target === "owner") throw new CloudPolicyError("role-assignment-denied", "This role cannot manage an owner membership.", true);
+}
 export function ensureNotLastOwner(state: Pick<CloudState, "memberships">, membership: CloudMembership, nextRole = membership.role, nextStatus = membership.status) { if (membership.role !== "owner" || (nextRole === "owner" && nextStatus === "active")) return; const owners = state.memberships.filter((x) => x.workspaceId === membership.workspaceId && x.status === "active" && x.role === "owner" && x.memberId !== membership.memberId); if (!owners.length) throw new CloudPolicyError("last-active-owner", "A workspace must retain an active owner.", true); }
 export function listAccessibleWorkspaces(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined): AccessibleWorkspace[] {
   const { user } = resolveInternalUser(state, identity);

@@ -68,6 +68,9 @@ export function ChatWorkspace() {
   const { runtime, agent, voice, scheduledActive, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const activeAssistantMessageId = useRef<string | null>(null);
+  const conversationWorkspaceId = useRef(
+    runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
+  );
   const projectFolderInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
   const verifiedProfile = useMemo(() => {
@@ -115,6 +118,18 @@ export function ChatWorkspace() {
   const navigationHistory = useRef([runtime.activeItem]);
   const navigationTarget = useRef<string | null>(null);
   const [navigationIndex, setNavigationIndex] = useState(0);
+
+  useEffect(() => {
+    const workspaceId = runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId;
+    if (conversationWorkspaceId.current !== workspaceId) {
+      void agent.cancel();
+      activeAssistantMessageId.current = null;
+      setConversationMessages([]);
+      navigationHistory.current = [runtime.activeItem];
+      setNavigationIndex(0);
+      conversationWorkspaceId.current = workspaceId;
+    }
+  }, [agent.cancel, runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId, runtime.activeItem]);
 
   useEffect(() => {
     if (navigationTarget.current === runtime.activeItem) {

@@ -1,12 +1,14 @@
 import { act, renderHook as rtlRenderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
-import type { ApprovalAuditEntry, ApprovalRequest } from "@fable/protocol";
+import type { AccountWorkspaceStatus, ApprovalAuditEntry, ApprovalRequest } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtime from "../runtime";
 import { useShellRuntime } from "./useShellRuntime";
 import { STORAGE_KEY, LEGACY_STORAGE_KEYS } from "../lib/constants";
 import type { PersistedShellState } from "../lib/types";
 import { FableQueryProvider } from "../lib/query-client";
+import { shellStateToRuntimeSnapshot } from "../lib/persistence";
+import { defaultShellState } from "./shell-runtime/defaults";
 
 /**
  * Isolated unit coverage for useShellRuntime's pure orchestration logic. All
@@ -173,6 +175,58 @@ describe("useShellRuntime - account onboarding boundary", () => {
     expect(result.current.identityStatus.state).toBe("signed-in");
     expect(result.current.accountWorkspaceStatus.state).toBe("ready");
     expect(result.current.onboardingRequired).toBe(true);
+  });
+
+  it("clears workspace-owned state before an empty target workspace is shown", async () => {
+    const nativeWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
+    nativeWindow.__TAURI_INTERNALS__ = {};
+    const workspace = (id: string, localId: string): AccountWorkspaceStatus => ({
+      configured: true,
+      state: "ready",
+      message: `${id} ready`,
+      accountBound: true,
+      workspaces: [{
+        fableWorkspaceId: id,
+        localWorkspaceId: localId,
+        name: id,
+        workspaceStatus: "active",
+        workspaceRevision: 1,
+        policyRevision: 1,
+        memberId: `member-${id}`,
+        role: "owner",
+        membershipStatus: "active",
+        membershipRevision: 1,
+        updatedAt: "2026-07-10T12:00:00.000Z"
+      }],
+      activeWorkspace: { localWorkspaceId: localId, fableWorkspaceId: id, name: id, source: "hosted" },
+      devices: []
+    });
+    vi.mocked(runtime.loadRuntimeIdentityStatus).mockResolvedValue({
+      enabled: true,
+      state: "signed-in",
+      message: "Signed in",
+      scopes: []
+    });
+    vi.mocked(runtime.reconcileRuntimeAccountWorkspace).mockResolvedValue(workspace("workspace-a", "local-a"));
+    vi.mocked(runtime.loadRuntimeSnapshot)
+      .mockResolvedValueOnce(shellStateToRuntimeSnapshot({
+        ...defaultShellState,
+        composerValue: "private draft from workspace A",
+        dismissedApprovalIds: ["approval-a"]
+      }))
+      .mockResolvedValueOnce(null);
+    vi.mocked(runtime.selectRuntimeAccountWorkspace).mockResolvedValue(workspace("workspace-b", "local-b"));
+
+    const { result, unmount } = renderHook(() => useShellRuntime());
+    await waitFor(() => expect(result.current.composerValue).toBe("private draft from workspace A"));
+
+    await act(async () => result.current.selectAccountWorkspace("workspace-b"));
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-b"));
+    expect(result.current.composerValue).toBe("");
+    expect(result.current.openApprovals.some((approval) => approval.id === "approval-a")).toBe(false);
+
+    unmount();
+    delete nativeWindow.__TAURI_INTERNALS__;
   });
 });
 
