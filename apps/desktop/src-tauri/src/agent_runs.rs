@@ -11,7 +11,20 @@ use crate::models::{
     PersistedAgentRun, MAX_AGENT_RUNS, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS,
     MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
 };
-use crate::paths::{agent_runs_path, normalize_spaces, truncate_characters};
+use crate::paths::{normalize_spaces, truncate_characters};
+use crate::store::repos::{run, scope::DataScope, workspace_directory};
+
+fn runtime_scope() -> Result<DataScope, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let active = workspace_directory::resolve_active_workspace_for_current_user(tx)?
+                .unwrap_or(workspace_directory::legacy_default_workspace(tx)?);
+            DataScope::workspace(active.local_workspace_id)
+        })
+        .map_err(|e| e.to_string())
+}
 
 const RUN_STATUSES: [&str; 8] = [
     "queued",
@@ -160,23 +173,141 @@ pub(crate) fn recover_agent_runs_at(
 
 #[tauri::command]
 pub fn save_agent_run(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     run: PersistedAgentRun,
 ) -> Result<PersistedAgentRun, String> {
-    persist_agent_run(&agent_runs_path(&app)?, run)
+    let run = normalize_agent_run(run)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = runtime_scope()?;
+    store
+        .transaction(|tx| {
+            if let Some(existing) = run::get_scoped(tx, store, &scope, &run.id)? {
+                let terminal = matches!(
+                    existing.status.as_str(),
+                    "completed" | "cancelled" | "failed" | "interrupted"
+                );
+                if terminal
+                    && matches!(
+                        run.status.as_str(),
+                        "queued" | "streaming" | "awaiting-approval" | "retrying"
+                    )
+                {
+                    return Err(crate::store::StoreError::Invalid(
+                        "A terminal agent run cannot return to an in-flight state.".into(),
+                    ));
+                }
+            }
+            let payload = serde_json::to_value(&run).map_err(|_| {
+                crate::store::StoreError::Invalid("Agent run could not be encoded.".into())
+            })?;
+            run::upsert_scoped(
+                tx,
+                store,
+                &scope,
+                &run.id,
+                run.thread_id.as_deref(),
+                &run.provider_id,
+                &run.model,
+                &run.status,
+                run.turn,
+                run.recoverable,
+                run.retry_count,
+                &run.created_at,
+                &run.updated_at,
+                &payload,
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(run)
 }
 
 #[tauri::command]
-pub fn list_agent_runs(app: tauri::AppHandle) -> Result<Vec<PersistedAgentRun>, String> {
-    read_agent_runs(&agent_runs_path(&app)?)
+pub fn list_agent_runs(_app: tauri::AppHandle) -> Result<Vec<PersistedAgentRun>, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = runtime_scope()?;
+    store
+        .with_conn(|tx| {
+            let ids = run::list_by_status_scoped(tx, &scope, &RUN_STATUSES)?;
+            ids.into_iter()
+                .map(|id| {
+                    run::get_scoped(tx, store, &scope, &id)?
+                        .and_then(|row| serde_json::from_value(row.payload).ok())
+                        .ok_or_else(|| {
+                            crate::store::StoreError::Invalid(
+                                "Agent run payload is invalid.".into(),
+                            )
+                        })
+                })
+                .collect()
+        })
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn recover_interrupted_agent_runs(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     recovered_at: String,
 ) -> Result<Vec<PersistedAgentRun>, String> {
-    recover_agent_runs_at(&agent_runs_path(&app)?, &normalize_spaces(&recovered_at))
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = runtime_scope()?;
+    let recovered_at = normalize_spaces(&recovered_at);
+    store
+        .transaction(|tx| {
+            let ids = run::list_by_status_scoped(
+                tx,
+                &scope,
+                &["queued", "streaming", "awaiting-approval", "retrying"],
+            )?;
+            let mut out = Vec::new();
+            for id in ids {
+                let row = run::get_scoped(tx, store, &scope, &id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Run disappeared during recovery.".into())
+                })?;
+                let mut value: PersistedAgentRun =
+                    serde_json::from_value(row.payload).map_err(|_| {
+                        crate::store::StoreError::Invalid("Agent run payload is invalid.".into())
+                    })?;
+                value.status = "interrupted".into();
+                value.recoverable = true;
+                value.pending_approval_ids.clear();
+                value.updated_at = recovered_at.clone();
+                let payload = serde_json::to_value(&value).map_err(|_| {
+                    crate::store::StoreError::Invalid("Agent run could not be encoded.".into())
+                })?;
+                run::upsert_scoped(
+                    tx,
+                    store,
+                    &scope,
+                    &value.id,
+                    value.thread_id.as_deref(),
+                    &value.provider_id,
+                    &value.model,
+                    &value.status,
+                    value.turn,
+                    value.recoverable,
+                    value.retry_count,
+                    &value.created_at,
+                    &value.updated_at,
+                    &payload,
+                )?;
+                out.push(value);
+            }
+            let all = run::list_by_status_scoped(tx, &scope, &RUN_STATUSES)?;
+            for id in all {
+                if let Some(row) = run::get_scoped(tx, store, &scope, &id)? {
+                    if let Ok(value) = serde_json::from_value::<PersistedAgentRun>(row.payload) {
+                        if !out.iter().any(|r: &PersistedAgentRun| r.id == value.id) {
+                            out.push(value)
+                        }
+                    }
+                }
+            }
+            Ok(out)
+        })
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

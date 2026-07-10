@@ -21,6 +21,7 @@ mod connector_auth;
 mod connector_cache;
 mod connector_sync;
 mod connectors;
+mod conversations;
 mod execution_approvals;
 mod google;
 mod knowledge;
@@ -117,6 +118,16 @@ pub fn run() {
             agent_runs::save_agent_run,
             agent_runs::list_agent_runs,
             agent_runs::recover_interrupted_agent_runs,
+            conversations::conversation_create_thread,
+            conversations::conversation_list_threads,
+            conversations::conversation_get_thread,
+            conversations::conversation_update_thread,
+            conversations::conversation_list_messages,
+            conversations::conversation_append_message,
+            conversations::conversation_revise_message,
+            conversations::conversation_load_draft,
+            conversations::conversation_save_draft,
+            conversations::conversation_delete_draft,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,

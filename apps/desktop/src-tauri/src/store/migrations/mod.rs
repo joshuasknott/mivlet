@@ -62,6 +62,11 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             8 => apply_v8_to_v9(conn)?,
             // 9 -> 10: retain secret-free hosted account-device observations.
             9 => apply_v9_to_v10(conn)?,
+            // 10 -> 11: conversations become explicitly workspace-owned and
+            // receive immutable revision checkpoints. Existing project-bound
+            // rows derive their owner through project; no synthetic project is
+            // ever created.
+            10 => apply_v10_to_v11(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -71,6 +76,68 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v10_to_v11(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "thread")? {
+        return Ok(());
+    }
+    // Fresh databases receive the complete v11 shape through SCHEMA_V1 before
+    // the migration runner records the version. Do not reinterpret those rows
+    // as legacy v10 merely because their schema_meta row is still zero.
+    if table_has_column(conn, "message", "kind")? {
+        return Ok(());
+    }
+    // `run` has dependents (tool calls, approvals, artifacts), so retain its
+    // stable primary key and add its explicit owner in-place before rebuilding
+    // the conversation parents it references.
+    if !table_has_column(conn, "run", "workspace_id")? {
+        conn.execute_batch(
+            "ALTER TABLE run ADD COLUMN workspace_id TEXT NOT NULL DEFAULT 'default';",
+        )?;
+        conn.execute_batch("UPDATE run SET workspace_id=COALESCE((SELECT p.workspace_id FROM thread t JOIN project p ON p.id=t.project_id WHERE t.id=run.thread_id),'default');")?;
+    }
+    conn.execute_batch(r#"
+      ALTER TABLE draft RENAME TO draft_v10;
+      CREATE TABLE draft (workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,thread_id TEXT NOT NULL DEFAULT '',id TEXT NOT NULL,updated_at TEXT NOT NULL,payload BLOB NOT NULL,payload_nonce BLOB NOT NULL,PRIMARY KEY(workspace_id,thread_id,id));
+      INSERT INTO draft (workspace_id,thread_id,id,updated_at,payload,payload_nonce) SELECT 'default','',id,updated_at,payload,payload_nonce FROM draft_v10;
+      DROP TABLE draft_v10;
+      ALTER TABLE thread RENAME TO thread_v10;
+      CREATE TABLE thread (
+        id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+        project_id TEXT REFERENCES project(id) ON DELETE SET NULL, title TEXT NOT NULL DEFAULT '', lifecycle TEXT NOT NULL DEFAULT 'active',
+        last_sequence INTEGER NOT NULL DEFAULT 0, last_message_id TEXT, authority TEXT NOT NULL DEFAULT 'local', visibility TEXT NOT NULL DEFAULT 'member-private',
+        owner_member_id TEXT, revision INTEGER NOT NULL DEFAULT 1, deleted_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+        payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+      );
+      INSERT INTO thread (id,workspace_id,project_id,created_at,updated_at,payload,payload_nonce)
+      SELECT t.id,p.workspace_id,t.project_id,t.created_at,t.updated_at,t.payload,t.payload_nonce FROM thread_v10 t JOIN project p ON p.id=t.project_id;
+      DROP TABLE thread_v10;
+      CREATE INDEX idx_thread_workspace ON thread(workspace_id,project_id,updated_at);
+      ALTER TABLE message RENAME TO message_v10;
+      CREATE TABLE message (
+        id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL, detail_kind TEXT NOT NULL DEFAULT '', seq INTEGER NOT NULL, previous_message_id TEXT,
+        idempotency_key TEXT NOT NULL, correlation_key TEXT, current_revision_id TEXT NOT NULL, current_revision_number INTEGER NOT NULL DEFAULT 1,
+        current_revision_state TEXT NOT NULL DEFAULT 'terminal', run_id TEXT, run_event_id TEXT, authority TEXT NOT NULL DEFAULT 'local', visibility TEXT NOT NULL DEFAULT 'member-private',
+        owner_member_id TEXT, revision INTEGER NOT NULL DEFAULT 1, deleted_at TEXT, created_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL, UNIQUE(thread_id,seq), UNIQUE(thread_id,idempotency_key)
+      );
+      INSERT INTO message (id,workspace_id,thread_id,kind,seq,idempotency_key,current_revision_id,created_at,payload,payload_nonce)
+      SELECT m.id,t.workspace_id,m.thread_id,CASE m.role WHEN 'assistant' THEN 'assistant' ELSE 'user' END,m.seq,'legacy:'||m.id,'legacy:'||m.id,m.created_at,m.payload,m.payload_nonce FROM message_v10 m JOIN thread t ON t.id=m.thread_id;
+      DROP TABLE message_v10;
+      CREATE INDEX idx_message_thread ON message(workspace_id,thread_id,seq);
+      CREATE TABLE IF NOT EXISTS message_revision (
+        id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE, thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+        message_id TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE, revision_number INTEGER NOT NULL, base_revision_number INTEGER NOT NULL, previous_revision_id TEXT,
+        state TEXT NOT NULL, reason TEXT NOT NULL, idempotency_key TEXT NOT NULL, correlation_key TEXT, checkpointed_at TEXT NOT NULL, run_id TEXT, run_event_id TEXT,
+        authority TEXT NOT NULL DEFAULT 'local', visibility TEXT NOT NULL DEFAULT 'member-private', owner_member_id TEXT, created_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+        UNIQUE(message_id,revision_number), UNIQUE(message_id,idempotency_key)
+      );
+      INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,payload,payload_nonce)
+      SELECT current_revision_id,workspace_id,thread_id,id,1,0,'terminal','initial','legacy:'||id,created_at,created_at,payload,payload_nonce FROM message;
+      CREATE TABLE IF NOT EXISTS conversation_tombstone (workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,target TEXT NOT NULL,thread_id TEXT NOT NULL,message_id TEXT,idempotency_key TEXT NOT NULL,deleted_at TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(workspace_id,target,thread_id,message_id));
+    "#)?;
     Ok(())
 }
 

@@ -715,7 +715,10 @@ pub fn load_runtime_snapshot(
     if let Some(snapshot) = crate::store::read_workspace_document(&path, &scope)? {
         return normalize_runtime_snapshot(snapshot).map(Some);
     }
-    read_runtime_snapshot(&path)
+    // A missing scoped snapshot is absence, not permission to read the legacy
+    // default workspace. Compatibility import is explicitly performed only by
+    // the validated default scope at migration time.
+    Ok(None)
 }
 
 #[tauri::command]

@@ -164,13 +164,16 @@ record!(ProjectRecord {
     payload: Value,
 });
 
-record!(ThreadRecord {
-    id: String,
-    project_id: String,
-    created_at: String,
-    updated_at: String,
-    payload: Value,
-});
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRecord {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub payload: Value,
+}
 
 record!(MessageRecord {
     id: String,
@@ -541,12 +544,11 @@ fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result
         store,
         "thread",
         "SELECT t.id, t.project_id, t.created_at, t.updated_at, t.payload, t.payload_nonce
-         FROM thread t JOIN project p ON p.id=t.project_id
-         WHERE p.workspace_id=?1 ORDER BY t.project_id, t.id;",
+         FROM thread t WHERE t.workspace_id=?1 ORDER BY t.project_id, t.id;",
         &[&workspace_id],
         &[
             (0, "id", Cast::Text),
-            (1, "projectId", Cast::Text),
+            (1, "projectId", Cast::NullableText),
             (2, "createdAt", Cast::Text),
             (3, "updatedAt", Cast::Text),
         ],
@@ -559,10 +561,8 @@ fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result
         conn,
         store,
         "message",
-        "SELECT m.id, m.thread_id, m.role, m.seq, m.created_at, m.payload, m.payload_nonce
-         FROM message m JOIN thread t ON t.id=m.thread_id
-         JOIN project p ON p.id=t.project_id
-         WHERE p.workspace_id=?1 ORDER BY m.thread_id, m.seq, m.id;",
+        "SELECT m.id, m.thread_id, m.kind, m.seq, m.created_at, m.payload, m.payload_nonce
+         FROM message m WHERE m.workspace_id=?1 ORDER BY m.thread_id, m.seq, m.id;",
         &[&workspace_id],
         &[
             (0, "id", Cast::Text),
@@ -582,9 +582,7 @@ fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result
         "run",
         "SELECT r.id, r.thread_id, r.provider_id, r.model, r.status, r.turn, r.recoverable,
                 r.retry_count, r.created_at, r.updated_at, r.payload, r.payload_nonce
-         FROM run r LEFT JOIN thread t ON t.id=r.thread_id
-         LEFT JOIN project p ON p.id=t.project_id
-         WHERE p.workspace_id=?1 OR (r.thread_id IS NULL AND ?1='default')
+         FROM run r WHERE r.workspace_id=?1
          ORDER BY r.created_at, r.id;",
         &[&workspace_id],
         &[
@@ -968,10 +966,14 @@ fn validate_integrity(s: &Sections) -> Result<()> {
 
     // thread -> project
     for t in &s.threads {
-        if !project_ids.contains(t.project_id.as_str()) {
+        if t.project_id
+            .as_ref()
+            .is_some_and(|project_id| !project_ids.contains(project_id.as_str()))
+        {
             errors.push(format!(
                 "Thread {} references unknown project {}.",
-                t.id, t.project_id
+                t.id,
+                t.project_id.as_deref().unwrap_or_default()
             ));
         }
     }
@@ -1560,10 +1562,11 @@ fn plan_and_apply(
         |tx, store, r| {
             let sealed = store.seal_json_owned(&r.payload, &format!("thread:{}", r.id))?;
             tx.execute(
-                "INSERT INTO thread (id, project_id, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6);",
+                "INSERT INTO thread (id, workspace_id, project_id, created_at, updated_at, payload, payload_nonce)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
                     r.project_id,
                     r.created_at,
                     r.updated_at,
@@ -1586,13 +1589,16 @@ fn plan_and_apply(
         |tx, store, r| {
             let sealed = store.seal_json_owned(&r.payload, &format!("message:{}", r.id))?;
             tx.execute(
-                "INSERT INTO message (id, thread_id, role, seq, created_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+                "INSERT INTO message (id, workspace_id, thread_id, kind, seq, idempotency_key, current_revision_id, created_at, payload, payload_nonce)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
                     r.thread_id,
                     r.role,
                     r.seq,
+                    format!("portable:{}",r.id),
+                    format!("portable:{}",r.id),
                     r.created_at,
                     sealed.ciphertext,
                     sealed.nonce
@@ -1613,11 +1619,12 @@ fn plan_and_apply(
         |tx, store, r| {
             let sealed = store.seal_json_owned(&r.payload, &format!("run:{}", r.id))?;
             tx.execute(
-                "INSERT INTO run (id, thread_id, provider_id, model, status, turn, recoverable,
+                "INSERT INTO run (id, workspace_id, thread_id, provider_id, model, status, turn, recoverable,
                           retry_count, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13);",
                 rusqlite::params![
                     r.id,
+                    workspace_id,
                     r.thread_id,
                     r.provider_id,
                     r.model,

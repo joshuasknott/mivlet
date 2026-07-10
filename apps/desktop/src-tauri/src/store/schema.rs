@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SCHEMA_VERSION: u32 = 11;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -566,29 +566,94 @@ CREATE TABLE IF NOT EXISTS project (
 
 CREATE TABLE IF NOT EXISTS thread (
   id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+  workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT REFERENCES project(id) ON DELETE SET NULL,
+  title TEXT NOT NULL DEFAULT '',
+  lifecycle TEXT NOT NULL DEFAULT 'active',
+  last_sequence INTEGER NOT NULL DEFAULT 0,
+  last_message_id TEXT,
+  authority TEXT NOT NULL DEFAULT 'local',
+  visibility TEXT NOT NULL DEFAULT 'member-private',
+  owner_member_id TEXT,
+  revision INTEGER NOT NULL DEFAULT 1,
+  deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_thread_project ON thread(project_id);
+CREATE INDEX IF NOT EXISTS idx_thread_workspace ON thread(workspace_id, project_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_project_workspace ON project(workspace_id);
 
 CREATE TABLE IF NOT EXISTS message (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
   thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
-  role TEXT NOT NULL,
+  role TEXT,
+  kind TEXT NOT NULL DEFAULT 'user',
+  detail_kind TEXT NOT NULL DEFAULT '',
   seq INTEGER NOT NULL,
+  previous_message_id TEXT,
+  idempotency_key TEXT NOT NULL DEFAULT '',
+  correlation_key TEXT,
+  current_revision_id TEXT NOT NULL DEFAULT '',
+  current_revision_number INTEGER NOT NULL DEFAULT 1,
+  current_revision_state TEXT NOT NULL DEFAULT 'terminal',
+  run_id TEXT,
+  run_event_id TEXT,
+  authority TEXT NOT NULL DEFAULT 'local',
+  visibility TEXT NOT NULL DEFAULT 'member-private',
+  owner_member_id TEXT,
+  revision INTEGER NOT NULL DEFAULT 1,
+  deleted_at TEXT,
   created_at TEXT NOT NULL,
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL,
   UNIQUE(thread_id, seq)
 );
-CREATE INDEX IF NOT EXISTS idx_message_thread ON message(thread_id, seq);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_message_thread_idempotency ON message(thread_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_message_thread ON message(workspace_id, thread_id, seq);
+
+CREATE TABLE IF NOT EXISTS message_revision (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
+  thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+  message_id TEXT NOT NULL REFERENCES message(id) ON DELETE CASCADE,
+  revision_number INTEGER NOT NULL,
+  base_revision_number INTEGER NOT NULL,
+  previous_revision_id TEXT,
+  state TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  correlation_key TEXT,
+  checkpointed_at TEXT NOT NULL,
+  run_id TEXT,
+  run_event_id TEXT,
+  authority TEXT NOT NULL DEFAULT 'local',
+  visibility TEXT NOT NULL DEFAULT 'member-private',
+  owner_member_id TEXT,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  UNIQUE(message_id, revision_number),
+  UNIQUE(message_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_message_revision_message ON message_revision(workspace_id, message_id, revision_number);
+
+CREATE TABLE IF NOT EXISTS conversation_tombstone (
+  workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
+  target TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  message_id TEXT,
+  idempotency_key TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  PRIMARY KEY(workspace_id, target, thread_id, message_id)
+);
 
 CREATE TABLE IF NOT EXISTS run (
   id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
   thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
   provider_id TEXT NOT NULL,
   model TEXT NOT NULL,
@@ -601,8 +666,8 @@ CREATE TABLE IF NOT EXISTS run (
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_run_status ON run(status);
-CREATE INDEX IF NOT EXISTS idx_run_thread ON run(thread_id);
+CREATE INDEX IF NOT EXISTS idx_run_status ON run(workspace_id, status);
+CREATE INDEX IF NOT EXISTS idx_run_thread ON run(workspace_id, thread_id);
 
 CREATE TABLE IF NOT EXISTS tool_call (
   id TEXT PRIMARY KEY,
@@ -857,10 +922,13 @@ CREATE TABLE IF NOT EXISTS model_config (
 
 -- drafts + resumable run state
 CREATE TABLE IF NOT EXISTS draft (
-  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
+  thread_id TEXT NOT NULL DEFAULT '',
+  id TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY (workspace_id, thread_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS run_state (
