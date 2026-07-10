@@ -1,3 +1,5 @@
+export * as Spine from "./spine/index.js";
+
 export type PermissionMode = "read-only" | "trusted-scope" | "full-access";
 export type PermissionProfileId = "read-only" | "trusted" | "full-with-approvals";
 export type ApprovalPresetLabel = "Read Only" | "Ask Me" | "Work Freely" | "Custom";
