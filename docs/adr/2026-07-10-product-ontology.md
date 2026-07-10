@@ -21,8 +21,10 @@ state. The [Master Build Plan](../product/master-build-plan.md) sequences the
 work needed to reach it. This ADR makes the blueprint's ontology durable and
 precise enough to guide later protocol, schema, product-copy, and migration work.
 It does not assign records to SQLite or Convex and does not define identity
-provider, membership-role, invitation, or authorization mechanics; those belong
-to the separate record-authority and identity/tenancy decisions in Wave 0A.
+provider, membership-role, invitation, or authorization mechanics; those are
+defined by the [Core Record Authority
+Matrix](../architecture/record-authority-matrix.md) and [Identity and Workspace
+Tenancy ADR](2026-07-10-identity-workspace-tenancy.md).
 
 ## Decision
 

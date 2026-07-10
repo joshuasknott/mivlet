@@ -34,7 +34,8 @@ principal becomes a Fable user, and which checks must precede access to a
 workspace.
 
 It does not decide the complete per-record encrypted SQLite versus Convex
-authority matrix. That is the separate Wave 0A authority deliverable. In
+authority matrix. That is defined by the [Core Record Authority
+Matrix](../architecture/record-authority-matrix.md). In
 particular, this ADR does not imply that all records in a one-member workspace
 are local-authoritative or that all records in a multi-member workspace are
 Convex-authoritative. Record placement, offline commitment, mirroring, and
@@ -489,8 +490,8 @@ Wave 0B contracts and Wave 0C migration must account for these changes:
 
 Migration must be staged, resumable, observable, and reversible until
 cross-workspace isolation and mapping cardinality have been verified. Exact
-record-by-record source authority and copy direction belong to the separate
-Wave 0A authority matrix.
+record-by-record source authority and copy direction follow the [Core Record
+Authority Matrix](../architecture/record-authority-matrix.md).
 
 ## Superseded statements
 
@@ -661,6 +662,3 @@ in Wave 0B contracts, the authority matrix, or focused implementation ADRs:
 11. Where is the per-device selected workspace stored, and how are open views,
     pending approvals, and background work invalidated after membership
     revocation?
-12. Which records are local-authoritative, Convex-authoritative, mirrored, or
-    device-only for one-member and multi-member workspaces? This is answered by
-    the separate Wave 0A authority matrix, not by this ADR.

@@ -29,10 +29,10 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 ### Wave 0A - Product truth and decisions
 
 - [x] Separate the final-state Product Blueprint from this execution tracker.
-- [ ] Record the core product ontology as an ADR.
-- [ ] Record identity and tenancy decisions: Clerk identity only; Fable-owned users, workspaces, membership, and authorization.
-- [ ] Decide local SQLite versus Convex authority for every core record.
-- [ ] Inventory schema, protocol, architecture, product-copy, and module-size conflicts against the blueprint.
+- [x] Record the [core product ontology](../adr/2026-07-10-product-ontology.md) as an ADR.
+- [x] Record [identity and tenancy decisions](../adr/2026-07-10-identity-workspace-tenancy.md): Clerk identity only; Fable-owned users, workspaces, membership, and authorization.
+- [x] Decide [local SQLite versus Convex authority](../architecture/record-authority-matrix.md) for every core record.
+- [x] Inventory [schema, protocol, architecture, product-copy, and module-size conflicts](product-spine-inventory.md) against the blueprint.
 
 ### Wave 0B - Canonical contracts
 

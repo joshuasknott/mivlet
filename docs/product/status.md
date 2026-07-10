@@ -18,6 +18,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Implemented
 
+- Product spine decisions (**Contract defined**): the canonical ontology, Fable-owned identity/workspace tenancy model, and per-record SQLite/Convex authority matrix are recorded in accepted Wave 0A documents. The current schemas and runtime still contain the legacy gaps catalogued in `product-spine-inventory.md`; Wave 0B/0C implementation has not landed.
 - Desktop shell: local-profile onboarding, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
 - Composer: supports text entry, slash command insertion, local file import, opt-in browser dictation where the runtime exposes speech recognition, model selection, permission selection, and native-agent submit path when a connected native backend exists.
 - Protocol package: defines approvals, memory, connectors, backend providers, runtime snapshots, native agent events, native tool specs, and tool-call request shapes.
@@ -122,6 +123,12 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Evidence Checked
 
+- `docs/product/vision.md`
+- `docs/product/master-build-plan.md`
+- `docs/product/product-spine-inventory.md`
+- `docs/adr/2026-07-10-product-ontology.md`
+- `docs/adr/2026-07-10-identity-workspace-tenancy.md`
+- `docs/architecture/record-authority-matrix.md`
 - `README.md`
 - `package.json`
 - `.github/workflows/ci.yml`

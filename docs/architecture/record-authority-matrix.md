@@ -14,14 +14,14 @@ It is intentionally a target contract, not a description of the current schema. 
 
 ## Evidence and precedence
 
-The [Product Blueprint](../product/vision.md) is the product authority; the [Master Build Plan](../product/master-build-plan.md) orders the work; [Status](../product/status.md) reports the checkout. The accepted [cloud backend ADR](../adr/2026-07-05-cloud-team-backend.md) selects Clerk + Convex, the local encrypted mirror/outbox, and the no-D1/no-credential-sync boundaries. The [encrypted-storage architecture](encrypted-storage.md), [cloud-sync design](cloud-team-sync-mvp.md), [workspace data model](workspace-data-model.md), and [cloud-sync threat note](../security/cloud-team-sync-threat-note.md) supply implementation evidence.
+The [Product Blueprint](../product/vision.md) is the product authority; the [Master Build Plan](../product/master-build-plan.md) orders the work; [Status](../product/status.md) reports the checkout. The accepted [identity and workspace tenancy ADR](../adr/2026-07-10-identity-workspace-tenancy.md) defines Fable-owned users, workspaces, membership, and authorization. The earlier [cloud backend ADR](../adr/2026-07-05-cloud-team-backend.md) still selects Clerk + Convex, the local encrypted mirror/outbox, and the no-D1/no-credential-sync boundaries where it is not superseded by the tenancy ADR. The [encrypted-storage architecture](encrypted-storage.md), [cloud-sync design](cloud-team-sync-mvp.md), [workspace data model](workspace-data-model.md), and [cloud-sync threat note](../security/cloud-team-sync-threat-note.md) supply implementation evidence.
 
 Two assumptions in the 4-5 July material are superseded by the 10 July blueprint and therefore must not be copied into new contracts:
 
 - A Fable account is now required; identity is not an optional team-only add-on.
 - Clerk Organizations do not define tenancy. Fable owns internal users, workspaces, memberships, invitations, roles, and authorization.
 
-The backend and security decisions from those documents remain useful. Their optional-account, Clerk-Organization, and "solo workspace is never cloud-backed" wording requires a follow-up ADR update; this document does not silently rewrite those ADRs.
+The backend and security decisions from those documents remain useful. Their optional-account, Clerk-Organization, and "solo workspace is never cloud-backed" wording is superseded by the identity and tenancy ADR and remains only as historical implementation context.
 
 ## Authority vocabulary
 
@@ -189,7 +189,7 @@ Rules for the contract:
 2. Define field-level share allowlists and redaction tests for each record family. The default is denied.
 3. Define shared export/import, retention, erasure, revision, idempotency-result retention, and tombstone retention before enabling more shared writes.
 4. Define the execution-driver boundary so a product record, selected execution node, and node-only queue/permit state cannot be confused.
-5. Record the supersession of optional-account and Clerk-Organization tenancy assumptions in the appropriate ADR task.
+5. Use the accepted identity and tenancy ADR as authority over legacy optional-account and Clerk-Organization assumptions.
 
 ### Wave 0C - tenancy, schema, and safe cutover
 
