@@ -41,7 +41,7 @@ than a completed hosted-account experience; this repository is not a release.
 | **Browser Preview Mode** | **Preview/fixture-only; transport deferred** | Permission architecture, session derivation, and audit redaction implemented; live browser transport deferred |
 | **Mobile Remote Control** | **Local status surface; transport deferred** | Settings reports the native local status honestly. No socket, live pairing, mobile app, or remote execution path is enabled. |
 | **Voice Dictation** | **Preview/Stub** | Composer voice toggle changes UI status; no audio capture or transcription pipeline |
-| **Hosted Fable Account & Team Workspaces** | **Foundation only** | Clerk identity and Convex sync foundations exist; mandatory hosted account onboarding and multi-person workspace product flows remain incomplete. |
+| **Fable Account & Shared Workspaces** | **Foundation only** | Clerk identity and Convex sync foundations exist; mandatory hosted account onboarding and one-or-many-member Fable workspace flows remain incomplete. Clerk Organizations do not define Fable tenancy. |
 | **Signing, Updater, Multi-OS** | **Planned (Missing)** | Unsigned Windows preview build only; macOS/Linux packaging and updater channels are deferred |
 
 ## Brand

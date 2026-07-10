@@ -1,23 +1,19 @@
 # Fable Thesis
 
-Fable is an open-source AI workspace for real work. It extends the coding-agent model beyond code so people can chat with their computer, delegate tasks across tools and files, and stay in control at every step.
+Fable is a minimalist, agent-native operating layer for human-agent work. A person describes an outcome in ordinary language; Fable resolves the relevant context and authority, decides how much work is required, coordinates the best permitted providers and connections, pauses for human judgement where needed, and returns durable results.
 
-Fable is local-first, private by default, permissioned, transparent, and built for everyone, not just developers.
+Fable is private software for Josh and invited users during the active build programme. Public release and open-source distribution are deferred decisions.
 
-## Product Principles
+## Product thesis
 
-- Start as a welcoming conversation, then reveal power through context.
-- Keep tools, memory, and approvals visible without turning the first screen into a dashboard.
-- Treat plugins as bridges with permissions, health, provenance, and removal paths.
-- Treat memory as inspectable user-owned infrastructure, not hidden personalization.
-- Require explicit confirmation for actions that write, publish, spend, delete, or share private data.
+- Begin with a Fable account, one provider, and a calm conversation.
+- Make projects, knowledge, memory, connections, departments, routines, pipelines, browser use, voice, and expert orchestration optional layers.
+- Let Fable size and plan missions dynamically; do not make users construct agent graphs or choose an execution mode first.
+- Keep context, sources, approvals, actions, runs, and artifacts inspectable.
+- Treat external content and tool output as untrusted and require exact approval at consequential side-effect boundaries.
+- Keep provider, Connection, capability, mission, artifact, routine, workspace, and authorization contracts Fable-owned and portable.
+- Use one hard-isolated workspace model for one or many members; Clerk supplies identity while Fable owns tenancy and authorization.
+- Prefer native connectors, build MCP as an early first-class architecture and advanced secondary experience, and describe unsupported or degraded paths honestly.
+- Make configured Fable easier to use, not more administratively demanding.
 
-## Reference Synthesis
-
-- Codex: approvals, permissions, plugins, `/goal`, `/plan`, and agent work review.
-- OpenCode: openness, adapter boundaries, and inspectable local runtime.
-- Cursor: desktop focus, restrained palette, and command-centered workflow.
-- ChatGPT: accessible composer, voice, memory controls, and nontechnical language.
-- Grok: direct visual answers and low-friction prompt-to-action flow.
-
-Fable must remain visually and structurally distinct from these products.
+The complete authority is [Product Blueprint](vision.md). The execution order is [Master Build Plan](master-build-plan.md).

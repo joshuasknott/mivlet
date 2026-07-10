@@ -4,7 +4,9 @@ Last audited: 2026-07-10.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
-> **Approved product direction:** Fable will require a hosted Clerk-backed Fable account; Personal Home serves solo users and Team Workspaces serve multiple people. The existing Clerk and Convex work below is a config-gated foundation, not fulfilment of this decision. The ordered implementation authority is [Master Build Plan](master-build-plan.md).
+> **Document boundary:** [Product Blueprint](vision.md) defines the approved final state. [Master Build Plan](master-build-plan.md) is the ordered execution tracker. This file reports current implementation facts only.
+
+> **Approved workspace direction:** Fable requires a Clerk-backed account, but Clerk supplies identity/session only. Fable owns internal users, workspaces, memberships, and authorization. One workspace model supports one or many members; there is no separate Personal Home, Team Workspace type, Fable Organization layer, or Clerk Organization tenancy. The existing Clerk and Convex code below is a config-gated foundation, not fulfilment of that direction.
 
 ## Repo Shape
 

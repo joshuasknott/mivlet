@@ -2,7 +2,7 @@
   "name": "fable",
   "version": "0.1.0",
   "private": true,
-  "description": "Fable is an open-source AI workspace for real work.",
+  "description": "Fable is an agent-native AI workspace for real work.",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "pnpm --filter @fable/desktop dev",

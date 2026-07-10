@@ -1,11 +1,13 @@
 # Architecture
 
+**Document role:** Supporting current-state architecture. The final-state product and durable architecture direction are defined in the [Product Blueprint](vision.md); ordered migrations and implementation work belong in the [Master Build Plan](master-build-plan.md). Where this document describes legacy local-only, project-bound, schedule-first, or optional-account behavior, it reports current implementation rather than approved final state.
+
 ## Stack
 
 - Tauri 2 for the desktop shell.
 - Rust for runtime commands, permissions, jobs, local context, and connector execution.
 - React, TypeScript, and Vite for the interface.
-- Clerk + Convex for future optional shared workspaces when configured.
+- Clerk for required Fable identity/session and Convex for shared workspace state and hosted coordination; the current implementation remains config-gated and incomplete.
 - Encrypted SQLite for offline/private local state (including schedules, workflows, and knowledge structures).
 - OS secure storage for credentials.
 

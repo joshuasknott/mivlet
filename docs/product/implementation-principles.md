@@ -1,10 +1,10 @@
 # Implementation Principles
 
-These are the implementation rules for Fable while it is becoming a real open-source, local-first workspace.
+These are supporting implementation rules for the private-product build. They are subordinate to the [Product Blueprint](vision.md), accepted ADRs, and the [Master Build Plan](master-build-plan.md).
 
-## 1. Local First Is The Default
+## 1. Local Execution And Hosted Identity Have Separate Jobs
 
-Private user work starts on the device. Local files, drafts, approvals, memory, snapshots, schedules, connector cache, and provider state should be usable without a hosted Fable account unless a feature truly requires hosted coordination.
+Fable requires a hosted account for identity and session, while private execution and sensitive local data prefer the desktop. Local files, provider credentials, connector credentials, local models, private interactive work, and OS-level control stay behind native boundaries unless the user explicitly chooses an eligible hosted execution path. Convex may own shared workspace state under the documented authority matrix; it does not replace encrypted SQLite or broaden data routing implicitly.
 
 ## 2. Secrets Stay Behind Native Boundaries
 
@@ -22,9 +22,9 @@ Every consequential action goes through the approval system: writes, shell comma
 
 Fixture data is allowed for preview, tests, and design validation. It must be labeled and kept out of live credential, account, connector, or provider claims.
 
-## 6. Open Adapters Over Closed Integrations
+## 6. Portable Adapters Over Vendor Lock-In
 
-Backends, connectors, model providers, and tools should be adapter-shaped. Keep protocol types stable, keep provider-specific logic isolated, and make future community adapters possible without rewriting the shell.
+Backends, connections, model providers, and tools should be adapter-shaped. Keep Fable-owned protocol types stable, keep provider-specific logic isolated, and preserve replacement paths without rewriting the shell.
 
 ## 7. Memory Needs Provenance
 
