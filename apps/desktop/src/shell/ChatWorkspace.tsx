@@ -845,4 +845,3 @@ export function ChatWorkspace() {
     </main>
   );
 }
-
