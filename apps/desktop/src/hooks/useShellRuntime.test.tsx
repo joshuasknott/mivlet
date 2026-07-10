@@ -31,6 +31,9 @@ vi.mock("../runtime", async (importOriginal) => {
     detectRuntimeAcpCli: vi.fn(async () => null),
     detectRuntimeLocalModel: vi.fn(async () => null),
     beginRuntimeIdentitySignIn: vi.fn(async () => null),
+    beginRuntimeIdentityRecovery: vi.fn(async () => null),
+    clearRuntimeAccountWorkspaceSession: vi.fn(async () => null),
+    createRuntimeAccountWorkspace: vi.fn(async () => null),
     exportRuntimeMemoryState: vi.fn(async () => null),
     importRuntimeConnectorItem: vi.fn(async () => null),
     importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
@@ -46,6 +49,7 @@ vi.mock("../runtime", async (importOriginal) => {
     loadRuntimeApprovalAudit: vi.fn(async () => null),
     loadRuntimeApprovalRules: vi.fn(async () => null),
     loadRuntimeIdentityStatus: vi.fn(async () => null),
+    loadRuntimeAccountWorkspaceStatus: vi.fn(async () => null),
     loadRuntimeImportedKnowledgeSources: vi.fn(async () => null),
     loadRuntimeMemoryState: vi.fn(async () => null),
     loadRuntimeSnapshot: vi.fn(async () => null),
@@ -53,6 +57,8 @@ vi.mock("../runtime", async (importOriginal) => {
     promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
     recordRuntimeBackendEvent: vi.fn(async () => null),
     refreshRuntimeIdentity: vi.fn(async () => null),
+    reconcileRuntimeAccountWorkspace: vi.fn(async () => null),
+    revokeRuntimeAccountDevice: vi.fn(async () => null),
     refreshRuntimeConnectorHealth: vi.fn(async () => null),
     listRuntimeConnectorSyncStates: vi.fn(async () => null),
     syncRuntimeConnector: vi.fn(async () => null),
@@ -74,6 +80,7 @@ vi.mock("../runtime", async (importOriginal) => {
     saveRuntimeSnapshot: vi.fn(async () => null),
     searchRuntimeConnector: vi.fn(async () => null),
     searchRuntimeKnowledgeSources: vi.fn(async () => null),
+    selectRuntimeAccountWorkspace: vi.fn(async () => null),
     signOutRuntimeIdentity: vi.fn(async () => null),
     startRuntimeConnectorAuth: vi.fn(async () => null)
   };
@@ -150,6 +157,22 @@ describe("useShellRuntime - approval defaults and Custom mapping", () => {
 
     act(() => result.current.updateCustomApprovalSetting("allowPowerfulCommands", true));
     expect(result.current.permissionMode).toBe("full-access");
+  });
+});
+
+describe("useShellRuntime - account onboarding boundary", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("uses the explicit signed-in preview account and enters provider onboarding", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    expect(result.current.identityStatus.state).toBe("signed-in");
+    expect(result.current.accountWorkspaceStatus.state).toBe("ready");
+    expect(result.current.onboardingRequired).toBe(true);
   });
 });
 

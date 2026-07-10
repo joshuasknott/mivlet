@@ -1,4 +1,4 @@
-import type { IdentityStatus } from "@fable/protocol";
+import type { AccountWorkspaceStatus, IdentityStatus } from "@fable/protocol";
 import { DEFAULT_CUSTOM_APPROVAL_SETTINGS } from "@fable/connectors";
 import { knowledgeSources, memoryRecords } from "../../data/workspace";
 import { DEFAULT_PERMISSION_LABEL } from "../../lib/agent-run";
@@ -35,6 +35,57 @@ export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   state: "disabled",
   message: "Fable account setup is not configured.",
   scopes: []
+};
+
+/** Deliberate browser/test fixture; production native identity starts disabled. */
+export const PREVIEW_IDENTITY_STATUS: IdentityStatus = {
+  enabled: true,
+  state: "signed-in",
+  message: "Preview account signed in.",
+  issuer: "https://preview.fable.invalid",
+  audience: "fable-preview",
+  scopes: ["account:preview"],
+  authentication: {
+    provider: "clerk",
+    normalizedIssuer: "https://preview.fable.invalid",
+    subject: "preview-user",
+    authenticationEventRef: "preview-auth-event",
+    sessionRef: "preview-session",
+    authenticatedAt: "1970-01-01T00:00:00.000Z",
+    expiresAt: "2999-01-01T00:00:00.000Z",
+    verifiedAttributes: [],
+    verifiedDisplayAttributes: { displayName: "Preview user" }
+  }
+};
+
+/** Deliberate browser/test fixture; native production must reconcile first. */
+export const PREVIEW_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
+  configured: false,
+  state: "ready",
+  message: "Preview workspace ready.",
+  accountBound: true,
+  workspaces: [
+    {
+      fableWorkspaceId: "preview-workspace",
+      localWorkspaceId: "preview-default",
+      name: "Preview workspace",
+      workspaceStatus: "active",
+      workspaceRevision: 0,
+      policyRevision: 0,
+      memberId: "preview-member",
+      role: "owner",
+      membershipStatus: "active",
+      membershipRevision: 0,
+      updatedAt: "1970-01-01T00:00:00.000Z"
+    }
+  ],
+  activeWorkspace: {
+    localWorkspaceId: "preview-default",
+    fableWorkspaceId: "preview-workspace",
+    name: "Preview workspace",
+    source: "legacy-default"
+  },
+  devices: []
 };
 
 export function runtimeOrPreview<T>(

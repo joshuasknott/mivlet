@@ -37,17 +37,13 @@ const EMPTY_SCHEDULE_STATE: RuntimeScheduleState = {
   runs: []
 };
 
-export const runtimeScheduleScope: RuntimeScheduleScope = {
-  workspaceId: "default",
-  projectId: null
-};
-
 export const runtimeScheduleQueryKeys = {
-  workspace: (scope: RuntimeScheduleScope) =>
-    ["runtime-schedules", scope.workspaceId, scope.projectId ?? "workspace"] as const
+  workspace: (scope: RuntimeScheduleScope | null) =>
+    ["runtime-schedules", scope?.workspaceId ?? "unavailable", scope?.projectId ?? "workspace"] as const
 };
 
-async function loadRuntimeScheduleState(): Promise<RuntimeScheduleState> {
+async function loadRuntimeScheduleState(scope: RuntimeScheduleScope | null): Promise<RuntimeScheduleState> {
+  if (!scope) return EMPTY_SCHEDULE_STATE;
   const [jobs, queue, definitions, runs] = await Promise.all([
     listRuntimeSchedulerJobs(),
     listRuntimeSchedulerQueue(),
@@ -91,12 +87,13 @@ async function loadRuntimeScheduleState(): Promise<RuntimeScheduleState> {
   };
 }
 
-export function useRuntimeSchedules(scope = runtimeScheduleScope) {
+export function useRuntimeSchedules(scope: RuntimeScheduleScope | null) {
   const queryClient = useQueryClient();
   const queryKey = runtimeScheduleQueryKeys.workspace(scope);
   const query = useQuery({
     queryKey,
-    queryFn: loadRuntimeScheduleState,
+    queryFn: () => loadRuntimeScheduleState(scope),
+    enabled: !hasTauriRuntime() || scope !== null,
     networkMode: "always",
     retry: 1,
     staleTime: 5_000
@@ -111,7 +108,7 @@ export function useRuntimeSchedules(scope = runtimeScheduleScope) {
 
   return {
     queryKey,
-    schedulesReady: !hasTauriRuntime() || !query.isPending,
+    schedulesReady: !hasTauriRuntime() || (scope !== null && !query.isPending),
     scheduleLoadError: query.error instanceof Error ? query.error.message : null,
     retryScheduleLoad: query.refetch,
     invalidateSchedules: () => queryClient.invalidateQueries({ queryKey }),

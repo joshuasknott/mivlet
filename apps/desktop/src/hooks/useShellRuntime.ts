@@ -44,6 +44,7 @@ import type {
   WorkflowStep,
   NotificationRecord,
   IdentityStatus,
+  AccountWorkspaceStatus,
   WorkspaceDirective,
   WorkspaceGoal,
   WorkspacePlan
@@ -115,6 +116,7 @@ import {
 import {
   beginRuntimeConnectorOAuth,
   beginRuntimeIdentitySignIn,
+  beginRuntimeIdentityRecovery,
   clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
@@ -136,6 +138,12 @@ import {
   loadRuntimeMemoryState,
   loadRuntimeSnapshot,
   loadRuntimeIdentityStatus,
+  loadRuntimeAccountWorkspaceStatus,
+  reconcileRuntimeAccountWorkspace,
+  createRuntimeAccountWorkspace,
+  selectRuntimeAccountWorkspace,
+  revokeRuntimeAccountDevice,
+  clearRuntimeAccountWorkspaceSession,
   listenRuntimeSchedulerRunRequest,
   enqueueRuntimeJobRun,
   reportRuntimeJobAttempt,
@@ -166,6 +174,10 @@ import {
   wireToWorkflowRun
 } from "../runtime";
 import { useRuntimeSchedules } from "./useRuntimeSchedules";
+import {
+  clearActiveRuntimeDataScope,
+  setActiveRuntimeDataScope
+} from "../runtime-scope";
 import {
   MAX_IMPORTED_KNOWLEDGE_SOURCES,
   utilityItems
@@ -205,6 +217,8 @@ import type { ModelDiscoveryOutcome } from "../lib/backend-state";
 import {
   ALLOW_PREVIEW_FALLBACKS,
   DEFAULT_IDENTITY_STATUS,
+  PREVIEW_ACCOUNT_WORKSPACE_STATUS,
+  PREVIEW_IDENTITY_STATUS,
   defaultShellState,
   runtimeOrPreview
 } from "./shell-runtime/defaults";
@@ -329,9 +343,27 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [lastAction, setLastAction] = useState("Workspace ready");
-  const [identityStatus, setIdentityStatus] =
-    useState<IdentityStatus>(DEFAULT_IDENTITY_STATUS);
+  const [identityStatus, setIdentityStatus] = useState<IdentityStatus>(() =>
+    hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS
+  );
   const [identityPending, setIdentityPending] = useState(false);
+  const [accountWorkspaceStatus, setAccountWorkspaceStatus] = useState<AccountWorkspaceStatus>(
+    () =>
+      hasTauriRuntime()
+        ? { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, state: "disabled", accountBound: false }
+        : PREVIEW_ACCOUNT_WORKSPACE_STATUS
+  );
+  const [accountWorkspacePending, setAccountWorkspacePending] = useState(hasTauriRuntime());
+  const accountWorkspaceFallback = hasTauriRuntime()
+    ? { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, state: "disabled" as const, accountBound: false }
+    : PREVIEW_ACCOUNT_WORKSPACE_STATUS;
+  const [workspaceScopeGeneration, setWorkspaceScopeGeneration] = useState(0);
+  const accountRequestGenerationRef = useRef(0);
+  const activeWorkspaceScope =
+    accountWorkspaceStatus.accountBound &&
+    (accountWorkspaceStatus.state === "ready" || accountWorkspaceStatus.state === "offline")
+      ? { workspaceId: accountWorkspaceStatus.activeWorkspace.localWorkspaceId, projectId: null }
+      : null;
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
   const [backendToolApprovals, setBackendToolApprovals] = useState<ApprovalRequest[]>([]);
   const [actionHistory, setActionHistory] = useState<ActionHistoryEvent[]>([]);
@@ -360,7 +392,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     schedulerQueue,
     setSchedulerQueue,
     invalidateSchedules
-  } = useRuntimeSchedules();
+  } = useRuntimeSchedules(activeWorkspaceScope);
   const scheduledJobs = useMemo<ScheduledJob[]>(() => {
     if (hasTauriRuntime() || runtimeScheduledJobs.length > 0 || schedules.length === 0) {
       return runtimeScheduledJobs;
@@ -688,7 +720,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         persistShellState(shellStateRef.current);
       }
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     window.localStorage.setItem(
@@ -739,7 +771,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }, [connectedAgentBackend, schedulerQueue]);
 
   useEffect(() => {
-    if (!runtimeSnapshotReady) {
+    if (!runtimeSnapshotReady || !activeWorkspaceScope) {
       return;
     }
 
@@ -755,7 +787,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setLastAction(error instanceof Error ? error.message : "Fable could not save runtime snapshot.");
       });
     }, 300);
-  }, [runtimeSnapshotReady, shellState]);
+  }, [activeWorkspaceScope?.workspaceId, runtimeSnapshotReady, shellState]);
 
   // Flush any pending snapshot save on unmount so the final state is captured.
   useEffect(() => {
@@ -766,10 +798,36 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current)).catch(() => undefined);
       }
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     let active = true;
+    if (!activeWorkspaceScope) {
+      setRuntimeSnapshotReady(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    // A switch is a hard tenant boundary. Drop everything that can have been
+    // loaded for the prior scope before any new asynchronous hydration lands.
+    // Preview is an intentional in-memory fixture, so retain its seeded data.
+    if (hasTauriRuntime()) {
+      setRuntimeSnapshotReady(false);
+      setApprovalAudit([]);
+      setActionHistory([]);
+      setApprovalRules([]);
+      setImportedKnowledgeSources([]);
+      setConnectorImportedSources([]);
+      setConnectorAccounts({});
+      setConnectorSearchResult(null);
+      setPreparedConnectorActions([]);
+      setKnowledgeCitations([]);
+      setManagedMemoryRecords([]);
+      setMemoryDisabled(false);
+      setPendingWorkflowRuns([]);
+      setRetryingRunIds([]);
+    }
 
     void loadRuntimeSnapshot()
       .then((snapshot: RuntimeSnapshot | null) => {
@@ -813,7 +871,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     let active = true;
@@ -829,7 +887,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   const refreshActionHistory = useCallback(() => {
     void loadRuntimeActionHistory().then((events) => {
@@ -837,27 +895,79 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setActionHistory(events.slice(0, 200));
       }
     });
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     refreshActionHistory();
   }, [refreshActionHistory]);
 
+  const applyAccountWorkspaceStatus = useCallback((status: AccountWorkspaceStatus) => {
+    const canUseWorkspace =
+      status.accountBound &&
+      (status.state === "ready" || status.state === "offline") &&
+      status.activeWorkspace.localWorkspaceId.length > 0;
+    if (canUseWorkspace) {
+      setActiveRuntimeDataScope(status.activeWorkspace.localWorkspaceId);
+    } else {
+      clearActiveRuntimeDataScope();
+    }
+    setAccountWorkspaceStatus(status);
+    setWorkspaceScopeGeneration((current) => current + 1);
+  }, []);
+
+  const refreshAccountWorkspace = useCallback(async (reconcile = false) => {
+    const requestGeneration = ++accountRequestGenerationRef.current;
+    setAccountWorkspacePending(true);
+    try {
+      const status = reconcile
+        ? await reconcileRuntimeAccountWorkspace()
+        : await loadRuntimeAccountWorkspaceStatus();
+      if (requestGeneration !== accountRequestGenerationRef.current) {
+        return status ?? accountWorkspaceFallback;
+      }
+      applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
+      return status ?? accountWorkspaceFallback;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Fable could not load account workspaces.";
+      const failed: AccountWorkspaceStatus = {
+        ...accountWorkspaceFallback,
+        state: "error",
+        accountBound: false,
+        message
+      };
+      if (requestGeneration === accountRequestGenerationRef.current) {
+        applyAccountWorkspaceStatus(failed);
+      }
+      return failed;
+    } finally {
+      if (requestGeneration === accountRequestGenerationRef.current) {
+        setAccountWorkspacePending(false);
+      }
+    }
+  }, [applyAccountWorkspaceStatus]);
+
   const refreshIdentityStatus = useCallback(async () => {
     const status = await loadRuntimeIdentityStatus();
-    setIdentityStatus(status ?? DEFAULT_IDENTITY_STATUS);
+    setIdentityStatus(status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS));
   }, []);
 
   useEffect(() => {
     void refreshIdentityStatus();
   }, [refreshIdentityStatus]);
 
+  useEffect(() => {
+    if (hasTauriRuntime()) void refreshAccountWorkspace(true);
+  }, [refreshAccountWorkspace]);
+
   const signInIdentity = useCallback(async () => {
     setIdentityPending(true);
     try {
       const status = await beginRuntimeIdentitySignIn();
-      const next = status ?? DEFAULT_IDENTITY_STATUS;
+      const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
+      if (next.state === "signed-in") {
+        await refreshAccountWorkspace(true);
+      }
       setLastAction(next.message);
     } catch (error) {
       const message =
@@ -871,7 +981,23 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     } finally {
       setIdentityPending(false);
     }
-  }, []);
+  }, [refreshAccountWorkspace]);
+
+  const recoverIdentity = useCallback(async () => {
+    setIdentityPending(true);
+    try {
+      const status = await beginRuntimeIdentityRecovery();
+      const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
+      setIdentityStatus(next);
+      if (next.state === "signed-in") await refreshAccountWorkspace(true);
+      setLastAction(next.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Fable account recovery is unavailable.";
+      setLastAction(message);
+    } finally {
+      setIdentityPending(false);
+    }
+  }, [refreshAccountWorkspace]);
 
   const refreshIdentity = useCallback(async () => {
     setIdentityPending(true);
@@ -880,6 +1006,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       if (status) {
         setIdentityStatus(status);
         setLastAction(status.message);
+        if (status.state === "signed-in") await refreshAccountWorkspace(true);
       } else {
         await refreshIdentityStatus();
       }
@@ -895,13 +1022,22 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     } finally {
       setIdentityPending(false);
     }
-  }, [refreshIdentityStatus]);
+  }, [refreshAccountWorkspace, refreshIdentityStatus]);
 
   const signOutIdentity = useCallback(async () => {
+    ++accountRequestGenerationRef.current;
     setIdentityPending(true);
     try {
       const status = await signOutRuntimeIdentity();
-      const next = status ?? DEFAULT_IDENTITY_STATUS;
+      await clearRuntimeAccountWorkspaceSession();
+      clearActiveRuntimeDataScope();
+      applyAccountWorkspaceStatus({
+        ...PREVIEW_ACCOUNT_WORKSPACE_STATUS,
+        state: "signed-out",
+        accountBound: false,
+        message: "Signed out. Sign in to access Fable workspaces."
+      });
+      const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
       setLastAction(next.message);
     } catch (error) {
@@ -916,7 +1052,62 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     } finally {
       setIdentityPending(false);
     }
-  }, []);
+  }, [applyAccountWorkspaceStatus]);
+
+  const reconcileAccountWorkspace = useCallback(async () => {
+    const status = await refreshAccountWorkspace(true);
+    setLastAction(status.message);
+  }, [refreshAccountWorkspace]);
+
+  const createAccountWorkspace = useCallback(async (name: string) => {
+    const requestGeneration = ++accountRequestGenerationRef.current;
+    setAccountWorkspacePending(true);
+    try {
+      const status = await createRuntimeAccountWorkspace(name);
+      if (requestGeneration === accountRequestGenerationRef.current) {
+        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
+        setLastAction((status ?? accountWorkspaceFallback).message);
+      }
+    } finally {
+      if (requestGeneration === accountRequestGenerationRef.current) setAccountWorkspacePending(false);
+    }
+  }, [applyAccountWorkspaceStatus]);
+
+  const selectAccountWorkspace = useCallback(async (fableWorkspaceId: string) => {
+    const requestGeneration = ++accountRequestGenerationRef.current;
+    setAccountWorkspacePending(true);
+    try {
+      clearActiveRuntimeDataScope();
+      setAccountWorkspaceStatus((current) => ({
+        ...current,
+        state: "bootstrapping",
+        accountBound: false,
+        message: "Switching workspace…"
+      }));
+      setWorkspaceScopeGeneration((current) => current + 1);
+      const status = await selectRuntimeAccountWorkspace(fableWorkspaceId);
+      if (requestGeneration === accountRequestGenerationRef.current) {
+        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
+        setLastAction((status ?? accountWorkspaceFallback).message);
+      }
+    } finally {
+      if (requestGeneration === accountRequestGenerationRef.current) setAccountWorkspacePending(false);
+    }
+  }, [applyAccountWorkspaceStatus]);
+
+  const revokeAccountDevice = useCallback(async (deviceId: string) => {
+    const requestGeneration = ++accountRequestGenerationRef.current;
+    setAccountWorkspacePending(true);
+    try {
+      const status = await revokeRuntimeAccountDevice(deviceId);
+      if (requestGeneration === accountRequestGenerationRef.current) {
+        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
+        setLastAction((status ?? accountWorkspaceFallback).message);
+      }
+    } finally {
+      if (requestGeneration === accountRequestGenerationRef.current) setAccountWorkspacePending(false);
+    }
+  }, [applyAccountWorkspaceStatus]);
 
   useEffect(() => {
     let active = true;
@@ -932,7 +1123,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     let active = true;
@@ -949,7 +1140,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     let active = true;
@@ -966,7 +1157,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   // Resolve agent-runtime backend auth state + capabilities from the Rust
   // credential boundary. Outside Tauri the preview registry is kept. Secrets
@@ -976,7 +1167,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
     void Promise.all([
       listRuntimeConnectorStatuses(),
-      listRuntimeConnectorSyncStates("default")
+      listRuntimeConnectorSyncStates()
     ]).then(([manifests, syncStates]) => {
       if (!active || !manifests) {
         return;
@@ -995,7 +1186,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceScopeGeneration]);
 
   useEffect(() => {
     let active = true;
@@ -1851,7 +2042,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     try {
       const sync = await syncRuntimeConnector({
         connectorId,
-        workspaceId: "default",
+        workspaceId: activeWorkspaceScope?.workspaceId ?? "",
         trigger: "manual"
       });
       if (sync) {
@@ -2156,8 +2347,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setBackendToolApprovals([]);
   };
 
-  // The onboarding gate: required unless explicitly dismissed or skipped.
-  const onboardingRequired = !onboardingDismissed;
+  // The product gate has no production bypass: a verified account workspace
+  // and one connected provider are both required. Browser fixtures may still
+  // use the explicit preview dismissal path.
+  const onboardingRequired =
+    !activeWorkspaceScope || connectedBackendIds.length === 0;
 
   const runCommand = (command: string) => {
     const prompt = `${command} `;
@@ -3340,9 +3534,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     recordBackendToolCall,
     identityStatus,
     identityPending,
+    accountWorkspaceStatus,
+    accountWorkspacePending,
     signInIdentity,
+    recoverIdentity,
     refreshIdentity,
     signOutIdentity,
+    reconcileAccountWorkspace,
+    createAccountWorkspace,
+    selectAccountWorkspace,
+    revokeAccountDevice,
     clearBackendToolApprovals,
     dismissOnboarding,
     lastAction,

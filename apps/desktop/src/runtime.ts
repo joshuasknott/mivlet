@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
-const DEFAULT_DATA_SCOPE = { workspaceId: "default", projectId: null } as const;
+import { getActiveRuntimeDataScope } from "./runtime-scope";
 import type { LocalTextFileCandidate } from "@fable/connectors";
 import type {
   ActionHistoryCategory,
@@ -54,7 +53,8 @@ import type {
   CloudSyncFlushResult,
   CloudSyncPullResult,
   CloudSyncStatus,
-  CloudWorkspaceLinkState
+  CloudWorkspaceLinkState,
+  AccountWorkspaceStatus
 } from "@fable/protocol";
 
 interface ApprovalAuditRecordResponse {
@@ -87,13 +87,24 @@ function toRuntimeError(error: unknown) {
   return new Error(typeof error === "string" ? error : "Fable runtime request failed.");
 }
 
+/**
+ * Native workspace repositories fail closed until account reconciliation has
+ * selected a verified local directory. Browser/test mode receives the explicit
+ * preview fixture scope from runtime-scope.ts.
+ */
+function activeDataScope() {
+  return getActiveRuntimeDataScope();
+}
+
 export async function loadRuntimeApprovalAudit() {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
-    return await invoke<ApprovalAuditEntry[]>("list_approval_audit");
+    return await invoke<ApprovalAuditEntry[]>("list_approval_audit", scope);
   } catch {
     return null;
   }
@@ -103,9 +114,11 @@ export async function loadRuntimeApprovalRules() {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
-    return await invoke<ApprovalGrant[]>("list_approval_rules");
+    return await invoke<ApprovalGrant[]>("list_approval_rules", scope);
   } catch {
     return null;
   }
@@ -115,10 +128,13 @@ export async function resolveRuntimeApprovalRequest(request: ApprovalResolutionR
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<ApprovalResolutionResponse>("resolve_approval_request", {
-      request
+      request,
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -130,8 +146,11 @@ export async function loadRuntimeImportedKnowledgeSources() {
     return null;
   }
 
+  const scope = activeDataScope();
+  if (!scope) return null;
+
   try {
-    return await invoke<LocalFileImport[]>("list_imported_knowledge_sources", DEFAULT_DATA_SCOPE);
+    return await invoke<LocalFileImport[]>("list_imported_knowledge_sources", scope);
   } catch {
     return null;
   }
@@ -141,11 +160,13 @@ export async function saveRuntimeImportedKnowledgeSources(sources: LocalFileImpo
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<LocalFileImport[]>("save_imported_knowledge_sources", {
       sources,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -156,11 +177,13 @@ export async function importRuntimeLocalKnowledgeSource(candidate: LocalTextFile
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<LocalFileImport>("import_local_knowledge_source", {
       candidate,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -175,12 +198,15 @@ export async function searchRuntimeKnowledgeSources(
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<KnowledgeSearchResponse>("search_knowledge_sources", {
       query,
       sources,
-      limit
+      limit,
+      ...scope
     });
   } catch {
     return null;
@@ -191,9 +217,11 @@ export async function loadRuntimeMemoryState() {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
-    return await invoke<MemoryControlState>("list_memory_state", DEFAULT_DATA_SCOPE);
+    return await invoke<MemoryControlState>("list_memory_state", scope);
   } catch {
     return null;
   }
@@ -203,9 +231,11 @@ export async function loadRuntimeSnapshot() {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
-    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", DEFAULT_DATA_SCOPE);
+    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", scope);
   } catch {
     return null;
   }
@@ -215,11 +245,13 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<RuntimeSnapshot>("save_runtime_snapshot", {
       snapshot,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -228,8 +260,10 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
 
 export async function saveRuntimeAgentRun(run: PersistedAgentRun) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<PersistedAgentRun>("save_agent_run", { run });
+    return await invoke<PersistedAgentRun>("save_agent_run", { run, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -237,8 +271,10 @@ export async function saveRuntimeAgentRun(run: PersistedAgentRun) {
 
 export async function listRuntimeAgentRuns() {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<PersistedAgentRun[]>("list_agent_runs");
+    return await invoke<PersistedAgentRun[]>("list_agent_runs", scope);
   } catch {
     return null;
   }
@@ -246,8 +282,10 @@ export async function listRuntimeAgentRuns() {
 
 export async function recoverRuntimeAgentRuns(recoveredAt: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<PersistedAgentRun[]>("recover_interrupted_agent_runs", { recoveredAt });
+    return await invoke<PersistedAgentRun[]>("recover_interrupted_agent_runs", { recoveredAt, ...scope });
   } catch {
     return null;
   }
@@ -257,11 +295,13 @@ export async function saveRuntimeMemoryState(state: MemoryControlState) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<MemoryControlState>("save_memory_state", {
       state,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -272,10 +312,12 @@ export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<string>("export_memory_state", {
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -286,11 +328,13 @@ export async function promoteRuntimeKnowledgeSourceToMemory(request: MemoryPromo
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<MemoryPromotionResponse>("promote_knowledge_source_to_memory", {
       request,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -301,10 +345,13 @@ export async function recordRuntimeApprovalDecision(entry: ApprovalAuditEntry) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     const response = await invoke<ApprovalAuditRecordResponse>("record_approval_decision", {
-      entry
+      entry,
+      ...scope
     });
     return response.persisted ? response.entry : null;
   } catch {
@@ -334,11 +381,14 @@ export async function loadRuntimeActionHistory(
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
 
   try {
     return await invoke<ActionHistoryEvent[]>("list_action_history", {
       category: category ?? null,
-      limit: limit ?? null
+      limit: limit ?? null,
+      ...scope
     });
   } catch {
     return null;
@@ -355,9 +405,11 @@ export async function recordRuntimeActionHistory(
   if (!hasTauriRuntime()) {
     return false;
   }
+  const scope = activeDataScope();
+  if (!scope) return false;
 
   try {
-    return await invoke<boolean>("record_action_history", { request });
+    return await invoke<boolean>("record_action_history", { request, ...scope });
   } catch {
     return false;
   }
@@ -397,6 +449,15 @@ export async function beginRuntimeIdentitySignIn() {
   }
 }
 
+export async function beginRuntimeIdentityRecovery() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<IdentityStatus>("identity_begin_recovery");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export async function refreshRuntimeIdentity() {
   if (!hasTauriRuntime()) {
     return null;
@@ -419,10 +480,66 @@ export async function signOutRuntimeIdentity() {
   }
 }
 
-export async function loadRuntimeCloudSyncStatus(workspaceId = "default") {
+/** The authoritative account directory; no local scope is trusted before this succeeds. */
+export async function loadRuntimeAccountWorkspaceStatus() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceStatus>("account_workspace_status");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function reconcileRuntimeAccountWorkspace() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceStatus>("account_workspace_reconcile");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function createRuntimeAccountWorkspace(name: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceStatus>("account_workspace_create", { name });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function selectRuntimeAccountWorkspace(fableWorkspaceId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceStatus>("account_workspace_select", { fableWorkspaceId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function revokeRuntimeAccountDevice(deviceId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceStatus>("account_device_revoke", { deviceId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function clearRuntimeAccountWorkspaceSession() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    await invoke<void>("account_workspace_clear_session");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function loadRuntimeCloudSyncStatus(workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  if (!workspaceId) return null;
   try {
     return await invoke<CloudSyncStatus>("cloud_sync_status", { workspaceId });
   } catch {
@@ -430,10 +547,11 @@ export async function loadRuntimeCloudSyncStatus(workspaceId = "default") {
   }
 }
 
-export async function loadRuntimeCloudSyncLinkState(workspaceId = "default") {
+export async function loadRuntimeCloudSyncLinkState(workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  if (!workspaceId) return null;
   try {
     return await invoke<CloudWorkspaceLinkState | null>("cloud_sync_link_state", { workspaceId });
   } catch {
@@ -445,6 +563,8 @@ export async function enqueueRuntimeCloudSyncMutation(request: CloudSyncEnqueueR
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope || request.localWorkspaceId !== scope.workspaceId) return null;
   try {
     return await invoke<CloudMutationOutboxRow>("cloud_sync_enqueue_shared_mutation", { request });
   } catch (error) {
@@ -452,10 +572,11 @@ export async function enqueueRuntimeCloudSyncMutation(request: CloudSyncEnqueueR
   }
 }
 
-export async function flushRuntimeCloudSyncOutbox(workspaceId = "default") {
+export async function flushRuntimeCloudSyncOutbox(workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  if (!workspaceId) return null;
   try {
     return await invoke<CloudSyncFlushResult>("cloud_sync_flush_outbox", { workspaceId });
   } catch (error) {
@@ -463,10 +584,11 @@ export async function flushRuntimeCloudSyncOutbox(workspaceId = "default") {
   }
 }
 
-export async function pullRuntimeCloudSyncAfterCursor(workspaceId = "default") {
+export async function pullRuntimeCloudSyncAfterCursor(workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  if (!workspaceId) return null;
   try {
     return await invoke<CloudSyncPullResult>("cloud_sync_pull_after_cursor", { workspaceId });
   } catch (error) {
@@ -536,8 +658,10 @@ export async function listRuntimeConnectorStatuses() {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<ConnectorManifest[]>("list_connector_statuses", DEFAULT_DATA_SCOPE);
+    return await invoke<ConnectorManifest[]>("list_connector_statuses", scope);
   } catch {
     return null;
   }
@@ -547,10 +671,12 @@ export async function startRuntimeConnectorAuth(request: ConnectorAuthRequest) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorAuthResult>("start_connector_auth", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -561,10 +687,12 @@ export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorAuthResult>("complete_connector_auth", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -582,10 +710,12 @@ export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) 
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorAuthResult>("begin_connector_oauth", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -621,10 +751,12 @@ export async function clearRuntimeConnectorAuth(connectorId: string) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorManifest>("clear_connector_auth", {
       connectorId,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -635,10 +767,12 @@ export async function listRuntimeConnectorAccounts(connectorId: string) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorAccountOption[]>("list_connector_accounts", {
       connectorId,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -649,11 +783,13 @@ export async function switchRuntimeConnectorAccount(connectorId: string, account
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorManifest>("switch_connector_account", {
       connectorId,
       accountId,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -664,20 +800,23 @@ export async function refreshRuntimeConnectorHealth(connectorId: string) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorManifest>("refresh_connector_health", {
       connectorId,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function listRuntimeConnectorSyncStates(workspaceId: string) {
+export async function listRuntimeConnectorSyncStates(workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  if (!workspaceId) return null;
   try {
     return await invoke<ConnectorSyncState[]>("list_connector_sync_states", { workspaceId });
   } catch (error) {
@@ -689,6 +828,8 @@ export async function syncRuntimeConnector(request: ConnectorSyncRequest) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope || request.workspaceId !== scope.workspaceId) return null;
   try {
     return await invoke<ConnectorSyncState>("sync_connector", { request });
   } catch (error) {
@@ -700,10 +841,12 @@ export async function searchRuntimeConnector(request: ConnectorSearchRequest) {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorSearchResult>("search_connector", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -714,10 +857,12 @@ export async function importRuntimeConnectorItem(request: ConnectorImportRequest
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorImportResult>("import_connector_item", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -728,10 +873,12 @@ export async function prepareRuntimeConnectorAction(request: ConnectorActionRequ
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorActionRequest>("prepare_connector_action", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -745,10 +892,12 @@ export async function executeRuntimeConnectorAction(request: {
   if (!hasTauriRuntime()) {
     return null;
   }
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<ConnectorActionResult>("execute_approved_connector_action", {
       request,
-      workspaceId: DEFAULT_DATA_SCOPE.workspaceId
+      workspaceId: scope.workspaceId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1281,8 +1430,10 @@ export async function executeRuntimeToolCall(request: RuntimeToolRequest) {
 
 export async function listRuntimeSchedulerJobs() {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<ScheduledJob[]>("list_scheduler_jobs", DEFAULT_DATA_SCOPE);
+    return await invoke<ScheduledJob[]>("list_scheduler_jobs", scope);
   } catch {
     return null;
   }
@@ -1290,8 +1441,10 @@ export async function listRuntimeSchedulerJobs() {
 
 export async function listRuntimeSchedulerQueue() {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<SchedulerQueueEntry[]>("list_scheduler_queue", DEFAULT_DATA_SCOPE);
+    return await invoke<SchedulerQueueEntry[]>("list_scheduler_queue", scope);
   } catch {
     return null;
   }
@@ -1299,8 +1452,10 @@ export async function listRuntimeSchedulerQueue() {
 
 export async function saveRuntimeScheduledJob(job: ScheduledJob) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<ScheduledJob>("save_scheduled_job", { job, ...DEFAULT_DATA_SCOPE });
+    return await invoke<ScheduledJob>("save_scheduled_job", { job, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1308,8 +1463,10 @@ export async function saveRuntimeScheduledJob(job: ScheduledJob) {
 
 export async function deleteRuntimeScheduledJob(jobId: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<void>("delete_scheduled_job", { jobId, ...DEFAULT_DATA_SCOPE });
+    return await invoke<void>("delete_scheduled_job", { jobId, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1317,8 +1474,10 @@ export async function deleteRuntimeScheduledJob(jobId: string) {
 
 export async function setRuntimeJobStatus(jobId: string, status: ScheduledJobStatus) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<void>("set_job_status", { jobId, status, ...DEFAULT_DATA_SCOPE });
+    return await invoke<void>("set_job_status", { jobId, status, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1326,12 +1485,14 @@ export async function setRuntimeJobStatus(jobId: string, status: ScheduledJobSta
 
 export async function enqueueRuntimeJobRun(jobId: string, runId: string, scheduledAt: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<SchedulerQueueEntry>("enqueue_job_run", {
       jobId,
       runId,
       scheduledAt,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1340,8 +1501,10 @@ export async function enqueueRuntimeJobRun(jobId: string, runId: string, schedul
 
 export async function reportRuntimeJobAttempt(runId: string, attempt: JobAttempt) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<void>("report_job_attempt", { runId, attempt, ...DEFAULT_DATA_SCOPE });
+    return await invoke<void>("report_job_attempt", { runId, attempt, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1350,11 +1513,13 @@ export async function reportRuntimeJobAttempt(runId: string, attempt: JobAttempt
 /** Renew a running entry's lease (heartbeat). Rejects stale tokens in Rust. */
 export async function renewRuntimeJobLease(runId: string, leaseToken: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<boolean>("renew_job_lease", {
       runId,
       leaseToken,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch {
     return null;
@@ -1364,8 +1529,10 @@ export async function renewRuntimeJobLease(runId: string, leaseToken: string) {
 /** Re-queue a blocked-auth entry once its backend reconnected. */
 export async function requeueRuntimeBlockedJobRun(runId: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<boolean>("requeue_blocked_job_run", { runId, ...DEFAULT_DATA_SCOPE });
+    return await invoke<boolean>("requeue_blocked_job_run", { runId, ...scope });
   } catch {
     return null;
   }
@@ -1374,8 +1541,10 @@ export async function requeueRuntimeBlockedJobRun(runId: string) {
 /** Cancel a queued/leased/running entry from the Schedules UI. */
 export async function cancelRuntimeJobRun(runId: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<boolean>("cancel_job_run", { runId, ...DEFAULT_DATA_SCOPE });
+    return await invoke<boolean>("cancel_job_run", { runId, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1412,10 +1581,12 @@ export async function listenRuntimeSchedulerRunRequest(
       attemptNumber?: number;
       execution?: ScheduledExecutionRoute;
     }>("fable://scheduler/run-request", (event) => {
-      const workspaceId = event.payload.workspaceId ?? "default";
+      const scope = activeDataScope();
+      if (!scope) return;
+      const workspaceId = event.payload.workspaceId;
       if (
-        workspaceId === DEFAULT_DATA_SCOPE.workspaceId &&
-        (event.payload.projectId ?? null) === DEFAULT_DATA_SCOPE.projectId
+        workspaceId === scope.workspaceId &&
+        (event.payload.projectId ?? null) === scope.projectId
       ) {
         onRun(event.payload);
       }
@@ -1435,7 +1606,8 @@ export async function listenRuntimeSchedulerCancelRequest(
     return await listen<{ runId: string; workspaceId?: string; projectId?: string }>(
       "fable://scheduler/cancel-request",
       (event) => {
-        if ((event.payload.workspaceId ?? "default") === DEFAULT_DATA_SCOPE.workspaceId) {
+        const scope = activeDataScope();
+        if (scope && event.payload.workspaceId === scope.workspaceId) {
           onCancel({ runId: event.payload.runId });
         }
       }
@@ -1515,11 +1687,13 @@ export function wireToWorkflowRun(record: WorkflowRunRecordWire): WorkflowRun {
 
 export async function saveRuntimeWorkflowRun(run: WorkflowRun) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   const record = toWorkflowRunWire(run);
   try {
     return await invoke<WorkflowRunRecordWire>("save_workflow_run", {
       run: record,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1528,10 +1702,12 @@ export async function saveRuntimeWorkflowRun(run: WorkflowRun) {
 
 export async function saveRuntimeWorkflowDefinition(definition: WorkflowDefinition) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<WorkflowDefinition>("save_workflow_definition", {
       definition,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1540,8 +1716,10 @@ export async function saveRuntimeWorkflowDefinition(definition: WorkflowDefiniti
 
 export async function listRuntimeWorkflowDefinitions() {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<WorkflowDefinition[]>("list_workflow_definitions", DEFAULT_DATA_SCOPE);
+    return await invoke<WorkflowDefinition[]>("list_workflow_definitions", scope);
   } catch {
     return null;
   }
@@ -1549,8 +1727,10 @@ export async function listRuntimeWorkflowDefinitions() {
 
 export async function listRuntimeWorkflowRuns() {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
-    return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs", DEFAULT_DATA_SCOPE);
+    return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs", scope);
   } catch {
     return null;
   }
@@ -1558,10 +1738,12 @@ export async function listRuntimeWorkflowRuns() {
 
 export async function listRuntimeWorkflowRunsForDefinition(definitionId: string) {
   if (!hasTauriRuntime()) return null;
+  const scope = activeDataScope();
+  if (!scope) return null;
   try {
     return await invoke<WorkflowRunRecordWire[]>("list_workflow_runs_for_definition", {
       definitionId,
-      ...DEFAULT_DATA_SCOPE
+      ...scope
     });
   } catch {
     return null;

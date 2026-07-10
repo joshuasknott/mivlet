@@ -3,7 +3,7 @@ import { useState, type PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScheduledJob } from "@fable/protocol";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { runtimeScheduleQueryKeys, runtimeScheduleScope, useRuntimeSchedules } from "./useRuntimeSchedules";
+import { runtimeScheduleQueryKeys, useRuntimeSchedules } from "./useRuntimeSchedules";
 import * as runtime from "../runtime";
 
 vi.mock("../runtime", async (importOriginal) => {
@@ -53,9 +53,9 @@ function makeJob(overrides: Partial<ScheduledJob> = {}): ScheduledJob {
 
 describe("runtimeScheduleQueryKeys", () => {
   it("scopes keys by workspace and project", () => {
-    expect(runtimeScheduleQueryKeys.workspace(runtimeScheduleScope)).toEqual([
+    expect(runtimeScheduleQueryKeys.workspace({ workspaceId: "preview-default", projectId: null })).toEqual([
       "runtime-schedules",
-      "default",
+      "preview-default",
       "workspace"
     ]);
     expect(
@@ -76,7 +76,10 @@ describe("useRuntimeSchedules", () => {
 
   it("hydrates schedule jobs from the Rust-backed runtime query", async () => {
     vi.mocked(runtime.listRuntimeSchedulerJobs).mockResolvedValue([makeJob()]);
-    const { result } = renderHook(() => useRuntimeSchedules(), { wrapper });
+    const { result } = renderHook(
+      () => useRuntimeSchedules({ workspaceId: "preview-default", projectId: null }),
+      { wrapper }
+    );
 
     await waitFor(() => expect(runtime.listRuntimeSchedulerJobs).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.scheduledJobs).toHaveLength(1));
@@ -91,7 +94,10 @@ describe("useRuntimeSchedules", () => {
       .mockRejectedValueOnce(new Error("store locked"))
       .mockResolvedValueOnce([makeJob({ id: "job-2", name: "Recovered" })]);
 
-    const { result } = renderHook(() => useRuntimeSchedules(), { wrapper });
+    const { result } = renderHook(
+      () => useRuntimeSchedules({ workspaceId: "preview-default", projectId: null }),
+      { wrapper }
+    );
 
     await waitFor(() => expect(result.current.scheduleLoadError).toBe("store locked"), {
       timeout: 3_000

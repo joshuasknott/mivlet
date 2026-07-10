@@ -3,6 +3,8 @@ import type { BackendProvider } from "@fable/protocol";
 import {
   ALLOW_PREVIEW_FALLBACKS,
   DEFAULT_IDENTITY_STATUS,
+  PREVIEW_ACCOUNT_WORKSPACE_STATUS,
+  PREVIEW_IDENTITY_STATUS,
   defaultShellState,
   runtimeOrPreview
 } from "./defaults";
@@ -58,6 +60,12 @@ describe("shell runtime defaults", () => {
       message: "Fable account setup is not configured.",
       scopes: []
     });
+    expect(PREVIEW_ACCOUNT_WORKSPACE_STATUS).toMatchObject({
+      state: "ready",
+      accountBound: true,
+      activeWorkspace: { localWorkspaceId: "preview-default" }
+    });
+    expect(PREVIEW_IDENTITY_STATUS).toMatchObject({ enabled: true, state: "signed-in" });
   });
 
   it("prefers a runtime value and permits the existing test preview fallback", () => {
