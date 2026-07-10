@@ -1,10 +1,11 @@
-//! Optional Clerk identity boundary for future cloud/team features.
+//! Clerk identity and session boundary for Fable accounts.
 //!
 //! This module is deliberately separate from connector OAuth and the
 //! confidential auth broker. It owns the system-browser Authorization Code +
 //! PKCE flow, token refresh, JWT validation, and OS-keyring storage for Fable's
-//! optional app identity. React receives only secret-free status and display
-//! identity.
+//! app identity. React receives only secret-free external authentication facts
+//! and verified display attributes. Fable tenancy and authorization are
+//! resolved outside this provider boundary.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -95,8 +96,6 @@ struct ClerkIdentityConfig {
     audience: String,
     authorized_party: Option<String>,
     scopes: Vec<String>,
-    organization_required: bool,
-    allowed_org_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -151,17 +150,15 @@ struct TokenClaims {
     #[serde(default)]
     azp: Option<String>,
     #[serde(default)]
+    sid: Option<String>,
+    #[serde(default)]
+    jti: Option<String>,
+    #[serde(default)]
     email: Option<String>,
     #[serde(default)]
+    email_verified: Option<bool>,
+    #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
-    org_id: Option<String>,
-    #[serde(default)]
-    org_name: Option<String>,
-    #[serde(default)]
-    org_slug: Option<String>,
-    #[serde(default)]
-    org_role: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -186,37 +183,41 @@ struct UserInfoResponse {
     #[serde(default)]
     email: Option<String>,
     #[serde(default)]
+    email_verified: Option<bool>,
+    #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
-    org_id: Option<String>,
-    #[serde(default)]
-    org_name: Option<String>,
-    #[serde(default)]
-    org_slug: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct IdentityOrganization {
-    id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    slug: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    role: Option<String>,
+struct VerifiedIdentityAttribute {
+    kind: String,
+    normalized_value_hash: String,
+    verified_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct IdentitySummary {
-    user_id: String,
+struct VerifiedAccountDisplayAttributes {
     #[serde(skip_serializing_if = "Option::is_none")]
     display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     email: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AccountAuthenticationFacts {
+    provider: String,
+    normalized_issuer: String,
+    subject: String,
+    authentication_event_ref: String,
+    session_ref: String,
+    authenticated_at: String,
+    expires_at: String,
+    verified_attributes: Vec<VerifiedIdentityAttribute>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    organization: Option<IdentityOrganization>,
+    verified_display_attributes: Option<VerifiedAccountDisplayAttributes>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -231,11 +232,17 @@ pub(crate) struct IdentityStatus {
     audience: Option<String>,
     scopes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    expires_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    identity: Option<IdentitySummary>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    organization_required: Option<bool>,
+    authentication: Option<AccountAuthenticationFacts>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyIdentitySummary {
+    user_id: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -250,7 +257,10 @@ struct StoredSession {
     audience: String,
     client_id: String,
     authorized_party: Option<String>,
-    identity: IdentitySummary,
+    #[serde(default)]
+    authentication: Option<AccountAuthenticationFacts>,
+    #[serde(default, rename = "identity", skip_serializing)]
+    legacy_identity: Option<LegacyIdentitySummary>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -263,8 +273,6 @@ struct PendingClerkOAuth {
     audience: String,
     authorized_party: Option<String>,
     scopes: Vec<String>,
-    organization_required: bool,
-    allowed_org_ids: Vec<String>,
     token_endpoint: String,
     jwks_uri: String,
     userinfo_endpoint: Option<String>,
@@ -334,13 +342,6 @@ fn split_env_list(value: Option<String>) -> Vec<String> {
         .collect()
 }
 
-fn env_flag(name: &str) -> bool {
-    matches!(
-        std::env::var(name).ok().as_deref(),
-        Some("1") | Some("true") | Some("yes") | Some("on")
-    )
-}
-
 fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
     let issuer = std::env::var("FABLE_CLERK_ISSUER").ok();
     let client_id = std::env::var("FABLE_CLERK_OAUTH_CLIENT_ID").ok();
@@ -384,13 +385,6 @@ fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
             scopes.push(required.to_string());
         }
     }
-    let allowed_org_ids = split_env_list(std::env::var("FABLE_CLERK_ALLOWED_ORG_IDS").ok());
-    let organization_required = env_flag("FABLE_CLERK_REQUIRE_ORG") || !allowed_org_ids.is_empty();
-    if (organization_required || env_flag("FABLE_CLERK_REQUEST_ORG"))
-        && !scopes.iter().any(|scope| scope == "user:org:read")
-    {
-        scopes.push("user:org:read".into());
-    }
     let authorized_party = std::env::var("FABLE_CLERK_AUTHORIZED_PARTY")
         .ok()
         .map(|value| value.trim().to_string())
@@ -402,8 +396,6 @@ fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
         audience,
         authorized_party,
         scopes,
-        organization_required,
-        allowed_org_ids,
     }))
 }
 
@@ -415,9 +407,7 @@ fn disabled_status() -> IdentityStatus {
         issuer: None,
         audience: None,
         scopes: Vec::new(),
-        expires_at: None,
-        identity: None,
-        organization_required: None,
+        authentication: None,
     }
 }
 
@@ -430,9 +420,7 @@ fn signed_out_status(config: &ClerkIdentityConfig) -> IdentityStatus {
         issuer: Some(config.issuer.clone()),
         audience: Some(config.audience.clone()),
         scopes: config.scopes.clone(),
-        expires_at: None,
-        identity: None,
-        organization_required: Some(config.organization_required),
+        authentication: None,
     }
 }
 
@@ -448,18 +436,14 @@ fn session_status(
         issuer: Some(session.issuer.clone()),
         audience: Some(session.audience.clone()),
         scopes: session.scopes.clone(),
-        expires_at: epoch_to_iso(session.expires_at),
-        identity: Some(session.identity.clone()),
-        organization_required: None,
+        authentication: session.authentication.clone(),
     }
 }
 
 fn status_from_error(config: &ClerkIdentityConfig, error: &IdentityError) -> IdentityStatus {
     IdentityStatus {
         enabled: true,
-        state: if error.code == "needs-organization" {
-            "needs-organization"
-        } else if error.code == "revoked" {
+        state: if error.code == "revoked" {
             "revoked"
         } else {
             "error"
@@ -469,9 +453,7 @@ fn status_from_error(config: &ClerkIdentityConfig, error: &IdentityError) -> Ide
         issuer: Some(config.issuer.clone()),
         audience: Some(config.audience.clone()),
         scopes: config.scopes.clone(),
-        expires_at: None,
-        identity: None,
-        organization_required: Some(config.organization_required),
+        authentication: None,
     }
 }
 
@@ -688,33 +670,6 @@ fn validate_claims(
             false,
         ));
     }
-    if config.organization_required && claims.org_id.as_deref().unwrap_or("").is_empty() {
-        return Err(identity_error(
-            "needs-organization",
-            "Choose an organization during Fable cloud sign-in.",
-            false,
-        ));
-    }
-    if !config.allowed_org_ids.is_empty() {
-        let Some(org_id) = claims.org_id.as_deref() else {
-            return Err(identity_error(
-                "needs-organization",
-                "Choose an allowed organization during Fable cloud sign-in.",
-                false,
-            ));
-        };
-        if !config
-            .allowed_org_ids
-            .iter()
-            .any(|allowed| allowed == org_id)
-        {
-            return Err(identity_error(
-                "needs-organization",
-                "The selected organization is not allowed for this Fable build.",
-                false,
-            ));
-        }
-    }
     Ok(())
 }
 
@@ -774,48 +729,107 @@ fn validate_jwt_with_jwks(
     Ok(data.claims)
 }
 
-fn summary_from_claims(claims: &TokenClaims) -> IdentitySummary {
-    let organization = claims.org_id.as_ref().map(|id| IdentityOrganization {
-        id: id.clone(),
-        name: claims.org_name.clone(),
-        slug: claims.org_slug.clone(),
-        role: claims.org_role.clone(),
-    });
-    IdentitySummary {
-        user_id: claims.sub.clone(),
-        display_name: claims.name.clone(),
-        email: claims.email.clone(),
-        organization,
+fn opaque_reference(kind: &str, value: &str) -> String {
+    let digest = Sha256::digest(value.as_bytes());
+    format!("{kind}:{}", URL_SAFE_NO_PAD.encode(digest))
+}
+
+fn normalized_value_hash(value: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(value.trim().to_lowercase().as_bytes()))
+}
+
+fn authentication_from_claims(
+    claims: &TokenClaims,
+    issuer: &str,
+    access_token: &str,
+    expires_at: u64,
+) -> AccountAuthenticationFacts {
+    let authenticated_epoch = claims.iat.unwrap_or_else(now_epoch);
+    let authenticated_at = epoch_to_iso(authenticated_epoch)
+        .unwrap_or_else(|| DateTime::<Utc>::from(UNIX_EPOCH).to_rfc3339());
+    let expires_at =
+        epoch_to_iso(expires_at).unwrap_or_else(|| DateTime::<Utc>::from(UNIX_EPOCH).to_rfc3339());
+    let verified_email = claims
+        .email_verified
+        .unwrap_or(false)
+        .then(|| claims.email.clone())
+        .flatten();
+    let verified_attributes = verified_email
+        .as_deref()
+        .map(|email| {
+            vec![VerifiedIdentityAttribute {
+                kind: "email".to_string(),
+                normalized_value_hash: normalized_value_hash(email),
+                verified_at: authenticated_at.clone(),
+            }]
+        })
+        .unwrap_or_default();
+    let verified_display_attributes = if claims.name.is_some() || verified_email.is_some() {
+        Some(VerifiedAccountDisplayAttributes {
+            display_name: claims.name.clone(),
+            email: verified_email,
+        })
+    } else {
+        None
+    };
+    AccountAuthenticationFacts {
+        provider: "clerk".to_string(),
+        normalized_issuer: issuer.to_string(),
+        subject: claims.sub.clone(),
+        authentication_event_ref: opaque_reference(
+            "clerk-authentication",
+            claims.jti.as_deref().unwrap_or(access_token),
+        ),
+        session_ref: opaque_reference(
+            "clerk-session",
+            claims.sid.as_deref().unwrap_or(access_token),
+        ),
+        authenticated_at,
+        expires_at,
+        verified_attributes,
+        verified_display_attributes,
     }
 }
 
-fn merge_userinfo(summary: &mut IdentitySummary, userinfo: UserInfoResponse) {
+fn merge_userinfo(authentication: &mut AccountAuthenticationFacts, userinfo: UserInfoResponse) {
     if userinfo
         .sub
         .as_deref()
-        .is_some_and(|sub| sub != summary.user_id)
+        .is_some_and(|sub| sub != authentication.subject)
     {
         return;
     }
-    if summary.email.is_none() {
-        summary.email = userinfo.email;
+    let display = authentication.verified_display_attributes.get_or_insert(
+        VerifiedAccountDisplayAttributes {
+            display_name: None,
+            email: None,
+        },
+    );
+    if display.display_name.is_none() {
+        display.display_name = userinfo.name;
     }
-    if summary.display_name.is_none() {
-        summary.display_name = userinfo.name;
+    if userinfo.email_verified.unwrap_or(false) {
+        if let Some(email) = userinfo.email {
+            if display.email.is_none() {
+                display.email = Some(email.clone());
+            }
+            if !authentication
+                .verified_attributes
+                .iter()
+                .any(|attribute| attribute.kind == "email")
+            {
+                authentication
+                    .verified_attributes
+                    .push(VerifiedIdentityAttribute {
+                        kind: "email".to_string(),
+                        normalized_value_hash: normalized_value_hash(&email),
+                        verified_at: authentication.authenticated_at.clone(),
+                    });
+            }
+        }
     }
-    if let Some(org_id) = userinfo.org_id {
-        let organization = summary.organization.get_or_insert(IdentityOrganization {
-            id: org_id,
-            name: None,
-            slug: None,
-            role: None,
-        });
-        if organization.name.is_none() {
-            organization.name = userinfo.org_name;
-        }
-        if organization.slug.is_none() {
-            organization.slug = userinfo.org_slug;
-        }
+    if display.display_name.is_none() && display.email.is_none() {
+        authentication.verified_display_attributes = None;
     }
 }
 
@@ -1144,12 +1158,13 @@ async fn session_from_tokens(
     let jwks = fetch_jwks(&metadata.jwks_uri).await?;
     let access_claims = validate_jwt_with_jwks(&tokens.access_token, &config, &jwks)?;
     if let Some(id_token) = &tokens.id_token {
-        validate_jwt_with_jwks(id_token, &config, &jwks)?;
-    }
-    let mut identity = summary_from_claims(&access_claims);
-    if let Some(userinfo_endpoint) = &metadata.userinfo_endpoint {
-        if let Some(userinfo) = fetch_userinfo(userinfo_endpoint, &tokens.access_token).await {
-            merge_userinfo(&mut identity, userinfo);
+        let id_claims = validate_jwt_with_jwks(id_token, &config, &jwks)?;
+        if id_claims.sub != access_claims.sub {
+            return Err(identity_error(
+                "invalid-token",
+                "Clerk access and identity tokens named different subjects.",
+                false,
+            ));
         }
     }
     let mut scopes = tokens
@@ -1170,6 +1185,17 @@ async fn session_from_tokens(
         .map(|seconds| now_epoch().saturating_add(seconds))
         .unwrap_or(access_claims.exp)
         .min(access_claims.exp);
+    let mut authentication = authentication_from_claims(
+        &access_claims,
+        &config.issuer,
+        &tokens.access_token,
+        expires_at,
+    );
+    if let Some(userinfo_endpoint) = &metadata.userinfo_endpoint {
+        if let Some(userinfo) = fetch_userinfo(userinfo_endpoint, &tokens.access_token).await {
+            merge_userinfo(&mut authentication, userinfo);
+        }
+    }
     Ok(StoredSession {
         access_token: tokens.access_token,
         id_token: tokens.id_token.or_else(|| {
@@ -1187,7 +1213,8 @@ async fn session_from_tokens(
         audience: config.audience,
         client_id: config.client_id,
         authorized_party: config.authorized_party,
-        identity,
+        authentication: Some(authentication),
+        legacy_identity: None,
     })
 }
 
@@ -1197,7 +1224,7 @@ async fn status_with_store(
     let Some(config) = load_config()? else {
         return Ok(disabled_status());
     };
-    let Some(session) = read_session(store)? else {
+    let Some(mut session) = read_session(store)? else {
         return Ok(signed_out_status(&config));
     };
     let metadata = match discover_metadata(&config).await {
@@ -1229,16 +1256,40 @@ async fn status_with_store(
             audience: session.audience.clone(),
             authorized_party: session.authorized_party.clone(),
             scopes: session.scopes.clone(),
-            organization_required: config.organization_required,
-            allowed_org_ids: config.allowed_org_ids.clone(),
         };
         match validate_jwt_with_jwks(&session.access_token, &active_config, &jwks) {
-            Ok(_) => {
+            Ok(claims) => {
+                if session.authentication.is_none() {
+                    let mut authentication = authentication_from_claims(
+                        &claims,
+                        &session.issuer,
+                        &session.access_token,
+                        session.expires_at,
+                    );
+                    if let Some(legacy) = session
+                        .legacy_identity
+                        .as_ref()
+                        .filter(|legacy| legacy.user_id == claims.sub)
+                    {
+                        let display = authentication.verified_display_attributes.get_or_insert(
+                            VerifiedAccountDisplayAttributes {
+                                display_name: None,
+                                email: None,
+                            },
+                        );
+                        if display.display_name.is_none() {
+                            display.display_name = legacy.display_name.clone();
+                        }
+                    }
+                    session.authentication = Some(authentication);
+                    session.legacy_identity = None;
+                    write_session(store, &session)?;
+                }
                 return Ok(session_status(
                     "signed-in",
                     "Fable cloud identity is connected.",
                     &session,
-                ))
+                ));
             }
             Err(error) if error.code == "revoked" => {}
             Err(error) => return Err(error),
@@ -1295,9 +1346,7 @@ async fn begin_sign_in_with_store(
                 issuer: Some(config.issuer),
                 audience: Some(config.audience),
                 scopes: config.scopes,
-                expires_at: None,
-                identity: None,
-                organization_required: Some(config.organization_required),
+                authentication: None,
             })
         }
         Err(error) => return Err(error),
@@ -1341,8 +1390,6 @@ async fn begin_sign_in_with_store(
         audience: config.audience.clone(),
         authorized_party: config.authorized_party.clone(),
         scopes: config.scopes.clone(),
-        organization_required: config.organization_required,
-        allowed_org_ids: config.allowed_org_ids.clone(),
         token_endpoint: metadata.token_endpoint.clone(),
         jwks_uri: metadata.jwks_uri.clone(),
         userinfo_endpoint: metadata.userinfo_endpoint.clone(),
@@ -1521,8 +1568,6 @@ async fn complete_callback_with_store(
         audience: pending.audience.clone(),
         authorized_party: pending.authorized_party.clone(),
         scopes: pending.scopes.clone(),
-        organization_required: pending.organization_required,
-        allowed_org_ids: pending.allowed_org_ids.clone(),
     };
     let metadata = AuthorizationServerMetadata {
         issuer: config.issuer.clone(),
@@ -1531,14 +1576,7 @@ async fn complete_callback_with_store(
         jwks_uri: pending.jwks_uri.clone(),
         userinfo_endpoint: pending.userinfo_endpoint.clone(),
     };
-    let session = match session_from_tokens(config.clone(), &metadata, None, tokens).await {
-        Ok(session) => session,
-        Err(error) if error.code == "needs-organization" => {
-            clear_session(store)?;
-            return Ok(status_from_error(&config, &error));
-        }
-        Err(error) => return Err(error),
-    };
+    let session = session_from_tokens(config.clone(), &metadata, None, tokens).await?;
     write_session(store, &session)?;
     Ok(session_status(
         "signed-in",
@@ -1612,8 +1650,6 @@ mod tests {
             audience: "fable-desktop".to_string(),
             authorized_party: Some("client_123".to_string()),
             scopes: vec!["openid".into(), "profile".into(), "email".into()],
-            organization_required: false,
-            allowed_org_ids: Vec::new(),
         }
     }
 
@@ -1626,12 +1662,11 @@ mod tests {
             nbf: Some(now_epoch() - 5),
             iat: Some(now_epoch() - 5),
             azp: Some("client_123".to_string()),
+            sid: Some("session_123".to_string()),
+            jti: Some("authentication_123".to_string()),
             email: Some("user@example.com".to_string()),
+            email_verified: Some(true),
             name: Some("User One".to_string()),
-            org_id: None,
-            org_name: None,
-            org_slug: None,
-            org_role: None,
         }
     }
 
@@ -1669,8 +1704,8 @@ mod tests {
     }
 
     #[test]
-    fn claim_validation_rejects_expired_future_and_missing_org() {
-        let mut config = test_config();
+    fn claim_validation_rejects_expired_and_future_tokens() {
+        let config = test_config();
         let now = now_epoch();
 
         let mut expired = test_claims();
@@ -1686,22 +1721,44 @@ mod tests {
             validate_claims(&future, &config, now).unwrap_err().code,
             "invalid-token"
         );
+    }
 
-        config.organization_required = true;
-        assert_eq!(
-            validate_claims(&test_claims(), &config, now)
-                .unwrap_err()
-                .code,
-            "needs-organization"
-        );
+    #[test]
+    fn organization_claims_neither_grant_nor_block_authentication() {
+        let now = now_epoch();
+        let claims_without_organization = test_claims();
+        let claims_with_organization: TokenClaims = serde_json::from_value(serde_json::json!({
+            "iss": "https://issuer.example",
+            "sub": "user_123",
+            "aud": "fable-desktop",
+            "exp": now + 3600,
+            "iat": now - 5,
+            "azp": "client_123",
+            "sid": "session_123",
+            "jti": "authentication_123",
+            "email": "user@example.com",
+            "email_verified": true,
+            "name": "User One",
+            "org_id": "org_untrusted",
+            "org_name": "Untrusted organization",
+            "org_slug": "untrusted",
+            "org_role": "owner"
+        }))
+        .unwrap();
 
-        let mut org_claims = test_claims();
-        org_claims.org_id = Some("org_allowed".to_string());
-        config.allowed_org_ids = vec!["org_other".to_string()];
-        assert_eq!(
-            validate_claims(&org_claims, &config, now).unwrap_err().code,
-            "needs-organization"
+        validate_claims(&claims_without_organization, &test_config(), now).unwrap();
+        validate_claims(&claims_with_organization, &test_config(), now).unwrap();
+
+        let facts = authentication_from_claims(
+            &claims_with_organization,
+            "https://issuer.example",
+            "access_secret",
+            now + 3600,
         );
+        let serialized = serde_json::to_string(&facts).unwrap();
+        assert!(!serialized.contains("org_untrusted"));
+        assert!(!serialized.contains("organization"));
+        assert!(!serialized.contains("\"role\""));
     }
 
     #[test]
@@ -1756,6 +1813,13 @@ mod tests {
 
     #[test]
     fn status_response_never_contains_stored_tokens() {
+        let claims = test_claims();
+        let authentication = authentication_from_claims(
+            &claims,
+            "https://issuer.example",
+            "access_secret",
+            claims.exp,
+        );
         let session = StoredSession {
             access_token: "access_secret".to_string(),
             id_token: Some("id_secret".to_string()),
@@ -1767,19 +1831,70 @@ mod tests {
             audience: "fable-desktop".to_string(),
             client_id: "client_123".to_string(),
             authorized_party: Some("client_123".to_string()),
-            identity: IdentitySummary {
-                user_id: "user_123".to_string(),
-                display_name: Some("User One".to_string()),
-                email: Some("user@example.com".to_string()),
-                organization: None,
-            },
+            authentication: Some(authentication),
+            legacy_identity: None,
         };
         let status = session_status("signed-in", "connected", &session);
         let serialized = serde_json::to_string(&status).unwrap();
         assert!(!serialized.contains("access_secret"));
         assert!(!serialized.contains("refresh_secret"));
         assert!(!serialized.contains("id_secret"));
+        assert!(!serialized.contains("session_123"));
+        assert!(!serialized.contains("authentication_123"));
+        assert!(serialized.contains("clerk-session:"));
+        assert!(serialized.contains("clerk-authentication:"));
         assert!(serialized.contains("user@example.com"));
+    }
+
+    #[test]
+    fn legacy_session_org_display_fields_are_ignored_and_removed_on_rewrite() {
+        let store = MemoryStore::default();
+        let legacy = serde_json::json!({
+            "access_token": "access_secret",
+            "id_token": "id_secret",
+            "refresh_token": "refresh_secret",
+            "token_type": "Bearer",
+            "expires_at": now_epoch() + 3600,
+            "scopes": ["openid", "profile", "email"],
+            "issuer": "https://issuer.example",
+            "audience": "fable-desktop",
+            "client_id": "client_123",
+            "authorized_party": "client_123",
+            "identity": {
+                "userId": "user_123",
+                "displayName": "User One",
+                "email": "user@example.com",
+                "organization": {
+                    "id": "org_obsolete",
+                    "name": "Obsolete organization",
+                    "slug": "obsolete",
+                    "role": "owner"
+                }
+            }
+        })
+        .to_string();
+        store.set(SESSION_KEY, &legacy).unwrap();
+
+        let mut session = read_session(&store).unwrap().unwrap();
+        let legacy_identity = session.legacy_identity.as_ref().unwrap();
+        assert_eq!(legacy_identity.user_id, "user_123");
+        assert_eq!(legacy_identity.email.as_deref(), Some("user@example.com"));
+
+        let claims = test_claims();
+        session.authentication = Some(authentication_from_claims(
+            &claims,
+            &session.issuer,
+            &session.access_token,
+            session.expires_at,
+        ));
+        session.legacy_identity = None;
+        write_session(&store, &session).unwrap();
+
+        let rewritten = store.get(SESSION_KEY).unwrap().unwrap();
+        assert!(!rewritten.contains("org_obsolete"));
+        assert!(!rewritten.contains("organization"));
+        assert!(!rewritten.contains("\"identity\""));
+        assert!(rewritten.contains("\"authentication\""));
     }
 
     #[test]

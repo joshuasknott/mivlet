@@ -1,5 +1,10 @@
 export * as Spine from "./spine/index.js";
 
+import type {
+  ExternalAuthenticationFacts,
+  WorkspaceRole
+} from "./spine/identity.js";
+
 export type PermissionMode = "read-only" | "trusted-scope" | "full-access";
 export type PermissionProfileId = "read-only" | "trusted" | "full-with-approvals";
 export type ApprovalPresetLabel = "Read Only" | "Ask Me" | "Work Freely" | "Custom";
@@ -570,52 +575,48 @@ export interface ConnectorAuthResult {
 }
 
 // ---------------------------------------------------------------------------
-// Optional Fable cloud identity.
+// Fable account identity and session status.
 //
 // This is not connector OAuth and not the confidential auth broker. It is a
-// future-facing, optional identity surface for cloud/team features. These wire
-// types are intentionally secret-free: React receives only status, short-lived
-// expiry metadata, and display identity. Refresh/session credentials remain in
-// the Rust OS-keyring boundary.
+// secret-free view of the native account identity boundary. Clerk authenticates
+// an external principal; Fable-owned membership and authorization are resolved
+// separately. Refresh/session credentials remain in the Rust OS-keyring boundary.
 // ---------------------------------------------------------------------------
 
-export type IdentityAuthState =
+export type AccountSessionState =
   | "disabled"
   | "signed-out"
   | "signed-in"
   | "offline"
   | "refreshing"
   | "revoked"
-  | "needs-organization"
   | "error";
 
-export interface IdentityOrganization {
-  id: string;
-  name?: string;
-  slug?: string;
-  role?: string;
+export interface VerifiedAccountDisplayAttributes {
+  displayName?: string;
+  /** Present only when the identity provider marks the address as verified. */
+  email?: string;
 }
 
-export interface IdentitySummary {
-  userId: string;
-  displayName?: string;
-  email?: string;
-  organization?: IdentityOrganization;
+/**
+ * Secret-free facts from a validated external account session. These facts
+ * identify a principal but grant no Fable workspace access or role.
+ */
+export interface AccountAuthenticationFacts extends ExternalAuthenticationFacts {
+  verifiedDisplayAttributes?: VerifiedAccountDisplayAttributes;
 }
 
 export interface IdentityStatus {
   enabled: boolean;
-  state: IdentityAuthState;
+  state: AccountSessionState;
   message: string;
   issuer?: string;
   audience?: string;
   scopes: string[];
-  expiresAt?: string;
-  identity?: IdentitySummary;
-  organizationRequired?: boolean;
+  authentication?: AccountAuthenticationFacts;
 }
 
-export type CloudWorkspaceRole = "owner" | "admin" | "editor" | "viewer";
+export type CloudWorkspaceRole = WorkspaceRole;
 export type CloudSyncState = "disabled" | "unlinked" | "active" | "stale" | "revoked" | "blocked" | "error";
 export type CloudSyncRecordType = "project";
 export type CloudSyncOperation = "create" | "update" | "delete";
@@ -623,7 +624,8 @@ export type CloudSyncOperation = "create" | "update" | "delete";
 export interface CloudWorkspaceLinkState {
   localWorkspaceId: string;
   cloudWorkspaceId: string;
-  clerkOrgId: string;
+  internalUserId: string;
+  memberId: string;
   role: CloudWorkspaceRole;
   syncState: CloudSyncState;
   linkedDeviceId: string;
