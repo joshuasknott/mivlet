@@ -14,9 +14,12 @@ import type {
 
 export type AccountControlPlaneMetadata = Omit<
   RecordMetadata,
-  "workspaceId" | "authority"
+  "workspaceId" | "authority" | "createdByInternalUserId" | "createdByDeviceId"
 > & {
   authority: "convex";
+  /** Bootstrap can create the first internal user before an actor exists. */
+  createdByInternalUserId?: InternalUserId;
+  createdByDeviceId?: DeviceId;
 };
 
 export type WorkspaceControlPlaneMetadata = Omit<RecordMetadata, "authority"> & {

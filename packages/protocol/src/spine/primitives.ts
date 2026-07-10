@@ -1,5 +1,14 @@
 declare const fableIdBrand: unique symbol;
 
+/**
+ * Version of the portable product-spine vocabulary. This advances only when a
+ * canonical wire contract changes; storage migrations have their own versions.
+ */
+export const PRODUCT_SPINE_CONTRACT_VERSION = "1.0.0" as const;
+
+/** Initial schema shape for records governed by the product spine. */
+export const PRODUCT_SPINE_SCHEMA_VERSION = 1 as const;
+
 export type FableId<Kind extends string> = string & {
   readonly [fableIdBrand]: Kind;
 };

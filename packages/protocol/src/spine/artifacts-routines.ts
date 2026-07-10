@@ -509,11 +509,10 @@ export interface ContractError {
   details?: Readonly<Record<string, unknown>>;
 }
 
-export interface ContractResult<T> {
-  ok: boolean;
-  value?: T;
-  error?: ContractError;
-}
+/** A result is always discriminated; a value and an error can never coexist. */
+export type ContractResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: ContractError };
 
 export interface CreateEnvelope<T> {
   clientMutationId: string;
@@ -521,11 +520,12 @@ export interface CreateEnvelope<T> {
   value: T;
 }
 
-export interface UpdateEnvelope<T> {
+export interface UpdateEnvelope<T, ImmutableKeys extends keyof T = never> {
   clientMutationId: string;
   idempotencyKey: string;
   baseRevision: number;
-  patch: Partial<T>;
+  /** Immutable identity, scope, provenance, and authority are never patchable. */
+  patch: Partial<Omit<T, ImmutableKeys>>;
 }
 
 export interface TransitionEnvelope<Status extends string> {
@@ -537,7 +537,19 @@ export interface TransitionEnvelope<Status extends string> {
 }
 
 export type ArtifactCreateEnvelope = CreateEnvelope<Artifact>;
-export type ArtifactUpdateEnvelope = UpdateEnvelope<Artifact>;
+type CanonicalRecordImmutableKeys =
+  | "id"
+  | "workspaceId"
+  | "authority"
+  | "schemaVersion"
+  | "revision"
+  | "createdByInternalUserId"
+  | "createdByDeviceId"
+  | "createdAt"
+  | "visibility"
+  | "ownerMemberId";
+
+export type ArtifactUpdateEnvelope = UpdateEnvelope<Artifact, CanonicalRecordImmutableKeys>;
 export type ArtifactTransitionEnvelope = TransitionEnvelope<ArtifactStatus>;
 export type ArtifactCreateResult = ContractResult<Artifact>;
 export type ArtifactTransitionResult = ContractResult<Artifact>;
@@ -550,7 +562,7 @@ export type ArtifactHandoffAcceptEnvelope = TransitionEnvelope<"accepted">;
 export type ArtifactHandoffRejectEnvelope = TransitionEnvelope<"rejected">;
 
 export type RoutineCreateEnvelope = CreateEnvelope<Routine>;
-export type RoutineUpdateEnvelope = UpdateEnvelope<Routine>;
+export type RoutineUpdateEnvelope = UpdateEnvelope<Routine, CanonicalRecordImmutableKeys>;
 export type RoutineTransitionEnvelope = TransitionEnvelope<RoutineStatus>;
 export type RoutinePauseEnvelope = TransitionEnvelope<"paused">;
 export type RoutineResumeEnvelope = TransitionEnvelope<"active">;

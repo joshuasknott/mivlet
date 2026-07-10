@@ -32,6 +32,8 @@ mod oauth_loopback;
 pub mod paths;
 mod permission_policy;
 pub mod portable;
+#[cfg(test)]
+mod product_spine_parity;
 mod remote_control;
 mod scheduler;
 mod snapshot;
