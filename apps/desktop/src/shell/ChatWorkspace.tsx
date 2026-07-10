@@ -244,13 +244,17 @@ export function ChatWorkspace() {
       if (!selectedConversationThreadId) setConversationMessages([]);
       return;
     }
-    if (hydrated.messages.length === 0 && (pendingPrompt || agent.state.running)) return;
+    // A freshly created thread hydrates before its serialized run writer has
+    // appended the first records. Do not let that valid-but-stale empty read
+    // erase the optimistic first exchange; explicit thread selection already
+    // clears the feed before hydration, so this cannot leak another thread.
+    if (hydrated.messages.length === 0 && conversationMessages.length > 0) return;
     setConversationMessages(hydrated.messages.map(({ message, currentRevision }) => ({
       id: message.id,
       role: message.kind === "user" ? "user" : "assistant",
       content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content
     })));
-  }, [agent.state.running, durableConversation.state.conversation, pendingPrompt, selectedConversationThreadId]);
+  }, [conversationMessages.length, durableConversation.state.conversation, selectedConversationThreadId]);
 
   useEffect(() => {
     if (durableConversation.state.loading || submissionInFlight) return;
@@ -499,7 +503,6 @@ export function ChatWorkspace() {
       });
       await durableConversation.deleteDraft();
       setSelectedConversationThreadId(thread.id);
-      runtime.setActiveItem(thread.id);
       setConversationMessages([{ id: messageId("user"), role: "user", content: submitted }]);
       setPendingPrompt(submitted);
       return;
