@@ -247,6 +247,8 @@ export interface ShellRuntime {
     providerId: string,
     secret: string
   ) => Promise<BackendVerifyResult>;
+  /** Re-check a configured credential or provider-owned runtime without collecting a secret. */
+  checkBackendConnection: (providerId: string) => Promise<BackendVerifyResult>;
   disconnectBackend: (providerId: string) => Promise<void>;
   /** Re-probe provider-owned runtimes after an install or sign-in completes. */
   refreshBackendProviders: () => Promise<BackendProvider[] | null>;

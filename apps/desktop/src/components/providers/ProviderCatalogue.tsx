@@ -408,7 +408,9 @@ export interface ProviderCatalogueProps {
   onConnect: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
   onDisconnect?: (providerId: string) => void | Promise<void>;
   onRefreshModels?: (providerId: string) => void | Promise<void>;
-  onCheckConnection?: (providerId: string) => void | Promise<void>;
+  onCheckConnection?: (
+    providerId: string
+  ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
   onStatus?: (message: string) => void;
 }
 
@@ -577,6 +579,9 @@ function ProviderConnectionModal({
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [locallyReady, setLocallyReady] = useState<string | null>(null);
+  const [locallyRemoved, setLocallyRemoved] = useState<string | null>(null);
+  const [replacingCredential, setReplacingCredential] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; tone: string } | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -637,7 +642,11 @@ function ProviderConnectionModal({
       const copy = connectResultCopy(result.outcome, { detail: result.message });
       setFeedback({ message: copy.message, tone: copy.tone });
       onStatus?.(copy.message);
-      if (result.outcome === "ready") setLocallyReady(providerId);
+      if (result.outcome === "ready") {
+        setLocallyReady(providerId);
+        setLocallyRemoved(null);
+        setReplacingCredential(false);
+      }
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not connect this provider.";
@@ -654,8 +663,10 @@ function ProviderConnectionModal({
     ? locallyReady === selectedMethod.provider.id
     : false;
   const methodConnected = selectedMethod
-    ? methodVerifiedHere ||
-      isProviderConnected(selectedMethod.provider, connectedBackendIds)
+    ? locallyRemoved === selectedMethod.provider.id
+      ? false
+      : methodVerifiedHere ||
+        isProviderConnected(selectedMethod.provider, connectedBackendIds)
     : false;
   const methodConnectionLabel = methodVerifiedHere
     ? "Ready"
@@ -669,9 +680,19 @@ function ProviderConnectionModal({
     setPending(true);
     setFeedback(null);
     try {
-      await onCheckConnection(providerId);
-      const message = "Connection state refreshed.";
-      setFeedback({ message, tone: "neutral" });
+      const result = await onCheckConnection(providerId);
+      if (result?.outcome === "ready") {
+        setLocallyReady(providerId);
+        setLocallyRemoved(null);
+      } else if (result?.outcome === "auth-failed") {
+        setLocallyReady(null);
+        setLocallyRemoved(providerId);
+      }
+      const copy = result
+        ? connectResultCopy(result.outcome, { detail: result.message })
+        : { message: "Connection state refreshed.", tone: "neutral" };
+      const message = copy.message;
+      setFeedback({ message, tone: copy.tone });
       onStatus?.(message);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not refresh this connection.";
@@ -748,7 +769,7 @@ function ProviderConnectionModal({
               </small>
             </div>
 
-            {selectedMethod.kind === "api-key" && !methodConnected ? (
+            {selectedMethod.kind === "api-key" && (!methodConnected || replacingCredential) ? (
               <form
                 className="provider-method-form"
                 onSubmit={(event) => {
@@ -776,7 +797,7 @@ function ProviderConnectionModal({
                   />
                 </label>
                 <button type="submit" className="provider-method-form__primary" disabled={pending}>
-                  {pending ? <><Spinner size={14} className="og-spinner" /> Verifying</> : "Add key & connect"}
+                  {pending ? <><Spinner size={14} className="og-spinner" /> Verifying</> : replacingCredential ? "Replace key & reconnect" : "Add key & connect"}
                 </button>
               </form>
             ) : null}
@@ -915,6 +936,15 @@ function ProviderConnectionModal({
                     : "This connection is ready."}
                 </span>
                 <div>
+                  {onCheckConnection && selectedMethod.provider.backendType === "native-api" ? (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => void checkConnection(selectedMethod.provider.id)}
+                    >
+                      {pending ? "Checking…" : "Check health"}
+                    </button>
+                  ) : null}
                   {onRefreshModels && selectedMethod.provider.backendType === "native-api" ? (
                     <button type="button" onClick={() => void onRefreshModels(selectedMethod.provider.id)}>
                       Refresh models
@@ -923,16 +953,53 @@ function ProviderConnectionModal({
                   {onDisconnect && selectedMethod.provider.backendType === "native-api" ? (
                     <button
                       type="button"
-                      onClick={() => {
-                        void Promise.resolve(onDisconnect(selectedMethod.provider.id)).then(() => {
-                          setLocallyReady(null);
-                          setFeedback({ message: "Disconnected.", tone: "neutral" });
-                        });
-                      }}
+                      onClick={() => setReplacingCredential(true)}
                     >
-                      Disconnect
+                      Replace key
                     </button>
                   ) : null}
+                  {onDisconnect && selectedMethod.provider.backendType === "native-api" ? (
+                    <button type="button" onClick={() => setConfirmingRemoval(true)}>
+                      Remove from Fable
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {confirmingRemoval && selectedMethod.provider.backendType === "native-api" ? (
+              <div className="provider-method-detail__removal" role="alertdialog" aria-label={`Remove ${selectedMethod.provider.label} from Fable`}>
+                <strong>Remove this key from Fable?</strong>
+                <p>
+                  Fable will delete its local credential. This does not revoke the key at the
+                  provider; revoke it in the provider&rsquo;s account if it may be compromised.
+                </p>
+                <div>
+                  <button type="button" onClick={() => setConfirmingRemoval(false)}>Keep provider</button>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => {
+                      setPending(true);
+                      void Promise.resolve(onDisconnect?.(selectedMethod.provider.id))
+                        .then(() => {
+                          setLocallyReady(null);
+                          setLocallyRemoved(selectedMethod.provider.id);
+                          setReplacingCredential(false);
+                          setConfirmingRemoval(false);
+                          const message = "Removed from Fable. Revoke the key at the provider too if needed.";
+                          setFeedback({ message, tone: "neutral" });
+                          onStatus?.(message);
+                        })
+                        .catch((error) => {
+                          const message = error instanceof Error ? error.message : "Could not remove this provider.";
+                          setFeedback({ message, tone: "danger" });
+                        })
+                        .finally(() => setPending(false));
+                    }}
+                  >
+                    Remove key
+                  </button>
                 </div>
               </div>
             ) : null}

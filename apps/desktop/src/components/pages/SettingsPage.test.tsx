@@ -54,6 +54,7 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     clearRunHistoryJobId: vi.fn(),
     refreshWorkflowRuns: vi.fn().mockResolvedValue(undefined),
     connectBackendWithVerify: vi.fn(),
+    checkBackendConnection: vi.fn(async (providerId: string) => ({ providerId, outcome: "ready" as const })),
     disconnectBackend: vi.fn(),
     refreshBackendProviders: vi.fn().mockResolvedValue([]),
     refreshModels: vi.fn(),
@@ -249,7 +250,11 @@ describe("Settings -> Providers", () => {
   });
 
   it("shows exact provider-owned login commands and rechecks the runtime", async () => {
-    const refreshBackends = vi.fn().mockResolvedValue([]);
+    const checkBackendConnection = vi.fn(async (providerId: string) => ({
+      providerId,
+      outcome: "failed" as const,
+      message: "Sign in through the provider CLI."
+    }));
     const codex: BackendProvider = {
       id: "codex",
       backendType: "codex-app-server",
@@ -262,7 +267,7 @@ describe("Settings -> Providers", () => {
     renderProviders(
       stubRuntime({
         backendProviders: [codex],
-        refreshBackendProviders: refreshBackends
+        checkBackendConnection
       })
     );
 
@@ -271,7 +276,7 @@ describe("Settings -> Providers", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /ChatGPT subscription Use/ }));
     expect(dialog).toHaveTextContent("codex login");
     fireEvent.click(within(dialog).getByRole("button", { name: "Check connection" }));
-    await waitFor(() => expect(refreshBackends).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(checkBackendConnection).toHaveBeenCalledWith("codex"));
   });
 });
 

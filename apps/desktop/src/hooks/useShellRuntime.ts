@@ -2299,6 +2299,56 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     await connectBackendWithVerify(providerId, secret);
   };
 
+  const checkBackendConnection = async (providerId: string): Promise<BackendVerifyResult> => {
+    const provider = backendProviders.find((entry) => entry.id === providerId);
+    if (!provider) {
+      return { providerId, outcome: "failed", message: "This provider is not in Fable's runtime catalogue." };
+    }
+
+    if (provider.backendType !== "native-api") {
+      const refreshed = await refreshBackendProviders();
+      const current = refreshed?.find((entry) => entry.id === providerId) ?? provider;
+      const ready = current.authState === "connected" || current.authState === "ready";
+      const result: BackendVerifyResult = ready
+        ? { providerId, outcome: "ready" }
+        : {
+            providerId,
+            outcome: "failed",
+            message: current.installHint ?? "The provider runtime is not connected yet."
+          };
+      setBackendStatus(result.message ?? `${providerId} connection checked.`);
+      return result;
+    }
+
+    const result = await verifyRuntimeBackend(providerId);
+    if (result === null) {
+      const previewResult: BackendVerifyResult = {
+        providerId,
+        outcome: "unsupported",
+        message: "Browser preview uses a synthetic provider connection; live health checks run in the desktop app."
+      };
+      setBackendStatus(previewResult.message ?? null);
+      return previewResult;
+    }
+
+    if (result.outcome === "auth-failed") {
+      await clearRuntimeBackend(providerId);
+      await refreshBackendProviders();
+      markProviderState(providerId, "needs-auth");
+      setBackendStatus(result.message ?? `${providerId} rejected or revoked this key.`);
+      return result;
+    }
+
+    await refreshBackendProviders();
+    setBackendStatus(
+      result.message ??
+        (result.outcome === "ready"
+          ? `${providerId} is healthy.`
+          : `${providerId} could not be checked right now.`)
+    );
+    return result;
+  };
+
   const disconnectBackend = async (providerId: string) => {
     setBackendStatus(`Disconnecting ${providerId}…`);
     try {
@@ -3537,6 +3587,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     onboardingRequired,
     connectBackend,
     connectBackendWithVerify,
+    checkBackendConnection,
     disconnectBackend,
     refreshBackendProviders,
     modelDiscoveryByProvider,

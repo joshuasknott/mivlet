@@ -40,6 +40,7 @@ vi.mock("../runtime", async (importOriginal) => {
     importRuntimeConnectorItem: vi.fn(async () => null),
     importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
     listRuntimeBackends: vi.fn(async () => null),
+    verifyRuntimeBackend: vi.fn(async () => null),
     listRuntimeBackendModels: vi.fn(async () => null),
     listRuntimeConnectorStatuses: vi.fn(async () => null),
     listRuntimeSchedulerJobs: vi.fn(async () => null),
@@ -866,6 +867,22 @@ describe("useShellRuntime — backend connect (preview mode)", () => {
     expect(result.current.connectedBackendIds).not.toContain("openai");
     const openai = result.current.backendProviders.find((p) => p.id === "openai");
     expect(openai?.authState).not.toBe("connected");
+  });
+
+  it("reports preview health honestly instead of claiming a live check", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+    await act(async () => {
+      await result.current.connectBackend("openai");
+    });
+
+    let health;
+    await act(async () => {
+      health = await result.current.checkBackendConnection("openai");
+    });
+
+    expect(health).toMatchObject({ providerId: "openai", outcome: "unsupported" });
+    expect(result.current.backendStatus).toMatch(/preview.*synthetic/i);
   });
 });
 

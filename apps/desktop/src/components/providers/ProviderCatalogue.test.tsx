@@ -172,7 +172,7 @@ describe("ProviderCatalogue", () => {
     expect(within(dialog).getByLabelText("API key for openai / chatgpt")).toBeInTheDocument();
   });
 
-  it("hands an API key directly to verification and clears the uncontrolled field", async () => {
+  it("adds an API-key provider through verification and clears the uncontrolled field", async () => {
     const user = userEvent.setup();
     const { onConnect } = renderCatalogue();
     await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
@@ -241,6 +241,97 @@ describe("ProviderCatalogue", () => {
       )
     ).toBeInTheDocument();
     expect(within(dialog).queryByText("This connection is ready.")).toBeNull();
+  });
+
+  it("checks provider health and reports a verified connection", async () => {
+    const user = userEvent.setup();
+    const onCheckConnection = vi.fn(async (providerId: string) => ({
+      providerId,
+      outcome: "ready" as const
+    }));
+    render(
+      <ProviderCatalogue
+        providers={[provider("openai", "OpenAI", "native-api", "connected")]}
+        connectedBackendIds={["openai"]}
+        onConnect={async (providerId) => ({ providerId, outcome: "ready" })}
+        onCheckConnection={onCheckConnection}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, Configured/ }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Check health" }));
+
+    expect(onCheckConnection).toHaveBeenCalledWith("openai");
+    expect(within(dialog).getByText("Connected and verified.")).toBeInTheDocument();
+  });
+
+  it("reconnects a configured provider by replacing and re-verifying its key", async () => {
+    const user = userEvent.setup();
+    const onConnect = vi.fn(async (providerId: string) => ({ providerId, outcome: "ready" as const }));
+    render(
+      <ProviderCatalogue
+        providers={[provider("openai", "OpenAI", "native-api", "connected")]}
+        connectedBackendIds={["openai"]}
+        onConnect={onConnect}
+        onDisconnect={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, Configured/ }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Replace key" }));
+    await user.type(within(dialog).getByLabelText("API key for openai / chatgpt"), "sk-replacement");
+    await user.click(within(dialog).getByRole("button", { name: "Replace key & reconnect" }));
+
+    expect(onConnect).toHaveBeenCalledWith("openai", "sk-replacement");
+    expect(within(dialog).getByText("Connected and verified.")).toBeInTheDocument();
+  });
+
+  it("treats a revoked or expired key as disconnected after a health check", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProviderCatalogue
+        providers={[provider("openai", "OpenAI", "native-api", "connected")]}
+        connectedBackendIds={["openai"]}
+        onConnect={async (providerId) => ({ providerId, outcome: "ready" })}
+        onCheckConnection={async (providerId) => ({ providerId, outcome: "auth-failed" })}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, Configured/ }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Check health" }));
+
+    expect(within(dialog).getByText(/rejected or has expired/i)).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Add key & connect" })).toBeInTheDocument();
+  });
+
+  it("removes a local key only after explaining provider-side revocation", async () => {
+    const user = userEvent.setup();
+    const onDisconnect = vi.fn(async () => {});
+    render(
+      <ProviderCatalogue
+        providers={[provider("openai", "OpenAI", "native-api", "connected")]}
+        connectedBackendIds={["openai"]}
+        onConnect={async (providerId) => ({ providerId, outcome: "ready" })}
+        onDisconnect={onDisconnect}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, Configured/ }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
+    await user.click(within(dialog).getByRole("button", { name: "Remove from Fable" }));
+    expect(within(dialog).getByText(/does not revoke the key at the provider/i)).toBeInTheDocument();
+    expect(onDisconnect).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole("button", { name: "Remove key" }));
+    expect(onDisconnect).toHaveBeenCalledWith("openai");
+    expect(await within(dialog).findByText(/Removed from Fable/i)).toBeInTheDocument();
   });
 
   it("does not offer a fake Fable disconnect for provider-owned CLI sessions", async () => {

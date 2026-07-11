@@ -328,8 +328,9 @@ function ProviderAccessView({
           onStatus(`${providerId} model refresh finished. Check the provider status for the result.`);
         }}
         onCheckConnection={async (providerId) => {
-          await runtime.refreshBackendProviders();
+          const result = await runtime.checkBackendConnection(providerId);
           onStatus(`${providerId} connection checked.`);
+          return result;
         }}
         onStatus={onStatus}
       />
