@@ -35,6 +35,7 @@ use chrono::{SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 
 use crate::store::schema::CURRENT_SCHEMA_VERSION;
 use crate::store::vault::Sealed;
@@ -475,40 +476,44 @@ fn open_json_value(store: &Store, sealed: &Sealed, aad: &str) -> Result<Value> {
 fn read_artifact_records(
     conn: &Connection,
     store: &Store,
-    workspace_id: &str,
+    owner: &crate::store::repos::scope::PrivateDataScope,
 ) -> Result<Vec<ArtifactRecord>> {
+    let workspace_id = owner.workspace_id();
     let mut stmt=conn.prepare(
         "SELECT owner_subject,authority,visibility,owner_member_id,owner_internal_user_id,id,run_id,
                 thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,
                 content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce
-         FROM artifact WHERE workspace_id=?1 ORDER BY created_at,id")?;
+         FROM artifact WHERE workspace_id=?1 AND owner_subject=?2 ORDER BY created_at,id")?;
     let rows = stmt
-        .query_map([workspace_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, Option<String>>(7)?,
-                row.get::<_, Option<String>>(8)?,
-                row.get::<_, String>(9)?,
-                row.get::<_, String>(10)?,
-                row.get::<_, i64>(11)?,
-                row.get::<_, String>(12)?,
-                row.get::<_, String>(13)?,
-                row.get::<_, String>(14)?,
-                row.get::<_, i64>(15)?,
-                row.get::<_, String>(16)?,
-                row.get::<_, String>(17)?,
-                Sealed {
-                    ciphertext: row.get(18)?,
-                    nonce: row.get(19)?,
-                },
-            ))
-        })?
+        .query_map(
+            rusqlite::params![workspace_id, owner.owner_subject()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, String>(13)?,
+                    row.get::<_, String>(14)?,
+                    row.get::<_, i64>(15)?,
+                    row.get::<_, String>(16)?,
+                    row.get::<_, String>(17)?,
+                    Sealed {
+                        ciphertext: row.get(18)?,
+                        nonce: row.get(19)?,
+                    },
+                ))
+            },
+        )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut output = Vec::new();
     for (
@@ -636,7 +641,12 @@ pub fn export_workspace_for(store: &Store, workspace_id: &str) -> Result<Manifes
                     .into(),
             ));
         }
-        read_sections(conn, store, scope.workspace_id())
+        let artifact_owner=crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(conn)
+            .ok().filter(|context|context.active_workspace.local_workspace_id==scope.workspace_id())
+            .map(|context|crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+                scope.clone(),&context.internal_user_id,context.member_id.as_deref()))
+            .transpose()?;
+        read_sections(conn, store, scope.workspace_id(),artifact_owner.as_ref())
     })?;
     validate_integrity(&sections)?;
     validate_no_secrets(&sections)?;
@@ -652,7 +662,12 @@ pub fn export_workspace_for(store: &Store, workspace_id: &str) -> Result<Manifes
     })
 }
 
-fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result<Sections> {
+fn read_sections(
+    conn: &Connection,
+    store: &Store,
+    workspace_id: &str,
+    artifact_owner: Option<&crate::store::repos::scope::PrivateDataScope>,
+) -> Result<Sections> {
     // profile (singleton id=1)
     let profile = if workspace_id == crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
         read_profile(conn, store)?
@@ -852,7 +867,10 @@ fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result
 
     // Artifact workspace authority comes directly from the durable artifact
     // row/run workspace, so projectless threads are included.
-    let artifacts = read_artifact_records(conn, store, &workspace_id)?;
+    let artifacts = artifact_owner
+        .map(|owner| read_artifact_records(conn, store, owner))
+        .transpose()?
+        .unwrap_or_default();
 
     // connector_account — credential_ref is intentionally NOT selected.
     let connector_accounts = read_rows(
@@ -1606,6 +1624,287 @@ fn migrate_manifest(
     Ok(())
 }
 
+fn invalid_artifact(message: &str) -> StoreError {
+    StoreError::Invalid(format!("Portable artifact is not canonical: {message}."))
+}
+
+fn validate_portable_artifact(
+    tx: &Connection,
+    store: &Store,
+    workspace_id: &str,
+    owner: &crate::store::repos::scope::PrivateDataScope,
+    acting_internal_user_id: &str,
+    r: &ArtifactRecord,
+) -> Result<()> {
+    let artifact = r
+        .payload
+        .as_object()
+        .ok_or_else(|| invalid_artifact("artifact payload is malformed"))?;
+    let exact_str =
+        |key: &str, expected: &str| artifact.get(key).and_then(Value::as_str) == Some(expected);
+    if !exact_str("id", &r.id)
+        || !exact_str("workspaceId", workspace_id)
+        || !exact_str("authority", "local")
+        || !exact_str("visibility", "member-private")
+        || !exact_str("kind", &r.kind)
+        || !exact_str("status", &r.status)
+        || !exact_str("createdAt", &r.created_at)
+        || !exact_str("updatedAt", &r.updated_at)
+        || artifact.get("schemaVersion").and_then(Value::as_i64) != Some(1)
+        || artifact
+            .get("createdByInternalUserId")
+            .and_then(Value::as_str)
+            != Some(acting_internal_user_id)
+        || artifact.get("revision").and_then(Value::as_i64) != Some(r.revision)
+        || !exact_str("currentVersionId", &r.current_version_id)
+        || artifact.get("producingRunId").and_then(Value::as_str) != r.run_id.as_deref()
+        || r.payload
+            .pointer("/context/threadId")
+            .and_then(Value::as_str)
+            != r.thread_id.as_deref()
+    {
+        return Err(invalid_artifact(
+            "wrapper and artifact identity or scope differ",
+        ));
+    }
+    let owner_exact = match owner.owner_member_id() {
+        Some(member) => {
+            artifact.get("ownerMemberId").and_then(Value::as_str) == Some(member)
+                && artifact.get("ownerInternalUserId").is_none()
+        }
+        None => {
+            artifact.get("ownerInternalUserId").and_then(Value::as_str)
+                == owner.owner_internal_user_id()
+                && artifact.get("ownerMemberId").is_none()
+        }
+    };
+    if !owner_exact {
+        return Err(invalid_artifact("payload owner differs from active owner"));
+    }
+    let title = artifact
+        .get("title")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_artifact("title is missing"))?;
+    if title.is_empty()
+        || title.chars().count() > 256
+        || format!("{:x}", Sha256::digest(title.as_bytes())) != r.title_fingerprint
+    {
+        return Err(invalid_artifact("title or title hash differs"));
+    }
+    if artifact
+        .get("reviews")
+        .and_then(Value::as_array)
+        .is_some_and(|v| !v.is_empty())
+        || artifact.get("publication").is_some_and(|v| !v.is_null())
+    {
+        return Err(invalid_artifact(
+            "review or publication claims cannot be revalidated",
+        ));
+    }
+    if r.payload
+        .pointer("/retention/status")
+        .and_then(Value::as_str)
+        != Some("active")
+    {
+        return Err(invalid_artifact("retention is not active"));
+    }
+    let run_id = r
+        .run_id
+        .as_deref()
+        .ok_or_else(|| invalid_artifact("producing run is missing"))?;
+    let thread_id = r
+        .thread_id
+        .as_deref()
+        .ok_or_else(|| invalid_artifact("thread is missing"))?;
+    let message_id = r
+        .source_message_id
+        .as_deref()
+        .ok_or_else(|| invalid_artifact("source message is missing"))?;
+    let thread:(Option<String>,Option<String>)=tx.query_row(
+        "SELECT project_id,owner_member_id FROM thread WHERE id=?1 AND workspace_id=?2 AND deleted_at IS NULL",
+        rusqlite::params![thread_id,workspace_id],|row|Ok((row.get(0)?,row.get(1)?)))
+        .optional()?.ok_or_else(||invalid_artifact("thread is not native in the target workspace"))?;
+    if thread.1.as_deref() != owner.owner_member_id()
+        || r.payload
+            .pointer("/context/projectId")
+            .and_then(Value::as_str)
+            != thread.0.as_deref()
+    {
+        return Err(invalid_artifact("thread owner or project scope differs"));
+    }
+    let run_ok:bool=tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND workspace_id=?2 AND thread_id=?3 AND status='completed')",
+        rusqlite::params![run_id,workspace_id,thread_id],|row|row.get(0))?;
+    if !run_ok {
+        return Err(invalid_artifact(
+            "completed producing run is not native in the target thread",
+        ));
+    }
+    let revision = tx
+        .query_row(
+            "SELECT m.current_revision_id,r.payload,r.payload_nonce FROM message m
+         JOIN message_revision r ON r.id=m.current_revision_id
+         WHERE m.id=?1 AND m.workspace_id=?2 AND m.thread_id=?3 AND m.run_id=?4
+           AND m.kind='assistant' AND m.current_revision_state='terminal' AND m.deleted_at IS NULL",
+            rusqlite::params![message_id, workspace_id, thread_id, run_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Sealed {
+                        ciphertext: row.get(1)?,
+                        nonce: row.get(2)?,
+                    },
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| invalid_artifact("terminal assistant source message is not native"))?;
+    if r.versions.is_empty() || r.revision != r.versions.len() as i64 {
+        return Err(invalid_artifact(
+            "revision does not equal immutable history length",
+        ));
+    }
+    let mut previous_id: Option<&str> = None;
+    let mut version_ids = std::collections::HashSet::new();
+    for (index, version) in r.versions.iter().enumerate() {
+        let payload = version
+            .payload
+            .as_object()
+            .ok_or_else(|| invalid_artifact("version payload is malformed"))?;
+        let expected_number = index as i64 + 1;
+        if payload.get("id").and_then(Value::as_str) != Some(version.id.as_str())
+            || payload.get("artifactId").and_then(Value::as_str) != Some(r.id.as_str())
+            || payload.get("version").and_then(Value::as_i64) != Some(expected_number)
+            || payload.get("status").and_then(Value::as_str) != Some("available")
+            || version.artifact_id != r.id
+            || version.version != expected_number
+            || version.status != "available"
+            || payload.get("createdAt").and_then(Value::as_str) != Some(version.created_at.as_str())
+        {
+            return Err(invalid_artifact("version wrapper and payload differ"));
+        }
+        if !version_ids.insert(version.id.as_str()) {
+            return Err(invalid_artifact("version id is duplicated"));
+        }
+        if payload
+            .get("createdByInternalUserId")
+            .and_then(Value::as_str)
+            != Some(acting_internal_user_id)
+        {
+            return Err(invalid_artifact("version actor differs from active owner"));
+        }
+        let text = version
+            .payload
+            .pointer("/content/text")
+            .and_then(Value::as_str)
+            .filter(|_| {
+                version
+                    .payload
+                    .pointer("/content/kind")
+                    .and_then(Value::as_str)
+                    == Some("inline")
+            })
+            .ok_or_else(|| invalid_artifact("version content is not bounded inline text"))?;
+        if text.is_empty() || text.as_bytes().len() > 65_536 {
+            return Err(invalid_artifact("inline content is out of bounds"));
+        }
+        let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+        let media = serde_json::json!({"mediaType":"text/markdown","byteLength":text.len(),"encoding":"utf-8"});
+        let content_hash = serde_json::json!({"algorithm":"sha-256","value":hash});
+        if version.content_fingerprint != hash
+            || version.size_bytes != text.len() as i64
+            || payload.get("media") != Some(&media)
+            || version.payload.pointer("/content/media") != Some(&media)
+            || payload.get("contentHash") != Some(&content_hash)
+            || version.payload.pointer("/content/contentHash") != Some(&content_hash)
+        {
+            return Err(invalid_artifact("content bytes, media, and hash differ"));
+        }
+        for evidence in ["citations", "inputs", "decisions"] {
+            if payload
+                .get(evidence)
+                .and_then(Value::as_array)
+                .is_some_and(|v| !v.is_empty())
+            {
+                return Err(invalid_artifact(
+                    "portable evidence claims are not independently verifiable",
+                ));
+            }
+        }
+        let provenance = payload
+            .get("provenance")
+            .and_then(Value::as_object)
+            .ok_or_else(|| invalid_artifact("version provenance is missing"))?;
+        let lineage = payload
+            .get("lineage")
+            .and_then(Value::as_array)
+            .ok_or_else(|| invalid_artifact("version lineage is missing"))?;
+        if index == 0 {
+            if provenance.get("kind").and_then(Value::as_str) != Some("run")
+                || provenance.get("runId").and_then(Value::as_str) != Some(run_id)
+                || provenance.get("observedAt").and_then(Value::as_str)
+                    != Some(version.created_at.as_str())
+                || !lineage.is_empty()
+            {
+                return Err(invalid_artifact(
+                    "first version provenance is not the producing run",
+                ));
+            }
+        } else {
+            let previous = previous_id.unwrap();
+            if provenance.get("kind").and_then(Value::as_str) != Some("artifact-version")
+                || provenance
+                    .get("sourceArtifactVersionId")
+                    .and_then(Value::as_str)
+                    != Some(previous)
+                || provenance.get("observedAt").and_then(Value::as_str)
+                    != Some(version.created_at.as_str())
+                || lineage.len() != 1
+                || lineage[0].get("relation").and_then(Value::as_str) != Some("supersedes")
+                || lineage[0].get("artifactId").and_then(Value::as_str) != Some(r.id.as_str())
+                || lineage[0].get("artifactVersionId").and_then(Value::as_str) != Some(previous)
+                || lineage[0].get("recordedAt").and_then(Value::as_str)
+                    != Some(version.created_at.as_str())
+            {
+                return Err(invalid_artifact("supersedes lineage is not exact"));
+            }
+        }
+        previous_id = Some(&version.id);
+    }
+    let current = r.versions.last().unwrap();
+    if current.id != r.current_version_id
+        || current.content_fingerprint != r.content_fingerprint
+        || current.size_bytes != r.size_bytes
+    {
+        return Err(invalid_artifact("current version pointer differs"));
+    }
+    let sources = artifact
+        .get("sourceProvenance")
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_artifact("artifact source provenance is missing"))?;
+    if sources.len() != 1 || sources[0] != r.versions[0].payload["provenance"] {
+        return Err(invalid_artifact(
+            "artifact source provenance differs from version one",
+        ));
+    }
+    let durable = open_json_value(
+        store,
+        &revision.1,
+        &format!("message-revision:{workspace_id}:{}", revision.0),
+    )?;
+    if durable.as_str()
+        != r.versions[0]
+            .payload
+            .pointer("/content/text")
+            .and_then(Value::as_str)
+    {
+        return Err(invalid_artifact(
+            "first version does not match the native source response",
+        ));
+    }
+    Ok(())
+}
+
 fn plan_and_apply(
     tx: &Connection,
     store: &Store,
@@ -1929,15 +2228,16 @@ fn plan_and_apply(
                     "Artifact archive owner does not match the active private owner.".into(),
                 ));
             }
-            let mut artifact_payload = r.payload.clone();
-            if let Some(object) = artifact_payload.as_object_mut() {
-                object.insert(
-                    "workspaceId".into(),
-                    Value::String(workspace_id.to_string()),
-                );
-            }
+            validate_portable_artifact(
+                tx,
+                store,
+                workspace_id,
+                &owner,
+                &context.internal_user_id,
+                r,
+            )?;
             let sealed = store.seal_json_owned(
-                &artifact_payload,
+                &r.payload,
                 &format!("artifact:{workspace_id}:{}:{}", owner.owner_subject(), r.id),
             )?;
             tx.execute(
@@ -2727,22 +3027,40 @@ mod tests {
         }).unwrap();
     }
 
+    fn seed_native_artifact_source(store: &Store) {
+        store.transaction(|tx|{
+            let thread=store.seal_json_owned(&serde_json::json!({}),"thread:artifact-thread")?;
+            tx.execute("INSERT INTO thread(id,workspace_id,title,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-thread','default','T','t','t',?1,?2)",rusqlite::params![thread.ciphertext,thread.nonce])?;
+            let run=store.seal_json_owned(&serde_json::json!({}),"run:artifact-run")?;
+            tx.execute("INSERT INTO run(id,workspace_id,thread_id,provider_id,model,status,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-run','default','artifact-thread','p','m','completed','t','t',?1,?2)",rusqlite::params![run.ciphertext,run.nonce])?;
+            let message=store.seal_json_owned(&serde_json::json!({}),"message:artifact-message")?;
+            let revision=store.seal_json_owned(&serde_json::json!("One"),"message-revision:default:artifact-revision")?;
+            tx.execute("INSERT INTO message(id,workspace_id,thread_id,kind,run_id,seq,idempotency_key,current_revision_id,current_revision_state,created_at,payload,payload_nonce) VALUES ('artifact-message','default','artifact-thread','assistant','artifact-run',1,'artifact-message','artifact-revision','terminal','t',?1,?2)",rusqlite::params![message.ciphertext,message.nonce])?;
+            tx.execute("INSERT INTO message_revision(id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,run_id,created_at,payload,payload_nonce) VALUES ('artifact-revision','default','artifact-thread','artifact-message',1,0,'terminal','initial','artifact-revision','t','artifact-run','t',?1,?2)",rusqlite::params![revision.ciphertext,revision.nonce])?;
+            Ok(())
+        }).unwrap();
+    }
+
     #[test]
     fn projectless_artifact_exports_all_versions_and_round_trips_for_exact_owner() {
         let source = store();
         bind_local_user(&source);
+        seed_native_artifact_source(&source);
         source.transaction(|tx|{
-            let thread=source.seal_json_owned(&serde_json::json!({}),"thread:artifact-thread")?;
-            tx.execute("INSERT INTO thread(id,workspace_id,title,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-thread','default','T','t','t',?1,?2)",rusqlite::params![thread.ciphertext,thread.nonce])?;
-            let run=source.seal_json_owned(&serde_json::json!({}),"run:artifact-run")?;
-            tx.execute("INSERT INTO run(id,workspace_id,thread_id,provider_id,model,status,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-run','default','artifact-thread','p','m','completed','t','t',?1,?2)",rusqlite::params![run.ciphertext,run.nonce])?;
-            let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerInternalUserId":"user-local","revision":2,"title":"Artifact","currentVersionId":"artifact-1:v2"});
+            let run_provenance=serde_json::json!({"kind":"run","runId":"artifact-run","observedAt":"t"});
+            let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerInternalUserId":"user-local","schemaVersion":1,"revision":2,"createdByInternalUserId":"user-local","createdAt":"t","updatedAt":"t2","kind":"document","status":"draft","title":"Artifact","currentVersionId":"artifact-1:v2","producingRunId":"artifact-run","sourceProvenance":[run_provenance],"context":{"threadId":"artifact-thread"},"reviews":[],"retention":{"status":"active"}});
             let artifact=source.seal_json_owned(&artifact_payload,"artifact:default:user:user-local:artifact-1")?;
-            tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_internal_user_id,id,run_id,thread_id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('default','user:user-local','local','member-private','user-local','artifact-1','artifact-run','artifact-thread','document','draft',2,'artifact-1:v2','title','hash-2',3,'t','t2',?1,?2)",rusqlite::params![artifact.ciphertext,artifact.nonce])?;
+            let title_hash=format!("{:x}",Sha256::digest(b"Artifact"));
+            let current_hash=format!("{:x}",Sha256::digest(b"Two"));
+            tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_internal_user_id,id,run_id,thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('default','user:user-local','local','member-private','user-local','artifact-1','artifact-run','artifact-thread','artifact-message','document','draft',2,'artifact-1:v2',?1,?2,3,'t','t2',?3,?4)",rusqlite::params![title_hash,current_hash,artifact.ciphertext,artifact.nonce])?;
             for (id,version,text) in [("artifact-1:v1",1,"One"),("artifact-1:v2",2,"Two")] {
-                let payload=serde_json::json!({"id":id,"artifactId":"artifact-1","version":version,"content":{"kind":"inline","text":text}});
+                let hash=format!("{:x}",Sha256::digest(text.as_bytes()));
+                let media=serde_json::json!({"mediaType":"text/markdown","byteLength":text.len(),"encoding":"utf-8"});
+                let content_hash=serde_json::json!({"algorithm":"sha-256","value":hash});
+                let (created,provenance,lineage)=if version==1 {("t",run_provenance.clone(),serde_json::json!([]))} else {("t2",serde_json::json!({"kind":"artifact-version","sourceArtifactVersionId":"artifact-1:v1","observedAt":"t2"}),serde_json::json!([{"relation":"supersedes","artifactId":"artifact-1","artifactVersionId":"artifact-1:v1","recordedAt":"t2"}]))};
+                let payload=serde_json::json!({"id":id,"artifactId":"artifact-1","version":version,"status":"available","createdAt":created,"createdByInternalUserId":"user-local","content":{"kind":"inline","text":text,"media":media,"contentHash":content_hash},"media":media,"contentHash":content_hash,"provenance":provenance,"citations":[],"inputs":[],"decisions":[],"lineage":lineage});
                 let sealed=source.seal_json_owned(&payload,&format!("artifact_version:default:user:user-local:artifact-1:{id}"))?;
-                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('default','user:user-local','artifact-1',?1,?2,'available',?3,3,'t',?4,?5)",rusqlite::params![id,version,format!("hash-{version}"),sealed.ciphertext,sealed.nonce])?;
+                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('default','user:user-local','artifact-1',?1,?2,'available',?3,3,?4,?5,?6)",rusqlite::params![id,version,hash,created,sealed.ciphertext,sealed.nonce])?;
             }
             Ok(())
         }).unwrap();
@@ -2756,6 +3074,7 @@ mod tests {
         let json = serde_json::to_string(&manifest).unwrap();
         let destination = store();
         bind_local_user(&destination);
+        seed_native_artifact_source(&destination);
         import_workspace(&destination, &json, ImportOptions::default()).unwrap();
         let roundtrip = export_workspace(&destination).unwrap();
         assert_eq!(roundtrip.sections.artifacts[0].versions.len(), 2);
@@ -2763,6 +3082,86 @@ mod tests {
             roundtrip.sections.artifacts[0].current_version_id,
             "artifact-1:v2"
         );
+
+        let rejects = |bad: Manifest| {
+            let target = store();
+            bind_local_user(&target);
+            seed_native_artifact_source(&target);
+            let encoded = serde_json::to_string(&bad).unwrap();
+            assert!(import_workspace(&target, &encoded, ImportOptions::default()).is_err());
+        };
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].owner_internal_user_id = Some("attacker".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].current_version_id = "artifact-1:forged".into();
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].versions[0].payload["id"] = Value::String("wrong-version".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].versions[1].content_fingerprint = "forged-hash".into();
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].versions[0].payload["citations"] = serde_json::json!([{
+            "id":"forged","source":{"kind":"run","runId":"artifact-run"}
+        }]);
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].versions[0].payload["decisions"] = serde_json::json!([{
+            "id":"forged","kind":"approval","summary":"Forged","decidedAt":"t","approvalId":"missing"
+        }]);
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].thread_id = Some("foreign-thread".into());
+        bad.sections.artifacts[0].payload["context"]["threadId"] =
+            Value::String("foreign-thread".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].source_message_id = Some("foreign-message".into());
+        rejects(bad);
+    }
+
+    #[test]
+    fn artifact_export_is_exactly_active_member_private() {
+        let store = store();
+        store.transaction(|tx|{
+            tx.execute("INSERT INTO fable_workspace_mirror(fable_workspace_id,local_workspace_id,status,revision,policy_revision,updated_at) VALUES ('shared','default','active',1,1,'t')",[])?;
+            for (user,member) in [("user-a","member-a"),("user-b","member-b")] {
+                tx.execute("INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES (?1,'active',1,'t')",[user])?;
+                tx.execute("INSERT INTO fable_membership_mirror(fable_workspace_id,member_id,internal_user_id,role,status,revision,updated_at) VALUES ('shared',?1,?2,'member','active',1,'t')",rusqlite::params![member,user])?;
+            }
+            for (id,member,marker) in [("artifact-a","member-a","A PRIVATE"),("artifact-b","member-b","B PRIVATE")] {
+                let subject=format!("member:{member}");let version_id=format!("{id}:v1");
+                let artifact=store.seal_json_owned(&serde_json::json!({"id":id,"title":marker}),&format!("artifact:default:{subject}:{id}"))?;
+                tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_member_id,id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('default',?1,'local','member-private',?2,?3,'document','draft',1,?4,'title','hash',1,'t','t',?5,?6)",rusqlite::params![subject,member,id,version_id,artifact.ciphertext,artifact.nonce])?;
+                let version=store.seal_json_owned(&serde_json::json!({"id":version_id,"artifactId":id,"version":1,"marker":marker}),&format!("artifact_version:default:{subject}:{id}:{version_id}"))?;
+                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('default',?1,?2,?3,1,'available','hash',1,'t',?4,?5)",rusqlite::params![subject,id,version_id,version.ciphertext,version.nonce])?;
+            }
+            crate::store::repos::workspace_directory::set_current_internal_user(tx,"user-a","t")?;
+            crate::store::repos::workspace_directory::select_active_workspace(tx,"user-a","shared","t")?;
+            Ok(())
+        }).unwrap();
+        let alpha = export_workspace(&store).unwrap();
+        let alpha_json = serde_json::to_string(&alpha.sections.artifacts).unwrap();
+        assert_eq!(alpha.sections.artifacts.len(), 1);
+        assert!(alpha_json.contains("A PRIVATE"));
+        assert!(!alpha_json.contains("B PRIVATE"));
+        store
+            .transaction(|tx| {
+                crate::store::repos::workspace_directory::set_current_internal_user(
+                    tx, "user-b", "t2",
+                )?;
+                crate::store::repos::workspace_directory::select_active_workspace(
+                    tx, "user-b", "shared", "t2",
+                )
+            })
+            .unwrap();
+        let beta = export_workspace(&store).unwrap();
+        let beta_json = serde_json::to_string(&beta.sections.artifacts).unwrap();
+        assert_eq!(beta.sections.artifacts.len(), 1);
+        assert!(beta_json.contains("B PRIVATE"));
+        assert!(!beta_json.contains("A PRIVATE"));
     }
 
     #[test]
