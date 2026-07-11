@@ -48,6 +48,40 @@ function rejection(code: RejectionCode, status: "rejected" | "conflict" = "rejec
   return { status, code, message: "The shared record is unavailable." } as CloudMutationResult;
 }
 
+function backfillRequired(): CloudMutationResult {
+  return { status: "rejected", code: "backfill-required", message: "Shared history requires an authorized backfill." } as CloudMutationResult;
+}
+
+export async function requireCompleteSharedHistory(ctx: any, workspace: any, afterRevision = 0) {
+  const workspaceId = workspace.workspaceId;
+  const workspaceRevision = workspace.revision;
+  if ((workspace.sharedHistoryRevision ?? 0) !== workspaceRevision || workspaceRevision - afterRevision > 10_000) {
+    throw new Error("shared-history-backfill-required");
+  }
+  const rows = await ctx.db.query("shared_record_changes")
+    .withIndex("by_workspace_revision", (q: any) => q.eq("workspaceId", workspaceId).gt("revision", afterRevision))
+    .collect();
+  const ordered = rows.slice().sort((a: any, b: any) => a.revision - b.revision);
+  const malformed = ordered.some((row: any, index: number) => {
+    const expectedRevision = afterRevision + index + 1;
+    if (row.workspaceId !== workspaceId || row.recordType !== "project" || row.revision !== expectedRevision) return true;
+    if (row.change?.kind === "record") {
+      const record = row.change.record;
+      return row.recordId !== record?.id || record?.workspaceId !== workspaceId || record?.authority !== "convex" ||
+        record?.visibility !== "workspace-shared" || record?.schemaVersion !== 1 || record?.lifecycle !== "active" ||
+        record?.revision !== row.revision || record?.workspaceRevision !== row.revision;
+    }
+    const tombstone = row.change?.tombstone;
+    return row.change?.kind !== "tombstone" || row.recordId !== tombstone?.recordId ||
+      tombstone?.workspaceId !== workspaceId || tombstone?.recordType !== "project" ||
+      tombstone?.revision !== row.revision || !tombstone?.actorMemberId;
+  });
+  if (ordered.length !== workspaceRevision - afterRevision || malformed) {
+    throw new Error("shared-history-backfill-required");
+  }
+  return ordered;
+}
+
 export function replayedMutation(replay: { intentFingerprint: string; result: CloudMutationResult } | null, fingerprint: string) {
   if (!replay) return null;
   return replay.intentFingerprint === fingerprint ? replay.result : rejection("idempotency-conflict");
@@ -84,7 +118,7 @@ function stableJson(value: any): string {
   return JSON.stringify(value);
 }
 
-async function computedFingerprint(args: any, payload: any) {
+export async function computedFingerprint(args: any, payload: any) {
   const canonical = stableJson({
     workspaceId: args.workspaceId, deviceId: args.deviceId, clientMutationId: args.clientMutationId,
     baseRevision: args.baseRevision, recordType: args.recordType, recordId: args.recordId,
@@ -112,11 +146,17 @@ export const applyOutboxMutation = mutationGeneric({
     let authz: any;
     try {
       authz = await requireActiveDevice(ctx, args.workspaceId, args.deviceId);
-      if (authz.membership.role === "viewer") return await store(ctx, args, rejection("permission-denied"), now, authz);
+      if (authz.membership.role === "viewer") return rejection("permission-denied");
     } catch (error) {
       const message = error instanceof Error ? error.message.toLowerCase() : "";
       const code = message.includes("membership") ? "membership-inactive" : message.includes("device") ? "device-inactive" : "permission-denied";
       return rejection(code);
+    }
+    try {
+      await requireCompleteSharedHistory(ctx, authz.workspace, authz.workspace.revision);
+    } catch (error) {
+      if (error instanceof Error && error.message === "shared-history-backfill-required") return backfillRequired();
+      throw error;
     }
     let payload: any;
     try {
@@ -178,7 +218,16 @@ export const applyOutboxMutation = mutationGeneric({
       });
       result = { status: "accepted", workspaceRevision: revision, tombstone: projectTombstone(await ctx.db.get(tombstoneId)) };
     }
-    await ctx.db.patch(workspace._id, { revision, updatedAt: now });
+    const change = result.status === "accepted" && "record" in result
+      ? { kind: "record", record: result.record }
+      : result.status === "accepted" && "tombstone" in result
+        ? { kind: "tombstone", tombstone: result.tombstone }
+        : null;
+    if (!change) throw new Error("Accepted shared mutation omitted its canonical change.");
+    await ctx.db.insert("shared_record_changes", {
+      workspaceId: args.workspaceId, revision, recordType: "project", recordId: args.recordId, change, createdAt: now
+    });
+    await ctx.db.patch(workspace._id, { revision, sharedHistoryRevision: revision, updatedAt: now });
     return store(ctx, args, result, now, authz);
   }
 });

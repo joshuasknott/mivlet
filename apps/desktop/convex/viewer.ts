@@ -2,7 +2,7 @@ import { queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import type { CloudWorkspaceDelta, CloudWorkspaceDeltaChange } from "@fable/protocol";
 import { requireActiveMembership } from "./authorization";
-import { projectRecord, projectTombstone } from "./mutations";
+import { projectRecord, projectTombstone, requireCompleteSharedHistory } from "./mutations";
 
 export function workspaceDelta(
   workspaceId: string,
@@ -44,13 +44,16 @@ export const getWorkspaceDelta = queryGeneric({
   args: { workspaceId: v.string(), afterRevision: v.number() },
   handler: async (ctx, args) => {
     const { workspace } = await requireActiveMembership(ctx, args.workspaceId);
-    const projects = await ctx.db.query("shared_projects")
-      .withIndex("by_workspace_revision", (q: any) => q.eq("workspaceId", args.workspaceId).gt("revision", args.afterRevision))
-      .collect();
-    const tombstones = await ctx.db.query("tombstones")
-      .withIndex("by_workspace_revision", (q: any) => q.eq("workspaceId", args.workspaceId).gt("revision", args.afterRevision))
-      .collect();
-    return workspaceDelta(args.workspaceId, args.afterRevision, workspace.revision, projects, tombstones);
+    if (!Number.isInteger(args.afterRevision) || args.afterRevision < 0 || args.afterRevision > workspace.revision) {
+      throw new Error("The shared workspace cursor is unavailable.");
+    }
+    const history = await requireCompleteSharedHistory(ctx, workspace, args.afterRevision);
+    return {
+      workspaceId: args.workspaceId,
+      afterRevision: args.afterRevision,
+      workspaceRevision: workspace.revision,
+      changes: history.filter((row: any) => row.revision > args.afterRevision).map((row: any) => row.change)
+    } as CloudWorkspaceDelta;
   }
 });
 

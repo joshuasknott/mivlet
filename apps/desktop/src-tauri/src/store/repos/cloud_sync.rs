@@ -871,6 +871,7 @@ pub fn settle_mutation(
             record,
         } => {
             validate_accepted_project(&outbox, workspace_revision, &record)?;
+            reject_durable_tombstone(tx, &outbox.local_workspace_id, &record.id)?;
             project::upsert_shared_mirror(
                 tx,
                 store,
@@ -1151,6 +1152,7 @@ pub fn apply_workspace_delta(
                     "Cloud workspace record would resurrect a tombstone.".into(),
                 ));
             }
+            reject_durable_tombstone(tx, local_workspace_id, &record.id)?;
         }
     }
     // Deletes are applied first so a later failure can never expose stale content;
@@ -1231,6 +1233,24 @@ pub fn apply_workspace_delta(
     tx.execute("UPDATE cloud_workspace_link SET last_accepted_revision=MAX(last_accepted_revision,?1),updated_at=?2
         WHERE local_workspace_id=?3;", rusqlite::params![delta.workspace_revision,now,local_workspace_id])?;
     Ok(delta.workspace_revision)
+}
+
+fn reject_durable_tombstone(
+    tx: &Connection,
+    local_workspace_id: &str,
+    record_id: &str,
+) -> Result<()> {
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM cloud_record_tombstone WHERE local_workspace_id=?1 AND record_type='project' AND record_id=?2);",
+        rusqlite::params![local_workspace_id, record_id],
+        |row| row.get(0),
+    )?;
+    if exists {
+        return Err(StoreError::Invalid(
+            "Cloud workspace record would resurrect a durable tombstone.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn upsert_delta_shadow(
@@ -1437,6 +1457,40 @@ mod tests {
             record_id: "project-a".into(),
             operation: "update".into(),
             payload: serde_json::json!({ "title": "Launch" }),
+        }
+    }
+
+    fn accepted_record(revision: i64) -> AcceptedSharedProject {
+        AcceptedSharedProject {
+            id: "project-a".into(),
+            workspace_id: "fable-ws".into(),
+            authority: "convex".into(),
+            visibility: "workspace-shared".into(),
+            schema_version: 1,
+            revision,
+            workspace_revision: revision,
+            created_by_internal_user_id: "user-a".into(),
+            created_by_device_id: "device-a".into(),
+            created_at: "t0".into(),
+            updated_at: "t1".into(),
+            title: "Shared".into(),
+            description: None,
+            instructions: None,
+            lifecycle: "active".into(),
+        }
+    }
+
+    fn accepted_tombstone(revision: i64) -> AcceptedSharedTombstone {
+        AcceptedSharedTombstone {
+            workspace_id: "fable-ws".into(),
+            record_type: "project".into(),
+            record_id: "project-a".into(),
+            revision,
+            deleted_at: "t1".into(),
+            actor_internal_user_id: "user-a".into(),
+            actor_member_id: "member-a".into(),
+            actor_device_id: "device-a".into(),
+            reason_class: "user-delete".into(),
         }
     }
 
@@ -1849,5 +1903,82 @@ mod tests {
             .with_conn(|conn| get_outbox(conn, &store, "local-project"))
             .unwrap_err();
         assert!(matches!(error, StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn durable_tombstone_blocks_later_batch_and_settlement_resurrection() {
+        let store = store();
+        store
+            .transaction(|tx| upsert_link(tx, &link(), "t0"))
+            .unwrap();
+        let deletion = WorkspaceDelta {
+            workspace_id: "fable-ws".into(),
+            after_revision: 3,
+            workspace_revision: 4,
+            changes: vec![DeltaChange::Tombstone {
+                tombstone: accepted_tombstone(4),
+            }],
+        };
+        store
+            .transaction(|tx| apply_workspace_delta(tx, &store, "default", &deletion, "t1"))
+            .unwrap();
+        let resurrection = WorkspaceDelta {
+            workspace_id: "fable-ws".into(),
+            after_revision: 4,
+            workspace_revision: 5,
+            changes: vec![DeltaChange::Record {
+                record: accepted_record(5),
+            }],
+        };
+        store
+            .transaction(|tx| apply_workspace_delta(tx, &store, "default", &resurrection, "t2"))
+            .unwrap_err();
+        assert_eq!(
+            store
+                .with_conn(|tx| get_cursor(tx, "default", "device-a"))
+                .unwrap()
+                .unwrap()
+                .last_pulled_revision,
+            4
+        );
+        let count: i64 = store
+            .with_conn(|tx| {
+                tx.query_row(
+                    "SELECT COUNT(*) FROM project WHERE id='project-a';",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+
+        let mut input = mutation("project");
+        input.base_revision = 4;
+        store
+            .transaction(|tx| enqueue_mutation(tx, &store, &input, "t2"))
+            .unwrap();
+        store
+            .transaction(|tx| {
+                settle_mutation(
+                    tx,
+                    &store,
+                    "local-project",
+                    Settlement::Record {
+                        workspace_revision: 5,
+                        record: accepted_record(5),
+                    },
+                    "t3",
+                )
+            })
+            .unwrap_err();
+        assert_eq!(
+            store
+                .with_conn(|tx| get_outbox(tx, &store, "local-project"))
+                .unwrap()
+                .unwrap()
+                .status,
+            "pending"
+        );
     }
 }

@@ -175,6 +175,7 @@ fn valid_rejection_code(status: &str, code: &str) -> bool {
         "device-inactive",
         "stale-revision",
         "idempotency-conflict",
+        "backfill-required",
         "conflict",
     ];
     matches!(status, "rejected" | "conflict") && allowed.contains(&code)
@@ -214,6 +215,28 @@ fn reauthorize_sync(
     Ok(current)
 }
 
+fn guard_sync_transaction(
+    tx: &rusqlite::Connection,
+    expected: &repo::CloudWorkspaceLink,
+) -> crate::store::Result<()> {
+    let context = workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+    let current = repo::get_link(tx, &expected.local_workspace_id)?.ok_or_else(|| {
+        crate::store::StoreError::Invalid("The cloud link became unavailable.".into())
+    })?;
+    if context.active_workspace.local_workspace_id != expected.local_workspace_id
+        || context.active_workspace.fable_workspace_id.as_deref()
+            != Some(&expected.fable_workspace_id)
+        || context.internal_user_id != expected.internal_user_id
+        || context.member_id.as_deref() != Some(&expected.member_id)
+        || !same_sync_authority(expected, &current)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "The signed-in cloud workspace changed during synchronization.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn settlement_from_hosted(result: HostedMutationResult) -> Result<repo::Settlement, String> {
     match result {
         HostedMutationResult::Accepted {
@@ -248,6 +271,9 @@ fn settlement_from_hosted(result: HostedMutationResult) -> Result<repo::Settleme
         } => {
             if !valid_rejection_code("rejected", &code) {
                 return Err("The hosted mutation rejection is invalid.".into());
+            }
+            if code == "backfill-required" {
+                return Err("Shared history requires an authorized backfill; the queued change remains pending.".into());
             }
             if let Some(record) = current_record.as_ref() {
                 validate_hosted_record(record)?;
@@ -365,7 +391,10 @@ pub fn cloud_sync_enqueue_shared_mutation(
         payload: request.payload,
     };
     store
-        .transaction(|tx| repo::enqueue_mutation(tx, store, &input, &now()))
+        .transaction(|tx| {
+            guard_sync_transaction(tx, &_link)?;
+            repo::enqueue_mutation(tx, store, &input, &now())
+        })
         .map_err(|error| error.to_string())
 }
 
@@ -420,7 +449,10 @@ pub async fn cloud_sync_flush_outbox(workspace_id: String) -> Result<CloudSyncFl
             let mut remaining = queued.len();
             for row in queued {
                 store
-                    .transaction(|tx| repo::mark_attempt(tx, &row.local_mutation_id, &now()))
+                    .transaction(|tx| {
+                        guard_sync_transaction(tx, &link)?;
+                        repo::mark_attempt(tx, &row.local_mutation_id, &now())
+                    })
                     .map_err(|error| error.to_string())?;
                 let mut args = json!({
                     "workspaceId": link.fable_workspace_id,
@@ -453,6 +485,7 @@ pub async fn cloud_sync_flush_outbox(workspace_id: String) -> Result<CloudSyncFl
                 let settlement = settlement_from_hosted(result)?;
                 let settled = store
                     .transaction(|tx| {
+                        guard_sync_transaction(tx, &link)?;
                         repo::settle_mutation(tx, store, &row.local_mutation_id, settlement, &now())
                     })
                     .map_err(|error| error.to_string())?;
@@ -535,7 +568,10 @@ pub async fn cloud_sync_pull_after_cursor(
     let delta: repo::WorkspaceDelta = serde_json::from_value(value)
         .map_err(|_| "The hosted workspace delta is malformed.".to_string())?;
     let revision = store
-        .transaction(|tx| repo::apply_workspace_delta(tx, store, &workspace_id, &delta, &now()))
+        .transaction(|tx| {
+            guard_sync_transaction(tx, &link)?;
+            repo::apply_workspace_delta(tx, store, &workspace_id, &delta, &now())
+        })
         .map_err(|error| error.to_string())?;
     Ok(CloudSyncPullResult {
         phase: "synced".into(),
@@ -547,6 +583,60 @@ pub async fn cloud_sync_pull_after_cursor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+
+    fn guarded_store() -> (Store, repo::CloudWorkspaceLink) {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        store
+            .transaction(|tx| {
+                workspace_directory::upsert_authoritative_summary(
+                    tx,
+                    &workspace_directory::WorkspaceDirectoryUpsert {
+                        internal_user_id: "user-a".into(),
+                        fable_workspace_id: "fable-ws".into(),
+                        name: "Shared".into(),
+                        workspace_status: "active".into(),
+                        workspace_revision: 1,
+                        policy_revision: 1,
+                        member_id: "member-a".into(),
+                        role: "editor".into(),
+                        membership_status: "active".into(),
+                        membership_revision: 1,
+                        updated_at: "t0".into(),
+                    },
+                )?;
+                workspace_directory::set_current_internal_user(tx, "user-a", "t0")?;
+                let selection =
+                    workspace_directory::select_active_workspace(tx, "user-a", "fable-ws", "t0")?;
+                repo::upsert_link(
+                    tx,
+                    &repo::LinkWorkspaceInput {
+                        local_workspace_id: selection.local_workspace_id,
+                        fable_workspace_id: "fable-ws".into(),
+                        internal_user_id: "user-a".into(),
+                        member_id: "member-a".into(),
+                        role: "editor".into(),
+                        sync_state: "active".into(),
+                        device_id: "device-a".into(),
+                        last_accepted_revision: 0,
+                    },
+                    "t0",
+                )
+            })
+            .unwrap();
+        let local_workspace_id = store
+            .with_conn(|tx| workspace_directory::list_authoritative_summaries(tx, "user-a"))
+            .unwrap()
+            .remove(0)
+            .local_workspace_id;
+        let link = store
+            .with_conn(|tx| repo::get_link(tx, &local_workspace_id))
+            .unwrap()
+            .unwrap();
+        (store, link)
+    }
 
     #[test]
     fn missing_config_keeps_cloud_sync_disabled() {
@@ -591,6 +681,11 @@ mod tests {
         assert!(valid_rejection_code("conflict", "stale-revision"));
         assert!(!valid_rejection_code("rejected", "server-error"));
         assert!(!valid_rejection_code("accepted", "conflict"));
+        let blocked: HostedMutationResult = serde_json::from_value(json!({
+            "status": "rejected", "code": "backfill-required", "message": "opaque"
+        }))
+        .unwrap();
+        assert!(settlement_from_hosted(blocked).is_err());
     }
 
     #[test]
@@ -625,5 +720,108 @@ mod tests {
             }
             assert!(!same_sync_authority(&expected, &current));
         }
+    }
+
+    #[test]
+    fn transaction_guard_blocks_account_switch_before_outbox_write() {
+        let (store, link) = guarded_store();
+        store
+            .transaction(|tx| workspace_directory::clear_current_internal_user(tx))
+            .unwrap();
+        let input = repo::EnqueueMutationInput {
+            local_workspace_id: link.local_workspace_id.clone(),
+            local_mutation_id: "local-a".into(),
+            client_mutation_id: "client-a".into(),
+            base_revision: 0,
+            record_type: "project".into(),
+            record_id: "project-a".into(),
+            operation: "create".into(),
+            payload: json!({ "title": "Plan" }),
+        };
+        store
+            .transaction(|tx| {
+                guard_sync_transaction(tx, &link)?;
+                repo::enqueue_mutation(tx, &store, &input, "t1").map(|_| ())
+            })
+            .unwrap_err();
+        let count: i64 = store
+            .with_conn(|tx| {
+                tx.query_row("SELECT COUNT(*) FROM cloud_mutation_outbox;", [], |row| {
+                    row.get(0)
+                })
+                .map_err(crate::store::StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert_eq!(
+            store
+                .with_conn(|tx| repo::get_cursor(tx, &link.local_workspace_id, "device-a"))
+                .unwrap()
+                .unwrap()
+                .last_pulled_revision,
+            0
+        );
+    }
+
+    #[test]
+    fn transaction_guard_blocks_selection_switch_before_delta_apply() {
+        let (store, link) = guarded_store();
+        store
+            .transaction(|tx| {
+                tx.execute("DELETE FROM active_workspace_selection;", [])
+                    .map(|_| ())
+                    .map_err(crate::store::StoreError::from)
+            })
+            .unwrap();
+        let delta = repo::WorkspaceDelta {
+            workspace_id: "fable-ws".into(),
+            after_revision: 0,
+            workspace_revision: 1,
+            changes: vec![repo::DeltaChange::Record {
+                record: repo::AcceptedSharedProject {
+                    id: "project-a".into(),
+                    workspace_id: "fable-ws".into(),
+                    authority: "convex".into(),
+                    visibility: "workspace-shared".into(),
+                    schema_version: 1,
+                    revision: 1,
+                    workspace_revision: 1,
+                    created_by_internal_user_id: "user-a".into(),
+                    created_by_device_id: "device-a".into(),
+                    created_at: "t0".into(),
+                    updated_at: "t1".into(),
+                    title: "Plan".into(),
+                    description: None,
+                    instructions: None,
+                    lifecycle: "active".into(),
+                },
+            }],
+        };
+        store
+            .transaction(|tx| {
+                guard_sync_transaction(tx, &link)?;
+                repo::apply_workspace_delta(tx, &store, &link.local_workspace_id, &delta, "t1")
+                    .map(|_| ())
+            })
+            .unwrap_err();
+        let mirror_count: i64 = store
+            .with_conn(|tx| {
+                tx.query_row(
+                    "SELECT COUNT(*) FROM project WHERE authority='convex';",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(crate::store::StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(mirror_count, 0);
+        assert_eq!(
+            store
+                .with_conn(|tx| repo::get_cursor(tx, &link.local_workspace_id, "device-a"))
+                .unwrap()
+                .unwrap()
+                .last_pulled_revision,
+            0
+        );
     }
 }
