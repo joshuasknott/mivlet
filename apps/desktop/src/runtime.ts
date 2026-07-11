@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getActiveRuntimeDataScope } from "./runtime-scope";
+import { importLocalTextFile, searchKnowledgeSources } from "@fable/connectors";
 import type { LocalTextFileCandidate } from "@fable/connectors";
 import type {
   ActionHistoryCategory,
@@ -98,6 +99,31 @@ function activeDataScope() {
   return getActiveRuntimeDataScope();
 }
 
+export interface RuntimeKnowledgeScopeOverride {
+  workspaceId: string;
+  projectId: string;
+}
+
+const previewProjectKnowledge = new Map<string, LocalFileImport[]>();
+
+function knowledgeScope(scopeOverride?: RuntimeKnowledgeScopeOverride) {
+  const active = activeDataScope();
+  if (!scopeOverride) return active;
+  const workspaceId = scopeOverride.workspaceId.trim();
+  const projectId = scopeOverride.projectId.trim();
+  if (!workspaceId || !projectId) {
+    throw new Error("Project knowledge requires a workspace and project.");
+  }
+  if (!active || active.workspaceId !== workspaceId) {
+    throw new Error("The active knowledge workspace changed. Refresh and try again.");
+  }
+  return { workspaceId, projectId };
+}
+
+function previewKnowledgeKey(scope: RuntimeKnowledgeScopeOverride) {
+  return `${scope.workspaceId}\u0000${scope.projectId}`;
+}
+
 export async function loadRuntimeApprovalAudit() {
   if (!hasTauriRuntime()) {
     return null;
@@ -143,27 +169,37 @@ export async function resolveRuntimeApprovalRequest(request: ApprovalResolutionR
   }
 }
 
-export async function loadRuntimeImportedKnowledgeSources() {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-
-  const scope = activeDataScope();
+export async function loadRuntimeImportedKnowledgeSources(scopeOverride?: RuntimeKnowledgeScopeOverride) {
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    return scopeOverride ? [...(previewProjectKnowledge.get(previewKnowledgeKey(scopeOverride)) ?? [])] : null;
+  }
 
   try {
     return await invoke<LocalFileImport[]>("list_imported_knowledge_sources", scope);
-  } catch {
+  } catch (error) {
+    if (scopeOverride) throw toRuntimeError(error);
     return null;
   }
 }
 
-export async function saveRuntimeImportedKnowledgeSources(sources: LocalFileImport[]) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+export async function saveRuntimeImportedKnowledgeSources(
+  sources: LocalFileImport[],
+  scopeOverride?: RuntimeKnowledgeScopeOverride
+) {
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const scoped = sources.map((source) => ({
+      ...source,
+      workspaceId: scopeOverride.workspaceId,
+      scope: { level: "project" as const, projectId: scopeOverride.projectId }
+    }));
+    previewProjectKnowledge.set(previewKnowledgeKey(scopeOverride), scoped);
+    return [...scoped];
+  }
 
   try {
     return await invoke<LocalFileImport[]>("save_imported_knowledge_sources", {
@@ -175,12 +211,24 @@ export async function saveRuntimeImportedKnowledgeSources(sources: LocalFileImpo
   }
 }
 
-export async function importRuntimeLocalKnowledgeSource(candidate: LocalTextFileCandidate) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+export async function importRuntimeLocalKnowledgeSource(
+  candidate: LocalTextFileCandidate,
+  scopeOverride?: RuntimeKnowledgeScopeOverride
+) {
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const imported = {
+      ...importLocalTextFile(candidate),
+      workspaceId: scopeOverride.workspaceId,
+      scope: { level: "project" as const, projectId: scopeOverride.projectId }
+    };
+    const key = previewKnowledgeKey(scopeOverride);
+    const current = previewProjectKnowledge.get(key) ?? [];
+    previewProjectKnowledge.set(key, [imported, ...current.filter((source) => source.id !== imported.id)]);
+    return imported;
+  }
 
   try {
     return await invoke<LocalFileImport>("import_local_knowledge_source", {
@@ -195,13 +243,21 @@ export async function importRuntimeLocalKnowledgeSource(candidate: LocalTextFile
 export async function searchRuntimeKnowledgeSources(
   query: string,
   sources: KnowledgeSource[],
-  limit?: number
+  limit?: number,
+  scopeOverride?: RuntimeKnowledgeScopeOverride
 ) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const outsideScope = sources.some((source) =>
+      source.workspaceId !== scopeOverride.workspaceId ||
+      source.scope?.level !== "project" ||
+      source.scope.projectId !== scopeOverride.projectId
+    );
+    if (outsideScope) throw new Error("Knowledge search received a source outside this project.");
+    return searchKnowledgeSources(query, sources, limit);
+  }
 
   try {
     return await invoke<KnowledgeSearchResponse>("search_knowledge_sources", {
@@ -210,7 +266,8 @@ export async function searchRuntimeKnowledgeSources(
       limit,
       ...scope
     });
-  } catch {
+  } catch (error) {
+    if (scopeOverride) throw toRuntimeError(error);
     return null;
   }
 }
