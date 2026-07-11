@@ -902,9 +902,7 @@ function structurallyEqual(left: unknown, right: unknown): boolean {
     leftKeys.every((key, index) => key === rightKeys[index] && structurallyEqual(left[key], right[key]));
 }
 
-const ARTIFACT_REVIEW_STATUS_VALUES = new Set([
-  "requested", "in-review", "approved", "changes-requested", "rejected", "withdrawn"
-]);
+const ARTIFACT_REVIEW_STATUS_VALUES = new Set(["requested", "approved", "changes-requested"]);
 const ARTIFACT_REVIEW_TEXT_MAX_CHARS = 2_000;
 
 function isArtifactReview(value: unknown, artifact: Record<string, unknown>, versions: unknown[]) {
@@ -928,15 +926,21 @@ function isArtifactReview(value: unknown, artifact: Record<string, unknown>, ver
           )))) {
     return false;
   }
-  const resolved = value.status === "approved" || value.status === "changes-requested" ||
-    value.status === "rejected" || value.status === "withdrawn";
+  const resolved = value.status === "approved" || value.status === "changes-requested";
   if (resolved !== (typeof value.resolvedAt === "string")) return false;
-  if (value.acceptance === undefined) return value.status !== "approved";
-  return value.status === "approved" &&
+  if (value.status === "requested") {
+    return value.requestedChanges === undefined && value.acceptance === undefined;
+  }
+  if (value.status === "changes-requested") {
+    if (!Array.isArray(value.requestedChanges) || value.acceptance !== undefined) return false;
+    const normalized = value.requestedChanges.map((entry) => (entry as string).trim());
+    return new Set(normalized).size === normalized.length;
+  }
+  return value.requestedChanges === undefined &&
     isRecord(value.acceptance) &&
-    typeof value.acceptance.acceptedByInternalUserId === "string" &&
-    Boolean(value.acceptance.acceptedByInternalUserId) &&
+    value.acceptance.acceptedByInternalUserId === value.requestedByInternalUserId &&
     typeof value.acceptance.acceptedAt === "string" &&
+    value.acceptance.acceptedAt === value.resolvedAt &&
     !Number.isNaN(Date.parse(value.acceptance.acceptedAt)) &&
     (value.acceptance.note === undefined ||
       (typeof value.acceptance.note === "string" &&

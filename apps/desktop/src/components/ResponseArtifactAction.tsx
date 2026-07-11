@@ -34,6 +34,7 @@ export function ResponseArtifactAction({
   const [changesNeeded, setChangesNeeded] = useState("");
   const changesInputRef = useRef<HTMLTextAreaElement>(null);
   const requestChangesButtonRef = useRef<HTMLButtonElement>(null);
+  const reviewStatusRef = useRef<HTMLSpanElement>(null);
 
   const artifact = existing;
   const sourceCount = artifact?.currentVersion.citations.length ?? citations.length;
@@ -108,7 +109,7 @@ export function ResponseArtifactAction({
       setRequestingChanges(false);
       setChangesNeeded("");
       if (action === "request-changes") {
-        window.setTimeout(() => requestChangesButtonRef.current?.focus(), 0);
+        window.setTimeout(() => reviewStatusRef.current?.focus(), 0);
       }
       setNotice(action === "request-review"
         ? "Private review started."
@@ -146,7 +147,7 @@ export function ResponseArtifactAction({
             <strong>{artifact.artifact.title}</strong>
             <div className="response-artifact__meta">
               <span>Version {artifact.currentVersion.version}</span>
-              <span className="response-artifact__review-status">{reviewStatusLabel}</span>
+              <span ref={reviewStatusRef} className="response-artifact__review-status" tabIndex={-1}>{reviewStatusLabel}</span>
             </div>
           </header>
           {editing ? (

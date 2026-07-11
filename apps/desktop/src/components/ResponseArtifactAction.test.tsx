@@ -153,10 +153,9 @@ describe("ResponseArtifactAction", () => {
       action: "request-changes",
       requestedChanges: ["Clarify the conclusion."]
     });
-    await waitFor(() => expect(requestChanges).toHaveFocus());
-
     view.rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={changesRequested} onSaved={onSaved} />);
-    expect(screen.getByText("Changes requested")).toBeInTheDocument();
+    const changedStatus = screen.getByText("Changes requested", { exact: true });
+    await waitFor(() => expect(changedStatus).toHaveFocus());
     expect(screen.getByRole("button", { name: "Edit Answer" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start private review for Answer" })).not.toBeInTheDocument();
   });

@@ -202,6 +202,34 @@ describe("artifact runtime revisions", () => {
       threadId: "thread-1", messageId: "message-1", runId: "run-1",
       title: "Answer", content: "Answer", citations: []
     })).rejects.toThrow(/malformed/i);
+
+    for (const review of [
+      {
+        id: "review-1", status: "requested", requestedByInternalUserId: "user-1",
+        versionId: "version-1", requestedAt: "2026-07-11T00:00:00.000Z",
+        requestedChanges: ["Should not be present"]
+      },
+      {
+        id: "review-1", status: "changes-requested", requestedByInternalUserId: "user-1",
+        versionId: "version-1", requestedAt: "2026-07-11T00:00:00.000Z",
+        resolvedAt: "2026-07-11T00:01:00.000Z"
+      },
+      {
+        id: "review-1", status: "approved", requestedByInternalUserId: "user-1",
+        versionId: "version-1", requestedAt: "2026-07-11T00:00:00.000Z",
+        resolvedAt: "2026-07-11T00:01:00.000Z",
+        requestedChanges: ["Should not be present"],
+        acceptance: { acceptedByInternalUserId: "user-1", acceptedAt: "2026-07-11T00:01:00.000Z" }
+      }
+    ]) {
+      const invalidShape = JSON.parse(JSON.stringify(nativeBundle()));
+      invalidShape.artifact.reviews = [review];
+      mocks.invoke.mockResolvedValueOnce(invalidShape);
+      await expect(createRuntimeResponseArtifact({
+        threadId: "thread-1", messageId: "message-1", runId: "run-1",
+        title: "Answer", content: "Answer", citations: []
+      })).rejects.toThrow(/malformed/i);
+    }
   });
 
   it("rejects a divergent current version duplicate", async () => {
