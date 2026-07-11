@@ -259,6 +259,13 @@ pub struct BeginRemoteMcpAuthorizationRequest {
     configuration_reference: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisconnectRemoteMcpAuthorizationRequest {
+    workspace_id: String,
+    configuration_reference: String,
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteMcpAuthorizationResult {
@@ -266,6 +273,13 @@ pub struct RemoteMcpAuthorizationResult {
     issuer: String,
     scopes: Vec<String>,
     client_registration_strategy: String,
+    message: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteMcpDisconnectionResult {
+    status: &'static str,
     message: String,
 }
 
@@ -287,6 +301,7 @@ struct RemoteMcpAuthorizationDiscovery {
     authorization_endpoint: Url,
     token_endpoint: Url,
     registration_endpoint: Option<Url>,
+    revocation_endpoint: Option<Url>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
@@ -299,6 +314,8 @@ struct RemoteMcpOAuthTokens {
     token_endpoint: String,
     client_id: String,
     resource: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    revocation_endpoint: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -818,6 +835,73 @@ pub async fn begin_remote_mcp_authorization(
         scopes: tokens.scopes,
         client_registration_strategy: discovery.summary.client_registration_strategy,
         message: "MCP account credentials are stored in the native credential boundary.".into(),
+    })
+}
+
+#[tauri::command]
+pub async fn disconnect_remote_mcp_authorization(
+    request: DisconnectRemoteMcpAuthorizationRequest,
+) -> Result<RemoteMcpDisconnectionResult, String> {
+    let _authorization_guard = oauth_authorization_lock().lock().await;
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let connection = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_details_for_remote(
+                tx,
+                store,
+                &scope,
+                &request.configuration_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    let credential_key = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_oauth_credential_binding(
+                tx,
+                store,
+                &scope,
+                &connection.connection_id,
+            )
+        })
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "This MCP server has no connected account.".to_string())?;
+    let expected_key = mcp_oauth_credential_key(
+        scope.data.workspace_id(),
+        scope.private.owner_subject(),
+        &request.configuration_reference,
+    );
+    if credential_key != expected_key {
+        return Err("MCP Connection credential binding does not match this server.".into());
+    }
+    let tokens = load_mcp_oauth_tokens(&credential_key)?.ok_or_else(|| {
+        "MCP Connection credentials are unavailable; reconnect this server.".to_string()
+    })?;
+    revoke_mcp_oauth_token(&tokens).await?;
+    let credential_removal = remove_mcp_oauth_tokens(&credential_key);
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    store
+        .transaction(|tx| {
+            crate::store::repos::connection_record::revoke_mcp_oauth(
+                tx,
+                store,
+                &scope,
+                &connection.connection_id,
+                connection.connection_revision,
+                &credential_key,
+                &now,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    credential_removal?;
+    Ok(RemoteMcpDisconnectionResult {
+        status: "disconnected",
+        message: "The MCP account credential was revoked and removed from this device.".into(),
     })
 }
 
@@ -2933,6 +3017,7 @@ async fn usable_mcp_access_token(session: &McpRemoteSession) -> Result<Option<St
     if refreshed.refresh_token.is_none() {
         refreshed.refresh_token = tokens.refresh_token.take();
     }
+    refreshed.revocation_endpoint = tokens.revocation_endpoint.take();
     let access_token = refreshed.access_token.clone();
     store_mcp_oauth_tokens(credential_key, &refreshed)?;
     Ok(Some(access_token))
@@ -3374,6 +3459,11 @@ fn parse_authorization_server_metadata(
         .map(validate_remote_endpoint)
         .transpose()?;
     let dynamic_registration_supported = registration_endpoint.is_some();
+    let revocation_endpoint = object
+        .get("revocation_endpoint")
+        .and_then(Value::as_str)
+        .map(validate_remote_endpoint)
+        .transpose()?;
     let client_id_metadata_document_supported = object
         .get("client_id_metadata_document_supported")
         .and_then(Value::as_bool)
@@ -3397,6 +3487,7 @@ fn parse_authorization_server_metadata(
         authorization_endpoint,
         token_endpoint,
         registration_endpoint,
+        revocation_endpoint,
     })
 }
 
@@ -3779,6 +3870,7 @@ fn parse_mcp_token_response(
         token_endpoint: token_endpoint.to_string(),
         client_id: client_id.to_string(),
         resource: resource.to_string(),
+        revocation_endpoint: None,
     })
 }
 
@@ -3812,13 +3904,45 @@ async fn exchange_mcp_authorization_code(
     let bytes = read_remote_body(response, MCP_AUTH_METADATA_MAX_BYTES).await?;
     let value: Value = serde_json::from_slice(&bytes)
         .map_err(|_| "MCP OAuth token response was malformed.".to_string())?;
-    parse_mcp_token_response(
+    let mut tokens = parse_mcp_token_response(
         &value,
         &discovery.summary.scopes,
         &discovery.token_endpoint,
         client_id,
         resource,
-    )
+    )?;
+    tokens.revocation_endpoint = discovery.revocation_endpoint.as_ref().map(Url::to_string);
+    Ok(tokens)
+}
+
+async fn revoke_mcp_oauth_token(tokens: &RemoteMcpOAuthTokens) -> Result<(), String> {
+    let Some(raw_endpoint) = tokens.revocation_endpoint.as_deref() else {
+        return Ok(());
+    };
+    let endpoint = validate_remote_endpoint(raw_endpoint)?;
+    let (token, hint) = tokens
+        .refresh_token
+        .as_deref()
+        .map(|token| (token, "refresh_token"))
+        .unwrap_or((&tokens.access_token, "access_token"));
+    let client = remote_http_client(&endpoint).await?;
+    let response = client
+        .post(endpoint)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .form(&[
+            ("token", token),
+            ("token_type_hint", hint),
+            ("client_id", tokens.client_id.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "MCP OAuth revocation request failed.".to_string())?;
+    if response.status().is_redirection() || !response.status().is_success() {
+        return Err(
+            "MCP OAuth revocation was rejected; the local account remains connected.".into(),
+        );
+    }
+    Ok(())
 }
 
 async fn discover_remote_authorization(
@@ -4286,6 +4410,7 @@ mod tests {
             "issuer": "https://auth.example.com/tenant",
             "authorization_endpoint": "https://auth.example.com/authorize",
             "token_endpoint": "https://auth.example.com/token",
+            "revocation_endpoint": "https://auth.example.com/revoke",
             "code_challenge_methods_supported": ["S256"],
             "response_types_supported": ["code"],
             "grant_types_supported": ["authorization_code"],
@@ -4302,6 +4427,10 @@ mod tests {
         assert_eq!(
             discovery.token_endpoint.as_str(),
             "https://auth.example.com/token"
+        );
+        assert_eq!(
+            discovery.revocation_endpoint.as_ref().map(Url::as_str),
+            Some("https://auth.example.com/revoke")
         );
         let mut wrong_resource = protected.clone();
         wrong_resource["resource"] = Value::String("https://other.example.com/mcp".into());

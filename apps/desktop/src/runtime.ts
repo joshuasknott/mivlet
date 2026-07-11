@@ -3197,6 +3197,17 @@ export async function beginRuntimeRemoteMcpAuthorization(
   }).catch((error) => { throw toRuntimeError(error); });
 }
 
+export async function disconnectRuntimeRemoteMcpAuthorization(
+  workspaceId: string,
+  configurationReference: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<{ status: "disconnected"; message: string }>(
+    "disconnect_remote_mcp_authorization",
+    { request: { workspaceId, configurationReference } }
+  ).catch((error) => { throw toRuntimeError(error); });
+}
+
 export async function openRuntimeRemoteMcpSession(
   workspaceId: string,
   configurationReference: string

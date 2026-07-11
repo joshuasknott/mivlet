@@ -596,6 +596,13 @@ pub(crate) fn mcp_oauth_credential_binding(
     {
         return Ok(None);
     }
+    if current.authorization_state == "revoked"
+        && current.credential_state == "revoked"
+        && current.credential_custody == "none"
+        && credential_ref.is_empty()
+    {
+        return Ok(None);
+    }
     if current.authorization_state != "authorized"
         || current.credential_state != "available"
         || current.credential_custody != "os-secure-store"
@@ -609,6 +616,59 @@ pub(crate) fn mcp_oauth_credential_binding(
         ));
     }
     Ok(Some(credential_ref))
+}
+
+pub fn revoke_mcp_oauth(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    id: &str,
+    expected_revision: i64,
+    credential_ref: &str,
+    updated_at: &str,
+) -> Result<SafeConnectionRecord> {
+    require_current_scope(tx, scope, ScopeAccess::Write)?;
+    let current = get(tx, store, scope, id)?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
+    let stored_ref: String = tx.query_row(
+        "SELECT credential_ref FROM connection_record
+         WHERE workspace_id=?1 AND id=?2 AND kind='mcp' AND deleted_at IS NULL;",
+        rusqlite::params![scope.data.workspace_id(), id],
+        |row| row.get(0),
+    )?;
+    if current.kind != "mcp"
+        || current.revision != expected_revision
+        || current.authorization_state != "authorized"
+        || current.credential_state != "available"
+        || current.credential_custody != "os-secure-store"
+        || stored_ref != credential_ref
+    {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before its account was disconnected.".into(),
+        ));
+    }
+    let changed = tx.execute(
+        "UPDATE connection_record SET revision=revision+1,lifecycle='disconnected',
+           authorization_state='revoked',health_state='offline',credential_custody='none',
+           credential_state='revoked',credential_ref='',updated_at=?1
+         WHERE workspace_id=?2 AND id=?3 AND revision=?4 AND kind='mcp'
+           AND credential_ref=?5 AND authority='local' AND deleted_at IS NULL;",
+        rusqlite::params![
+            updated_at,
+            scope.data.workspace_id(),
+            id,
+            expected_revision,
+            credential_ref,
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before disconnection was saved.".into(),
+        ));
+    }
+    get(tx, store, scope, id)?.ok_or_else(|| {
+        StoreError::Invalid("MCP Connection could not be read after disconnection.".into())
+    })
 }
 
 pub(crate) fn mcp_details_for_launch(
@@ -1747,6 +1807,26 @@ mod tests {
                 )
             })
             .is_err());
+        let revoked = store
+            .transaction(|tx| {
+                revoke_mcp_oauth(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    authorized.revision,
+                    "mcp-oauth-opaque-binding",
+                    "2026-07-11T20:06:00Z",
+                )
+            })
+            .unwrap();
+        assert_eq!(revoked.lifecycle, "disconnected");
+        assert_eq!(revoked.authorization_state, "revoked");
+        assert_eq!(revoked.credential_state, "revoked");
+        assert!(store
+            .with_conn(|tx| mcp_oauth_credential_binding(tx, &store, &scope, &created.id))
+            .unwrap()
+            .is_none());
     }
 
     #[test]

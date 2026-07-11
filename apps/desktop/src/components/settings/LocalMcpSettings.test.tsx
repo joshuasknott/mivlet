@@ -5,6 +5,7 @@ import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@fable
 const runtime = vi.hoisted(() => ({
   beginAuth: vi.fn(),
   commit: vi.fn(),
+  disconnectAuth: vi.fn(),
   inspectAuth: vi.fn(),
   list: vi.fn(),
   prepare: vi.fn(),
@@ -16,6 +17,7 @@ const transportFactory = vi.hoisted(() => vi.fn());
 vi.mock("../../runtime", () => ({
   beginRuntimeRemoteMcpAuthorization: runtime.beginAuth,
   commitRuntimeMcpServerConfiguration: runtime.commit,
+  disconnectRuntimeRemoteMcpAuthorization: runtime.disconnectAuth,
   inspectRuntimeRemoteMcpAuthorization: runtime.inspectAuth,
   listRuntimeMcpServerConfigurations: runtime.list,
   prepareRuntimeMcpServerConfiguration: runtime.prepare,
@@ -95,6 +97,7 @@ beforeEach(() => {
     message: "stored"
   });
   runtime.commit.mockReset().mockResolvedValue(summary);
+  runtime.disconnectAuth.mockReset().mockResolvedValue({ status: "disconnected", message: "removed" });
   runtime.inspectAuth.mockReset().mockResolvedValue({
     issuer: "https://auth.example.com",
     pkceMethod: "S256",
@@ -238,6 +241,11 @@ describe("LocalMcpSettings", () => {
     await waitFor(() => expect(runtime.beginAuth).toHaveBeenCalledWith("workspace-a", "remote-tools"));
     expect(status).toHaveBeenCalledWith(
       "Remote tools account connected. Check the server before enabling any access."
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect account" }));
+    await waitFor(() => expect(runtime.disconnectAuth).toHaveBeenCalledWith("workspace-a", "remote-tools"));
+    expect(status).toHaveBeenCalledWith(
+      "Remote tools account disconnected. Its saved tool access cannot run until you reconnect and check it again."
     );
   });
 });

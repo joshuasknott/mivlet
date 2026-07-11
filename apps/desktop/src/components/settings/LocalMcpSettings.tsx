@@ -4,6 +4,7 @@ import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol
 import {
   beginRuntimeRemoteMcpAuthorization,
   commitRuntimeMcpServerConfiguration,
+  disconnectRuntimeRemoteMcpAuthorization,
   inspectRuntimeRemoteMcpAuthorization,
   listRuntimeMcpServerConfigurations,
   prepareRuntimeMcpServerConfiguration,
@@ -210,6 +211,24 @@ export function LocalMcpSettings({
     }
   };
 
+  const disconnectAccount = async (server: RuntimeMcpServerSummary) => {
+    setAuthorizingId(server.id);
+    try {
+      const result = await disconnectRuntimeRemoteMcpAuthorization(workspaceId, server.id);
+      if (!result) throw new Error("Remote tool-server sign-out requires the desktop app.");
+      setDiscoveries((current) => {
+        const next = { ...current };
+        delete next[server.id];
+        return next;
+      });
+      onStatus(`${server.displayName} account disconnected. Its saved tool access cannot run until you reconnect and check it again.`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : `${server.displayName} couldn’t be disconnected.`);
+    } finally {
+      setAuthorizingId(null);
+    }
+  };
+
   const saveEnablement = async (server: RuntimeMcpServerSummary) => {
     const discovery = discoveries[server.id];
     const draft = enablementDrafts[server.id];
@@ -280,14 +299,24 @@ export function LocalMcpSettings({
                           {checkingId === server.id ? "Checking…" : "Check server"}
                         </button>
                         {server.transport === "streamable-http" ? (
-                          <button
-                            type="button"
-                            className="button button--secondary"
-                            disabled={authorizingId === server.id || server.disabled}
-                            onClick={() => void authorize(server)}
-                          >
-                            {authorizingId === server.id ? "Connectingâ€¦" : "Connect account"}
-                          </button>
+                          <span className="profile-action-row">
+                            <button
+                              type="button"
+                              className="button button--secondary"
+                              disabled={authorizingId === server.id || server.disabled}
+                              onClick={() => void authorize(server)}
+                            >
+                              {authorizingId === server.id ? "Workingâ€¦" : "Connect account"}
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--secondary"
+                              disabled={authorizingId === server.id || server.disabled}
+                              onClick={() => void disconnectAccount(server)}
+                            >
+                              Disconnect account
+                            </button>
+                          </span>
                         ) : null}
                       </div>
                       {discovery && draft ? (
