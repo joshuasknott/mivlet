@@ -151,6 +151,8 @@ pub fn run() {
             artifacts::artifact_review_action,
             artifacts::artifact_get,
             artifacts::artifact_list_for_thread,
+            artifacts::artifact_search,
+            artifacts::artifact_export,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,

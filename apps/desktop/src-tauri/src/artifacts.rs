@@ -379,3 +379,171 @@ pub fn artifact_list_for_thread(thread_id: String) -> Result<Vec<Value>, String>
         .with_conn(|tx| artifact::list_for_thread(tx, store, &scope, &thread_id))
         .map_err(|e| e.to_string())
 }
+
+const ARTIFACT_KINDS: &[&str] = &[
+    "document",
+    "report",
+    "decision",
+    "code-change",
+    "design",
+    "image",
+    "video",
+    "dataset",
+    "configuration",
+    "archive",
+    "other",
+];
+const ARTIFACT_STATUSES: &[&str] = &[
+    "draft",
+    "in-review",
+    "changes-requested",
+    "accepted",
+    "published",
+    "archived",
+    "deleted",
+];
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactSearchQuery {
+    query: Option<String>,
+    thread_id: Option<String>,
+    project_id: Option<String>,
+    #[serde(default)]
+    kinds: Vec<String>,
+    #[serde(default)]
+    statuses: Vec<String>,
+    limit: Option<usize>,
+}
+
+fn normalize_optional_id(value: Option<String>, label: &str) -> Result<Option<String>, String> {
+    value
+        .map(|value| {
+            let value = value.trim().to_string();
+            if value.is_empty() || value.chars().count() > 256 {
+                Err(format!("{label} must be 1-256 characters."))
+            } else {
+                Ok(value)
+            }
+        })
+        .transpose()
+}
+
+fn normalize_vocab(
+    values: Vec<String>,
+    allowed: &[&str],
+    label: &str,
+) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let value = value.trim().to_string();
+        if !allowed.contains(&value.as_str()) {
+            return Err(format!("Unsupported artifact {label}: {value}."));
+        }
+        if !normalized.contains(&value) {
+            normalized.push(value);
+        }
+    }
+    Ok(normalized)
+}
+
+fn normalize_search_text(value: Option<String>) -> Result<Option<String>, String> {
+    let value = value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if value
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 256)
+    {
+        Err("Artifact search text can be at most 256 characters.".into())
+    } else {
+        Ok(value)
+    }
+}
+
+#[tauri::command]
+pub fn artifact_search(input: ArtifactSearchQuery) -> Result<Vec<Value>, String> {
+    let query = normalize_search_text(input.query)?;
+    let thread_id = normalize_optional_id(input.thread_id, "Thread id")?;
+    let project_id = normalize_optional_id(input.project_id, "Project id")?;
+    let kinds = normalize_vocab(input.kinds, ARTIFACT_KINDS, "kind")?;
+    let statuses = normalize_vocab(input.statuses, ARTIFACT_STATUSES, "status")?;
+    let limit = input.limit.unwrap_or(20).clamp(1, 50);
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = authority()?.scope;
+    store
+        .with_conn(|tx| {
+            artifact::search(
+                tx,
+                store,
+                &scope,
+                &artifact::ArtifactSearchFilter {
+                    query: query.as_deref(),
+                    thread_id: thread_id.as_deref(),
+                    project_id: project_id.as_deref(),
+                    kinds: &kinds,
+                    statuses: &statuses,
+                    limit,
+                },
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod search_input_tests {
+    use super::*;
+
+    #[test]
+    fn search_input_is_trimmed_bounded_deduplicated_and_clamped() {
+        assert_eq!(
+            normalize_search_text(Some("  Needle  ".into())).unwrap(),
+            Some("Needle".into())
+        );
+        assert_eq!(normalize_search_text(Some("  ".into())).unwrap(), None);
+        assert!(normalize_search_text(Some("x".repeat(257))).is_err());
+        assert_eq!(
+            normalize_optional_id(Some(" thread-1 ".into()), "Thread").unwrap(),
+            Some("thread-1".into())
+        );
+        assert!(normalize_optional_id(Some(" ".into()), "Thread").is_err());
+        assert_eq!(
+            normalize_vocab(
+                vec!["document".into(), "document".into()],
+                ARTIFACT_KINDS,
+                "kind"
+            )
+            .unwrap(),
+            vec!["document"]
+        );
+        assert!(normalize_vocab(vec!["secret".into()], ARTIFACT_KINDS, "kind").is_err());
+        assert!(normalize_vocab(vec!["removed".into()], ARTIFACT_STATUSES, "status").is_err());
+        assert_eq!(0usize.clamp(1, 50), 1);
+        assert_eq!(500usize.clamp(1, 50), 50);
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactExportInput {
+    artifact_id: String,
+    version_id: String,
+}
+
+#[tauri::command]
+pub fn artifact_export(input: ArtifactExportInput) -> Result<Value, String> {
+    let artifact_id = normalize_optional_id(Some(input.artifact_id), "Artifact id")?
+        .expect("a supplied id normalizes to a value");
+    let version_id = normalize_optional_id(Some(input.version_id), "Artifact version id")?
+        .expect("a supplied id normalizes to a value");
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = authority()?.scope;
+    let exported_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    store
+        .with_conn(|tx| {
+            artifact::export_version(tx, store, &scope, &artifact_id, &version_id, &exported_at)
+        })
+        .map_err(|error| error.to_string())
+}
