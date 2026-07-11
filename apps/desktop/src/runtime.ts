@@ -3045,6 +3045,24 @@ export interface RuntimeOpenedRemoteMcpSession {
   connectionRevision: number;
 }
 
+export interface RuntimeRemoteMcpAuthorizationSummary {
+  issuer: string;
+  scopes: string[];
+  pkceMethod: "S256";
+  clientIdMetadataDocumentSupported: boolean;
+  dynamicRegistrationSupported: boolean;
+}
+
+export async function inspectRuntimeRemoteMcpAuthorization(
+  workspaceId: string,
+  configurationReference: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeRemoteMcpAuthorizationSummary>("inspect_remote_mcp_authorization", {
+    request: { workspaceId, configurationReference }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
 export async function openRuntimeRemoteMcpSession(
   workspaceId: string,
   configurationReference: string

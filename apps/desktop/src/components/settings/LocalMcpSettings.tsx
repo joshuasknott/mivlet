@@ -3,6 +3,7 @@ import { McpClient } from "@fable/connectors";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
   commitRuntimeMcpServerConfiguration,
+  inspectRuntimeRemoteMcpAuthorization,
   listRuntimeMcpServerConfigurations,
   prepareRuntimeMcpServerConfiguration,
   resolveRuntimeApprovalRequest,
@@ -138,7 +139,30 @@ export function LocalMcpSettings({
         `${server.displayName} responded with ${tools.length} tool${tools.length === 1 ? "" : "s"} and ${resources.length} resource${resources.length === 1 ? "" : "s"}. Nothing was enabled.`
       );
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : `${server.displayName} couldn’t be checked.`);
+      if (
+        server.transport === "streamable-http" &&
+        error instanceof Error &&
+        error.message.includes("HTTP 401")
+      ) {
+        try {
+          const authorization = await inspectRuntimeRemoteMcpAuthorization(workspaceId, server.id);
+          if (authorization) {
+            onStatus(
+              `${server.displayName} requires sign-in and advertises secure S256 authorization. Connecting an account isn’t available yet.`
+            );
+          } else {
+            onStatus("Remote tool-server sign-in requires the desktop app.");
+          }
+        } catch (authorizationError) {
+          onStatus(
+            authorizationError instanceof Error
+              ? authorizationError.message
+              : `${server.displayName} sign-in setup couldn’t be verified.`
+          );
+        }
+      } else {
+        onStatus(error instanceof Error ? error.message : `${server.displayName} couldn’t be checked.`);
+      }
     } finally {
       await client?.close().catch(() => undefined);
       setCheckingId(null);

@@ -4,6 +4,7 @@ import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@fable
 
 const runtime = vi.hoisted(() => ({
   commit: vi.fn(),
+  inspectAuth: vi.fn(),
   list: vi.fn(),
   prepare: vi.fn(),
   resolve: vi.fn(),
@@ -13,6 +14,7 @@ const transportFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("../../runtime", () => ({
   commitRuntimeMcpServerConfiguration: runtime.commit,
+  inspectRuntimeRemoteMcpAuthorization: runtime.inspectAuth,
   listRuntimeMcpServerConfigurations: runtime.list,
   prepareRuntimeMcpServerConfiguration: runtime.prepare,
   resolveRuntimeApprovalRequest: runtime.resolve,
@@ -83,6 +85,7 @@ class FixtureTransport implements McpTransport {
 
 beforeEach(() => {
   runtime.commit.mockReset().mockResolvedValue(summary);
+  runtime.inspectAuth.mockReset().mockResolvedValue({ issuer: "https://auth.example.com", pkceMethod: "S256", scopes: [] });
   runtime.list.mockReset().mockResolvedValue([]);
   runtime.prepare.mockReset().mockResolvedValue({ configurationFingerprint: "abc", approval });
   runtime.resolve.mockReset().mockResolvedValue({ persisted: true });
@@ -171,5 +174,25 @@ describe("LocalMcpSettings", () => {
       endpoint: "https://tools.example.com/mcp"
     }));
     expect(runtime.prepare.mock.calls.at(-1)?.[0]).not.toHaveProperty("command");
+  });
+
+  it("verifies secure sign-in metadata after a remote authorization challenge", async () => {
+    const remote = { ...summary, id: "remote-tools", displayName: "Remote tools", transport: "streamable-http" as const };
+    runtime.list.mockResolvedValue([remote]);
+    transportFactory.mockResolvedValue({
+      send: vi.fn().mockRejectedValue(new Error("Remote MCP rejected the request with HTTP 401.")),
+      subscribe: () => () => undefined,
+      subscribeClose: () => () => undefined,
+      recordDiscovery: vi.fn(),
+      close: vi.fn()
+    });
+    const status = vi.fn();
+    render(<LocalMcpSettings workspaceId="workspace-a" onStatus={status} />);
+    fireEvent.click(screen.getByText("Manage tool servers"));
+    fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
+    await waitFor(() => expect(runtime.inspectAuth).toHaveBeenCalledWith("workspace-a", "remote-tools"));
+    expect(status).toHaveBeenCalledWith(
+      "Remote tools requires sign-in and advertises secure S256 authorization. Connecting an account isn’t available yet."
+    );
   });
 });

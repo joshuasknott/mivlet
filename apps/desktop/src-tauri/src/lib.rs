@@ -254,6 +254,7 @@ pub fn run() {
             mcp_process::commit_mcp_server_configuration,
             mcp_process::list_mcp_server_configurations,
             mcp_process::open_remote_mcp_session,
+            mcp_process::inspect_remote_mcp_authorization,
             mcp_process::send_remote_mcp_frame,
             mcp_process::close_remote_mcp_session,
             mcp_process::record_mcp_server_discovery,
