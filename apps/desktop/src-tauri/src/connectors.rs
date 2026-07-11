@@ -13,8 +13,8 @@ use crate::connector_approvals::{
     verify_prepared_connector_action,
 };
 use crate::connector_auth::{
-    complete_auth, connection_for, disconnect, refresh_connection, start_auth, usable_connection,
-    ConnectorConnection,
+    account_options_from_connections, complete_auth, connection_for, disconnect, read_connections,
+    refresh_connection, start_auth, usable_connection, ConnectorConnection,
 };
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{
@@ -1256,11 +1256,80 @@ pub fn list_connector_accounts(
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
-    Ok(crate::connector_auth::accounts_for_connector(
-        &path,
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id.clone()),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .map_err(|message| command_error("invalid-request", entry.id, &message, false))?;
+    let connections = read_connections(&path)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    let store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            entry.id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    reconcile_canonical_connector_accounts(store, &scope, entry.id, &connections)?;
+    Ok(account_options_from_connections(
+        &connections,
         entry.id,
         &workspace_id,
     ))
+}
+
+fn reconcile_canonical_connector_accounts(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    connections: &[ConnectorConnection],
+) -> Result<(), ConnectorCommandError> {
+    store
+        .transaction(|tx| {
+            for connection in connections
+                .iter()
+                .filter(|connection| connection.connector_id == connector_id)
+            {
+                let id = crate::connector_auth::derive_native_connection_id(
+                    scope.data.workspace_id(),
+                    connector_id,
+                    &connection.account.id,
+                );
+                let expected_revision =
+                    crate::store::repos::connection_record::get(tx, store, scope, &id)?
+                        .map(|record| record.revision);
+                let (lifecycle, authorization_state, credential_state) =
+                    match connection.status.as_str() {
+                        "connected" => ("authorized", "authorized", "available"),
+                        "expired" => ("refresh-required", "expired", "refresh-required"),
+                        _ => ("pending-authorization", "pending", "unknown"),
+                    };
+                crate::store::repos::connection_record::upsert_native_connector(
+                    tx,
+                    store,
+                    scope,
+                    crate::store::repos::connection_record::NativeConnectorConnectionWrite {
+                        connector_definition_key: connector_id,
+                        external_account_id: &connection.account.id,
+                        display_name: &connection.account.display_name,
+                        lifecycle,
+                        authorization_state,
+                        health_state: "unknown",
+                        credential_state,
+                        expected_revision,
+                        updated_at: &connection.updated_at,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))
 }
 
 /// Make the workspace-bound Fable Connection active for a connector. Other
@@ -1658,6 +1727,30 @@ fn _empty_provider_metadata() -> BTreeMap<String, String> {
 #[cfg(test)]
 mod workspace_scope_tests {
     use super::*;
+    use crate::authorized_scope::{resolve, ScopeAccess};
+    use crate::models::ConnectorAccountSummary;
+    use crate::store::repos::workspace_directory::{
+        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
+        WorkspaceDirectoryUpsert,
+    };
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+
+    fn summary(user: &str, workspace: &str, member: &str) -> WorkspaceDirectoryUpsert {
+        WorkspaceDirectoryUpsert {
+            internal_user_id: user.into(),
+            fable_workspace_id: workspace.into(),
+            name: workspace.into(),
+            workspace_status: "active".into(),
+            workspace_revision: 1,
+            policy_revision: 1,
+            member_id: member.into(),
+            role: "owner".into(),
+            membership_status: "active".into(),
+            membership_revision: 1,
+            updated_at: "t".into(),
+        }
+    }
 
     #[test]
     fn connector_commands_fail_closed_for_an_unconfigured_workspace() {
@@ -1692,6 +1785,90 @@ mod workspace_scope_tests {
         assert_eq!(
             error.message,
             "Requested OAuth scope set requires at least one scope."
+        );
+    }
+
+    #[test]
+    fn account_listing_reconciles_canonical_records_idempotently_and_rejects_stale_scope() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let (scope_a, local_b) = store
+            .transaction(|tx| {
+                let a = upsert_authoritative_summary(
+                    tx,
+                    &summary("user-a", "workspace-a", "member-a"),
+                )?;
+                let b = upsert_authoritative_summary(
+                    tx,
+                    &summary("user-b", "workspace-b", "member-b"),
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
+                Ok((
+                    resolve(tx, Some(&a.local_workspace_id), None, ScopeAccess::Write)?,
+                    b.local_workspace_id,
+                ))
+            })
+            .unwrap();
+        let connection = ConnectorConnection {
+            connector_id: "gmail".into(),
+            account: ConnectorAccountSummary {
+                id: "provider-account-secret".into(),
+                display_name: "Work Gmail".into(),
+                handle: None,
+                email: None,
+                workspace: None,
+                avatar_url: None,
+            },
+            status: "connected".into(),
+            scopes: vec!["gmail.readonly".into()],
+            expires_at: None,
+            credential_ref: crate::connector_auth::native_connector_credential_ref(
+                "gmail",
+                "provider-account-secret",
+            ),
+            connected_at: "1".into(),
+            updated_at: "2".into(),
+            is_active: true,
+        };
+
+        reconcile_canonical_connector_accounts(
+            &store,
+            &scope_a,
+            "gmail",
+            std::slice::from_ref(&connection),
+        )
+        .unwrap();
+        reconcile_canonical_connector_accounts(
+            &store,
+            &scope_a,
+            "gmail",
+            std::slice::from_ref(&connection),
+        )
+        .unwrap();
+        let records = store
+            .with_conn(|tx| crate::store::repos::connection_record::list(tx, &store, &scope_a))
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].revision, 1);
+        assert!(!serde_json::to_string(&records)
+            .unwrap()
+            .contains("provider-account-secret"));
+
+        store
+            .transaction(|tx| {
+                set_current_internal_user(tx, "user-b", "t")?;
+                select_active_workspace(tx, "user-b", "workspace-b", "t")?;
+                let scope_b = resolve(tx, Some(&local_b), None, ScopeAccess::Write)?;
+                assert!(
+                    crate::store::repos::connection_record::list(tx, &store, &scope_b)?.is_empty()
+                );
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            reconcile_canonical_connector_accounts(&store, &scope_a, "gmail", &[connection])
+                .is_err()
         );
     }
 }

@@ -1239,6 +1239,7 @@ fn promote_single_active(connections: &mut [ConnectorConnection], connector_id: 
 /// All stored accounts for a connector (active first), so the UI can render an
 /// account switcher. Token secrets never leave the credential boundary; only
 /// the non-secret account summaries are returned.
+#[cfg(test)]
 pub(crate) fn accounts_for_connector(
     path: &Path,
     connector_id: &str,
@@ -1247,6 +1248,14 @@ pub(crate) fn accounts_for_connector(
     let Ok(connections) = read_connections(path) else {
         return Vec::new();
     };
+    account_options_from_connections(&connections, connector_id, workspace_id)
+}
+
+pub(crate) fn account_options_from_connections(
+    connections: &[ConnectorConnection],
+    connector_id: &str,
+    workspace_id: &str,
+) -> Vec<ConnectorAccountOption> {
     let mut matching: Vec<&ConnectorConnection> = connections
         .iter()
         .filter(|connection| connection.connector_id == connector_id)

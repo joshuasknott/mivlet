@@ -213,6 +213,19 @@ pub fn upsert_native_connector(
             },
         },
     };
+    if existing.is_some() {
+        let current = get(tx, store, scope, &id)?.ok_or_else(|| {
+            StoreError::Invalid("Connection disappeared before it was saved.".into())
+        })?;
+        if current.display_name == content.display_name
+            && current.lifecycle == input.lifecycle
+            && current.authorization_state == input.authorization_state
+            && current.health_state == input.health_state
+            && current.credential_state == input.credential_state
+        {
+            return Ok(current);
+        }
+    }
     let sealed = seal_json(
         store,
         &serde_json::to_value(content)
@@ -548,8 +561,14 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("expected revision"));
-        let updated = store
+        let unchanged = store
             .transaction(|tx| upsert_native_connector(tx, &store, &scope_a, input(Some(1))))
+            .unwrap();
+        assert_eq!(unchanged.revision, 1);
+        let mut changed = input(Some(1));
+        changed.health_state = "healthy";
+        let updated = store
+            .transaction(|tx| upsert_native_connector(tx, &store, &scope_a, changed))
             .unwrap();
         assert_eq!(updated.revision, 2);
         assert!(store
