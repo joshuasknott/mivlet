@@ -23,6 +23,7 @@ import { composerModelsFor } from "./composer-models";
 import { ShellPageBoundary } from "./ShellRoutes";
 import { useShellAgentController } from "./useShellAgentController";
 import { useProjects } from "../hooks/useProjects";
+import { invitationAccountContextKey } from "../lib/invitation-account-context";
 import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView, type ProjectMemoryView } from "../components/pages/ProjectPage";
 import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
 import { useProjectMemory } from "../hooks/useProjectMemory";
@@ -95,12 +96,14 @@ export function ChatWorkspace() {
   // Account identity and native ownership can settle at different moments.
   // Include both boundaries so either A->B transition clears A immediately;
   // workspace selection is deliberately absent so same-user switches stay put.
-  const invitationAccountContextKey = [
-    runtime.identityStatus.authentication?.subject ?? "signed-out",
-    runtime.identityStatus.state,
-    runtime.accountWorkspaceStatus.activeContextOwner?.internalUserId ?? "unbound",
-    runtime.accountWorkspaceStatus.state
-  ].join(":");
+  const invitationContextKey = invitationAccountContextKey({
+    provider: runtime.identityStatus.authentication?.provider,
+    normalizedIssuer: runtime.identityStatus.authentication?.normalizedIssuer,
+    subject: runtime.identityStatus.authentication?.subject,
+    identityState: runtime.identityStatus.state,
+    internalUserId: runtime.accountWorkspaceStatus.activeContextOwner?.internalUserId,
+    accountState: runtime.accountWorkspaceStatus.state
+  });
   const verifiedProfile = useMemo(() => {
     const display = runtime.identityStatus.authentication?.verifiedDisplayAttributes;
     return { name: display?.displayName ?? display?.email ?? "Fable account", email: display?.email ?? "" };
@@ -1185,7 +1188,7 @@ export function ChatWorkspace() {
                   </div>
                   <Suspense fallback={null}>
                     <WorkspaceSettingsView
-                      key={invitationAccountContextKey}
+                      key={invitationContextKey}
                       workspaceName={workspaceName}
                       onInvitationAccepted={async () => {
                         await runtime.reconcileAccountWorkspace();
