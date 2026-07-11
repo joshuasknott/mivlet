@@ -158,7 +158,8 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 3B - OAuth and native reliability
 
-- [ ] Complete durable encrypted one-time OAuth handoff storage.
+- [x] Complete durable encrypted one-time OAuth handoff storage.
+  - Evidence: the broker has production-shaped Cloudflare Durable Object SQLite stores for pending OAuth state, one-time handoffs, and rate limits. Pending verifier and handoff payloads are encrypted before storage with AES-256-GCM using an HKDF-derived key and record-bound additional authenticated data; atomic delete-before-return consumption prevents replay, while expiries and alarms remove abandoned records. Staging and production bindings plus the `v1-broker-ephemeral` Durable Object migration are declared, and durable mode fails closed on missing bindings, a non-32-byte encryption secret, or a non-HTTPS public URL. The broker's 99-test suite covers concurrency, replay, expiry, encryption, and absence of plaintext, and its production build passes. Deployment, secret provisioning, live migration, provider callback registration, and external OAuth validation remain honestly open in the next item.
 - [ ] Complete broker deployment configuration and callback policy.
 - [ ] Complete multi-account, refresh, revocation, disconnect, and recovery behavior.
 - [x] Complete exact connector approvals and audit.

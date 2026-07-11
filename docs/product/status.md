@@ -87,7 +87,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | ACP Providers | **Functional but gated** | Cursor, GitHub Copilot, Grok Build, OpenCode, Kimi Code, and Mistral Vibe run only when their local CLI is installed and authenticated. |
 | Codex app-server | **Functional but gated** | Live chat-server loop when local Codex CLI is installed/authenticated. |
 | Local Ollama Runtime | **Functional but gated** | Live loopback streaming is available only when the user installs Ollama, starts its local service on a literal loopback IP, and pulls a generation model. Real-runtime smoke testing is opt-in. |
-| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth, lifecycle states, and provider adapters exist. Notion, Slack, and Linear expose authenticated reads and approval-gated writes; GitHub's implemented live surface is read-only. Durable atomic handoff storage, production deployment, provider secrets, callback registration, and live OAuth validation are still missing. |
+| Confidential Connectors (GitHub, Vercel, Notion, Slack, Linear) | **Functional but gated** | Rust/TS brokered auth, lifecycle states, provider adapters, and encrypted one-time Durable Object handoff storage exist. Notion, Slack, and Linear expose authenticated reads and approval-gated writes; GitHub's implemented live surface is read-only. Production deployment, provider secrets, callback registration, and live OAuth validation are still missing. |
 | Fable Cloud Identity (Clerk) | **Implemented; live-validation gated** | Native PKCE, mandatory sign-in, recovery, expiry/revocation, strict claim/config validation, workspace bootstrap/switching, and account device revocation are implemented. Production configuration and a live session are not validated. |
 | Browser Preview Mode | **Preview/fixture-only; transport deferred** | Purely synthetic fixture responses. Browser permission policy architecture, session derivation, and audit redaction are implemented; headless browser transport and live execution are deferred. |
 | Mobile Remote Control | **Local status surface; transport deferred** | Protocol metadata, trust checks, and native status commands exist. Settings reports that live LAN transport and pairing are unavailable; no socket, mobile app, hosted account, or remote execution authority exists. |
@@ -115,9 +115,11 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 ## Not Implemented Yet
 
 - No deployed production auth broker or externally validated OAuth session. The
-  broker defaults to memory storage, but durable atomic storage classes and
-  Worker bindings exist behind `FABLE_BROKER_STORAGE_BACKEND=durable`; durable
-  mode still requires deployment, bindings, and `FABLE_BROKER_STORE_ENCRYPTION_KEY`.
+  repository implementation includes encrypted, atomic, one-time Durable Object
+  SQLite storage behind `FABLE_BROKER_STORAGE_BACKEND=durable`, with declared
+  staging/production bindings and migration metadata. Deployment, live Durable
+  Object migration, and provisioning `FABLE_BROKER_STORE_ENCRYPTION_KEY` remain
+  external configuration work; the local-development default remains memory storage.
 - No provider-console apps, deployed callback URLs, OAuth consent verification, or non-production live OAuth validation evidence in the repo.
 - No externally validated live connector sessions in this checkout. Google public-client connectors still require provider configuration and test accounts; confidential-client connectors still require the auth broker (implemented in `apps/broker` targeting Cloudflare Workers, but not yet deployed in production).
 - Browser-only preview state still uses localStorage; the Tauri production path uses encrypted SQLite for main documents, schedules, workflows, and knowledge structures. Backend and connector credentials remain separately handled by OS secure storage.
