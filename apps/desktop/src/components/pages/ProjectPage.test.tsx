@@ -370,7 +370,7 @@ describe("ProjectPage", () => {
     await user.click(screen.getByRole("button", { name: "Use again" }));
     expect(toggleDisabled).toHaveBeenCalledTimes(2);
     await user.click(screen.getByRole("button", { name: "Delete" }));
-    expect(window.confirm).toHaveBeenCalledWith("Delete â€œLaunch briefâ€ from this project?");
+    expect(window.confirm).toHaveBeenCalledWith('Delete "Launch brief" from this project?');
     expect(remove).toHaveBeenCalledWith("source-1");
   });
 
@@ -428,12 +428,12 @@ describe("ProjectPage", () => {
         onSelectThread={vi.fn()}
       />
     );
-    expect(screen.getByText("Choose the current version of this file. Fable wonâ€™t keep access to its location.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the current version of this file. Fable won't keep access to its location.")).toBeInTheDocument();
     const file = new File(["new"], "launch.md", { type: "text/markdown" });
     await user.upload(screen.getByLabelText("Choose the current version of Launch brief"), file);
-    expect(screen.getByText("Updatingâ€¦")).toBeInTheDocument();
+    expect(screen.getByText("Updating...")).toBeInTheDocument();
     await waitFor(() => expect(updateFile).toHaveBeenCalledWith("source-1", file));
     finishUpdate();
-    await waitFor(() => expect(screen.queryByText("Updatingâ€¦")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Updating...")).not.toBeInTheDocument());
   });
 });

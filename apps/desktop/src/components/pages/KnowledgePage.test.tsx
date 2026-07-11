@@ -174,13 +174,13 @@ describe("KnowledgePage — import lifecycle states", () => {
     });
     renderPage(runtime);
     await user.click(screen.getByRole("button", { name: "Open Quarterly plan" }));
-    expect(screen.getByText("Choose the current version of this file. Fable wonâ€™t keep access to its location.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the current version of this file. Fable won't keep access to its location.")).toBeInTheDocument();
     const file = new File(["new plan"], "quarterly-plan.md", { type: "text/markdown" });
     await user.upload(screen.getByLabelText("Choose the current version of Quarterly plan"), file);
     expect(runtime.refreshKnowledgeSource).toHaveBeenCalledWith("source-1", file);
-    expect(screen.getByText("Updatingâ€¦")).toBeInTheDocument();
+    expect(screen.getByText("Updating...")).toBeInTheDocument();
     finishUpdate();
-    await waitFor(() => expect(screen.queryByText("Updatingâ€¦")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Updating...")).not.toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "Open Drive plan" }));
     await user.click(screen.getByRole("button", { name: "Refresh" }));
