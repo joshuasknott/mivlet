@@ -152,6 +152,8 @@ kbd {
 }
 
 .conversation-message--assistant {
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: flex-start;
 }
 
@@ -160,6 +162,7 @@ kbd {
 }
 
 .run-context-summary {
+  width: min(720px, 86%);
   margin-top: 8px;
   color: var(--ink-muted);
   font-size: var(--text-12);
@@ -220,10 +223,15 @@ kbd {
   color: var(--ink-secondary);
 }
 
-.run-context-summary__sources p {
+.conversation-message--assistant .run-context-summary__sources p {
+  max-width: none;
   margin: 0;
+  padding: 0;
   color: var(--ink-muted);
   font-size: var(--text-12);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .hero {
