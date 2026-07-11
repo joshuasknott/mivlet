@@ -114,6 +114,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 23 -> 24: persist member-private missions and immutable generated
             // plan revisions. No mission or execution authority is inferred.
             23 => apply_v23_to_v24(conn)?,
+            // 24 -> 25: add the encrypted append-only mission run journal.
+            // Migration creates no runs, checkpoints, or execution authority.
+            24 => apply_v24_to_v25(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -123,6 +126,37 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v24_to_v25(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mission_run_record (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, id TEXT NOT NULL, status TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK(revision >= 1), last_sequence INTEGER NOT NULL CHECK(last_sequence >= 1),
+          last_event_id TEXT NOT NULL, current_attempt_number INTEGER,
+          terminal INTEGER NOT NULL CHECK(terminal IN (0,1)), created_by_internal_user_id TEXT NOT NULL,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_run_owner
+          ON mission_run_record(workspace_id,owner_member_id,status,updated_at);
+        CREATE TABLE IF NOT EXISTS mission_run_event (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence >= 1),
+          id TEXT NOT NULL, event_type TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+          previous_event_id TEXT, attempt_number INTEGER, occurred_at TEXT NOT NULL,
+          payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,run_id,sequence),
+          UNIQUE(workspace_id,owner_member_id,id),
+          UNIQUE(workspace_id,owner_member_id,run_id,idempotency_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_run_event_run
+          ON mission_run_event(workspace_id,owner_member_id,run_id,sequence);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1302,8 +1336,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v24 is current; v24 -> v25 has no registered migration.
-        let err = apply(&conn, 24, 25).unwrap_err();
+        // v25 is current; v25 -> v26 has no registered migration.
+        let err = apply(&conn, 25, 26).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1318,6 +1352,30 @@ mod tests {
             "mission_plan_record",
             "mission_plan_revision",
         ] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1);",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1);
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table};"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+
+    #[test]
+    fn v24_to_v25_adds_empty_mission_run_journal_without_inferred_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE workspace(id TEXT PRIMARY KEY);")
+            .unwrap();
+        apply(&conn, 24, 25).unwrap();
+        for table in ["mission_run_record", "mission_run_event"] {
             let exists: i64 = conn
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1);",

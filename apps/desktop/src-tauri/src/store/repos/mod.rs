@@ -33,6 +33,7 @@ pub mod mcp_local_server;
 pub mod memory_record;
 pub mod message;
 pub mod mission_plan;
+pub mod mission_run;
 pub mod preferences;
 pub mod project;
 pub mod run;

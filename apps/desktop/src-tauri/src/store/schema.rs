@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 24;
+pub const CURRENT_SCHEMA_VERSION: u32 = 25;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -1548,6 +1548,38 @@ CREATE TABLE IF NOT EXISTS mission_plan_revision (
 );
 CREATE INDEX IF NOT EXISTS idx_mission_plan_revision_plan
   ON mission_plan_revision(workspace_id,owner_member_id,plan_id,revision_number);
+
+-- Append-only mission run journal. Query columns contain only bounded ids,
+-- enums, sequence numbers, and timestamps; run/event bodies stay encrypted.
+CREATE TABLE IF NOT EXISTS mission_run_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL, id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence >= 1),
+  last_event_id TEXT NOT NULL,
+  current_attempt_number INTEGER,
+  terminal INTEGER NOT NULL CHECK(terminal IN (0,1)),
+  created_by_internal_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_run_owner
+  ON mission_run_record(workspace_id,owner_member_id,status,updated_at);
+CREATE TABLE IF NOT EXISTS mission_run_event (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL,
+  sequence INTEGER NOT NULL CHECK(sequence >= 1), id TEXT NOT NULL,
+  event_type TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+  previous_event_id TEXT, attempt_number INTEGER, occurred_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,run_id,sequence),
+  UNIQUE(workspace_id,owner_member_id,id),
+  UNIQUE(workspace_id,owner_member_id,run_id,idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_run_event_run
+  ON mission_run_event(workspace_id,owner_member_id,run_id,sequence);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (

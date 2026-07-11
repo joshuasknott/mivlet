@@ -231,6 +231,15 @@ on overrun, and preserves partial streamed work. Durable worker/run records,
 grant revalidation at execution time, handoff execution, and product wiring are
 still open; this evidence therefore does not complete the worker or driver box.
 
+Run-journal evidence now includes a deterministic portable reducer for legal
+status transitions, contiguous previous-event links, exact idempotent replay,
+checkpoint replay boundaries, advancing recovery attempts, cooperative
+cancellation, and terminal immutability. Encrypted SQLite schema v25 stores the
+current projection plus immutable events, rejects stale/changed appends
+atomically, and reopens the owner-qualified chain after restart. Native command
+wiring, checkpoint state blobs, and production execution-event persistence are
+still open, so the durable-run box remains unchecked.
+
 ### Wave 4B - Routing and experience
 
 - [ ] Route by capability, quality, cost, speed, privacy, context, tools, health, preference, and risk.
