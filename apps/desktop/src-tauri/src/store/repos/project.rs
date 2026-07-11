@@ -23,6 +23,8 @@ struct ProjectContent {
     description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_by_device_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -44,6 +46,20 @@ pub struct ProjectRow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
     pub lifecycle: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SharedProjectMirror {
+    pub id: String,
+    pub workspace_id: String,
+    pub revision: i64,
+    pub created_by_internal_user_id: String,
+    pub created_by_device_id: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub instructions: Option<String>,
 }
 
 fn aad(id: &str) -> String {
@@ -115,6 +131,106 @@ const SELECT_PROJECT: &str = "SELECT id,workspace_id,authority,visibility,owner_
     schema_version,revision,created_by_internal_user_id,created_at,updated_at,lifecycle,
     payload,payload_nonce FROM project";
 
+pub fn upsert_shared_mirror(
+    tx: &Connection,
+    store: &Store,
+    project: &SharedProjectMirror,
+) -> Result<()> {
+    let id = normalize_id(&project.id, "Project")?;
+    let workspace_id = normalize_id(&project.workspace_id, "Workspace")?;
+    let title = normalize_required(&project.title, "title", TITLE_MAX)?;
+    if project.revision < 1 {
+        return Err(StoreError::Invalid(
+            "Shared project revision is invalid.".into(),
+        ));
+    }
+    let existing: Option<(String, String, String, i64)> = tx
+        .query_row(
+            "SELECT workspace_id,authority,visibility,revision FROM project WHERE id=?1;",
+            [&id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    if existing
+        .as_ref()
+        .is_some_and(|(workspace, authority, visibility, revision)| {
+            workspace != &workspace_id
+                || authority != "convex"
+                || visibility != "workspace-shared"
+                || *revision > project.revision
+        })
+    {
+        return Err(StoreError::Invalid(
+            "Shared project mirror conflicts with local authority.".into(),
+        ));
+    }
+    let content = ProjectContent {
+        title: title.clone(),
+        description: normalize_optional(
+            project.description.as_deref(),
+            "description",
+            DESCRIPTION_MAX,
+        )?,
+        instructions: normalize_optional(
+            project.instructions.as_deref(),
+            "instructions",
+            INSTRUCTIONS_MAX,
+        )?,
+        created_by_device_id: Some(normalize_id(&project.created_by_device_id, "Device")?),
+    };
+    let sealed = seal_json(
+        store,
+        &serde_json::to_value(content)
+            .map_err(|_| StoreError::Invalid("Project content is invalid.".into()))?,
+        &aad(&id),
+    )?;
+    tx.execute(
+        "INSERT INTO project (id,workspace_id,title_fingerprint,authority,visibility,owner_member_id,
+          created_by_internal_user_id,schema_version,revision,lifecycle,created_at,updated_at,payload,payload_nonce)
+         VALUES (?1,?2,?3,'convex','workspace-shared',NULL,?4,1,?5,'active',?6,?7,?8,?9)
+         ON CONFLICT(id) DO UPDATE SET title_fingerprint=excluded.title_fingerprint,
+          revision=excluded.revision,updated_at=excluded.updated_at,payload=excluded.payload,
+          payload_nonce=excluded.payload_nonce WHERE project.authority='convex'
+          AND project.visibility='workspace-shared' AND project.workspace_id=excluded.workspace_id
+          AND project.revision<=excluded.revision;",
+        rusqlite::params![id,workspace_id,title_fingerprint(&title),project.created_by_internal_user_id,
+            project.revision,project.created_at,project.updated_at,sealed.ciphertext,sealed.nonce],
+    )?;
+    Ok(())
+}
+
+pub fn delete_shared_mirror(
+    tx: &Connection,
+    workspace_id: &str,
+    project_id: &str,
+    revision: i64,
+) -> Result<()> {
+    let existing: Option<(String, String, String, i64)> = tx
+        .query_row(
+            "SELECT workspace_id,authority,visibility,revision FROM project WHERE id=?1;",
+            [project_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    if let Some((workspace, authority, visibility, current_revision)) = existing {
+        if workspace != workspace_id || authority != "convex" || visibility != "workspace-shared" {
+            return Err(StoreError::Invalid(
+                "Shared project tombstone conflicts with another authority scope.".into(),
+            ));
+        }
+        if current_revision > revision {
+            return Ok(());
+        }
+    }
+    let changed = tx.execute(
+        "DELETE FROM project WHERE workspace_id=?1 AND id=?2 AND authority='convex'
+         AND visibility='workspace-shared' AND revision<=?3;",
+        rusqlite::params![workspace_id, project_id, revision],
+    )?;
+    let _ = changed;
+    Ok(())
+}
+
 pub fn create(
     tx: &Connection,
     store: &Store,
@@ -141,6 +257,7 @@ pub fn create(
         title: title.clone(),
         description: normalize_optional(description, "description", DESCRIPTION_MAX)?,
         instructions: normalize_optional(instructions, "instructions", INSTRUCTIONS_MAX)?,
+        created_by_device_id: None,
     };
     let unavailable: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM project WHERE id=?1 UNION ALL SELECT 1 FROM project_tombstone WHERE project_id=?1);",
@@ -241,6 +358,7 @@ pub fn update(
             Some(value) => normalize_optional(value, "instructions", INSTRUCTIONS_MAX)?,
             None => old.instructions,
         },
+        created_by_device_id: None,
     };
     let fingerprint = title_fingerprint(&content.title);
     let sealed = seal_json(
