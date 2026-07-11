@@ -62,6 +62,7 @@ import type {
   CloudWorkspaceLinkState,
   AccountInvitationAcceptanceOutcome,
   AccountPendingInvitationList,
+  AccountWorkspaceMemberList,
   AccountWorkspaceStatus
 } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
@@ -2030,6 +2031,17 @@ export async function loadRuntimePendingInvitations() {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<AccountPendingInvitationList>("account_membership_pending_invitations");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function loadRuntimeWorkspaceMembers(fableWorkspaceId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceMemberList>("account_workspace_members", {
+      fableWorkspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }

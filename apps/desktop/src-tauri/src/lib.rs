@@ -227,6 +227,7 @@ pub fn run() {
             account_workspace::account_workspace_reconcile,
             account_workspace::account_membership_pending_invitations,
             account_workspace::account_membership_accept_invitation,
+            account_workspace::account_workspace_members,
             account_workspace::account_workspace_create,
             account_workspace::account_workspace_select,
             account_workspace::account_device_revoke,

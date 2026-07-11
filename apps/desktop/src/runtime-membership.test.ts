@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptRuntimePendingInvitation,
-  loadRuntimePendingInvitations
+  loadRuntimePendingInvitations,
+  loadRuntimeWorkspaceMembers
 } from "./runtime";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -23,6 +24,7 @@ describe("membership invitation runtime boundary", () => {
 
   it("does not simulate an invitation inbox outside Tauri", async () => {
     await expect(loadRuntimePendingInvitations()).resolves.toBeNull();
+    await expect(loadRuntimeWorkspaceMembers("workspace-a")).resolves.toBeNull();
     await expect(acceptRuntimePendingInvitation("invitation-a")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -31,13 +33,16 @@ describe("membership invitation runtime boundary", () => {
     setNative(true);
     mocks.invoke
       .mockResolvedValueOnce({ invitations: [] })
+      .mockResolvedValueOnce({ workspaceId: "workspace-a", actorRole: "owner", members: [] })
       .mockResolvedValueOnce({ result: { status: "rejected" }, accountWorkspace: {} });
 
     await loadRuntimePendingInvitations();
+    await loadRuntimeWorkspaceMembers("workspace-a");
     await acceptRuntimePendingInvitation("invitation-a");
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["account_membership_pending_invitations"],
+      ["account_workspace_members", { fableWorkspaceId: "workspace-a" }],
       ["account_membership_accept_invitation", { invitationId: "invitation-a" }]
     ]);
   });

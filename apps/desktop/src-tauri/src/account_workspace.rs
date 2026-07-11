@@ -176,6 +176,28 @@ pub struct AccountPendingInvitationList {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountWorkspaceMemberSummary {
+    member_id: String,
+    role: String,
+    status: String,
+    revision: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    email_hint: Option<String>,
+    is_current_user: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountWorkspaceMemberList {
+    workspace_id: String,
+    actor_role: String,
+    members: Vec<AccountWorkspaceMemberSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostedMembership {
     workspace_id: String,
     authority: String,
@@ -518,6 +540,79 @@ fn valid_role(value: &str) -> bool {
     ["owner", "admin", "editor", "viewer"].contains(&value)
 }
 
+fn is_control_or_format(value: char) -> bool {
+    value.is_control()
+        || matches!(
+            value,
+            '\u{00ad}'
+                | '\u{061c}'
+                | '\u{06dd}'
+                | '\u{070f}'
+                | '\u{08e2}'
+                | '\u{180e}'
+                | '\u{feff}'
+                | '\u{110bd}'
+                | '\u{110cd}'
+                | '\u{e0001}'
+        )
+        || ('\u{0600}'..='\u{0605}').contains(&value)
+        || ('\u{0890}'..='\u{0891}').contains(&value)
+        || ('\u{200b}'..='\u{200f}').contains(&value)
+        || ('\u{202a}'..='\u{202e}').contains(&value)
+        || ('\u{2060}'..='\u{2064}').contains(&value)
+        || ('\u{2066}'..='\u{206f}').contains(&value)
+        || ('\u{fff9}'..='\u{fffb}').contains(&value)
+        || ('\u{13430}'..='\u{1343f}').contains(&value)
+        || ('\u{1bca0}'..='\u{1bca3}').contains(&value)
+        || ('\u{1d173}'..='\u{1d17a}').contains(&value)
+        || ('\u{e0020}'..='\u{e007f}').contains(&value)
+}
+
+fn valid_display_name(value: &str) -> bool {
+    !value.is_empty()
+        && value == value.trim()
+        && value.chars().count() <= 120
+        && !value.chars().any(is_control_or_format)
+}
+
+fn valid_email_hint(value: &str) -> bool {
+    if value.is_empty() || value != value.trim() || value.len() > 254 {
+        return false;
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() < 8
+        || !(bytes[0].is_ascii_alphanumeric() || bytes[0] == b'*')
+        || &bytes[1..5] != b"***@"
+    {
+        return false;
+    }
+    let domain = &value[5..];
+    if domain.is_empty()
+        || domain.len() > 253
+        || domain != domain.to_ascii_lowercase()
+        || !domain.is_ascii()
+    {
+        return false;
+    }
+    let labels = domain.split('.').collect::<Vec<_>>();
+    labels.len() >= 2
+        && labels.iter().all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                && label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                && label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+        })
+}
+
 fn validate_invitation(record: &HostedInvitation) -> Result<(), String> {
     let recipient_is_valid = match &record.recipient_constraint {
         InvitationRecipientConstraint::InternalUser { internal_user_id } => {
@@ -682,6 +777,59 @@ fn parse_pending_invitations(value: Value) -> Result<AccountPendingInvitationLis
         }
     }
     Ok(AccountPendingInvitationList { invitations })
+}
+
+fn parse_workspace_members(
+    value: Value,
+    expected_workspace_id: &str,
+    expected_current_member_id: &str,
+) -> Result<AccountWorkspaceMemberList, String> {
+    let roster: AccountWorkspaceMemberList = serde_json::from_value(value)
+        .map_err(|_| "The hosted workspace member response is malformed.".to_string())?;
+    if roster.workspace_id != expected_workspace_id
+        || !valid_role(&roster.actor_role)
+        || roster.members.len() > 500
+    {
+        return Err("The hosted workspace member response failed validation.".into());
+    }
+
+    let mut member_ids = BTreeSet::new();
+    let mut current_members = 0;
+    for member in &roster.members {
+        if !valid_id(&member.member_id)
+            || !member_ids.insert(member.member_id.clone())
+            || !valid_role(&member.role)
+            || !["active", "suspended"].contains(&member.status.as_str())
+            || member.revision < 0
+            || member
+                .display_name
+                .as_ref()
+                .is_some_and(|value| !valid_display_name(value))
+            || member
+                .email_hint
+                .as_ref()
+                .is_some_and(|value| !valid_email_hint(value))
+        {
+            return Err("The hosted workspace member list contains an invalid entry.".into());
+        }
+        if member.is_current_user {
+            current_members += 1;
+            if member.member_id != expected_current_member_id
+                || member.status != "active"
+                || member.role != roster.actor_role
+            {
+                return Err(
+                    "The hosted workspace member list does not match the active membership.".into(),
+                );
+            }
+        }
+    }
+    if current_members != 1 {
+        return Err(
+            "The hosted workspace member list does not identify the active membership.".into(),
+        );
+    }
+    Ok(roster)
 }
 
 fn parse_acceptance_result(
@@ -919,6 +1067,24 @@ async fn pending_invitations_with_transport(
     )
 }
 
+async fn workspace_members_with_transport(
+    transport: &dyn HostedAccountTransport,
+    expected_identity: &AccountIdentitySnapshot,
+    workspace_id: &str,
+    current_member_id: &str,
+) -> Result<AccountWorkspaceMemberList, String> {
+    let response = bound_hosted_call(
+        transport,
+        &expected_identity.account_binding,
+        ConvexFunctionType::Query,
+        "membership:listRoster",
+        json!({ "workspaceId": workspace_id }),
+    )
+    .await?;
+    let _identity_guard = transport.lock_identity_generation(expected_identity)?;
+    parse_workspace_members(response, workspace_id, current_member_id)
+}
+
 async fn accept_invitation_with_transport(
     transport: &dyn HostedAccountTransport,
     expected_identity: &AccountIdentitySnapshot,
@@ -1111,6 +1277,35 @@ pub async fn account_workspace_reconcile() -> Result<AccountWorkspaceStatus, Str
 pub async fn account_membership_pending_invitations() -> Result<AccountPendingInvitationList, String>
 {
     pending_invitations_with_transport(&NativeHostedAccountTransport).await
+}
+
+#[tauri::command]
+pub async fn account_workspace_members(
+    fable_workspace_id: String,
+) -> Result<AccountWorkspaceMemberList, String> {
+    if !valid_id(&fable_workspace_id) {
+        return Err("Workspace id is invalid.".into());
+    }
+    let transport = NativeHostedAccountTransport;
+    let identity = transport.identity_snapshot()?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let context = store
+        .with_conn(directory::require_active_workspace_context_for_current_user)
+        .map_err(|error| error.to_string())?;
+    if context.active_workspace.fable_workspace_id.as_deref() != Some(&fable_workspace_id) {
+        return Err("Select this workspace before loading its members.".into());
+    }
+    let current_member_id = context
+        .member_id
+        .ok_or_else(|| "The active workspace membership is unavailable.".to_string())?;
+    workspace_members_with_transport(
+        &transport,
+        &identity,
+        &fable_workspace_id,
+        &current_member_id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1407,6 +1602,26 @@ mod tests {
         }
     }
 
+    fn roster_member(member_id: &str, is_current_user: bool) -> Value {
+        json!({
+            "memberId": member_id,
+            "role": "owner",
+            "status": "active",
+            "revision": 1,
+            "displayName": "Workspace member",
+            "emailHint": "m***@example.com",
+            "isCurrentUser": is_current_user
+        })
+    }
+
+    fn roster(workspace_id: &str) -> Value {
+        json!({
+            "workspaceId": workspace_id,
+            "actorRole": "owner",
+            "members": [roster_member("member_current", true)]
+        })
+    }
+
     #[test]
     fn convex_envelopes_fail_closed() {
         assert_eq!(
@@ -1496,6 +1711,155 @@ mod tests {
             "workspaceName": "x".repeat(161)
         }]))
         .is_err());
+    }
+
+    #[test]
+    fn workspace_member_parser_accepts_only_the_expected_bounded_roster() {
+        let parsed = parse_workspace_members(roster("ws_home"), "ws_home", "member_current")
+            .expect("valid roster");
+        assert_eq!(parsed.workspace_id, "ws_home");
+        assert_eq!(parsed.members.len(), 1);
+
+        assert!(parse_workspace_members(roster("ws_other"), "ws_home", "member_current").is_err());
+
+        let duplicate = json!({
+            "workspaceId": "ws_home",
+            "actorRole": "owner",
+            "members": [
+                roster_member("member_current", true),
+                roster_member("member_current", false)
+            ]
+        });
+        assert!(parse_workspace_members(duplicate, "ws_home", "member_current").is_err());
+
+        let oversized = json!({
+            "workspaceId": "ws_home",
+            "actorRole": "owner",
+            "members": (0..501).map(|index| json!({
+                "memberId": format!("member_{index}"),
+                "role": "viewer",
+                "status": "active",
+                "revision": 0,
+                "isCurrentUser": index == 0
+            })).collect::<Vec<_>>()
+        });
+        assert!(parse_workspace_members(oversized, "ws_home", "member_0").is_err());
+    }
+
+    #[test]
+    fn workspace_member_parser_rejects_current_user_mismatch_and_private_metadata() {
+        for invalid in [
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [roster_member("member_other", true)]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [roster_member("member_current", false)]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [
+                    roster_member("member_current", true),
+                    roster_member("member_other", true)
+                ]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [{
+                    "memberId": "member_current", "role": "owner", "status": "active",
+                    "revision": 1, "isCurrentUser": true,
+                    "internalUserId": "user_private"
+                }]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [{
+                    "memberId": "member_current", "role": "owner", "status": "active",
+                    "revision": 1, "isCurrentUser": true,
+                    "displayName": "x".repeat(121)
+                }]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [{
+                    "memberId": "member_current", "role": "owner", "status": "active",
+                    "revision": 1, "isCurrentUser": true,
+                    "displayName": "Hidden\u{202e}name"
+                }]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [{
+                    "memberId": "member_current", "role": "owner", "status": "active",
+                    "revision": 1, "isCurrentUser": true,
+                    "emailHint": "member@example.com"
+                }]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [{
+                    "memberId": "member_current", "role": "owner", "status": "active",
+                    "revision": 1, "isCurrentUser": true,
+                    "emailHint": "m***@Example.com"
+                }]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "admin",
+                "members": [roster_member("member_current", true)]
+            }),
+            json!({
+                "workspaceId": "ws_home", "actorRole": "owner",
+                "members": [{
+                    "memberId": "member_current", "role": "owner", "status": "removed",
+                    "revision": 1, "isCurrentUser": true
+                }]
+            }),
+        ] {
+            assert!(parse_workspace_members(invalid, "ws_home", "member_current").is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn workspace_member_request_uses_only_the_fixed_query_and_payload() {
+        let transport = ScriptedTransport::new(vec![ScriptStep {
+            mutation: false,
+            path: "membership:listRoster",
+            args: json!({ "workspaceId": "ws_home" }),
+            result: roster("ws_home"),
+        }]);
+        let result = workspace_members_with_transport(
+            &transport,
+            &identity("bootstrap_key"),
+            "ws_home",
+            "member_current",
+        )
+        .await
+        .expect("valid roster");
+        assert_eq!(result.members.len(), 1);
+        assert!(transport.finished());
+    }
+
+    #[tokio::test]
+    async fn workspace_member_request_rejects_account_switches() {
+        let transport = ScriptedTransport::with_bindings(
+            vec![ScriptStep {
+                mutation: false,
+                path: "membership:listRoster",
+                args: json!({ "workspaceId": "ws_home" }),
+                result: roster("ws_home"),
+            }],
+            vec!["bootstrap_key", "changed_account"],
+        );
+        let error = workspace_members_with_transport(
+            &transport,
+            &identity("bootstrap_key"),
+            "ws_home",
+            "member_current",
+        )
+        .await
+        .expect_err("account switch must fail");
+        assert_eq!(error, ACCOUNT_CHANGED_ERROR);
     }
 
     #[test]
