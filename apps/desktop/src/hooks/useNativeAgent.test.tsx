@@ -3,7 +3,8 @@ import type {
   AgentRunRequest,
   BackendAgentEvent,
   BackendProvider,
-  PersistedAgentRun
+  PersistedAgentRun,
+  PreparedRunContext
 } from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -60,8 +61,10 @@ const mocks = vi.hoisted(() => ({
   // every executeRuntimeToolCall records its request and resolves with this result.
   toolRequests: [] as unknown[],
   savedRuns: [] as unknown[],
+  persistenceEvents: [] as string[],
   saveError: null as Error | null,
   recoveredRuns: [] as PersistedAgentRun[],
+  listedRuns: null as PersistedAgentRun[] | null,
   toolResult: { ok: true, output: "Fetched body text from Rust." }
 }));
 
@@ -86,6 +89,7 @@ vi.mock("../runtime", () => ({
   streamRuntimeCompletion: vi.fn(
     async (request: { providerId: string; requestId: string; model: string; body: unknown }) => {
       mocks.streamCalls += 1;
+      mocks.persistenceEvents.push("egress");
       // Record the egress request so the per-provider routing tests can assert
       // the body was shaped by the correct shaper before crossing to Rust.
       mocks.streamRequests.push(request);
@@ -99,9 +103,11 @@ vi.mock("../runtime", () => ({
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => {
     if (mocks.saveError) throw mocks.saveError;
     mocks.savedRuns.push(run);
+    mocks.persistenceEvents.push("save");
     return run;
   }),
   recoverRuntimeAgentRuns: vi.fn(async () => mocks.recoveredRuns),
+  listRuntimeAgentRuns: vi.fn(async () => mocks.listedRuns),
   listRuntimeBackendModels: vi.fn(async () => null),
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
@@ -138,6 +144,18 @@ const baseRequest: AgentRunRequest = {
   maxTokens: 1024
 };
 
+const preparedContext: PreparedRunContext = {
+  systemPrefix: "Use the selected project notes.",
+  receipt: {
+    version: 1,
+    runId: "019f4f00-0000-7000-8000-contextreceipt",
+    assembledAt: "2026-07-11T12:00:00.000Z",
+    scope: { level: "project", projectId: "project-1" },
+    citations: [],
+    contributions: [{ id: "memory-1", kind: "memory", reason: "memory-approved" }]
+  }
+};
+
 /** A connected, streaming native-API provider the hook can resolve to a backend. */
 function connectedOpenAiProvider(): BackendProvider {
   return {
@@ -166,8 +184,10 @@ function resetLineState() {
   mocks.cancelCalls = [];
   mocks.toolRequests = [];
   mocks.savedRuns = [];
+  mocks.persistenceEvents = [];
   mocks.saveError = null;
   mocks.recoveredRuns = [];
+  mocks.listedRuns = null;
   mocks.toolResult = { ok: true, output: "Fetched body text from Rust." };
   listenCount = 0;
 }
@@ -196,6 +216,53 @@ describe("useNativeAgent", () => {
     expect(result.current.state.running).toBe(false);
     // No transport means no stream ever started.
     expect(mocks.streamCalls).toBe(0);
+  });
+
+  it("persists the immutable prepared receipt before egress and uses its canonical run id", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Done"), finishStop];
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+    await act(async () => { await result.current.run(baseRequest, preparedContext); });
+    const saved = mocks.savedRuns as PersistedAgentRun[];
+    expect(saved[0]).toMatchObject({ id: preparedContext.receipt.runId, contextReceipt: preparedContext.receipt, status: "streaming" });
+    expect(mocks.persistenceEvents[0]).toBe("save");
+    expect(mocks.persistenceEvents.indexOf("save")).toBeLessThan(mocks.persistenceEvents.indexOf("egress"));
+    expect(saved.every((run) => run.contextReceipt === preparedContext.receipt)).toBe(true);
+    expect(mocks.streamRequests[0]).toBeDefined();
+    expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toEqual(preparedContext.receipt);
+  });
+
+  it("creates an explicit empty receipt when a caller has no prepared context", async () => {
+    installDesktopRuntime();
+    mocks.lines = [finishStop];
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()], threadId: "thread-1" }));
+    await act(async () => { await result.current.run(baseRequest); });
+    const first = mocks.savedRuns[0] as PersistedAgentRun;
+    expect(first.contextReceipt).toMatchObject({ runId: first.id, scope: { level: "thread", threadId: "thread-1" }, citations: [], contributions: [] });
+  });
+
+  it("removes optimistic receipt evidence when the pre-egress save fails", async () => {
+    installDesktopRuntime();
+    mocks.saveError = new Error("disk unavailable");
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+    await act(async () => { await result.current.run(baseRequest, preparedContext); });
+    expect(mocks.streamCalls).toBe(0);
+    expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toBeUndefined();
+    expect(result.current.state.currentRunId).toBeNull();
+  });
+
+  it("hydrates context receipts for completed, failed, and interrupted historical runs", async () => {
+    installDesktopRuntime();
+    mocks.listedRuns = (["completed", "failed", "interrupted"] as const).map((status, index) => ({
+      id: `run-${status}`,
+      providerId: "openai", model: "gpt-5", status, transcript: "response", turn: 0,
+      pendingApprovalIds: [], recoverable: status !== "completed", retryCount: 0,
+      createdAt: "2026-07-11T12:00:00.000Z", updatedAt: "2026-07-11T12:00:01.000Z",
+      contextReceipt: { ...preparedContext.receipt, runId: `run-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] }
+    }));
+    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+    await waitFor(() => expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3));
+    expect(result.current.state.contextReceipts["run-interrupted"]?.contributions[0].reason).toBe("retrieved");
   });
 
   it("surfaces interrupted runs and retries from the durable user prompt", async () => {

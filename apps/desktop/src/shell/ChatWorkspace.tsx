@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { parseComposerText } from "@fable/connectors";
-import type { KnowledgeCitation } from "@fable/protocol";
+import type { KnowledgeCitation, PreparedRunContext } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { connectors } from "../data/workspace";
@@ -16,7 +16,7 @@ import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, DirectiveCards } from "../components/workspace-cards";
+import { CitationResults, DirectiveCards, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -40,7 +40,7 @@ function messageId(prefix: string) {
 // Standalone pages are code-split: each is only rendered when navigated to, so
 // loading them lazily keeps the initial workspace bundle small. Named exports
 // are adapted to the lazy() default-export contract via `.then`. Suspense
-// fallbacks are minimal (no layout shift) â€” the heaviest of these (Settings)
+// fallbacks are minimal (no layout shift) - the heaviest of these (Settings)
 // pulls in Run History, Schedule panel, and provider rendering on demand.
 const OnboardingPage = lazy(() =>
   import("../components/pages/OnboardingPage").then((m) => ({ default: m.OnboardingPage }))
@@ -70,7 +70,7 @@ export function ChatWorkspace() {
   // The shared approval gate: the shell's grant/deny decisions resolve it, and
   // the agent-loop executor awaits it. Created once before the hooks so both
   // useShellRuntime (dispatch on grant/deny) and useNativeAgent (executor awaits
-  // it) share the same instance â€” a grant in the approval UI drives the tool call
+  // it) share the same instance - a grant in the approval UI drives the tool call
   // the loop is currently blocked on.
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
@@ -436,13 +436,19 @@ export function ChatWorkspace() {
     const content = agent.state.transcript || fallback;
     setConversationMessages((current) =>
       current.map((message) =>
-        message.id === assistantId ? { ...message, content } : message
+        message.id === assistantId
+          ? {
+              ...message,
+              content,
+              ...(agent.state.running && agent.state.currentRunId ? { runId: agent.state.currentRunId } : {})
+            }
+          : message
       )
     );
     if (!agent.state.running && agent.state.status !== "streaming" && agent.state.status !== "awaiting-approval") {
       activeAssistantMessageId.current = null;
     }
-  }, [agent.state.lastError, agent.state.running, agent.state.status, agent.state.transcript]);
+  }, [agent.state.currentRunId, agent.state.lastError, agent.state.running, agent.state.status, agent.state.transcript]);
 
   // Recoverable runs scoped to the active thread. Hoisted + memoized so the
   // agent panel does not re-filter the full recoverable list on every render
@@ -474,13 +480,16 @@ export function ChatWorkspace() {
             className={`conversation-message conversation-message--${message.role}`}
           >
             <p>{message.content}</p>
+            {message.role === "assistant" && message.runId && agent.state.contextReceipts[message.runId] ? (
+              <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
+            ) : null}
             {message.role === "assistant" && message.runId && message.content ? (
               <ResponseArtifactAction
                 threadId={selectedConversationThreadId ?? ""}
                 messageId={message.id}
                 runId={message.runId}
                 content={message.content}
-                citations={runtime.knowledgeCitations}
+                citations={citationsForRun(message.runId, agent.state.contextReceipts)}
                 existing={threadArtifacts.find((entry) => entry.sourceMessageId === message.id)}
                 onSaved={(saved) => setThreadArtifacts((current) => [...current.filter((entry) => entry.artifact.id !== saved.artifact.id), saved])}
               />
@@ -635,7 +644,7 @@ export function ChatWorkspace() {
 
   /**
    * Submit raw composer text. Fable-owned slash commands (/goal, /plan,
-   * /remember, /schedule) are parsed and executed first â€” they create
+   * /remember, /schedule) are parsed and executed first - they create
    * structured Fable state and, when a backend is connected, submit follow-up
    * model work through the agent run. Unknown slashes and ordinary text fall
    * through to the normal prompt path unchanged.
@@ -735,7 +744,21 @@ export function ChatWorkspace() {
         projectId: runProjectId,
         projectMemoryRecords
       }))
-      .then((contextPrefix) => agent.run(request, contextPrefix || undefined, runtime.permissionMode))
+      .then((runtimeContext) => {
+        // Compatibility during the parallel landing: the final assembly path
+        // returns PreparedRunContext; older callers are accepted by the hook
+        // and receive an explicit empty receipt.
+        if (typeof runtimeContext === "object" && runtimeContext && "receipt" in runtimeContext) {
+          const preparedContext = runtimeContext as PreparedRunContext;
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId
+              ? { ...entry, runId: preparedContext.receipt.runId }
+              : entry
+          ));
+          return agent.run(request, preparedContext, runtime.permissionMode);
+        }
+        return agent.run(request, runtimeContext || undefined, runtime.permissionMode);
+      })
       .catch((cause) => {
         const message = cause instanceof Error ? cause.message : "Fable could not load this project's context.";
         agent.reportError(message);

@@ -24,7 +24,9 @@ import type {
   BackendProvider,
   PersistedAgentExchange,
   PersistedAgentRun,
-  PermissionMode
+  PermissionMode,
+  PreparedRunContext,
+  RunContextReceipt
 } from "@fable/protocol";
 import {
   resolveAgentBackend,
@@ -39,6 +41,7 @@ import { createDesktopLocalModelTransport } from "../lib/local-model-transport";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
   listRuntimeBackendModels,
+  listRuntimeAgentRuns,
   recoverRuntimeAgentRuns,
   saveRuntimeAgentRun
 } from "../runtime";
@@ -65,6 +68,10 @@ export interface NativeAgentState {
   lastError: string | null;
   status: PersistedAgentRun["status"] | "idle";
   recoverableRuns: PersistedAgentRun[];
+  /** Immutable context evidence keyed by canonical run id, including recovered completed runs. */
+  contextReceipts: Record<string, RunContextReceipt>;
+  /** Canonical id for the current or most recently started run. */
+  currentRunId: string | null;
   /** True when there is no desktop runtime to carry the request. */
   noTransport: boolean;
 }
@@ -117,6 +124,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     lastError: null,
     status: "idle",
     recoverableRuns: [],
+    contextReceipts: {},
+    currentRunId: null,
     noTransport: !hasDesktopRuntime()
   });
   // The active backend + run id for the current run. cancel() delegates to the
@@ -144,16 +153,23 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   createDurableRunWriterRef.current = options.createDurableRunWriter;
 
   useEffect(() => {
-    void recoverRuntimeAgentRuns(new Date().toISOString()).then((runs) => {
+    void (async () => {
+      const recovered = await recoverRuntimeAgentRuns(new Date().toISOString());
+      const listed = await listRuntimeAgentRuns();
+      const runs = listed ?? recovered;
       if (!runs) return;
       setState((current) => ({
         ...current,
+        contextReceipts: runs.reduce<Record<string, RunContextReceipt>>((receipts, run) => {
+          if (run.contextReceipt) receipts[run.id] = run.contextReceipt;
+          return receipts;
+        }, { ...current.contextReceipts }),
         recoverableRuns: runs.filter(
           (run) =>
             (run.status === "interrupted" || run.status === "failed") && run.recoverable
         )
       }));
-    });
+    })();
   }, []);
 
   // Resolve the connected backend to a provider-neutral AgentBackend. The deps
@@ -191,7 +207,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const run = useCallback(
     async (
       request: AgentRunRequest,
-      contextPrefix?: string,
+      preparedContext?: PreparedRunContext | string,
       requestedPermissionMode?: PermissionMode,
       parentRunId?: string
     ) => {
@@ -209,11 +225,30 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           ...current,
           noTransport: !hasDesktopRuntime(),
           lastError: "Native agent needs the desktop runtime.",
-          status: "failed"
+          status: "failed",
+          currentRunId: null
         }));
         return;
       }
       const providerId = backend.providerId;
+      const generatedRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const createdAt = new Date().toISOString();
+      const prepared = typeof preparedContext === "object" && preparedContext?.receipt
+        ? preparedContext
+        : {
+            systemPrefix: typeof preparedContext === "string" ? preparedContext : "",
+            receipt: {
+              version: 1 as const,
+              runId: generatedRunId,
+              assembledAt: createdAt,
+              scope: threadIdRef.current
+                ? { level: "thread" as const, threadId: threadIdRef.current }
+                : { level: "global" as const },
+              citations: [],
+              contributions: []
+            }
+          };
+      const runId = prepared.receipt.runId;
       setState((current) => ({
         ...current,
         transcript: "",
@@ -224,13 +259,13 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         recoverableRuns: parentRunId
           ? current.recoverableRuns.filter((run) => run.id !== parentRunId)
           : current.recoverableRuns,
+        currentRunId: runId,
+        contextReceipts: { ...current.contextReceipts, [runId]: prepared.receipt },
         noTransport: false
       }));
-      const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       // Mark active before the first durable write so a second click cannot
       // start an overlapping run while initial persistence is still pending.
       activeRunIdRef.current = runId;
-      const createdAt = new Date().toISOString();
       const initialExchanges: PersistedAgentExchange[] = request.messages
         .filter(
           (message): message is typeof message & { role: "user" | "assistant" | "tool" } =>
@@ -251,6 +286,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         threadId: threadIdRef.current,
         exchanges: initialExchanges,
         parentRunId,
+        contextReceipt: prepared.receipt,
         turn: 0,
         pendingApprovalIds: [],
         recoverable: true,
@@ -276,7 +312,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         const message = error instanceof Error ? error.message : "Could not save the conversation before it started.";
         const failed = { ...persisted, status: "failed" as const, recoverable: true, error: message, updatedAt: new Date().toISOString() };
         activePersistedRef.current = failed;
-        setState((current) => ({ ...current, running: false, status: "failed", lastError: message, recoverableRuns: [failed, ...current.recoverableRuns] }));
+        setState((current) => {
+          const contextReceipts = { ...current.contextReceipts };
+          delete contextReceipts[runId];
+          return { ...current, running: false, status: "failed", lastError: message, recoverableRuns: [failed, ...current.recoverableRuns], contextReceipts, currentRunId: null };
+        });
         try { await saveRuntimeAgentRun(failed); } catch { /* persistence is already the reported terminal failure */ }
         activeRunIdRef.current = null;
         activePersistedRef.current = null;
@@ -306,7 +346,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             throw new Error("Tool execution pending approval in the shell.");
           }),
         shouldCancel: shouldCancelRef.current ?? (() => false),
-        contextPrefix,
+        contextPrefix: prepared.systemPrefix,
         permissionMode,
         runId,
         onRetry: () => {
@@ -631,7 +671,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       lastError: message,
       transcript: "",
       usage: null,
-      status: "failed"
+      status: "failed",
+      currentRunId: null
     }));
   }, []);
 
