@@ -11,8 +11,9 @@ import { SquaresFour } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AccountPendingInvitation,
   ActionHistoryEvent,
   CustomApprovalSettings,
   RemoteControlStatusSnapshot,
@@ -25,7 +26,7 @@ import {
   customApprovalToggleLabel
 } from "../../lib/approval-copy";
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
-import { getRuntimeRemoteControlStatus } from "../../runtime";
+import { acceptRuntimePendingInvitation, getRuntimeRemoteControlStatus, loadRuntimePendingInvitations } from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
@@ -1147,11 +1148,89 @@ function AppearanceSettingsView({
 
 export function WorkspaceSettingsView({
   workspaceName,
-  onStatus
+  onStatus,
+  onInvitationAccepted
 }: {
   workspaceName: string;
   onStatus: (message: string) => void;
+  onInvitationAccepted: () => void | Promise<void>;
 }) {
+  const [invitations, setInvitations] = useState<readonly AccountPendingInvitation[]>([]);
+  const [invitationState, setInvitationState] = useState<"loading" | "ready" | "unavailable" | "error">("loading");
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
+  const [invitationMessage, setInvitationMessage] = useState("");
+  const feedbackRef = useRef<HTMLParagraphElement>(null);
+
+  const loadInvitations = async () => {
+    setInvitationState("loading");
+    setInvitationMessage("");
+    try {
+      const result = await loadRuntimePendingInvitations();
+      if (result === null) {
+        setInvitations([]);
+        setInvitationState("unavailable");
+      } else {
+        setInvitations(result.invitations);
+        setInvitationState("ready");
+      }
+    } catch {
+      setInvitations([]);
+      setInvitationState("error");
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const result = await loadRuntimePendingInvitations();
+        if (!active) return;
+        if (result === null) {
+          setInvitationState("unavailable");
+        } else {
+          setInvitations(result.invitations);
+          setInvitationState("ready");
+        }
+      } catch {
+        if (active) setInvitationState("error");
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (invitationMessage) feedbackRef.current?.focus();
+  }, [invitationMessage]);
+
+  const acceptInvitation = async (invitationId: string) => {
+    if (acceptingId) return;
+    setAcceptingId(invitationId);
+    setInvitationMessage("");
+    try {
+      const outcome = await acceptRuntimePendingInvitation(invitationId);
+      if (outcome === null) {
+        setInvitationState("unavailable");
+      } else if (outcome.result.status !== "accepted") {
+        setInvitationMessage("This invitation is no longer available. Refresh invitations to check again.");
+      } else {
+        setInvitations((current) => current.filter((entry) => entry.invitation.invitationId !== invitationId));
+        try {
+          await onInvitationAccepted();
+          setInvitationMessage("Invitation accepted. The workspace is now available from the workspace selector.");
+        } catch {
+          setInvitationMessage("Invitation accepted. The workspace list couldn’t refresh yet; try refreshing your account.");
+        }
+      }
+    } catch {
+      setInvitationMessage("That invitation couldn’t be accepted. Check your connection and try again.");
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
+  const roleLabel = (role: AccountPendingInvitation["invitation"]["role"]) =>
+    role === "owner" ? "Workspace owner" : role === "admin" ? "Workspace admin" : role === "editor" ? "Can edit" : "Can view";
+
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
@@ -1179,27 +1258,35 @@ export function WorkspaceSettingsView({
                 <UserCircle size={19} />
               </span>
               <span>
-                <strong id="workspace-access-title">
-                  Shared access
-                  <span style={{
-                    fontSize: "10px",
-                    marginLeft: "6px",
-                    padding: "2px 6px",
-                    background: "var(--accent-subtle)",
-                    color: "var(--accent-strong)",
-                    borderRadius: "10px",
-                    fontWeight: 500,
-                    verticalAlign: "middle"
-                  }}>
-                    WIP
-                  </span>
-                </strong>
-                <small>Workspace invitations and shared access are coming soon.</small>
+                <strong id="workspace-access-title">Workspace invitations</strong>
+                <small>Invitations addressed to your signed-in Fable account appear here.</small>
               </span>
             </div>
-            <p className="profile-security-note" style={{ marginTop: "8px" }}>
-              <strong>Shared work is in development.</strong> You’ll be able to invite people and work together here in a future update.
-            </p>
+            {invitationState === "loading" ? <p role="status">Checking for invitations…</p> : null}
+            {invitationState === "unavailable" ? <p className="profile-security-note">Sharing invitations require the Fable desktop account service.</p> : null}
+            {invitationState === "error" ? (
+              <div>
+                <p role="alert">Invitations couldn’t be loaded. Check your connection and try again.</p>
+                <button type="button" className="button button--secondary" onClick={() => void loadInvitations()}>Try again</button>
+              </div>
+            ) : null}
+            {invitationState === "ready" && invitations.length === 0 ? <p>No pending invitations.</p> : null}
+            {invitationState === "ready" && invitations.length > 0 ? (
+              <div className="provider-access-list" aria-label="Pending workspace invitations">
+                {invitations.map(({ invitation }) => (
+                  <div className="provider-access-row" key={invitation.invitationId}>
+                    <span>
+                      <strong>Workspace invitation</strong>
+                      <small>{roleLabel(invitation.role)} · Expires {new Date(invitation.expiresAt).toLocaleDateString()}</small>
+                    </span>
+                    <button type="button" className="button button--primary" disabled={acceptingId !== null} onClick={() => void acceptInvitation(invitation.invitationId)}>
+                      {acceptingId === invitation.invitationId ? "Accepting…" : "Accept invitation"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {invitationMessage ? <p ref={feedbackRef} tabIndex={-1} role="status" className="profile-security-note">{invitationMessage}</p> : null}
           </section>
         </div>
 

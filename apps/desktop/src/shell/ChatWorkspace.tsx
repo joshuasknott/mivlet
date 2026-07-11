@@ -1177,6 +1177,9 @@ export function ChatWorkspace() {
                   <Suspense fallback={null}>
                     <WorkspaceSettingsView
                       workspaceName={workspaceName}
+                      onInvitationAccepted={async () => {
+                        await runtime.reconcileAccountWorkspace();
+                      }}
                       onStatus={(message) => {
                         setWorkspaceSettingsStatus(message);
                         runtime.setLastAction(message);
