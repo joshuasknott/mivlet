@@ -179,7 +179,7 @@ fn pending_key(connector_id: &str, state: &str) -> String {
     format!("oauth-pending:{connector_id}:{state}")
 }
 
-fn token_key(connector_id: &str, account_id: &str) -> String {
+pub(crate) fn native_connector_credential_ref(connector_id: &str, account_id: &str) -> String {
     format!("oauth-token:{connector_id}:{account_id}")
 }
 
@@ -921,7 +921,7 @@ async fn complete_with_store(
             .await?
         }
     };
-    let credential_ref = token_key(connector_id, &account.id);
+    let credential_ref = native_connector_credential_ref(connector_id, &account.id);
     let previous = store
         .get(&credential_ref)
         .ok()
@@ -1919,7 +1919,7 @@ mod tests {
         };
         store
             .set(
-                &token_key("fixture", "account-1"),
+                &native_connector_credential_ref("fixture", "account-1"),
                 &serde_json::to_string(&existing).unwrap(),
             )
             .unwrap();
@@ -2430,7 +2430,10 @@ mod tests {
         assert_eq!(error.code, "configuration-required");
         assert!(!error.retryable);
         // The desktop never stored a token and the connection is not live.
-        assert!(store.get(&token_key("github", "any")).unwrap().is_none());
+        assert!(store
+            .get(&native_connector_credential_ref("github", "any"))
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]

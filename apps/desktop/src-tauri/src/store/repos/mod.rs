@@ -19,6 +19,7 @@ pub mod artifact;
 pub mod audit_event;
 pub mod backend_connection;
 pub mod cloud_sync;
+pub mod connection_record;
 pub mod connector_account;
 pub mod connector_cache;
 pub mod connector_cache_settings;
