@@ -810,11 +810,7 @@ export async function deleteRuntimeConversationDraft(draftKey: string) {
   await invoke<void>("conversation_delete_draft", { id: draftKey, threadId: draftThreadId(draftKey) });
 }
 
-export interface RuntimeArtifactBundle {
-  artifact: Spine.ArtifactsAndRoutines.Artifact;
-  version: Spine.ArtifactsAndRoutines.ArtifactVersion;
-  sourceMessageId: string;
-}
+export type RuntimeArtifactBundle = Spine.ArtifactsAndRoutines.ArtifactBundle;
 
 export interface CreateResponseArtifactInput {
   threadId: string;
@@ -826,13 +822,58 @@ export interface CreateResponseArtifactInput {
 }
 
 const previewArtifacts = new Map<string, RuntimeArtifactBundle[]>();
+const ARTIFACT_MAX_INLINE_CONTENT_BYTES = 65_536;
 
 function assertArtifactBundle(value: unknown, workspaceId: string): asserts value is RuntimeArtifactBundle {
-  if (!isRecord(value) || !isRecord(value.artifact) || !isRecord(value.version) ||
-      value.artifact.workspaceId !== workspaceId || typeof value.artifact.id !== "string" ||
-      typeof value.version.id !== "string" || typeof value.sourceMessageId !== "string") {
+  if (!isRecord(value) || !isRecord(value.artifact) || !isRecord(value.currentVersion) || !Array.isArray(value.versions)) {
     throw new Error("Malformed or cross-workspace artifact response.");
   }
+  const artifact = value.artifact;
+  const currentVersion = value.currentVersion;
+  const malformed =
+    artifact.workspaceId !== workspaceId ||
+    typeof artifact.id !== "string" ||
+    typeof currentVersion.id !== "string" ||
+    (value.sourceMessageId !== undefined && typeof value.sourceMessageId !== "string") ||
+    value.versions.length === 0 ||
+    artifact.currentVersionId !== currentVersion.id ||
+    value.versions[value.versions.length - 1]?.id !== currentVersion.id ||
+    value.versions.some((version, index) =>
+      !isRecord(version) ||
+      typeof version.id !== "string" ||
+      version.artifactId !== artifact.id ||
+      version.version !== index + 1
+    );
+  if (malformed) {
+    throw new Error("Malformed or cross-workspace artifact response.");
+  }
+}
+
+function validateArtifactText(content: string) {
+  const byteLength = new TextEncoder().encode(content).byteLength;
+  if (byteLength === 0) throw new Error("Add some content before saving a new version.");
+  if (byteLength > ARTIFACT_MAX_INLINE_CONTENT_BYTES) {
+    throw new Error("This version is too large. Keep it under 64 KiB.");
+  }
+  return byteLength;
+}
+
+async function inlineArtifactContent(content: string): Promise<Extract<Spine.ArtifactsAndRoutines.ArtifactContent, { kind: "inline" }>> {
+  const bytes = new TextEncoder().encode(content);
+  const byteLength = validateArtifactText(content);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hash = [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+  const media = { mediaType: "text/markdown", byteLength, encoding: "utf-8" };
+  return {
+    kind: "inline",
+    text: content,
+    media,
+    contentHash: { algorithm: "sha-256", value: hash }
+  };
+}
+
+function staleArtifactVersionError() {
+  return new Error("This artifact changed elsewhere. Reopen it before saving a new version.");
 }
 
 export async function createRuntimeResponseArtifact(input: CreateResponseArtifactInput) {
@@ -855,9 +896,15 @@ export async function createRuntimeResponseArtifact(input: CreateResponseArtifac
     const media = { mediaType: "text/markdown", byteLength: new TextEncoder().encode(input.content).byteLength, encoding: "utf-8" };
     const contentHash = { algorithm: "sha-256" as const, value: `preview-${input.content.length}` };
     const provenance = { kind: "run" as const, runId: input.runId as never, externalReference: `message:${input.messageId}`, observedAt: now };
+    const currentVersion = {
+      id: versionId, artifactId, version: 1, status: "available", createdAt: now,
+      createdByInternalUserId: "preview-user", content: { kind: "inline", text: input.content, media, contentHash },
+      media, contentHash, provenance, citations: input.citations.map((citation, index) => ({ id: `citation-${index + 1}`, label: citation.title, source: { kind: "import", externalReference: citation.sourceId, observedAt: now }, locator: citation.chunkId ?? citation.sourcePath, quotedText: citation.snippet })), lineage: []
+    };
     const bundle = {
       artifact: { id: artifactId, workspaceId: scope.workspaceId, authority: "local", visibility: "member-private", ownerMemberId: "preview-member", schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user", createdAt: now, updatedAt: now, kind: "document", status: "draft", title: input.title, currentVersionId: versionId, producingRunId: input.runId, sourceProvenance: [provenance], context: { threadId: input.threadId }, reviews: [], retention: { status: "active" } },
-      version: { id: versionId, artifactId, version: 1, status: "available", createdAt: now, createdByInternalUserId: "preview-user", content: { kind: "inline", text: input.content, media, contentHash }, media, contentHash, provenance, citations: input.citations.map((citation, index) => ({ id: `citation-${index + 1}`, label: citation.title, source: { kind: "import", externalReference: citation.sourceId, observedAt: now }, locator: citation.chunkId ?? citation.sourcePath, quotedText: citation.snippet })), lineage: [] },
+      currentVersion,
+      versions: [currentVersion],
       sourceMessageId: input.messageId
     } as unknown as RuntimeArtifactBundle;
     const records = previewArtifacts.get(scope.workspaceId) ?? [];
@@ -885,6 +932,87 @@ export async function getRuntimeArtifact(artifactId: string) {
   if (result === null) return null;
   assertArtifactBundle(result, scope.workspaceId);
   return result;
+}
+
+export async function appendRuntimeArtifactVersion(input: {
+  artifactId: string;
+  expectedRevision: number;
+  expectedCurrentVersionId: string;
+  title?: string;
+  content: string;
+}) {
+  const scope = conversationScopeOrThrow();
+  const content = await inlineArtifactContent(input.content);
+  const commandInput = {
+    artifactId: input.artifactId,
+    expectedRevision: input.expectedRevision,
+    expectedCurrentVersionId: input.expectedCurrentVersionId,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    content
+  };
+  if (!hasTauriRuntime()) {
+    const records = previewArtifacts.get(scope.workspaceId) ?? [];
+    const index = records.findIndex((entry) => entry.artifact.id === input.artifactId);
+    if (index < 0) throw new Error("This artifact is no longer available.");
+    const current = records[index];
+    if (
+      current.artifact.revision !== input.expectedRevision ||
+      current.artifact.currentVersionId !== input.expectedCurrentVersionId
+    ) {
+      throw staleArtifactVersionError();
+    }
+    const now = new Date().toISOString();
+    const versionId = `artifact-version-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+    const prior = current.currentVersion;
+    const nextVersion = {
+      id: versionId as never,
+      artifactId: current.artifact.id,
+      version: current.versions.length + 1,
+      status: "available" as const,
+      createdAt: now,
+      createdByInternalUserId: "preview-user" as never,
+      content,
+      media: content.media,
+      contentHash: content.contentHash,
+      provenance: {
+        kind: "artifact-version" as const,
+        sourceArtifactVersionId: prior.id,
+        observedAt: now
+      },
+      citations: [...prior.citations],
+      lineage: [{
+        relation: "supersedes" as const,
+        artifactId: current.artifact.id,
+        artifactVersionId: prior.id,
+        recordedAt: now
+      }],
+      ...(prior.inputs ? { inputs: [...prior.inputs] } : {}),
+      ...(prior.decisions ? { decisions: [...prior.decisions] } : {})
+    } satisfies Spine.ArtifactsAndRoutines.ArtifactVersion;
+    const updated: RuntimeArtifactBundle = {
+      artifact: {
+        ...current.artifact,
+        ...(input.title === undefined ? {} : { title: input.title }),
+        currentVersionId: nextVersion.id,
+        revision: current.artifact.revision + 1,
+        updatedAt: now
+      },
+      currentVersion: nextVersion,
+      versions: [...current.versions, nextVersion],
+      sourceMessageId: current.sourceMessageId
+    };
+    previewArtifacts.set(scope.workspaceId, records.map((entry, recordIndex) => recordIndex === index ? updated : entry));
+    return updated;
+  }
+  try {
+    const result = await invoke<unknown>("artifact_append_version", { input: commandInput });
+    assertArtifactBundle(result, scope.workspaceId);
+    return result;
+  } catch (cause) {
+    const error = toRuntimeError(cause);
+    if (/stale|changed|revision|current version/i.test(error.message)) throw staleArtifactVersionError();
+    throw error;
+  }
 }
 
 export async function saveRuntimeMemoryState(
