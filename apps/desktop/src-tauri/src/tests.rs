@@ -3664,7 +3664,7 @@ fn minimum_account_provider_chat_artifact_journey_survives_native_store_reopen()
     let at = "2026-07-11T12:00:00Z";
 
     // The provider secret remains in the native credential boundary. A
-    // successful provider response maps to the explicit verified outcome, and
+    // successful provider response maps to the explicit ready outcome, and
     // only a discovered generation model becomes the eligible route below.
     let mut credentials = HashMap::new();
     store_credential_into(
@@ -3678,7 +3678,7 @@ fn minimum_account_provider_chat_artifact_journey_survives_native_store_reopen()
     .expect("store native provider credential");
     assert_eq!(
         verify_outcome_for_status(reqwest::StatusCode::OK),
-        "verified"
+        "ready"
     );
     let provider = list_providers_from(&credentials, &connected_backends)
         .expect("list native providers")
