@@ -304,6 +304,38 @@ pub fn get(
     partial.map(|row| open_safe(store, row)).transpose()
 }
 
+pub(crate) fn native_credential_binding(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    id: &str,
+) -> Result<String> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let record = get(tx, store, scope, id)?
+        .ok_or_else(|| StoreError::Invalid("Connection is unavailable.".into()))?;
+    if record.kind != "native-connector" || record.connector_definition_key.is_empty() {
+        return Err(StoreError::Invalid(
+            "Connection has no native credential binding.".into(),
+        ));
+    }
+    let credential_ref: String = tx.query_row(
+        "SELECT credential_ref FROM connection_record
+         WHERE workspace_id=?1 AND id=?2 AND kind='native-connector' AND deleted_at IS NULL;",
+        rusqlite::params![scope.data.workspace_id(), id],
+        |row| row.get(0),
+    )?;
+    if credential_ref.is_empty()
+        || credential_ref.len() > CREDENTIAL_REF_MAX
+        || !credential_ref.starts_with("oauth-token:")
+        || credential_ref.chars().any(char::is_control)
+    {
+        return Err(StoreError::Invalid(
+            "Connection credential binding is invalid.".into(),
+        ));
+    }
+    Ok(credential_ref)
+}
+
 pub fn transition_native_connector(
     tx: &Connection,
     store: &Store,

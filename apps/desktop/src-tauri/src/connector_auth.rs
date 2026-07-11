@@ -1293,7 +1293,7 @@ pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<Connecto
 }
 
 pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
-    let connection = connection_for(path, connector_id)?;
+    let mut connection = connection_for(path, connector_id)?;
     let identity = crate::clerk_identity::native_identity_generation_snapshot().ok()?;
     let scope = crate::authorized_scope::command_scope(
         Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
@@ -1316,6 +1316,9 @@ pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<Conne
     {
         return None;
     }
+    connection.credential_ref =
+        canonical_credential_binding(durable_store, &scope, connector_id, &connection.account.id)
+            .ok()?;
     NativeConnectorSecretStore
         .get(&connection.credential_ref)
         .ok()
@@ -1769,9 +1772,11 @@ fn prepare_disconnect(
             })
             .cloned()
     });
-    let Some(connection) = active else {
+    let Some(mut connection) = active else {
         return Ok(None);
     };
+    connection.credential_ref =
+        canonical_credential_binding(durable_store, scope, connector_id, &connection.account.id)?;
     let previous_secret = store
         .get(&connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
@@ -2039,6 +2044,21 @@ fn canonical_connection_for_refresh(
     Ok(record)
 }
 
+fn canonical_credential_binding(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    provider_account_id: &str,
+) -> Result<String, ConnectorCommandError> {
+    let id =
+        derive_native_connection_id(scope.data.workspace_id(), connector_id, provider_account_id);
+    store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::native_credential_binding(tx, store, scope, &id)
+        })
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))
+}
+
 fn verify_refresh_snapshot(
     connector_id: &str,
     store: &dyn ConnectorSecretStore,
@@ -2301,6 +2321,14 @@ pub(crate) async fn refresh_connection(
         )
     })?;
     let mut connection = connections[active_index].clone();
+    let canonical = canonical_connection_for_refresh(
+        durable_store,
+        &scope,
+        connector_id,
+        &connection.account.id,
+    )?;
+    connection.credential_ref =
+        canonical_credential_binding(durable_store, &scope, connector_id, &connection.account.id)?;
     let secret_store = NativeConnectorSecretStore;
     let encoded = secret_store
         .get(&connection.credential_ref)
@@ -2321,12 +2349,6 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
-    let canonical = canonical_connection_for_refresh(
-        durable_store,
-        &scope,
-        connector_id,
-        &connection.account.id,
-    )?;
     if tokens.expires_at.is_none()
         || tokens
             .expires_at
@@ -3821,6 +3843,9 @@ mod tests {
             || Ok(()),
         )
         .unwrap();
+        let mut compatibility = read_connections(&path).unwrap();
+        compatibility[0].credential_ref = "oauth-token:google-drive:stale-legacy-ref".into();
+        write_connections(&path, &compatibility).unwrap();
 
         // Disconnect
         disconnect_with_store_and_path("google-drive", &store, &path, &durable, &scope, || Ok(()))
@@ -4030,10 +4055,15 @@ mod tests {
             || Ok(()),
         )
         .unwrap();
-        let previous_connections = read_connections(&path).unwrap();
+        let mut previous_connections = read_connections(&path).unwrap();
+        previous_connections[0].credential_ref = "oauth-token:gmail:stale-legacy-ref".into();
+        write_connections(&path, &previous_connections).unwrap();
         let canonical_before =
             canonical_connection_for_refresh(&durable, &scope, "gmail", "account-1").unwrap();
         let mut updated_connection = previous_connections[0].clone();
+        updated_connection.credential_ref =
+            canonical_credential_binding(&durable, &scope, "gmail", "account-1").unwrap();
+        assert_eq!(updated_connection.credential_ref, credential_ref);
         updated_connection.expires_at = Some(now_epoch() + 3600);
         updated_connection.updated_at = now_epoch().to_string();
         let new_tokens = StoredTokenSet {
@@ -4109,6 +4139,7 @@ mod tests {
             Some(new_encoded.as_str())
         );
         let refreshed_connections = read_connections(&path).unwrap();
+        assert_eq!(refreshed_connections[0].credential_ref, credential_ref);
         let canonical_after =
             canonical_connection_for_refresh(&durable, &scope, "gmail", "account-1").unwrap();
 
