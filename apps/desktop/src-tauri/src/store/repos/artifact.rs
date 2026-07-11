@@ -612,77 +612,107 @@ pub fn search(
         }
     }
     let result_limit = filter.limit.clamp(1, 50);
-    let candidate_limit = (result_limit.saturating_mul(4)).clamp(50, 200);
-    sql.push_str(" ORDER BY a.updated_at DESC,a.id LIMIT ?");
-    params.push(rusqlite::types::Value::Integer(candidate_limit as i64));
-    let mut stmt = tx.prepare(&sql)?;
-    let candidates = stmt
-        .query_map(rusqlite::params_from_iter(params), |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                Sealed {
-                    ciphertext: row.get(2)?,
-                    nonce: row.get(3)?,
-                },
-                Sealed {
-                    ciphertext: row.get(4)?,
-                    nonce: row.get(5)?,
-                },
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-
+    sql.push_str(" ORDER BY a.updated_at DESC,a.id ASC LIMIT ? OFFSET ?");
     let query = filter.query.map(str::to_lowercase);
     let mut results = Vec::new();
-    for (artifact_id, version_id, artifact_sealed, version_sealed) in candidates {
-        let artifact_value =
-            open_json(store, &artifact_sealed, &artifact_aad(scope, &artifact_id))?;
-        let version_value = open_json(
-            store,
-            &version_sealed,
-            &version_aad(scope, &artifact_id, &version_id),
-        )?;
-        let mut matched_on = Vec::new();
-        if let Some(query) = query.as_deref() {
-            if includes_case_insensitive(artifact_value.get("title").and_then(Value::as_str), query)
+    let page_size = if query.is_some() { 100 } else { result_limit };
+    let max_scan = if query.is_some() { 2_000 } else { result_limit };
+    let mut scanned = 0usize;
+    loop {
+        let requested = page_size.min(max_scan.saturating_sub(scanned));
+        if requested == 0 {
+            let mut next_params = params.clone();
+            next_params.push(rusqlite::types::Value::Integer(1));
+            next_params.push(rusqlite::types::Value::Integer(scanned as i64));
+            let mut stmt = tx.prepare(&sql)?;
+            if stmt
+                .query_map(rusqlite::params_from_iter(next_params), |row| {
+                    row.get::<_, String>(0)
+                })?
+                .next()
+                .transpose()?
+                .is_some()
             {
-                matched_on.push("title");
+                return Err(StoreError::Invalid(
+                    "Search is too broad; narrow it and try again.".into(),
+                ));
             }
-            if includes_case_insensitive(
-                version_value
-                    .pointer("/content/text")
-                    .and_then(Value::as_str),
-                query,
-            ) {
-                matched_on.push("content");
-            }
-            if array_field_matches(&version_value, "/citations", "label", query)
-                || array_field_matches(&version_value, "/inputs", "label", query)
-                || array_field_matches(
-                    &artifact_value,
-                    "/sourceProvenance",
-                    "externalReference",
+            break;
+        }
+        let mut page_params = params.clone();
+        page_params.push(rusqlite::types::Value::Integer(requested as i64));
+        page_params.push(rusqlite::types::Value::Integer(scanned as i64));
+        let mut stmt = tx.prepare(&sql)?;
+        let candidates = stmt
+            .query_map(rusqlite::params_from_iter(page_params), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    Sealed {
+                        ciphertext: row.get(2)?,
+                        nonce: row.get(3)?,
+                    },
+                    Sealed {
+                        ciphertext: row.get(4)?,
+                        nonce: row.get(5)?,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let page_len = candidates.len();
+        for (artifact_id, version_id, artifact_sealed, version_sealed) in candidates {
+            let artifact_value =
+                open_json(store, &artifact_sealed, &artifact_aad(scope, &artifact_id))?;
+            let version_value = open_json(
+                store,
+                &version_sealed,
+                &version_aad(scope, &artifact_id, &version_id),
+            )?;
+            let mut matched_on = Vec::new();
+            if let Some(query) = query.as_deref() {
+                if includes_case_insensitive(
+                    artifact_value.get("title").and_then(Value::as_str),
                     query,
-                )
-            {
-                matched_on.push("source");
+                ) {
+                    matched_on.push("title");
+                }
+                if includes_case_insensitive(
+                    version_value
+                        .pointer("/content/text")
+                        .and_then(Value::as_str),
+                    query,
+                ) {
+                    matched_on.push("content");
+                }
+                if array_field_matches(&version_value, "/citations", "label", query)
+                    || array_field_matches(&version_value, "/inputs", "label", query)
+                    || array_field_matches(
+                        &artifact_value,
+                        "/sourceProvenance",
+                        "externalReference",
+                        query,
+                    )
+                {
+                    matched_on.push("source");
+                }
+                if array_field_matches(&version_value, "/decisions", "summary", query) {
+                    matched_on.push("decision");
+                }
+                if matched_on.is_empty() {
+                    continue;
+                }
             }
-            if array_field_matches(&version_value, "/decisions", "summary", query) {
-                matched_on.push("decision");
-            }
-            if matched_on.is_empty() {
-                continue;
+            results.push(json!({
+                "artifact":artifact_value,
+                "currentVersion":version_value,
+                "matchedOn":matched_on,
+            }));
+            if results.len() == result_limit {
+                return Ok(results);
             }
         }
-        let bundle = get_bundle(tx, store, scope, &artifact_id)?
-            .ok_or_else(|| StoreError::Invalid("Artifact disappeared during search.".into()))?;
-        results.push(json!({
-            "artifact":bundle["artifact"].clone(),
-            "currentVersion":bundle["currentVersion"].clone(),
-            "matchedOn":matched_on,
-        }));
-        if results.len() == result_limit {
+        scanned += page_len;
+        if page_len < requested {
             break;
         }
     }
@@ -690,15 +720,15 @@ pub fn search(
 }
 
 fn safe_locator(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    if lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("urn:") {
-        return true;
-    }
-    !value.is_empty()
-        && !value.starts_with(['/', '\\', '~'])
-        && !value.contains(['/', '\\'])
-        && !(value.len() > 1 && value.as_bytes()[1] == b':')
-        && !lower.starts_with("file:")
+    url::Url::parse(value).is_ok_and(|url| {
+        matches!(url.scheme(), "http" | "https")
+            && !url.cannot_be_a_base()
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    })
 }
 
 fn sanitized_source(source: &Value) -> Value {
@@ -1196,6 +1226,20 @@ mod tests {
                 .unwrap()
                 .is_empty());
 
+            // Search reads only artifact + current version. Corrupt historical
+            // version/review ciphertext must not strand a healthy current result.
+            let old_sealed = tx_sealed(&store, &scope, "artifact-1", "version-1");
+            store.transaction(|tx| {
+                tx.execute("UPDATE artifact_version SET payload=x'00',payload_nonce=x'00' WHERE workspace_id='shared' AND owner_subject=?1 AND id='version-1'",[scope.owner_subject()])?;
+                tx.execute("INSERT INTO artifact_review(workspace_id,owner_subject,artifact_id,id,version_id,status,requested_by_internal_user_id,requested_at,resolved_at,payload,payload_nonce) VALUES ('shared',?1,'artifact-1','corrupt-review','version-1','approved','user-member-a','2026-01-01T00:00:00Z','2026-01-01T00:01:00Z',x'00',x'00')",[scope.owner_subject()])?;
+                Ok(())
+            }).unwrap();
+            assert_eq!(find(Some("current needle"), None, None, 50).len(), 1);
+            store.transaction(|tx| {
+                tx.execute("UPDATE artifact_version SET payload=?1,payload_nonce=?2 WHERE workspace_id='shared' AND owner_subject=?3 AND id='version-1'",rusqlite::params![old_sealed.ciphertext,old_sealed.nonce,scope.owner_subject()])?;
+                Ok(())
+            }).unwrap();
+
             let old = store
                 .with_conn(|tx| {
                     export_version(
@@ -1331,6 +1375,99 @@ mod tests {
                 .unwrap()["content"]["text"],
             "One"
         );
+    }
+
+    #[test]
+    fn nonempty_search_pages_past_two_hundred_and_reports_scan_ceiling() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let scope = owner("paged", "member-a");
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('paged','Paged','t','t')",
+                    [],
+                )?;
+                for index in 0..2_001usize {
+                    let artifact_id = format!("artifact-{index:04}");
+                    let version_id = format!("{artifact_id}:v1");
+                    let title = if index == 250 {
+                        "Older Than Two Hundred Needle"
+                    } else {
+                        "Ordinary artifact"
+                    };
+                    let updated_at = format!("{:04}", 2_001 - index);
+                    let artifact = json!({"id":artifact_id,"title":title,"kind":"document","status":"draft","reviews":[]});
+                    let version = json!({"id":version_id,"artifactId":artifact_id,"status":"available","content":{"kind":"inline","text":"ordinary"},"citations":[],"inputs":[],"decisions":[]});
+                    let sealed_artifact =
+                        seal_json(&store, &artifact, &artifact_aad(&scope, &artifact_id))?;
+                    let sealed_version = seal_json(
+                        &store,
+                        &version,
+                        &version_aad(&scope, &artifact_id, &version_id),
+                    )?;
+                    tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_member_id,id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('paged',?1,'local','member-private','member-a',?2,'document','draft',1,?3,'title','hash',8,'t',?4,?5,?6)",rusqlite::params![scope.owner_subject(),artifact_id,version_id,updated_at,sealed_artifact.ciphertext,sealed_artifact.nonce])?;
+                    tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('paged',?1,?2,?3,1,'available','hash',8,'t',?4,?5)",rusqlite::params![scope.owner_subject(),artifact_id,version_id,sealed_version.ciphertext,sealed_version.nonce])?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        let found = store
+            .with_conn(|tx| {
+                search(
+                    tx,
+                    &store,
+                    &scope,
+                    &ArtifactSearchFilter {
+                        query: Some("older than two hundred needle"),
+                        thread_id: None,
+                        project_id: None,
+                        kinds: &[],
+                        statuses: &[],
+                        limit: 1,
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(found[0]["artifact"]["id"], "artifact-0250");
+        let broad = store.with_conn(|tx| {
+            search(
+                tx,
+                &store,
+                &scope,
+                &ArtifactSearchFilter {
+                    query: Some("not present anywhere"),
+                    thread_id: None,
+                    project_id: None,
+                    kinds: &[],
+                    statuses: &[],
+                    limit: 1,
+                },
+            )
+        });
+        assert!(broad
+            .unwrap_err()
+            .to_string()
+            .contains("Search is too broad; narrow it"));
+    }
+
+    #[test]
+    fn safe_locator_accepts_only_plain_credential_free_http_urls() {
+        assert!(safe_locator("https://example.com/path"));
+        assert!(safe_locator("http://example.com/path"));
+        for unsafe_value in [
+            "https://user@example.com/path",
+            "https://user:password@example.com/path",
+            "https://example.com/path?token=secret",
+            "https://example.com/callback?code=oauth-code",
+            "https://example.com/file?signature=signed",
+            "https://example.com/path#private",
+            "//example.com/path",
+            "urn:source:one",
+            "source-one",
+            "C:\\private\\file.txt",
+        ] {
+            assert!(!safe_locator(unsafe_value), "accepted {unsafe_value}");
+        }
     }
 
     fn tx_sealed(
