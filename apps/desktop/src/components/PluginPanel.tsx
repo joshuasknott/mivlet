@@ -228,7 +228,7 @@ function ConnectorDetails({
         </label>
       ) : connector.status === "connected" && connector.account ? (
         <p className="connector-detail__account">
-          Active account: {connector.account.email ?? connector.account.displayName}
+          Active connection: {connector.account.email ?? connector.account.displayName}
         </p>
       ) : null}
 

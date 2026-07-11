@@ -1206,12 +1206,22 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     void Promise.all([
       listRuntimeConnectorStatuses(),
       listRuntimeConnectorSyncStates()
-    ]).then(([manifests, syncStates]) => {
+    ]).then(async ([manifests, syncStates]) => {
       if (!active || !manifests) {
         return;
       }
+      const connectionEntries = await Promise.all(
+        manifests
+          .filter((manifest) => manifest.status === "connected")
+          .map(async (manifest) => [
+            manifest.id,
+            await listRuntimeConnectorAccounts(manifest.id) ?? []
+          ] as const)
+      );
+      if (!active) return;
       const syncById = new Map(syncStates?.map((state) => [state.connectorId, state]) ?? []);
       const runtimeById = new Map(manifests.map((manifest) => [manifest.id, manifest]));
+      setConnectorAccounts(Object.fromEntries(connectionEntries));
       setConnectorManifests((current) =>
         current.map((manifest) => {
           const runtime = runtimeById.get(manifest.id) ?? manifest;

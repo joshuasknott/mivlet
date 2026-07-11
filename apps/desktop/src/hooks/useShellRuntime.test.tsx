@@ -43,6 +43,7 @@ vi.mock("../runtime", async (importOriginal) => {
     verifyRuntimeBackend: vi.fn(async () => null),
     listRuntimeBackendModels: vi.fn(async () => null),
     listRuntimeConnectorStatuses: vi.fn(async () => null),
+    listRuntimeConnectorAccounts: vi.fn(async () => null),
     listRuntimeSchedulerJobs: vi.fn(async () => null),
     listRuntimeSchedulerQueue: vi.fn(async () => null),
     listRuntimeWorkflowDefinitions: vi.fn(async () => null),
@@ -88,6 +89,40 @@ vi.mock("../runtime", async (importOriginal) => {
     signOutRuntimeIdentity: vi.fn(async () => null),
     startRuntimeConnectorAuth: vi.fn(async () => null)
   };
+});
+
+describe("useShellRuntime — Connection hydration", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("restores safe Connection projections for connected connectors after restart", async () => {
+    vi.mocked(runtime.listRuntimeConnectorStatuses).mockResolvedValue([{
+      id: "gmail",
+      name: "Gmail",
+      status: "connected",
+      permissions: ["Read mail"],
+      healthSummary: "Connected",
+      lastCheckedAt: "2026-07-11T12:00:00.000Z",
+      account: { id: "provider-account", displayName: "Work", email: "work@example.com" },
+      supportedActions: []
+    }]);
+    vi.mocked(runtime.listRuntimeConnectorAccounts).mockResolvedValue([{
+      connectionId: "connection_safe",
+      account: { id: "provider-account", displayName: "Work", email: "work@example.com" },
+      active: true,
+      lifecycle: "authorized",
+      authorizationState: "authorized",
+      healthState: "unknown",
+      credentialCustody: "os-secure-store",
+      credentialState: "available"
+    }]);
+
+    const { result } = renderHook(() => useShellRuntime());
+    await waitFor(() => expect(result.current.connectorAccounts.gmail?.[0]?.connectionId).toBe("connection_safe"));
+    expect(runtime.listRuntimeConnectorAccounts).toHaveBeenCalledWith("gmail");
+  });
 });
 
 vi.mock("../lib/local-knowledge-refresh", () => ({

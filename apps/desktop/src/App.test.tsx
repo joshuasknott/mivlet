@@ -178,6 +178,7 @@ vi.mock("./runtime", () => ({
   importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
+  listRuntimeConnectorAccounts: vi.fn(async () => null),
   listRuntimeConnectorSyncStates: vi.fn(async () => null),
   listRuntimeSchedulerJobs: vi.fn(async () =>
     runtimeMocks.savedScheduledJobs.length ? [...runtimeMocks.savedScheduledJobs] : null
@@ -1894,7 +1895,7 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
 
     // Test Slack (connected)
-    await user.click(screen.getByText("Slack"));
+    await user.click(await screen.findByText("Slack"));
     expect(screen.getByRole("heading", { name: "Slack" })).toBeInTheDocument();
     const slackDetails = screen.getByRole("article", { name: "Slack details" });
     expect(within(slackDetails).getByText("Connected")).toBeInTheDocument();
