@@ -3,6 +3,7 @@
 import {
   parseMcpLine,
   isMcpResponse,
+  normalizeMcpToolResult,
   type McpFrame,
   type McpNotification,
   type McpRequest,
@@ -90,7 +91,13 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
         this.pendingToolResponses.delete(frame.id);
         clearTimeout(pending.timeout);
         if (frame.error) pending.reject(new Error(`MCP ${frame.error.code}: ${frame.error.message}`));
-        else pending.resolve(frame.result);
+        else {
+          try {
+            pending.resolve(normalizeMcpToolResult(frame.result));
+          } catch (error) {
+            pending.reject(error instanceof Error ? error : new Error("MCP tool returned invalid content."));
+          }
+        }
       }
     }
     for (const handler of this.frameHandlers) handler(frame);
@@ -330,7 +337,7 @@ class RemoteDesktopMcpTransport implements DesktopMcpTransportHandle {
       throw new Error("Remote MCP did not return the approved tool response.");
     }
     if (response.error) throw new Error(`MCP ${response.error.code}: ${response.error.message}`);
-    return response.result;
+    return normalizeMcpToolResult(response.result);
   }
 
   close(): Promise<void> {

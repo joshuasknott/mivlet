@@ -161,8 +161,10 @@ describe("desktop MCP transport", () => {
       confirmationText: "run read"
     };
     const authorized = await transport!.authorizeToolCall(proposal, resolution);
-    await expect(transport!.executeAuthorizedToolCall(proposal, authorized.permitId)).resolves.toEqual({
-      content: [{ type: "text", text: "ok" }]
+    await expect(transport!.executeAuthorizedToolCall(proposal, authorized.permitId)).resolves.toMatchObject({
+      trust: "untrusted",
+      instructionAuthority: "none",
+      content: [{ kind: "text", text: "ok", trust: "untrusted" }]
     });
     expect(runtime.prepare).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: "workspace-a", toolName: "read", arguments: { path: "safe.txt" }
@@ -217,8 +219,10 @@ describe("desktop MCP transport", () => {
       confirmationText: "run read"
     };
     const authorized = await transport!.authorizeToolCall(proposal, resolution);
-    await expect(transport!.executeAuthorizedToolCall(proposal, authorized.permitId)).resolves.toEqual({
-      content: [{ type: "text", text: "remote-ok" }]
+    await expect(transport!.executeAuthorizedToolCall(proposal, authorized.permitId)).resolves.toMatchObject({
+      trust: "untrusted",
+      instructionAuthority: "none",
+      content: [{ kind: "text", text: "remote-ok", trust: "untrusted" }]
     });
     expect(runtime.execute).toHaveBeenCalledWith(proposal, "permit-1", "native-mcp-tool-1");
     await transport!.close();
