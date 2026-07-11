@@ -153,6 +153,8 @@ pub fn run() {
             artifacts::artifact_list_for_thread,
             artifacts::artifact_search,
             artifacts::artifact_export,
+            artifacts::artifact_handoff_propose,
+            artifacts::artifact_handoff_accept,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,

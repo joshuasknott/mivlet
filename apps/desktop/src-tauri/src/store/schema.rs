@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 17;
+pub const CURRENT_SCHEMA_VERSION: u32 = 18;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -835,6 +835,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_review_open
   ON artifact_review(workspace_id,owner_subject,artifact_id) WHERE status='requested';
 CREATE INDEX IF NOT EXISTS idx_artifact_review_history
   ON artifact_review(workspace_id,owner_subject,artifact_id,requested_at,id);
+
+CREATE TABLE IF NOT EXISTS artifact_handoff (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  version_id TEXT NOT NULL,
+  source_thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE RESTRICT,
+  source_project_id TEXT REFERENCES project(id) ON DELETE RESTRICT,
+  target_project_id TEXT NOT NULL REFERENCES project(id) ON DELETE RESTRICT,
+  status TEXT NOT NULL CHECK(status IN ('proposed','accepted')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  proposed_by_internal_user_id TEXT NOT NULL,
+  resolved_by_internal_user_id TEXT,
+  proposed_at TEXT NOT NULL,
+  resolved_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
+    REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_handoff_open
+  ON artifact_handoff(workspace_id,owner_subject,artifact_id,version_id,target_project_id)
+  WHERE status='proposed';
+CREATE INDEX IF NOT EXISTS idx_artifact_handoff_target
+  ON artifact_handoff(workspace_id,owner_subject,target_project_id,status,resolved_at,id);
 
 CREATE TABLE IF NOT EXISTS artifact_legacy_unowned (
   id TEXT PRIMARY KEY,

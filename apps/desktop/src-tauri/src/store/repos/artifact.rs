@@ -32,6 +32,14 @@ fn review_aad(scope: &PrivateDataScope, artifact_id: &str, id: &str) -> String {
     )
 }
 
+fn handoff_aad(scope: &PrivateDataScope, id: &str) -> String {
+    format!(
+        "artifact_handoff:{}:{}:{id}",
+        scope.workspace_id(),
+        scope.owner_subject()
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn create_private(
     tx: &Connection,
@@ -488,6 +496,256 @@ pub fn list_for_thread(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn propose_handoff(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    artifact_id: &str,
+    version_id: &str,
+    target_project_id: &str,
+    actor_internal_user_id: &str,
+    note: Option<&str>,
+    at: &str,
+) -> Result<Value> {
+    scope.ensure_exists(tx)?;
+    let owner_member_id = scope.owner_member_id().ok_or_else(|| {
+        StoreError::Invalid("Artifact handoff requires an active private workspace member.".into())
+    })?;
+    let source = tx
+        .query_row(
+            "SELECT a.thread_id,t.project_id FROM artifact a
+             JOIN artifact_version v ON v.workspace_id=a.workspace_id AND v.owner_subject=a.owner_subject
+               AND v.artifact_id=a.id AND v.id=?4
+             JOIN thread t ON t.id=a.thread_id AND t.workspace_id=a.workspace_id
+             WHERE a.workspace_id=?1 AND a.owner_subject=?2 AND a.id=?3
+               AND a.authority='local' AND a.visibility='member-private' AND a.status!='deleted'
+               AND v.status='available' AND t.authority='local' AND t.visibility='member-private'
+               AND t.owner_member_id=?5 AND t.deleted_at IS NULL",
+            rusqlite::params![
+                scope.workspace_id(),
+                scope.owner_subject(),
+                artifact_id,
+                version_id,
+                owner_member_id
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+        )
+        .optional()?
+        .ok_or_else(|| {
+            StoreError::Invalid("Artifact version is unavailable for handoff by this owner.".into())
+        })?;
+    let target_is_exact: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM project WHERE id=?1 AND workspace_id=?2
+           AND authority='local' AND visibility='member-private' AND owner_member_id=?3
+           AND lifecycle='active' AND deleted_at IS NULL)",
+        rusqlite::params![target_project_id, scope.workspace_id(), owner_member_id],
+        |row| row.get(0),
+    )?;
+    if !target_is_exact {
+        return Err(StoreError::Invalid(
+            "Target project is not an active private project owned by this member.".into(),
+        ));
+    }
+    if source.1.as_deref() == Some(target_project_id) {
+        return Err(StoreError::Invalid(
+            "Artifact source and target project must be different.".into(),
+        ));
+    }
+    let duplicate: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artifact_handoff WHERE workspace_id=?1 AND owner_subject=?2
+           AND artifact_id=?3 AND version_id=?4 AND target_project_id=?5 AND status='proposed')",
+        rusqlite::params![
+            scope.workspace_id(),
+            scope.owner_subject(),
+            artifact_id,
+            version_id,
+            target_project_id
+        ],
+        |row| row.get(0),
+    )?;
+    if duplicate {
+        return Err(StoreError::Invalid(
+            "An identical artifact handoff is already awaiting acceptance.".into(),
+        ));
+    }
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(
+            format!(
+                "{}:{}:{artifact_id}:{version_id}:{target_project_id}:{at}",
+                scope.workspace_id(),
+                scope.owner_subject()
+            )
+            .as_bytes()
+        )
+    );
+    let id = format!("handoff:{}", &digest[..24]);
+    let mut payload = json!({
+        "id":id,"workspaceId":scope.workspace_id(),"authority":"local","visibility":"member-private",
+        "ownerMemberId":owner_member_id,"schemaVersion":1,"revision":1,
+        "createdByInternalUserId":actor_internal_user_id,"createdAt":at,"updatedAt":at,
+        "status":"proposed",
+        "source":{"workspaceId":scope.workspace_id(),"threadId":source.0},
+        "target":{"workspaceId":scope.workspace_id(),"projectId":target_project_id},
+        "artifactVersionIds":[version_id],"includedContext":[],"authorityTransfer":"none",
+        "proposedByInternalUserId":actor_internal_user_id,"proposedAt":at
+    });
+    if let Some(project_id) = source.1.as_deref() {
+        payload["source"]["projectId"] = Value::String(project_id.into());
+    }
+    if let Some(note) = note {
+        payload["note"] = Value::String(note.into());
+    }
+    let sealed = seal_json(store, &payload, &handoff_aad(scope, &id))?;
+    tx.execute(
+        "INSERT INTO artifact_handoff(workspace_id,owner_subject,artifact_id,id,version_id,
+           source_thread_id,source_project_id,target_project_id,status,revision,
+           proposed_by_internal_user_id,proposed_at,payload,payload_nonce)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'proposed',1,?9,?10,?11,?12)",
+        rusqlite::params![
+            scope.workspace_id(),
+            scope.owner_subject(),
+            artifact_id,
+            id,
+            version_id,
+            source.0,
+            source.1,
+            target_project_id,
+            actor_internal_user_id,
+            at,
+            sealed.ciphertext,
+            sealed.nonce
+        ],
+    )?;
+    Ok(payload)
+}
+
+fn validate_proposed_handoff(
+    payload: &Value,
+    scope: &PrivateDataScope,
+    id: &str,
+    version_id: &str,
+    source_thread_id: &str,
+    source_project_id: Option<&str>,
+    target_project_id: &str,
+    proposed_by: &str,
+    revision: i64,
+) -> Result<()> {
+    let exact = payload.get("id").and_then(Value::as_str) == Some(id)
+        && payload.get("workspaceId").and_then(Value::as_str) == Some(scope.workspace_id())
+        && payload.get("authority").and_then(Value::as_str) == Some("local")
+        && payload.get("visibility").and_then(Value::as_str) == Some("member-private")
+        && payload.get("ownerMemberId").and_then(Value::as_str) == scope.owner_member_id()
+        && payload.get("status").and_then(Value::as_str) == Some("proposed")
+        && payload.get("revision").and_then(Value::as_i64) == Some(revision)
+        && payload
+            .pointer("/source/workspaceId")
+            .and_then(Value::as_str)
+            == Some(scope.workspace_id())
+        && payload.pointer("/source/threadId").and_then(Value::as_str) == Some(source_thread_id)
+        && payload.pointer("/source/projectId").and_then(Value::as_str) == source_project_id
+        && payload
+            .pointer("/target/workspaceId")
+            .and_then(Value::as_str)
+            == Some(scope.workspace_id())
+        && payload.pointer("/target/projectId").and_then(Value::as_str) == Some(target_project_id)
+        && payload.get("artifactVersionIds").and_then(Value::as_array)
+            == Some(&vec![Value::String(version_id.into())])
+        && payload
+            .get("includedContext")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && payload.get("authorityTransfer").and_then(Value::as_str) == Some("none")
+        && payload
+            .get("proposedByInternalUserId")
+            .and_then(Value::as_str)
+            == Some(proposed_by);
+    if exact {
+        Ok(())
+    } else {
+        Err(StoreError::Invalid(
+            "Artifact handoff payload integrity check failed.".into(),
+        ))
+    }
+}
+
+pub fn accept_handoff(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    handoff_id: &str,
+    expected_revision: i64,
+    actor_internal_user_id: &str,
+    at: &str,
+) -> Result<Value> {
+    scope.ensure_exists(tx)?;
+    let row=tx.query_row(
+        "SELECT artifact_id,version_id,source_thread_id,source_project_id,target_project_id,status,
+           revision,proposed_by_internal_user_id,payload,payload_nonce
+         FROM artifact_handoff WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3",
+        rusqlite::params![scope.workspace_id(),scope.owner_subject(),handoff_id],
+        |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,
+            row.get::<_,Option<String>>(3)?,row.get::<_,String>(4)?,row.get::<_,String>(5)?,
+            row.get::<_,i64>(6)?,row.get::<_,String>(7)?,payload_of(row)?)),
+    ).optional()?.ok_or_else(||StoreError::Invalid("Artifact handoff is unavailable for this owner.".into()))?;
+    if row.5 != "proposed" {
+        return Err(StoreError::Invalid(
+            "Artifact handoff is already resolved.".into(),
+        ));
+    }
+    if row.6 != expected_revision {
+        return Err(StoreError::Invalid(
+            "Artifact handoff changed elsewhere. Reload it and try again.".into(),
+        ));
+    }
+    let version_still_available: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artifact_version WHERE workspace_id=?1 AND owner_subject=?2
+          AND artifact_id=?3 AND id=?4 AND status='available')",
+        rusqlite::params![scope.workspace_id(), scope.owner_subject(), row.0, row.1],
+        |row| row.get(0),
+    )?;
+    let target_still_active:bool=tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM project WHERE id=?1 AND workspace_id=?2 AND authority='local'
+          AND visibility='member-private' AND owner_member_id=?3 AND lifecycle='active' AND deleted_at IS NULL)",
+        rusqlite::params![row.4,scope.workspace_id(),scope.owner_member_id()],|row|row.get(0))?;
+    if !version_still_available || !target_still_active {
+        return Err(StoreError::Invalid(
+            "Artifact handoff source or target is no longer available.".into(),
+        ));
+    }
+    let mut payload = open_json(store, &row.8, &handoff_aad(scope, handoff_id))?;
+    validate_proposed_handoff(
+        &payload,
+        scope,
+        handoff_id,
+        &row.1,
+        &row.2,
+        row.3.as_deref(),
+        &row.4,
+        &row.7,
+        row.6,
+    )?;
+    payload["status"] = Value::String("accepted".into());
+    payload["revision"] = json!(expected_revision + 1);
+    payload["updatedAt"] = Value::String(at.into());
+    payload["resolvedAt"] = Value::String(at.into());
+    payload["resolvedByInternalUserId"] = Value::String(actor_internal_user_id.into());
+    let sealed = seal_json(store, &payload, &handoff_aad(scope, handoff_id))?;
+    let changed=tx.execute(
+        "UPDATE artifact_handoff SET status='accepted',revision=?1,resolved_by_internal_user_id=?2,
+          resolved_at=?3,payload=?4,payload_nonce=?5
+         WHERE workspace_id=?6 AND owner_subject=?7 AND id=?8 AND status='proposed' AND revision=?9",
+        rusqlite::params![expected_revision+1,actor_internal_user_id,at,sealed.ciphertext,sealed.nonce,
+            scope.workspace_id(),scope.owner_subject(),handoff_id,expected_revision])?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "Artifact handoff changed elsewhere. Reload it and try again.".into(),
+        ));
+    }
+    Ok(payload)
+}
+
 pub struct ArtifactSearchFilter<'a> {
     pub query: Option<&'a str>,
     pub thread_id: Option<&'a str>,
@@ -566,29 +824,49 @@ pub fn search(
         }
     }
 
-    let mut sql = String::from(
-        "SELECT a.id,a.current_version_id,a.payload,a.payload_nonce,v.payload,v.payload_nonce
-         FROM artifact a
-         JOIN artifact_version v ON v.workspace_id=a.workspace_id AND v.owner_subject=a.owner_subject
-           AND v.artifact_id=a.id AND v.id=a.current_version_id
-         LEFT JOIN thread t ON t.id=a.thread_id AND t.workspace_id=a.workspace_id
-         WHERE a.workspace_id=? AND a.owner_subject=? AND a.authority='local'
-           AND a.visibility='member-private' AND a.status!='deleted' AND v.status='available'",
-    );
-    let mut params = vec![
+    let mut params = Vec::new();
+    let mut sql = if let Some(project_id) = filter.project_id {
+        params.push(rusqlite::types::Value::Text(project_id.into()));
+        String::from(
+            "SELECT a.id,COALESCE(h.version_id,a.current_version_id),a.payload,a.payload_nonce,v.payload,v.payload_nonce
+             FROM artifact a
+             LEFT JOIN artifact_handoff h ON h.workspace_id=a.workspace_id AND h.owner_subject=a.owner_subject
+               AND h.artifact_id=a.id AND h.target_project_id=? AND h.status='accepted'
+               AND h.id=(SELECT latest.id FROM artifact_handoff latest
+                 WHERE latest.workspace_id=a.workspace_id AND latest.owner_subject=a.owner_subject
+                   AND latest.artifact_id=a.id AND latest.target_project_id=h.target_project_id
+                   AND latest.status='accepted' ORDER BY latest.resolved_at DESC,latest.id DESC LIMIT 1)
+             JOIN artifact_version v ON v.workspace_id=a.workspace_id AND v.owner_subject=a.owner_subject
+               AND v.artifact_id=a.id AND v.id=COALESCE(h.version_id,a.current_version_id)
+             LEFT JOIN thread t ON t.id=a.thread_id AND t.workspace_id=a.workspace_id
+             WHERE a.workspace_id=? AND a.owner_subject=? AND a.authority='local'
+               AND a.visibility='member-private' AND a.status!='deleted' AND v.status='available'",
+        )
+    } else {
+        String::from(
+            "SELECT a.id,a.current_version_id,a.payload,a.payload_nonce,v.payload,v.payload_nonce
+             FROM artifact a
+             JOIN artifact_version v ON v.workspace_id=a.workspace_id AND v.owner_subject=a.owner_subject
+               AND v.artifact_id=a.id AND v.id=a.current_version_id
+             LEFT JOIN thread t ON t.id=a.thread_id AND t.workspace_id=a.workspace_id
+             WHERE a.workspace_id=? AND a.owner_subject=? AND a.authority='local'
+               AND a.visibility='member-private' AND a.status!='deleted' AND v.status='available'",
+        )
+    };
+    params.extend([
         rusqlite::types::Value::Text(scope.workspace_id().into()),
         rusqlite::types::Value::Text(scope.owner_subject().into()),
-    ];
+    ]);
     if let Some(thread_id) = filter.thread_id {
         sql.push_str(" AND a.thread_id=?");
         params.push(rusqlite::types::Value::Text(thread_id.into()));
     }
     if let Some(project_id) = filter.project_id {
         sql.push_str(
-            " AND t.project_id=? AND t.authority='local' AND t.visibility='member-private'
+            " AND ((t.project_id=? AND t.authority='local' AND t.visibility='member-private'
               AND t.deleted_at IS NULL
               AND ((? IS NOT NULL AND t.owner_member_id=?)
-                OR (? IS NULL AND t.owner_member_id IS NULL))",
+                OR (? IS NULL AND t.owner_member_id IS NULL))) OR h.id IS NOT NULL)",
         );
         params.push(rusqlite::types::Value::Text(project_id.into()));
         for _ in 0..3 {
@@ -1485,6 +1763,331 @@ mod tests {
                 )?)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn exact_version_handoff_is_owner_bound_cas_and_searchable_after_reopen() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("artifact-handoff.sqlite");
+        let vault = vault();
+        let accepted_id;
+        let corrupt_id;
+        {
+            let store = Store::open(&path, vault.clone()).unwrap();
+            seed(&store, "shared", "member-a");
+            let scope = owner("shared", "member-a");
+            let foreign = owner("shared", "member-b");
+            store.transaction(|tx| {
+                tx.execute("INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('other','Other','t','t')",[])?;
+                for (id, owner, visibility, lifecycle, deleted_at) in [
+                    ("project-2", Some("member-a"), "member-private", "active", None),
+                    ("project-3", Some("member-a"), "member-private", "active", None),
+                    ("project-archived", Some("member-a"), "member-private", "archived", None),
+                    ("project-foreign", Some("member-b"), "member-private", "active", None),
+                    ("project-shared", None, "workspace-shared", "active", None),
+                    ("project-deleted", Some("member-a"), "member-private", "active", Some("t")),
+                ] {
+                    let payload=seal_json(&store,&json!({"id":id}),&format!("project:{id}"))?;
+                    tx.execute("INSERT INTO project(id,workspace_id,title_fingerprint,authority,visibility,owner_member_id,created_by_internal_user_id,lifecycle,deleted_at,created_at,updated_at,payload,payload_nonce) VALUES (?1,'shared','title','local',?2,?3,'user-member-a',?4,?5,'t','t',?6,?7)",rusqlite::params![id,visibility,owner,lifecycle,deleted_at,payload.ciphertext,payload.nonce])?;
+                }
+                let cross=seal_json(&store,&json!({"id":"project-cross"}),"project:project-cross")?;
+                tx.execute("INSERT INTO project(id,workspace_id,title_fingerprint,authority,visibility,owner_member_id,created_by_internal_user_id,lifecycle,created_at,updated_at,payload,payload_nonce) VALUES ('project-cross','other','title','local','member-private','member-a','user-member-a','active','t','t',?1,?2)",rusqlite::params![cross.ciphertext,cross.nonce])?;
+                Ok(())
+            }).unwrap();
+            let v1 = version("version-1", 1, "One", None);
+            store
+                .transaction(|tx| {
+                    create_private(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        "run-1",
+                        "thread-1",
+                        "message-1",
+                        "document",
+                        "title",
+                        "hash-1",
+                        3,
+                        "t",
+                        &artifact_value("shared", "member-a", "version-1", 1),
+                        &v1,
+                    )
+                })
+                .unwrap();
+            let v2 = version("artifact-1:v2", 2, "Two", Some("version-1"));
+            store
+                .transaction(|tx| {
+                    append_version(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        1,
+                        "version-1",
+                        "title",
+                        "hash-2",
+                        3,
+                        "t2",
+                        &artifact_value("shared", "member-a", "artifact-1:v2", 2),
+                        &v2,
+                    )
+                })
+                .unwrap();
+            let before = store
+                .with_conn(|tx| get_bundle(tx, &store, &scope, "artifact-1"))
+                .unwrap()
+                .unwrap();
+
+            for target in [
+                "project-1",
+                "missing",
+                "project-archived",
+                "project-foreign",
+                "project-shared",
+                "project-deleted",
+                "project-cross",
+            ] {
+                assert!(
+                    store
+                        .transaction(|tx| propose_handoff(
+                            tx,
+                            &store,
+                            &scope,
+                            "artifact-1",
+                            "version-1",
+                            target,
+                            "user-member-a",
+                            None,
+                            "2026-07-11T01:00:00Z"
+                        ))
+                        .is_err(),
+                    "accepted invalid target {target}"
+                );
+            }
+            assert!(store
+                .transaction(|tx| propose_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "missing",
+                    "project-2",
+                    "user-member-a",
+                    None,
+                    "2026-07-11T01:00:00Z"
+                ))
+                .is_err());
+            store.transaction(|tx|{tx.execute("UPDATE artifact_version SET status='redacted' WHERE workspace_id='shared' AND owner_subject=?1 AND id='version-1'",[scope.owner_subject()])?;Ok(())}).unwrap();
+            assert!(store
+                .transaction(|tx| propose_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "version-1",
+                    "project-2",
+                    "user-member-a",
+                    None,
+                    "2026-07-11T01:00:00Z"
+                ))
+                .is_err());
+            store.transaction(|tx|{tx.execute("UPDATE artifact_version SET status='available' WHERE workspace_id='shared' AND owner_subject=?1 AND id='version-1'",[scope.owner_subject()])?;Ok(())}).unwrap();
+
+            let proposed = store
+                .transaction(|tx| {
+                    propose_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        "version-1",
+                        "project-2",
+                        "user-member-a",
+                        Some("Share the approved snapshot"),
+                        "2026-07-11T01:01:00Z",
+                    )
+                })
+                .unwrap();
+            accepted_id = proposed["id"].as_str().unwrap().to_string();
+            assert_eq!(proposed["status"], "proposed");
+            assert_eq!(proposed["artifactVersionIds"], json!(["version-1"]));
+            assert_eq!(proposed["includedContext"], json!([]));
+            assert_eq!(proposed["authorityTransfer"], "none");
+            assert_eq!(proposed["proposedByInternalUserId"], "user-member-a");
+            assert!(proposed.get("resolvedByInternalUserId").is_none());
+            assert!(store
+                .transaction(|tx| propose_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "version-1",
+                    "project-2",
+                    "user-member-a",
+                    None,
+                    "2026-07-11T01:01:01Z"
+                ))
+                .is_err());
+            assert!(store
+                .transaction(|tx| accept_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    &accepted_id,
+                    2,
+                    "user-member-a",
+                    "2026-07-11T01:02:00Z"
+                ))
+                .is_err());
+            assert!(store
+                .transaction(|tx| accept_handoff(
+                    tx,
+                    &store,
+                    &foreign,
+                    &accepted_id,
+                    1,
+                    "user-member-b",
+                    "2026-07-11T01:02:00Z"
+                ))
+                .is_err());
+            let accepted = store
+                .transaction(|tx| {
+                    accept_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        &accepted_id,
+                        1,
+                        "user-member-a",
+                        "2026-07-11T01:02:00Z",
+                    )
+                })
+                .unwrap();
+            assert_eq!(accepted["status"], "accepted");
+            assert_eq!(accepted["revision"], 2);
+            assert_eq!(accepted["resolvedByInternalUserId"], "user-member-a");
+            assert!(store
+                .transaction(|tx| accept_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    &accepted_id,
+                    2,
+                    "user-member-a",
+                    "2026-07-11T01:03:00Z"
+                ))
+                .is_err());
+            let after = store
+                .with_conn(|tx| get_bundle(tx, &store, &scope, "artifact-1"))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                after, before,
+                "handoff mutated source artifact/version/reviews"
+            );
+            let search_project = |project_id: &str| {
+                store
+                    .with_conn(|tx| {
+                        search(
+                            tx,
+                            &store,
+                            &scope,
+                            &ArtifactSearchFilter {
+                                query: None,
+                                thread_id: None,
+                                project_id: Some(project_id),
+                                kinds: &[],
+                                statuses: &[],
+                                limit: 50,
+                            },
+                        )
+                    })
+                    .unwrap()
+            };
+            let target = search_project("project-2");
+            assert_eq!(target.len(), 1);
+            assert_eq!(target[0]["currentVersion"]["id"], "version-1");
+            assert_eq!(
+                search_project("project-1")[0]["currentVersion"]["id"],
+                "artifact-1:v2"
+            );
+            assert!(search_project("project-3").is_empty());
+            assert!(serde_json::to_string(&target)
+                .unwrap()
+                .find("Share the approved snapshot")
+                .is_none());
+
+            let corrupt = store
+                .transaction(|tx| {
+                    propose_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        "artifact-1:v2",
+                        "project-3",
+                        "user-member-a",
+                        None,
+                        "2026-07-11T01:04:00Z",
+                    )
+                })
+                .unwrap();
+            corrupt_id = corrupt["id"].as_str().unwrap().to_string();
+            store.transaction(|tx|{
+                let sealed=tx.query_row("SELECT payload,payload_nonce FROM artifact_handoff WHERE workspace_id='shared' AND owner_subject=?1 AND id=?2",rusqlite::params![scope.owner_subject(),corrupt_id],|row|Ok(Sealed{ciphertext:row.get(0)?,nonce:row.get(1)?}))?;
+                let mut payload=open_json(&store,&sealed,&handoff_aad(&scope,&corrupt_id))?;
+                payload["includedContext"]=json!([{"workspaceId":"shared","projectId":"project-foreign"}]);
+                payload["authorityTransfer"]=Value::String("full".into());
+                let resealed=seal_json(&store,&payload,&handoff_aad(&scope,&corrupt_id))?;
+                tx.execute("UPDATE artifact_handoff SET payload=?1,payload_nonce=?2 WHERE workspace_id='shared' AND owner_subject=?3 AND id=?4",rusqlite::params![resealed.ciphertext,resealed.nonce,scope.owner_subject(),corrupt_id])?;
+                Ok(())
+            }).unwrap();
+            assert!(store
+                .transaction(|tx| accept_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    &corrupt_id,
+                    1,
+                    "user-member-a",
+                    "2026-07-11T01:05:00Z"
+                ))
+                .is_err());
+        }
+        let store = Store::open(&path, vault).unwrap();
+        let scope = owner("shared", "member-a");
+        let target = store
+            .with_conn(|tx| {
+                search(
+                    tx,
+                    &store,
+                    &scope,
+                    &ArtifactSearchFilter {
+                        query: None,
+                        thread_id: None,
+                        project_id: Some("project-2"),
+                        kinds: &[],
+                        statuses: &[],
+                        limit: 50,
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(target[0]["currentVersion"]["id"], "version-1");
+        assert!(store
+            .transaction(|tx| accept_handoff(
+                tx,
+                &store,
+                &scope,
+                &corrupt_id,
+                1,
+                "user-member-a",
+                "2026-07-11T01:06:00Z"
+            ))
+            .is_err());
+        let association_count:i64=store.with_conn(|tx|Ok(tx.query_row("SELECT COUNT(*) FROM artifact_handoff WHERE workspace_id='shared' AND owner_subject=?1 AND id=?2 AND status='accepted'",rusqlite::params![scope.owner_subject(),accepted_id],|row|row.get(0))?)).unwrap();
+        assert_eq!(association_count, 1);
     }
 
     #[test]

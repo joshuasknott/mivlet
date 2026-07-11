@@ -522,6 +522,18 @@ mod search_input_tests {
         assert_eq!(0usize.clamp(1, 50), 1);
         assert_eq!(500usize.clamp(1, 50), 50);
     }
+
+    #[test]
+    fn handoff_inputs_reject_renderer_authority_and_actor_fields() {
+        assert!(serde_json::from_value::<ArtifactHandoffProposeInput>(json!({
+            "artifactId":"artifact-1","versionId":"version-1","targetProjectId":"project-2",
+            "proposedByInternalUserId":"attacker","authorityTransfer":"full","includedContext":[{}]
+        })).is_err());
+        assert!(serde_json::from_value::<ArtifactHandoffAcceptInput>(json!({
+            "handoffId":"handoff-1","expectedRevision":1,"resolvedByInternalUserId":"attacker"
+        }))
+        .is_err());
+    }
 }
 
 #[derive(Deserialize)]
@@ -544,6 +556,89 @@ pub fn artifact_export(input: ArtifactExportInput) -> Result<Value, String> {
     store
         .with_conn(|tx| {
             artifact::export_version(tx, store, &scope, &artifact_id, &version_id, &exported_at)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactHandoffProposeInput {
+    artifact_id: String,
+    version_id: String,
+    target_project_id: String,
+    note: Option<String>,
+}
+
+#[tauri::command]
+pub fn artifact_handoff_propose(input: ArtifactHandoffProposeInput) -> Result<Value, String> {
+    let artifact_id = normalize_optional_id(Some(input.artifact_id), "Artifact id")?
+        .expect("a supplied id normalizes to a value");
+    let version_id = normalize_optional_id(Some(input.version_id), "Artifact version id")?
+        .expect("a supplied id normalizes to a value");
+    let target_project_id =
+        normalize_optional_id(Some(input.target_project_id), "Target project id")?
+            .expect("a supplied id normalizes to a value");
+    let note = input
+        .note
+        .map(|note| {
+            let note = note.trim().to_string();
+            if note.is_empty() || note.chars().count() > 2_000 {
+                Err("Artifact handoff notes must be 1-2,000 characters.".to_string())
+            } else {
+                Ok(note)
+            }
+        })
+        .transpose()?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let authority = authority()?;
+    let at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    store
+        .transaction(|tx| {
+            artifact::propose_handoff(
+                tx,
+                store,
+                &authority.scope,
+                &artifact_id,
+                &version_id,
+                &target_project_id,
+                &authority.internal_user_id,
+                note.as_deref(),
+                &at,
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactHandoffAcceptInput {
+    handoff_id: String,
+    expected_revision: i64,
+}
+
+#[tauri::command]
+pub fn artifact_handoff_accept(input: ArtifactHandoffAcceptInput) -> Result<Value, String> {
+    if input.expected_revision < 1 {
+        return Err("Artifact handoff revision must be positive.".into());
+    }
+    let handoff_id = normalize_optional_id(Some(input.handoff_id), "Handoff id")?
+        .expect("a supplied id normalizes to a value");
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let authority = authority()?;
+    let at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    store
+        .transaction(|tx| {
+            artifact::accept_handoff(
+                tx,
+                store,
+                &authority.scope,
+                &handoff_id,
+                input.expected_revision,
+                &authority.internal_user_id,
+                &at,
+            )
         })
         .map_err(|error| error.to_string())
 }

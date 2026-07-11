@@ -90,6 +90,8 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 16 -> 17: normalized, owner-qualified encrypted artifact review
             // history linked to exact immutable versions.
             16 => apply_v16_to_v17(conn)?,
+            // 17 -> 18: exact-version, owner-qualified artifact handoffs.
+            17 => apply_v17_to_v18(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -99,6 +101,33 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v17_to_v18(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(r#"
+      CREATE TABLE IF NOT EXISTS artifact_handoff (
+        workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, artifact_id TEXT NOT NULL,
+        id TEXT NOT NULL, version_id TEXT NOT NULL,
+        source_thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE RESTRICT,
+        source_project_id TEXT REFERENCES project(id) ON DELETE RESTRICT,
+        target_project_id TEXT NOT NULL REFERENCES project(id) ON DELETE RESTRICT,
+        status TEXT NOT NULL CHECK(status IN ('proposed','accepted')),
+        revision INTEGER NOT NULL CHECK(revision >= 1),
+        proposed_by_internal_user_id TEXT NOT NULL, resolved_by_internal_user_id TEXT,
+        proposed_at TEXT NOT NULL, resolved_at TEXT, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+        PRIMARY KEY(workspace_id,owner_subject,id),
+        FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+          REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
+        FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
+          REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_handoff_open
+        ON artifact_handoff(workspace_id,owner_subject,artifact_id,version_id,target_project_id)
+        WHERE status='proposed';
+      CREATE INDEX IF NOT EXISTS idx_artifact_handoff_target
+        ON artifact_handoff(workspace_id,owner_subject,target_project_id,status,resolved_at,id);
+    "#)?;
     Ok(())
 }
 
@@ -1019,9 +1048,30 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v17 is current; v17 -> v18 has no registered migration.
-        let err = apply(&conn, 17, 18).unwrap_err();
+        // v18 is current; v18 -> v19 has no registered migration.
+        let err = apply(&conn, 18, 19).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v17_to_v18_adds_exact_owner_handoffs() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(r#"
+          CREATE TABLE project(id TEXT PRIMARY KEY);
+          CREATE TABLE thread(id TEXT PRIMARY KEY);
+          CREATE TABLE artifact(workspace_id TEXT,owner_subject TEXT,id TEXT,
+            PRIMARY KEY(workspace_id,owner_subject,id));
+          CREATE TABLE artifact_version(workspace_id TEXT,owner_subject TEXT,artifact_id TEXT,id TEXT,
+            PRIMARY KEY(workspace_id,owner_subject,id),
+            UNIQUE(workspace_id,owner_subject,artifact_id,id));
+        "#).unwrap();
+        apply(&conn, 17, 18).unwrap();
+        assert!(table_exists(&conn, "artifact_handoff").unwrap());
+        assert!(table_has_column(&conn, "artifact_handoff", "target_project_id").unwrap());
+        let indices:i64=conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('idx_artifact_handoff_open','idx_artifact_handoff_target')",
+            [],|row|row.get(0)).unwrap();
+        assert_eq!(indices, 2);
     }
 
     #[test]
