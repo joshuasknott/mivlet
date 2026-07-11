@@ -70,10 +70,26 @@ describe("registered hosted membership handlers", () => {
       { _id: "invite:expired", invitationId: "inv-expired", workspaceId: "ws-a", role: "viewer", inviterMemberId: "m-owner", recipientKind: "internal-user", recipientInternalUserId: "u-recipient", status: "pending", expiresAt: f.now - 1, createdAt: 1, updatedAt: 1, createdByInternalUserId: "u-owner" },
     );
     const before = f.writes(); const result = await (listRecipientPending as any)._handler(f.ctx, {});
-    expect(result).toEqual([{ invitation: expect.objectContaining({ invitationId: "inv-active", status: "pending" }), selection: { kind: "direct-inbox", invitationId: "inv-active" } }]);
+    expect(result).toEqual([{
+      invitation: expect.objectContaining({ invitationId: "inv-active", status: "pending" }),
+      selection: { kind: "direct-inbox", invitationId: "inv-active" },
+      workspaceName: "A",
+    }]);
     expect(JSON.stringify(result)).not.toMatch(/proof|presentationRef/);
     expect(f.tables.workspace_invitations[1].status).toBe("pending");
     expect(f.writes()).toBe(before);
+  });
+
+  it("fails closed rather than inventing a workspace name for an inbox item", async () => {
+    const f = fixture("recipient");
+    f.tables.workspace_invitations.push({
+      _id: "invite:active", invitationId: "inv-active", workspaceId: "ws-missing", role: "editor",
+      inviterMemberId: "m-owner", recipientKind: "internal-user", recipientInternalUserId: "u-recipient",
+      status: "pending", expiresAt: f.now + 60_000, createdAt: 1, updatedAt: 1,
+      createdByInternalUserId: "u-owner",
+    });
+    await expect((listRecipientPending as any)._handler(f.ctx, {})).rejects.toThrow(/workspace/i);
+    expect(f.writes()).toBe(0);
   });
 
   it("accepts only the authenticated direct-inbox recipient and consumes once", async () => {

@@ -110,7 +110,20 @@ export const listRecipientPending = queryGeneric({
   handler: async (ctx) => {
     const { user } = await requireFableUser(ctx); const now = Date.now();
     const invitations = await ctx.db.query("workspace_invitations").withIndex("by_recipient", (q: any) => q.eq("recipientInternalUserId", user.internalUserId)).collect();
-    return invitations.filter((entry: any) => entry.status === "pending" && entry.expiresAt > now).map((entry: any) => ({ invitation: invitationRecord(entry), selection: { kind: "direct-inbox" as const, invitationId: entry.invitationId } })).sort((a: any, b: any) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
+    const pending = invitations.filter((entry: any) => entry.status === "pending" && entry.expiresAt > now);
+    const result = [];
+    for (const entry of pending) {
+      const workspace = await uniqueByIndex(ctx, "workspaces", "by_workspace", (q: any) => q.eq("workspaceId", entry.workspaceId));
+      if (!workspace || workspace.status !== "active" || typeof workspace.name !== "string" || !workspace.name.trim() || workspace.name.length > 160) {
+        throw new CloudPolicyError("workspace-unavailable", "The invitation workspace is unavailable.", true);
+      }
+      result.push({
+        invitation: invitationRecord(entry),
+        selection: { kind: "direct-inbox" as const, invitationId: entry.invitationId },
+        workspaceName: workspace.name,
+      });
+    }
+    return result.sort((a: any, b: any) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
   },
 });
 

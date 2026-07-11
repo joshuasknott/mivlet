@@ -1,5 +1,4 @@
 import type {
-  AcceptWorkspaceInvitationResult,
   ExternalAuthenticationFacts,
   InvitationAcceptancePresentation,
   WorkspaceInvitationRecord,
@@ -124,6 +123,8 @@ export interface AccountWorkspaceStatus {
 export interface AccountPendingInvitation {
   invitation: WorkspaceInvitationRecord;
   selection: Extract<InvitationAcceptancePresentation, { kind: "direct-inbox" }>;
+  /** Server-owned display name for the exact invitation workspace. */
+  workspaceName: string;
 }
 
 /** Secret-free inbox state; the renderer cannot choose another recipient. */
@@ -131,13 +132,26 @@ export interface AccountPendingInvitationList {
   invitations: readonly AccountPendingInvitation[];
 }
 
+export type AccountInvitationAcceptanceDecision =
+  | {
+      status: "accepted";
+      invitationId: string;
+      workspaceId: string;
+      role: WorkspaceRole;
+    }
+  | {
+      status: "conflict" | "rejected";
+      code: string;
+      message: string;
+    };
+
 /**
  * Native composes the hosted decision with the refreshed local workspace
  * directory. React supplies only the invitation id and never supplies
  * presentation evidence, identity facts, authorization, or idempotency.
  */
 export interface AccountInvitationAcceptanceOutcome {
-  result: AcceptWorkspaceInvitationResult;
+  result: AccountInvitationAcceptanceDecision;
   accountWorkspace: AccountWorkspaceStatus;
   reconciliation: {
     status: "refreshed" | "refresh-needed" | "not-needed";
