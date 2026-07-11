@@ -87,6 +87,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // immutable owner-bound version history. Legacy ciphertext cannot
             // be safely rebound to an owner, so it remains quarantined.
             15 => apply_v15_to_v16(conn)?,
+            // 16 -> 17: normalized, owner-qualified encrypted artifact review
+            // history linked to exact immutable versions.
+            16 => apply_v16_to_v17(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -96,6 +99,30 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v16_to_v17(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(r#"
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_version_identity
+        ON artifact_version(workspace_id,owner_subject,artifact_id,id);
+      CREATE TABLE IF NOT EXISTS artifact_review (
+        workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, artifact_id TEXT NOT NULL,
+        id TEXT NOT NULL, version_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('requested','changes-requested','approved')),
+        requested_by_internal_user_id TEXT NOT NULL, reviewer_member_id TEXT,
+        requested_at TEXT NOT NULL, resolved_at TEXT, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+        PRIMARY KEY(workspace_id,owner_subject,id),
+        FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+          REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
+        FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
+          REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_review_open
+        ON artifact_review(workspace_id,owner_subject,artifact_id) WHERE status='requested';
+      CREATE INDEX IF NOT EXISTS idx_artifact_review_history
+        ON artifact_review(workspace_id,owner_subject,artifact_id,requested_at,id);
+    "#)?;
     Ok(())
 }
 
@@ -992,9 +1019,27 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v16 is current; v16 -> v17 has no registered migration.
-        let err = apply(&conn, 16, 17).unwrap_err();
+        // v17 is current; v17 -> v18 has no registered migration.
+        let err = apply(&conn, 17, 18).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v16_to_v17_adds_owner_qualified_review_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(r#"
+          CREATE TABLE artifact(workspace_id TEXT,owner_subject TEXT,id TEXT,
+            PRIMARY KEY(workspace_id,owner_subject,id));
+          CREATE TABLE artifact_version(workspace_id TEXT,owner_subject TEXT,artifact_id TEXT,id TEXT,
+            PRIMARY KEY(workspace_id,owner_subject,id));
+        "#).unwrap();
+        apply(&conn, 16, 17).unwrap();
+        assert!(table_exists(&conn, "artifact_review").unwrap());
+        assert!(table_has_column(&conn, "artifact_review", "version_id").unwrap());
+        let indices:i64=conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name IN ('idx_artifact_review_open','idx_artifact_review_history')",
+            [],|row|row.get(0)).unwrap();
+        assert_eq!(indices, 2);
     }
 
     #[test]
@@ -1177,7 +1222,7 @@ mod tests {
             .unwrap();
         assert_eq!(before, 0);
 
-        apply(&conn, 1, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 1, 2).unwrap();
 
         // After: both tables and the connector-cache indices exist.
         let tables: i64 = conn
@@ -1195,7 +1240,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(indices, 4);
+        assert_eq!(indices, 3);
     }
 
     /// The v1→v2 DDL is a strict subset of the current full schema: applying
@@ -1243,7 +1288,7 @@ mod tests {
         .unwrap();
         assert!(!audit_event_has_column(&conn, "category").unwrap());
 
-        apply(&conn, 2, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 2, 3).unwrap();
 
         assert!(audit_event_has_column(&conn, "category").unwrap());
         assert!(audit_event_has_column(&conn, "correlation_id").unwrap());
@@ -1442,7 +1487,7 @@ mod tests {
         .unwrap();
         assert!(!table_has_column(&conn, "connector_cache", "search_text").unwrap());
 
-        apply(&conn, 5, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 5, 6).unwrap();
 
         assert!(table_has_column(&conn, "connector_cache", "search_text").unwrap());
         // Existing rows backfill to the default empty string (the store
@@ -1475,7 +1520,7 @@ mod tests {
         assert_eq!(idx, 1);
 
         // Idempotent: re-applying does not error or duplicate.
-        apply(&conn, 5, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 5, 6).unwrap();
         let idx2: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='index'
@@ -1494,7 +1539,7 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
             .unwrap();
-        apply(&conn, 5, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 5, 6).unwrap();
         let tables: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='connector_cache';",
@@ -1523,8 +1568,8 @@ mod tests {
         )
         .unwrap();
 
-        apply(&conn, 6, CURRENT_SCHEMA_VERSION).unwrap();
-        apply(&conn, 6, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 6, 7).unwrap();
+        apply(&conn, 6, 7).unwrap();
 
         let tables: i64 = conn
             .query_row(
@@ -1541,8 +1586,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tables, 5);
-        assert!(table_has_column(&conn, "cloud_workspace_link", "fable_workspace_id").unwrap());
-        assert!(table_exists(&conn, "fable_workspace_mirror").unwrap());
+        assert!(table_has_column(&conn, "cloud_workspace_link", "cloud_workspace_id").unwrap());
+        assert!(table_has_column(&conn, "cloud_workspace_link", "clerk_org_id").unwrap());
     }
 
     #[test]

@@ -281,6 +281,7 @@ pub fn artifact_append_version(input: AppendArtifactVersion) -> Result<Value, St
         });
         let object=artifact_value.as_object_mut().ok_or_else(||crate::store::StoreError::Invalid("Artifact payload is invalid.".into()))?;
         object.insert("title".into(),Value::String(title.clone()));
+        object.insert("status".into(),Value::String("draft".into()));
         object.insert("revision".into(),json!(input.expected_revision+1));
         object.insert("currentVersionId".into(),Value::String(version_id));
         object.insert("updatedAt".into(),Value::String(at.clone()));
@@ -288,6 +289,85 @@ pub fn artifact_append_version(input: AppendArtifactVersion) -> Result<Value, St
             &input.expected_current_version_id,&format!("{:x}",Sha256::digest(title.as_bytes())),
             &hash,bytes.len(),&at,&artifact_value,&version)
     }).map_err(|error|error.to_string())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactReviewAction {
+    artifact_id: String,
+    version_id: String,
+    expected_revision: i64,
+    action: String,
+    note: Option<String>,
+    #[serde(default)]
+    requested_changes: Vec<String>,
+}
+
+fn normalize_review_text(value: Option<String>) -> Result<Option<String>, String> {
+    value
+        .map(|value| {
+            let value = value.trim().to_string();
+            if value.is_empty() || value.chars().count() > 2_000 {
+                Err("Artifact review notes must be 1-2,000 characters.".to_string())
+            } else {
+                Ok(value)
+            }
+        })
+        .transpose()
+}
+
+#[tauri::command]
+pub fn artifact_review_action(input: ArtifactReviewAction) -> Result<Value, String> {
+    if !matches!(
+        input.action.as_str(),
+        "request-review" | "request-changes" | "accept"
+    ) {
+        return Err("That artifact review action is not supported yet.".into());
+    }
+    let note = normalize_review_text(input.note)?;
+    let mut requested_changes = Vec::new();
+    for change in input.requested_changes {
+        let change = change.trim().to_string();
+        if change.is_empty() || change.chars().count() > 500 {
+            return Err("Requested changes must be 1-500 characters each.".into());
+        }
+        if !requested_changes.contains(&change) {
+            requested_changes.push(change)
+        }
+        if requested_changes.len() > 32 {
+            return Err("Artifact reviews can request at most 32 changes.".into());
+        }
+    }
+    match input.action.as_str() {
+        "request-changes" if requested_changes.is_empty() => {
+            return Err("Request changes needs at least one specific change.".into())
+        }
+        "request-review" | "accept" if !requested_changes.is_empty() => {
+            return Err("Only request changes can include requested changes.".into())
+        }
+        _ => {}
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let authority = authority()?;
+    let at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    store
+        .transaction(|tx| {
+            artifact::review_action(
+                tx,
+                store,
+                &authority.scope,
+                &input.artifact_id,
+                &input.version_id,
+                input.expected_revision,
+                &input.action,
+                &authority.internal_user_id,
+                note.as_deref(),
+                &requested_changes,
+                &at,
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

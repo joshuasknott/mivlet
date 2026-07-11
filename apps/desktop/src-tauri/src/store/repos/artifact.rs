@@ -22,6 +22,14 @@ fn version_aad(scope: &PrivateDataScope, artifact_id: &str, id: &str) -> String 
     )
 }
 
+fn review_aad(scope: &PrivateDataScope, artifact_id: &str, id: &str) -> String {
+    format!(
+        "artifact_review:{}:{}:{artifact_id}:{id}",
+        scope.workspace_id(),
+        scope.owner_subject()
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn create_private(
     tx: &Connection,
@@ -213,7 +221,12 @@ pub fn get_bundle(
     let Some((current_id, source_message_id, sealed)) = row else {
         return Ok(None);
     };
-    let artifact = open_json(store, &sealed, &artifact_aad(scope, id))?;
+    let mut artifact = open_json(store, &sealed, &artifact_aad(scope, id))?;
+    let reviews = list_reviews(tx, store, scope, id)?;
+    let object = artifact
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Invalid("Artifact payload is invalid.".into()))?;
+    object.insert("reviews".into(), Value::Array(reviews));
     let versions = list_versions(tx, store, scope, id)?;
     let current = versions
         .iter()
@@ -223,6 +236,191 @@ pub fn get_bundle(
     Ok(Some(
         json!({"artifact":artifact,"currentVersion":current,"versions":versions,"sourceMessageId":source_message_id}),
     ))
+}
+
+pub fn list_reviews(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    artifact_id: &str,
+) -> Result<Vec<Value>> {
+    let mut stmt = tx.prepare(
+        "SELECT id,payload,payload_nonce FROM artifact_review
+         WHERE workspace_id=?1 AND owner_subject=?2 AND artifact_id=?3 ORDER BY requested_at,id",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::params![scope.workspace_id(), scope.owner_subject(), artifact_id],
+        |row| Ok((row.get::<_, String>(0)?, payload_of(row)?)),
+    )?;
+    rows.map(|row| {
+        let (id, sealed) = row?;
+        open_json(store, &sealed, &review_aad(scope, artifact_id, &id))
+    })
+    .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn review_action(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    artifact_id: &str,
+    version_id: &str,
+    expected_revision: i64,
+    action: &str,
+    actor_internal_user_id: &str,
+    note: Option<&str>,
+    requested_changes: &[String],
+    at: &str,
+) -> Result<Value> {
+    scope.ensure_exists(tx)?;
+    let row=tx.query_row(
+        "SELECT revision,current_version_id,status,payload,payload_nonce FROM artifact
+         WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3 AND authority='local' AND visibility='member-private'",
+        rusqlite::params![scope.workspace_id(),scope.owner_subject(),artifact_id],
+        |row|Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,payload_of(row)?)),
+    ).optional()?.ok_or_else(||StoreError::Invalid("Artifact is unavailable for this owner.".into()))?;
+    if row.0 != expected_revision {
+        return Err(StoreError::Invalid(
+            "Artifact changed elsewhere. Reload it and try again.".into(),
+        ));
+    }
+    if row.1 != version_id {
+        return Err(StoreError::Invalid(
+            "Only the current artifact version can be reviewed.".into(),
+        ));
+    }
+    let version_available: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artifact_version WHERE workspace_id=?1 AND owner_subject=?2
+          AND artifact_id=?3 AND id=?4 AND status='available')",
+        rusqlite::params![
+            scope.workspace_id(),
+            scope.owner_subject(),
+            artifact_id,
+            version_id
+        ],
+        |row| row.get(0),
+    )?;
+    if !version_available {
+        return Err(StoreError::Invalid(
+            "Artifact version is unavailable.".into(),
+        ));
+    }
+    let mut artifact_value = open_json(store, &row.3, &artifact_aad(scope, artifact_id))?;
+    let (review_id, next_artifact_status) = match action {
+        "request-review" => {
+            if row.2 != "draft" {
+                return Err(StoreError::Invalid(
+                    "Only a draft artifact can request review.".into(),
+                ));
+            }
+            let open:bool=tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM artifact_review WHERE workspace_id=?1 AND owner_subject=?2 AND artifact_id=?3 AND status='requested')",
+                rusqlite::params![scope.workspace_id(),scope.owner_subject(),artifact_id],|row|row.get(0))?;
+            if open {
+                return Err(StoreError::Invalid(
+                    "Artifact already has an open review.".into(),
+                ));
+            }
+            let review_id = format!("review:{artifact_id}:r{}", expected_revision + 1);
+            let mut review = json!({
+                "id":review_id,"status":"requested","requestedByInternalUserId":actor_internal_user_id,
+                "versionId":version_id,"requestedAt":at
+            });
+            if let Some(member) = scope.owner_member_id() {
+                review["reviewerMemberId"] = Value::String(member.into())
+            }
+            if let Some(note) = note {
+                review["summary"] = Value::String(note.into())
+            }
+            let sealed = seal_json(store, &review, &review_aad(scope, artifact_id, &review_id))?;
+            tx.execute(
+                "INSERT INTO artifact_review(workspace_id,owner_subject,artifact_id,id,version_id,status,
+                  requested_by_internal_user_id,reviewer_member_id,requested_at,payload,payload_nonce)
+                 VALUES (?1,?2,?3,?4,?5,'requested',?6,?7,?8,?9,?10)",
+                rusqlite::params![scope.workspace_id(),scope.owner_subject(),artifact_id,review_id,version_id,
+                    actor_internal_user_id,scope.owner_member_id(),at,sealed.ciphertext,sealed.nonce])?;
+            (review_id, "in-review")
+        }
+        "request-changes" | "accept" => {
+            if row.2 != "in-review" {
+                return Err(StoreError::Invalid(
+                    "Artifact has no open current-version review.".into(),
+                ));
+            }
+            let open=tx.query_row(
+                "SELECT id,payload,payload_nonce FROM artifact_review WHERE workspace_id=?1 AND owner_subject=?2
+                  AND artifact_id=?3 AND version_id=?4 AND status='requested'",
+                rusqlite::params![scope.workspace_id(),scope.owner_subject(),artifact_id,version_id],
+                |row|Ok((row.get::<_,String>(0)?,payload_of(row)?)),
+            ).optional()?.ok_or_else(||StoreError::Invalid("Artifact has no open current-version review.".into()))?;
+            let mut review = open_json(store, &open.1, &review_aad(scope, artifact_id, &open.0))?;
+            let (review_status, artifact_status) = if action == "accept" {
+                ("approved", "accepted")
+            } else {
+                ("changes-requested", "changes-requested")
+            };
+            review["status"] = Value::String(review_status.into());
+            review["resolvedAt"] = Value::String(at.into());
+            if let Some(note) = note {
+                review["summary"] = Value::String(note.into())
+            }
+            if action == "accept" {
+                review["acceptance"] =
+                    json!({"acceptedByInternalUserId":actor_internal_user_id,"acceptedAt":at});
+                if let Some(note) = note {
+                    review["acceptance"]["note"] = Value::String(note.into())
+                }
+            } else {
+                review["requestedChanges"] = json!(requested_changes);
+            }
+            let sealed = seal_json(store, &review, &review_aad(scope, artifact_id, &open.0))?;
+            let changed = tx.execute(
+                "UPDATE artifact_review SET status=?1,resolved_at=?2,payload=?3,payload_nonce=?4
+                 WHERE workspace_id=?5 AND owner_subject=?6 AND id=?7 AND status='requested'",
+                rusqlite::params![
+                    review_status,
+                    at,
+                    sealed.ciphertext,
+                    sealed.nonce,
+                    scope.workspace_id(),
+                    scope.owner_subject(),
+                    open.0
+                ],
+            )?;
+            if changed != 1 {
+                return Err(StoreError::Invalid(
+                    "Artifact review changed elsewhere.".into(),
+                ));
+            }
+            (open.0, artifact_status)
+        }
+        _ => {
+            return Err(StoreError::Invalid(
+                "That artifact review action is not supported yet.".into(),
+            ))
+        }
+    };
+    let object = artifact_value
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Invalid("Artifact payload is invalid.".into()))?;
+    object.insert("status".into(), Value::String(next_artifact_status.into()));
+    object.insert("revision".into(), json!(expected_revision + 1));
+    object.insert("updatedAt".into(), Value::String(at.into()));
+    let sealed = seal_json(store, &artifact_value, &artifact_aad(scope, artifact_id))?;
+    let changed=tx.execute(
+        "UPDATE artifact SET status=?1,revision=?2,updated_at=?3,payload=?4,payload_nonce=?5
+         WHERE workspace_id=?6 AND owner_subject=?7 AND id=?8 AND revision=?9 AND current_version_id=?10",
+        rusqlite::params![next_artifact_status,expected_revision+1,at,sealed.ciphertext,sealed.nonce,
+            scope.workspace_id(),scope.owner_subject(),artifact_id,expected_revision,version_id])?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "Artifact changed elsewhere. Reload it and try again.".into(),
+        ));
+    }
+    let _ = review_id;
+    get_bundle(tx, store, scope, artifact_id)?
+        .ok_or_else(|| StoreError::Invalid("Artifact review did not persist.".into()))
 }
 
 #[cfg(test)]
@@ -304,13 +502,18 @@ pub fn append_version(
     version_value: &Value,
 ) -> Result<Value> {
     let current=tx.query_row(
-        "SELECT revision,current_version_id FROM artifact WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3",
+        "SELECT revision,current_version_id,status FROM artifact WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3",
         rusqlite::params![scope.workspace_id(),scope.owner_subject(),artifact_id],
-        |row|Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?)),
+        |row|Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?)),
     ).optional()?.ok_or_else(||StoreError::Invalid("Artifact is unavailable for this owner.".into()))?;
     if current.0 != expected_revision || current.1 != expected_current_version_id {
         return Err(StoreError::Invalid(
             "Artifact changed elsewhere. Reload it and try again.".into(),
+        ));
+    }
+    if current.2 == "in-review" {
+        return Err(StoreError::Invalid(
+            "Resolve the open review before editing this artifact.".into(),
         ));
     }
     let version_id = version_value
@@ -333,7 +536,7 @@ pub fn append_version(
             content_fingerprint,size_bytes as i64,updated_at,sealed_version.ciphertext,sealed_version.nonce])?;
     let sealed_artifact = seal_json(store, artifact_value, &artifact_aad(scope, artifact_id))?;
     let changed=tx.execute(
-        "UPDATE artifact SET revision=?1,current_version_id=?2,title_fingerprint=?3,content_fingerprint=?4,
+        "UPDATE artifact SET status='draft',revision=?1,current_version_id=?2,title_fingerprint=?3,content_fingerprint=?4,
           size_bytes=?5,updated_at=?6,payload=?7,payload_nonce=?8
          WHERE workspace_id=?9 AND owner_subject=?10 AND id=?11 AND revision=?12 AND current_version_id=?13",
         rusqlite::params![expected_revision+1,version_id,title_fingerprint,content_fingerprint,size_bytes as i64,
@@ -500,5 +703,245 @@ mod tests {
             .unwrap();
         assert_eq!(bundle["currentVersion"]["id"], "artifact-1:v2");
         assert_eq!(bundle["versions"][0]["content"]["text"], "One");
+    }
+
+    #[test]
+    fn review_lifecycle_is_owner_bound_cas_and_preserves_history() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("reviews.sqlite");
+        let vault = vault();
+        let first_review;
+        {
+            let store = Store::open(&path, vault.clone()).unwrap();
+            seed(&store, "shared", "member-a");
+            let a = owner("shared", "member-a");
+            let b = owner("shared", "member-b");
+            store
+                .transaction(|tx| {
+                    create_private(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        "run-1",
+                        "thread-1",
+                        "message-1",
+                        "document",
+                        "title",
+                        "hash-1",
+                        3,
+                        "t",
+                        &artifact_value("shared", "member-a", "version-1", 1),
+                        &version("version-1", 1, "One", None),
+                    )
+                })
+                .unwrap();
+            let requested = store
+                .transaction(|tx| {
+                    review_action(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        "version-1",
+                        1,
+                        "request-review",
+                        "user-member-a",
+                        Some("Please review"),
+                        &[],
+                        "r1",
+                    )
+                })
+                .unwrap();
+            assert_eq!(requested["artifact"]["status"], "in-review");
+            let duplicate = store.transaction(|tx| {
+                review_action(
+                    tx,
+                    &store,
+                    &a,
+                    "artifact-1",
+                    "version-1",
+                    2,
+                    "request-review",
+                    "user-member-a",
+                    None,
+                    &[],
+                    "r1b",
+                )
+            });
+            assert!(duplicate.is_err());
+            let blocked = store.transaction(|tx| {
+                append_version(
+                    tx,
+                    &store,
+                    &a,
+                    "artifact-1",
+                    2,
+                    "version-1",
+                    "title",
+                    "hash-2",
+                    3,
+                    "x",
+                    &artifact_value("shared", "member-a", "artifact-1:v2", 3),
+                    &version("artifact-1:v2", 2, "Two", Some("version-1")),
+                )
+            });
+            assert!(blocked.unwrap_err().to_string().contains("Resolve"));
+            let changes = vec!["Clarify the result".to_string()];
+            let changed = store
+                .transaction(|tx| {
+                    review_action(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        "version-1",
+                        2,
+                        "request-changes",
+                        "user-member-a",
+                        Some("Needs clarity"),
+                        &changes,
+                        "r2",
+                    )
+                })
+                .unwrap();
+            first_review = changed["artifact"]["reviews"][0].clone();
+            assert_eq!(first_review["status"], "changes-requested");
+            let draft = store
+                .transaction(|tx| {
+                    append_version(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        3,
+                        "version-1",
+                        "title",
+                        "hash-2",
+                        3,
+                        "r3",
+                        &artifact_value("shared", "member-a", "artifact-1:v2", 4),
+                        &version("artifact-1:v2", 2, "Two", Some("version-1")),
+                    )
+                })
+                .unwrap();
+            assert_eq!(draft["artifact"]["status"], "draft");
+            assert_eq!(draft["artifact"]["reviews"][0], first_review);
+            let second = store
+                .transaction(|tx| {
+                    review_action(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        "artifact-1:v2",
+                        4,
+                        "request-review",
+                        "user-member-a",
+                        None,
+                        &[],
+                        "r4",
+                    )
+                })
+                .unwrap();
+            assert_eq!(second["artifact"]["reviews"].as_array().unwrap().len(), 2);
+            let old = store.transaction(|tx| {
+                review_action(
+                    tx,
+                    &store,
+                    &a,
+                    "artifact-1",
+                    "version-1",
+                    5,
+                    "accept",
+                    "user-member-a",
+                    None,
+                    &[],
+                    "bad",
+                )
+            });
+            assert!(old.unwrap_err().to_string().contains("current"));
+            let stale = store.transaction(|tx| {
+                review_action(
+                    tx,
+                    &store,
+                    &a,
+                    "artifact-1",
+                    "artifact-1:v2",
+                    4,
+                    "accept",
+                    "user-member-a",
+                    None,
+                    &[],
+                    "bad",
+                )
+            });
+            assert!(stale.unwrap_err().to_string().contains("changed elsewhere"));
+            let cross = store.transaction(|tx| {
+                review_action(
+                    tx,
+                    &store,
+                    &b,
+                    "artifact-1",
+                    "artifact-1:v2",
+                    5,
+                    "accept",
+                    "user-member-b",
+                    None,
+                    &[],
+                    "bad",
+                )
+            });
+            assert!(cross.unwrap_err().to_string().contains("unavailable"));
+            let accepted = store
+                .transaction(|tx| {
+                    review_action(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        "artifact-1:v2",
+                        5,
+                        "accept",
+                        "user-member-a",
+                        Some("Approved"),
+                        &[],
+                        "r5",
+                    )
+                })
+                .unwrap();
+            assert_eq!(accepted["artifact"]["status"], "accepted");
+            assert_eq!(accepted["artifact"]["reviews"][1]["status"], "approved");
+            assert_eq!(accepted["artifact"]["reviews"][0], first_review);
+            let after = store
+                .transaction(|tx| {
+                    append_version(
+                        tx,
+                        &store,
+                        &a,
+                        "artifact-1",
+                        6,
+                        "artifact-1:v2",
+                        "title",
+                        "hash-3",
+                        5,
+                        "r6",
+                        &artifact_value("shared", "member-a", "artifact-1:v3", 7),
+                        &version("artifact-1:v3", 3, "Three", Some("artifact-1:v2")),
+                    )
+                })
+                .unwrap();
+            assert_eq!(after["artifact"]["status"], "draft");
+            assert_eq!(after["artifact"]["reviews"][0], first_review);
+        }
+        let store = Store::open(&path, vault).unwrap();
+        let a = owner("shared", "member-a");
+        let reopened = store
+            .with_conn(|tx| get_bundle(tx, &store, &a, "artifact-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(reopened["artifact"]["reviews"].as_array().unwrap().len(), 2);
+        assert_eq!(reopened["artifact"]["reviews"][0], first_review);
+        assert_eq!(reopened["artifact"]["status"], "draft");
     }
 }

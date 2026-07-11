@@ -148,6 +148,7 @@ pub fn run() {
             goals::goal_restore,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
+            artifacts::artifact_review_action,
             artifacts::artifact_get,
             artifacts::artifact_list_for_thread,
             knowledge::import_local_text_file,

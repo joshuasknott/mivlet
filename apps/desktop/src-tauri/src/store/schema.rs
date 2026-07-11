@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 16;
+pub const CURRENT_SCHEMA_VERSION: u32 = 17;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -804,12 +804,37 @@ CREATE TABLE IF NOT EXISTS artifact_version (
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL,
   PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,artifact_id,id),
   UNIQUE(workspace_id,owner_subject,artifact_id,version),
   FOREIGN KEY(workspace_id,owner_subject,artifact_id)
     REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_artifact_version_history
   ON artifact_version(workspace_id,owner_subject,artifact_id,version);
+
+CREATE TABLE IF NOT EXISTS artifact_review (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  version_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('requested','changes-requested','approved')),
+  requested_by_internal_user_id TEXT NOT NULL,
+  reviewer_member_id TEXT,
+  requested_at TEXT NOT NULL,
+  resolved_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
+    REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_review_open
+  ON artifact_review(workspace_id,owner_subject,artifact_id) WHERE status='requested';
+CREATE INDEX IF NOT EXISTS idx_artifact_review_history
+  ON artifact_review(workspace_id,owner_subject,artifact_id,requested_at,id);
 
 CREATE TABLE IF NOT EXISTS artifact_legacy_unowned (
   id TEXT PRIMARY KEY,
