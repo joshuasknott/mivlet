@@ -371,6 +371,7 @@
 }
 
 .project-knowledge__list li > button,
+.project-knowledge__actions button,
 .project-memory button {
   min-height: 30px;
   padding: 0 10px;
@@ -379,6 +380,21 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
+}
+
+.project-knowledge__item--disabled {
+  opacity: 0.72;
+}
+
+.project-knowledge__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.project-knowledge__actions .project-knowledge__delete {
+  color: var(--danger, #a33b32);
 }
 
 .project-memory__export {
@@ -522,6 +538,10 @@
   .project-knowledge__meta {
     justify-items: start;
     text-align: left;
+  }
+
+  .project-knowledge__actions {
+    justify-content: flex-start;
   }
 
   .project-memory__actions {

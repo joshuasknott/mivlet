@@ -23,6 +23,7 @@ export interface ProjectKnowledgeSourceView {
   freshness: string;
   status?: SourceStatus;
   statusMessage?: string;
+  disabled?: boolean;
 }
 
 export interface ProjectKnowledgeView {
@@ -32,6 +33,8 @@ export interface ProjectKnowledgeView {
   refresh: () => void | Promise<unknown>;
   importFile: (file: File) => Promise<unknown>;
   search: (query: string) => Promise<ProjectKnowledgeSourceView[]>;
+  toggleDisabled: (sourceId: string) => Promise<unknown>;
+  remove: (sourceId: string) => Promise<unknown>;
 }
 
 export interface ProjectMemoryRecordView {
@@ -100,6 +103,7 @@ export function ProjectPage({
   const [knowledgeResults, setKnowledgeResults] = useState<ProjectKnowledgeSourceView[] | null>(null);
   const [knowledgeBusy, setKnowledgeBusy] = useState(false);
   const [knowledgeActionError, setKnowledgeActionError] = useState("");
+  const [knowledgeActionId, setKnowledgeActionId] = useState<string | null>(null);
   const knowledgeFileRef = useRef<HTMLInputElement>(null);
   const [memoryBusyId, setMemoryBusyId] = useState<string | null>(null);
   const [memoryActionError, setMemoryActionError] = useState("");
@@ -117,6 +121,7 @@ export function ProjectPage({
     setKnowledgeQuery("");
     setKnowledgeResults(null);
     setKnowledgeActionError("");
+    setKnowledgeActionId(null);
     setMemoryBusyId(null);
     setMemoryActionError("");
     setEditingMemoryId(null);
@@ -184,6 +189,19 @@ export function ProjectPage({
       setKnowledgeActionError(cause instanceof Error ? cause.message : "Couldn’t add that file to this project. Try again.");
     } finally {
       setKnowledgeBusy(false);
+    }
+  };
+
+  const runKnowledgeAction = async (sourceId: string, action: () => Promise<unknown>) => {
+    setKnowledgeActionId(sourceId);
+    setKnowledgeActionError("");
+    try {
+      await action();
+      setKnowledgeResults(null);
+    } catch (cause) {
+      setKnowledgeActionError(cause instanceof Error ? cause.message : "Fable could not update that project source.");
+    } finally {
+      setKnowledgeActionId(null);
     }
   };
 
@@ -326,23 +344,42 @@ export function ProjectPage({
         {!knowledge.loading && !knowledge.error && visibleKnowledge.length > 0 ? (
           <ul className="project-knowledge__list" aria-label="Project knowledge sources">
             {visibleKnowledge.map((source) => (
-              <li key={source.id}>
+              <li key={source.id} className={source.disabled ? "project-knowledge__item project-knowledge__item--disabled" : "project-knowledge__item"}>
                 <div>
                   <strong>{source.title}</strong>
                   <span>{source.provenance}</span>
                 </div>
                 <div className="project-knowledge__meta">
-                  <span>{source.status === "indexing" ? "Indexing" : source.status === "stale" ? "Needs refresh" : source.status === "error" ? "Import failed" : source.freshness}</span>
+                  <span>{source.disabled ? "Not in use" : source.status === "indexing" ? "Indexing" : source.status === "stale" ? "Needs refresh" : source.status === "error" ? "Import failed" : source.freshness}</span>
                   {source.statusMessage ? <span title={source.statusMessage}>{source.statusMessage}</span> : null}
                 </div>
                 {project.lifecycle === "active" ? (
-                  <button
-                    type="button"
-                    disabled={memoryBusyId === source.id || memory.disabled}
-                    onClick={() => void runMemoryAction(source.id, () => memory.promote(source.id))}
-                  >
-                    {memoryBusyId === source.id ? "Rememberingâ€¦" : "Remember"}
-                  </button>
+                  <div className="project-knowledge__actions">
+                    {!source.disabled ? (
+                      <button
+                        type="button"
+                        disabled={memoryBusyId === source.id || memory.disabled || knowledgeActionId === source.id}
+                        onClick={() => void runMemoryAction(source.id, () => memory.promote(source.id))}
+                      >
+                        {memoryBusyId === source.id ? "Rememberingâ€¦" : "Remember"}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={knowledgeActionId === source.id}
+                      onClick={() => void runKnowledgeAction(source.id, () => knowledge.toggleDisabled(source.id))}
+                    >{source.disabled ? "Use again" : "Stop using"}</button>
+                    <button
+                      type="button"
+                      className="project-knowledge__delete"
+                      disabled={knowledgeActionId === source.id}
+                      onClick={() => {
+                        if (window.confirm(`Delete â€œ${source.title}â€ from this project?`)) {
+                          void runKnowledgeAction(source.id, () => knowledge.remove(source.id));
+                        }
+                      }}
+                    >Delete</button>
+                  </div>
                 ) : null}
               </li>
             ))}

@@ -26,7 +26,9 @@ const emptyKnowledge: ProjectKnowledgeView = {
   error: null,
   refresh: async () => undefined,
   importFile: async () => undefined,
-  search: async () => []
+  search: async () => [],
+  toggleDisabled: async () => undefined,
+  remove: async () => undefined
 };
 
 const emptyMemory: ProjectMemoryView = {
@@ -319,5 +321,92 @@ describe("ProjectPage", () => {
     expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Export" }));
     expect(await screen.findByLabelText("Project memory export")).toHaveTextContent("Launch date");
+  });
+
+  it("disables, re-enables, and confirms deletion of project sources", async () => {
+    const user = userEvent.setup();
+    const toggleDisabled = vi.fn().mockResolvedValue(undefined);
+    const remove = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const { rerender } = render(
+      <ProjectPage
+        project={project}
+        knowledge={{
+          ...emptyKnowledge,
+          sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today" }],
+          toggleDisabled,
+          remove
+        }}
+        memory={emptyMemory}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Stop using" }));
+    expect(toggleDisabled).toHaveBeenCalledWith("source-1");
+
+    rerender(
+      <ProjectPage
+        project={project}
+        knowledge={{
+          ...emptyKnowledge,
+          sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today", disabled: true }],
+          toggleDisabled,
+          remove
+        }}
+        memory={emptyMemory}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Not in use")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remember" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use again" }));
+    expect(toggleDisabled).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(window.confirm).toHaveBeenCalledWith("Delete â€œLaunch briefâ€ from this project?");
+    expect(remove).toHaveBeenCalledWith("source-1");
+  });
+
+  it("hides project source lifecycle controls when archived", () => {
+    render(
+      <ProjectPage
+        project={{ ...project, lifecycle: "archived" }}
+        knowledge={{ ...emptyKnowledge, sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today", disabled: true }] }}
+        memory={emptyMemory}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Not in use")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Use again" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  it("surfaces native project source lifecycle rejections", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={{
+          ...emptyKnowledge,
+          sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today" }],
+          toggleDisabled: vi.fn().mockRejectedValue(new Error("Archived projects are read-only."))
+        }}
+        memory={emptyMemory}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Stop using" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Archived projects are read-only.");
   });
 });

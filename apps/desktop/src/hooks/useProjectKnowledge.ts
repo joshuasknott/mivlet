@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { validateLocalFileCandidate, type LocalTextFileCandidate } from "@fable/connectors";
+import type { LocalFileImport } from "@fable/protocol";
 import {
   importRuntimeLocalKnowledgeSource,
   loadRuntimeImportedKnowledgeSources,
+  saveRuntimeImportedKnowledgeSources,
   searchRuntimeKnowledgeSources,
   type RuntimeKnowledgeScopeOverride
 } from "../runtime";
@@ -43,7 +45,11 @@ export function useProjectKnowledge(options: UseProjectKnowledgeOptions) {
   const refresh = useCallback(async () => {
     if (!options.enabled || !workspaceId || !projectId) return [];
     setMutationError(null);
-    const sources = (await loadRuntimeImportedKnowledgeSources(scope)) ?? [];
+    const loaded = (await loadRuntimeImportedKnowledgeSources(scope)) ?? [];
+    const cached = queryClient.getQueryData<LocalFileImport[]>(queryKey) ?? [];
+    const retained = cached.filter((source) => "deletedAt" in source || "disabled" in source && source.disabled);
+    const loadedIds = new Set(loaded.map((source) => source.id));
+    const sources = [...loaded, ...retained.filter((source) => !loadedIds.has(source.id))];
     queryClient.setQueryData(queryKey, sources);
     return sources;
   }, [options.enabled, projectId, queryClient, queryKey, scope, workspaceId]);
@@ -79,19 +85,69 @@ export function useProjectKnowledge(options: UseProjectKnowledgeOptions) {
     return imported;
   }), [projectId, refresh, scope, surfaceError, workspaceId]);
 
-  const sources = query.data ?? [];
+  const allSources = query.data ?? [];
+  const ensureWritable = useCallback(async () => {
+    const project = await getRuntimeProject(workspaceId, projectId);
+    if (!project || project.lifecycle !== "active") {
+      throw new Error("Archived projects are read-only. Restore this project before changing knowledge.");
+    }
+  }, [projectId, workspaceId]);
+
+  const persist = useCallback((next: typeof allSources) => surfaceError(async () => {
+    await ensureWritable();
+    const previous = queryClient.getQueryData<typeof allSources>(queryKey) ?? [];
+    queryClient.setQueryData(queryKey, next);
+    try {
+      const saved = await saveRuntimeImportedKnowledgeSources(next, scope);
+      if (saved) {
+        const savedIds = new Set(saved.map((source) => source.id));
+        const retained = next.filter((source) => (source.disabled || source.deletedAt) && !savedIds.has(source.id));
+        queryClient.setQueryData(queryKey, [...saved, ...retained]);
+      }
+      return saved ?? next;
+    } catch (error) {
+      queryClient.setQueryData(queryKey, previous);
+      throw error;
+    }
+  }), [allSources, ensureWritable, queryClient, queryKey, scope, surfaceError]);
+
+  const toggleDisabled = useCallback((sourceId: string) => {
+    const target = allSources.find((source) => source.id === sourceId && !source.deletedAt);
+    if (!target) return Promise.reject(new Error("That project source is no longer available."));
+    return persist(allSources.map((source) => source.id === sourceId
+      ? { ...source, disabled: !source.disabled, pinned: source.disabled ? source.pinned : false }
+      : source));
+  }, [allSources, persist]);
+
+  const remove = useCallback((sourceId: string) => {
+    const target = allSources.find((source) => source.id === sourceId && !source.deletedAt);
+    if (!target) return Promise.reject(new Error("That project source is no longer available."));
+    const deletedAt = new Date().toISOString();
+    return persist(allSources.map((source) => source.id === sourceId
+      ? { ...source, disabled: true, pinned: false, deletedAt }
+      : source));
+  }, [allSources, persist]);
+
+  const sources = useMemo(() => allSources.filter((source) => !source.deletedAt), [allSources]);
+  const liveSources = useMemo(
+    () => allSources.filter((source) => !source.deletedAt && !source.disabled),
+    [allSources]
+  );
   const search = useCallback((searchQuery: string) => surfaceError(async () => {
-    const result = await searchRuntimeKnowledgeSources(searchQuery, sources, undefined, scope);
+    const result = await searchRuntimeKnowledgeSources(searchQuery, liveSources, undefined, scope);
     if (!result) throw new Error("Fable could not search project knowledge.");
     return result;
-  }), [scope, sources, surfaceError]);
+  }), [liveSources, scope, surfaceError]);
 
   return useMemo(() => ({
     sources,
+    liveSources,
     loading: options.enabled && query.isPending,
     error: mutationError ?? (query.error instanceof Error ? query.error.message : null),
     refresh,
     importFile,
-    search
-  }), [importFile, mutationError, options.enabled, query.error, query.isPending, refresh, search, sources]);
+    search,
+    toggleDisabled,
+    remove
+  }), [importFile, liveSources, mutationError, options.enabled, query.error, query.isPending, refresh, remove, search, sources, toggleDisabled]);
 }

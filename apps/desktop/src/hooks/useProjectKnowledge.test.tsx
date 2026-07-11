@@ -6,6 +6,7 @@ import { useProjectKnowledge } from "./useProjectKnowledge";
 
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
+  save: vi.fn(),
   importSource: vi.fn(),
   search: vi.fn(),
   getProject: vi.fn()
@@ -13,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../runtime", () => ({
   loadRuntimeImportedKnowledgeSources: mocks.load,
+  saveRuntimeImportedKnowledgeSources: mocks.save,
   importRuntimeLocalKnowledgeSource: mocks.importSource,
   searchRuntimeKnowledgeSources: mocks.search
 }));
@@ -48,6 +50,7 @@ describe("useProjectKnowledge", () => {
     vi.clearAllMocks();
     mocks.load.mockResolvedValue([]);
     mocks.importSource.mockResolvedValue(imported);
+    mocks.save.mockImplementation(async (sources) => sources);
     mocks.search.mockResolvedValue({ query: "notes", mode: "lexical-fallback", citations: [] });
     mocks.getProject.mockResolvedValue({ id: "project-a", lifecycle: "active" });
   });
@@ -92,5 +95,72 @@ describe("useProjectKnowledge", () => {
     expect((failure as Error).message).toMatch(/read-only/i);
     await waitFor(() => expect(result.current.error).toMatch(/read-only/i));
     expect(mocks.importSource).not.toHaveBeenCalled();
+  });
+
+  it("disables and re-enables a source while excluding it from search", async () => {
+    mocks.load.mockResolvedValue([imported]);
+    // Native live reads may omit disabled rows; the exact-scope cache must
+    // retain lifecycle state so the user can re-enable it.
+    mocks.save.mockResolvedValueOnce([]);
+    const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => { await result.current.toggleDisabled("source-1"); });
+    expect(result.current.sources[0].disabled).toBe(true);
+    expect(result.current.liveSources).toEqual([]);
+    await act(async () => { await result.current.search("notes"); });
+    expect(mocks.search).toHaveBeenLastCalledWith("notes", [], undefined, { workspaceId: "workspace-a", projectId: "project-a" });
+    await act(async () => { await result.current.toggleDisabled("source-1"); });
+    await waitFor(() => expect(result.current.sources[0].disabled).toBe(false));
+    expect(result.current.liveSources).toHaveLength(1);
+  });
+
+  it("persists a delete tombstone, hides the row, and keeps it in the full save", async () => {
+    mocks.load.mockResolvedValue([imported]);
+    const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => { await result.current.remove("source-1"); });
+    expect(result.current.sources).toEqual([]);
+    expect(result.current.liveSources).toEqual([]);
+    expect(mocks.save).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "source-1", disabled: true, pinned: false, deletedAt: expect.any(String) })
+    ], { workspaceId: "workspace-a", projectId: "project-a" });
+  });
+
+  it("rolls an optimistic lifecycle mutation back when native persistence fails", async () => {
+    mocks.load.mockResolvedValue([imported]);
+    mocks.save.mockRejectedValueOnce(new Error("native save failed"));
+    const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => { await expect(result.current.toggleDisabled("source-1")).rejects.toThrow("native save failed"); });
+    expect(result.current.sources[0].disabled).toBeFalsy();
+    expect(result.current.error).toBe("native save failed");
+  });
+
+  it("keeps exact project query caches isolated", async () => {
+    mocks.load.mockImplementation((scope: { workspaceId: string; projectId: string }) => Promise.resolve([
+      { ...imported, workspaceId: scope.workspaceId, id: `source-${scope.projectId}`, scope: { level: "project", projectId: scope.projectId } }
+    ]));
+    const sharedWrapper = wrapper();
+    const a = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: sharedWrapper });
+    const b = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-b", enabled: true }), { wrapper: sharedWrapper });
+    const otherWorkspace = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-b", projectId: "project-a", enabled: true }), { wrapper: sharedWrapper });
+    await waitFor(() => expect(a.result.current.sources).toHaveLength(1));
+    await waitFor(() => expect(b.result.current.sources).toHaveLength(1));
+    await waitFor(() => expect(otherWorkspace.result.current.sources).toHaveLength(1));
+    await act(async () => { await a.result.current.toggleDisabled("source-project-a"); });
+    expect(a.result.current.sources[0].disabled).toBe(true);
+    expect(b.result.current.sources[0].disabled).toBeFalsy();
+    expect(otherWorkspace.result.current.sources[0].disabled).toBeFalsy();
+    expect(mocks.save).toHaveBeenLastCalledWith(expect.any(Array), { workspaceId: "workspace-a", projectId: "project-a" });
+  });
+
+  it("rejects lifecycle writes for archived projects", async () => {
+    mocks.load.mockResolvedValue([imported]);
+    mocks.getProject.mockResolvedValue({ id: "project-a", lifecycle: "archived" });
+    const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    await act(async () => { await expect(result.current.toggleDisabled("source-1")).rejects.toThrow(/read-only/i); });
+    expect(mocks.save).not.toHaveBeenCalled();
+    expect(result.current.sources[0].disabled).toBeFalsy();
   });
 });

@@ -305,12 +305,15 @@ export function ChatWorkspace() {
       provenance: source.provenance,
       freshness: source.freshness,
       status: source.status,
-      statusMessage: source.statusMessage
+      statusMessage: source.statusMessage,
+      disabled: Boolean(source.disabled)
     })),
     loading: projectKnowledge.loading,
     error: projectKnowledge.error,
     refresh: projectKnowledge.refresh,
     importFile: projectKnowledge.importFile,
+    toggleDisabled: projectKnowledge.toggleDisabled,
+    remove: projectKnowledge.remove,
     search: async (query: string) => {
       const result = await projectKnowledge.search(query);
       return result.citations.map((citation: KnowledgeCitation) => ({
@@ -320,7 +323,7 @@ export function ChatWorkspace() {
         freshness: citation.freshness
       }));
     }
-  }), [projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.search, projectKnowledge.sources]);
+  }), [projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.remove, projectKnowledge.search, projectKnowledge.sources, projectKnowledge.toggleDisabled]);
   const projectMemory = useProjectMemory({
     workspaceId: boundWorkspaceId ?? "",
     projectId: scopedProjectId ?? "",
@@ -341,7 +344,7 @@ export function ChatWorkspace() {
     error: projectMemory.error,
     refresh: projectMemory.refresh,
     promote: async (sourceId: string) => {
-      const source = projectKnowledge.sources.find((candidate) => candidate.id === sourceId);
+      const source = projectKnowledge.liveSources.find((candidate) => candidate.id === sourceId);
       if (!source) throw new Error("That knowledge source is no longer available.");
       return projectMemory.promote(source);
     },
@@ -350,7 +353,7 @@ export function ChatWorkspace() {
     toggleDisabled: projectMemory.toggleDisabled,
     forget: projectMemory.forget,
     exportText: projectMemory.exportText
-  }), [projectKnowledge.sources, projectMemory.disabled, projectMemory.edit, projectMemory.error, projectMemory.exportText, projectMemory.forget, projectMemory.loading, projectMemory.promote, projectMemory.records, projectMemory.refresh, projectMemory.toggleDisabled, projectMemory.togglePin]);
+  }), [projectKnowledge.liveSources, projectMemory.disabled, projectMemory.edit, projectMemory.error, projectMemory.exportText, projectMemory.forget, projectMemory.loading, projectMemory.promote, projectMemory.records, projectMemory.refresh, projectMemory.toggleDisabled, projectMemory.togglePin]);
 
   useEffect(() => {
     if (selectedProjectId && !projectStore.loading && !selectedProject) {
