@@ -1293,18 +1293,90 @@ fn approval_for_tool_proposal(
     id: String,
     requested_at: String,
 ) -> crate::models::ApprovalRequest {
+    let (argument_fields, external_destinations) = safe_mcp_argument_preview(&proposal.arguments);
+    let mut data_used = vec![format!("proposal fingerprint: {fingerprint}")];
+    if !argument_fields.is_empty() {
+        data_used.push(format!("argument fields: {}", argument_fields.join(", ")));
+    }
+    if !external_destinations.is_empty() {
+        data_used.push(format!(
+            "external destinations: {}",
+            external_destinations.join(", ")
+        ));
+    }
     crate::models::ApprovalRequest {
         id,
         service: "MCP tools".into(),
         action: format!("run MCP tool {}", proposal.tool_name),
         mode: "full-access".into(),
         risk_level: "critical".into(),
-        data_used: vec![format!("proposal fingerprint: {fingerprint}")],
+        data_used,
         consequence: "Runs an enabled tool in a user-managed MCP server.".into(),
         requested_at,
         decisions: vec!["once".into(), "deny".into()],
         confirmation_phrase: Some(format!("run {}", proposal.tool_name)),
     }
+}
+
+fn safe_mcp_argument_preview(value: &Value) -> (Vec<String>, Vec<String>) {
+    const MAX_PREVIEW_ITEMS: usize = 16;
+
+    fn safe_key_segment(value: &str) -> bool {
+        !value.is_empty()
+            && value.len() <= 64
+            && value
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
+    }
+
+    fn walk(value: &Value, path: &str, fields: &mut Vec<String>, destinations: &mut Vec<String>) {
+        if fields.len() >= MAX_PREVIEW_ITEMS && destinations.len() >= MAX_PREVIEW_ITEMS {
+            return;
+        }
+        match value {
+            Value::Object(object) => {
+                for (key, child) in object.iter().take(MAX_PREVIEW_ITEMS) {
+                    if !safe_key_segment(key) {
+                        continue;
+                    }
+                    let child_path = if path.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{path}.{key}")
+                    };
+                    if fields.len() < MAX_PREVIEW_ITEMS {
+                        fields.push(child_path.clone());
+                    }
+                    walk(child, &child_path, fields, destinations);
+                }
+            }
+            Value::Array(values) => {
+                for child in values.iter().take(MAX_PREVIEW_ITEMS) {
+                    walk(child, path, fields, destinations);
+                }
+            }
+            Value::String(text) if destinations.len() < MAX_PREVIEW_ITEMS => {
+                if let Ok(url) = Url::parse(text) {
+                    if matches!(url.scheme(), "http" | "https")
+                        && url.username().is_empty()
+                        && url.password().is_none()
+                    {
+                        destinations.push(url.origin().ascii_serialization());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut fields = Vec::new();
+    let mut destinations = Vec::new();
+    walk(value, "", &mut fields, &mut destinations);
+    fields.sort();
+    fields.dedup();
+    destinations.sort();
+    destinations.dedup();
+    (fields, destinations)
 }
 
 fn validate_mcp_tool_name(value: &str) -> Result<(), String> {
@@ -1356,6 +1428,17 @@ fn validate_mcp_arguments(value: &Value) -> Result<(), String> {
             Value::Array(values) => {
                 for child in values {
                     walk(child, depth + 1, nodes)?;
+                }
+            }
+            Value::String(text) => {
+                if let Ok(url) = Url::parse(text) {
+                    if matches!(url.scheme(), "http" | "https")
+                        && (!url.username().is_empty() || url.password().is_some())
+                    {
+                        return Err(
+                            "URL credentials cannot be passed in MCP tool arguments.".into()
+                        );
+                    }
                 }
             }
             _ => {}
@@ -2796,12 +2879,18 @@ mod tests {
     }
 
     #[test]
-    fn tool_approval_is_fingerprint_only_and_arguments_reject_credentials() {
+    fn tool_approval_is_secret_free_and_arguments_reject_credentials() {
         let proposal = McpToolProposal {
             workspace_id: "workspace-a".into(),
             session_id: "mcp-1234567890abcdef1234567890abcdef".into(),
             tool_name: "read".into(),
-            arguments: serde_json::json!({ "path": "safe.txt" }),
+            arguments: serde_json::json!({
+                "path": "safe.txt",
+                "request": {
+                    "callbackUrl": "https://api.example.com/hook?token=private-value",
+                    "body": "private-body"
+                }
+            }),
         };
         validate_mcp_tool_name(&proposal.tool_name).unwrap();
         validate_mcp_arguments(&proposal.arguments).unwrap();
@@ -2813,8 +2902,19 @@ mod tests {
         );
         let encoded = serde_json::to_string(&approval).unwrap();
         assert!(encoded.contains("fingerprint-only"));
+        assert!(encoded.contains("argument fields"));
+        assert!(encoded.contains("request.callbackUrl"));
+        assert!(encoded.contains("request.body"));
+        assert!(encoded.contains("https://api.example.com"));
         assert!(!encoded.contains("safe.txt"));
+        assert!(!encoded.contains("private-value"));
+        assert!(!encoded.contains("/hook"));
+        assert!(!encoded.contains("private-body"));
         assert!(validate_mcp_arguments(&serde_json::json!({ "apiKey": "secret" })).is_err());
+        assert!(validate_mcp_arguments(
+            &serde_json::json!({ "url": "https://user:pass@example.com/private" })
+        )
+        .is_err());
         assert!(validate_mcp_arguments(&serde_json::json!(["not-an-object"])).is_err());
     }
 
