@@ -121,8 +121,8 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
   - Repo-local evidence: response artifacts derive v1 citations from the immutable producing-run receipt, and later versions inherit that evidence without accepting renderer replacements. Portable import rejects unsigned citation, input, decision, review, and publication claims until Fable has a trusted evidence-transfer mechanism.
 - [x] Add review, requested changes, acceptance, and approval state.
   - Evidence: schema v17 stores immutable exact-version private review records. A private owner can start review, request bounded specific changes, create a new draft version, review again, and mark that exact version accepted with atomic stale-write protection, restart recovery, portable history, honest self-review copy, and keyboard focus coverage. Multi-member assignment remains part of Wave 2D rather than being simulated here.
-- [ ] Add artifact search and export.
-  - Repo-local evidence: owner-scoped workspace archives now include projectless artifacts and all immutable versions, and reject cross-member or tampered imports. A focused user-facing artifact search and exact-version export remain open.
+- [x] Add artifact search and export.
+  - Evidence: Knowledge → Artifacts now lists and searches exact-owner current artifacts by title, content, source, and decision; opens plain type/status/scope/origin/source/review details; selects immutable historical versions; and exports an exact version as whitelisted Markdown or JSON. Native search validates thread/project scope, pages bounded current-only rows, reports an honest narrow-search error at its scan ceiling, and exact export verifies hashes/media while stripping paths, signed URLs, hidden history, reviews, grants, and authority.
 - [ ] Support explicit cross-context handoff without transferring hidden history or authority.
 
 ### Wave 2D - First multi-member slice
