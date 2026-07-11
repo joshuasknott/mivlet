@@ -418,7 +418,7 @@ pub async fn spawn_mcp_process(
 
 #[tauri::command]
 pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String> {
-    if !valid_session_id(&request.session_id) || !valid_mcp_frame(&request.frame) {
+    if !valid_session_id(&request.session_id) || !permitted_renderer_frame(&request.frame) {
         return Err("The MCP frame is invalid.".to_string());
     }
     let scope = crate::authorized_scope::command_scope(
@@ -661,6 +661,30 @@ fn valid_mcp_frame(frame: &str) -> bool {
     object.contains_key("id") && (object.contains_key("result") ^ object.contains_key("error"))
 }
 
+fn permitted_renderer_frame(frame: &str) -> bool {
+    if !valid_mcp_frame(frame) {
+        return false;
+    }
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
+        return false;
+    };
+    let Some(method) = object.get("method").and_then(Value::as_str) else {
+        // This client advertises no server-request capabilities, so renderer
+        // responses are never needed and cannot become an execution bypass.
+        return false;
+    };
+    matches!(
+        method,
+        "initialize"
+            | "ping"
+            | "tools/list"
+            | "resources/list"
+            | "resources/templates/list"
+            | "notifications/initialized"
+            | "notifications/cancelled"
+    )
+}
+
 #[derive(Default)]
 struct BoundedLineDecoder {
     buffer: Vec<u8>,
@@ -713,6 +737,29 @@ mod tests {
         ));
         assert!(!valid_mcp_frame(
             r#"{"jsonrpc":"2.0","id":null,"result":{}}"#
+        ));
+    }
+
+    #[test]
+    fn renderer_frames_are_control_plane_only() {
+        assert!(permitted_renderer_frame(
+            r#"{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}"#
+        ));
+        assert!(permitted_renderer_frame(
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
+        ));
+        for method in [
+            "tools/call",
+            "resources/read",
+            "prompts/get",
+            "sampling/createMessage",
+        ] {
+            assert!(!permitted_renderer_frame(&format!(
+                r#"{{"jsonrpc":"2.0","id":"blocked","method":"{method}","params":{{}}}}"#
+            )));
+        }
+        assert!(!permitted_renderer_frame(
+            r#"{"jsonrpc":"2.0","id":"server-request","result":{}}"#
         ));
     }
 
