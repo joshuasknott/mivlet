@@ -303,4 +303,41 @@ describe("desktop semantic capability grants", () => {
     expect(runtime.commitGrant).not.toHaveBeenCalled();
     expect(runtime.executeTool).toHaveBeenCalledOnce();
   });
+
+  it("turns a missing Connection into actionable, no-fallback search guidance", async () => {
+    runtime.prepareGrant.mockRejectedValue(Object.assign(
+      new Error("No authorized Connection can provide this capability."),
+      { code: "no-eligible-connection", retryable: false }
+    ));
+    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
+    const executor = createDesktopToolExecutor(gate, { workspaceId: "workspace-1" });
+
+    await expect(executor(
+      connectionApproval,
+      JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })
+    )).rejects.toThrow(/connect a supported work source or bind an MCP cited-search tool/i);
+    await expect(executor(
+      connectionApproval,
+      JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })
+    )).rejects.toThrow(/no connected source was searched/i);
+    expect(gate.waitForDecision).not.toHaveBeenCalled();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("explains degraded Connection failure without silently switching sources", async () => {
+    runtime.prepareGrant.mockRejectedValue(Object.assign(
+      new Error("The selected Connection is not healthy enough for this capability."),
+      { code: "connection-unhealthy", retryable: true }
+    ));
+    const executor = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      { workspaceId: "workspace-1" }
+    );
+
+    await expect(executor(
+      connectionApproval,
+      JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })
+    )).rejects.toThrow(/did not silently use a different source/i);
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
 });

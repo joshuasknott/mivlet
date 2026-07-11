@@ -68,12 +68,16 @@ export function createDesktopToolExecutor(
     const parsed = safeParseArgs(args);
     let mcpRoute: RuntimeResolvedMcpCapabilityRoute | null = null;
     if (toolName === "connection-read") {
-      const workspaceId = options.workspaceId;
-      const capabilityId = typeof parsed.capability === "string" ? parsed.capability.trim() : "";
-      if (workspaceId && capabilityId) {
-        mcpRoute = await resolveRuntimeMcpCapabilityRoute(workspaceId, capabilityId);
+      try {
+        const workspaceId = options.workspaceId;
+        const capabilityId = typeof parsed.capability === "string" ? parsed.capability.trim() : "";
+        if (workspaceId && capabilityId) {
+          mcpRoute = await resolveRuntimeMcpCapabilityRoute(workspaceId, capabilityId);
+        }
+        await ensureCapabilityGrant(gate, options, parsed, mcpRoute?.connectionId);
+      } catch (error) {
+        throw contextualConnectedSourceError(error);
       }
-      await ensureCapabilityGrant(gate, options, parsed, mcpRoute?.connectionId);
     }
     const decision = await gate.waitForDecision(approval);
     if (decision !== "granted") {
@@ -91,6 +95,30 @@ export function createDesktopToolExecutor(
     }
     return runOnDesktop(approval, parsed, options);
   };
+}
+
+function contextualConnectedSourceError(error: unknown): Error {
+  const candidate = error as { code?: unknown; message?: unknown; retryable?: unknown };
+  const code = typeof candidate?.code === "string" ? candidate.code : "connected-source-unavailable";
+  const detail = typeof candidate?.message === "string"
+    ? candidate.message
+    : "Connected-source search is unavailable.";
+  const reconnectCodes = new Set([
+    "connection-not-authorized",
+    "credential-unavailable",
+    "scope-denied"
+  ]);
+  const guidance = code === "no-eligible-connection"
+    ? "No eligible Connection is set up for this search. Connect a supported work source or bind an MCP cited-search tool in Settings > Providers, then retry."
+    : reconnectCodes.has(code)
+      ? "The selected Connection needs attention. Reconnect it in Settings > Providers, confirm the requested read scope, then retry."
+      : code === "connection-unhealthy" || candidate?.retryable === true
+        ? "The selected Connection is temporarily unavailable. Retry later or choose another eligible Connection; Fable did not silently use a different source."
+        : detail;
+  return Object.assign(
+    new Error(`[connected-source:${code}] ${guidance} No connected source was searched. (${detail})`),
+    { code }
+  );
 }
 
 async function ensureCapabilityGrant(

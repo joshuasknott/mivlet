@@ -95,7 +95,12 @@ function toRuntimeError(error: unknown) {
     "message" in error &&
     typeof error.message === "string"
   ) {
-    return new Error(error.message);
+    const runtimeError = new Error(error.message) as Error & { code?: string; retryable?: boolean };
+    if ("code" in error && typeof error.code === "string") runtimeError.code = error.code;
+    if ("retryable" in error && typeof error.retryable === "boolean") {
+      runtimeError.retryable = error.retryable;
+    }
+    return runtimeError;
   }
 
   return new Error(typeof error === "string" ? error : "Fable runtime request failed.");
