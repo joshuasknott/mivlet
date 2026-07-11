@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it } from "vitest";
-import { RunContextSummary, citationsForRun } from "./workspace-cards";
+import { RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -30,7 +30,36 @@ describe("RunContextSummary", () => {
     expect(summary).toHaveTextContent("Launch notes");
     expect(summary).toHaveTextContent("Local file - Today - Retrieved source");
     expect(summary).toHaveTextContent("Launch in August");
+    expect(summary).toHaveTextContent("Audience not recorded");
     expect(summary).not.toHaveTextContent("0.9");
+  });
+
+  it("labels private and shared v2 audiences without exposing member ids", () => {
+    const privateReceipt: RunContextReceipt = {
+      ...receipt,
+      version: 2,
+      audience: {
+        authority: "local",
+        visibility: "member-private",
+        actingMemberId: "member-private" as never
+      }
+    };
+    const sharedReceipt: RunContextReceipt = {
+      ...receipt,
+      version: 2,
+      audience: {
+        authority: "convex",
+        visibility: "workspace-shared",
+        actingMemberId: "member-shared" as never
+      }
+    };
+    expect(runContextAudienceLabel(privateReceipt)).toBe("Only you");
+    expect(runContextAudienceLabel(sharedReceipt)).toBe("Workspace");
+
+    render(<RunContextSummary receipt={privateReceipt} />);
+    const summary = screen.getByLabelText("Context used");
+    expect(summary).toHaveTextContent("AudienceOnly you");
+    expect(summary).not.toHaveTextContent("member-private");
   });
 
   it("stays hidden when no bounded context contributed", () => {

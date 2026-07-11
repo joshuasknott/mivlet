@@ -24,6 +24,11 @@ const CONTEXT_REASON_LABELS = {
   "tool-result": "Tool result"
 } as const;
 
+export function runContextAudienceLabel(receipt: RunContextReceipt): string {
+  if (receipt.version === 1) return "Audience not recorded";
+  return receipt.audience.visibility === "member-private" ? "Only you" : "Workspace";
+}
+
 /** Concise evidence labels only; never hidden reasoning or model chain-of-thought. */
 export function RunContextSummary({ receipt }: { receipt: RunContextReceipt }) {
   const counts = new Map<string, number>();
@@ -42,6 +47,10 @@ export function RunContextSummary({ receipt }: { receipt: RunContextReceipt }) {
             : "Memory and context"}
         </span>
       </summary>
+      <p className="run-context-summary__audience">
+        <strong>Audience</strong>
+        <span>{runContextAudienceLabel(receipt)}</span>
+      </p>
       <ul className="run-context-summary__reasons" aria-label="Context reasons">
         {[...counts].map(([label, count]) => (
           <li key={label}>{label}{count > 1 ? ` (${count})` : ""}</li>

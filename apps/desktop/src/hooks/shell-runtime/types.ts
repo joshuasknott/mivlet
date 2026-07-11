@@ -137,6 +137,10 @@ export interface ShellRuntime {
   toggleKnowledgeSourceDisabled: (sourceId: string) => void;
   /** Permanently remove a source from search, citations, pins, and context. */
   deleteKnowledgeSource: (sourceId: string) => void;
+  /**
+   * Assemble context for the authenticated active member. Fails closed when
+   * the active workspace has no matching member instead of widening scope.
+   */
   assembleKnowledgeContext: (query: string, context?: ProjectMemoryRunContext) => Promise<PreparedRunContext>;
   // schedules
   schedules: Schedule[];

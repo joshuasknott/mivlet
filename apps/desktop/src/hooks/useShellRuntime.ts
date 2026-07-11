@@ -98,7 +98,10 @@ import {
   knowledgeScopeForRun,
   permissionLabelFor,
   permissionModeFor,
+  privateRunAudience,
+  recordsVisibleToRunAudience,
   selectMemoryForRun,
+  withPreviewPrivateAuthority,
   type ProjectMemoryRunContext
 } from "../lib/agent-run";
 import {
@@ -1546,8 +1549,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     );
   };
 
-  const knowledgeRetrievalSources = () =>
-    workspaceKnowledgeSources
+  const knowledgeRetrievalSources = (sources: readonly KnowledgeSource[] = workspaceKnowledgeSources) =>
+    sources
       // Only live (non-disabled), authorized, connected-connector sources can
       // enter retrieval. Stale/error statuses are additionally excluded by the
       // retrieve pipeline's filterRetrievable; we re-check live here so a
@@ -1569,9 +1572,26 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const runId = createRunContextId();
     const assembledAt = new Date().toISOString();
     const scope = knowledgeScopeForRun(activeThread?.id, context);
-    const result = await retrieve(knowledgeRetrievalSources(), {
+    const audience = privateRunAudience(
+      accountWorkspaceStatus,
+      hasTauriRuntime() ? "hosted" : "preview"
+    );
+    const selectedMemory = selectMemoryForRun(managedMemoryRecords, context);
+    // Native records must already carry canonical ownership from migration.
+    // Browser preview has no native store, so its deliberate fixtures receive
+    // explicit private ownership before the same fail-closed filter is applied.
+    const governedSources = hasTauriRuntime()
+      ? workspaceKnowledgeSources
+      : withPreviewPrivateAuthority(workspaceKnowledgeSources, audience);
+    const governedMemory = hasTauriRuntime()
+      ? selectedMemory
+      : withPreviewPrivateAuthority(selectedMemory, audience);
+    const visibleSources = recordsVisibleToRunAudience(governedSources, audience);
+    const visibleMemory = recordsVisibleToRunAudience(governedMemory, audience);
+    const result = await retrieve(knowledgeRetrievalSources(visibleSources), {
       query,
       scope,
+      audience,
       limit: 8,
       budgetChars: 6_000
     });
@@ -1581,10 +1601,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       runId,
       assembledAt,
       scope,
+      audience,
       // Only live memories enter context: forgotten/disabled records are
       // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
       // switch) excludes everything.
-      memory: memoryDisabled ? [] : selectMemoryForRun(managedMemoryRecords, context),
+      memory: memoryDisabled ? [] : visibleMemory,
       citations: result.citations,
       authorization: {
         isSourceAuthorized: (connectorId: string, account?: string) =>

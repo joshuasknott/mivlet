@@ -8,16 +8,20 @@
  */
 
 import type {
+  AccountWorkspaceStatus,
   AgentRunRequest,
   ApprovalPresetLabel,
   BackendModel,
+  ContextRecordAuthorityScope,
   KnowledgeScope,
   KnowledgeSource,
   MemoryRecord,
   PermissionMode,
+  RunContextAudience,
   Spine
 } from "@fable/protocol";
 import { buildContextPrefix, MAX_TOKENS_DEFAULT, validateModelForRun } from "@fable/connectors";
+import { authorityScopeAllowsAudience } from "@fable/knowledge";
 
 /**
  * The composer's approval picker uses simple user-facing labels. These map
@@ -110,6 +114,86 @@ export interface BuildContextPrefixForRunInput {
 export interface ProjectMemoryRunContext {
   projectId?: string | null;
   projectMemoryRecords?: MemoryRecord[];
+}
+
+export type PrivateAudienceSource = "hosted" | "preview";
+
+const PRIVATE_CONTEXT_MEMBER_ERROR =
+  "Fable could not confirm who can use this context. Refresh your account workspace and try again.";
+
+/**
+ * Resolve the exact active member that owns a local private run. Native runs
+ * require a hosted selection; browser preview is an explicit, separate path
+ * and can never become a fallback for native ownership.
+ */
+export function privateRunAudience(
+  status: AccountWorkspaceStatus,
+  source: PrivateAudienceSource
+): RunContextAudience {
+  const activeLocalId = status.activeWorkspace.localWorkspaceId.trim();
+  const usableState = status.state === "ready" || status.state === "offline";
+  const sourceMatches = source === "hosted"
+    ? status.activeWorkspace.source === "hosted"
+    : status.activeWorkspace.source === "legacy-default";
+  const member = status.workspaces.find((workspace) =>
+    workspace.localWorkspaceId === activeLocalId &&
+    (!status.activeWorkspace.fableWorkspaceId ||
+      workspace.fableWorkspaceId === status.activeWorkspace.fableWorkspaceId)
+  );
+  if (
+    !status.accountBound ||
+    !usableState ||
+    !activeLocalId ||
+    !sourceMatches ||
+    !member ||
+    member.workspaceStatus !== "active" ||
+    member.membershipStatus !== "active" ||
+    !member.memberId.trim()
+  ) {
+    throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
+  }
+  return {
+    authority: "local",
+    visibility: "member-private",
+    actingMemberId: member.memberId as RunContextAudience["actingMemberId"]
+  };
+}
+
+/** Synthetic shared audience for contract tests and future hosted assembly. */
+export function workspaceSharedRunAudience(actingMemberId: string): RunContextAudience {
+  if (!actingMemberId.trim()) throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
+  return {
+    authority: "convex",
+    visibility: "workspace-shared",
+    actingMemberId: actingMemberId as RunContextAudience["actingMemberId"]
+  };
+}
+
+/** Apply the central fail-closed authority contract to run inputs. */
+export function recordsVisibleToRunAudience<T extends { authorityScope?: ContextRecordAuthorityScope }>(
+  records: readonly T[],
+  audience: RunContextAudience
+): T[] {
+  return records.filter((record) => authorityScopeAllowsAudience(record.authorityScope, audience));
+}
+
+/**
+ * Browser preview has no native migration boundary, so its explicit fixture
+ * records are cloned with the preview member's private authority before use.
+ */
+export function withPreviewPrivateAuthority<T extends { authorityScope?: ContextRecordAuthorityScope }>(
+  records: readonly T[],
+  audience: RunContextAudience
+): T[] {
+  if (audience.authority !== "local" || audience.visibility !== "member-private") {
+    throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
+  }
+  const authorityScope: ContextRecordAuthorityScope = {
+    authority: "local",
+    visibility: "member-private",
+    ownerMemberId: audience.actingMemberId
+  };
+  return records.map((record) => ({ ...record, authorityScope }));
 }
 
 function isLiveMemoryRecord(record: MemoryRecord) {

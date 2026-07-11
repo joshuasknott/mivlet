@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
+import type { AccountWorkspaceStatus, KnowledgeSource, MemoryRecord } from "@fable/protocol";
 import {
   buildAgentRequest,
   buildContinuationMessages,
@@ -10,8 +10,12 @@ import {
   PERMISSION_PROFILES,
   permissionLabelFor,
   permissionModeFor,
+  privateRunAudience,
+  recordsVisibleToRunAudience,
   resolveSelectedModel,
-  selectMemoryForRun
+  selectMemoryForRun,
+  withPreviewPrivateAuthority,
+  workspaceSharedRunAudience
 } from "./agent-run";
 
 const memory = (over: Partial<MemoryRecord> = {}): MemoryRecord => ({
@@ -35,6 +39,102 @@ const source = (over: Partial<KnowledgeSource> = {}): KnowledgeSource => ({
   freshness: "today",
   pinned: true,
   ...over
+});
+
+const accountStatus = (over: Partial<AccountWorkspaceStatus> = {}): AccountWorkspaceStatus => ({
+  configured: true,
+  state: "ready",
+  message: "Workspace ready.",
+  accountBound: true,
+  workspaces: [{
+    fableWorkspaceId: "workspace-hosted",
+    localWorkspaceId: "workspace-local",
+    name: "Fable",
+    workspaceStatus: "active",
+    workspaceRevision: 1,
+    policyRevision: 1,
+    memberId: "member-active",
+    role: "owner",
+    membershipStatus: "active",
+    membershipRevision: 1,
+    updatedAt: "2026-07-11T00:00:00.000Z"
+  }],
+  activeWorkspace: {
+    localWorkspaceId: "workspace-local",
+    fableWorkspaceId: "workspace-hosted",
+    name: "Fable",
+    source: "hosted"
+  },
+  devices: [],
+  ...over
+});
+
+describe("run context audience", () => {
+  it("derives the private audience from the exact active hosted member", () => {
+    expect(privateRunAudience(accountStatus(), "hosted")).toEqual({
+      authority: "local",
+      visibility: "member-private",
+      actingMemberId: "member-active"
+    });
+  });
+
+  it("fails closed instead of using a mismatched or legacy placeholder member", () => {
+    expect(() => privateRunAudience(accountStatus({
+      activeWorkspace: {
+        localWorkspaceId: "other-local",
+        fableWorkspaceId: "workspace-hosted",
+        name: "Other",
+        source: "hosted"
+      }
+    }), "hosted")).toThrow(/could not confirm who can use this context/i);
+    expect(() => privateRunAudience(accountStatus({
+      activeWorkspace: {
+        localWorkspaceId: "workspace-local",
+        name: "Legacy",
+        source: "legacy-default"
+      }
+    }), "hosted")).toThrow(/could not confirm who can use this context/i);
+  });
+
+  it("assigns explicit preview ownership without mutating fixture records", () => {
+    const preview = privateRunAudience(accountStatus({
+      configured: false,
+      activeWorkspace: {
+        localWorkspaceId: "workspace-local",
+        fableWorkspaceId: "workspace-hosted",
+        name: "Preview",
+        source: "legacy-default"
+      }
+    }), "preview");
+    const original = memory({ authorityScope: undefined });
+    const [owned] = withPreviewPrivateAuthority([original], preview);
+    expect(original.authorityScope).toBeUndefined();
+    expect(owned.authorityScope).toEqual({
+      authority: "local",
+      visibility: "member-private",
+      ownerMemberId: "member-active"
+    });
+  });
+
+  it("excludes private inputs from a synthetic shared audience via the central filter contract", () => {
+    const sharedAudience = workspaceSharedRunAudience("member-active");
+    const records = recordsVisibleToRunAudience([
+      memory({
+        id: "private",
+        authorityScope: {
+          authority: "local",
+          visibility: "member-private",
+          ownerMemberId: "member-active" as never
+        }
+      }),
+      memory({
+        id: "shared",
+        authorityScope: { authority: "convex", visibility: "workspace-shared" }
+      }),
+      memory({ id: "legacy", authorityScope: undefined })
+    ], sharedAudience);
+    expect(records.map((record) => record.id)).toEqual(["shared"]);
+  });
 });
 
 describe("buildContextPrefixForRun", () => {

@@ -1403,17 +1403,59 @@ describe("useShellRuntime — prepared run context", () => {
     });
 
     expect(prepared).toBeDefined();
-    expect(prepared!.receipt.version).toBe(1);
+    expect(prepared!.receipt.version).toBe(2);
     expect(prepared!.receipt.runId).toMatch(/^run-[a-z0-9-]+$/i);
     expect(Number.isNaN(Date.parse(prepared!.receipt.assembledAt))).toBe(false);
     expect(prepared!.receipt.scope).toEqual({ level: "global" });
+    expect(prepared!.receipt).toEqual(expect.objectContaining({
+      audience: {
+        authority: "local",
+        visibility: "member-private",
+        actingMemberId: "preview-member"
+      }
+    }));
     expect(prepared!.receipt.citations[0]).toEqual(expect.objectContaining({
       sourceId: "source-seed",
+      authorityScope: {
+        authority: "local",
+        visibility: "member-private",
+        ownerMemberId: "preview-member"
+      },
       ranking: expect.objectContaining({ relevance: expect.any(Number) })
     }));
     expect(prepared!.receipt.contributions.map((entry) => entry.reason)).toEqual(
       expect.arrayContaining(["memory-approved", "retrieved"])
     );
     expect(Object.isFrozen(prepared!.receipt)).toBe(true);
+  });
+
+  it("fails closed when native account state has no matching active member", async () => {
+    const nativeWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
+    nativeWindow.__TAURI_INTERNALS__ = {};
+    vi.mocked(runtime.loadRuntimeAccountWorkspaceStatus).mockResolvedValue({
+      configured: true,
+      state: "ready",
+      message: "Workspace ready.",
+      accountBound: true,
+      workspaces: [],
+      activeWorkspace: {
+        localWorkspaceId: "local-active",
+        fableWorkspaceId: "workspace-active",
+        name: "Fable",
+        source: "hosted"
+      },
+      devices: []
+    });
+    const view = renderHook(() => useShellRuntime());
+    try {
+      const { result } = view;
+      await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+      await expect(result.current.assembleKnowledgeContext("private notes")).rejects.toThrow(
+        /could not confirm who can use this context/i
+      );
+    } finally {
+      view.unmount();
+      delete nativeWindow.__TAURI_INTERNALS__;
+    }
   });
 });
