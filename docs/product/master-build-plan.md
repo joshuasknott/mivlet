@@ -104,6 +104,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 ### Wave 2B - Knowledge, memory, and context
 
 - [ ] Complete source ingestion, provenance, trust, freshness, and lifecycle.
+  - Repo-local evidence: supported local text files now have authenticated workspace/project import, provenance, trust, search, disable/re-enable, tombstone delete, and explicit one-shot content refresh. Connection-backed source ingestion and lifecycle remain open with Wave 3.
 - [ ] Filter retrieval by member, workspace, project, department, and Connection before ranking.
 - [ ] Complete citations and explain why important context was selected.
 - [x] Complete visible, editable, scoped, exportable, disableable, and forgettable memory.
