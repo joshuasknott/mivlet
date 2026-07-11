@@ -818,7 +818,13 @@ mod tests {
             count(&store, "SELECT COUNT(*) FROM draft WHERE id='composer';"),
             1
         );
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM backend_connection;"), 2);
+        assert_eq!(
+            count(
+                &store,
+                "SELECT COUNT(*) FROM backend_connection_legacy_unowned;"
+            ),
+            2
+        );
         assert_eq!(count(&store, "SELECT COUNT(*) FROM schedule;"), 1);
         assert_eq!(count(&store, "SELECT COUNT(*) FROM memory_record;"), 1);
 
@@ -842,7 +848,13 @@ mod tests {
         );
         let store = store();
         migrate_all(&store, dir.path()).unwrap();
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM backend_connection;"), 1);
+        assert_eq!(
+            count(
+                &store,
+                "SELECT COUNT(*) FROM backend_connection_legacy_unowned;"
+            ),
+            1
+        );
     }
 
     #[test]

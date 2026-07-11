@@ -727,25 +727,9 @@ fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result
     .collect::<Result<_>>()?;
 
     // backend_connection — no payload columns; read directly.
-    let backend_connections: Vec<BackendConnectionRecord> = if workspace_id == "default" {
-        let mut stmt = conn.prepare(
-            "SELECT provider_id, connected_at, updated_at FROM backend_connection ORDER BY provider_id;",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(BackendConnectionRecord {
-                provider_id: row.get(0)?,
-                connected_at: row.get(1)?,
-                updated_at: row.get(2)?,
-            })
-        })?;
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        out
-    } else {
-        Vec::new()
-    };
+    // Provider connections are account-owned authorization metadata, not
+    // workspace content. Credentials and connection claims stay local.
+    let backend_connections: Vec<BackendConnectionRecord> = Vec::new();
 
     let knowledge_sources = read_rows(
         conn,
@@ -1809,22 +1793,8 @@ fn plan_and_apply(
     // authority on its own (keys live in the keyring).
     {
         let section = "backendConnections";
-        for r in &manifest.sections.backend_connections {
-            let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM backend_connection WHERE provider_id = ?1);",
-                rusqlite::params![r.provider_id],
-                |row| row.get(0),
-            )?;
-            if exists && options.conflict == ConflictPolicy::Skip {
-                report.inc_skipped(section);
-                continue;
-            }
-            tx.execute(
-                "INSERT INTO backend_connection (provider_id, connected_at, updated_at)
-                 VALUES (?1, ?2, ?3);",
-                rusqlite::params![r.provider_id, r.connected_at, r.updated_at],
-            )?;
-            report.inc_inserted(section);
+        for _ in &manifest.sections.backend_connections {
+            report.inc_skipped(section);
         }
     }
 
@@ -2468,11 +2438,6 @@ mod tests {
                     "INSERT INTO connector_account (workspace_id, project_id, connector_id, account_id, status, expires_at, credential_ref, connected_at, updated_at, payload, payload_nonce)
                      VALUES ('default',NULL,'github','u','connected',12345,'keyring-opaque-key','t','t',?1,?2);",
                     rusqlite::params![cap.ciphertext, cap.nonce],
-                )?;
-                // backend connection
-                tx.execute(
-                    "INSERT INTO backend_connection (provider_id, connected_at, updated_at) VALUES ('openai','t','t');",
-                    [],
                 )?;
                 // knowledge source
                 let kp = store.seal_json_owned(&serde_json::json!({"title":"doc"}), "knowledge_source:default:k1")?;

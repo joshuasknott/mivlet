@@ -741,8 +741,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v11 is current; v11 -> v12 has no registered migration.
-        let err = apply(&conn, 11, 12).unwrap_err();
+        // v12 is current; v12 -> v13 has no registered migration.
+        let err = apply(&conn, 12, 13).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
