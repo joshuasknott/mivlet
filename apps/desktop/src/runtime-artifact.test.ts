@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearActiveRuntimeDataScope, setActiveRuntimeDataScope } from "./runtime-scope";
 import {
   appendRuntimeArtifactVersion,
+  acceptRuntimeArtifactHandoff,
   createRuntimeResponseArtifact,
   exportRuntimeArtifact,
   listRuntimeThreadArtifacts,
+  proposeRuntimeArtifactHandoff,
   reviewRuntimeArtifact,
   searchRuntimeArtifacts,
   type RuntimeArtifactBundle
 } from "./runtime";
+import { archiveRuntimeProject, createRuntimeProject, type RuntimeProject } from "./lib/project-runtime";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -61,6 +64,30 @@ function nativeBundle(workspaceId = "workspace-native"): RuntimeArtifactBundle {
     versions: [version],
     sourceMessageId: "message-1"
   } as unknown as RuntimeArtifactBundle;
+}
+
+function nativeProject(workspaceId = "workspace-native"): RuntimeProject {
+  return {
+    id: "project-target", workspaceId, authority: "local", visibility: "member-private",
+    ownerMemberId: "member-1", schemaVersion: 1, revision: 1,
+    createdByInternalUserId: "user-1", createdAt: "2026-07-11T00:00:00.000Z",
+    updatedAt: "2026-07-11T00:00:00.000Z", title: "Target project", lifecycle: "active"
+  } as unknown as RuntimeProject;
+}
+
+function nativeHandoff(status: "proposed" | "accepted" = "proposed", note?: string) {
+  return {
+    id: "handoff-1", workspaceId: "workspace-native", authority: "local",
+    visibility: "member-private", ownerMemberId: "member-1", schemaVersion: 1,
+    revision: status === "proposed" ? 1 : 2, createdByInternalUserId: "user-1",
+    createdAt: "2026-07-11T00:00:00.000Z", updatedAt: "2026-07-11T00:01:00.000Z",
+    status, source: { workspaceId: "workspace-native", threadId: "thread-1" },
+    target: { workspaceId: "workspace-native", projectId: "project-target" },
+    artifactVersionIds: ["version-1"], includedContext: [], authorityTransfer: "none",
+    proposedByInternalUserId: "user-1", proposedAt: "2026-07-11T00:00:00.000Z",
+    ...(note ? { note } : {}),
+    ...(status === "accepted" ? { resolvedAt: "2026-07-11T00:01:00.000Z", resolvedByInternalUserId: "user-1" } : {})
+  };
 }
 
 describe("artifact runtime revisions", () => {
@@ -574,5 +601,104 @@ describe("artifact runtime revisions", () => {
       citations: [], inputs: [], decisions: [], lineage: []
     });
     await expect(exported).rejects.toThrow(/active workspace changed/i);
+  });
+
+  it("uses exact native handoff envelopes and rejects expanded authority or history", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    mocks.invoke.mockResolvedValueOnce(nativeBundle()).mockResolvedValueOnce(nativeProject()).mockResolvedValueOnce(nativeHandoff("proposed", "Add this"));
+    const proposed = await proposeRuntimeArtifactHandoff({
+      artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target", note: " Add this "
+    });
+    expect(mocks.invoke.mock.calls.slice(-3)).toEqual([
+      ["artifact_get", { artifactId: "artifact-1" }],
+      ["project_get", { projectId: "project-target" }],
+      ["artifact_handoff_propose", { input: {
+        artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target", note: "Add this"
+      } }]
+    ]);
+    mocks.invoke.mockResolvedValueOnce(nativeHandoff("accepted", "Add this"));
+    await acceptRuntimeArtifactHandoff(proposed.id, proposed.revision);
+    expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_handoff_accept", {
+      input: { handoffId: "handoff-1", expectedRevision: 1 }
+    });
+
+    setActiveRuntimeDataScope("workspace-malformed");
+    const malformedBundle = nativeBundle("workspace-malformed");
+    const malformedHandoff = {
+      ...nativeHandoff(),
+      workspaceId: "workspace-malformed",
+      source: { workspaceId: "workspace-malformed", threadId: "thread-1" },
+      target: { workspaceId: "workspace-malformed", projectId: "project-target" },
+      authorityHistory: ["shared"]
+    };
+    mocks.invoke.mockResolvedValueOnce(malformedBundle).mockResolvedValueOnce(nativeProject("workspace-malformed"))
+      .mockResolvedValueOnce(malformedHandoff);
+    await expect(proposeRuntimeArtifactHandoff({
+      artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target"
+    })).rejects.toThrow(/malformed/i);
+
+    setActiveRuntimeDataScope("workspace-source-project");
+    const sourceProjectBundle = nativeBundle("workspace-source-project");
+    sourceProjectBundle.artifact.context = { projectId: "project-target" as never };
+    mocks.invoke.mockResolvedValueOnce(sourceProjectBundle);
+    await expect(proposeRuntimeArtifactHandoff({
+      artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target"
+    })).rejects.toThrow(/already in that project/i);
+  });
+
+  it("previews propose and CAS accept for one version without mutating its source artifact", async () => {
+    setActiveRuntimeDataScope("workspace-handoff-preview");
+    const target = await createRuntimeProject("workspace-handoff-preview", { title: "Launch" });
+    const sourceProject = await createRuntimeProject("workspace-handoff-preview", { title: "Source" });
+    const created = await createRuntimeResponseArtifact({
+      threadId: "thread-handoff", messageId: "message-handoff", runId: "run-handoff",
+      title: "Handoff report", content: "Version one", citations: []
+    });
+    const before = structuredClone(created);
+    const proposed = await proposeRuntimeArtifactHandoff({
+      artifactId: created.artifact.id, versionId: created.currentVersion.id, targetProjectId: target.id
+    });
+    await expect(acceptRuntimeArtifactHandoff(proposed.id, proposed.revision + 1)).rejects.toThrow(/changed elsewhere/i);
+    const accepted = await acceptRuntimeArtifactHandoff(proposed.id, proposed.revision);
+    expect(accepted.status).toBe("accepted");
+    const targetResults = await searchRuntimeArtifacts({ projectId: target.id });
+    expect(targetResults.map((entry) => entry.artifact.id)).toContain(created.artifact.id);
+    const unchanged = await searchRuntimeArtifacts({ query: "Handoff report" });
+    expect(unchanged[0].artifact.context).toEqual(before.artifact.context);
+    expect(unchanged[0].currentVersion).toEqual(before.currentVersion);
+    expect(unchanged[0].artifact.authority).toBe(before.artifact.authority);
+    await expect(proposeRuntimeArtifactHandoff({
+      artifactId: created.artifact.id, versionId: created.currentVersion.id, targetProjectId: target.id
+    })).rejects.toThrow(/already been added/i);
+
+    await archiveRuntimeProject("workspace-handoff-preview", { projectId: sourceProject.id, baseRevision: sourceProject.revision });
+    await expect(proposeRuntimeArtifactHandoff({
+      artifactId: created.artifact.id, versionId: created.currentVersion.id, targetProjectId: sourceProject.id
+    })).rejects.toThrow(/active private project/i);
+
+    setActiveRuntimeDataScope("workspace-foreign-project");
+    const foreign = await createRuntimeProject("workspace-foreign-project", { title: "Foreign" });
+    setActiveRuntimeDataScope("workspace-handoff-preview");
+    await expect(proposeRuntimeArtifactHandoff({
+      artifactId: created.artifact.id, versionId: created.currentVersion.id, targetProjectId: foreign.id
+    })).rejects.toThrow(/active private project/i);
+  });
+
+  it("rejects a native handoff response after the active workspace changes", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-handoff-race");
+    let resolveHandoff!: (value: unknown) => void;
+    mocks.invoke.mockResolvedValueOnce(nativeBundle("workspace-handoff-race")).mockResolvedValueOnce(nativeProject("workspace-handoff-race"))
+      .mockReturnValueOnce(new Promise((resolve) => { resolveHandoff = resolve; }));
+    const pending = proposeRuntimeArtifactHandoff({
+      artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target"
+    });
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_handoff_propose", {
+      input: { artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target" }
+    }));
+    setActiveRuntimeDataScope("workspace-other");
+    resolveHandoff(nativeHandoff());
+    await expect(pending).rejects.toThrow(/active workspace changed/i);
   });
 });

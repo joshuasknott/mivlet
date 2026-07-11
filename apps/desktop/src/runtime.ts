@@ -4,6 +4,7 @@ import { getActiveRuntimeDataScope } from "./runtime-scope";
 import { importLocalTextFile, searchKnowledgeSources } from "@fable/connectors";
 import type { LocalTextFileCandidate } from "@fable/connectors";
 import { applyLocalKnowledgeRefresh } from "./lib/local-knowledge-refresh";
+import { getRuntimeProject } from "./lib/project-runtime";
 import type {
   ActionHistoryCategory,
   ActionHistoryEvent,
@@ -822,6 +823,7 @@ export interface CreateResponseArtifactInput {
 }
 
 const previewArtifacts = new Map<string, RuntimeArtifactBundle[]>();
+const previewArtifactProjectAssociations = new Map<string, Map<string, Set<string>>>();
 const ARTIFACT_MAX_INLINE_CONTENT_BYTES = 65_536;
 
 function isArtifactMedia(value: unknown): value is Spine.ArtifactsAndRoutines.ArtifactMediaMetadata {
@@ -1083,6 +1085,9 @@ export async function getRuntimeArtifact(artifactId: string) {
 
 export type RuntimeArtifactSearchResult = Spine.ArtifactsAndRoutines.ArtifactSearchResult;
 export type RuntimeArtifactExport = Spine.ArtifactsAndRoutines.ArtifactExport;
+export type RuntimeArtifactHandoff = Spine.ArtifactsAndRoutines.ArtifactHandoff;
+
+const knownArtifactHandoffs = new Map<string, Map<string, RuntimeArtifactHandoff>>();
 
 const ARTIFACT_MATCH_FIELDS = new Set(["title", "content", "source", "decision"]);
 
@@ -1136,6 +1141,83 @@ function parseArtifactExport(
   return value as unknown as RuntimeArtifactExport;
 }
 
+const HANDOFF_CONTEXT_KEYS = new Set([
+  "workspaceId", "threadId", "projectId", "goalId", "missionId",
+  "departmentId", "pipelineId", "routineId"
+]);
+
+function isHandoffContext(value: unknown, workspaceId: string) {
+  return isRecord(value) && value.workspaceId === workspaceId &&
+    Object.keys(value).every((key) => HANDOFF_CONTEXT_KEYS.has(key)) &&
+    Object.entries(value).every(([key, entry]) =>
+      key === "workspaceId" || (typeof entry === "string" && entry.length > 0)
+    );
+}
+
+function parseArtifactHandoff(value: unknown, expected: {
+  workspaceId: string;
+  ownerMemberId: string;
+  source: Spine.ArtifactsAndRoutines.HandoffContextReference;
+  targetProjectId: string;
+  versionId: string;
+  status: "proposed" | "accepted";
+  revision?: number;
+  note?: string;
+}) {
+  const allowedKeys = new Set([
+    "id", "workspaceId", "authority", "visibility", "ownerMemberId", "schemaVersion",
+    "revision", "createdByInternalUserId", "createdByDeviceId", "createdAt", "updatedAt",
+    "deletedAt", "status", "source", "target", "artifactVersionIds", "includedContext",
+    "authorityTransfer", "proposedByInternalUserId", "proposedAt", "resolvedAt",
+    "resolvedByInternalUserId", "rejectionReason", "note"
+  ]);
+  if (!isRecord(value) || Object.keys(value).some((key) => !allowedKeys.has(key)) ||
+      typeof value.id !== "string" || !value.id || value.workspaceId !== expected.workspaceId ||
+      value.authority !== "local" || value.visibility !== "member-private" ||
+      value.ownerMemberId !== expected.ownerMemberId ||
+      typeof value.schemaVersion !== "number" || !Number.isInteger(value.schemaVersion) || value.schemaVersion < 1 ||
+      typeof value.revision !== "number" || !Number.isInteger(value.revision) || value.revision < 1 ||
+      (expected.revision !== undefined && value.revision !== expected.revision) ||
+      typeof value.createdByInternalUserId !== "string" || !value.createdByInternalUserId ||
+      (value.createdByDeviceId !== undefined && typeof value.createdByDeviceId !== "string") ||
+      typeof value.createdAt !== "string" || Number.isNaN(Date.parse(value.createdAt)) ||
+      typeof value.updatedAt !== "string" || Number.isNaN(Date.parse(value.updatedAt)) ||
+      (value.deletedAt !== undefined && (typeof value.deletedAt !== "string" || Number.isNaN(Date.parse(value.deletedAt)))) ||
+      value.status !== expected.status || !isHandoffContext(value.source, expected.workspaceId) ||
+      !structurallyEqual(value.source, expected.source) || !isHandoffContext(value.target, expected.workspaceId) ||
+      !structurallyEqual(value.target, { workspaceId: expected.workspaceId, projectId: expected.targetProjectId }) ||
+      !Array.isArray(value.artifactVersionIds) || value.artifactVersionIds.length !== 1 ||
+      value.artifactVersionIds[0] !== expected.versionId ||
+      !Array.isArray(value.includedContext) || value.includedContext.length !== 0 ||
+      value.authorityTransfer !== "none" ||
+      typeof value.proposedByInternalUserId !== "string" || !value.proposedByInternalUserId ||
+      value.proposedByInternalUserId !== value.createdByInternalUserId ||
+      typeof value.proposedAt !== "string" || Number.isNaN(Date.parse(value.proposedAt)) ||
+      value.note !== expected.note ||
+      (value.rejectionReason !== undefined && typeof value.rejectionReason !== "string")) {
+    throw new Error("Malformed or cross-workspace artifact handoff response.");
+  }
+  if (expected.status === "proposed") {
+    if (value.resolvedAt !== undefined || value.resolvedByInternalUserId !== undefined || value.rejectionReason !== undefined) {
+      throw new Error("Malformed or cross-workspace artifact handoff response.");
+    }
+  } else if (typeof value.resolvedAt !== "string" || Number.isNaN(Date.parse(value.resolvedAt)) ||
+      typeof value.resolvedByInternalUserId !== "string" || !value.resolvedByInternalUserId ||
+      value.rejectionReason !== undefined) {
+    throw new Error("Malformed or cross-workspace artifact handoff response.");
+  }
+  return value as unknown as RuntimeArtifactHandoff;
+}
+
+function rememberArtifactHandoff(handoff: RuntimeArtifactHandoff) {
+  let workspace = knownArtifactHandoffs.get(handoff.workspaceId);
+  if (!workspace) {
+    workspace = new Map();
+    knownArtifactHandoffs.set(handoff.workspaceId, workspace);
+  }
+  workspace.set(handoff.id, handoff);
+}
+
 export async function searchRuntimeArtifacts(
   query: Spine.ArtifactsAndRoutines.ArtifactSearchQuery = {}
 ): Promise<RuntimeArtifactSearchResult[]> {
@@ -1154,7 +1236,10 @@ export async function searchRuntimeArtifacts(
     return records.flatMap((entry) => {
       const { artifact, currentVersion } = entry;
       if (boundedQuery.threadId && artifact.context.threadId !== boundedQuery.threadId) return [];
-      if (boundedQuery.projectId && artifact.context.projectId !== boundedQuery.projectId) return [];
+      const associatedWithProject = boundedQuery.projectId
+        ? previewArtifactProjectAssociations.get(scope.workspaceId)?.get(boundedQuery.projectId)?.has(artifact.id) === true
+        : false;
+      if (boundedQuery.projectId && artifact.context.projectId !== boundedQuery.projectId && !associatedWithProject) return [];
       if (boundedQuery.kinds && !boundedQuery.kinds.includes(artifact.kind)) return [];
       if (boundedQuery.statuses && !boundedQuery.statuses.includes(artifact.status)) return [];
       const currentText = currentVersion.content.kind === "inline" ? currentVersion.content.text : "";
@@ -1205,6 +1290,166 @@ export async function exportRuntimeArtifact(artifactId: string, versionId: strin
     throw new Error("The active workspace changed while the artifact was exporting.");
   }
   return parseArtifactExport(result, artifactId, versionId);
+}
+
+export async function proposeRuntimeArtifactHandoff(input: {
+  artifactId: string;
+  versionId: string;
+  targetProjectId: string;
+  note?: string;
+}) {
+  const scope = conversationScopeOrThrow();
+  const bundle = await getRuntimeArtifact(input.artifactId);
+  if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+    throw new Error("The active workspace changed while preparing the artifact handoff.");
+  }
+  if (!bundle || bundle.artifact.workspaceId !== scope.workspaceId ||
+      bundle.artifact.authority !== "local" || bundle.artifact.visibility !== "member-private" ||
+      typeof bundle.artifact.ownerMemberId !== "string") {
+    throw new Error("This private artifact is no longer available.");
+  }
+  const ownerMemberId = bundle.artifact.ownerMemberId;
+  if (!bundle.versions.some((version) => version.id === input.versionId)) {
+    throw new Error("This artifact version is no longer available.");
+  }
+  if (bundle.artifact.context.projectId === input.targetProjectId) {
+    throw new Error("This artifact is already in that project.");
+  }
+  const target = await getRuntimeProject(scope.workspaceId, input.targetProjectId);
+  if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+    throw new Error("The active workspace changed while preparing the artifact handoff.");
+  }
+  if (!target || target.lifecycle !== "active" || target.workspaceId !== scope.workspaceId ||
+      target.authority !== "local" || target.visibility !== "member-private" ||
+      target.ownerMemberId !== ownerMemberId) {
+    throw new Error("Choose an active private project in this workspace.");
+  }
+  const source = { workspaceId: scope.workspaceId, ...bundle.artifact.context } as Spine.ArtifactsAndRoutines.HandoffContextReference;
+  const duplicate = (knownArtifactHandoffs.get(scope.workspaceId)?.values() ?? []) as Iterable<RuntimeArtifactHandoff>;
+  if ([...duplicate].some((handoff) =>
+    (handoff.status === "proposed" || handoff.status === "accepted") &&
+    handoff.artifactVersionIds[0] === input.versionId && handoff.target.projectId === input.targetProjectId
+  )) {
+    throw new Error("This artifact version has already been added to that project.");
+  }
+  const commandInput = {
+    artifactId: input.artifactId,
+    versionId: input.versionId,
+    targetProjectId: input.targetProjectId,
+    ...(input.note?.trim() ? { note: input.note.trim() } : {})
+  };
+  let handoff: RuntimeArtifactHandoff;
+  if (!hasTauriRuntime()) {
+    const now = new Date().toISOString();
+    handoff = parseArtifactHandoff({
+      id: `artifact-handoff-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+      workspaceId: scope.workspaceId,
+      authority: "local",
+      visibility: "member-private",
+      ownerMemberId,
+      schemaVersion: 1,
+      revision: 1,
+      createdByInternalUserId: bundle.artifact.createdByInternalUserId,
+      createdAt: now,
+      updatedAt: now,
+      status: "proposed",
+      source,
+      target: { workspaceId: scope.workspaceId, projectId: input.targetProjectId },
+      artifactVersionIds: [input.versionId],
+      includedContext: [],
+      authorityTransfer: "none",
+      proposedByInternalUserId: bundle.artifact.createdByInternalUserId,
+      proposedAt: now,
+      ...(commandInput.note ? { note: commandInput.note } : {})
+    }, {
+      workspaceId: scope.workspaceId,
+      ownerMemberId,
+      source,
+      targetProjectId: input.targetProjectId,
+      versionId: input.versionId,
+      status: "proposed",
+      revision: 1,
+      note: commandInput.note
+    });
+  } else {
+    const result = await invoke<unknown>("artifact_handoff_propose", { input: commandInput });
+    if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+      throw new Error("The active workspace changed while preparing the artifact handoff.");
+    }
+    handoff = parseArtifactHandoff(result, {
+      workspaceId: scope.workspaceId,
+      ownerMemberId,
+      source,
+      targetProjectId: input.targetProjectId,
+      versionId: input.versionId,
+      status: "proposed",
+      note: commandInput.note
+    });
+  }
+  rememberArtifactHandoff(handoff);
+  return handoff;
+}
+
+export async function acceptRuntimeArtifactHandoff(handoffId: string, expectedRevision: number) {
+  const scope = conversationScopeOrThrow();
+  const proposed = knownArtifactHandoffs.get(scope.workspaceId)?.get(handoffId);
+  if (!proposed || proposed.status !== "proposed" || proposed.revision !== expectedRevision ||
+      typeof proposed.ownerMemberId !== "string" || typeof proposed.target.projectId !== "string") {
+    throw new Error("This project handoff changed elsewhere. Prepare it again.");
+  }
+  const ownerMemberId = proposed.ownerMemberId;
+  const targetProjectId = proposed.target.projectId;
+  let accepted: RuntimeArtifactHandoff;
+  if (!hasTauriRuntime()) {
+    const now = new Date().toISOString();
+    accepted = parseArtifactHandoff({
+      ...proposed,
+      status: "accepted",
+      revision: expectedRevision + 1,
+      updatedAt: now,
+      resolvedAt: now,
+      resolvedByInternalUserId: proposed.proposedByInternalUserId
+    }, {
+      workspaceId: scope.workspaceId,
+      ownerMemberId,
+      source: proposed.source,
+      targetProjectId,
+      versionId: proposed.artifactVersionIds[0],
+      status: "accepted",
+      revision: expectedRevision + 1,
+      note: proposed.note
+    });
+    let workspace = previewArtifactProjectAssociations.get(scope.workspaceId);
+    if (!workspace) {
+      workspace = new Map();
+      previewArtifactProjectAssociations.set(scope.workspaceId, workspace);
+    }
+    let artifacts = workspace.get(targetProjectId);
+    if (!artifacts) {
+      artifacts = new Set();
+      workspace.set(targetProjectId, artifacts);
+    }
+    const bundle = (previewArtifacts.get(scope.workspaceId) ?? [])
+      .find((entry) => entry.versions.some((version) => version.id === proposed.artifactVersionIds[0]));
+    if (bundle) artifacts.add(bundle.artifact.id);
+  } else {
+    const result = await invoke<unknown>("artifact_handoff_accept", { input: { handoffId, expectedRevision } });
+    if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+      throw new Error("The active workspace changed while accepting the artifact handoff.");
+    }
+    accepted = parseArtifactHandoff(result, {
+      workspaceId: scope.workspaceId,
+      ownerMemberId,
+      source: proposed.source,
+      targetProjectId,
+      versionId: proposed.artifactVersionIds[0],
+      status: "accepted",
+      revision: expectedRevision + 1,
+      note: proposed.note
+    });
+  }
+  rememberArtifactHandoff(accepted);
+  return accepted;
 }
 
 export async function appendRuntimeArtifactVersion(input: {

@@ -7,17 +7,24 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import {
   exportRuntimeArtifact,
   getRuntimeArtifact,
+  proposeRuntimeArtifactHandoff,
+  acceptRuntimeArtifactHandoff,
   searchRuntimeArtifacts,
   type RuntimeArtifactBundle,
   type RuntimeArtifactExport,
+  type RuntimeArtifactHandoff,
   type RuntimeArtifactSearchResult
 } from "../../runtime";
+import { listRuntimeProjects, type RuntimeProject } from "../../lib/project-runtime";
 
 vi.mock("../../runtime", () => ({
   searchRuntimeArtifacts: vi.fn(async () => []),
   getRuntimeArtifact: vi.fn(async () => null),
-  exportRuntimeArtifact: vi.fn()
+  exportRuntimeArtifact: vi.fn(),
+  proposeRuntimeArtifactHandoff: vi.fn(),
+  acceptRuntimeArtifactHandoff: vi.fn()
 }));
+vi.mock("../../lib/project-runtime", () => ({ listRuntimeProjects: vi.fn(async () => []) }));
 
 /**
  * Behavioral lifecycle coverage for the Knowledge page. The page is rendered
@@ -184,6 +191,30 @@ function artifactSearchResult(bundle: RuntimeArtifactBundle): RuntimeArtifactSea
   return { artifact: bundle.artifact, currentVersion: bundle.currentVersion, matchedOn: ["title"] };
 }
 
+function makeProject(overrides: Partial<RuntimeProject> = {}): RuntimeProject {
+  return {
+    id: "project-target", workspaceId: "test-workspace", authority: "local",
+    visibility: "member-private", ownerMemberId: "member-1", schemaVersion: 1,
+    revision: 1, createdByInternalUserId: "user-1", createdAt: "2026-07-11T09:00:00.000Z",
+    updatedAt: "2026-07-11T09:00:00.000Z", title: "Launch project", lifecycle: "active",
+    ...overrides
+  } as unknown as RuntimeProject;
+}
+
+function makeHandoff(status: "proposed" | "accepted" = "proposed"): RuntimeArtifactHandoff {
+  return {
+    id: "handoff-1", workspaceId: "test-workspace", authority: "local", visibility: "member-private",
+    ownerMemberId: "member-1", schemaVersion: 1, revision: status === "proposed" ? 1 : 2,
+    createdByInternalUserId: "user-1", createdAt: "2026-07-11T09:00:00.000Z",
+    updatedAt: "2026-07-11T09:00:00.000Z", status,
+    source: { workspaceId: "test-workspace", threadId: "thread-1" },
+    target: { workspaceId: "test-workspace", projectId: "project-target" },
+    artifactVersionIds: ["version-1"], includedContext: [], authorityTransfer: "none",
+    proposedByInternalUserId: "user-1", proposedAt: "2026-07-11T09:00:00.000Z",
+    ...(status === "accepted" ? { resolvedAt: "2026-07-11T09:01:00.000Z", resolvedByInternalUserId: "user-1" } : {})
+  } as unknown as RuntimeArtifactHandoff;
+}
+
 describe("KnowledgePage — import lifecycle states", () => {
   it("shows the indexing notice while a source is being indexed, then the indexed state", () => {
     const runtime = stubRuntime({
@@ -255,6 +286,7 @@ describe("KnowledgePage — artifacts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
+    vi.mocked(listRuntimeProjects).mockResolvedValue([]);
   });
 
   it("searches on entry and query changes, shows the count, and opens plain-language details", async () => {
@@ -359,6 +391,94 @@ describe("KnowledgePage — artifacts", () => {
     await waitFor(() => expect(searchRuntimeArtifacts).toHaveBeenCalledTimes(2));
     expect(createObjectUrl).not.toHaveBeenCalled();
     expect(screen.queryByText("JSON export ready.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("prepares and confirms one selected version for an eligible private project", async () => {
+    const user = userEvent.setup();
+    const bundle = makeArtifactBundle();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
+    vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
+    vi.mocked(listRuntimeProjects).mockResolvedValue([makeProject()]);
+    vi.mocked(proposeRuntimeArtifactHandoff).mockResolvedValue(makeHandoff());
+    vi.mocked(acceptRuntimeArtifactHandoff).mockResolvedValue(makeHandoff("accepted"));
+    const runtime = stubRuntime({
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    });
+    renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
+    await user.selectOptions(await screen.findByLabelText("Version of Launch report"), "version-1");
+    const project = await screen.findByLabelText("Project for Launch report version 1");
+    await user.selectOptions(project, "project-target");
+    expect(screen.getByText("Adds this version only. Conversation history and permissions stay here.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Prepare" }));
+    expect(proposeRuntimeArtifactHandoff).toHaveBeenCalledWith({
+      artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target"
+    });
+    const confirm = await screen.findByRole("button", { name: "Confirm add version 1" });
+    expect(confirm).toHaveFocus();
+    await user.click(confirm);
+    expect(acceptRuntimeArtifactHandoff).toHaveBeenCalledWith("handoff-1", 1);
+    expect(await screen.findByText("Version 1 added to project.")).toBeInTheDocument();
+    expect(screen.queryByText(/collaborator|shared|copied conversation/i)).not.toBeInTheDocument();
+  });
+
+  it("hides project handoff without an eligible target and shows proposal errors honestly", async () => {
+    const user = userEvent.setup();
+    const bundle = makeArtifactBundle();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
+    vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
+    const runtime = stubRuntime({
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    });
+    const view = renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
+    await waitFor(() => expect(listRuntimeProjects).toHaveBeenCalled());
+    expect(screen.queryByLabelText(/Project for Launch report/)).not.toBeInTheDocument();
+
+    view.unmount();
+    vi.mocked(listRuntimeProjects).mockResolvedValue([makeProject()]);
+    vi.mocked(proposeRuntimeArtifactHandoff).mockRejectedValue(new Error("That project is no longer available."));
+    renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
+    await user.selectOptions(await screen.findByLabelText("Project for Launch report version 2"), "project-target");
+    await user.click(screen.getByRole("button", { name: "Prepare" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("That project is no longer available.");
+  });
+
+  it("discards handoff success and error state when the workspace changes", async () => {
+    const user = userEvent.setup();
+    const bundle = makeArtifactBundle();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
+    vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
+    vi.mocked(listRuntimeProjects).mockResolvedValue([makeProject()]);
+    vi.mocked(proposeRuntimeArtifactHandoff).mockResolvedValue(makeHandoff());
+    let resolveAccept!: (handoff: RuntimeArtifactHandoff) => void;
+    const pendingAccept = new Promise<RuntimeArtifactHandoff>((resolve) => { resolveAccept = resolve; });
+    vi.mocked(acceptRuntimeArtifactHandoff).mockReturnValue(pendingAccept);
+    const state = {
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    };
+    const runtime = stubRuntime(state);
+    const view = renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
+    await user.selectOptions(await screen.findByLabelText("Project for Launch report version 2"), "project-target");
+    await user.click(screen.getByRole("button", { name: "Prepare" }));
+    await user.click(await screen.findByRole("button", { name: "Confirm add version 2" }));
+    const otherWorkspaceRuntime = stubRuntime(state);
+    otherWorkspaceRuntime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId = "other-workspace";
+    view.rerender(<KnowledgePage runtime={otherWorkspaceRuntime} />);
+    resolveAccept(makeHandoff("accepted"));
+    await pendingAccept;
+    await Promise.resolve();
+    expect(screen.queryByText(/added to project/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 

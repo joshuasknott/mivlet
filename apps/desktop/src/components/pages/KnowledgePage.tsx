@@ -20,11 +20,15 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import {
   exportRuntimeArtifact,
   getRuntimeArtifact,
+  proposeRuntimeArtifactHandoff,
+  acceptRuntimeArtifactHandoff,
   searchRuntimeArtifacts,
   type RuntimeArtifactBundle,
   type RuntimeArtifactExport,
+  type RuntimeArtifactHandoff,
   type RuntimeArtifactSearchResult
 } from "../../runtime";
+import { listRuntimeProjects, type RuntimeProject } from "../../lib/project-runtime";
 
 type KnowledgeSection = "sources" | "memories" | "artifacts";
 type SearchScope = "everything" | KnowledgeSection;
@@ -516,6 +520,13 @@ function ArtifactDetail({
   const [exporting, setExporting] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [exportError, setExportError] = useState("");
+  const [eligibleProjects, setEligibleProjects] = useState<RuntimeProject[]>([]);
+  const [targetProjectId, setTargetProjectId] = useState("");
+  const [preparedHandoff, setPreparedHandoff] = useState<RuntimeArtifactHandoff | null>(null);
+  const [handoffPending, setHandoffPending] = useState(false);
+  const [handoffStatus, setHandoffStatus] = useState("");
+  const [handoffError, setHandoffError] = useState("");
+  const confirmHandoffRef = useRef<HTMLButtonElement>(null);
   const version = bundle.versions.find((entry) => entry.id === selectedVersionId) ?? bundle.currentVersion;
   const scopeLabel = bundle.artifact.context.projectId
     ? "Project"
@@ -523,6 +534,26 @@ function ArtifactDetail({
       ? "Conversation"
       : "Workspace";
   const review = [...bundle.artifact.reviews].reverse().find((entry) => entry.versionId === version.id);
+  useEffect(() => {
+    let active = true;
+    void listRuntimeProjects(activeWorkspaceId, true).then((projects) => {
+      if (!active || activeWorkspaceRef.current !== activeWorkspaceId) return;
+      setEligibleProjects(projects.filter((project) =>
+        project.lifecycle === "active" && project.authority === "local" &&
+        project.visibility === "member-private" &&
+        project.ownerMemberId === bundle.artifact.ownerMemberId &&
+        project.id !== bundle.artifact.context.projectId
+      ));
+    }).catch(() => { if (active && activeWorkspaceRef.current === activeWorkspaceId) setEligibleProjects([]); });
+    return () => { active = false; };
+  }, [activeWorkspaceId, activeWorkspaceRef, bundle.artifact.context.projectId, bundle.artifact.ownerMemberId]);
+  useEffect(() => {
+    setTargetProjectId("");
+    setPreparedHandoff(null);
+    setHandoffStatus("");
+    setHandoffError("");
+  }, [version.id]);
+  useEffect(() => { preparedHandoff && confirmHandoffRef.current?.focus(); }, [preparedHandoff]);
   const runExport = (format: "markdown" | "json") => {
     const requestedWorkspaceId = activeWorkspaceId;
     setExporting(true);
@@ -542,6 +573,45 @@ function ArtifactDetail({
         if (activeWorkspaceRef.current === requestedWorkspaceId) setExporting(false);
       });
   };
+  const prepareHandoff = () => {
+    if (!targetProjectId) return;
+    const requestedWorkspaceId = activeWorkspaceId;
+    setHandoffPending(true);
+    setHandoffError("");
+    setHandoffStatus("");
+    void proposeRuntimeArtifactHandoff({
+      artifactId: bundle.artifact.id,
+      versionId: version.id,
+      targetProjectId
+    }).then((handoff) => {
+      if (activeWorkspaceRef.current === requestedWorkspaceId) setPreparedHandoff(handoff);
+    }).catch((cause) => {
+      if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
+      setHandoffError(cause instanceof Error ? cause.message : "Fable could not prepare that project handoff.");
+    }).finally(() => {
+      if (activeWorkspaceRef.current === requestedWorkspaceId) setHandoffPending(false);
+    });
+  };
+  const confirmHandoff = () => {
+    if (!preparedHandoff) return;
+    const requestedWorkspaceId = activeWorkspaceId;
+    setHandoffPending(true);
+    setHandoffError("");
+    void acceptRuntimeArtifactHandoff(preparedHandoff.id, preparedHandoff.revision)
+      .then(() => {
+        if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
+        setPreparedHandoff(null);
+        setTargetProjectId("");
+        setHandoffStatus(`Version ${version.version} added to project.`);
+      })
+      .catch((cause) => {
+        if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
+        setHandoffError(cause instanceof Error ? cause.message : "Fable could not add that version to the project.");
+      })
+      .finally(() => {
+        if (activeWorkspaceRef.current === requestedWorkspaceId) setHandoffPending(false);
+      });
+  };
   return (
     <section className="artifact-detail" aria-label={`Artifact details for ${bundle.artifact.title}`}>
       <dl>
@@ -552,7 +622,7 @@ function ArtifactDetail({
       </dl>
       <label className="artifact-detail__version">
         <span>Version</span>
-        <select value={version.id} onChange={(event) => onSelectVersion(event.target.value)} aria-label={`Version of ${bundle.artifact.title}`}>
+        <select disabled={handoffPending || preparedHandoff !== null} value={version.id} onChange={(event) => onSelectVersion(event.target.value)} aria-label={`Version of ${bundle.artifact.title}`}>
           {[...bundle.versions].reverse().map((entry) => (
             <option key={entry.id} value={entry.id}>Version {entry.version}{entry.id === bundle.currentVersion.id ? " - Current" : ""}</option>
           ))}
@@ -571,6 +641,37 @@ function ArtifactDetail({
       </div>
       {exportStatus ? <p role="status">{exportStatus}</p> : null}
       {exportError ? <p role="alert">{exportError}</p> : null}
+      {eligibleProjects.length ? (
+        <section className="artifact-handoff" aria-label={`Add ${bundle.artifact.title} to a project`}>
+          <label>
+            <span>Add to project</span>
+            <select
+              aria-label={`Project for ${bundle.artifact.title} version ${version.version}`}
+              value={targetProjectId}
+              disabled={handoffPending || preparedHandoff !== null}
+              onChange={(event) => {
+                setTargetProjectId(event.target.value);
+                setPreparedHandoff(null);
+                setHandoffError("");
+              }}
+            >
+              <option value="">Choose a project</option>
+              {eligibleProjects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+            </select>
+          </label>
+          {targetProjectId ? <p>Adds this version only. Conversation history and permissions stay here.</p> : null}
+          {targetProjectId && !preparedHandoff ? (
+            <button type="button" disabled={handoffPending} onClick={prepareHandoff}>Prepare</button>
+          ) : null}
+          {preparedHandoff ? (
+            <button ref={confirmHandoffRef} type="button" disabled={handoffPending} onClick={confirmHandoff}>
+              Confirm add version {version.version}
+            </button>
+          ) : null}
+          {handoffStatus ? <p role="status">{handoffStatus}</p> : null}
+          {handoffError ? <p role="alert">{handoffError}</p> : null}
+        </section>
+      ) : null}
     </section>
   );
 }

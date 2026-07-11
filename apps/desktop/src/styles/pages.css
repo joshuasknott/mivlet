@@ -1000,6 +1000,35 @@
   gap: 8px;
 }
 
+.artifact-handoff {
+  display: grid;
+  justify-items: start;
+  gap: 9px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.artifact-handoff label {
+  display: grid;
+  gap: 5px;
+}
+
+.artifact-handoff label > span {
+  color: var(--ink);
+  font-size: var(--text-14);
+  font-weight: 500;
+}
+
+.artifact-handoff select {
+  min-width: 220px;
+}
+
+.artifact-handoff p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
 .knowledge-item {
   border-bottom: 1px solid var(--line);
 }
