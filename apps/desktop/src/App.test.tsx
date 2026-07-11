@@ -499,7 +499,7 @@ describe("Fable home", () => {
     fireEvent.click(screen.getByLabelText("Archive Demo Project"));
     expect(onArchiveProject).toHaveBeenCalledWith(sampleProject);
 
-    fireEvent.change(screen.getByLabelText("Move Sample conversation"), { target: { value: "" } });
+    fireEvent.change(screen.getAllByLabelText("Move Sample conversation")[0], { target: { value: "" } });
     expect(onMoveThread).toHaveBeenCalledWith("thread-abc-123", null);
 
     fireEvent.click(screen.getByRole("button", { name: /archived \(1\)/i }));

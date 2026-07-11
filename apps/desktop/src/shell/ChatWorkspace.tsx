@@ -10,7 +10,7 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
+import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
@@ -71,7 +71,6 @@ export function ChatWorkspace() {
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
-  const projectStore = useProjects();
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -85,6 +84,7 @@ export function ChatWorkspace() {
       runtime.accountWorkspaceStatus.state === "offline")
       ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
       : null;
+  const projectStore = useProjects(boundWorkspaceId);
   const conversationWorkspaceId = useRef<string | null>(boundWorkspaceId);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
   const verifiedProfile = useMemo(() => {
@@ -250,10 +250,11 @@ export function ChatWorkspace() {
     [durableThreads]
   );
   const projectWorkspaces = useMemo(
-    () => projectStore.projects.map((project: Omit<SidebarProject, "threads">) => ({
+    () => projectStore.projects.map((project) => ({
       ...project,
       description: project.description ?? "",
       instructions: project.instructions ?? "",
+      lifecycle: "active" as const,
       threads: durableThreads.filter((thread) =>
         durableConversation.state.threads.some((record) => record.id === thread.id && record.projectId === project.id)
       )
@@ -261,10 +262,11 @@ export function ChatWorkspace() {
     [durableConversation.state.threads, durableThreads, projectStore.projects]
   );
   const archivedProjectWorkspaces = useMemo(
-    () => projectStore.archivedProjects.map((project: Omit<SidebarProject, "threads">) => ({
+    () => projectStore.archivedProjects.map((project) => ({
       ...project,
       description: project.description ?? "",
       instructions: project.instructions ?? "",
+      lifecycle: "archived" as const,
       threads: []
     })),
     [projectStore.archivedProjects]
@@ -771,7 +773,7 @@ export function ChatWorkspace() {
           runtime.setComposerValue("");
           runtime.startNewChat();
         }}
-        onAddProject={(input) => projectStore.create(input)}
+        onAddProject={async (input) => { await projectStore.create(input); }}
         onNewProjectChat={(projectId) => {
           setNewThreadProjectId(projectId);
           setSelectedConversationThreadId(undefined);
@@ -781,11 +783,17 @@ export function ChatWorkspace() {
           runtime.startNewChat();
           runtime.setLastAction("New project chat ready");
         }}
-        onRenameProject={(project, title) => projectStore.update({ projectId: project.id, baseRevision: project.revision, title })}
-        onArchiveProject={(project) => projectStore.archive(project)}
-        onRestoreProject={(project) => projectStore.restore(project)}
+        onRenameProject={async (project, title) => {
+          await projectStore.update({ projectId: project.id as never, baseRevision: project.revision, title });
+        }}
+        onArchiveProject={async (project) => {
+          await projectStore.archive({ projectId: project.id as never, baseRevision: project.revision });
+        }}
+        onRestoreProject={async (project) => {
+          await projectStore.restore({ projectId: project.id as never, baseRevision: project.revision });
+        }}
         onDeleteProject={async (project) => {
-          await projectStore.remove(project);
+          await projectStore.remove({ projectId: project.id as never, baseRevision: project.revision });
           await durableConversation.refresh();
         }}
         onMoveThread={async (threadId, projectId) => {
