@@ -28,6 +28,9 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+use rusqlite::OptionalExtension;
+use sha2::{Digest, Sha256};
+
 use crate::models::{
     ApprovalAuditEntry, BackendConsequentialEvent, BackendCredentialRequest, BackendModel,
     BackendProvider, APPROVAL_DECISIONS, APPROVAL_MODES, APPROVAL_RISK_LEVELS,
@@ -494,7 +497,41 @@ impl BackendCredentialStore for HashMap<String, String> {
 /// needs-auth). The in-memory fallback exists so headless/test runs without a
 /// keychain still resolve.
 pub(crate) fn read_credential(provider_id: &str) -> Result<Option<String>, String> {
-    CredentialStores.get(provider_id)
+    let internal_user_id = require_current_internal_user()?;
+    let connected = connected_providers_for(&internal_user_id)?;
+    if !connected.iter().any(|id| id == provider_id) {
+        return Ok(None);
+    }
+    CredentialStores { internal_user_id }.get(provider_id)
+}
+
+fn connected_providers_for(internal_user_id: &str) -> Result<Vec<String>, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| crate::store::repos::backend_connection::list(tx, internal_user_id))
+        .map_err(|error| error.to_string())
+}
+
+fn record_connected_provider(internal_user_id: &str, provider_id: &str) -> Result<(), String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    store
+        .transaction(|tx| {
+            crate::store::repos::backend_connection::upsert(tx, internal_user_id, provider_id, &now)
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn remove_connected_provider(internal_user_id: &str, provider_id: &str) -> Result<(), String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            crate::store::repos::backend_connection::delete(tx, internal_user_id, provider_id)
+        })
+        .map_err(|error| error.to_string())
 }
 
 /// The composed production store. Reads retain an in-memory test/headless seam;
@@ -502,38 +539,75 @@ pub(crate) fn read_credential(provider_id: &str) -> Result<Option<String>, Strin
 /// when its credential would disappear at restart. It is never serialized and
 /// exposes a secret — it is only ever asked whether a credential *exists* or
 /// handed one to persist.
-pub(crate) struct CredentialStores;
+pub(crate) struct CredentialStores {
+    internal_user_id: String,
+}
+
+fn scoped_credential_key(internal_user_id: &str, provider_id: &str) -> String {
+    let digest = Sha256::digest(internal_user_id.as_bytes());
+    format!("account-{:x}:{provider_id}", digest)
+}
+
+fn require_current_internal_user() -> Result<String, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            tx.query_row(
+                "SELECT u.internal_user_id
+                 FROM current_internal_user AS current
+                 JOIN fable_internal_user_mirror AS u
+                   ON u.internal_user_id=current.internal_user_id
+                 WHERE current.singleton=1 AND u.status='active';",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(Into::into)
+            .and_then(|value| {
+                value.ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Sign in to a Fable account before using a provider.".into(),
+                    )
+                })
+            })
+        })
+        .map_err(|error| error.to_string())
+}
 
 impl BackendCredentialStore for CredentialStores {
     fn get(&self, provider_id: &str) -> Result<Option<String>, String> {
+        let scoped_key = scoped_credential_key(&self.internal_user_id, provider_id);
         // Keychain first. A hit resolves; a miss OR an unavailable keychain
         // falls through to the in-memory store (so the same miss/miss path is
         // taken either way, and headless builds still work).
-        if let Ok(Some(secret)) = KeyringStore.get(provider_id) {
+        if let Ok(Some(secret)) = KeyringStore.get(&scoped_key) {
             return Ok(Some(secret));
         }
         let store = credential_store()
             .lock()
             .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-        Ok(store.get(provider_id).cloned())
+        Ok(store.get(&scoped_key).cloned())
     }
 
     fn set(&mut self, provider_id: &str, secret: &str) -> Result<(), String> {
         // Production writes must be durable and OS-protected. The in-memory
         // map remains an injectable/headless read seam for tests, but a failed
         // keyring write is never reported as a successful connection.
-        KeyringStore.set(provider_id, secret)
+        let scoped_key = scoped_credential_key(&self.internal_user_id, provider_id);
+        KeyringStore.set(&scoped_key, secret)
     }
 
     fn remove(&mut self, provider_id: &str) -> Result<(), String> {
         // Do not report a disconnect until durable secure-store deletion
         // succeeds. Otherwise metadata could say disconnected while the secret
         // remains in the OS keyring.
-        KeyringStore.remove(provider_id)?;
+        let scoped_key = scoped_credential_key(&self.internal_user_id, provider_id);
+        KeyringStore.remove(&scoped_key)?;
         let mut store = credential_store()
             .lock()
             .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
-        BackendCredentialStore::remove(&mut *store, provider_id)?;
+        BackendCredentialStore::remove(&mut *store, &scoped_key)?;
         Ok(())
     }
 }
@@ -995,11 +1069,26 @@ pub(crate) fn normalize_backend_event(
 
 #[tauri::command]
 pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, String> {
+    let internal_user_id = require_current_internal_user()?;
+    let connected = connected_providers_for(&internal_user_id)?;
     let path = connected_backends_path(&app)?;
     // Auth state is resolved against the keychain (primary) with the in-memory
     // store as fallback — never against a raw secret. A persisted connected id
     // re-resolves to "connected" when the keychain still holds the entry.
-    let mut providers = list_providers_from(&CredentialStores, &path)?;
+    let stores = CredentialStores { internal_user_id };
+    let mut providers = list_providers_from(&stores, &path)?;
+    for provider in &mut providers {
+        let native_api = catalog_entry(&provider.id)
+            .map(|entry| entry.backend_type == "native-api")
+            .unwrap_or(false);
+        if native_api && !connected.iter().any(|id| id == &provider.id) {
+            provider.auth_state = "needs-auth".into();
+            provider.capabilities.clear();
+            for model in &mut provider.models {
+                model.available = false;
+            }
+        }
+    }
     if let Some(codex) = providers.iter_mut().find(|provider| provider.id == "codex") {
         let status = crate::codex_app_server::codex_cli_status();
         apply_codex_cli_status(codex, &status);
@@ -1012,9 +1101,17 @@ pub fn store_backend_credential(
     app: tauri::AppHandle,
     request: BackendCredentialRequest,
 ) -> Result<String, String> {
+    let internal_user_id = require_current_internal_user()?;
     let path = connected_backends_path(&app)?;
-    let mut stores = CredentialStores;
-    store_credential_into(&mut stores, &path, request)
+    let mut stores = CredentialStores {
+        internal_user_id: internal_user_id.clone(),
+    };
+    let provider_id = store_credential_into(&mut stores, &path, request)?;
+    if let Err(error) = record_connected_provider(&internal_user_id, &provider_id) {
+        let _ = stores.remove(&provider_id);
+        return Err(error);
+    }
+    Ok(provider_id)
 }
 
 #[tauri::command]
@@ -1022,9 +1119,14 @@ pub fn clear_backend_credential(
     app: tauri::AppHandle,
     provider_id: String,
 ) -> Result<String, String> {
+    let internal_user_id = require_current_internal_user()?;
     let path = connected_backends_path(&app)?;
-    let mut stores = CredentialStores;
-    clear_credential_into(&mut stores, &path, &provider_id)
+    let mut stores = CredentialStores {
+        internal_user_id: internal_user_id.clone(),
+    };
+    let provider_id = clear_credential_into(&mut stores, &path, &provider_id)?;
+    remove_connected_provider(&internal_user_id, &provider_id)?;
+    Ok(provider_id)
 }
 
 #[tauri::command]

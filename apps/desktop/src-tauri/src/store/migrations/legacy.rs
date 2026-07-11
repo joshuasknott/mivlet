@@ -373,7 +373,7 @@ fn migrate_snapshot(store: &Store, raw: &[u8], now: &str) -> Result<MigrationDia
         // connected backend ids → backend_connection rows (ids only, no secrets).
         for id in &snap.connected_backend_ids {
             if crate::models::SUPPORTED_BACKEND_PROVIDER_IDS.contains(&id.as_str()) {
-                repos::backend_connection::upsert(tx, id, now)?;
+                repos::backend_connection::quarantine_legacy(tx, id, now)?;
                 diag.migrated += 1;
             } else {
                 diag.note_skip(format!("unsupported backend id '{id}'"));
@@ -498,7 +498,7 @@ fn migrate_connected_backends(
     store.transaction(|tx| {
         for id in ids {
             if crate::models::SUPPORTED_BACKEND_PROVIDER_IDS.contains(&id.as_str()) {
-                repos::backend_connection::upsert(tx, &id, now)?;
+                repos::backend_connection::quarantine_legacy(tx, &id, now)?;
                 diag.migrated += 1;
             } else {
                 diag.note_skip(format!("unsupported backend id '{id}'"));

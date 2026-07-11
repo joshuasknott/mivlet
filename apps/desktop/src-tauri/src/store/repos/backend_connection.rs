@@ -8,39 +8,63 @@ use rusqlite::Connection;
 use crate::models::SUPPORTED_BACKEND_PROVIDER_IDS;
 use crate::store::{Result, StoreError};
 
-/// Record that `provider_id` is connected (idempotent upsert).
-pub fn upsert(tx: &Connection, provider_id: &str, now: &str) -> Result<()> {
+/// Record an account-owned provider connection (idempotent upsert).
+pub fn upsert(tx: &Connection, internal_user_id: &str, provider_id: &str, now: &str) -> Result<()> {
     if !SUPPORTED_BACKEND_PROVIDER_IDS.contains(&provider_id) {
         return Err(StoreError::Invalid(format!(
             "Unsupported backend provider id '{provider_id}'."
         )));
     }
     tx.execute(
-        "INSERT INTO backend_connection (provider_id, connected_at, updated_at)
-         VALUES (?1, ?2, ?2)
-         ON CONFLICT(provider_id) DO UPDATE SET updated_at=excluded.updated_at;",
-        rusqlite::params![provider_id, now],
+        "INSERT INTO backend_connection
+           (internal_user_id, provider_id, connected_at, updated_at)
+         VALUES (?1, ?2, ?3, ?3)
+         ON CONFLICT(internal_user_id, provider_id)
+         DO UPDATE SET updated_at=excluded.updated_at;",
+        rusqlite::params![internal_user_id, provider_id, now],
     )?;
     Ok(())
 }
 
 /// Remove a backend connection.
-pub fn delete(tx: &Connection, provider_id: &str) -> Result<()> {
+pub fn delete(tx: &Connection, internal_user_id: &str, provider_id: &str) -> Result<()> {
     tx.execute(
-        "DELETE FROM backend_connection WHERE provider_id = ?1;",
-        rusqlite::params![provider_id],
+        "DELETE FROM backend_connection
+         WHERE internal_user_id = ?1 AND provider_id = ?2;",
+        rusqlite::params![internal_user_id, provider_id],
     )?;
     Ok(())
 }
 
 /// List connected provider ids.
-pub fn list(tx: &Connection) -> Result<Vec<String>> {
-    let mut stmt =
-        tx.prepare("SELECT provider_id FROM backend_connection ORDER BY provider_id;")?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+pub fn list(tx: &Connection, internal_user_id: &str) -> Result<Vec<String>> {
+    let mut stmt = tx.prepare(
+        "SELECT provider_id FROM backend_connection
+         WHERE internal_user_id = ?1 ORDER BY provider_id;",
+    )?;
+    let rows = stmt.query_map([internal_user_id], |row| row.get::<_, String>(0))?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
     }
     Ok(out)
+}
+
+/// Preserve ownerless legacy metadata without granting it to any account.
+pub fn quarantine_legacy(tx: &Connection, provider_id: &str, now: &str) -> Result<()> {
+    if !SUPPORTED_BACKEND_PROVIDER_IDS.contains(&provider_id) {
+        return Err(StoreError::Invalid(format!(
+            "Unsupported backend provider id '{provider_id}'."
+        )));
+    }
+    tx.execute(
+        "INSERT INTO backend_connection_legacy_unowned
+           (provider_id, connected_at, updated_at, quarantined_at)
+         VALUES (?1, ?2, ?2, ?2)
+         ON CONFLICT(provider_id) DO UPDATE SET
+           updated_at=excluded.updated_at,
+           quarantined_at=excluded.quarantined_at;",
+        rusqlite::params![provider_id, now],
+    )?;
+    Ok(())
 }

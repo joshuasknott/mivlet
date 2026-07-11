@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 11;
+pub const CURRENT_SCHEMA_VERSION: u32 = 12;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -760,9 +760,23 @@ CREATE INDEX IF NOT EXISTS idx_connector_account_credential
   ON connector_account(credential_ref) WHERE credential_ref <> '';
 
 CREATE TABLE IF NOT EXISTS backend_connection (
+  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+  provider_id TEXT NOT NULL,
+  connected_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (internal_user_id, provider_id)
+);
+CREATE INDEX IF NOT EXISTS idx_backend_connection_user
+  ON backend_connection(internal_user_id, updated_at);
+
+-- Pre-v12 provider metadata had no account owner. It is retained for recovery
+-- diagnostics only and is never consulted for authorization or credential use.
+CREATE TABLE IF NOT EXISTS backend_connection_legacy_unowned (
   provider_id TEXT PRIMARY KEY,
   connected_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  quarantined_at TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'legacy record had no authenticated account owner'
 );
 
 -- knowledge + memory

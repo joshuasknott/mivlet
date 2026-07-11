@@ -67,6 +67,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // rows derive their owner through project; no synthetic project is
             // ever created.
             10 => apply_v10_to_v11(conn)?,
+            // 11 -> 12: provider connections become account-owned. Legacy
+            // provider-only rows cannot be safely attributed and are retained
+            // in an inaccessible quarantine table instead of being guessed.
+            11 => apply_v11_to_v12(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -76,6 +80,41 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v11_to_v12(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "backend_connection")?
+        || table_has_column(conn, "backend_connection", "internal_user_id")?
+    {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        ALTER TABLE backend_connection RENAME TO backend_connection_v11;
+        CREATE TABLE backend_connection (
+          internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+          provider_id TEXT NOT NULL,
+          connected_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (internal_user_id, provider_id)
+        );
+        CREATE INDEX idx_backend_connection_user
+          ON backend_connection(internal_user_id, updated_at);
+        CREATE TABLE IF NOT EXISTS backend_connection_legacy_unowned (
+          provider_id TEXT PRIMARY KEY,
+          connected_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          quarantined_at TEXT NOT NULL,
+          reason TEXT NOT NULL DEFAULT 'legacy record had no authenticated account owner'
+        );
+        INSERT OR IGNORE INTO backend_connection_legacy_unowned
+          (provider_id, connected_at, updated_at, quarantined_at)
+        SELECT provider_id, connected_at, updated_at, datetime('now')
+        FROM backend_connection_v11;
+        DROP TABLE backend_connection_v11;
+        "#,
+    )?;
     Ok(())
 }
 
