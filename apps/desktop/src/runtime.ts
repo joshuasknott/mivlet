@@ -902,13 +902,55 @@ function structurallyEqual(left: unknown, right: unknown): boolean {
     leftKeys.every((key, index) => key === rightKeys[index] && structurallyEqual(left[key], right[key]));
 }
 
+const ARTIFACT_REVIEW_STATUS_VALUES = new Set([
+  "requested", "in-review", "approved", "changes-requested", "rejected", "withdrawn"
+]);
+const ARTIFACT_REVIEW_TEXT_MAX_CHARS = 2_000;
+
+function isArtifactReview(value: unknown, artifact: Record<string, unknown>, versions: unknown[]) {
+  if (!isRecord(value) ||
+      typeof value.id !== "string" || !value.id ||
+      typeof value.status !== "string" || !ARTIFACT_REVIEW_STATUS_VALUES.has(value.status) ||
+      typeof value.requestedByInternalUserId !== "string" || !value.requestedByInternalUserId ||
+      typeof value.versionId !== "string" ||
+      !versions.some((version) => isRecord(version) && version.id === value.versionId) ||
+      typeof value.requestedAt !== "string" || Number.isNaN(Date.parse(value.requestedAt)) ||
+      (value.resolvedAt !== undefined &&
+        (typeof value.resolvedAt !== "string" || Number.isNaN(Date.parse(value.resolvedAt)))) ||
+      (value.reviewerMemberId !== undefined &&
+        (typeof value.reviewerMemberId !== "string" || value.reviewerMemberId !== artifact.ownerMemberId)) ||
+      (value.summary !== undefined &&
+        (typeof value.summary !== "string" || value.summary.length > ARTIFACT_REVIEW_TEXT_MAX_CHARS)) ||
+      (value.requestedChanges !== undefined &&
+        (!Array.isArray(value.requestedChanges) || value.requestedChanges.length === 0 ||
+          value.requestedChanges.some((entry) =>
+            typeof entry !== "string" || !entry.trim() || entry.length > ARTIFACT_REVIEW_TEXT_MAX_CHARS
+          )))) {
+    return false;
+  }
+  const resolved = value.status === "approved" || value.status === "changes-requested" ||
+    value.status === "rejected" || value.status === "withdrawn";
+  if (resolved !== (typeof value.resolvedAt === "string")) return false;
+  if (value.acceptance === undefined) return value.status !== "approved";
+  return value.status === "approved" &&
+    isRecord(value.acceptance) &&
+    typeof value.acceptance.acceptedByInternalUserId === "string" &&
+    Boolean(value.acceptance.acceptedByInternalUserId) &&
+    typeof value.acceptance.acceptedAt === "string" &&
+    !Number.isNaN(Date.parse(value.acceptance.acceptedAt)) &&
+    (value.acceptance.note === undefined ||
+      (typeof value.acceptance.note === "string" &&
+        value.acceptance.note.length <= ARTIFACT_REVIEW_TEXT_MAX_CHARS));
+}
+
 function assertArtifactBundle(value: unknown, workspaceId: string): asserts value is RuntimeArtifactBundle {
   if (!isRecord(value) || !isRecord(value.artifact) || !isRecord(value.currentVersion) || !Array.isArray(value.versions)) {
     throw new Error("Malformed or cross-workspace artifact response.");
   }
   const artifact = value.artifact;
   const currentVersion = value.currentVersion;
-  const finalVersion = value.versions[value.versions.length - 1];
+  const versions = value.versions;
+  const finalVersion = versions[versions.length - 1];
   if (typeof artifact.id !== "string") {
     throw new Error("Malformed or cross-workspace artifact response.");
   }
@@ -933,12 +975,12 @@ function assertArtifactBundle(value: unknown, workspaceId: string): asserts valu
     !artifact.sourceProvenance.every(isRecord) ||
     !isRecord(artifact.context) ||
     !Array.isArray(artifact.reviews) ||
-    !artifact.reviews.every(isRecord) ||
+    !artifact.reviews.every((review) => isArtifactReview(review, artifact, versions)) ||
     !isRecord(artifact.retention) ||
     typeof artifact.retention.status !== "string" ||
     (value.sourceMessageId !== undefined && typeof value.sourceMessageId !== "string") ||
-    value.versions.length === 0 ||
-    value.versions.some((version, index) => !isArtifactVersion(version, artifactId, index + 1)) ||
+    versions.length === 0 ||
+    versions.some((version, index) => !isArtifactVersion(version, artifactId, index + 1)) ||
     !isRecord(finalVersion) ||
     artifact.currentVersionId !== finalVersion.id ||
     !structurallyEqual(currentVersion, finalVersion);
@@ -1062,6 +1104,9 @@ export async function appendRuntimeArtifactVersion(input: {
     ) {
       throw staleArtifactVersionError();
     }
+    if (current.artifact.status === "in-review") {
+      throw new Error("Resolve private review before editing.");
+    }
     const now = new Date().toISOString();
     const versionId = `artifact-version-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
     const prior = current.currentVersion;
@@ -1149,13 +1194,13 @@ export async function reviewRuntimeArtifact(input: {
     let nextStatus = current.artifact.status;
     let reviews = [...current.artifact.reviews];
     if (input.action === "request-review") {
-      if (nextStatus !== "draft" && nextStatus !== "changes-requested") {
+      if (nextStatus !== "draft") {
         throw new Error("This artifact is not ready to request review.");
       }
       nextStatus = "in-review";
       reviews.push({
         id: `artifact-review-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
-        status: "in-review",
+        status: "requested",
         requestedByInternalUserId: "preview-user" as never,
         versionId: current.currentVersion.id,
         requestedAt: now
@@ -1165,7 +1210,8 @@ export async function reviewRuntimeArtifact(input: {
       let reviewIndex = -1;
       for (let candidate = reviews.length - 1; candidate >= 0; candidate -= 1) {
         const review = reviews[candidate];
-        if (review.versionId === current.currentVersion.id && review.status === "in-review") {
+        if (review.versionId === current.currentVersion.id &&
+            (review.status === "requested" || review.status === "in-review")) {
           reviewIndex = candidate;
           break;
         }

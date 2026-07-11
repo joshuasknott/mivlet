@@ -216,6 +216,32 @@ describe("artifact runtime revisions", () => {
     })).rejects.toThrow(/malformed/i);
   });
 
+  it("rejects malformed reviews and reviews linked to a foreign version", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    const invalidStatus = JSON.parse(JSON.stringify(nativeBundle()));
+    invalidStatus.artifact.reviews = [{
+      id: "review-1", status: "mystery", requestedByInternalUserId: "user-1",
+      versionId: "version-1", requestedAt: "2026-07-11T00:00:00.000Z"
+    }];
+    mocks.invoke.mockResolvedValueOnce(invalidStatus);
+    await expect(createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    })).rejects.toThrow(/malformed/i);
+
+    const foreignVersion = JSON.parse(JSON.stringify(nativeBundle()));
+    foreignVersion.artifact.reviews = [{
+      id: "review-1", status: "requested", requestedByInternalUserId: "user-1",
+      versionId: "version-foreign", requestedAt: "2026-07-11T00:00:00.000Z"
+    }];
+    mocks.invoke.mockResolvedValueOnce(foreignVersion);
+    await expect(createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    })).rejects.toThrow(/malformed/i);
+  });
+
   it("appends v2 immutably in preview without inventing sources and enforces CAS", async () => {
     setActiveRuntimeDataScope("workspace-preview-revision");
     const first = await createRuntimeResponseArtifact({
@@ -293,7 +319,7 @@ describe("artifact runtime revisions", () => {
     expect(inReview.artifact.status).toBe("in-review");
     expect(inReview.artifact.revision).toBe(2);
     expect(inReview.artifact.reviews[0]).toEqual(expect.objectContaining({
-      status: "in-review",
+      status: "requested",
       versionId: draft.currentVersion.id
     }));
 
@@ -356,10 +382,29 @@ describe("artifact runtime revisions", () => {
       artifactId: inReview.artifact.id, versionId: inReview.currentVersion.id,
       expectedRevision: draft.artifact.revision, action: "accept"
     })).rejects.toThrow(/changed elsewhere/i);
-    const revised = await appendRuntimeArtifactVersion({
+    await expect(appendRuntimeArtifactVersion({
       artifactId: inReview.artifact.id,
       expectedRevision: inReview.artifact.revision,
       expectedCurrentVersionId: inReview.currentVersion.id,
+      content: "New draft"
+    })).rejects.toThrow("Resolve private review before editing.");
+    const changes = await reviewRuntimeArtifact({
+      artifactId: inReview.artifact.id,
+      versionId: inReview.currentVersion.id,
+      expectedRevision: inReview.artifact.revision,
+      action: "request-changes",
+      requestedChanges: ["Revise this draft."]
+    });
+    await expect(reviewRuntimeArtifact({
+      artifactId: changes.artifact.id,
+      versionId: changes.currentVersion.id,
+      expectedRevision: changes.artifact.revision,
+      action: "request-review"
+    })).rejects.toThrow(/not ready to request review/i);
+    const revised = await appendRuntimeArtifactVersion({
+      artifactId: changes.artifact.id,
+      expectedRevision: changes.artifact.revision,
+      expectedCurrentVersionId: changes.currentVersion.id,
       content: "New draft"
     });
     await expect(reviewRuntimeArtifact({

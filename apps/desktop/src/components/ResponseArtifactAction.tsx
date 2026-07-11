@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KnowledgeCitation } from "@fable/protocol";
 import {
   appendRuntimeArtifactVersion,
@@ -32,17 +32,23 @@ export function ResponseArtifactAction({
   const [draft, setDraft] = useState("");
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [changesNeeded, setChangesNeeded] = useState("");
+  const changesInputRef = useRef<HTMLTextAreaElement>(null);
+  const requestChangesButtonRef = useRef<HTMLButtonElement>(null);
 
   const artifact = existing;
   const sourceCount = artifact?.currentVersion.citations.length ?? citations.length;
   const regionId = `artifact-${messageId}`;
   const reviewStatusLabel = artifact ? ({
     draft: "Draft",
-    "in-review": "In review",
+    "in-review": "Private review",
     "changes-requested": "Changes requested",
     accepted: "Accepted"
   } as const)[artifact.artifact.status as "draft" | "in-review" | "changes-requested" | "accepted"]
     ?? artifact.artifact.status.replaceAll("-", " ") : "";
+
+  useEffect(() => {
+    if (requestingChanges) changesInputRef.current?.focus();
+  }, [requestingChanges]);
 
   const saveInitialArtifact = () => {
     setSaving(true);
@@ -101,10 +107,13 @@ export function ResponseArtifactAction({
       onSaved(saved);
       setRequestingChanges(false);
       setChangesNeeded("");
+      if (action === "request-changes") {
+        window.setTimeout(() => requestChangesButtonRef.current?.focus(), 0);
+      }
       setNotice(action === "request-review"
-        ? "Review requested."
+        ? "Private review started."
         : action === "accept"
-          ? "Artifact accepted."
+          ? "Marked accepted."
           : "Changes requested.");
     }).catch((cause) => {
       setError(cause instanceof Error ? cause.message : "Could not update this review.");
@@ -118,6 +127,9 @@ export function ResponseArtifactAction({
         disabled={saving}
         aria-expanded={artifact ? open : undefined}
         aria-controls={artifact ? regionId : undefined}
+        aria-label={artifact
+          ? `${open ? "Hide" : "View"} artifact ${artifact.artifact.title}`
+          : "Save response as artifact"}
         onClick={() => {
           if (artifact) setOpen((value) => !value);
           else saveInitialArtifact();
@@ -147,12 +159,13 @@ export function ResponseArtifactAction({
                 onChange={(event) => setDraft(event.target.value)}
               />
               <div className="response-artifact__editor-actions">
-                <button type="button" disabled={saving} onClick={saveNewVersion}>
+                <button type="button" disabled={saving} aria-label={`Save new version of ${artifact.artifact.title}`} onClick={saveNewVersion}>
                   {saving ? "Saving..." : "Save new version"}
                 </button>
                 <button
                   type="button"
                   disabled={saving}
+                  aria-label={`Cancel editing ${artifact.artifact.title}`}
                   onClick={() => { setEditing(false); setDraft(""); setError(""); }}
                 >
                   Cancel
@@ -166,9 +179,10 @@ export function ResponseArtifactAction({
                   ? artifact.currentVersion.content.text
                   : "Stored content"}
               </div>
-              {artifact.currentVersion.content.kind === "inline" ? (
+              {artifact.currentVersion.content.kind === "inline" && artifact.artifact.status !== "in-review" ? (
                 <button
                   type="button"
+                  aria-label={`Edit ${artifact.artifact.title}`}
                   onClick={() => {
                     setDraft(artifact.currentVersion.content.kind === "inline" ? artifact.currentVersion.content.text : "");
                     setEditing(true);
@@ -179,14 +193,17 @@ export function ResponseArtifactAction({
                   Edit
                 </button>
               ) : null}
+              {artifact.artifact.status === "in-review" ? (
+                <p className="response-artifact__review-lock">Resolve private review before editing.</p>
+              ) : null}
               <div className="response-artifact__review-actions">
-                {artifact.artifact.status === "draft" || artifact.artifact.status === "changes-requested" ? (
-                  <button type="button" disabled={saving} onClick={() => submitReviewAction("request-review")}>Request review</button>
+                {artifact.artifact.status === "draft" ? (
+                  <button type="button" disabled={saving} aria-label={`Start private review for ${artifact.artifact.title}`} onClick={() => submitReviewAction("request-review")}>Start private review</button>
                 ) : null}
                 {artifact.artifact.status === "in-review" ? (
                   <>
-                    <button type="button" disabled={saving} onClick={() => submitReviewAction("accept")}>Accept</button>
-                    <button type="button" disabled={saving} onClick={() => { setRequestingChanges(true); setError(""); setNotice(""); }}>Request changes</button>
+                    <button type="button" disabled={saving} aria-label={`Mark ${artifact.artifact.title} accepted`} onClick={() => submitReviewAction("accept")}>Mark accepted</button>
+                    <button ref={requestChangesButtonRef} type="button" disabled={saving} aria-label={`Request changes to ${artifact.artifact.title}`} onClick={() => { setRequestingChanges(true); setError(""); setNotice(""); }}>Request changes</button>
                   </>
                 ) : null}
               </div>
@@ -194,7 +211,9 @@ export function ResponseArtifactAction({
                 <div className="response-artifact__changes">
                   <label htmlFor={`${regionId}-changes`}>Changes needed</label>
                   <textarea
+                    ref={changesInputRef}
                     id={`${regionId}-changes`}
+                    aria-label={`Changes needed for ${artifact.artifact.title}`}
                     value={changesNeeded}
                     maxLength={2000}
                     disabled={saving}
@@ -204,6 +223,7 @@ export function ResponseArtifactAction({
                     <button
                       type="button"
                       disabled={saving || !changesNeeded.trim()}
+                      aria-label={`Confirm changes for ${artifact.artifact.title}`}
                       onClick={() => submitReviewAction("request-changes", [changesNeeded.trim()])}
                     >
                       Confirm changes
@@ -211,7 +231,8 @@ export function ResponseArtifactAction({
                     <button
                       type="button"
                       disabled={saving}
-                      onClick={() => { setRequestingChanges(false); setChangesNeeded(""); setError(""); }}
+                      aria-label={`Cancel requested changes for ${artifact.artifact.title}`}
+                      onClick={() => { requestChangesButtonRef.current?.focus(); setRequestingChanges(false); setChangesNeeded(""); setError(""); }}
                     >
                       Cancel
                     </button>
