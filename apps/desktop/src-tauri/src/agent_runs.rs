@@ -140,11 +140,26 @@ pub(crate) fn persist_agent_run(
 ) -> Result<PersistedAgentRun, String> {
     let run = normalize_agent_run(run)?;
     let mut runs = read_agent_runs(path)?;
+    if let Some(existing) = runs.iter().find(|existing| existing.id == run.id) {
+        if existing.thread_id != run.thread_id || existing.created_at != run.created_at {
+            return Err("Agent run ownership and creation identity are immutable.".to_string());
+        }
+        if is_terminal_status(&existing.status) {
+            if existing == &run {
+                return Ok(run);
+            }
+            return Err("A terminal agent run is immutable.".to_string());
+        }
+    }
     runs.retain(|existing| existing.id != run.id);
     runs.insert(0, run.clone());
     runs.truncate(MAX_AGENT_RUNS);
     write_agent_runs(path, &runs)?;
     Ok(run)
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(status, "completed" | "cancelled" | "failed" | "interrupted")
 }
 
 pub(crate) fn recover_agent_runs_at(
@@ -359,6 +374,30 @@ mod tests {
         assert_eq!(recovered[0].thread_id.as_deref(), Some("thread-1"));
         assert_eq!(recovered[0].exchanges.len(), 1);
         assert!(recovered[0].recoverable);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn file_journal_rejects_terminal_replacement_and_late_inflight_writer() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-agent-runs-terminal-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let completed = fixture("completed");
+        persist_agent_run(&path, completed.clone()).expect("persist terminal");
+        persist_agent_run(&path, completed.clone()).expect("exact replay");
+
+        let mut replacement = completed.clone();
+        replacement.status = "failed".into();
+        replacement.error = Some("late failure".into());
+        assert!(persist_agent_run(&path, replacement).is_err());
+
+        let mut stale = completed.clone();
+        stale.status = "streaming".into();
+        stale.transcript = "stale partial".into();
+        assert!(persist_agent_run(&path, stale).is_err());
+        assert_eq!(read_agent_runs(&path).unwrap(), vec![completed]);
         let _ = fs::remove_file(path);
     }
 }

@@ -62,6 +62,61 @@ pub fn upsert_scoped(
     payload: &Value,
 ) -> Result<()> {
     scope.ensure_exists(tx)?;
+    let existing = tx
+        .query_row(
+            "SELECT workspace_id, thread_id, provider_id, model, status, turn, recoverable,
+                    retry_count, created_at, updated_at, payload, payload_nonce
+             FROM run WHERE id=?1",
+            [id],
+            |row| {
+                Ok(ExistingRun {
+                    workspace_id: row.get(0)?,
+                    thread_id: row.get(1)?,
+                    provider_id: row.get(2)?,
+                    model: row.get(3)?,
+                    status: row.get(4)?,
+                    turn: row.get(5)?,
+                    recoverable: row.get::<_, i64>(6)? != 0,
+                    retry_count: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                    sealed: Sealed {
+                        ciphertext: row.get(10)?,
+                        nonce: row.get(11)?,
+                    },
+                })
+            },
+        )
+        .optional()?;
+
+    if let Some(existing) = existing {
+        if existing.workspace_id != scope.workspace_id()
+            || existing.thread_id.as_deref() != thread_id
+            || existing.created_at != created_at
+        {
+            return Err(crate::store::StoreError::Invalid(
+                "Agent run ownership and creation identity are immutable.".into(),
+            ));
+        }
+
+        if is_terminal_status(&existing.status) {
+            let existing_payload = open_json(store, &existing.sealed, &aad(id))?;
+            let exact_replay = existing.provider_id == provider_id
+                && existing.model == model
+                && existing.status == status
+                && existing.turn == turn as i64
+                && existing.recoverable == recoverable
+                && existing.retry_count == retry_count as i64
+                && existing.updated_at == updated_at
+                && existing_payload == *payload;
+            if exact_replay {
+                return Ok(());
+            }
+            return Err(crate::store::StoreError::Invalid(
+                "A terminal agent run is immutable.".into(),
+            ));
+        }
+    }
     if let Some(thread_id) = thread_id {
         let owner: Option<String> = tx
             .query_row(
@@ -82,8 +137,7 @@ pub fn upsert_scoped(
                           retry_count, created_at, updated_at, payload, payload_nonce)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
          ON CONFLICT(id) DO UPDATE SET
-           workspace_id=excluded.workspace_id, thread_id=excluded.thread_id, provider_id=excluded.provider_id,
-           model=excluded.model, status=excluded.status, turn=excluded.turn,
+           provider_id=excluded.provider_id, model=excluded.model, status=excluded.status, turn=excluded.turn,
            recoverable=excluded.recoverable, retry_count=excluded.retry_count,
            updated_at=excluded.updated_at,
            payload=excluded.payload, payload_nonce=excluded.payload_nonce;",
@@ -104,6 +158,24 @@ pub fn upsert_scoped(
         ],
     )?;
     Ok(())
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(status, "completed" | "cancelled" | "failed" | "interrupted")
+}
+
+struct ExistingRun {
+    workspace_id: String,
+    thread_id: Option<String>,
+    provider_id: String,
+    model: String,
+    status: String,
+    turn: i64,
+    recoverable: bool,
+    retry_count: i64,
+    created_at: String,
+    updated_at: String,
+    sealed: Sealed,
 }
 
 /// Read a run's metadata + decrypted payload.
@@ -240,3 +312,244 @@ fn aad(id: &str) -> String {
 }
 
 use rusqlite::OptionalExtension as _;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::repos::artifact;
+    use crate::store::vault::{MasterKey, Vault};
+
+    fn store() -> Store {
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
+    }
+
+    fn seed_scope(store: &Store, workspace: &str, thread: &str) -> DataScope {
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace(id,name,created_at,updated_at) VALUES (?1,?1,'t','t')",
+                    [workspace],
+                )?;
+                let sealed = seal_json(store, &serde_json::json!({}), &format!("thread:{thread}"))?;
+                tx.execute(
+                    "INSERT INTO thread(id,workspace_id,title,created_at,updated_at,payload,payload_nonce)
+                     VALUES (?1,?2,'Thread','t','t',?3,?4)",
+                    rusqlite::params![thread, workspace, sealed.ciphertext, sealed.nonce],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        DataScope::workspace(workspace).unwrap()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn save(
+        store: &Store,
+        scope: &DataScope,
+        id: &str,
+        thread: &str,
+        status: &str,
+        created_at: &str,
+        updated_at: &str,
+        payload: &Value,
+    ) -> Result<()> {
+        store.transaction(|tx| {
+            upsert_scoped(
+                tx,
+                store,
+                scope,
+                id,
+                Some(thread),
+                "provider",
+                "model",
+                status,
+                1,
+                false,
+                0,
+                created_at,
+                updated_at,
+                payload,
+            )
+        })
+    }
+
+    #[test]
+    fn conflicting_cross_workspace_upsert_fails_and_cannot_expose_linked_artifact() {
+        let store = store();
+        let alpha = seed_scope(&store, "alpha", "thread-alpha");
+        let beta = seed_scope(&store, "beta", "thread-beta");
+        let completed = serde_json::json!({"answer":"alpha"});
+        save(
+            &store,
+            &alpha,
+            "shared-run",
+            "thread-alpha",
+            "completed",
+            "created",
+            "finished",
+            &completed,
+        )
+        .unwrap();
+        store
+            .transaction(|tx| {
+                let sealed = seal_json(
+                    &store,
+                    &serde_json::json!({"secret":"alpha-artifact"}),
+                    "artifact:artifact-alpha",
+                )?;
+                tx.execute(
+                    "INSERT INTO artifact(id,run_id,kind,content_fingerprint,size_bytes,created_at,payload,payload_nonce)
+                     VALUES ('artifact-alpha','shared-run','document','hash',1,'t',?1,?2)",
+                    rusqlite::params![sealed.ciphertext, sealed.nonce],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let takeover = save(
+            &store,
+            &beta,
+            "shared-run",
+            "thread-beta",
+            "streaming",
+            "created",
+            "later",
+            &serde_json::json!({"answer":"beta"}),
+        );
+        assert!(takeover.is_err());
+        assert!(store
+            .with_conn(|tx| artifact::get(tx, &store, &beta, "artifact-alpha"))
+            .unwrap()
+            .is_none());
+        let preserved = store
+            .with_conn(|tx| get_scoped(tx, &store, &alpha, "shared-run"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(preserved.thread_id.as_deref(), Some("thread-alpha"));
+        assert_eq!(preserved.payload, completed);
+    }
+
+    #[test]
+    fn run_thread_and_created_at_are_immutable_before_terminal_state() {
+        let store = store();
+        let scope = seed_scope(&store, "alpha", "thread-one");
+        seed_scope(&store, "other", "unused");
+        store
+            .transaction(|tx| {
+                let sealed = seal_json(&store, &Value::Null, "thread:thread-two")?;
+                tx.execute(
+                    "INSERT INTO thread(id,workspace_id,title,created_at,updated_at,payload,payload_nonce)
+                     VALUES ('thread-two','alpha','Thread','t','t',?1,?2)",
+                    rusqlite::params![sealed.ciphertext, sealed.nonce],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        save(
+            &store,
+            &scope,
+            "run-1",
+            "thread-one",
+            "streaming",
+            "created",
+            "one",
+            &serde_json::json!({"partial":1}),
+        )
+        .unwrap();
+        assert!(save(
+            &store,
+            &scope,
+            "run-1",
+            "thread-two",
+            "streaming",
+            "created",
+            "two",
+            &serde_json::json!({"partial":2}),
+        )
+        .is_err());
+        assert!(save(
+            &store,
+            &scope,
+            "run-1",
+            "thread-one",
+            "streaming",
+            "different-created-at",
+            "two",
+            &serde_json::json!({"partial":2}),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn terminal_result_allows_exact_replay_but_rejects_every_replacement() {
+        let store = store();
+        let scope = seed_scope(&store, "alpha", "thread-one");
+        let terminal = serde_json::json!({"answer":"final"});
+        save(
+            &store,
+            &scope,
+            "run-1",
+            "thread-one",
+            "streaming",
+            "created",
+            "streaming-at",
+            &serde_json::json!({"answer":"partial"}),
+        )
+        .unwrap();
+        save(
+            &store,
+            &scope,
+            "run-1",
+            "thread-one",
+            "completed",
+            "created",
+            "finished-at",
+            &terminal,
+        )
+        .unwrap();
+        save(
+            &store,
+            &scope,
+            "run-1",
+            "thread-one",
+            "completed",
+            "created",
+            "finished-at",
+            &terminal,
+        )
+        .expect("exact replay is idempotent");
+
+        for (status, updated_at, payload) in [
+            ("failed", "late", serde_json::json!({"error":"replacement"})),
+            (
+                "streaming",
+                "stale",
+                serde_json::json!({"answer":"partial"}),
+            ),
+            (
+                "completed",
+                "later",
+                serde_json::json!({"answer":"changed"}),
+            ),
+        ] {
+            assert!(save(
+                &store,
+                &scope,
+                "run-1",
+                "thread-one",
+                status,
+                "created",
+                updated_at,
+                &payload,
+            )
+            .is_err());
+        }
+        let preserved = store
+            .with_conn(|tx| get_scoped(tx, &store, &scope, "run-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(preserved.status, "completed");
+        assert_eq!(preserved.updated_at, "finished-at");
+        assert_eq!(preserved.payload, terminal);
+    }
+}
