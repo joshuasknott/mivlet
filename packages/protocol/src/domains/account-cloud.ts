@@ -1,4 +1,10 @@
-import type { ExternalAuthenticationFacts, WorkspaceRole } from "../spine/identity.js";
+import type {
+  AcceptWorkspaceInvitationResult,
+  ExternalAuthenticationFacts,
+  InvitationAcceptancePresentation,
+  WorkspaceInvitationRecord,
+  WorkspaceRole,
+} from "../spine/identity.js";
 import type {
   DeviceId,
   InternalUserId,
@@ -112,6 +118,27 @@ export interface AccountWorkspaceStatus {
     memberId?: string;
   };
   devices: AccountDeviceSummary[];
+}
+
+/** A server-selected invitation addressed to the current authenticated user. */
+export interface AccountPendingInvitation {
+  invitation: WorkspaceInvitationRecord;
+  selection: Extract<InvitationAcceptancePresentation, { kind: "direct-inbox" }>;
+}
+
+/** Secret-free inbox state; the renderer cannot choose another recipient. */
+export interface AccountPendingInvitationList {
+  invitations: readonly AccountPendingInvitation[];
+}
+
+/**
+ * Native composes the hosted decision with the refreshed local workspace
+ * directory. React supplies only the invitation id and never supplies
+ * presentation evidence, identity facts, authorization, or idempotency.
+ */
+export interface AccountInvitationAcceptanceOutcome {
+  result: AcceptWorkspaceInvitationResult;
+  accountWorkspace: AccountWorkspaceStatus;
 }
 
 export type CloudWorkspaceRole = WorkspaceRole;
