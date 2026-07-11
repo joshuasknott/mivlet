@@ -12,8 +12,16 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const runtime = useShellRuntime({ approvalGate });
   const cancelRequestedRef = useRef(false);
   useEffect(() => { approvalGate.replaceStandingGrants([...runtime.sessionApprovalGrants, ...runtime.approvalRules]); }, [approvalGate, runtime.sessionApprovalGrants, runtime.approvalRules]);
-  const executor = useMemo(() => createDesktopToolExecutor(approvalGate), [approvalGate]);
   const queueToolApproval = (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => { if (approvalGate.register(event.approval)) runtime.recordBackendToolCall(event); };
+  const executor = useMemo(
+    () =>
+      createDesktopToolExecutor(approvalGate, {
+        workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId,
+        queueApproval: (approval, tool, argumentsJson) =>
+          queueToolApproval({ callId: approval.id, tool, arguments: argumentsJson, approval })
+      }),
+    [approvalGate, runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId]
+  );
   const cancelApprovals = () => { approvalGate.cancelPending(); runtime.clearBackendToolApprovals(); };
   const durableConversation = useDurableConversation({ workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId, threadId });
   const agent = useNativeAgent({ providers: runtime.backendProviders, activeProviderId: runtime.connectedAgentBackend?.id, models: runtime.selectableModels, threadId, createDurableRunWriter: createDesktopDurableRunWriter, execute: executor, shouldCancel: () => cancelRequestedRef.current, onCancel: () => { cancelRequestedRef.current = true; cancelApprovals(); }, onToolCall: queueToolApproval });

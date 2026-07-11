@@ -113,6 +113,7 @@ pub(crate) struct SemanticCapabilityReadResult {
     pub connection_id: String,
     pub connector_id: String,
     pub implementation_evidence: String,
+    pub matched_grant_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discovery_evidence:
         Option<crate::store::repos::capability_evidence::CapabilityImplementationEvidence>,
@@ -122,9 +123,22 @@ pub(crate) struct SemanticCapabilityReadResult {
 struct ResolvedNativeRead {
     implementation: &'static NativeReadImplementation,
     connection_id: String,
+    connection_revision: i64,
+    connection_display_name: String,
     availability: String,
     discovery_evidence:
         Option<crate::store::repos::capability_evidence::CapabilityImplementationEvidence>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CapabilityGrantTarget {
+    pub capability_id: String,
+    pub connection_id: String,
+    pub connection_revision: i64,
+    pub connection_display_name: String,
+    pub consequence: String,
+    pub availability: String,
 }
 
 fn error(code: &str, capability_id: &str, message: &str, retryable: bool) -> ConnectorCommandError {
@@ -256,6 +270,8 @@ pub(crate) fn persist_native_discovery_evidence(
 fn resolve_native_read(
     app: &tauri::AppHandle,
     capability_id: &str,
+    workspace_id: &str,
+    project_id: Option<&str>,
 ) -> Result<ResolvedNativeRead, ConnectorCommandError> {
     let implementation = implementation(capability_id).ok_or_else(|| {
         error(
@@ -267,8 +283,18 @@ fn resolve_native_read(
     })?;
     let identity = crate::clerk_identity::native_identity_generation_snapshot()
         .map_err(|message| error("connection-not-authorized", capability_id, &message, false))?;
+    // Validate the requested project boundary independently, then resolve the
+    // Connection through workspace authority because Connections themselves
+    // are never project-owned. The capability grant below retains the narrower
+    // project scope.
+    crate::authorized_scope::command_scope(
+        Some(workspace_id.to_string()),
+        project_id.map(str::to_string),
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .map_err(|message| error("privacy-boundary", capability_id, &message, false))?;
     let scope = crate::authorized_scope::command_scope(
-        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+        Some(workspace_id.to_string()),
         None,
         crate::authorized_scope::ScopeAccess::Read,
     )
@@ -346,18 +372,76 @@ fn resolve_native_read(
     Ok(ResolvedNativeRead {
         implementation,
         connection_id,
+        connection_revision: canonical.revision,
+        connection_display_name: canonical.display_name,
         availability,
         discovery_evidence,
     })
 }
 
+pub(crate) fn native_grant_target(
+    app: &tauri::AppHandle,
+    workspace_id: &str,
+    project_id: Option<&str>,
+    capability_id: &str,
+) -> Result<CapabilityGrantTarget, ConnectorCommandError> {
+    let resolved = resolve_native_read(app, capability_id, workspace_id, project_id)?;
+    Ok(CapabilityGrantTarget {
+        capability_id: capability_id.to_string(),
+        connection_id: resolved.connection_id,
+        connection_revision: resolved.connection_revision,
+        connection_display_name: resolved.connection_display_name,
+        consequence: "read".into(),
+        availability: resolved.availability,
+    })
+}
+
 pub(crate) async fn read(
     app: &tauri::AppHandle,
+    workspace_id: String,
+    project_id: Option<String>,
     capability_id: String,
     input: BTreeMap<String, serde_json::Value>,
     cursor: Option<String>,
 ) -> Result<SemanticCapabilityReadResult, ConnectorCommandError> {
-    let resolved = resolve_native_read(app, &capability_id)?;
+    let resolved = resolve_native_read(app, &capability_id, &workspace_id, project_id.as_deref())?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id),
+        project_id,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .map_err(|message| error("privacy-boundary", &capability_id, &message, false))?;
+    let store = crate::store::try_global().ok_or_else(|| {
+        error(
+            "implementation-unverified",
+            &capability_id,
+            "Fable's encrypted capability-grant store is unavailable.",
+            false,
+        )
+    })?;
+    let grant_result = store
+        .transaction(|tx| {
+            crate::store::repos::capability_grant::authorize_and_consume(
+                tx,
+                store,
+                &scope,
+                &capability_id,
+                &resolved.connection_id,
+                "read",
+                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            )
+        })
+        .map_err(|store_error| {
+            error(
+                "implementation-unverified",
+                &capability_id,
+                &store_error.to_string(),
+                false,
+            )
+        })?;
+    let grants = grant_result
+        .map_err(|failure| error(failure.code, &capability_id, failure.message, false))?;
+    let matched_grant_ids = grants.into_iter().map(|grant| grant.id).collect();
     let connector_id = resolved.implementation.connector_id.to_string();
     let result = match resolved.implementation.adapter {
         NativeReadAdapter::Capability(adapter_capability) => {
@@ -481,6 +565,7 @@ pub(crate) async fn read(
         connection_id: resolved.connection_id,
         connector_id,
         implementation_evidence: "adapter-validated".into(),
+        matched_grant_ids,
         discovery_evidence: resolved.discovery_evidence,
         result,
     })

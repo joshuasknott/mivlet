@@ -386,6 +386,41 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
     expect(resolved).toBe(true);
   });
 
+  it("a legacy standing approval never replaces a semantic capability grant or exact search approval", async () => {
+    const gate = createApprovalGate();
+    const approval: ApprovalRequest = {
+      id: "connection-call",
+      service: "openai",
+      action: "connection-read capability: knowledge.content.search",
+      mode: "read-only",
+      riskLevel: "medium",
+      dataUsed: ["capability: knowledge.content.search"],
+      consequence: "Search the selected Connection once.",
+      requestedAt: new Date(0).toISOString(),
+      decisions: ["once", "session", "rule", "modify", "deny"]
+    };
+    gate.addStandingGrant({
+      id: "legacy-rule",
+      requestId: approval.id,
+      scope: "rule",
+      service: approval.service,
+      action: approval.action,
+      mode: approval.mode,
+      dataUsed: approval.dataUsed,
+      createdAt: new Date(0).toISOString()
+    });
+
+    expect(gate.register(approval)).toBe(true);
+    let resolved = false;
+    const pending = gate.waitForDecision(approval).then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    gate.resolveGrant(approval.id);
+    await pending;
+  });
+
   it("resolveDeny drives a pending call to denied", async () => {
     const gate = createApprovalGate();
     let resolved: DecisionResult | undefined;

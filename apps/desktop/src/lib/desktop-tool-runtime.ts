@@ -26,7 +26,22 @@ import {
   type ApprovalGate,
   type ToolExecutor
 } from "@fable/connectors";
-import { executeRuntimeToolCall, type RuntimeToolResult } from "../runtime";
+import {
+  commitRuntimeCapabilityGrant,
+  executeRuntimeToolCall,
+  prepareRuntimeCapabilityGrant,
+  type RuntimeCapabilityGrantProposal
+} from "../runtime";
+
+export interface DesktopToolExecutorOptions {
+  workspaceId?: string;
+  projectId?: string;
+  queueApproval?: (
+    approval: ApprovalRequest,
+    tool: string,
+    argumentsJson: string
+  ) => void;
+}
 
 /**
  * Build the desktop ToolExecutor from a shared approval gate. The executor
@@ -34,8 +49,16 @@ import { executeRuntimeToolCall, type RuntimeToolResult } from "../runtime";
  * granted tool through the Rust boundary — which re-validates the approval and
  * performs the side effect. Returns the agent-loop ToolExecutor contract.
  */
-export function createDesktopToolExecutor(gate: ApprovalGate): ToolExecutor {
+export function createDesktopToolExecutor(
+  gate: ApprovalGate,
+  options: DesktopToolExecutorOptions = {}
+): ToolExecutor {
   return async (approval, args) => {
+    const toolName = approval.action.split(/\s+/)[0];
+    const parsed = safeParseArgs(args);
+    if (toolName === "connection-read") {
+      await ensureCapabilityGrant(gate, options, parsed);
+    }
     const decision = await gate.waitForDecision(approval);
     if (decision !== "granted") {
       throw new Error(`Tool call denied: ${approval.action}.`);
@@ -47,8 +70,52 @@ export function createDesktopToolExecutor(gate: ApprovalGate): ToolExecutor {
     if (approval.action.split(/\s+/)[0] === ACP_PERMISSION_TOOL) {
       return "ACP permission granted once.";
     }
-    return runOnDesktop(approval, args);
+    return runOnDesktop(approval, parsed, options);
   };
+}
+
+async function ensureCapabilityGrant(
+  gate: ApprovalGate,
+  options: DesktopToolExecutorOptions,
+  parsed: Record<string, unknown>
+): Promise<void> {
+  const workspaceId = options.workspaceId;
+  const capabilityId = typeof parsed.capability === "string" ? parsed.capability.trim() : "";
+  if (!workspaceId || !capabilityId) {
+    throw new Error("Connected-source search requires an active workspace and semantic capability.");
+  }
+  const proposal: RuntimeCapabilityGrantProposal = {
+    workspaceId,
+    projectId: options.projectId,
+    capabilityId
+  };
+  const prepared = await prepareRuntimeCapabilityGrant(proposal);
+  if (prepared === null) {
+    throw new Error("Capability grants require the desktop runtime.");
+  }
+  if (prepared.status === "granted") return;
+  options.queueApproval?.(
+    prepared.approval,
+    "capability-grant",
+    JSON.stringify(proposal)
+  );
+  const decision = await gate.waitForDecision(prepared.approval);
+  if (decision !== "granted") {
+    throw new Error(`Capability grant denied: ${capabilityId}.`);
+  }
+  const resolution: ApprovalResolutionRequest = {
+    request: prepared.approval,
+    decision: "once",
+    decidedAt: new Date().toISOString(),
+    // The UI already validated this phrase before persisting the one-time
+    // execution permit. Replaying the exact expected value lets Rust validate
+    // the same immutable request while the persisted permit remains authority.
+    confirmationText: prepared.approval.confirmationPhrase
+  };
+  const committed = await commitRuntimeCapabilityGrant(proposal, resolution);
+  if (committed === null) {
+    throw new Error("Capability grants require the desktop runtime.");
+  }
 }
 
 /**
@@ -60,9 +127,12 @@ export function createDesktopToolExecutor(gate: ApprovalGate): ToolExecutor {
  * records a tool-role error message and continues, rather than pretending a
  * side effect happened.
  */
-async function runOnDesktop(approval: ApprovalRequest, args: string): Promise<string> {
+async function runOnDesktop(
+  approval: ApprovalRequest,
+  parsed: Record<string, unknown>,
+  options: DesktopToolExecutorOptions
+): Promise<string> {
   const toolName = approval.action.split(/\s+/)[0];
-  const parsed = safeParseArgs(args);
   // The gate already guaranteed a grant; synthesize the resolution request Rust
   // re-validates (decision "once" — the standing session/rule grants are
   // tracked separately on the gate and auto-satisfied before this point).
@@ -75,7 +145,9 @@ async function runOnDesktop(approval: ApprovalRequest, args: string): Promise<st
   const result = await executeRuntimeToolCall({
     tool: toolName,
     arguments: parsed,
-    approval: resolution
+    approval: resolution,
+    workspaceId: options.workspaceId,
+    projectId: options.projectId
   });
   if (result === null) {
     // No Tauri runtime: nothing executed (preview/test path).

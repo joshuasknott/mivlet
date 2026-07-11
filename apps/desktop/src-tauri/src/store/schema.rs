@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 22;
+pub const CURRENT_SCHEMA_VERSION: u32 = 23;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -977,6 +977,45 @@ CREATE INDEX IF NOT EXISTS idx_capability_evidence_connection
   ON capability_implementation_evidence(workspace_id,connection_id,connection_revision);
 CREATE INDEX IF NOT EXISTS idx_capability_evidence_capability
   ON capability_implementation_evidence(workspace_id,capability_key,availability);
+
+-- Explicit member-private standing capability authority. The encrypted payload
+-- retains the portable grant policy; plaintext columns are only bounded ids,
+-- enums, timestamps, and counters needed for fail-closed resolution.
+CREATE TABLE IF NOT EXISTS capability_grant (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  owner_member_id TEXT,
+  id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  capability_key TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  connection_revision_at_grant INTEGER NOT NULL CHECK(connection_revision_at_grant >= 1),
+  consequence_class TEXT NOT NULL CHECK(consequence_class IN ('read','draft','write','publish','destructive','financial','identity-sensitive')),
+  scope_kind TEXT NOT NULL CHECK(scope_kind IN ('workspace','project')),
+  scope_key TEXT NOT NULL,
+  project_id TEXT,
+  state TEXT NOT NULL CHECK(state IN ('active','suspended','expired','revoked')),
+  max_uses INTEGER CHECK(max_uses IS NULL OR max_uses > 0),
+  uses_consumed INTEGER NOT NULL DEFAULT 0 CHECK(uses_consumed >= 0),
+  expires_at TEXT,
+  granted_by_internal_user_id TEXT NOT NULL,
+  granted_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  revoked_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  FOREIGN KEY(workspace_id,connection_id)
+    REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE,
+  CHECK((scope_kind='workspace' AND project_id IS NULL AND scope_key='workspace') OR
+        (scope_kind='project' AND project_id IS NOT NULL AND scope_key='project:' || project_id)),
+  CHECK(max_uses IS NULL OR uses_consumed <= max_uses)
+);
+CREATE INDEX IF NOT EXISTS idx_capability_grant_lookup
+  ON capability_grant(workspace_id,owner_subject,capability_key,connection_id,consequence_class,scope_key,state);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_grant_active_exact
+  ON capability_grant(workspace_id,owner_subject,capability_key,connection_id,consequence_class,scope_key)
+  WHERE state='active';
 
 -- Machine-local launch configuration for user-managed STDIO MCP servers.
 -- Executable paths and arguments are encrypted; plaintext columns contain only

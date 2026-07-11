@@ -236,6 +236,12 @@ interface PendingEntry {
  * exactly so argument substitution and mode changes fail closed.
  */
 function grantMatches(grant: ApprovalGrant, approval: ApprovalRequest): boolean {
+  // Semantic Connection reads use a separate durable capability grant. A
+  // legacy session/rule approval must never become implicit standing source
+  // authority or replace the exact-action approval for an individual search.
+  if (approval.action.split(/\s+/)[0] === "connection-read") {
+    return false;
+  }
   if (approval.riskLevel === "high" || approval.riskLevel === "critical") {
     return false;
   }

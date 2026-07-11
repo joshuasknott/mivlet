@@ -3002,6 +3002,83 @@ export interface RuntimePreparedMcpServerConfiguration {
   approval: import("@fable/protocol").ApprovalRequest;
 }
 
+export interface RuntimeCapabilityGrantProposal {
+  workspaceId: string;
+  projectId?: string;
+  capabilityId: string;
+  maxUses?: number;
+  expiresAt?: string;
+}
+
+export interface RuntimeCapabilityGrant {
+  id: string;
+  capabilityId: string;
+  connectionId: string;
+  consequence: string;
+  scopeKind: "workspace" | "project";
+  workspaceId: string;
+  projectId?: string;
+  state: "active" | "suspended" | "expired" | "revoked";
+  maxUses?: number;
+  usesConsumed: number;
+  expiresAt?: string;
+  approvalRequirement: "required-for-every-action";
+  revision: number;
+  grantedAt: string;
+  updatedAt: string;
+}
+
+export type RuntimePreparedCapabilityGrant =
+  | { status: "granted"; grant: RuntimeCapabilityGrant }
+  | {
+      status: "confirmation-required";
+      proposalFingerprint: string;
+      target: {
+        capabilityId: string;
+        connectionId: string;
+        connectionRevision: number;
+        connectionDisplayName: string;
+        consequence: string;
+        availability: string;
+      };
+      approval: import("@fable/protocol").ApprovalRequest;
+    };
+
+export async function prepareRuntimeCapabilityGrant(proposal: RuntimeCapabilityGrantProposal) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimePreparedCapabilityGrant>("prepare_capability_grant", { proposal })
+    .catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function commitRuntimeCapabilityGrant(
+  proposal: RuntimeCapabilityGrantProposal,
+  resolution: ApprovalResolutionRequest
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeCapabilityGrant>("commit_capability_grant", {
+    request: { proposal, resolution }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function listRuntimeCapabilityGrants(workspaceId: string, projectId?: string) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeCapabilityGrant[]>("list_capability_grants", {
+    request: { workspaceId, projectId }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function revokeRuntimeCapabilityGrant(
+  workspaceId: string,
+  grantId: string,
+  expectedRevision: number,
+  projectId?: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeCapabilityGrant>("revoke_capability_grant", {
+    request: { workspaceId, projectId, grantId, expectedRevision }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
 export async function prepareRuntimeMcpServerConfiguration(
   configuration: RuntimeMcpServerConfiguration
 ) {
@@ -3234,6 +3311,10 @@ export interface RuntimeToolRequest {
   /** The approval resolution request the shell used to grant the call. Rust
    *  re-validates it before running the tool (defense in depth). */
   approval: ApprovalResolutionRequest;
+  /** Authenticated scope assertion; Rust re-resolves it from active account state. */
+  workspaceId?: string;
+  /** Optional active private project scope. */
+  projectId?: string;
   /** Test-only compatibility field. Production Rust ignores caller-supplied roots. */
   workspaceRoot?: string;
 }

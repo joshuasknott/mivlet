@@ -50,6 +50,10 @@ pub struct ToolExecutionRequest {
     pub tool: String,
     pub arguments: serde_json::Value,
     pub approval: ApprovalResolutionRequest,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// Retained for wire compatibility and pure helper tests. The Tauri command
     /// deliberately ignores it and resolves authority from the native app.
     #[allow(dead_code)]
@@ -100,6 +104,8 @@ pub(crate) enum ToolOutcome {
         request: crate::models::ConnectorCapabilityRequest,
     },
     NeedsSemanticRead {
+        workspace_id: String,
+        project_id: Option<String>,
         capability_id: String,
         input: std::collections::BTreeMap<String, serde_json::Value>,
         cursor: Option<String>,
@@ -153,6 +159,8 @@ pub(crate) fn execute_tool_outcome(
     // Capture the dispatch keys before the approval is moved into resolve_approval.
     let tool = request.tool.clone();
     let arguments = request.arguments.clone();
+    let workspace_id = request.workspace_id.clone();
+    let project_id = request.project_id.clone();
 
     // Defense in depth: re-resolve the approval exactly as the shell did. A deny
     // (or an invalid/reshaped approval) fails closed here too — never executes.
@@ -180,10 +188,17 @@ pub(crate) fn execute_tool_outcome(
             Err(error) => ToolOutcome::Done(Err(error)),
         },
         "connection-read" => match semantic_request_from_args(&arguments) {
-            Ok((capability_id, input, cursor)) => ToolOutcome::NeedsSemanticRead {
-                capability_id,
-                input,
-                cursor,
+            Ok((capability_id, input, cursor)) => match workspace_id {
+                Some(workspace_id) => ToolOutcome::NeedsSemanticRead {
+                    workspace_id,
+                    project_id,
+                    capability_id,
+                    input,
+                    cursor,
+                },
+                None => ToolOutcome::Done(Err(
+                    "Semantic Connection reads require the active workspace scope.".into(),
+                )),
             },
             Err(error) => ToolOutcome::Done(Err(error)),
         },
@@ -1090,13 +1105,22 @@ pub async fn execute_tool_call(
                 .map_err(|_| "Fable could not encode the connector result.".to_string())
         }
         ToolOutcome::NeedsSemanticRead {
+            workspace_id,
+            project_id,
             capability_id,
             input,
             cursor,
         } => {
-            let result = crate::capability_registry::read(&app, capability_id, input, cursor)
-                .await
-                .map_err(|error| error.message)?;
+            let result = crate::capability_registry::read(
+                &app,
+                workspace_id,
+                project_id,
+                capability_id,
+                input,
+                cursor,
+            )
+            .await
+            .map_err(|error| error.message)?;
             serde_json::to_string(&result)
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|_| "Fable could not encode the capability result.".to_string())

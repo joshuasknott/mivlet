@@ -108,6 +108,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 21 -> 22: add encrypted, member-private launch configuration for
             // local STDIO MCP servers. Migration creates no launch authority.
             21 => apply_v21_to_v22(conn)?,
+            // 22 -> 23: add explicit, owner-qualified capability grants. The
+            // migration creates no implicit authority or inferred rows.
+            22 => apply_v22_to_v23(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -117,6 +120,49 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v22_to_v23(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS capability_grant (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_subject TEXT NOT NULL,
+          owner_member_id TEXT,
+          id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK(revision >= 1),
+          capability_key TEXT NOT NULL,
+          connection_id TEXT NOT NULL,
+          connection_revision_at_grant INTEGER NOT NULL CHECK(connection_revision_at_grant >= 1),
+          consequence_class TEXT NOT NULL CHECK(consequence_class IN ('read','draft','write','publish','destructive','financial','identity-sensitive')),
+          scope_kind TEXT NOT NULL CHECK(scope_kind IN ('workspace','project')),
+          scope_key TEXT NOT NULL,
+          project_id TEXT,
+          state TEXT NOT NULL CHECK(state IN ('active','suspended','expired','revoked')),
+          max_uses INTEGER CHECK(max_uses IS NULL OR max_uses > 0),
+          uses_consumed INTEGER NOT NULL DEFAULT 0 CHECK(uses_consumed >= 0),
+          expires_at TEXT,
+          granted_by_internal_user_id TEXT NOT NULL,
+          granted_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          revoked_at TEXT,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_subject,id),
+          FOREIGN KEY(workspace_id,connection_id)
+            REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE,
+          CHECK((scope_kind='workspace' AND project_id IS NULL AND scope_key='workspace') OR
+                (scope_kind='project' AND project_id IS NOT NULL AND scope_key='project:' || project_id)),
+          CHECK(max_uses IS NULL OR uses_consumed <= max_uses)
+        );
+        CREATE INDEX IF NOT EXISTS idx_capability_grant_lookup
+          ON capability_grant(workspace_id,owner_subject,capability_key,connection_id,consequence_class,scope_key,state);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_grant_active_exact
+          ON capability_grant(workspace_id,owner_subject,capability_key,connection_id,consequence_class,scope_key)
+          WHERE state='active';
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1213,8 +1259,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v22 is current; v22 -> v23 has no registered migration.
-        let err = apply(&conn, 22, 23).unwrap_err();
+        // v23 is current; v23 -> v24 has no registered migration.
+        let err = apply(&conn, 23, 24).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1352,6 +1398,35 @@ mod tests {
         assert!(table_exists(&conn, "mcp_local_server_config").unwrap());
         assert_eq!(
             conn.query_row("SELECT COUNT(*) FROM mcp_local_server_config", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn v22_to_v23_adds_empty_capability_grants_without_guessing_authority() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE workspace(id TEXT PRIMARY KEY);
+            CREATE TABLE connection_record(
+              workspace_id TEXT NOT NULL,
+              id TEXT NOT NULL,
+              PRIMARY KEY(workspace_id,id)
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 22, 23).unwrap();
+        apply(&conn, 22, 23).unwrap();
+
+        assert!(table_exists(&conn, "capability_grant").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM capability_grant", [], |row| {
                 row.get::<_, i64>(0)
             })
             .unwrap(),

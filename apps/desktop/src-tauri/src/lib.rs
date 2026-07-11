@@ -13,6 +13,7 @@ mod approvals;
 mod artifacts;
 mod authorized_scope;
 mod backends;
+mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
 mod cloud_sync;
@@ -263,6 +264,10 @@ pub fn run() {
             mcp_process::prepare_mcp_tool_call,
             mcp_process::authorize_mcp_tool_call,
             mcp_process::execute_approved_mcp_tool_call,
+            capability_grants::prepare_capability_grant,
+            capability_grants::commit_capability_grant,
+            capability_grants::list_capability_grants,
+            capability_grants::revoke_capability_grant,
             google::cancel_google_call,
             tools::execute_tool_call,
             store::encrypted_store_status,
