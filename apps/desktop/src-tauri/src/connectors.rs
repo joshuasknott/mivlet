@@ -1172,6 +1172,30 @@ fn require_connector_workspace(workspace_id: Option<String>) -> Result<(), Conne
     Ok(())
 }
 
+fn connector_authorization_context(
+    workspace_id: Option<String>,
+    connector_id: &str,
+) -> Result<
+    (
+        crate::clerk_identity::NativeIdentityGenerationSnapshot,
+        crate::authorized_scope::AuthorizedCommandScope,
+    ),
+    ConnectorCommandError,
+> {
+    let workspace_id = workspace_id
+        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    require_connector_workspace(Some(workspace_id.clone()))?;
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
+    Ok((identity, scope))
+}
+
 #[tauri::command]
 pub fn list_connector_statuses(
     app: tauri::AppHandle,
@@ -1191,12 +1215,17 @@ pub fn start_connector_auth(
     request: ConnectorAuthRequest,
     workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    let identity = crate::clerk_identity::native_identity_generation_snapshot()
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
-    start_auth(entry.id, entry.auth_mode, scopes, request, &identity)
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    start_auth(
+        entry.id,
+        entry.auth_mode,
+        scopes,
+        request,
+        &identity,
+        &scope,
+    )
 }
 
 #[tauri::command]
@@ -1205,11 +1234,9 @@ pub async fn complete_connector_auth(
     request: ConnectorAuthRequest,
     workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
-    let identity = crate::clerk_identity::native_identity_generation_snapshot()
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
-    complete_auth(&app, entry.id, request, &identity).await
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    complete_auth(&app, entry.id, request, &identity, &scope).await
 }
 
 /// Begin a loopback OAuth flow end-to-end: bind an exact desktop redirect,
@@ -1223,13 +1250,19 @@ pub async fn begin_connector_oauth(
     request: ConnectorAuthRequest,
     workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    let identity = crate::clerk_identity::native_identity_generation_snapshot()
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
-    oauth_loopback::run_loopback_oauth(&app, entry.id, entry.auth_mode, scopes, request, identity)
-        .await
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    oauth_loopback::run_loopback_oauth(
+        &app,
+        entry.id,
+        entry.auth_mode,
+        scopes,
+        request,
+        identity,
+        scope,
+    )
+    .await
 }
 
 #[tauri::command]

@@ -65,6 +65,8 @@ struct PendingOAuth {
     /// test/upgrade records may omit it, but production starts are always bound.
     #[serde(default)]
     fable_account_binding: Option<String>,
+    #[serde(default)]
+    local_workspace_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -372,7 +374,7 @@ fn start_with_store(
     config: OAuthProviderConfig,
     store: &dyn ConnectorSecretStore,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    start_with_store_bound(connector_id, redirect_uri, config, store, None)
+    start_with_store_bound(connector_id, redirect_uri, config, store, None, None)
 }
 
 fn start_with_store_bound(
@@ -381,6 +383,7 @@ fn start_with_store_bound(
     config: OAuthProviderConfig,
     store: &dyn ConnectorSecretStore,
     fable_account_binding: Option<String>,
+    local_workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let redirect = Url::parse(redirect_uri).map_err(|_| {
         command_error(
@@ -442,6 +445,7 @@ fn start_with_store_bound(
         brokered: config.brokered,
         created_at: now_epoch(),
         fable_account_binding,
+        local_workspace_id,
     };
     let encoded = serde_json::to_string(&pending).map_err(|_| {
         command_error(
@@ -736,6 +740,7 @@ async fn prepare_with_store(
     callback_url: &str,
     store: &dyn ConnectorSecretStore,
     expected_account_binding: Option<&str>,
+    expected_workspace_id: Option<&str>,
 ) -> Result<
     (
         StoredTokenSet,
@@ -826,6 +831,17 @@ async fn prepare_with_store(
             "needs-auth",
             connector_id,
             "Fable account changed during connector authorization; try again.",
+            false,
+        ));
+    }
+    if pending.local_workspace_id.as_deref() != expected_workspace_id {
+        store
+            .remove(&key)
+            .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+        return Err(command_error(
+            "needs-auth",
+            connector_id,
+            "Active workspace changed during connector authorization; try again.",
             false,
         ));
     }
@@ -1023,7 +1039,7 @@ async fn complete_with_store(
     store: &dyn ConnectorSecretStore,
 ) -> Result<(StoredTokenSet, ConnectorAccountSummary, String), ConnectorCommandError> {
     let (tokens, account, credential_ref, _rollback, encoded_tokens) =
-        prepare_with_store(connector_id, callback_url, store, None).await?;
+        prepare_with_store(connector_id, callback_url, store, None, None).await?;
     store
         .set(&credential_ref, &encoded_tokens)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
@@ -1246,6 +1262,7 @@ pub(crate) fn start_auth(
     scopes: Vec<String>,
     request: ConnectorAuthRequest,
     identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let redirect = request.redirect_uri.ok_or_else(|| {
         command_error(
@@ -1262,6 +1279,7 @@ pub(crate) fn start_auth(
         config,
         &NativeConnectorSecretStore,
         Some(identity.account_binding.clone()),
+        Some(scope.data.workspace_id().to_string()),
     )
 }
 
@@ -1270,6 +1288,7 @@ pub(crate) async fn complete_auth(
     connector_id: &str,
     request: ConnectorAuthRequest,
     identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let callback = request.callback_url.ok_or_else(|| {
         command_error(
@@ -1285,15 +1304,17 @@ pub(crate) async fn complete_auth(
         &callback,
         &secret_store,
         Some(&identity.account_binding),
+        Some(scope.data.workspace_id()),
     )
     .await?;
-    commit_prepared_auth(app, connector_id, identity, &secret_store, prepared)
+    commit_prepared_auth(app, connector_id, identity, scope, &secret_store, prepared)
 }
 
 fn commit_prepared_auth(
     app: &tauri::AppHandle,
     connector_id: &str,
     identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
     secret_store: &dyn ConnectorSecretStore,
     prepared: (
         StoredTokenSet,
@@ -1303,56 +1324,139 @@ fn commit_prepared_auth(
         String,
     ),
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    let (tokens, account, credential_ref, rollback, encoded_tokens) = prepared;
-    let _identity_guard = persist_credential_after_guard(
-        secret_store,
+    let path = connector_connections_path(app)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    commit_prepared_auth_state(
+        &path,
+        durable_store,
         connector_id,
-        &credential_ref,
-        &encoded_tokens,
+        scope,
+        secret_store,
+        prepared,
         || {
             crate::clerk_identity::lock_native_identity_generation(identity)
                 .map_err(|message| command_error("needs-auth", connector_id, &message, false))
         },
+    )
+}
+
+fn commit_prepared_auth_state<G>(
+    path: &Path,
+    durable_store: &crate::store::Store,
+    connector_id: &str,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    secret_store: &dyn ConnectorSecretStore,
+    prepared: (
+        StoredTokenSet,
+        ConnectorAccountSummary,
+        String,
+        CredentialRollback,
+        String,
+    ),
+    before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
+) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    let (tokens, account, credential_ref, rollback, encoded_tokens) = prepared;
+    let _commit_guard = persist_credential_after_guard(
+        secret_store,
+        connector_id,
+        &credential_ref,
+        &encoded_tokens,
+        before_commit,
     )?;
-    let metadata_result = (|| {
-        let timestamp = now_epoch().to_string();
-        let connection = ConnectorConnection {
-            connector_id: connector_id.to_string(),
-            account: account.clone(),
-            status: "connected".to_string(),
-            scopes: tokens.scopes,
-            expires_at: tokens.expires_at,
-            credential_ref,
-            connected_at: timestamp.clone(),
-            updated_at: timestamp,
-            is_active: true,
-        };
-        let path = connector_connections_path(app)?;
-        let mut connections = read_connections(&path)?;
-        // Multi-account: keep every other account for this connector, deactivate
-        // them (the freshly authenticated one becomes active), and replace the
-        // matching account in place if the user re-authenticated it. Connecting a
-        // brand-new account therefore never discards an existing one.
-        let mut replaced = false;
-        for existing in connections.iter_mut() {
-            if existing.connector_id == connector_id {
-                existing.is_active = false;
-                if existing.account.id == account.id {
-                    *existing = connection.clone();
-                    replaced = true;
-                }
+    let timestamp = now_epoch().to_string();
+    let connection = ConnectorConnection {
+        connector_id: connector_id.to_string(),
+        account: account.clone(),
+        status: "connected".to_string(),
+        scopes: tokens.scopes,
+        expires_at: tokens.expires_at,
+        credential_ref,
+        connected_at: timestamp.clone(),
+        updated_at: timestamp.clone(),
+        is_active: true,
+    };
+    let previous_connections = match read_connections(path) {
+        Ok(connections) => connections,
+        Err(error) => {
+            return finish_metadata_commit(Err(error), secret_store, rollback)
+                .map(|_| unreachable!())
+                .map_err(|message| command_error("unknown", connector_id, &message, false));
+        }
+    };
+    let mut connections = previous_connections.clone();
+    let mut replaced = false;
+    for existing in connections.iter_mut() {
+        if existing.connector_id == connector_id {
+            existing.is_active = false;
+            if existing.account.id == account.id {
+                *existing = connection.clone();
+                replaced = true;
             }
         }
-        if !replaced {
-            connections.insert(0, connection);
-        }
-        // Backfill `is_active` for any legacy entry missing the field: the most
-        // recently connected account per connector wins as active.
-        promote_single_active(&mut connections, connector_id);
-        write_connections(&path, &connections)
-    })();
-    finish_metadata_commit(metadata_result, secret_store, rollback)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    }
+    if !replaced {
+        connections.insert(0, connection);
+    }
+    promote_single_active(&mut connections, connector_id);
+    if let Err(error) = write_connections(path, &connections) {
+        return finish_metadata_commit(Err(error), secret_store, rollback)
+            .map(|_| unreachable!())
+            .map_err(|message| command_error("unknown", connector_id, &message, false));
+    }
+
+    let canonical_result = durable_store.transaction(|tx| {
+        let id = derive_native_connection_id(scope.data.workspace_id(), connector_id, &account.id);
+        let existing = crate::store::repos::connection_record::get(tx, durable_store, scope, &id)?;
+        let expected_revision = existing.as_ref().map(|record| record.revision);
+        let health_state = existing
+            .as_ref()
+            .map(|record| record.health_state.as_str())
+            .unwrap_or("unknown");
+        crate::store::repos::connection_record::upsert_native_connector(
+            tx,
+            durable_store,
+            scope,
+            crate::store::repos::connection_record::NativeConnectorConnectionWrite {
+                connector_definition_key: connector_id,
+                external_account_id: &account.id,
+                display_name: &account.display_name,
+                lifecycle: "authorized",
+                authorization_state: "authorized",
+                health_state,
+                credential_state: "available",
+                expected_revision,
+                updated_at: &timestamp,
+            },
+        )?;
+        Ok(())
+    });
+    if let Err(error) = canonical_result {
+        let metadata_restored = write_connections(path, &previous_connections).is_ok();
+        let credential_restored = rollback_credential(secret_store, rollback).is_ok();
+        return if metadata_restored && credential_restored {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                &error.to_string(),
+                false,
+            ))
+        } else {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                "Fable could not finish or fully restore connector authorization; reconnect this provider.",
+                false,
+            ))
+        };
+    }
     Ok(ConnectorAuthResult {
         connector_id: connector_id.to_string(),
         status: "connected".to_string(),
@@ -1360,7 +1464,7 @@ fn commit_prepared_auth(
         account: Some(safe_account_projection(
             &account,
             connector_id,
-            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            scope.data.workspace_id(),
         )),
         message: "Connector account authenticated.".to_string(),
     })
@@ -1875,6 +1979,12 @@ pub(crate) async fn access_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authorized_scope::{resolve, ScopeAccess};
+    use crate::store::repos::workspace_directory::{
+        clear_current_internal_user, set_current_internal_user,
+    };
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
     use std::sync::{Arc, Mutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -2127,6 +2237,7 @@ mod tests {
             fixture_config(),
             &store,
             Some("account-binding-a".into()),
+            Some("workspace-a".into()),
         )
         .unwrap();
         let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
@@ -2138,10 +2249,16 @@ mod tests {
             .into_owned();
         let callback = format!("http://127.0.0.1:43123/callback?code=code&state={state}");
 
-        let error = prepare_with_store("fixture", &callback, &store, Some("account-binding-b"))
-            .await
-            .err()
-            .unwrap();
+        let error = prepare_with_store(
+            "fixture",
+            &callback,
+            &store,
+            Some("account-binding-b"),
+            Some("workspace-a"),
+        )
+        .await
+        .err()
+        .unwrap();
         assert_eq!(error.code, "needs-auth");
         assert!(store
             .get(&pending_key("fixture", &state))
@@ -2149,6 +2266,39 @@ mod tests {
             .is_none());
         assert!(store
             .get(&native_connector_credential_ref("fixture", "account-1"))
+            .unwrap()
+            .is_none());
+
+        let started = start_with_store_bound(
+            "fixture",
+            "http://127.0.0.1:43123/callback",
+            fixture_config(),
+            &store,
+            Some("account-binding-a".into()),
+            Some("workspace-a".into()),
+        )
+        .unwrap();
+        let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
+        let state = authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let callback = format!("http://127.0.0.1:43123/callback?code=code&state={state}");
+        let error = prepare_with_store(
+            "fixture",
+            &callback,
+            &store,
+            Some("account-binding-a"),
+            Some("workspace-b"),
+        )
+        .await
+        .err()
+        .unwrap();
+        assert_eq!(error.code, "needs-auth");
+        assert!(store
+            .get(&pending_key("fixture", &state))
             .unwrap()
             .is_none());
     }
@@ -2180,6 +2330,105 @@ mod tests {
         );
         assert!(!error.message.contains("old-secret"));
         assert!(!error.message.contains("new-secret"));
+    }
+
+    #[test]
+    fn canonical_auth_commit_succeeds_and_stale_scope_restores_prior_stores() {
+        let durable =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let scope = durable
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
+                    [],
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                resolve(tx, Some("default"), None, ScopeAccess::Write)
+            })
+            .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "fable-canonical-auth-commit-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let secrets = MemoryStore::default();
+        let prepared = |account_id: &str| {
+            let credential_ref = native_connector_credential_ref("gmail", account_id);
+            let tokens = StoredTokenSet {
+                access_token: format!("access-{account_id}"),
+                refresh_token: Some(format!("refresh-{account_id}")),
+                token_type: "Bearer".into(),
+                expires_at: None,
+                scopes: vec!["gmail.readonly".into()],
+                revocation_endpoint: None,
+                token_endpoint: None,
+                handoff_endpoint: None,
+                client_id: "desktop-client".into(),
+                brokered: false,
+            };
+            let encoded = serde_json::to_string(&tokens).unwrap();
+            (
+                tokens,
+                ConnectorAccountSummary {
+                    id: account_id.into(),
+                    display_name: format!("Account {account_id}"),
+                    handle: None,
+                    email: None,
+                    workspace: None,
+                    avatar_url: None,
+                },
+                credential_ref.clone(),
+                CredentialRollback {
+                    credential_ref,
+                    previous_secret: None,
+                },
+                encoded,
+            )
+        };
+
+        let result = commit_prepared_auth_state(
+            &path,
+            &durable,
+            "gmail",
+            &scope,
+            &secrets,
+            prepared("account-1"),
+            || Ok(()),
+        )
+        .unwrap();
+        assert!(result.account.unwrap().id.starts_with("connection_"));
+        assert_eq!(read_connections(&path).unwrap().len(), 1);
+        assert_eq!(
+            durable
+                .with_conn(|tx| crate::store::repos::connection_record::list(tx, &durable, &scope))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        durable
+            .transaction(|tx| clear_current_internal_user(tx))
+            .unwrap();
+        let error = commit_prepared_auth_state(
+            &path,
+            &durable,
+            "gmail",
+            &scope,
+            &secrets,
+            prepared("account-2"),
+            || Ok(()),
+        )
+        .unwrap_err();
+        let connections = read_connections(&path).unwrap();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].account.id, "account-1");
+        assert!(secrets
+            .get(&native_connector_credential_ref("gmail", "account-2"))
+            .unwrap()
+            .is_none());
+        assert!(!error.message.contains("access-account-2"));
+        assert!(!error.message.contains("refresh-account-2"));
+        let _ = fs::remove_file(path);
     }
 
     #[tokio::test]

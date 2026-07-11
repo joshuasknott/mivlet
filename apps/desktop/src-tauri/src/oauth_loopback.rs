@@ -607,6 +607,7 @@ pub(crate) async fn run_loopback_oauth(
     scopes: Vec<String>,
     request: ConnectorAuthRequest,
     identity: crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    scope: crate::authorized_scope::AuthorizedCommandScope,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|_| {
         command_error(
@@ -631,6 +632,7 @@ pub(crate) async fn run_loopback_oauth(
             connector_id: connector_id.to_string(),
         },
         &identity,
+        &scope,
     )?;
     let authorization_url = started.authorization_url.clone().unwrap_or_default();
     open_browser(&authorization_url);
@@ -692,6 +694,7 @@ pub(crate) async fn run_loopback_oauth(
             connector_id: connector_id.to_string(),
         },
         &identity,
+        &scope,
     )
     .await;
 
