@@ -132,7 +132,8 @@ export const listRoster = queryGeneric({
   args: { workspaceId: v.string() },
   handler: async (ctx, args) => {
     const authz = await requireActiveMembership(ctx, args.workspaceId);
-    const memberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace", (q: any) => q.eq("workspaceId", args.workspaceId)).collect();
+    const memberships = (await ctx.db.query("workspace_memberships").withIndex("by_workspace", (q: any) => q.eq("workspaceId", args.workspaceId)).collect())
+      .filter((membership: any) => membership.status === "active" || membership.status === "suspended");
     if (memberships.length > MAX_ROSTER_MEMBERS) throw new CloudPolicyError("conflict", "The workspace member list is unavailable.", true);
     const now = Date.now();
     const members = [];

@@ -119,13 +119,16 @@ describe("hosted profile and roster handlers", () => {
     const bootstrap = await (bootstrapAccount as any)._handler(f.ctx, { idempotencyKey: "bootstrap", initialWorkspaceName: "A" });
     const workspaceId = bootstrap.workspaceId;
     f.tables.internal_users.push({ _id: "user:other", internalUserId: "u-other", status: "active", profile: { displayName: "Other", emailHint: "o***@example.com" }, profileObservedAt: Date.now(), createdAt: 1, updatedAt: 1, revision: 1 });
+    f.tables.internal_users.push({ _id: "user:removed", internalUserId: "u-removed", status: "active", profile: { displayName: "Removed" }, profileObservedAt: Date.now(), createdAt: 1, updatedAt: 1, revision: 1 });
     f.tables.workspace_memberships.push({ _id: "membership:other", memberId: "member-other", workspaceId, internalUserId: "u-other", role: "viewer", status: "suspended", revision: 2, createdAt: 1, updatedAt: 1, activatedAt: 1 });
+    f.tables.workspace_memberships.push({ _id: "membership:removed", memberId: "member-removed", workspaceId, internalUserId: "u-removed", role: "viewer", status: "removed", revision: 3, createdAt: 1, updatedAt: 1, activatedAt: 1, removedAt: 2 });
 
     const roster = await (listRoster as any)._handler(f.ctx, { workspaceId });
     expect(roster).toMatchObject({ workspaceId, actorRole: "owner" });
     expect(roster.members).toHaveLength(2);
     expect(roster.members.find((member: any) => member.memberId === "member-other")).toMatchObject({ role: "viewer", status: "suspended", displayName: "Other", isCurrentUser: false });
     expect(roster.members.find((member: any) => member.isCurrentUser)).toMatchObject({ role: "owner", displayName: "Owner" });
+    expect(JSON.stringify(roster)).not.toContain("Removed");
     expect(JSON.stringify(roster)).not.toContain("u-other");
 
     await expect((listRoster as any)._handler(f.ctx, { workspaceId: "ws-foreign" })).rejects.toThrow(/workspace/i);
