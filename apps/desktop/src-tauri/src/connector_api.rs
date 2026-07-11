@@ -424,6 +424,14 @@ pub(crate) async fn read_capability(
     app: &tauri::AppHandle,
     request: ConnectorCapabilityRequest,
 ) -> Result<ConnectorCapabilityResult, ConnectorCommandError> {
+    read_capability_for_connection(app, request, None).await
+}
+
+pub(crate) async fn read_capability_for_connection(
+    app: &tauri::AppHandle,
+    request: ConnectorCapabilityRequest,
+    expected_connection_id: Option<&str>,
+) -> Result<ConnectorCapabilityResult, ConnectorCommandError> {
     let connector_id = request.connector_id.clone();
     if !matches!(connector_id.as_str(), "github" | "vercel" | "linear") {
         return Err(error(
@@ -433,7 +441,12 @@ pub(crate) async fn read_capability(
             false,
         ));
     }
-    let token = provider_access_token(app, &connector_id).await?;
+    let token = crate::connector_auth::provider_access_token_for_connection(
+        app,
+        &connector_id,
+        expected_connection_id,
+    )
+    .await?;
     let (method, url, query, body) = map_read(&request)?;
     let response = request_json(&connector_id, &token, method, &url, &query, body).await?;
     let (items, cursor) = extract_items(&request, &response.value);

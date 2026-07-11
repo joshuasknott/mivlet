@@ -13,6 +13,7 @@ mod approvals;
 mod artifacts;
 mod authorized_scope;
 mod backends;
+mod capability_registry;
 mod clerk_identity;
 mod cloud_sync;
 mod codex_app_server;

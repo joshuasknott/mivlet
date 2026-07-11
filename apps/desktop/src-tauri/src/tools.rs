@@ -66,11 +66,12 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 12] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 13] = [
     "read-file",
     "write-file",
     "run-shell",
     "web-fetch",
+    "connection-read",
     "github-read",
     "vercel-read",
     "linear-read",
@@ -98,6 +99,11 @@ pub(crate) enum ToolOutcome {
     NeedsConnectorRead {
         request: crate::models::ConnectorCapabilityRequest,
     },
+    NeedsSemanticRead {
+        capability_id: String,
+        input: std::collections::BTreeMap<String, serde_json::Value>,
+        cursor: Option<String>,
+    },
     /// An authenticated, read-only Google Workspace request owned by Rust.
     NeedsGoogleRead {
         tool: String,
@@ -123,7 +129,7 @@ pub(crate) fn execute_tool(
         ToolOutcome::NeedsWebFetch { .. } => {
             Err("web-fetch must be executed through the async command boundary.".to_string())
         }
-        ToolOutcome::NeedsConnectorRead { .. } => {
+        ToolOutcome::NeedsConnectorRead { .. } | ToolOutcome::NeedsSemanticRead { .. } => {
             Err("connector reads must be executed through the async command boundary.".to_string())
         }
         ToolOutcome::NeedsGoogleRead { .. } => {
@@ -173,6 +179,14 @@ pub(crate) fn execute_tool_outcome(
             Ok(url) => ToolOutcome::NeedsWebFetch { url },
             Err(error) => ToolOutcome::Done(Err(error)),
         },
+        "connection-read" => match semantic_request_from_args(&arguments) {
+            Ok((capability_id, input, cursor)) => ToolOutcome::NeedsSemanticRead {
+                capability_id,
+                input,
+                cursor,
+            },
+            Err(error) => ToolOutcome::Done(Err(error)),
+        },
         "github-read" | "vercel-read" | "linear-read" => {
             let connector_id = tool.trim_end_matches("-read");
             match connector_request_from_args(connector_id, &arguments) {
@@ -205,7 +219,9 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
-        "github-read" | "vercel-read" | "linear-read" => Some(("read-only", "medium")),
+        "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
+            Some(("read-only", "medium"))
+        }
         "google-drive-read" => Some(("read-only", "low")),
         "gmail-read" => Some(("read-only", "medium")),
         "google-calendar-read" => Some(("read-only", "low")),
@@ -887,6 +903,31 @@ fn connector_request_from_args(
     })
 }
 
+fn semantic_request_from_args(
+    arguments: &serde_json::Value,
+) -> Result<
+    (
+        String,
+        std::collections::BTreeMap<String, serde_json::Value>,
+        Option<String>,
+    ),
+    String,
+> {
+    let capability_id = require_string_argument(arguments, "capability")?;
+    let input = arguments
+        .get("input")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let cursor = arguments
+        .get("cursor")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    Ok((capability_id, input, cursor))
+}
+
 // ---------------------------------------------------------------------------
 // Tauri command wrappers.
 // ---------------------------------------------------------------------------
@@ -1047,6 +1088,18 @@ pub async fn execute_tool_call(
             serde_json::to_string(&result)
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|_| "Fable could not encode the connector result.".to_string())
+        }
+        ToolOutcome::NeedsSemanticRead {
+            capability_id,
+            input,
+            cursor,
+        } => {
+            let result = crate::capability_registry::read(&app, capability_id, input, cursor)
+                .await
+                .map_err(|error| error.message)?;
+            serde_json::to_string(&result)
+                .map(|output| ToolResult { ok: true, output })
+                .map_err(|_| "Fable could not encode the capability result.".to_string())
         }
         ToolOutcome::NeedsGoogleRead { tool, arguments } => {
             crate::google::execute_read_tool(&app, &tool, &arguments)

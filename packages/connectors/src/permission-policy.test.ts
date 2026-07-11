@@ -58,6 +58,7 @@ describe("permission profile policy", () => {
     expect(effectForTool("read-file")).toBe("local-read");
     expect(effectForTool("write-file")).toBe("local-write");
     expect(effectForTool("run-shell")).toBe("shell-execution");
+    expect(effectForTool("connection-read")).toBe("connector-read");
     expect(effectForTool("gmail-read")).toBe("connector-read");
   });
 

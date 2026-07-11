@@ -242,6 +242,20 @@ describe("Google native read tools", () => {
   });
 });
 
+describe("semantic Connection read tool", () => {
+  it("advertises the provider-neutral repository capability", () => {
+    const tool = registeredToolSpecs().find((candidate) => candidate.name === "connection-read");
+    expect(tool).toBeDefined();
+    expect(JSON.parse(tool!.parameters)).toMatchObject({
+      required: ["capability", "input"],
+      properties: {
+        capability: { enum: ["source.repository.list"] }
+      }
+    });
+    expect(tool!.description.toLowerCase()).not.toContain("github");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Error handling.
 // ---------------------------------------------------------------------------

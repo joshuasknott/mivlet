@@ -130,6 +130,7 @@ export function effectForTool(toolName: string): PermissionEffect | null {
       return "shell-execution";
     case "web-fetch":
       return "web-fetch";
+    case "connection-read":
     case "github-read":
     case "vercel-read":
     case "linear-read":

@@ -66,7 +66,8 @@ pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
         "write-file" => Some("local-write"),
         "run-shell" => Some("shell-execution"),
         "web-fetch" => Some("web-fetch"),
-        "github-read"
+        "connection-read"
+        | "github-read"
         | "vercel-read"
         | "linear-read"
         | "google-drive-read"

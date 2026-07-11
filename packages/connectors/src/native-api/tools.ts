@@ -55,6 +55,21 @@ const TOOLS: Record<string, BackendTool> = {
       required: ["url"]
     })
   },
+  "connection-read": {
+    name: "connection-read",
+    description: "Read data through a semantic Fable capability using the best eligible Connection without choosing a provider brand.",
+    defaultMode: "read-only",
+    defaultRisk: "medium",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        capability: { type: "string", enum: ["source.repository.list"] },
+        input: { type: "object", additionalProperties: true },
+        cursor: { type: "string" }
+      },
+      required: ["capability", "input"]
+    })
+  },
   "github-read": connectorReadTool("github"),
   "vercel-read": connectorReadTool("vercel"),
   "linear-read": connectorReadTool("linear"),

@@ -2536,6 +2536,36 @@ fn unknown_tool_fails_closed_even_after_an_approval() {
 }
 
 #[test]
+fn semantic_connection_read_enters_only_the_async_resolver_boundary() {
+    let root = temp_workspace();
+    let arguments = serde_json::json!({
+        "capability": "source.repository.list",
+        "input": {}
+    });
+    let mut approval = tool_approval("connection-read", "read-only", "medium", None);
+    approval.action = "connection-read semantic capability".into();
+    approval.data_used = vec![
+        "capability: source.repository.list".into(),
+        "input: {}".into(),
+    ];
+    let request = tool_request("connection-read", arguments, approval, "once");
+
+    match crate::tools::execute_tool_outcome(request, &root) {
+        crate::tools::ToolOutcome::NeedsSemanticRead {
+            capability_id,
+            input,
+            cursor,
+        } => {
+            assert_eq!(capability_id, "source.repository.list");
+            assert!(input.is_empty());
+            assert!(cursor.is_none());
+        }
+        _ => panic!("semantic reads must defer only to the capability resolver"),
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn reshaped_high_risk_approval_fails_closed() {
     let root = temp_workspace();
     // The shell tries to downgrade a high-risk write to medium risk and drop the

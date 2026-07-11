@@ -2601,8 +2601,44 @@ pub(crate) async fn provider_access_token(
     app: &tauri::AppHandle,
     connector_id: &str,
 ) -> Result<String, ConnectorCommandError> {
-    let (_, tokens) = authorized_tokens(app, connector_id).await?;
+    provider_access_token_for_connection(app, connector_id, None).await
+}
+
+pub(crate) async fn provider_access_token_for_connection(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+    expected_connection_id: Option<&str>,
+) -> Result<String, ConnectorCommandError> {
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
+    let (connection, tokens) = authorized_tokens(app, connector_id).await?;
+    if let Some(expected) = expected_connection_id {
+        require_expected_connection(connector_id, &connection.account.id, expected)?;
+    }
+    let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+        .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
     Ok(tokens.access_token)
+}
+
+fn require_expected_connection(
+    connector_id: &str,
+    provider_account_id: &str,
+    expected_connection_id: &str,
+) -> Result<(), ConnectorCommandError> {
+    let actual = derive_native_connection_id(
+        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+        connector_id,
+        provider_account_id,
+    );
+    if actual != expected_connection_id {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "Active Connection changed before provider access.",
+            true,
+        ));
+    }
+    Ok(())
 }
 
 /// Resolve a usable access token entirely inside the Rust/keyring boundary.
@@ -3264,6 +3300,17 @@ mod tests {
         assert_eq!(accounts[0].credential_custody, "os-secure-store");
         assert_eq!(accounts[0].credential_state, "available");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn provider_access_binding_accepts_only_the_resolved_connection() {
+        let expected = derive_native_connection_id("default", "github", "account-a");
+        assert!(require_expected_connection("github", "account-a", &expected).is_ok());
+        let error = require_expected_connection("github", "account-b", &expected).unwrap_err();
+        assert_eq!(error.code, "conflict");
+        assert!(error.retryable);
+        assert!(!error.message.contains("account-a"));
+        assert!(!error.message.contains("account-b"));
     }
 
     // -------------------------------------------------------------------------
