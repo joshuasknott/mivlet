@@ -2736,6 +2736,31 @@
   resize: vertical;
 }
 
+.mcp-settings__server {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mcp-settings__access {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-2);
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.mcp-settings__access > small {
+  color: var(--ink-muted);
+}
+
+.mcp-settings__access label {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
 .settings-open-section {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

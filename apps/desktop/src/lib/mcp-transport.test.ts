@@ -3,6 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 const runtime = vi.hoisted(() => ({
   close: vi.fn(),
   listen: vi.fn(),
+  record: vi.fn(),
   spawn: vi.fn(),
   write: vi.fn()
 }));
@@ -10,6 +11,7 @@ const runtime = vi.hoisted(() => ({
 vi.mock("../runtime", () => ({
   closeRuntimeMcpProcess: runtime.close,
   listenRuntimeMcpFrames: runtime.listen,
+  recordRuntimeMcpDiscovery: runtime.record,
   spawnRuntimeMcpProcess: runtime.spawn,
   writeRuntimeMcpFrame: runtime.write
 }));
@@ -37,6 +39,7 @@ beforeEach(() => {
     return unlisten;
   });
   runtime.write.mockReset().mockResolvedValue(null);
+  runtime.record.mockReset().mockResolvedValue({ discoveryState: "discovered" });
   runtime.close.mockReset().mockResolvedValue(null);
 });
 
@@ -92,5 +95,16 @@ describe("desktop MCP transport", () => {
     await Promise.all([transport!.close(), transport!.close()]);
     expect(runtime.close).toHaveBeenCalledTimes(1);
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("records discovery against the live native session", async () => {
+    const transport = await createDesktopMcpTransport("workspace-a", "files");
+    await transport!.recordDiscovery(["read"], ["file:///safe"]);
+    expect(runtime.record).toHaveBeenCalledWith(
+      "workspace-a",
+      "mcp-1234567890abcdef1234567890abcdef",
+      ["read"],
+      ["file:///safe"]
+    );
   });
 });

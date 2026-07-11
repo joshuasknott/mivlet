@@ -31,6 +31,8 @@ struct McpChild {
     stdin: Option<mpsc::Sender<String>>,
     workspace_id: String,
     owner_subject: String,
+    connection_id: String,
+    connection_revision: i64,
 }
 
 type ProcessMap = HashMap<String, McpChild>;
@@ -53,6 +55,8 @@ pub struct SpawnedMcpProcess {
     session_id: String,
     channel: String,
     launch_reference: String,
+    connection_id: String,
+    connection_revision: i64,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -93,6 +97,25 @@ pub struct PreparedMcpServerConfiguration {
 pub struct CommitMcpServerConfigurationRequest {
     configuration: McpServerConfiguration,
     resolution: crate::models::ApprovalResolutionRequest,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordMcpDiscoveryRequest {
+    workspace_id: String,
+    session_id: String,
+    tools: Vec<String>,
+    resources: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMcpEnablementRequest {
+    workspace_id: String,
+    connection_id: String,
+    expected_revision: i64,
+    enabled_tools: Vec<String>,
+    enabled_resources: Vec<String>,
 }
 
 #[tauri::command]
@@ -200,6 +223,73 @@ pub fn list_mcp_server_configurations(
 }
 
 #[tauri::command]
+pub fn record_mcp_server_discovery(
+    request: RecordMcpDiscoveryRequest,
+) -> Result<crate::store::repos::connection_record::SafeMcpConnectionDetails, String> {
+    if !valid_session_id(&request.session_id) {
+        return Err("The MCP session id is invalid.".to_string());
+    }
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let (connection_id, connection_revision) = {
+        let map = process_map()
+            .lock()
+            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+        let process = map
+            .get(&request.session_id)
+            .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
+        require_session_owner(process, &scope)?;
+        (process.connection_id.clone(), process.connection_revision)
+    };
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            crate::store::repos::connection_record::record_mcp_discovery(
+                tx,
+                store,
+                &scope,
+                &connection_id,
+                connection_revision,
+                request.tools,
+                request.resources,
+                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_mcp_server_enablement(
+    request: SetMcpEnablementRequest,
+) -> Result<crate::store::repos::connection_record::SafeMcpConnectionDetails, String> {
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            crate::store::repos::connection_record::set_mcp_enablement(
+                tx,
+                store,
+                &scope,
+                &request.connection_id,
+                request.expected_revision,
+                request.enabled_tools,
+                request.enabled_resources,
+                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn spawn_mcp_process(
     app: AppHandle,
     request: SpawnMcpProcessRequest,
@@ -225,6 +315,16 @@ pub async fn spawn_mcp_process(
     if launch.metadata.disabled {
         return Err("This local MCP server is disabled.".to_string());
     }
+    let connection = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_details_for_launch(
+                tx,
+                store,
+                &scope,
+                &request.launch_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?;
 
     let executable = validate_executable(&launch.command)?;
     let workspace_root = crate::tools::resolve_workspace_root(&app)?;
@@ -303,12 +403,16 @@ pub async fn spawn_mcp_process(
                 stdin: Some(stdin_tx),
                 workspace_id: scope.data.workspace_id().to_string(),
                 owner_subject: scope.private.owner_subject().to_string(),
+                connection_id: connection.connection_id.clone(),
+                connection_revision: connection.connection_revision,
             },
         );
     Ok(SpawnedMcpProcess {
         session_id,
         channel,
         launch_reference: launch.metadata.id,
+        connection_id: connection.connection_id,
+        connection_revision: connection.connection_revision,
     })
 }
 

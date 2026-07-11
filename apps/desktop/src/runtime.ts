@@ -2940,6 +2940,20 @@ export interface RuntimeSpawnedMcpProcess {
   sessionId: string;
   channel: string;
   launchReference: string;
+  connectionId: string;
+  connectionRevision: number;
+}
+
+export interface RuntimeMcpConnectionDetails {
+  connectionId: string;
+  connectionRevision: number;
+  launchReference: string;
+  discoveryState: string;
+  discoveredAt?: string;
+  discoveredTools: string[];
+  discoveredResources: string[];
+  enabledTools: string[];
+  enabledResources: string[];
 }
 
 export interface RuntimeMcpServerConfiguration {
@@ -3023,6 +3037,39 @@ export async function closeRuntimeMcpProcess(workspaceId: string, sessionId: str
   try {
     return await invoke<null>("close_mcp_process", {
       request: { workspaceId, sessionId }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function recordRuntimeMcpDiscovery(
+  workspaceId: string,
+  sessionId: string,
+  tools: string[],
+  resources: string[]
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeMcpConnectionDetails>("record_mcp_server_discovery", {
+      request: { workspaceId, sessionId, tools, resources }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function setRuntimeMcpEnablement(
+  workspaceId: string,
+  connectionId: string,
+  expectedRevision: number,
+  enabledTools: string[],
+  enabledResources: string[]
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeMcpConnectionDetails>("set_mcp_server_enablement", {
+      request: { workspaceId, connectionId, expectedRevision, enabledTools, enabledResources }
     });
   } catch (error) {
     throw toRuntimeError(error);

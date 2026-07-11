@@ -6,7 +6,8 @@ const runtime = vi.hoisted(() => ({
   commit: vi.fn(),
   list: vi.fn(),
   prepare: vi.fn(),
-  resolve: vi.fn()
+  resolve: vi.fn(),
+  setEnablement: vi.fn()
 }));
 const transportFactory = vi.hoisted(() => vi.fn());
 
@@ -14,7 +15,8 @@ vi.mock("../../runtime", () => ({
   commitRuntimeMcpServerConfiguration: runtime.commit,
   listRuntimeMcpServerConfigurations: runtime.list,
   prepareRuntimeMcpServerConfiguration: runtime.prepare,
-  resolveRuntimeApprovalRequest: runtime.resolve
+  resolveRuntimeApprovalRequest: runtime.resolve,
+  setRuntimeMcpEnablement: runtime.setEnablement
 }));
 vi.mock("../../lib/mcp-transport", () => ({
   createDesktopMcpTransport: transportFactory
@@ -62,6 +64,18 @@ class FixtureTransport implements McpTransport {
     return () => { this.handler = undefined; };
   }
   subscribeClose(): () => void { return () => undefined; }
+  async recordDiscovery(): Promise<unknown> {
+    return {
+      connectionId: "connection-mcp",
+      connectionRevision: 2,
+      launchReference: "local-files",
+      discoveryState: "discovered",
+      discoveredTools: ["read"],
+      discoveredResources: ["file:///safe"],
+      enabledTools: [],
+      enabledResources: []
+    };
+  }
   async close(): Promise<void> {}
 }
 
@@ -70,6 +84,11 @@ beforeEach(() => {
   runtime.list.mockReset().mockResolvedValue([]);
   runtime.prepare.mockReset().mockResolvedValue({ configurationFingerprint: "abc", approval });
   runtime.resolve.mockReset().mockResolvedValue({ persisted: true });
+  runtime.setEnablement.mockReset().mockImplementation(async (_workspace, _connection, revision, tools, resources) => ({
+    connectionId: "connection-mcp", connectionRevision: revision + 1, launchReference: "local-files",
+    discoveryState: "discovered", discoveredTools: ["read"], discoveredResources: ["file:///safe"],
+    enabledTools: tools, enabledResources: resources
+  }));
   transportFactory.mockReset().mockResolvedValue(new FixtureTransport());
 });
 
@@ -101,7 +120,7 @@ describe("LocalMcpSettings", () => {
     });
     await waitFor(() => expect(runtime.commit).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Local files")).toBeInTheDocument();
-    expect(screen.getByText("Saved locally · No tools enabled")).toBeInTheDocument();
+    expect(screen.getByText("Saved locally · No tools enabled by default")).toBeInTheDocument();
   });
 
   it("checks discovery without authorizing a tool call", async () => {
@@ -112,6 +131,12 @@ describe("LocalMcpSettings", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
     await waitFor(() => expect(status).toHaveBeenCalledWith(
       "Local files responded with 1 tool and 1 resource. Nothing was enabled."
+    ));
+    const access = screen.getByLabelText("Local files access");
+    fireEvent.click(within(access).getByLabelText("read"));
+    fireEvent.click(within(access).getByRole("button", { name: "Save access" }));
+    await waitFor(() => expect(runtime.setEnablement).toHaveBeenCalledWith(
+      "workspace-a", "connection-mcp", 2, ["read"], []
     ));
   });
 

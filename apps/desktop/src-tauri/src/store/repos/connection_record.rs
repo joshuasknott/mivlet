@@ -73,7 +73,31 @@ enum ConnectionTransport {
         transport: String,
         local_launch_reference: String,
         discovery_state: String,
+        #[serde(default)]
+        discovered_at: Option<String>,
+        #[serde(default)]
+        discovered_tools: Vec<String>,
+        #[serde(default)]
+        discovered_resources: Vec<String>,
+        #[serde(default)]
+        enabled_tools: Vec<String>,
+        #[serde(default)]
+        enabled_resources: Vec<String>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafeMcpConnectionDetails {
+    pub connection_id: String,
+    pub connection_revision: i64,
+    pub launch_reference: String,
+    pub discovery_state: String,
+    pub discovered_at: Option<String>,
+    pub discovered_tools: Vec<String>,
+    pub discovered_resources: Vec<String>,
+    pub enabled_tools: Vec<String>,
+    pub enabled_resources: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -349,6 +373,11 @@ pub fn upsert_mcp_stdio(
             transport: "stdio".into(),
             local_launch_reference: launch_reference,
             discovery_state: "not-started".into(),
+            discovered_at: None,
+            discovered_tools: Vec::new(),
+            discovered_resources: Vec::new(),
+            enabled_tools: Vec::new(),
+            enabled_resources: Vec::new(),
         },
     };
     if existing.is_some() {
@@ -410,6 +439,191 @@ pub fn upsert_mcp_stdio(
     }
     get(tx, store, scope, &id)?
         .ok_or_else(|| StoreError::Invalid("MCP Connection could not be read after save.".into()))
+}
+
+pub(crate) fn mcp_details_for_launch(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    launch_reference: &str,
+) -> Result<SafeMcpConnectionDetails> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let launch_reference =
+        crate::store::repos::scope::normalize_id(launch_reference, "MCP launch reference")?;
+    let id = derive_mcp_connection_id(
+        scope.data.workspace_id(),
+        scope.private.owner_subject(),
+        &launch_reference,
+    );
+    let row = tx
+        .query_row(
+            &format!("{SELECT} WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL"),
+            rusqlite::params![scope.data.workspace_id(), id],
+            read_partial,
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
+    mcp_projection(store, &row)
+}
+
+pub(crate) fn record_mcp_discovery(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+    expected_revision: i64,
+    tools: Vec<String>,
+    resources: Vec<String>,
+    observed_at: &str,
+) -> Result<SafeMcpConnectionDetails> {
+    require_current_scope(tx, scope, ScopeAccess::Write)?;
+    let row = tx
+        .query_row(
+            &format!("{SELECT} WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL"),
+            rusqlite::params![scope.data.workspace_id(), connection_id],
+            read_partial,
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
+    if row.kind != "mcp" || row.revision != expected_revision {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed during discovery.".into(),
+        ));
+    }
+    let tools = normalized_discovery_values(tools, "tool", 256, 256)?;
+    let resources = normalized_discovery_values(resources, "resource", 256, 2_048)?;
+    let mut content = open_content(store, &row)?;
+    let ConnectionTransport::Mcp {
+        discovery_state,
+        discovered_at,
+        discovered_tools,
+        discovered_resources,
+        enabled_tools,
+        enabled_resources,
+        ..
+    } = &mut content.transport
+    else {
+        return Err(StoreError::Invalid(
+            "Connection content conflicts with its MCP identity.".into(),
+        ));
+    };
+    *discovery_state = "discovered".into();
+    *discovered_at = Some(observed_at.to_string());
+    *discovered_tools = tools;
+    *discovered_resources = resources;
+    enabled_tools.retain(|name| discovered_tools.binary_search(name).is_ok());
+    enabled_resources.retain(|uri| discovered_resources.binary_search(uri).is_ok());
+    let sealed = seal_json(
+        store,
+        &serde_json::to_value(content)
+            .map_err(|_| StoreError::Invalid("MCP discovery is invalid.".into()))?,
+        &aad(scope.data.workspace_id(), connection_id),
+    )?;
+    let changed = tx.execute(
+        "UPDATE connection_record SET revision=revision+1,health_state='healthy',updated_at=?1,
+           payload=?2,payload_nonce=?3
+         WHERE workspace_id=?4 AND id=?5 AND revision=?6 AND kind='mcp'
+           AND authority='local' AND deleted_at IS NULL;",
+        rusqlite::params![
+            observed_at,
+            sealed.ciphertext,
+            sealed.nonce,
+            scope.data.workspace_id(),
+            connection_id,
+            expected_revision
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before discovery was saved.".into(),
+        ));
+    }
+    mcp_details_for_id(tx, store, scope, connection_id)
+}
+
+pub(crate) fn set_mcp_enablement(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+    expected_revision: i64,
+    enabled_tools: Vec<String>,
+    enabled_resources: Vec<String>,
+    updated_at: &str,
+) -> Result<SafeMcpConnectionDetails> {
+    require_current_scope(tx, scope, ScopeAccess::Write)?;
+    let row = tx
+        .query_row(
+            &format!("{SELECT} WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL"),
+            rusqlite::params![scope.data.workspace_id(), connection_id],
+            read_partial,
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
+    if row.kind != "mcp" || row.revision != expected_revision {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before access was saved.".into(),
+        ));
+    }
+    let mut content = open_content(store, &row)?;
+    let ConnectionTransport::Mcp {
+        discovery_state,
+        discovered_tools,
+        discovered_resources,
+        enabled_tools: stored_tools,
+        enabled_resources: stored_resources,
+        ..
+    } = &mut content.transport
+    else {
+        return Err(StoreError::Invalid(
+            "Connection content conflicts with its MCP identity.".into(),
+        ));
+    };
+    if discovery_state != "discovered" {
+        return Err(StoreError::Invalid(
+            "MCP access cannot be enabled before discovery.".into(),
+        ));
+    }
+    let enabled_tools = normalized_discovery_values(enabled_tools, "tool", 256, 256)?;
+    let enabled_resources = normalized_discovery_values(enabled_resources, "resource", 256, 2_048)?;
+    if enabled_tools
+        .iter()
+        .any(|name| discovered_tools.binary_search(name).is_err())
+        || enabled_resources
+            .iter()
+            .any(|uri| discovered_resources.binary_search(uri).is_err())
+    {
+        return Err(StoreError::Invalid(
+            "MCP access includes an item that was not discovered on this Connection.".into(),
+        ));
+    }
+    *stored_tools = enabled_tools;
+    *stored_resources = enabled_resources;
+    let sealed = seal_json(
+        store,
+        &serde_json::to_value(content)
+            .map_err(|_| StoreError::Invalid("MCP enablement is invalid.".into()))?,
+        &aad(scope.data.workspace_id(), connection_id),
+    )?;
+    let changed = tx.execute(
+        "UPDATE connection_record SET revision=revision+1,updated_at=?1,payload=?2,payload_nonce=?3
+         WHERE workspace_id=?4 AND id=?5 AND revision=?6 AND kind='mcp'
+           AND authority='local' AND deleted_at IS NULL;",
+        rusqlite::params![
+            updated_at,
+            sealed.ciphertext,
+            sealed.nonce,
+            scope.data.workspace_id(),
+            connection_id,
+            expected_revision
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before access was saved.".into(),
+        ));
+    }
+    mcp_details_for_id(tx, store, scope, connection_id)
 }
 
 pub fn get(
@@ -574,12 +788,7 @@ fn read_partial(row: &rusqlite::Row<'_>) -> rusqlite::Result<Partial> {
 }
 
 fn open_safe(store: &Store, row: Partial) -> Result<SafeConnectionRecord> {
-    let content: ConnectionContent = serde_json::from_value(open_json(
-        store,
-        &row.sealed,
-        &aad(&row.workspace_id, &row.id),
-    )?)
-    .map_err(|_| StoreError::Invalid("Connection content is invalid.".into()))?;
+    let content = open_content(store, &row)?;
     match &content.transport {
         ConnectionTransport::NativeConnector {
             connector_definition_key,
@@ -590,6 +799,7 @@ fn open_safe(store: &Store, row: Partial) -> Result<SafeConnectionRecord> {
             transport,
             local_launch_reference,
             discovery_state,
+            ..
         } if row.kind == "mcp"
             && row.connector_definition_key.is_none()
             && transport == "stdio"
@@ -620,6 +830,87 @@ fn open_safe(store: &Store, row: Partial) -> Result<SafeConnectionRecord> {
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+fn open_content(store: &Store, row: &Partial) -> Result<ConnectionContent> {
+    serde_json::from_value(open_json(
+        store,
+        &row.sealed,
+        &aad(&row.workspace_id, &row.id),
+    )?)
+    .map_err(|_| StoreError::Invalid("Connection content is invalid.".into()))
+}
+
+fn mcp_details_for_id(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+) -> Result<SafeMcpConnectionDetails> {
+    let row = tx.query_row(
+        &format!("{SELECT} WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL"),
+        rusqlite::params![scope.data.workspace_id(), connection_id],
+        read_partial,
+    )?;
+    mcp_projection(store, &row)
+}
+
+fn mcp_projection(store: &Store, row: &Partial) -> Result<SafeMcpConnectionDetails> {
+    if row.kind != "mcp" {
+        return Err(StoreError::Invalid(
+            "Connection is not an MCP Connection.".into(),
+        ));
+    }
+    let content = open_content(store, row)?;
+    let ConnectionTransport::Mcp {
+        transport,
+        local_launch_reference,
+        discovery_state,
+        discovered_at,
+        discovered_tools,
+        discovered_resources,
+        enabled_tools,
+        enabled_resources,
+    } = content.transport
+    else {
+        return Err(StoreError::Invalid(
+            "Connection content conflicts with its MCP identity.".into(),
+        ));
+    };
+    if transport != "stdio" {
+        return Err(StoreError::Invalid("MCP transport is unavailable.".into()));
+    }
+    Ok(SafeMcpConnectionDetails {
+        connection_id: row.id.clone(),
+        connection_revision: row.revision,
+        launch_reference: local_launch_reference,
+        discovery_state,
+        discovered_at,
+        discovered_tools,
+        discovered_resources,
+        enabled_tools,
+        enabled_resources,
+    })
+}
+
+fn normalized_discovery_values(
+    values: Vec<String>,
+    label: &str,
+    max_items: usize,
+    max_chars: usize,
+) -> Result<Vec<String>> {
+    if values.len() > max_items {
+        return Err(StoreError::Invalid(format!(
+            "MCP {label} discovery exceeds the supported limit."
+        )));
+    }
+    let mut normalized = values
+        .into_iter()
+        .map(|value| bounded(&value, &format!("MCP {label}"), max_chars))
+        .collect::<Result<Vec<_>>>()?;
+    normalized.sort();
+    normalized.dedup();
+    Ok(normalized)
 }
 
 fn bounded(value: &str, label: &str, max: usize) -> Result<String> {
@@ -978,6 +1269,70 @@ mod tests {
                 0
             )
         );
+
+        let discovered = store
+            .transaction(|tx| {
+                record_mcp_discovery(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    created.revision,
+                    vec!["write".into(), "read".into(), "read".into()],
+                    vec!["file:///safe".into()],
+                    "2026-07-11T20:01:00Z",
+                )
+            })
+            .unwrap();
+        assert_eq!(discovered.connection_revision, 2);
+        assert_eq!(discovered.discovery_state, "discovered");
+        assert_eq!(discovered.discovered_tools, ["read", "write"]);
+        assert!(discovered.enabled_tools.is_empty());
+        assert!(store
+            .transaction(|tx| {
+                set_mcp_enablement(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    discovered.connection_revision,
+                    vec!["not-discovered".into()],
+                    Vec::new(),
+                    "2026-07-11T20:01:30Z",
+                )
+            })
+            .is_err());
+        let enabled = store
+            .transaction(|tx| {
+                set_mcp_enablement(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    discovered.connection_revision,
+                    vec!["read".into()],
+                    vec!["file:///safe".into()],
+                    "2026-07-11T20:01:30Z",
+                )
+            })
+            .unwrap();
+        assert_eq!(enabled.connection_revision, 3);
+        assert_eq!(enabled.enabled_tools, ["read"]);
+        assert_eq!(enabled.enabled_resources, ["file:///safe"]);
+        assert!(store
+            .transaction(|tx| {
+                record_mcp_discovery(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    created.revision,
+                    vec!["forged".into()],
+                    Vec::new(),
+                    "2026-07-11T20:02:00Z",
+                )
+            })
+            .is_err());
     }
 
     #[test]

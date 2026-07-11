@@ -6,6 +6,8 @@ import {
   listRuntimeMcpServerConfigurations,
   prepareRuntimeMcpServerConfiguration,
   resolveRuntimeApprovalRequest,
+  setRuntimeMcpEnablement,
+  type RuntimeMcpConnectionDetails,
   type RuntimeMcpServerConfiguration,
   type RuntimeMcpServerSummary
 } from "../../runtime";
@@ -33,6 +35,8 @@ export function LocalMcpSettings({
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [discoveries, setDiscoveries] = useState<Record<string, RuntimeMcpConnectionDetails>>({});
+  const [enablementDrafts, setEnablementDrafts] = useState<Record<string, { tools: string[]; resources: string[] }>>({});
 
   const refresh = async () => {
     const loaded = await listRuntimeMcpServerConfigurations(workspaceId);
@@ -108,6 +112,18 @@ export function LocalMcpSettings({
       const initialized = await client.initialize();
       const tools = initialized.capabilities.tools ? await client.listTools() : [];
       const resources = initialized.capabilities.resources ? await client.listResources() : [];
+      const discovery = await transport.recordDiscovery(
+        tools.map((tool) => tool.name),
+        resources.map((resource) => resource.uri)
+      );
+      setDiscoveries((current) => ({ ...current, [server.id]: discovery }));
+      setEnablementDrafts((current) => ({
+        ...current,
+        [server.id]: {
+          tools: discovery.enabledTools,
+          resources: discovery.enabledResources
+        }
+      }));
       onStatus(
         `${server.displayName} responded with ${tools.length} tool${tools.length === 1 ? "" : "s"} and ${resources.length} resource${resources.length === 1 ? "" : "s"}. Nothing was enabled.`
       );
@@ -116,6 +132,45 @@ export function LocalMcpSettings({
     } finally {
       await client?.close().catch(() => undefined);
       setCheckingId(null);
+    }
+  };
+
+  const toggleDraft = (serverId: string, kind: "tools" | "resources", value: string) => {
+    setEnablementDrafts((current) => {
+      const draft = current[serverId] ?? { tools: [], resources: [] };
+      const values = draft[kind];
+      return {
+        ...current,
+        [serverId]: {
+          ...draft,
+          [kind]: values.includes(value)
+            ? values.filter((candidate) => candidate !== value)
+            : [...values, value]
+        }
+      };
+    });
+  };
+
+  const saveEnablement = async (server: RuntimeMcpServerSummary) => {
+    const discovery = discoveries[server.id];
+    const draft = enablementDrafts[server.id];
+    if (!discovery || !draft) return;
+    setBusy(true);
+    try {
+      const saved = await setRuntimeMcpEnablement(
+        workspaceId,
+        discovery.connectionId,
+        discovery.connectionRevision,
+        draft.tools,
+        draft.resources
+      );
+      if (!saved) throw new Error("Local tool access requires the desktop app.");
+      setDiscoveries((current) => ({ ...current, [server.id]: saved }));
+      onStatus(`Access saved for ${server.displayName}. Tool calls still require Fable permission.`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Local tool access couldn’t be saved.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -145,22 +200,43 @@ export function LocalMcpSettings({
               <>
               {servers.length > 0 ? (
                 <div className="provider-access-list">
-                  {servers.map((server) => (
-                    <div className="provider-access-row" key={server.id}>
-                      <span>
-                        <strong>{server.displayName}</strong>
-                        <small>{server.disabled ? "Off" : "Saved locally · No tools enabled"}</small>
-                      </span>
-                      <button
-                        type="button"
-                        className="button button--secondary"
-                        disabled={checkingId === server.id || server.disabled}
-                        onClick={() => void check(server)}
-                      >
-                        {checkingId === server.id ? "Checking…" : "Check server"}
-                      </button>
+                  {servers.map((server) => {
+                    const discovery = discoveries[server.id];
+                    const draft = enablementDrafts[server.id];
+                    return <div className="mcp-settings__server" key={server.id}>
+                      <div className="provider-access-row">
+                        <span>
+                          <strong>{server.displayName}</strong>
+                          <small>{server.disabled ? "Off" : "Saved locally · No tools enabled by default"}</small>
+                        </span>
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          disabled={checkingId === server.id || server.disabled}
+                          onClick={() => void check(server)}
+                        >
+                          {checkingId === server.id ? "Checking…" : "Check server"}
+                        </button>
+                      </div>
+                      {discovery && draft ? (
+                        <div className="mcp-settings__access" aria-label={`${server.displayName} access`}>
+                          <strong>Available access</strong>
+                          <small>Select only what Fable may consider using. Every tool call still passes Fable permissions and approval.</small>
+                          {[...discovery.discoveredTools.map((value) => ({ kind: "tools" as const, value })), ...discovery.discoveredResources.map((value) => ({ kind: "resources" as const, value }))].map((item) => (
+                            <label key={`${item.kind}:${item.value}`}>
+                              <input
+                                type="checkbox"
+                                checked={draft[item.kind].includes(item.value)}
+                                onChange={() => toggleDraft(server.id, item.kind, item.value)}
+                              />
+                              <span>{item.value}</span>
+                            </label>
+                          ))}
+                          <button type="button" className="button button--secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
+                        </div>
+                      ) : null}
                     </div>
-                  ))}
+                  })}
                 </div>
               ) : <p>No local tool servers saved.</p>}
 

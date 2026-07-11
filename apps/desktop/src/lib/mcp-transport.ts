@@ -10,16 +10,22 @@ import {
 import {
   closeRuntimeMcpProcess,
   listenRuntimeMcpFrames,
+  recordRuntimeMcpDiscovery,
   spawnRuntimeMcpProcess,
   writeRuntimeMcpFrame
 } from "../runtime";
+import type { RuntimeMcpConnectionDetails } from "../runtime";
+
+export interface DesktopMcpTransportHandle extends McpTransport {
+  recordDiscovery(tools: string[], resources: string[]): Promise<RuntimeMcpConnectionDetails>;
+}
 
 function hasDesktopRuntime(): boolean {
   return typeof window !== "undefined" &&
     Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 }
 
-class DesktopMcpTransport implements McpTransport {
+class DesktopMcpTransport implements DesktopMcpTransportHandle {
   private readonly frameHandlers = new Set<(frame: McpFrame) => void>();
   private readonly closeHandlers = new Set<() => void>();
   private closed = false;
@@ -62,6 +68,16 @@ class DesktopMcpTransport implements McpTransport {
     return () => this.closeHandlers.delete(handler);
   }
 
+  async recordDiscovery(
+    tools: string[],
+    resources: string[]
+  ): Promise<RuntimeMcpConnectionDetails> {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const recorded = await recordRuntimeMcpDiscovery(this.workspaceId, this.sessionId, tools, resources);
+    if (!recorded) throw new Error("MCP discovery requires the desktop app.");
+    return recorded;
+  }
+
   close(): Promise<void> {
     this.markClosed();
     return this.beginNativeClose();
@@ -89,7 +105,7 @@ class DesktopMcpTransport implements McpTransport {
 export async function createDesktopMcpTransport(
   workspaceId: string,
   launchReference: string
-): Promise<McpTransport | null> {
+): Promise<DesktopMcpTransportHandle | null> {
   if (!hasDesktopRuntime()) return null;
   const spawned = await spawnRuntimeMcpProcess(workspaceId, launchReference);
   if (!spawned) return null;

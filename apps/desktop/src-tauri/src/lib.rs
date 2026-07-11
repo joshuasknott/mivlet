@@ -253,6 +253,8 @@ pub fn run() {
             mcp_process::prepare_mcp_server_configuration,
             mcp_process::commit_mcp_server_configuration,
             mcp_process::list_mcp_server_configurations,
+            mcp_process::record_mcp_server_discovery,
+            mcp_process::set_mcp_server_enablement,
             google::cancel_google_call,
             tools::execute_tool_call,
             store::encrypted_store_status,
