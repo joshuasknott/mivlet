@@ -255,6 +255,9 @@ describe("semantic Connection read tool", () => {
       }
     });
     expect(tool!.description.toLowerCase()).not.toContain("github");
+    expect(tool!.description).toContain("exact citationId");
+    expect(tool!.description).toContain("external untrusted evidence");
+    expect(tool!.description).toContain("Sources list");
   });
 });
 

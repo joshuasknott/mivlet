@@ -26,8 +26,7 @@ import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
 import { streamOllamaEvents } from "./ollama";
 import { streamOpenAiEvents } from "./openai-compat";
-import { registeredToolSpecs } from "./tools";
-import { lookupTool } from "./tools";
+import { CONNECTED_SOURCE_BRIEF_GUIDANCE, lookupTool, registeredToolSpecs } from "./tools";
 import type { HttpTransport } from "./transport";
 import { classifyBackendError } from "../agent-runtime/utils/errors";
 import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
@@ -145,8 +144,14 @@ export async function* runAgentLoop(
   const maxTurns = options.maxTurns ?? 8;
   const permissionMode = options.permissionMode ?? "full-access";
   const execute = permissionGatedExecutor(options.execute, permissionMode);
-  const messages: NativeMessage[] = options.contextPrefix
-    ? [{ role: "system", content: options.contextPrefix }, ...request.messages]
+  const systemPrefix = [
+    options.contextPrefix?.trim(),
+    tools.some((tool) => tool.name === "connection-read")
+      ? `Fable tool-use policy: ${CONNECTED_SOURCE_BRIEF_GUIDANCE}`
+      : undefined
+  ].filter((part): part is string => Boolean(part)).join("\n\n");
+  const messages: NativeMessage[] = systemPrefix
+    ? [{ role: "system", content: systemPrefix }, ...request.messages]
     : [...request.messages];
   const seenCallIds = new Set<string>();
   let toolCallCount = 0;

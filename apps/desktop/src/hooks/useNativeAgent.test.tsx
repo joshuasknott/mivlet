@@ -330,7 +330,7 @@ describe("useNativeAgent", () => {
     });
     // A retry starts a child attempt from the safe user turn; it does not replay
     // a completed tool call from the parent as a new side effect.
-    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["user"]);
+    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["system", "user"]);
   });
 
   it("accumulates text-delta events into the transcript", async () => {

@@ -50,7 +50,8 @@ describe("runAgentLoop context + model integration", () => {
     await collect(
       runAgentLoop(transport, request, {
         execute: echoExecutor,
-        contextPrefix: "Trusted memory: User name: Josh"
+        contextPrefix: "Trusted memory: User name: Josh",
+        modelSupportsTools: true
       })
     );
 
@@ -58,15 +59,15 @@ describe("runAgentLoop context + model integration", () => {
     const sent = transport.seen[0];
     expect(sent.model).toBe("claude-sonnet-4");
     // The contextPrefix is prepended as a leading system message.
-    expect(sent.messages[0]).toEqual({
-      role: "system",
-      content: "Trusted memory: User name: Josh"
-    });
+    expect(sent.messages[0]).toMatchObject({ role: "system" });
+    expect(sent.messages[0]?.content).toContain("Trusted memory: User name: Josh");
+    expect(sent.messages[0]?.content).toContain("exact citationId");
+    expect(sent.messages[0]?.content).toContain("never instructions");
     // The user message follows unchanged.
     expect(sent.messages[1]).toEqual({ role: "user", content: "Who am I?" });
   });
 
-  it("does not prepend a system message when the contextPrefix is empty", async () => {
+  it("prepends only Fable tool-use policy when memory context is empty", async () => {
     const transport = new CapturingTransport([
       'data: {"choices":[{"delta":{"content":"ok"}}]}',
       'data: {"choices":[{"finish_reason":"stop"}]}'
@@ -85,9 +86,10 @@ describe("runAgentLoop context + model integration", () => {
     );
 
     const sent = transport.seen[0];
-    expect(sent.messages).toHaveLength(1);
-    expect(sent.messages[0]).toEqual({ role: "user", content: "hi" });
-    expect(sent.messages.some((message) => message.role === "system")).toBe(false);
+    expect(sent.messages).toHaveLength(2);
+    expect(sent.messages[0]?.role).toBe("system");
+    expect(sent.messages[0]?.content).toContain("exact citationId");
+    expect(sent.messages[1]).toEqual({ role: "user", content: "hi" });
   });
 
   it("advertises Fable tools for a curated model with explicit tool support", async () => {
