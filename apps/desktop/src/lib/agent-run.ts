@@ -171,7 +171,7 @@ export function workspaceSharedRunAudience(actingMemberId: string): RunContextAu
   return {
     authority: "convex",
     visibility: "workspace-shared",
-    actingMemberId: actingMemberId as RunContextAudience["actingMemberId"]
+    actingMemberId: actingMemberId as never
   };
 }
 
