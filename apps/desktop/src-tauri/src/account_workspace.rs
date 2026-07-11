@@ -285,8 +285,22 @@ enum AccountInvitationAcceptanceDecision {
 
 type HostedFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AccountIdentitySnapshot {
+    account_binding: String,
+    generation: u64,
+}
+
+trait AccountGenerationLock {}
+impl AccountGenerationLock for clerk_identity::NativeIdentityGenerationGuard {}
+
 trait HostedAccountTransport: Send + Sync {
     fn account_binding<'a>(&'a self) -> HostedStringFuture<'a>;
+    fn identity_snapshot(&self) -> Result<AccountIdentitySnapshot, String>;
+    fn lock_identity_generation(
+        &self,
+        expected: &AccountIdentitySnapshot,
+    ) -> Result<Box<dyn AccountGenerationLock>, String>;
     fn call<'a>(
         &'a self,
         function_type: ConvexFunctionType,
@@ -301,7 +315,31 @@ struct NativeHostedAccountTransport;
 
 impl HostedAccountTransport for NativeHostedAccountTransport {
     fn account_binding<'a>(&'a self) -> HostedStringFuture<'a> {
-        Box::pin(clerk_identity::native_bootstrap_idempotency_key())
+        Box::pin(async {
+            clerk_identity::native_identity_generation_snapshot()
+                .map(|snapshot| snapshot.account_binding)
+        })
+    }
+
+    fn identity_snapshot(&self) -> Result<AccountIdentitySnapshot, String> {
+        clerk_identity::native_identity_generation_snapshot().map(|snapshot| {
+            AccountIdentitySnapshot {
+                account_binding: snapshot.account_binding,
+                generation: snapshot.generation,
+            }
+        })
+    }
+
+    fn lock_identity_generation(
+        &self,
+        expected: &AccountIdentitySnapshot,
+    ) -> Result<Box<dyn AccountGenerationLock>, String> {
+        let native = clerk_identity::NativeIdentityGenerationSnapshot {
+            account_binding: expected.account_binding.clone(),
+            generation: expected.generation,
+        };
+        clerk_identity::lock_native_identity_generation(&native)
+            .map(|guard| Box::new(guard) as Box<dyn AccountGenerationLock>)
     }
     fn call<'a>(
         &'a self,
@@ -739,6 +777,7 @@ fn parse_device_revoke(value: Value, expected_device_id: &str) -> Result<(), Str
 
 async fn reconcile_hosted_with_transport(
     transport: &dyn HostedAccountTransport,
+    expected_identity: &AccountIdentitySnapshot,
     idempotency_key: &str,
     store: &crate::store::Store,
 ) -> Result<(), String> {
@@ -784,6 +823,7 @@ async fn reconcile_hosted_with_transport(
         .await?,
     )?;
     let observed_at = now();
+    let _identity_guard = transport.lock_identity_generation(expected_identity)?;
     store
         .transaction(|conn| {
             // Preserve the locally observed timestamp for exact replayed
@@ -853,10 +893,11 @@ async fn reconcile_hosted_with_transport(
 }
 
 async fn reconcile_hosted() -> Result<(), String> {
-    let idempotency_key = clerk_identity::native_bootstrap_idempotency_key().await?;
+    let transport = NativeHostedAccountTransport;
+    let identity = transport.identity_snapshot()?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    reconcile_hosted_with_transport(&NativeHostedAccountTransport, &idempotency_key, store).await
+    reconcile_hosted_with_transport(&transport, &identity, &identity.account_binding, store).await
 }
 
 async fn pending_invitations_with_transport(
@@ -880,7 +921,7 @@ async fn pending_invitations_with_transport(
 
 async fn accept_invitation_with_transport(
     transport: &dyn HostedAccountTransport,
-    account_binding: &str,
+    expected_identity: &AccountIdentitySnapshot,
     invitation_id: &str,
     idempotency_key: &str,
     bootstrap_idempotency_key: &str,
@@ -889,7 +930,7 @@ async fn accept_invitation_with_transport(
     let result = parse_acceptance_result(
         bound_hosted_call(
             transport,
-            account_binding,
+            &expected_identity.account_binding,
             ConvexFunctionType::Mutation,
             "membership:acceptInvitation",
             json!({
@@ -903,7 +944,14 @@ async fn accept_invitation_with_transport(
         idempotency_key,
     )?;
     let reconciliation = if matches!(result, HostedAcceptanceResult::Accepted { .. }) {
-        match reconcile_hosted_with_transport(transport, bootstrap_idempotency_key, store).await {
+        match reconcile_hosted_with_transport(
+            transport,
+            expected_identity,
+            bootstrap_idempotency_key,
+            store,
+        )
+        .await
+        {
             Ok(()) => InvitationReconciliation {
                 status: "refreshed".into(),
                 message: "Workspace list is up to date.".into(),
@@ -1073,25 +1121,24 @@ pub async fn account_membership_accept_invitation(
         return Err("Invitation id is invalid.".into());
     }
     let transport = NativeHostedAccountTransport;
-    let account_binding = transport
-        .account_binding()
-        .await
-        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
-    let preflight_status = bound_account_workspace_status(&transport, &account_binding).await?;
-    let idempotency_key = invitation_acceptance_idempotency_key(&account_binding, &invitation_id)?;
+    let identity = transport.identity_snapshot()?;
+    let preflight_status =
+        bound_account_workspace_status(&transport, &identity.account_binding).await?;
+    let idempotency_key =
+        invitation_acceptance_idempotency_key(&identity.account_binding, &invitation_id)?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let accepted = accept_invitation_with_transport(
         &transport,
-        &account_binding,
+        &identity,
         &invitation_id,
         &idempotency_key,
-        &account_binding,
+        &identity.account_binding,
         store,
     )
     .await?;
     let final_status = if matches!(&accepted.result, HostedAcceptanceResult::Accepted { .. }) {
-        bound_account_workspace_status(&transport, &account_binding).await
+        bound_account_workspace_status(&transport, &identity.account_binding).await
     } else {
         Ok(preflight_status.clone())
     };
@@ -1206,13 +1253,23 @@ mod tests {
     struct ScriptedTransport {
         steps: Mutex<VecDeque<ScriptStep>>,
         bindings: Mutex<VecDeque<String>>,
+        commit_identity: Mutex<AccountIdentitySnapshot>,
+        switch_generation_on_lock: Mutex<bool>,
     }
+
+    struct ScriptGenerationLock;
+    impl AccountGenerationLock for ScriptGenerationLock {}
 
     impl ScriptedTransport {
         fn new(steps: Vec<ScriptStep>) -> Self {
             Self {
                 steps: Mutex::new(steps.into()),
                 bindings: Mutex::new(VecDeque::new()),
+                commit_identity: Mutex::new(AccountIdentitySnapshot {
+                    account_binding: "bootstrap_key".into(),
+                    generation: 1,
+                }),
+                switch_generation_on_lock: Mutex::new(false),
             }
         }
 
@@ -1220,7 +1277,16 @@ mod tests {
             Self {
                 steps: Mutex::new(steps.into()),
                 bindings: Mutex::new(bindings.into_iter().map(str::to_string).collect()),
+                commit_identity: Mutex::new(AccountIdentitySnapshot {
+                    account_binding: "bootstrap_key".into(),
+                    generation: 1,
+                }),
+                switch_generation_on_lock: Mutex::new(false),
             }
+        }
+
+        fn switch_generation_at_commit(&self) {
+            *self.switch_generation_on_lock.lock().unwrap() = true;
         }
 
         fn finished(&self) -> bool {
@@ -1237,6 +1303,24 @@ mod tests {
                 .pop_front()
                 .unwrap_or_else(|| "bootstrap_key".into());
             Box::pin(async move { Ok(binding) })
+        }
+
+        fn identity_snapshot(&self) -> Result<AccountIdentitySnapshot, String> {
+            Ok(self.commit_identity.lock().unwrap().clone())
+        }
+
+        fn lock_identity_generation(
+            &self,
+            expected: &AccountIdentitySnapshot,
+        ) -> Result<Box<dyn AccountGenerationLock>, String> {
+            if *self.switch_generation_on_lock.lock().unwrap() {
+                let mut identity = self.commit_identity.lock().unwrap();
+                identity.generation = identity.generation.wrapping_add(1);
+            }
+            if &*self.commit_identity.lock().unwrap() != expected {
+                return Err(ACCOUNT_CHANGED_ERROR.into());
+            }
+            Ok(Box::new(ScriptGenerationLock))
         }
 
         fn call<'a>(
@@ -1313,6 +1397,13 @@ mod tests {
             },
             active_context_owner: None,
             devices: Vec::new(),
+        }
+    }
+
+    fn identity(account_binding: &str) -> AccountIdentitySnapshot {
+        AccountIdentitySnapshot {
+            account_binding: account_binding.into(),
+            generation: 1,
         }
     }
 
@@ -1542,7 +1633,7 @@ mod tests {
                 .unwrap();
         let accepted = accept_invitation_with_transport(
             &transport,
-            "bootstrap_key",
+            &identity("bootstrap_key"),
             "inv_a",
             "native_accept_key",
             "bootstrap_key",
@@ -1608,7 +1699,7 @@ mod tests {
                 .unwrap();
         let accepted = accept_invitation_with_transport(
             &transport,
-            "bootstrap_key",
+            &identity("bootstrap_key"),
             "inv_a",
             "native_accept_key",
             "bootstrap_key",
@@ -1687,7 +1778,7 @@ mod tests {
                 .unwrap();
         assert!(accept_invitation_with_transport(
             &transport,
-            binding,
+            &identity(binding),
             "inv_a",
             &stable_key,
             binding,
@@ -1697,7 +1788,7 @@ mod tests {
         .is_err());
         let replay = accept_invitation_with_transport(
             &transport,
-            binding,
+            &identity(binding),
             "inv_a",
             &stable_key,
             binding,
@@ -1777,7 +1868,7 @@ mod tests {
         assert_eq!(
             accept_invitation_with_transport(
                 &transport,
-                "account_a",
+                &identity("account_a"),
                 "inv_a",
                 "native_key",
                 "account_a",
@@ -1811,7 +1902,7 @@ mod tests {
         assert_eq!(
             accept_invitation_with_transport(
                 &transport,
-                "account_a",
+                &identity("account_a"),
                 "inv_a",
                 "native_key",
                 "account_a",
@@ -1821,5 +1912,57 @@ mod tests {
             .unwrap_err(),
             ACCOUNT_CHANGED_ERROR
         );
+    }
+
+    #[tokio::test]
+    async fn generation_switch_after_last_response_prevents_directory_commit() {
+        let transport = ScriptedTransport::new(vec![
+            ScriptStep {
+                mutation: true,
+                path: "workspace:bootstrapAccount",
+                args: json!({ "idempotencyKey": "bootstrap_key" }),
+                result: json!({
+                    "status": "existing", "internalUserId": "usr_recipient", "workspaceId": "ws_home", "memberId": "member_home",
+                    "idempotency": { "key": "bootstrap_key", "replayed": true }
+                }),
+            },
+            ScriptStep {
+                mutation: false,
+                path: "workspace:listMine",
+                args: json!({}),
+                result: json!([
+                    { "workspaceId": "ws_home", "name": "Home", "revision": 0, "policyRevision": 1, "memberId": "member_home", "role": "owner", "membershipRevision": 1 }
+                ]),
+            },
+            ScriptStep {
+                mutation: false,
+                path: "device:listMine",
+                args: json!({}),
+                result: json!([]),
+            },
+        ]);
+        transport.switch_generation_at_commit();
+        let key = crate::store::vault::MasterKey::generate().unwrap();
+        let store =
+            crate::store::Store::open_in_memory(crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        assert_eq!(
+            reconcile_hosted_with_transport(
+                &transport,
+                &identity("bootstrap_key"),
+                "bootstrap_key",
+                &store,
+            )
+            .await
+            .unwrap_err(),
+            ACCOUNT_CHANGED_ERROR
+        );
+        store
+            .with_conn(|conn| {
+                assert!(directory::list_authoritative_summaries(conn, "usr_recipient")?.is_empty());
+                assert!(directory::list_authoritative_summaries_for_current_user(conn)?.is_none());
+                Ok(())
+            })
+            .unwrap();
     }
 }

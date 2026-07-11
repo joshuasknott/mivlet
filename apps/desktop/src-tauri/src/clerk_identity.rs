@@ -8,6 +8,7 @@
 //! resolved outside this provider boundary.
 
 use std::collections::BTreeMap;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -30,6 +31,17 @@ const MAX_CALLBACK_BYTES: usize = 8192;
 #[allow(dead_code)] // Reserved for the focused native hosted-account adapter.
 const MAX_CONVEX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const CLOCK_SKEW_SECONDS: u64 = 60;
+static IDENTITY_GENERATION: Mutex<u64> = Mutex::new(0);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeIdentityGenerationSnapshot {
+    pub(crate) account_binding: String,
+    pub(crate) generation: u64,
+}
+
+pub(crate) struct NativeIdentityGenerationGuard {
+    _guard: MutexGuard<'static, u64>,
+}
 
 const CLERK_CONFIG_KEYS: [&str; 8] = [
     "FABLE_CLERK_ISSUER",
@@ -640,15 +652,25 @@ fn write_session(
             false,
         )
     })?;
+    let mut generation = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Fable account state is unavailable.", false))?;
     store
         .set(SESSION_KEY, &encoded)
-        .map_err(|message| identity_error("unknown", message, false))
+        .map_err(|message| identity_error("unknown", message, false))?;
+    *generation = generation.wrapping_add(1);
+    Ok(())
 }
 
 fn clear_session(store: &dyn IdentitySecretStore) -> Result<(), IdentityError> {
+    let mut generation = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Fable account state is unavailable.", false))?;
     store
         .remove(SESSION_KEY)
-        .map_err(|message| identity_error("unknown", message, false))
+        .map_err(|message| identity_error("unknown", message, false))?;
+    *generation = generation.wrapping_add(1);
+    Ok(())
 }
 
 fn sign_out_with_store(
@@ -2056,24 +2078,49 @@ pub(crate) async fn native_identity_status() -> Result<IdentityStatus, String> {
         .map_err(command_message)
 }
 
-/// Returns an opaque, stable idempotency namespace for the currently validated
-/// external principal. The issuer and subject never cross this native boundary.
-pub(crate) async fn native_bootstrap_idempotency_key() -> Result<String, String> {
-    let session = authenticated_session_with_store(&NativeIdentitySecretStore)
-        .await
-        .map_err(command_message)?;
-    let authentication = session.authentication.ok_or_else(|| {
-        "Fable account identity facts are unavailable; sign in again.".to_string()
-    })?;
+fn account_binding_for_authentication(authentication: &AccountAuthenticationFacts) -> String {
     let mut digest = Sha256::new();
     digest.update(b"fable.account-workspace.bootstrap.v1\0");
     digest.update(authentication.normalized_issuer.as_bytes());
     digest.update(b"\0");
     digest.update(authentication.subject.as_bytes());
-    Ok(format!(
-        "bootstrap_{}",
-        URL_SAFE_NO_PAD.encode(digest.finalize())
-    ))
+    format!("bootstrap_{}", URL_SAFE_NO_PAD.encode(digest.finalize()))
+}
+
+pub(crate) fn native_identity_generation_snapshot(
+) -> Result<NativeIdentityGenerationSnapshot, String> {
+    let generation = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| "Fable account state is unavailable.".to_string())?;
+    let session = read_session(&NativeIdentitySecretStore)
+        .map_err(command_message)?
+        .ok_or_else(|| "Fable account session is unavailable; sign in again.".to_string())?;
+    let authentication = session.authentication.ok_or_else(|| {
+        "Fable account identity facts are unavailable; sign in again.".to_string()
+    })?;
+    Ok(NativeIdentityGenerationSnapshot {
+        account_binding: account_binding_for_authentication(&authentication),
+        generation: *generation,
+    })
+}
+
+pub(crate) fn lock_native_identity_generation(
+    expected: &NativeIdentityGenerationSnapshot,
+) -> Result<NativeIdentityGenerationGuard, String> {
+    let guard = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| "Fable account state is unavailable.".to_string())?;
+    if *guard != expected.generation {
+        return Err("Fable account changed during the request. Please try again.".into());
+    }
+    let session = read_session(&NativeIdentitySecretStore).map_err(command_message)?;
+    let current_binding = session
+        .and_then(|session| session.authentication)
+        .map(|authentication| account_binding_for_authentication(&authentication));
+    if current_binding.as_deref() != Some(expected.account_binding.as_str()) {
+        return Err("Fable account changed during the request. Please try again.".into());
+    }
+    Ok(NativeIdentityGenerationGuard { _guard: guard })
 }
 
 #[tauri::command]
@@ -2139,6 +2186,15 @@ mod tests {
             self.0.lock().unwrap().remove(key);
             Ok(())
         }
+    }
+
+    #[test]
+    fn session_clear_advances_native_identity_generation() {
+        let store = MemoryStore::default();
+        let before = *IDENTITY_GENERATION.lock().unwrap();
+        clear_session(&store).unwrap();
+        let after = *IDENTITY_GENERATION.lock().unwrap();
+        assert_ne!(after, before);
     }
 
     fn test_config() -> ClerkIdentityConfig {
