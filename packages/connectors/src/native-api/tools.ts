@@ -65,7 +65,7 @@ const TOOLS: Record<string, BackendTool> = {
       properties: {
         capability: {
           type: "string",
-          enum: ["source.repository.list", "source.file.search", "knowledge.content.search", "communication.email.search", "communication.channel.list", "calendar.list", "software.deployment.list", "work.issue.list"]
+          enum: ["source.repository.list", "source.file.search", "knowledge.content.search", "communication.email.search", "communication.channel.list", "calendar.list", "calendar.event.search", "software.deployment.list", "work.issue.list"]
         },
         input: { type: "object", additionalProperties: true },
         cursor: { type: "string" }

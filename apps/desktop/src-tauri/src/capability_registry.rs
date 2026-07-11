@@ -15,6 +15,7 @@ enum NativeReadAdapter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeSearchAdapter {
     Google,
+    GoogleCalendarEvents,
     GoogleCalendarList,
     Notion,
     SlackChannels,
@@ -75,6 +76,12 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
         connector_id: "google-calendar",
         adapter: NativeReadAdapter::Search(NativeSearchAdapter::GoogleCalendarList),
         required_scopes: &["https://www.googleapis.com/auth/calendar.calendarlist.readonly"],
+    },
+    NativeReadImplementation {
+        capability_id: "calendar.event.search",
+        connector_id: "google-calendar",
+        adapter: NativeReadAdapter::Search(NativeSearchAdapter::GoogleCalendarEvents),
+        required_scopes: &["https://www.googleapis.com/auth/calendar.events.readonly"],
     },
 ];
 
@@ -330,8 +337,20 @@ pub(crate) async fn read(
                     false,
                 ));
             }
+            if search_adapter == NativeSearchAdapter::GoogleCalendarEvents
+                && request.query.trim().is_empty()
+            {
+                return Err(error(
+                    "invalid-request",
+                    &capability_id,
+                    "Calendar event search requires a query.",
+                    false,
+                ));
+            }
             let result = match search_adapter {
-                NativeSearchAdapter::Google | NativeSearchAdapter::GoogleCalendarList => {
+                NativeSearchAdapter::Google
+                | NativeSearchAdapter::GoogleCalendarEvents
+                | NativeSearchAdapter::GoogleCalendarList => {
                     crate::google::search_for_connection(
                         app,
                         request,
@@ -494,6 +513,16 @@ mod tests {
             implementation("calendar.list").unwrap().required_scopes,
             &["https://www.googleapis.com/auth/calendar.calendarlist.readonly"]
         );
+        assert_eq!(
+            implementation("calendar.event.search").unwrap().adapter,
+            NativeReadAdapter::Search(NativeSearchAdapter::GoogleCalendarEvents)
+        );
+        assert_eq!(
+            implementation("calendar.event.search")
+                .unwrap()
+                .required_scopes,
+            &["https://www.googleapis.com/auth/calendar.events.readonly"]
+        );
         let mut drive_connection = connection(&["https://www.googleapis.com/auth/drive.file"]);
         drive_connection.connector_id = "google-drive".into();
         let mut drive_canonical = canonical("healthy");
@@ -555,6 +584,18 @@ mod tests {
             availability_for(
                 implementation("calendar.list").unwrap(),
                 &calendar_connection,
+                &calendar_canonical,
+            )
+            .unwrap(),
+            "available"
+        );
+        let mut event_connection =
+            connection(&["https://www.googleapis.com/auth/calendar.events.readonly"]);
+        event_connection.connector_id = "google-calendar".into();
+        assert_eq!(
+            availability_for(
+                implementation("calendar.event.search").unwrap(),
+                &event_connection,
                 &calendar_canonical,
             )
             .unwrap(),
