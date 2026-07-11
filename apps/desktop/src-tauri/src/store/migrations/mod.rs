@@ -71,6 +71,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // provider-only rows cannot be safely attributed and are retained
             // in an inaccessible quarantine table instead of being guessed.
             11 => apply_v11_to_v12(conn)?,
+            // 12 -> 13: projects gain explicit local authority, member-private
+            // ownership, optimistic revisions, lifecycle, and durable delete
+            // tombstones. Existing encrypted payloads and ids are retained.
+            12 => apply_v12_to_v13(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -80,6 +84,67 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v12_to_v13(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "project")? {
+        return Ok(());
+    }
+    for (column, ddl) in [
+        ("authority", "TEXT NOT NULL DEFAULT 'local'"),
+        ("visibility", "TEXT NOT NULL DEFAULT 'member-private'"),
+        ("owner_member_id", "TEXT"),
+        ("created_by_internal_user_id", "TEXT"),
+        ("schema_version", "INTEGER NOT NULL DEFAULT 1"),
+        ("revision", "INTEGER NOT NULL DEFAULT 1"),
+        ("lifecycle", "TEXT NOT NULL DEFAULT 'active'"),
+        ("deleted_at", "TEXT"),
+    ] {
+        if !table_has_column(conn, "project", column)? {
+            conn.execute_batch(&format!("ALTER TABLE project ADD COLUMN {column} {ddl};"))?;
+        }
+    }
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS project_tombstone (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          project_id TEXT NOT NULL,
+          deleted_at TEXT NOT NULL,
+          deleted_by_internal_user_id TEXT NOT NULL,
+          last_revision INTEGER NOT NULL,
+          PRIMARY KEY (workspace_id, project_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_owner
+          ON project(workspace_id, owner_member_id, lifecycle, updated_at);
+
+        -- Attribute a legacy local project only when the workspace has exactly
+        -- one active member. Ambiguous rows remain preserved but inaccessible;
+        -- migration must never guess a private owner.
+        UPDATE project
+           SET owner_member_id = (
+                 SELECT MIN(m.member_id)
+                   FROM fable_workspace_mirror AS w
+                   JOIN fable_membership_mirror AS m
+                     ON m.fable_workspace_id=w.fable_workspace_id
+                  WHERE w.local_workspace_id=project.workspace_id
+                    AND w.status='active' AND m.status='active'
+                  GROUP BY w.local_workspace_id
+                 HAVING COUNT(*)=1
+               ),
+               created_by_internal_user_id = (
+                 SELECT MIN(m.internal_user_id)
+                   FROM fable_workspace_mirror AS w
+                   JOIN fable_membership_mirror AS m
+                     ON m.fable_workspace_id=w.fable_workspace_id
+                  WHERE w.local_workspace_id=project.workspace_id
+                    AND w.status='active' AND m.status='active'
+                  GROUP BY w.local_workspace_id
+                 HAVING COUNT(*)=1
+               )
+         WHERE owner_member_id IS NULL;
+        "#,
+    )?;
     Ok(())
 }
 
@@ -741,9 +806,38 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v12 is current; v12 -> v13 has no registered migration.
-        let err = apply(&conn, 12, 13).unwrap_err();
+        // v13 is current; v13 -> v14 has no registered migration.
+        let err = apply(&conn, 13, 14).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v12_to_v13_preserves_projects_and_backfills_unambiguous_private_owner() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE workspace (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE project (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL);
+            CREATE TABLE fable_workspace_mirror (fable_workspace_id TEXT PRIMARY KEY, local_workspace_id TEXT NOT NULL, status TEXT NOT NULL);
+            CREATE TABLE fable_membership_mirror (fable_workspace_id TEXT NOT NULL, member_id TEXT NOT NULL, internal_user_id TEXT NOT NULL, status TEXT NOT NULL);
+            INSERT INTO workspace VALUES ('w1','One','t','t');
+            INSERT INTO fable_workspace_mirror VALUES ('fw1','w1','active');
+            INSERT INTO fable_membership_mirror VALUES ('fw1','member-1','user-1','active');
+            INSERT INTO project VALUES ('project-1','w1','fp','t','t',x'0102',x'0304');
+            "#,
+        ).unwrap();
+        apply(&conn, 12, 13).unwrap();
+        let row = conn.query_row(
+            "SELECT owner_member_id,created_by_internal_user_id,revision,lifecycle,payload FROM project WHERE id='project-1';",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, String>(3)?, row.get::<_, Vec<u8>>(4)?)),
+        ).unwrap();
+        assert_eq!(
+            (row.0.as_str(), row.1.as_str(), row.2, row.3.as_str()),
+            ("member-1", "user-1", 1, "active")
+        );
+        assert_eq!(row.4, vec![1, 2]);
+        assert!(table_exists(&conn, "project_tombstone").unwrap());
     }
 
     /// A fresh database applies SCHEMA_V1 directly and is already at the

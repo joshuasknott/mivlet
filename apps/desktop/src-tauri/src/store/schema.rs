@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 12;
+pub const CURRENT_SCHEMA_VERSION: u32 = 13;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -558,10 +558,27 @@ CREATE TABLE IF NOT EXISTS project (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   title_fingerprint TEXT NOT NULL,
+  authority TEXT NOT NULL DEFAULT 'local',
+  visibility TEXT NOT NULL DEFAULT 'member-private',
+  owner_member_id TEXT,
+  created_by_internal_user_id TEXT,
+  schema_version INTEGER NOT NULL DEFAULT 1,
+  revision INTEGER NOT NULL DEFAULT 1,
+  lifecycle TEXT NOT NULL DEFAULT 'active',
+  deleted_at TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_tombstone (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  deleted_by_internal_user_id TEXT NOT NULL,
+  last_revision INTEGER NOT NULL,
+  PRIMARY KEY (workspace_id, project_id)
 );
 
 CREATE TABLE IF NOT EXISTS thread (
@@ -584,6 +601,7 @@ CREATE TABLE IF NOT EXISTS thread (
 );
 CREATE INDEX IF NOT EXISTS idx_thread_workspace ON thread(workspace_id, project_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_project_workspace ON project(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_project_owner ON project(workspace_id, owner_member_id, lifecycle, updated_at);
 
 CREATE TABLE IF NOT EXISTS message (
   id TEXT PRIMARY KEY,

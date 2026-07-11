@@ -37,6 +37,7 @@ mod permission_policy;
 pub mod portable;
 #[cfg(test)]
 mod product_spine_parity;
+mod projects;
 mod remote_control;
 mod scheduler;
 mod snapshot;
@@ -129,6 +130,13 @@ pub fn run() {
             conversations::conversation_load_draft,
             conversations::conversation_save_draft,
             conversations::conversation_delete_draft,
+            projects::project_create,
+            projects::project_list,
+            projects::project_get,
+            projects::project_update,
+            projects::project_archive,
+            projects::project_restore,
+            projects::project_delete,
             artifacts::artifact_create_from_response,
             artifacts::artifact_get,
             artifacts::artifact_list_for_thread,

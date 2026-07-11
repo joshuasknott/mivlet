@@ -27,6 +27,7 @@ pub mod knowledge_source;
 pub mod memory_record;
 pub mod message;
 pub mod preferences;
+pub mod project;
 pub mod run;
 pub mod run_state;
 pub mod schedule;
