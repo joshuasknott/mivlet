@@ -127,7 +127,7 @@ pub fn artifact_create_from_response(input: CreateArtifact) -> Result<Value, Str
             artifact::create_private(
                 tx,
                 store,
-                &scope,
+                scope,
                 &input.artifact_id,
                 &input.run_id,
                 &input.thread_id,

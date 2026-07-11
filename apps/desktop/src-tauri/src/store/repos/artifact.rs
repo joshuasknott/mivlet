@@ -652,6 +652,7 @@ pub fn propose_handoff(
     Ok(payload)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_proposed_handoff(
     payload: &Value,
     scope: &PrivateDataScope,
