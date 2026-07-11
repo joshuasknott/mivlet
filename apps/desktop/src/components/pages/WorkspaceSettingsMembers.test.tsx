@@ -233,7 +233,8 @@ describe("workspace member roster", () => {
     render(view());
 
     fireEvent.click(await screen.findByRole("button", { name: "Pause access" }));
-    expect(await screen.findByText(/Access changed elsewhere/i)).toHaveFocus();
+    const conflictMessage = await screen.findByText(/Access changed elsewhere/i);
+    await waitFor(() => expect(conflictMessage).toHaveFocus());
     await waitFor(() => expect(mocks.loadMembers).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("Access paused.")).not.toBeInTheDocument();
   });
