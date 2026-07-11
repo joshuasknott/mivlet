@@ -267,6 +267,12 @@ export * from "./commands";
 // live behind the Rust boundary. See docs/architecture/mobile-remote.md.
 export * from "./mobile-remote";
 
+// MCP client core. Process and credential custody stay behind native transport
+// adapters; this package owns protocol lifecycle, discovery, and exact-call
+// authorization seams shared by STDIO and later Streamable HTTP.
+export * from "./mcp/client";
+export * from "./mcp/protocol";
+
 // Browser automation foundation: pure run/session binding, shared permission
 // policy classification, and redacted audit shaping. Live transport is supplied
 // by a future native/browser boundary; unavailable runtimes fail closed.

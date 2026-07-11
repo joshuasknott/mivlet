@@ -170,6 +170,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 ### Wave 3C - MCP runtime
 
 - [ ] Implement local STDIO MCP.
+  - Repo-local progress: the portable MCP 2025-11-25 client core now implements bounded newline-delimited JSON-RPC framing, mandatory initialization and capability negotiation, paginated tool/resource discovery, request timeouts with cancellation, clean shutdown, malformed-result rejection, and exact tool-call authorization over a deeply frozen JSON snapshot. Discovery remains untrusted and never grants execution authority; denied calls never reach the transport, and neither caller nor authorizer mutation can substitute approved input. Native process custody, local configuration storage, Tauri transport wiring, per-tool/resource enablement, and an actual server journey remain open, so this item is not complete.
 - [ ] Implement remote Streamable HTTP MCP.
 - [ ] Add explicit authorization including OAuth/PKCE where appropriate.
 - [ ] Add trust classification, discovery, and per-tool/resource enablement.

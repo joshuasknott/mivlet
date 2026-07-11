@@ -111,6 +111,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - Schedules execute locally through the runtime scheduler when due and when a connected runnable backend is available. Blocked-auth and unavailable-backend states remain explicit instead of silently falling back. The schedules are backed by encrypted SQLite tables.
 - Voice dictation is opt-in and available only when the host browser/webview exposes a Web Speech API. Unsupported runtimes preserve normal text entry; there is no native offline speech provider.
 - The native Convex account/workspace adapter is configuration-gated. Existing hosted devices can be listed and revoked; automatic registration of the current device is deferred until Fable has a genuine public-key/proof-of-possession contract.
+- The MCP 2025-11-25 client core implements lifecycle negotiation, bounded JSON-RPC framing, paginated tool/resource discovery, timeouts and cancellation, and an exact-call authorization seam. It is not yet connected to native STDIO process custody, local MCP configuration, desktop UI, capability grants, or a live server, so MCP remains unavailable as a product Connection.
 
 ## Not Implemented Yet
 
