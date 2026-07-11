@@ -140,6 +140,7 @@ export const listRoster = queryGeneric({
     for (const membership of memberships.sort((left: any, right: any) => left.memberId.localeCompare(right.memberId))) {
       const users = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", membership.internalUserId)).collect();
       if (users.length !== 1) throw new CloudPolicyError("conflict", "The workspace member list is unavailable.", true);
+      if (users[0].status !== "active") continue;
       const profileFresh = typeof users[0].profileObservedAt === "number" && now - users[0].profileObservedAt <= PROFILE_FRESHNESS_MS;
       members.push({
         memberId: membership.memberId,

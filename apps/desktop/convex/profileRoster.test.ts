@@ -134,6 +134,19 @@ describe("hosted profile and roster handlers", () => {
     await expect((listRoster as any)._handler(f.ctx, { workspaceId: "ws-foreign" })).rejects.toThrow(/workspace/i);
   });
 
+  it("does not disclose a non-active internal account through stale membership", async () => {
+    const f = fixture("owner", { name: "Owner" });
+    const bootstrap = await (bootstrapAccount as any)._handler(f.ctx, { idempotencyKey: "bootstrap", initialWorkspaceName: "A" });
+    f.tables.internal_users.push({ _id: "user:disabled", internalUserId: "u-disabled", status: "disabled", profile: { displayName: "Private old name", emailHint: "p***@example.com" }, profileObservedAt: Date.now(), createdAt: 1, updatedAt: 1, revision: 2 });
+    f.tables.workspace_memberships.push({ _id: "membership:disabled", memberId: "member-disabled", workspaceId: bootstrap.workspaceId, internalUserId: "u-disabled", role: "editor", status: "active", revision: 1, createdAt: 1, updatedAt: 1, activatedAt: 1 });
+
+    const roster = await (listRoster as any)._handler(f.ctx, { workspaceId: bootstrap.workspaceId });
+    expect(roster.members).toHaveLength(1);
+    expect(roster.members[0].isCurrentUser).toBe(true);
+    expect(JSON.stringify(roster)).not.toContain("Private old name");
+    expect(JSON.stringify(roster)).not.toContain("p***@example.com");
+  });
+
   it("fails closed for an ambiguous user and omits stale profiles", async () => {
     const f = fixture("owner", { name: "Owner" });
     const bootstrap = await (bootstrapAccount as any)._handler(f.ctx, { idempotencyKey: "bootstrap", initialWorkspaceName: "A" });
