@@ -1171,7 +1171,10 @@ export async function searchRuntimeArtifacts(
       return normalized && matchedOn.length === 0 ? [] : [{ artifact, currentVersion, matchedOn }];
     }).slice(0, boundedQuery.limit);
   }
-  const result = await invoke<unknown>("artifact_search", { query: boundedQuery });
+  const result = await invoke<unknown>("artifact_search", { input: boundedQuery });
+  if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+    throw new Error("The active workspace changed while artifacts were loading.");
+  }
   if (!Array.isArray(result)) throw new Error("Malformed artifact search response.");
   result.forEach((entry) => assertArtifactSearchResult(entry, scope.workspaceId));
   return result;
@@ -1197,7 +1200,10 @@ export async function exportRuntimeArtifact(artifactId: string, versionId: strin
       lineage: version.lineage
     }, artifactId, versionId);
   }
-  const result = await invoke<unknown>("artifact_export", { artifactId, versionId });
+  const result = await invoke<unknown>("artifact_export", { input: { artifactId, versionId } });
+  if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+    throw new Error("The active workspace changed while the artifact was exporting.");
+  }
   return parseArtifactExport(result, artifactId, versionId);
 }
 

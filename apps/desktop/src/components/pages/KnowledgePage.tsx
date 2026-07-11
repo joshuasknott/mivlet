@@ -311,6 +311,8 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
           selectedVersionId={selectedArtifactVersionId}
           loading={artifactLoading}
           error={artifactError}
+          activeWorkspaceId={activeWorkspaceId}
+          activeWorkspaceRef={activeWorkspaceRef}
           onSelectVersion={setSelectedArtifactVersionId}
           onToggle={(artifactId) => {
             if (expandedArtifactId === artifactId) {
@@ -444,6 +446,8 @@ function ArtifactResults({
   selectedVersionId,
   loading,
   error,
+  activeWorkspaceId,
+  activeWorkspaceRef,
   onToggle,
   onSelectVersion
 }: {
@@ -453,6 +457,8 @@ function ArtifactResults({
   selectedVersionId: string;
   loading: boolean;
   error: string;
+  activeWorkspaceId: string;
+  activeWorkspaceRef: { current: string };
   onToggle: (artifactId: string) => void;
   onSelectVersion: (versionId: string) => void;
 }) {
@@ -482,6 +488,8 @@ function ArtifactResults({
               <ArtifactDetail
                 bundle={detail}
                 selectedVersionId={selectedVersionId || detail.currentVersion.id}
+                activeWorkspaceId={activeWorkspaceId}
+                activeWorkspaceRef={activeWorkspaceRef}
                 onSelectVersion={onSelectVersion}
               />
             ) : <p className="artifact-state" role="status">Opening artifact...</p> : null}
@@ -495,10 +503,14 @@ function ArtifactResults({
 function ArtifactDetail({
   bundle,
   selectedVersionId,
+  activeWorkspaceId,
+  activeWorkspaceRef,
   onSelectVersion
 }: {
   bundle: RuntimeArtifactBundle;
   selectedVersionId: string;
+  activeWorkspaceId: string;
+  activeWorkspaceRef: { current: string };
   onSelectVersion: (versionId: string) => void;
 }) {
   const [exporting, setExporting] = useState(false);
@@ -512,16 +524,23 @@ function ArtifactDetail({
       : "Workspace";
   const review = [...bundle.artifact.reviews].reverse().find((entry) => entry.versionId === version.id);
   const runExport = (format: "markdown" | "json") => {
+    const requestedWorkspaceId = activeWorkspaceId;
     setExporting(true);
     setExportError("");
     setExportStatus("");
     void exportRuntimeArtifact(bundle.artifact.id, version.id)
       .then((exported) => {
+        if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
         downloadArtifactExport(exported, version.version, format);
         setExportStatus(`${format === "markdown" ? "Markdown" : "JSON"} export ready.`);
       })
-      .catch((cause) => setExportError(cause instanceof Error ? cause.message : "Fable could not export that version."))
-      .finally(() => setExporting(false));
+      .catch((cause) => {
+        if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
+        setExportError(cause instanceof Error ? cause.message : "Fable could not export that version.");
+      })
+      .finally(() => {
+        if (activeWorkspaceRef.current === requestedWorkspaceId) setExporting(false);
+      });
   };
   return (
     <section className="artifact-detail" aria-label={`Artifact details for ${bundle.artifact.title}`}>

@@ -511,7 +511,7 @@ describe("artifact runtime revisions", () => {
     }]);
     await searchRuntimeArtifacts({ query: " report ", limit: 500 });
     expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_search", {
-      query: { query: "report", limit: 100 }
+      input: { query: "report", limit: 100 }
     });
 
     mocks.invoke.mockResolvedValueOnce([{ artifact: { ...bundle.artifact, workspaceId: "other" }, currentVersion: bundle.currentVersion, matchedOn: [] }]);
@@ -528,8 +528,10 @@ describe("artifact runtime revisions", () => {
     });
     await exportRuntimeArtifact(bundle.artifact.id, bundle.currentVersion.id);
     expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_export", {
-      artifactId: bundle.artifact.id,
-      versionId: bundle.currentVersion.id
+      input: {
+        artifactId: bundle.artifact.id,
+        versionId: bundle.currentVersion.id
+      }
     });
 
     mocks.invoke.mockResolvedValueOnce({
@@ -544,5 +546,33 @@ describe("artifact runtime revisions", () => {
     });
     await expect(exportRuntimeArtifact(bundle.artifact.id, bundle.currentVersion.id))
       .rejects.toThrow(/malformed/i);
+  });
+
+  it("rejects native search and export responses after the active workspace changes", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    const bundle = nativeBundle();
+    let resolveSearch!: (value: unknown) => void;
+    mocks.invoke.mockReturnValueOnce(new Promise((resolve) => { resolveSearch = resolve; }));
+    const search = searchRuntimeArtifacts({ query: "report" });
+    setActiveRuntimeDataScope("workspace-other");
+    resolveSearch([{ artifact: bundle.artifact, currentVersion: bundle.currentVersion, matchedOn: ["title"] }]);
+    await expect(search).rejects.toThrow(/active workspace changed/i);
+
+    setActiveRuntimeDataScope("workspace-native");
+    let resolveExport!: (value: unknown) => void;
+    mocks.invoke.mockReturnValueOnce(new Promise((resolve) => { resolveExport = resolve; }));
+    const exported = exportRuntimeArtifact(bundle.artifact.id, bundle.currentVersion.id);
+    setActiveRuntimeDataScope("workspace-other");
+    resolveExport({
+      artifactId: bundle.artifact.id,
+      versionId: bundle.currentVersion.id,
+      title: bundle.artifact.title,
+      kind: bundle.artifact.kind,
+      exportedAt: "2026-07-11T00:00:00.000Z",
+      content: bundle.currentVersion.content,
+      citations: [], inputs: [], decisions: [], lineage: []
+    });
+    await expect(exported).rejects.toThrow(/active workspace changed/i);
   });
 });

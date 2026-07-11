@@ -320,6 +320,45 @@ describe("KnowledgePage — artifacts", () => {
     expect(json).not.toContain("artifact-1");
   });
 
+  it("silently discards an export that resolves after the workspace changes", async () => {
+    const user = userEvent.setup();
+    const bundle = makeArtifactBundle();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
+    vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
+    let resolveExport!: (value: RuntimeArtifactExport) => void;
+    const pendingExport = new Promise<RuntimeArtifactExport>((resolve) => { resolveExport = resolve; });
+    vi.mocked(exportRuntimeArtifact).mockReturnValue(pendingExport);
+    const createObjectUrl = vi.fn(() => "blob:artifact");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const state = {
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    };
+    const runtime = stubRuntime(state);
+    const view = renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
+    await user.click(screen.getByRole("button", { name: "Export Launch report version 2 as JSON" }));
+    expect(exportRuntimeArtifact).toHaveBeenCalledWith("artifact-1", "version-2");
+
+    const otherWorkspaceRuntime = stubRuntime(state);
+    otherWorkspaceRuntime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId = "other-workspace";
+    view.rerender(<KnowledgePage runtime={otherWorkspaceRuntime} />);
+    resolveExport({
+      artifactId: "artifact-1", versionId: "version-2", title: "Launch report", kind: "document",
+      exportedAt: "2026-07-11T10:00:00.000Z", content: bundle.currentVersion.content,
+      citations: [], inputs: [], decisions: [], lineage: []
+    } as unknown as RuntimeArtifactExport);
+    await pendingExport;
+    await Promise.resolve();
+    await waitFor(() => expect(searchRuntimeArtifacts).toHaveBeenCalledTimes(2));
+    expect(createObjectUrl).not.toHaveBeenCalled();
+    expect(screen.queryByText("JSON export ready.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("renders honest empty and error states", async () => {
     const user = userEvent.setup();
     const runtime = stubRuntime({
