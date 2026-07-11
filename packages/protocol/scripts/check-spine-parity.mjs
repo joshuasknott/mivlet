@@ -37,7 +37,7 @@ for (const [name, value] of limits) {
   if (owners[0][1][name] !== value) fail(`limit ${name} differs from the manifest`);
 }
 
-const requiredFamilies = ["Identity", "Connections", "Missions", "Conversations", "Projects", "ArtifactsAndRoutines"];
+const requiredFamilies = ["Identity", "Connections", "Missions", "Conversations", "Projects", "Goals", "ArtifactsAndRoutines"];
 if (!Array.isArray(manifest.families) || manifest.families.length !== requiredFamilies.length) fail("missing required family");
 const suppliedFamilies = manifest.families.map(({ name }) => name);
 if (new Set(suppliedFamilies).size !== suppliedFamilies.length || requiredFamilies.some((name) => !suppliedFamilies.includes(name))) {
