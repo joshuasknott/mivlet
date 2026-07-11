@@ -152,6 +152,22 @@ pub(crate) fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFi
         .map_err(|_| "Fable could not parse imported knowledge sources.".to_string())
 }
 
+/// Read the authoritative imported-knowledge document for an already
+/// authorized scope. Project reads never fall back to workspace or legacy
+/// data when their scoped document is absent.
+pub(crate) fn read_imported_knowledge_sources_scoped(
+    path: &Path,
+    scope: &DataScope,
+) -> Result<Vec<LocalFileImport>, String> {
+    if let Some(sources) = crate::store::read_workspace_document(path, scope)? {
+        return Ok(sources);
+    }
+    if scope.project_id().is_some() {
+        return Ok(Vec::new());
+    }
+    read_imported_knowledge_sources(path)
+}
+
 fn append_imported_knowledge_source(
     mut sources: Vec<LocalFileImport>,
     source: LocalFileImport,
@@ -679,13 +695,7 @@ pub fn list_imported_knowledge_sources(
 ) -> Result<Vec<LocalFileImport>, String> {
     let path = imported_knowledge_path(&app)?;
     let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
-    if let Some(sources) = crate::store::read_workspace_document(&path, &scope)? {
-        return Ok(sources);
-    }
-    if scope.project_id().is_some() {
-        return Ok(Vec::new());
-    }
-    read_imported_knowledge_sources(&path)
+    read_imported_knowledge_sources_scoped(&path, &scope)
 }
 
 #[tauri::command]

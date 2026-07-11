@@ -18,6 +18,7 @@ use crate::paths::{
     approval_audit_path, approval_rules_path, execution_approvals_path, file_slug,
     normalize_spaces, truncate_characters,
 };
+use crate::store::repos::scope::DataScope;
 
 pub(crate) fn normalize_approval_data(values: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
@@ -122,6 +123,28 @@ pub(crate) fn persist_approval_audit_entry(
     let entries = append_approval_audit_entry(entries, entry.clone());
     write_approval_audit_entries(path, &entries)?;
 
+    Ok(ApprovalAuditRecordResponse {
+        persisted: true,
+        entry,
+        audit_len: entries.len(),
+    })
+}
+
+/// Persist an approval decision in the exact authorized data scope. This is
+/// intentionally narrow: project Memory promotion must not leak its audit
+/// trail into the workspace-wide legacy approval document.
+pub(crate) fn persist_approval_audit_entry_scoped(
+    path: &Path,
+    scope: &DataScope,
+    entry: ApprovalAuditEntry,
+) -> Result<ApprovalAuditRecordResponse, String> {
+    let entry = normalize_approval_audit_entry(entry)?;
+    let entries: Vec<ApprovalAuditEntry> =
+        crate::store::read_workspace_document(path, scope)?.unwrap_or_default();
+    let entries = append_approval_audit_entry(entries, entry.clone());
+    if !crate::store::write_workspace_document(path, scope, &entries)? {
+        return Err("Fable's encrypted store is not initialized.".to_string());
+    }
     Ok(ApprovalAuditRecordResponse {
         persisted: true,
         entry,

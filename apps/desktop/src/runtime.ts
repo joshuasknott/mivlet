@@ -104,7 +104,13 @@ export interface RuntimeKnowledgeScopeOverride {
   projectId: string;
 }
 
+export interface RuntimeMemoryScopeOverride {
+  workspaceId: string;
+  projectId: string;
+}
+
 const previewProjectKnowledge = new Map<string, LocalFileImport[]>();
+const previewProjectMemory = new Map<string, MemoryControlState>();
 
 function knowledgeScope(scopeOverride?: RuntimeKnowledgeScopeOverride) {
   const active = activeDataScope();
@@ -122,6 +128,48 @@ function knowledgeScope(scopeOverride?: RuntimeKnowledgeScopeOverride) {
 
 function previewKnowledgeKey(scope: RuntimeKnowledgeScopeOverride) {
   return `${scope.workspaceId}\u0000${scope.projectId}`;
+}
+
+function memoryScope(scopeOverride?: RuntimeMemoryScopeOverride) {
+  const active = activeDataScope();
+  if (!scopeOverride) return active;
+  const workspaceId = scopeOverride.workspaceId.trim();
+  const projectId = scopeOverride.projectId.trim();
+  if (!workspaceId || !projectId) {
+    throw new Error("Project memory requires a workspace and project.");
+  }
+  if (!active || active.workspaceId !== workspaceId) {
+    throw new Error("The active memory workspace changed. Refresh and try again.");
+  }
+  return { workspaceId, projectId };
+}
+
+function previewMemoryKey(scope: RuntimeMemoryScopeOverride) {
+  return `${scope.workspaceId}\u0000${scope.projectId}`;
+}
+
+function canonicalProjectMemoryState(
+  state: MemoryControlState,
+  scope: RuntimeMemoryScopeOverride
+): MemoryControlState {
+  return {
+    disabled: state.disabled,
+    records: state.records.map((record) => {
+      if (record.workspaceId && record.workspaceId !== scope.workspaceId) {
+        throw new Error("Memory records cannot cross workspace boundaries.");
+      }
+      if (record.scope && (
+        record.scope.level !== "project" || record.scope.projectId !== scope.projectId
+      )) {
+        throw new Error("Memory records cannot cross project boundaries.");
+      }
+      return {
+        ...record,
+        workspaceId: scope.workspaceId,
+        scope: { level: "project" as const, projectId: scope.projectId }
+      };
+    })
+  };
 }
 
 export async function loadRuntimeApprovalAudit() {
@@ -272,16 +320,18 @@ export async function searchRuntimeKnowledgeSources(
   }
 }
 
-export async function loadRuntimeMemoryState() {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+export async function loadRuntimeMemoryState(scopeOverride?: RuntimeMemoryScopeOverride) {
+  const scope = memoryScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    return previewProjectMemory.get(previewMemoryKey(scopeOverride)) ?? { disabled: false, records: [] };
+  }
 
   try {
     return await invoke<MemoryControlState>("list_memory_state", scope);
-  } catch {
+  } catch (error) {
+    if (scopeOverride) throw toRuntimeError(error);
     return null;
   }
 }
@@ -796,12 +846,18 @@ export async function getRuntimeArtifact(artifactId: string) {
   return result;
 }
 
-export async function saveRuntimeMemoryState(state: MemoryControlState) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+export async function saveRuntimeMemoryState(
+  state: MemoryControlState,
+  scopeOverride?: RuntimeMemoryScopeOverride
+) {
+  const scope = memoryScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const canonical = canonicalProjectMemoryState(state, scopeOverride);
+    previewProjectMemory.set(previewMemoryKey(scopeOverride), canonical);
+    return canonical;
+  }
 
   try {
     return await invoke<MemoryControlState>("save_memory_state", {
@@ -813,12 +869,25 @@ export async function saveRuntimeMemoryState(state: MemoryControlState) {
   }
 }
 
-export async function exportRuntimeMemoryState(_state: MemoryControlState) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+export async function exportRuntimeMemoryState(
+  _state: MemoryControlState,
+  scopeOverride?: RuntimeMemoryScopeOverride
+) {
+  const scope = memoryScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const canonical = previewProjectMemory.get(previewMemoryKey(scopeOverride))
+      ?? { disabled: false, records: [] };
+    return JSON.stringify({
+      format: "arden.memory.export.v1",
+      workspaceId: scope.workspaceId,
+      disabled: canonical.disabled,
+      disabledRecordsIncluded: false,
+      forgottenRecordsIncluded: false,
+      records: canonical.records.filter((record) => !record.disabled && !record.forgottenAt)
+    }, null, 2);
+  }
 
   try {
     return await invoke<string>("export_memory_state", {
@@ -829,12 +898,83 @@ export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   }
 }
 
-export async function promoteRuntimeKnowledgeSourceToMemory(request: MemoryPromotionRequest) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
+export async function promoteRuntimeKnowledgeSourceToMemory(
+  request: MemoryPromotionRequest,
+  scopeOverride?: RuntimeMemoryScopeOverride
+) {
+  const scope = memoryScope(scopeOverride);
   if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const key = previewKnowledgeKey(scopeOverride);
+    const source = (previewProjectKnowledge.get(key) ?? []).find(
+      (candidate) => candidate.id === request.source.id
+    );
+    if (!source) throw new Error("Knowledge source is unavailable in this project.");
+    if (source.disabled) throw new Error("Disabled knowledge cannot be promoted to memory.");
+    if (source.deletedAt) throw new Error("Deleted knowledge cannot be promoted to memory.");
+    if (source.scope && (
+      source.scope.level !== "project" || source.scope.projectId !== scopeOverride.projectId
+    )) {
+      throw new Error("Knowledge source does not belong to this project.");
+    }
+    if (!["once", "session", "rule"].includes(request.decision)) {
+      throw new Error("Memory promotion requires once, session, or rule approval.");
+    }
+    const stateKey = previewMemoryKey(scopeOverride);
+    const current = previewProjectMemory.get(stateKey) ?? { disabled: false, records: [] };
+    if (current.disabled) throw new Error("Memory is disabled.");
+    const recordId = `memory-from-${source.id.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    if (current.records.some((record) => record.id === recordId && record.forgottenAt)) {
+      throw new Error("Forgotten memory cannot be restored by promotion.");
+    }
+    const record = {
+      id: recordId,
+      kind: "imported" as const,
+      title: source.title,
+      value: source.contentPreview || `${source.title} from ${source.provenance}. Freshness: ${source.freshness}.`,
+      source: `Approved from untrusted source: ${source.provenance}`,
+      freshness: "Approved now",
+      approved: true,
+      pinned: true,
+      workspaceId: scopeOverride.workspaceId,
+      scope: { level: "project" as const, projectId: scopeOverride.projectId },
+      confidence: 1,
+      provenance: {
+        origin: "source" as const,
+        sourceId: source.id,
+        note: source.provenance,
+        title: source.title,
+        connectorId: source.connectorId,
+        contentFingerprint: source.contentFingerprint,
+        importedAt: source.importedAt,
+        trust: source.trust,
+        workspaceId: scopeOverride.workspaceId,
+        projectId: scopeOverride.projectId
+      },
+      approvalState: "approved" as const,
+      createdAt: request.decidedAt,
+      updatedAt: request.decidedAt,
+      disabled: false
+    };
+    const state = canonicalProjectMemoryState({
+      disabled: false,
+      records: [record, ...current.records.filter((existing) => existing.id !== recordId)]
+    }, scopeOverride);
+    previewProjectMemory.set(stateKey, state);
+    return {
+      persisted: true,
+      record: state.records[0],
+      auditEntry: {
+        id: `memory-promotion-${source.id}-${request.decidedAt}`,
+        requestId: `memory-promotion-${source.id}`,
+        decision: request.decision,
+        decidedAt: request.decidedAt,
+        note: `Fable Memory Approve ${source.provenance} into durable memory`
+      },
+      state
+    } satisfies MemoryPromotionResponse;
+  }
 
   try {
     return await invoke<MemoryPromotionResponse>("promote_knowledge_source_to_memory", {
