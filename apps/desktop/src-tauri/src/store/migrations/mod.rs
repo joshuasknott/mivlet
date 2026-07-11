@@ -1308,6 +1308,34 @@ mod tests {
     }
 
     #[test]
+    fn v23_to_v24_adds_empty_mission_plan_storage_without_inferred_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE workspace(id TEXT PRIMARY KEY);")
+            .unwrap();
+        apply(&conn, 23, 24).unwrap();
+        for table in [
+            "mission_record",
+            "mission_plan_record",
+            "mission_plan_revision",
+        ] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1);",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1);
+            let count: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table};"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+    }
+
+    #[test]
     fn v18_to_v19_quarantines_legacy_connector_identity_without_claiming_authority() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(

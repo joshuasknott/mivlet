@@ -139,6 +139,7 @@ describe("mission generated-plan lifecycle", () => {
       reason: "new-evidence",
       draft: draft({ summary: "Use newly connected source evidence." }),
       now: "2026-07-11T02:00:00.000Z",
+      expectedMissionRevision: 5,
       expectedPlanRevision: 1
     });
 
@@ -158,8 +159,45 @@ describe("mission generated-plan lifecycle", () => {
       reason: "recovery",
       draft: draft(),
       now: "2026-07-11T03:00:00.000Z",
+      expectedMissionRevision: 5,
       expectedPlanRevision: 2
     })).toThrow("changed before this revision");
+
+    expect(() => reviseMissionPlan({
+      mission: { ...initial.mission, revision: 6 },
+      plan: initial.plan,
+      currentRevision: initial.currentRevision,
+      revisionId: id<"plan-revision">("revision-stale-mission"),
+      reason: "recovery",
+      draft: draft(),
+      now: "2026-07-11T03:00:00.000Z",
+      expectedMissionRevision: 5,
+      expectedPlanRevision: 1
+    })).toThrow("mission changed");
+
+    expect(() => reviseMissionPlan({
+      mission: initial.mission,
+      plan: initial.plan,
+      currentRevision: initial.currentRevision,
+      revisionId: id<"plan-revision">("revision-expanded-cap"),
+      reason: "manual-revision",
+      draft: draft({ bounds: { ...draft().bounds, maxRevisions: 4 } }),
+      now: "2026-07-11T03:00:00.000Z",
+      expectedMissionRevision: 5,
+      expectedPlanRevision: 1
+    })).toThrow("cannot raise");
+
+    expect(() => reviseMissionPlan({
+      mission: initial.mission,
+      plan: { ...initial.plan, workspaceId: id<"workspace">("workspace-other") },
+      currentRevision: initial.currentRevision,
+      revisionId: id<"plan-revision">("revision-mixed-scope"),
+      reason: "recovery",
+      draft: draft(),
+      now: "2026-07-11T03:00:00.000Z",
+      expectedMissionRevision: 5,
+      expectedPlanRevision: 1
+    })).toThrow("active lifecycle");
   });
 
   it("rejects cycles, missing required outcomes, and excess parallelism", () => {

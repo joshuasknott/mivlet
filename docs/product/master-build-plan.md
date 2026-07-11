@@ -216,8 +216,11 @@ generated plans, required deliverable and acceptance coverage, useful parallel
 width, worker budgets, immutable initial/replacement revisions, and optimistic
 conflicts. Encrypted SQLite schema v24 persists the member-private mission,
 selected plan, and immutable revision atomically and restores it after process
-restart. Authenticated native commands, worker execution, run events, and the
-inspectable product journey remain open, so the Wave 4A boxes stay unchecked.
+restart. Authenticated native create/read/revise commands derive workspace,
+member, actor, authority, lifecycle, timestamps, and revisions; they repeat the
+bounded-plan validation before persistence rather than trusting the renderer.
+Worker execution, run events, and the inspectable product journey remain open,
+so the Wave 4A boxes stay unchecked.
 
 ### Wave 4B - Routing and experience
 

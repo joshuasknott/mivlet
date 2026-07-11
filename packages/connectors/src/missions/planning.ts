@@ -60,6 +60,7 @@ interface RevisePlanInput {
   reason: Exclude<PlanRevisionReason, "initial">;
   draft: GeneratedPlanDraft;
   now: string;
+  expectedMissionRevision: number;
   expectedPlanRevision: number;
 }
 
@@ -191,19 +192,34 @@ export function createMissionPlan(input: CreatePlanInput): MissionPlanLifecycle 
 }
 
 export function reviseMissionPlan(input: RevisePlanInput): MissionPlanLifecycle {
+  if (input.mission.revision !== input.expectedMissionRevision) {
+    throw new MissionPlanValidationError(["The mission changed before this revision could be selected."]);
+  }
   if (input.plan.revision !== input.expectedPlanRevision) {
     throw new MissionPlanValidationError(["The plan changed before this revision could be selected."]);
   }
   if (
     input.plan.status !== "current" ||
     input.plan.missionId !== input.mission.id ||
+    input.mission.currentPlanId !== input.plan.id ||
+    input.mission.currentPlanRevisionId !== input.currentRevision.id ||
     input.currentRevision.id !== input.plan.currentRevisionId ||
-    input.currentRevision.planId !== input.plan.id
+    input.currentRevision.planId !== input.plan.id ||
+    input.currentRevision.missionId !== input.mission.id ||
+    input.currentRevision.planRevisionNumber !== input.plan.currentRevisionNumber ||
+    !sameRecordScope(input.mission, input.plan) ||
+    !sameRecordScope(input.mission, input.currentRevision) ||
+    input.plan.deletedAt !== undefined ||
+    ["completed", "partially-completed", "failed", "cancelled", "archived"].includes(input.mission.status)
   ) {
     throw new MissionPlanValidationError(["The current mission, plan, and plan revision do not form one active lifecycle."]);
   }
   const nextNumber = input.currentRevision.planRevisionNumber + 1;
-  const revisionLimit = input.draft.bounds.maxRevisions ?? input.currentRevision.bounds.maxRevisions ?? MAX_GENERATED_PLAN_REVISIONS;
+  const currentRevisionLimit = input.currentRevision.bounds.maxRevisions ?? MAX_GENERATED_PLAN_REVISIONS;
+  if ((input.draft.bounds.maxRevisions ?? currentRevisionLimit) > currentRevisionLimit) {
+    throw new MissionPlanValidationError(["A plan revision cannot raise the selected revision limit."]);
+  }
+  const revisionLimit = input.draft.bounds.maxRevisions ?? currentRevisionLimit;
   if (nextNumber > revisionLimit) throw new MissionPlanValidationError(["The generated plan revision limit has been reached."]);
   const sizing = sizeMissionPlan(input.mission, input.draft);
   if (input.mission.executionDepth !== sizing.executionDepth) {
@@ -235,6 +251,24 @@ export function reviseMissionPlan(input: RevisePlanInput): MissionPlanLifecycle 
     currentRevision,
     sizing
   };
+}
+
+function sameRecordScope(
+  left: Pick<Spine.Primitives.RecordMetadata, "workspaceId" | "authority" | "schemaVersion"> & {
+    visibility: Spine.Primitives.RecordVisibility;
+    ownerMemberId?: Spine.Primitives.MemberId;
+  },
+  right: Pick<Spine.Primitives.RecordMetadata, "workspaceId" | "authority" | "schemaVersion"> & {
+    visibility: Spine.Primitives.RecordVisibility;
+    ownerMemberId?: Spine.Primitives.MemberId;
+  }
+): boolean {
+  return left.workspaceId === right.workspaceId &&
+    left.authority === right.authority &&
+    left.schemaVersion === right.schemaVersion &&
+    left.visibility === right.visibility &&
+    (left.visibility !== "member-private" ||
+      (right.visibility === "member-private" && left.ownerMemberId === right.ownerMemberId));
 }
 
 function metadataFor(mission: Mission, now: string): Spine.Primitives.ScopedRecordMetadata {

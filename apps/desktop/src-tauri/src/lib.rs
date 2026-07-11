@@ -33,6 +33,7 @@ mod knowledge;
 mod local_model;
 mod mcp_process;
 mod memory;
+mod mission_plans;
 mod models;
 mod native_api;
 mod notifications;
@@ -149,6 +150,9 @@ pub fn run() {
             goals::goal_achieve,
             goals::goal_archive,
             goals::goal_restore,
+            mission_plans::mission_plan_create,
+            mission_plans::mission_plan_get,
+            mission_plans::mission_plan_revise,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
             artifacts::artifact_review_action,
