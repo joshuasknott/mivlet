@@ -14,7 +14,8 @@ use crate::connector_approvals::{
 };
 use crate::connector_auth::{
     account_options_from_connections, complete_auth, connection_for, disconnect, read_connections,
-    refresh_connection, start_auth, usable_connection, ConnectorConnection,
+    refresh_connection, safe_account_projection, start_auth, usable_connection,
+    ConnectorConnection,
 };
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{
@@ -788,9 +789,13 @@ fn build_manifest_with_health(
         health,
         account: connected
             .then(|| {
-                connection
-                    .as_ref()
-                    .map(|connection| connection.account.clone())
+                connection.as_ref().map(|connection| {
+                    safe_account_projection(
+                        &connection.account,
+                        entry.id,
+                        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+                    )
+                })
             })
             .flatten(),
         setup_message: (!connected).then(|| {

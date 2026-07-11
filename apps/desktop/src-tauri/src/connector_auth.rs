@@ -1213,7 +1213,11 @@ pub(crate) async fn complete_auth(
         connector_id: connector_id.to_string(),
         status: "connected".to_string(),
         authorization_url: None,
-        account: Some(account),
+        account: Some(safe_account_projection(
+            &account,
+            connector_id,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+        )),
         message: "Connector account authenticated.".to_string(),
     })
 }
@@ -1264,36 +1268,51 @@ pub(crate) fn account_options_from_connections(
     matching.sort_by_key(|connection| !connection.is_active);
     matching
         .into_iter()
-        .map(|connection| ConnectorAccountOption {
-            connection_id: derive_native_connection_id(
-                workspace_id,
-                connector_id,
-                &connection.account.id,
-            ),
-            account: connection.account.clone(),
-            active: connection.is_active,
-            lifecycle: match connection.status.as_str() {
-                "connected" => "authorized",
-                "expired" => "refresh-required",
-                _ => "pending-authorization",
+        .map(|connection| {
+            let connection_id =
+                derive_native_connection_id(workspace_id, connector_id, &connection.account.id);
+            ConnectorAccountOption {
+                account: safe_account_projection(&connection.account, connector_id, workspace_id),
+                connection_id,
+                active: connection.is_active,
+                lifecycle: match connection.status.as_str() {
+                    "connected" => "authorized",
+                    "expired" => "refresh-required",
+                    _ => "pending-authorization",
+                }
+                .into(),
+                authorization_state: match connection.status.as_str() {
+                    "connected" => "authorized",
+                    "expired" => "expired",
+                    _ => "pending",
+                }
+                .into(),
+                health_state: "unknown".into(),
+                credential_custody: "os-secure-store".into(),
+                credential_state: match connection.status.as_str() {
+                    "connected" => "available",
+                    "expired" => "refresh-required",
+                    _ => "unknown",
+                }
+                .into(),
             }
-            .into(),
-            authorization_state: match connection.status.as_str() {
-                "connected" => "authorized",
-                "expired" => "expired",
-                _ => "pending",
-            }
-            .into(),
-            health_state: "unknown".into(),
-            credential_custody: "os-secure-store".into(),
-            credential_state: match connection.status.as_str() {
-                "connected" => "available",
-                "expired" => "refresh-required",
-                _ => "unknown",
-            }
-            .into(),
         })
         .collect()
+}
+
+pub(crate) fn safe_account_projection(
+    account: &ConnectorAccountSummary,
+    connector_id: &str,
+    workspace_id: &str,
+) -> ConnectorAccountSummary {
+    ConnectorAccountSummary {
+        id: derive_native_connection_id(workspace_id, connector_id, &account.id),
+        display_name: account.display_name.clone(),
+        handle: account.handle.clone(),
+        email: account.email.clone(),
+        workspace: account.workspace.clone(),
+        avatar_url: account.avatar_url.clone(),
+    }
 }
 
 /// Derive the stable Fable identity used by both the compatibility runtime and
@@ -2050,7 +2069,7 @@ mod tests {
         .unwrap();
         let accounts = accounts_for_connector(&path, "gmail", "workspace-a");
         assert_eq!(accounts.iter().filter(|option| option.active).count(), 1);
-        assert_eq!(accounts[0].account.id, "first");
+        assert_eq!(accounts[0].account.id, accounts[0].connection_id);
         assert!(accounts[0].connection_id.starts_with("connection_"));
         assert!(!accounts[0].connection_id.contains("first"));
         assert_ne!(
@@ -2059,7 +2078,7 @@ mod tests {
         );
         let second = accounts
             .iter()
-            .find(|option| option.account.id == "second")
+            .find(|option| option.account.display_name == "second")
             .unwrap()
             .connection_id
             .clone();
@@ -2067,7 +2086,13 @@ mod tests {
         switch_active_connection(&path, "gmail", "workspace-a", &second).unwrap();
         let accounts = accounts_for_connector(&path, "gmail", "workspace-a");
         assert_eq!(accounts.iter().filter(|option| option.active).count(), 1);
-        assert_eq!(accounts[0].account.id, "second");
+        assert_eq!(accounts[0].account.id, accounts[0].connection_id);
+        assert!(!serde_json::to_string(&accounts)
+            .unwrap()
+            .contains("\"id\":\"first\""));
+        assert!(!serde_json::to_string(&accounts)
+            .unwrap()
+            .contains("\"id\":\"second\""));
         assert_eq!(accounts[0].lifecycle, "authorized");
         assert_eq!(accounts[0].authorization_state, "authorized");
         assert_eq!(accounts[0].health_state, "unknown");

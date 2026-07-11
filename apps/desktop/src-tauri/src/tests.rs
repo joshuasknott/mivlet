@@ -124,6 +124,36 @@ fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
     }
 }
 
+#[test]
+fn connected_manifest_projects_opaque_connection_identity() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let old_broker = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+    std::env::set_var("FABLE_AUTH_BROKER_URL", "https://auth.example/");
+
+    let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
+        connection: Some(slack_connection("connected")),
+    });
+    let slack = manifests
+        .iter()
+        .find(|manifest| manifest.id == "slack")
+        .unwrap();
+    let projected = slack
+        .account
+        .as_ref()
+        .expect("connected account projection");
+    assert!(projected.id.starts_with("connection_"));
+    assert_ne!(projected.id, "U1");
+    assert!(!serde_json::to_string(slack)
+        .unwrap()
+        .contains("\"id\":\"U1\""));
+
+    if let Some(value) = old_broker {
+        std::env::set_var("FABLE_AUTH_BROKER_URL", value);
+    } else {
+        std::env::remove_var("FABLE_AUTH_BROKER_URL");
+    }
+}
+
 fn connector_action(action: &str, connector_id: &str, service: &str) -> ConnectorActionRequest {
     let id = format!("{connector_id}-fixture-action");
     let (label, mode, risk_level, consequence, confirmation_phrase) = match action {

@@ -312,6 +312,8 @@ pub struct ConnectorHealth {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorAccountSummary {
+    /// Renderer-facing connector DTOs carry the opaque Fable Connection id
+    /// here for compatibility. Raw provider account ids remain native-only.
     pub id: String,
     pub display_name: String,
     pub handle: Option<String>,

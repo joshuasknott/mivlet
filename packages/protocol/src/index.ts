@@ -291,6 +291,7 @@ export interface ConnectorSyncRequest {
 }
 
 export interface ConnectorAccountSummary {
+  /** Opaque Fable Connection reference; never a raw provider account id. */
   id: string;
   displayName: string;
   handle?: string;
