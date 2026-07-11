@@ -126,8 +126,18 @@ describe("hosted profile and roster handlers", () => {
     const roster = await (listRoster as any)._handler(f.ctx, { workspaceId });
     expect(roster).toMatchObject({ workspaceId, actorRole: "owner" });
     expect(roster.members).toHaveLength(2);
-    expect(roster.members.find((member: any) => member.memberId === "member-other")).toMatchObject({ role: "viewer", status: "suspended", displayName: "Other", isCurrentUser: false });
-    expect(roster.members.find((member: any) => member.isCurrentUser)).toMatchObject({ role: "owner", displayName: "Owner" });
+    expect(roster.members.find((member: any) => member.memberId === "member-other")).toMatchObject({
+      role: "viewer",
+      status: "suspended",
+      displayName: "Other",
+      isCurrentUser: false,
+      management: { allowedRoles: ["owner", "admin", "editor"], allowedActions: ["reactivate", "remove"] },
+    });
+    expect(roster.members.find((member: any) => member.isCurrentUser)).toMatchObject({
+      role: "owner",
+      displayName: "Owner",
+      management: { allowedRoles: [], allowedActions: [], blockedReason: "last-active-owner" },
+    });
     expect(JSON.stringify(roster)).not.toContain("Removed");
     expect(JSON.stringify(roster)).not.toContain("u-other");
 

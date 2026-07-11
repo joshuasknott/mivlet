@@ -5,8 +5,10 @@ import {
   createInvitationToState,
   listRecipientPendingInvitationsToState,
   listWorkspaceInvitationsToState,
+  projectMemberManagement,
   revokeInvitationToState,
   type CloudIdentity,
+  type CloudMembership,
   type MembershipLifecycleState,
 } from "./cloudPolicy";
 
@@ -102,8 +104,36 @@ describe("hosted membership lifecycle", () => {
     s.memberships.push({ memberId: "m-outsider-owner", workspaceId: "ws-a", internalUserId: "u-outsider", role: "owner", status: "suspended", revision: 2, createdAt: 1, updatedAt: 50, activatedAt: 1, suspendedAt: 50 });
     expect(createInvitationToState(s, admin, { workspaceId: "ws-a", role: "editor", recipientInternalUserId: "u-outsider", expiresAt: 1_000, idempotencyKey: "admin-existing-owner", invitationId: "inv-existing-owner" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
     expect(changeMembershipToState(s, admin, { workspaceId: "ws-a", memberId: "m-owner", action: "change-role", role: "admin", baseRevision: 1, idempotencyKey: "manage-owner" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
-    expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId: "m-owner", action: "remove", baseRevision: 1, idempotencyKey: "last-owner" }, 100)).toMatchObject({ status: "rejected", code: "last-active-owner" });
+    expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId: "m-owner", action: "remove", baseRevision: 1, idempotencyKey: "self-remove" }, 100)).toMatchObject({ status: "rejected", code: "permission-denied" });
+    expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId: "m-admin", action: "change-role", role: "admin", baseRevision: 1, idempotencyKey: "same-role" }, 100)).toMatchObject({ status: "conflict", code: "conflict" });
     expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId: "m-admin", action: "suspend", baseRevision: 99, idempotencyKey: "stale" }, 100)).toMatchObject({ status: "conflict", code: "stale-revision" });
     expect(() => changeMembershipToState(s, owner, { workspaceId: "ws-b", memberId: "m-admin", action: "suspend", baseRevision: 1, idempotencyKey: "cross" }, 100)).toThrow(/membership/i);
+  });
+
+  it("projects exact actions without granting self, non-manager, or admin-to-owner controls", () => {
+    const s = state();
+    const ownerMember = s.memberships.find((member) => member.memberId === "m-owner")!;
+    const adminMember = s.memberships.find((member) => member.memberId === "m-admin")!;
+    const editorMember: CloudMembership = { memberId: "m-editor", workspaceId: "ws-a", internalUserId: "u-recipient", role: "editor", status: "active", revision: 1 };
+    s.memberships.push(editorMember);
+
+    expect(projectMemberManagement(s, ownerMember, ownerMember)).toEqual({
+      allowedRoles: [], allowedActions: [], blockedReason: "last-active-owner",
+    });
+    expect(projectMemberManagement(s, ownerMember, adminMember)).toEqual({
+      allowedRoles: ["owner", "editor", "viewer"], allowedActions: ["suspend", "remove"],
+    });
+    expect(projectMemberManagement(s, adminMember, ownerMember)).toEqual({
+      allowedRoles: [], allowedActions: [], blockedReason: "owner-protected",
+    });
+    expect(projectMemberManagement(s, adminMember, editorMember)).toEqual({
+      allowedRoles: ["admin", "viewer"], allowedActions: ["suspend", "remove"],
+    });
+    expect(projectMemberManagement(s, editorMember, adminMember)).toEqual({
+      allowedRoles: [], allowedActions: [], blockedReason: "permission-denied",
+    });
+
+    editorMember.status = "suspended";
+    expect(projectMemberManagement(s, ownerMember, editorMember).allowedActions).toEqual(["reactivate", "remove"]);
   });
 });

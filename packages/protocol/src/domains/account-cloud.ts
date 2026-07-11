@@ -160,15 +160,46 @@ export interface AccountInvitationAcceptanceOutcome {
   };
 }
 
+export const ACCOUNT_WORKSPACE_MEMBER_ACTIONS = [
+  "change-role",
+  "suspend",
+  "reactivate",
+  "remove",
+] as const;
+export type AccountWorkspaceMemberAction =
+  (typeof ACCOUNT_WORKSPACE_MEMBER_ACTIONS)[number];
+
+export const ACCOUNT_WORKSPACE_MEMBER_BLOCKED_REASONS = [
+  "current-member",
+  "last-active-owner",
+  "owner-protected",
+  "permission-denied",
+  "unavailable",
+] as const;
+export type AccountWorkspaceMemberBlockedReason =
+  (typeof ACCOUNT_WORKSPACE_MEMBER_BLOCKED_REASONS)[number];
+
+/**
+ * Server-projected affordances. They improve the UI but never replace the
+ * hosted authorization and revision checks performed for the exact action.
+ */
+export interface AccountWorkspaceMemberManagement {
+  allowedRoles: readonly WorkspaceRole[];
+  allowedActions: readonly Exclude<AccountWorkspaceMemberAction, "change-role">[];
+  blockedReason?: AccountWorkspaceMemberBlockedReason;
+}
+
 /** Display-only roster projection. Profile hints never grant workspace access. */
 export interface AccountWorkspaceMemberSummary {
-  memberId: string;
+  /** Opaque, process-local reference. Raw hosted member ids never reach React. */
+  memberActionRef: string;
   role: WorkspaceRole;
   status: MembershipStatus;
   revision: number;
   displayName?: string;
   emailHint?: string;
   isCurrentUser: boolean;
+  management: AccountWorkspaceMemberManagement;
 }
 
 export interface AccountWorkspaceMemberList {
@@ -176,6 +207,25 @@ export interface AccountWorkspaceMemberList {
   actorRole: WorkspaceRole;
   members: readonly AccountWorkspaceMemberSummary[];
 }
+
+/** React supplies intent and optimistic revision, never hosted authority or ids. */
+export interface AccountWorkspaceMemberChangeRequest {
+  memberActionRef: string;
+  action: AccountWorkspaceMemberAction;
+  expectedRevision: number;
+  role?: WorkspaceRole;
+}
+
+export type AccountWorkspaceMemberChangeOutcome =
+  | {
+      status: "accepted";
+      message: string;
+    }
+  | {
+      status: "conflict" | "rejected";
+      code: string;
+      message: string;
+    };
 
 export type CloudWorkspaceRole = WorkspaceRole;
 export type CloudSyncState = "disabled" | "unlinked" | "active" | "stale" | "revoked" | "blocked" | "error";

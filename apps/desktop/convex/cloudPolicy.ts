@@ -25,6 +25,14 @@ const WRITE_ROLES = new Set<CloudRole>(["owner", "admin", "editor"]);
 const MANAGE_ROLES = new Set<CloudRole>(["owner", "admin"]);
 const ASSIGNABLE: Record<CloudRole, readonly CloudRole[]> = { owner: ["owner", "admin", "editor", "viewer"], admin: ["admin", "editor", "viewer"], editor: [], viewer: [] };
 
+export type MemberStatusAction = "suspend" | "reactivate" | "remove";
+export type MemberManagementBlockedReason = "current-member" | "last-active-owner" | "owner-protected" | "permission-denied" | "unavailable";
+export interface MemberManagementProjection {
+  allowedRoles: CloudRole[];
+  allowedActions: MemberStatusAction[];
+  blockedReason?: MemberManagementBlockedReason;
+}
+
 export class CloudPolicyError extends Error { constructor(public readonly code: string, message: string, public readonly opaque = false) { super(message); } }
 export function ensureInvitationTarget(recipientStatus: string | undefined, invitationExists: boolean, membershipStatus: string | undefined) {
   if (recipientStatus !== "active" || invitationExists || membershipStatus === "active" || membershipStatus === "removed") throw new CloudPolicyError("invitation-unavailable", "The invitation target is unavailable.", true);
@@ -79,7 +87,68 @@ export function ensureMemberManagement(actor: CloudRole, target: CloudRole, next
   ensureRoleAssignment(actor, next);
   if (actor === "admin" && target === "owner") throw new CloudPolicyError("role-assignment-denied", "This role cannot manage an owner membership.", true);
 }
+export function ensureMemberMutation(actor: CloudMembership, target: CloudMembership, action: MemberLifecycleAction, nextRole: CloudRole) {
+  if (actor.memberId === target.memberId) throw new CloudPolicyError("permission-denied", "Your own workspace access is read-only here.", true);
+  if (action === "change-role" && nextRole === target.role) throw new CloudPolicyError("conflict", "The membership already has this role.", true);
+  ensureMemberManagement(actor.role, target.role, nextRole);
+}
 export function ensureNotLastOwner(state: Pick<CloudState, "memberships">, membership: CloudMembership, nextRole = membership.role, nextStatus = membership.status) { if (membership.role !== "owner" || (nextRole === "owner" && nextStatus === "active")) return; const owners = state.memberships.filter((x) => x.workspaceId === membership.workspaceId && x.status === "active" && x.role === "owner" && x.memberId !== membership.memberId); if (!owners.length) throw new CloudPolicyError("last-active-owner", "A workspace must retain an active owner.", true); }
+
+/** Project exact member-management affordances without granting authority. */
+export function projectMemberManagement(
+  state: Pick<CloudState, "memberships">,
+  actor: CloudMembership,
+  target: CloudMembership,
+): MemberManagementProjection {
+  if (actor.memberId === target.memberId) {
+    const otherActiveOwner = state.memberships.some((member) =>
+      member.workspaceId === target.workspaceId
+      && member.memberId !== target.memberId
+      && member.status === "active"
+      && member.role === "owner"
+    );
+    return {
+      allowedRoles: [],
+      allowedActions: [],
+      blockedReason: target.role === "owner" && target.status === "active" && !otherActiveOwner
+        ? "last-active-owner"
+        : "current-member",
+    };
+  }
+  if (!MANAGE_ROLES.has(actor.role)) return { allowedRoles: [], allowedActions: [], blockedReason: "permission-denied" };
+  if (actor.role === "admin" && target.role === "owner") return { allowedRoles: [], allowedActions: [], blockedReason: "owner-protected" };
+
+  const allowedRoles = ASSIGNABLE[actor.role]
+    .filter((role) => role !== target.role)
+    .filter((role) => {
+      try {
+        ensureMemberManagement(actor.role, target.role, role);
+        ensureNotLastOwner(state, target, role, target.status);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const candidates: MemberStatusAction[] = target.status === "active"
+    ? ["suspend", "remove"]
+    : target.status === "suspended"
+      ? ["reactivate", "remove"]
+      : [];
+  const allowedActions = candidates.filter((action) => {
+    try {
+      ensureMemberManagement(actor.role, target.role, target.role);
+      ensureNotLastOwner(state, target, target.role, resolveMemberTransition(target.status, action));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  return {
+    allowedRoles,
+    allowedActions,
+    ...(allowedRoles.length || allowedActions.length ? {} : { blockedReason: "unavailable" as const }),
+  };
+}
 export function listAccessibleWorkspaces(state: Pick<CloudState, "users" | "identityLinks" | "workspaces" | "memberships">, identity: CloudIdentity | null | undefined): AccessibleWorkspace[] {
   const { user } = resolveInternalUser(state, identity);
   return state.memberships
@@ -294,7 +363,7 @@ export function changeMembershipToState(state: MembershipLifecycleState, identit
   try {
     const targets = state.memberships.filter((entry) => entry.memberId === args.memberId); if (targets.length !== 1 || targets[0].workspaceId !== args.workspaceId) throw new CloudPolicyError("membership-required", "The membership is unavailable.", true); const target = targets[0];
     if (target.revision !== args.baseRevision) throw new CloudPolicyError("stale-revision", "The membership revision is stale.", true); const nextRole = args.action === "change-role" ? args.role : target.role; if (!nextRole) throw new CloudPolicyError("role-assignment-denied", "The requested role cannot be assigned.", true);
-    ensureMemberManagement(actor.membership.role, target.role, nextRole); const nextStatus = resolveMemberTransition(target.status, args.action); ensureNotLastOwner(state, target, nextRole, nextStatus);
+    ensureMemberMutation(actor.membership, target, args.action, nextRole); const nextStatus = resolveMemberTransition(target.status, args.action); ensureNotLastOwner(state, target, nextRole, nextStatus);
     target.role = nextRole; target.status = nextStatus; target.revision += 1; target.updatedAt = now;
     if (args.action === "suspend") target.suspendedAt = now; if (args.action === "reactivate") { target.activatedAt = now; target.suspendedAt = undefined; } if (args.action === "remove") { target.removedAt = now; target.suspendedAt = undefined; }
     if (args.action === "suspend" || args.action === "remove") for (const link of state.deviceLinks.filter((entry) => entry.workspaceId === args.workspaceId && entry.memberId === target.memberId && entry.status !== "revoked")) { link.status = "revoked"; link.revokedAt = now; }

@@ -7,8 +7,10 @@ import {
   canonicalMembership,
   ensureInvitationTarget,
   ensureMemberManagement,
+  ensureMemberMutation,
   ensureNotLastOwner,
   ensureRoleAssignment,
+  projectMemberManagement,
   resolveMemberTransition,
   type LifecycleOutcome,
 } from "./cloudPolicy";
@@ -149,6 +151,7 @@ export const listRoster = queryGeneric({
         revision: membership.revision,
         ...(profileFresh && users[0].profile ? users[0].profile : {}),
         isCurrentUser: membership.internalUserId === authz.user.internalUserId,
+        management: projectMemberManagement({ memberships }, authz.membership, membership),
       });
     }
     return { workspaceId: args.workspaceId, actorRole: authz.membership.role, members };
@@ -227,7 +230,7 @@ export const change = mutationGeneric({
     const prior = await replay(ctx, authz.user.internalUserId, args.idempotencyKey, "membership.change", intentFingerprint); if (prior) return prior; let result: any; let currentTarget: any;
     try {
       const target = await uniqueByIndex(ctx, "workspace_memberships", "by_member", (q) => q.eq("memberId", args.memberId)); currentTarget = target; if (!target || target.workspaceId !== args.workspaceId) throw new CloudPolicyError("membership-required", "The membership is unavailable.", true); if (target.revision !== args.baseRevision) throw new CloudPolicyError("stale-revision", "The membership revision is stale.", true);
-      const nextRole = args.action === "change-role" ? args.role : target.role; if (!nextRole) throw new CloudPolicyError("role-assignment-denied", "The requested role cannot be assigned.", true); ensureMemberManagement(authz.membership.role, target.role, nextRole); const nextStatus = resolveMemberTransition(target.status, args.action);
+      const nextRole = args.action === "change-role" ? args.role : target.role; if (!nextRole) throw new CloudPolicyError("role-assignment-denied", "The requested role cannot be assigned.", true); ensureMemberMutation(authz.membership, target, args.action, nextRole); const nextStatus = resolveMemberTransition(target.status, args.action);
       const memberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace", (q: any) => q.eq("workspaceId", args.workspaceId)).collect(); ensureNotLastOwner({ memberships }, target, nextRole, nextStatus);
       const patch: any = { role: nextRole, status: nextStatus, revision: target.revision + 1, updatedAt: now }; if (args.action === "suspend") patch.suspendedAt = now; if (args.action === "reactivate") { patch.activatedAt = now; patch.suspendedAt = undefined; } if (args.action === "remove") { patch.removedAt = now; patch.suspendedAt = undefined; }
       await ctx.db.patch(target._id, patch); if (args.action === "suspend" || args.action === "remove") { const links = (await ctx.db.query("workspace_device_links").withIndex("by_workspace", (q: any) => q.eq("workspaceId", args.workspaceId)).collect()).filter((link: any) => link.memberId === target.memberId && link.status !== "revoked"); for (const link of links) await ctx.db.patch(link._id, { status: "revoked", revision: link.revision + 1, revokedAt: now }); }

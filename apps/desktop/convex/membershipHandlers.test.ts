@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acceptInvitation, createInvitation, listRecipientPending } from "./membership";
+import { acceptInvitation, change, createInvitation, listRecipientPending } from "./membership";
 
 type Doc = Record<string, any> & { _id: string };
 type Tables = Record<string, Doc[]>;
@@ -127,5 +127,26 @@ describe("registered hosted membership handlers", () => {
     f.tables.workspace_invitations.push({ _id: "invite:expired", invitationId: "inv-expired", workspaceId: "ws-a", role: "viewer", inviterMemberId: "m-owner", recipientKind: "internal-user", recipientInternalUserId: "u-recipient", status: "pending", expiresAt: f.now - 1, createdAt: 1, updatedAt: 1, createdByInternalUserId: "u-owner" });
     expect(await (acceptInvitation as any)._handler(f.ctx, direct("inv-expired", "expired"))).toMatchObject({ status: "conflict", error: { code: "invitation-expired" } });
     expect(f.tables.workspace_invitations.find((entry) => entry.invitationId === "inv-expired")?.status).toBe("expired");
+  });
+
+  it("enforces self-read-only, no-op, and admin-to-owner rules in the registered mutation", async () => {
+    const f = fixture();
+    const ownerBefore = { ...f.tables.workspace_memberships[0] };
+    expect(await (change as any)._handler(f.ctx, {
+      workspaceId: "ws-a", memberId: "m-owner", action: "remove", baseRevision: 1, idempotencyKey: "self-remove",
+    })).toMatchObject({ status: "rejected", error: { code: "permission-denied" } });
+    expect(f.tables.workspace_memberships[0]).toMatchObject(ownerBefore);
+
+    expect(await (change as any)._handler(f.ctx, {
+      workspaceId: "ws-a", memberId: "m-editor", action: "change-role", role: "editor", baseRevision: 1, idempotencyKey: "same-role",
+    })).toMatchObject({ status: "conflict", error: { code: "conflict" } });
+    expect(f.tables.workspace_memberships[1]).toMatchObject({ role: "editor", revision: 1 });
+
+    f.setSubject("editor");
+    f.tables.workspace_memberships[1].role = "admin";
+    expect(await (change as any)._handler(f.ctx, {
+      workspaceId: "ws-a", memberId: "m-owner", action: "suspend", baseRevision: 1, idempotencyKey: "admin-owner",
+    })).toMatchObject({ status: "rejected", error: { code: "role-assignment-denied" } });
+    expect(f.tables.workspace_memberships[0]).toMatchObject({ status: "active", revision: 1 });
   });
 });
