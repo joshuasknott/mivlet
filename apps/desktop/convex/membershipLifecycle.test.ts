@@ -3,6 +3,7 @@ import {
   acceptInvitationToState,
   changeMembershipToState,
   createInvitationToState,
+  ensureNotLastOwner,
   listRecipientPendingInvitationsToState,
   listWorkspaceInvitationsToState,
   projectMemberManagement,
@@ -135,5 +136,12 @@ describe("hosted membership lifecycle", () => {
 
     editorMember.status = "suspended";
     expect(projectMemberManagement(s, ownerMember, editorMember).allowedActions).toEqual(["reactivate", "remove"]);
+
+    const suspendedOwner: CloudMembership = { ...editorMember, memberId: "m-suspended-owner", role: "owner" };
+    s.memberships.push(suspendedOwner);
+    expect(() => ensureNotLastOwner(s, ownerMember, "admin", "active")).toThrow(/active owner/i);
+    s.memberships.push({ ...suspendedOwner, memberId: "m-second-owner", status: "active" });
+    expect(() => ensureNotLastOwner(s, ownerMember, "admin", "active")).not.toThrow();
+    expect(projectMemberManagement(s, ownerMember, ownerMember).blockedReason).toBe("current-member");
   });
 });

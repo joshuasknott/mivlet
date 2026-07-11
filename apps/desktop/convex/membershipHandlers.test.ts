@@ -149,4 +149,27 @@ describe("registered hosted membership handlers", () => {
     })).toMatchObject({ status: "rejected", error: { code: "role-assignment-denied" } });
     expect(f.tables.workspace_memberships[0]).toMatchObject({ status: "active", revision: 1 });
   });
+
+  it("accepts, replays, and stale-checks a registered suspension while revoking links", async () => {
+    const f = fixture();
+    f.tables.workspace_device_links.push({
+      _id: "link:editor", workspaceId: "ws-a", memberId: "m-editor", internalUserId: "u-editor",
+      deviceId: "device-editor", status: "active", revision: 1,
+    });
+    const args = { workspaceId: "ws-a", memberId: "m-editor", action: "suspend", baseRevision: 1, idempotencyKey: "suspend-editor" };
+    const accepted = await (change as any)._handler(f.ctx, args);
+    expect(accepted).toMatchObject({
+      status: "accepted",
+      membership: { memberId: "m-editor", status: "suspended", revision: 2 },
+      idempotency: { key: "suspend-editor", replayed: false },
+    });
+    expect(f.tables.workspace_device_links[0]).toMatchObject({ status: "revoked", revision: 2 });
+    const writesAfterAccepted = f.writes();
+    expect(await (change as any)._handler(f.ctx, args)).toEqual({
+      ...accepted, idempotency: { ...accepted.idempotency, replayed: true },
+    });
+    expect(f.writes()).toBe(writesAfterAccepted);
+    expect(await (change as any)._handler(f.ctx, { ...args, action: "remove" })).toMatchObject({ status: "conflict", error: { code: "idempotency-conflict" } });
+    expect(await (change as any)._handler(f.ctx, { ...args, idempotencyKey: "stale", baseRevision: 1 })).toMatchObject({ status: "conflict", error: { code: "stale-revision" } });
+  });
 });

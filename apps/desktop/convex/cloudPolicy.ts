@@ -125,8 +125,9 @@ export function projectMemberManagement(
         ensureMemberManagement(actor.role, target.role, role);
         ensureNotLastOwner(state, target, role, target.status);
         return true;
-      } catch {
-        return false;
+      } catch (error) {
+        if (error instanceof CloudPolicyError) return false;
+        throw error;
       }
     });
   const candidates: MemberStatusAction[] = target.status === "active"
@@ -139,8 +140,9 @@ export function projectMemberManagement(
       ensureMemberManagement(actor.role, target.role, target.role);
       ensureNotLastOwner(state, target, target.role, resolveMemberTransition(target.status, action));
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (error instanceof CloudPolicyError) return false;
+      throw error;
     }
   });
   return {
