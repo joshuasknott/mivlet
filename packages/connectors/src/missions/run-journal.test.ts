@@ -77,15 +77,18 @@ describe("durable run journal projection", () => {
 
   it("makes terminal cancellation immutable and preserves the exact request", () => {
     const initial = appendRunEvent(undefined, created());
+    const running = appendRunEvent(initial, event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1")));
     const cancellation: Spine.Missions.CancellationRequest = {
-      requestKey: "stop-1", requestedAt: "t2", requestedByInternalUserId: id<"internal-user">("user-1"),
+      requestKey: "stop-1", requestedAt: "t3", requestedByInternalUserId: id<"internal-user">("user-1"),
       scope: "run", mode: "cooperative"
     };
-    const requested = appendRunEvent(initial, event("cancellation-requested", 2, { cancellation }, id<"run-event">("event-1")));
-    const cancelled = appendRunEvent(requested, event("run-cancelled", 3, { cancellation }, id<"run-event">("event-2")));
+    const requested = appendRunEvent(running, event("cancellation-requested", 3, { cancellation }, id<"run-event">("event-2")));
+    expect(() => appendRunEvent(requested, event("cancellation-requested", 4, { cancellation: { ...cancellation, requestKey: "stop-2" } }, id<"run-event">("event-3"))))
+      .toThrow("already has a cancellation");
+    const cancelled = appendRunEvent(requested, event("run-cancelled", 4, { cancellation }, id<"run-event">("event-3")));
     expect(cancelled.run.status).toBe("cancelled");
     expect(cancelled.run.cancellation?.requestKey).toBe("stop-1");
-    expect(() => appendRunEvent(cancelled, event("worker-progressed", 4, { workerId: id<"worker">("worker-1"), summary: "late" }, id<"run-event">("event-3"))))
+    expect(() => appendRunEvent(cancelled, event("worker-progressed", 5, { workerId: id<"worker">("worker-1"), summary: "late" }, id<"run-event">("event-4"))))
       .toThrow("terminal run journal is immutable");
   });
 });

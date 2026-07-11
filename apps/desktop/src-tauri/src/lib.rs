@@ -34,6 +34,7 @@ mod local_model;
 mod mcp_process;
 mod memory;
 mod mission_plans;
+mod mission_runs;
 mod models;
 mod native_api;
 mod notifications;
@@ -153,6 +154,9 @@ pub fn run() {
             mission_plans::mission_plan_create,
             mission_plans::mission_plan_get,
             mission_plans::mission_plan_revise,
+            mission_runs::mission_run_create,
+            mission_runs::mission_run_get,
+            mission_runs::mission_run_request_cancellation,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
             artifacts::artifact_review_action,

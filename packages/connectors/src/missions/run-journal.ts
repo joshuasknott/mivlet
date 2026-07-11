@@ -6,8 +6,8 @@ type RunStatus = Spine.Missions.RunStatus;
 
 const TERMINAL = new Set<RunStatus>(["completed", "partially-completed", "failed", "cancelled"]);
 const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
-  created: ["planning", "queued", "running", "cancelled", "failed"],
-  planning: ["queued", "running", "waiting-human-input", "cancelled", "failed"],
+  created: ["planning", "queued", "running", "cancelling", "cancelled", "failed"],
+  planning: ["queued", "running", "waiting-human-input", "cancelling", "cancelled", "failed"],
   queued: ["running", "cancelling", "cancelled", "failed"],
   running: ["waiting-approval", "waiting-human-input", "paused", "retrying", "cancelling", "completed", "partially-completed", "failed", "cancelled"],
   "waiting-approval": ["running", "cancelling", "cancelled", "failed"],
@@ -84,11 +84,14 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
   const run = current.run;
   if (event.type === "run-created") throw new RunJournalError("run-created can appear only once.");
   if (event.type === "status-transitioned") {
-    if (event.payload.from !== run.status || !TRANSITIONS[run.status].includes(event.payload.to)) {
+    if (event.payload.from !== run.status || TERMINAL.has(event.payload.to) || !TRANSITIONS[run.status].includes(event.payload.to)) {
       throw new RunJournalError("Run status transition is invalid from the current state.");
     }
   }
   if (event.type === "cancellation-requested") {
+    if (run.cancellation || run.status === "cancelling" || !TRANSITIONS[run.status].includes("cancelling")) {
+      throw new RunJournalError("Run already has a cancellation request or cannot begin cancelling.");
+    }
     if (event.payload.cancellation.scope === "worker" && !event.payload.cancellation.workerId) {
       throw new RunJournalError("Worker cancellation requires an exact worker id.");
     }
@@ -113,6 +116,13 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
   }
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
     throw new RunJournalError("run-completed requires a succeeded result.");
+  }
+  const terminalTarget = event.type === "run-completed" ? "completed"
+    : event.type === "run-failed" ? (event.payload.partial ? "partially-completed" : "failed")
+      : event.type === "run-cancelled" ? (event.payload.partial ? "partially-completed" : "cancelled")
+        : undefined;
+  if (terminalTarget && !TRANSITIONS[run.status].includes(terminalTarget)) {
+    throw new RunJournalError("Terminal run event is invalid from the current state.");
   }
   if (event.type === "run-cancelled" && event.payload.cancellation.requestKey !== run.cancellation?.requestKey) {
     throw new RunJournalError("Run cancellation must resolve the current cancellation request.");

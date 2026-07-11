@@ -237,8 +237,12 @@ checkpoint replay boundaries, advancing recovery attempts, cooperative
 cancellation, and terminal immutability. Encrypted SQLite schema v25 stores the
 current projection plus immutable events, rejects stale/changed appends
 atomically, and reopens the owner-qualified chain after restart. Native command
-wiring, checkpoint state blobs, and production execution-event persistence are
-still open, so the durable-run box remains unchecked.
+support now creates a root run only from the authenticated member's ready,
+currently selected persisted mission plan; reads only that owner's journal;
+and appends an idempotent native-built cooperative cancellation without
+accepting renderer authority, actor, status, sequence, or time. Checkpoint state
+blobs and production worker execution-event persistence are still open, so the
+durable-run box remains unchecked.
 
 ### Wave 4B - Routing and experience
 
