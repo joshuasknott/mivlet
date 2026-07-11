@@ -1,6 +1,7 @@
 import type { GenericMutationCtx, GenericQueryCtx } from "convex/server";
 import type { GenericDataModel } from "convex/server";
 import type { CloudIdentity } from "./cloudPolicy";
+import { normalizeInvitationEmail } from "./invitationRecipient";
 
 type AuthCtx = GenericQueryCtx<GenericDataModel> | GenericMutationCtx<GenericDataModel>;
 
@@ -12,6 +13,7 @@ export interface ValidatedDisplayProfile {
 export interface ConvexAccountIdentity {
   external: CloudIdentity;
   profile?: ValidatedDisplayProfile;
+  verifiedEmail?: string;
 }
 
 const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/gu;
@@ -48,9 +50,14 @@ export async function requireConvexAccountIdentity(ctx: AuthCtx): Promise<Convex
   const identity = await ctx.auth.getUserIdentity();
   const issuer = readStringClaim(identity ?? {}, "issuer") ?? readIssuerFromTokenIdentifier(identity?.tokenIdentifier);
   if (!identity?.subject || !issuer) throw new Error("A validated issuer and subject are required.");
+  let verifiedEmail: string | undefined;
+  if ((identity?.emailVerified === true || identity?.email_verified === true) && typeof identity.email === "string") {
+    try { verifiedEmail = normalizeInvitationEmail(identity.email); } catch { verifiedEmail = undefined; }
+  }
   return {
     external: { provider: "clerk", normalizedIssuer: normalizeIssuer(issuer), subject: identity.subject },
     profile: validatedDisplayProfile(identity),
+    ...(verifiedEmail ? { verifiedEmail } : {}),
   };
 }
 

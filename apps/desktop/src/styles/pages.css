@@ -1937,6 +1937,53 @@
   border-radius: var(--radius-2);
 }
 
+.workspace-invitation-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, auto) auto;
+  grid-template-areas:
+    "email-label access-label ."
+    "email-input access-input action";
+  align-items: end;
+  gap: 8px 10px;
+}
+
+.workspace-invitation-form label {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  font-weight: 500;
+}
+
+.workspace-invitation-form label:first-child {
+  grid-area: email-label;
+}
+
+.workspace-invitation-form label:nth-of-type(2) {
+  grid-area: access-label;
+}
+
+.workspace-invitation-form input { grid-area: email-input; }
+.workspace-invitation-form select { grid-area: access-input; }
+.workspace-invitation-form button { grid-area: action; }
+
+.workspace-invitation-form input,
+.workspace-invitation-form select {
+  min-height: 38px;
+  padding: 0 11px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-1);
+  font: inherit;
+  font-size: var(--text-13);
+}
+
+.workspace-invitation-form input:focus,
+.workspace-invitation-form select:focus {
+  border-color: var(--accent-line);
+  box-shadow: var(--focus-ring);
+  outline: 0;
+}
+
 .workspace-member-row {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) auto;

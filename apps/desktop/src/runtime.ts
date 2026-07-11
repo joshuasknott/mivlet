@@ -64,6 +64,8 @@ import type {
   AccountPendingInvitationList,
   AccountWorkspaceMemberChangeOutcome,
   AccountWorkspaceMemberChangeRequest,
+  AccountWorkspaceInvitationCreateOutcome,
+  AccountWorkspaceInvitationCreateRequest,
   AccountWorkspaceMemberList,
   AccountWorkspaceStatus
 } from "@fable/protocol";
@@ -2053,6 +2055,17 @@ export async function changeRuntimeWorkspaceMember(request: AccountWorkspaceMemb
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<AccountWorkspaceMemberChangeOutcome>("account_workspace_member_change", {
+      request
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function createRuntimeWorkspaceInvitation(request: AccountWorkspaceInvitationCreateRequest) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountWorkspaceInvitationCreateOutcome>("account_workspace_invitation_create", {
       request
     });
   } catch (error) {

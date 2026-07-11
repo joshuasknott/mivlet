@@ -2,7 +2,6 @@ import type {
   ExternalAuthenticationFacts,
   InvitationAcceptancePresentation,
   MembershipStatus,
-  WorkspaceInvitationRecord,
   WorkspaceRole,
 } from "../spine/identity.js";
 import type {
@@ -122,7 +121,14 @@ export interface AccountWorkspaceStatus {
 
 /** A server-selected invitation addressed to the current authenticated user. */
 export interface AccountPendingInvitation {
-  invitation: WorkspaceInvitationRecord;
+  invitation: {
+    invitationId: string;
+    workspaceId: string;
+    status: "pending";
+    role: WorkspaceRole;
+    expiresAt: IsoDateTime;
+    displayHint?: string;
+  };
   selection: Extract<InvitationAcceptancePresentation, { kind: "direct-inbox" }>;
   /** Server-owned display name for the exact invitation workspace. */
   workspaceName: string;
@@ -205,8 +211,35 @@ export interface AccountWorkspaceMemberSummary {
 export interface AccountWorkspaceMemberList {
   workspaceId: string;
   actorRole: WorkspaceRole;
+  invitationManagement: {
+    available: boolean;
+    allowedRoles: readonly WorkspaceRole[];
+    message: string;
+    invitationActionRef?: string;
+  };
   members: readonly AccountWorkspaceMemberSummary[];
 }
+
+/** Ephemeral verified-email intent. Native and hosted code must never retain the raw email. */
+export interface AccountWorkspaceInvitationCreateRequest {
+  invitationActionRef: string;
+  email: string;
+  role: WorkspaceRole;
+}
+
+export type AccountWorkspaceInvitationCreateOutcome =
+  | {
+      status: "accepted";
+      role: WorkspaceRole;
+      expiresAt: IsoDateTime;
+      displayHint: string;
+      message: string;
+    }
+  | {
+      status: "conflict" | "rejected";
+      code: string;
+      message: string;
+    };
 
 /** React supplies intent and optimistic revision, never hosted authority or ids. */
 export interface AccountWorkspaceMemberChangeRequest {

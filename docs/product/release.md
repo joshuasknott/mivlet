@@ -52,6 +52,11 @@ stored in React state, snapshots, logs, or JSON metadata.
 - Clerk + Convex now have a schema, policy tests, device/outbox foundations,
   and config-gated desktop commands. The product vertical slice for mandatory
   account onboarding and multi-person workspaces is still incomplete.
+  Verified-email invitation targeting additionally requires the Convex server
+  environment variable `FABLE_INVITATION_RECIPIENT_HMAC_KEYRING`, encoded as
+  `{"active":"v2","keys":{"v2":"<64 lowercase hex>","v1":"<64 lowercase hex>"}}`.
+  Keep at most three 256-bit keys, retain the previous version during rotation,
+  and never place this secret in the desktop environment or renderer bundle.
 - Ollama runs only through an existing literal-loopback service. Fable does not
   install Ollama, download models, or store an Ollama credential.
 

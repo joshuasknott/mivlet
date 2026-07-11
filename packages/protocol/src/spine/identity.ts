@@ -210,6 +210,7 @@ export type InvitationRecipientConstraint =
   | {
       kind: "verified-identity-attribute";
       attributeKind: VerifiedIdentityAttributeKind;
+      hashVersion: string;
       normalizedValueHash: string;
       displayHint?: string;
     };
@@ -371,6 +372,7 @@ export const AUTHORIZATION_ERROR_CODES = [
   "role-assignment-denied",
   "last-active-owner",
   "invitation-unavailable",
+  "invitation-targeting-unavailable",
   "invitation-expired",
   "invitation-recipient-mismatch",
   "invitation-already-consumed",

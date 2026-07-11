@@ -45,11 +45,13 @@ export default defineSchema({
   }).index("by_workspace", ["workspaceId"]).index("by_workspace_user", ["workspaceId", "internalUserId"]).index("by_member", ["memberId"]).index("by_internal_user", ["internalUserId"]),
   workspace_invitations: defineTable({
     invitationId: v.string(), workspaceId: v.string(), role, inviterMemberId: v.string(), recipientKind: v.union(v.literal("internal-user"), v.literal("verified-identity-attribute")),
-    recipientInternalUserId: v.optional(v.string()), recipientAttributeKind: v.optional(v.union(v.literal("email"), v.literal("phone"))), recipientAttributeHash: v.optional(v.string()),
+    recipientInternalUserId: v.optional(v.string()), recipientAttributeKind: v.optional(v.union(v.literal("email"), v.literal("phone"))), recipientAttributeHashVersion: v.optional(v.string()), recipientAttributeHash: v.optional(v.string()), recipientDisplayHint: v.optional(v.string()),
     status: invitationStatus, expiresAt: v.number(), presentationRef: v.optional(v.string()), acceptedByInternalUserId: v.optional(v.string()), acceptedMembershipId: v.optional(v.string()),
     acceptedAt: v.optional(v.number()), revokedByMemberId: v.optional(v.string()), revokedAt: v.optional(v.number()), createdAt: v.number(), updatedAt: v.number(),
     schemaVersion: v.optional(v.number()), createdByInternalUserId: v.optional(v.string())
-  }).index("by_invitation", ["invitationId"]).index("by_workspace", ["workspaceId"]).index("by_recipient", ["recipientInternalUserId"]),
+  }).index("by_invitation", ["invitationId"]).index("by_workspace", ["workspaceId"]).index("by_recipient", ["recipientInternalUserId"])
+    .index("by_recipient_attribute", ["recipientAttributeKind", "recipientAttributeHashVersion", "recipientAttributeHash"])
+    .index("by_workspace_attribute", ["workspaceId", "recipientAttributeKind", "recipientAttributeHashVersion", "recipientAttributeHash"]),
   membership_lifecycle_idempotency: defineTable({
     actorInternalUserId: v.string(), idempotencyKey: v.string(), operation: v.string(), intentFingerprint: v.string(), result: v.any(), createdAt: v.number()
   }).index("by_actor_key", ["actorInternalUserId", "idempotencyKey"]),

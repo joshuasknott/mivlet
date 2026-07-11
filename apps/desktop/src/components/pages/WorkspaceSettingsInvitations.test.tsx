@@ -24,17 +24,9 @@ function pending(invitationId = "invite-1", workspaceName = "Atlas Studio"): Acc
   return {
     invitation: {
       workspaceId: "workspace-1" as never,
-      authority: "convex",
-      schemaVersion: 1 as never,
-      revision: 1 as never,
-      createdByInternalUserId: "user-1" as never,
-      createdAt: "2026-07-11T09:00:00.000Z" as never,
-      updatedAt: "2026-07-11T09:00:00.000Z" as never,
       invitationId: invitationId as never,
       status: "pending",
       role: "editor",
-      inviterMemberId: "member-1" as never,
-      recipientConstraint: { kind: "internal-user", internalUserId: "user-2" as never },
       expiresAt: "2026-07-18T09:00:00.000Z" as never
     },
     selection: { kind: "direct-inbox", invitationId: invitationId as never },

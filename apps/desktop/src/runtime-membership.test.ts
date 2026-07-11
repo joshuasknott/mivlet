@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptRuntimePendingInvitation,
   changeRuntimeWorkspaceMember,
+  createRuntimeWorkspaceInvitation,
   loadRuntimePendingInvitations,
   loadRuntimeWorkspaceMembers
 } from "./runtime";
@@ -31,6 +32,11 @@ describe("membership invitation runtime boundary", () => {
       action: "suspend",
       expectedRevision: 2
     })).resolves.toBeNull();
+    await expect(createRuntimeWorkspaceInvitation({
+      invitationActionRef: "invitation-action-a",
+      email: "person@example.com",
+      role: "editor"
+    })).resolves.toBeNull();
     await expect(acceptRuntimePendingInvitation("invitation-a")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -41,6 +47,7 @@ describe("membership invitation runtime boundary", () => {
       .mockResolvedValueOnce({ invitations: [] })
       .mockResolvedValueOnce({ workspaceId: "workspace-a", actorRole: "owner", members: [] })
       .mockResolvedValueOnce({ status: "accepted", message: "Workspace access updated." })
+      .mockResolvedValueOnce({ status: "accepted", invitationId: "invite-a" })
       .mockResolvedValueOnce({ result: { status: "rejected" }, accountWorkspace: {} });
 
     await loadRuntimePendingInvitations();
@@ -50,6 +57,11 @@ describe("membership invitation runtime boundary", () => {
       action: "change-role",
       expectedRevision: 2,
       role: "viewer"
+    });
+    await createRuntimeWorkspaceInvitation({
+      invitationActionRef: "invitation-action-a",
+      email: "person@example.com",
+      role: "editor"
     });
     await acceptRuntimePendingInvitation("invitation-a");
 
@@ -61,6 +73,11 @@ describe("membership invitation runtime boundary", () => {
         action: "change-role",
         expectedRevision: 2,
         role: "viewer"
+      } }],
+      ["account_workspace_invitation_create", { request: {
+        invitationActionRef: "invitation-action-a",
+        email: "person@example.com",
+        role: "editor"
       } }],
       ["account_membership_accept_invitation", { invitationId: "invitation-a" }]
     ]);

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { acceptInvitation, change, createInvitation, listRecipientPending } from "./membership";
+import { afterEach, describe, expect, it } from "vitest";
+import { acceptInvitation, change, createInvitation, createVerifiedEmailInvitation, listRecipientPending } from "./membership";
+import { INVITATION_RECIPIENT_KEYRING_ENV } from "./invitationRecipient";
 
 type Doc = Record<string, any> & { _id: string };
 type Tables = Record<string, Doc[]>;
@@ -27,20 +28,21 @@ function fixture(subject = "owner") {
     ],
     workspace_invitations: [], membership_lifecycle_idempotency: [], membership_lifecycle_audit: [], workspace_device_links: [], account_devices: [],
   };
-  let currentSubject = subject; let writes = 0; let sequence = 0;
+  let currentSubject = subject; let identityClaims: Record<string, unknown> = {}; let writes = 0; let sequence = 0;
   const db = {
     query: (table: string) => new FakeQuery(tables[table] ?? []),
     insert: async (table: string, value: Record<string, unknown>) => { writes += 1; const doc = { _id: `${table}:${++sequence}`, ...value }; (tables[table] ??= []).push(doc); return doc._id; },
     patch: async (id: string, value: Record<string, unknown>) => { writes += 1; const doc = Object.values(tables).flat().find((entry) => entry._id === id); if (!doc) throw new Error(`Missing ${id}`); Object.assign(doc, value); },
   };
-  const ctx = { db, auth: { getUserIdentity: async () => ({ subject: currentSubject, issuer: "https://issuer.example", tokenIdentifier: `https://issuer.example|raw-${currentSubject}-token` }) } };
-  return { ctx, tables, now, setSubject: (next: string) => { currentSubject = next; }, writes: () => writes };
+  const ctx = { db, auth: { getUserIdentity: async () => ({ subject: currentSubject, issuer: "https://issuer.example", tokenIdentifier: `https://issuer.example|raw-${currentSubject}-token`, ...identityClaims }) } };
+  return { ctx, tables, now, setSubject: (next: string) => { currentSubject = next; }, setIdentityClaims: (next: Record<string, unknown>) => { identityClaims = next; }, writes: () => writes };
 }
 
 const createArgs = (expiresAt: number, overrides: Record<string, unknown> = {}) => ({ workspaceId: "ws-a", role: "editor", recipientInternalUserId: "u-recipient", expiresAt, idempotencyKey: "create-key", ...overrides });
 const direct = (invitationId: string, idempotencyKey = "accept-key") => ({ invitationId, presentation: { kind: "direct-inbox", invitationId }, idempotencyKey });
 
 describe("registered hosted membership handlers", () => {
+  afterEach(() => { delete process.env[INVITATION_RECIPIENT_KEYRING_ENV]; });
   it("authorizes before idempotency and performs no unauthorized writes", async () => {
     const f = fixture("editor");
     f.tables.membership_lifecycle_idempotency.push({ _id: "receipt:forged", actorInternalUserId: "u-owner", idempotencyKey: "create-key", operation: "invitation.create", intentFingerprint: "forged", result: { status: "accepted" }, createdAt: f.now });
@@ -171,5 +173,54 @@ describe("registered hosted membership handlers", () => {
     expect(f.writes()).toBe(writesAfterAccepted);
     expect(await (change as any)._handler(f.ctx, { ...args, action: "remove" })).toMatchObject({ status: "conflict", error: { code: "idempotency-conflict" } });
     expect(await (change as any)._handler(f.ctx, { ...args, idempotencyKey: "stale", baseRevision: 1 })).toMatchObject({ status: "conflict", error: { code: "stale-revision" } });
+  });
+
+  it("fails closed with zero writes when verified-email targeting is not configured", async () => {
+    const f = fixture(); const before = f.writes();
+    const result = await (createVerifiedEmailInvitation as any)._handler(f.ctx, {
+      workspaceId: "ws-a", role: "editor", email: "private@example.com", idempotencyKey: "verified-create",
+    });
+    expect(result).toMatchObject({ status: "rejected", error: { code: "invitation-targeting-unavailable" } });
+    expect(f.writes()).toBe(before);
+    expect(JSON.stringify(f.tables)).not.toContain("private@example.com");
+  });
+
+  it("creates and replays a hash-only verified-email invitation without account enumeration", async () => {
+    process.env[INVITATION_RECIPIENT_KEYRING_ENV] = JSON.stringify({ active: "v2", keys: { v2: "11".repeat(32), v1: "22".repeat(32) } });
+    const f = fixture();
+    const args = { workspaceId: "ws-a", role: "editor", email: "Private+Work@Example.com", idempotencyKey: "verified-create" };
+    const first = await (createVerifiedEmailInvitation as any)._handler(f.ctx, args);
+    expect(first).toMatchObject({ status: "accepted", invitation: { workspaceId: "ws-a", role: "editor", status: "pending", displayHint: "p***@example.com" }, idempotency: { replayed: false } });
+    const stored = f.tables.workspace_invitations[0];
+    expect(stored).toMatchObject({ recipientKind: "verified-identity-attribute", recipientAttributeKind: "email", recipientAttributeHashVersion: "v2", recipientDisplayHint: "p***@example.com" });
+    expect(stored.recipientAttributeHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify({ first, tables: f.tables })).not.toContain("private+work@example.com");
+    expect(JSON.stringify(first)).not.toContain(stored.recipientAttributeHash);
+    const writes = f.writes();
+    expect(await (createVerifiedEmailInvitation as any)._handler(f.ctx, args)).toEqual({ ...first, idempotency: { ...first.idempotency, replayed: true } });
+    expect(f.writes()).toBe(writes);
+    expect(await (createVerifiedEmailInvitation as any)._handler(f.ctx, { ...args, role: "viewer" })).toMatchObject({ status: "conflict", error: { code: "idempotency-conflict" } });
+
+    process.env[INVITATION_RECIPIENT_KEYRING_ENV] = JSON.stringify({ active: "v3", keys: { v3: "33".repeat(32), v2: "11".repeat(32) } });
+    expect(await (createVerifiedEmailInvitation as any)._handler(f.ctx, { ...args, idempotencyKey: "rotated" })).toMatchObject({ status: "rejected", error: { code: "invitation-unavailable" } });
+  });
+
+  it("lists and accepts only a freshly verified matching email without exposing its hash", async () => {
+    process.env[INVITATION_RECIPIENT_KEYRING_ENV] = JSON.stringify({ active: "v1", keys: { v1: "44".repeat(32) } });
+    const f = fixture();
+    const created = await (createVerifiedEmailInvitation as any)._handler(f.ctx, {
+      workspaceId: "ws-a", role: "viewer", email: "recipient@example.com", idempotencyKey: "verified-create",
+    });
+    const invitationId = created.invitation.invitationId;
+    f.setSubject("recipient");
+    f.setIdentityClaims({ email: "Recipient@Example.com", emailVerified: true });
+    const inbox = await (listRecipientPending as any)._handler(f.ctx, {});
+    expect(inbox).toEqual([{
+      invitation: { invitationId, workspaceId: "ws-a", status: "pending", role: "viewer", expiresAt: expect.any(String), displayHint: "r***@example.com" },
+      selection: { kind: "direct-inbox", invitationId }, workspaceName: "A",
+    }]);
+    expect(JSON.stringify(inbox)).not.toMatch(/recipientAttribute|normalizedValueHash|internalUserId/);
+    const accepted = await (acceptInvitation as any)._handler(f.ctx, direct(invitationId, "verified-accept"));
+    expect(accepted).toMatchObject({ status: "accepted", membership: { internalUserId: "u-recipient", role: "viewer", status: "active" } });
   });
 });

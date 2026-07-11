@@ -561,6 +561,16 @@
     padding: 0 14px;
   }
 
+  .workspace-invitation-form {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "email-label"
+      "email-input"
+      "access-label"
+      "access-input"
+      "action";
+  }
+
   .workspace-member-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;

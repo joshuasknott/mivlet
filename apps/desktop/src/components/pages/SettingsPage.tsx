@@ -1183,6 +1183,10 @@ export function WorkspaceSettingsView({
   } | null>(null);
   const [memberMessage, setMemberMessage] = useState<{ contextKey: string; text: string } | null>(null);
   const memberFeedbackRef = useRef<HTMLParagraphElement>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<WorkspaceRole>("editor");
+  const [inviteMessage, setInviteMessage] = useState<{ contextKey: string; text: string } | null>(null);
+  const inviteFeedbackRef = useRef<HTMLParagraphElement>(null);
 
   const loadInvitations = async () => {
     setInvitationState("loading");
@@ -1239,12 +1243,22 @@ export function WorkspaceSettingsView({
   }, [memberContextKey, members.roster]);
 
   useEffect(() => {
+    setInviteEmail("");
+    setInviteRole("editor");
+    setInviteMessage(null);
+  }, [memberContextKey]);
+
+  useEffect(() => {
     setMemberMessage(null);
   }, [memberContextKey]);
 
   useEffect(() => {
     if (memberMessage?.contextKey === memberContextKey) memberFeedbackRef.current?.focus();
   }, [memberContextKey, memberMessage]);
+
+  useEffect(() => {
+    if (inviteMessage?.contextKey === memberContextKey) inviteFeedbackRef.current?.focus();
+  }, [inviteMessage, memberContextKey]);
 
   const acceptInvitation = async (invitationId: string) => {
     if (acceptanceTokenRef.current) return;
@@ -1332,6 +1346,41 @@ export function WorkspaceSettingsView({
     }
   };
 
+  const createInvitation = async () => {
+    const capability = members.roster?.invitationManagement;
+    if (!capability?.available || !capability.invitationActionRef || members.invitationPending) return;
+    setInviteMessage(null);
+    try {
+      const outcome = await members.createInvitation({
+        invitationActionRef: capability.invitationActionRef,
+        email: inviteEmail,
+        role: inviteRole
+      });
+      if (!outcome) return;
+      if (outcome.status === "accepted") {
+        setInviteEmail("");
+        setInviteMessage({
+          contextKey: memberContextKey,
+          text: "Invitation created. They’ll see it when they sign in with that verified email."
+        });
+      } else if (outcome.status === "conflict") {
+        setInviteMessage({ contextKey: memberContextKey, text: "That person already has a pending invitation." });
+      } else {
+        setInviteMessage({
+          contextKey: memberContextKey,
+          text: outcome.code === "invitation-targeting-unavailable"
+            ? "Invites aren’t available in this build yet."
+            : "That invitation couldn’t be created. Nothing was changed."
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error && error.message === "Enter a valid email address."
+        ? error.message
+        : "That invitation couldn’t be created. Check your connection and try again.";
+      setInviteMessage({ contextKey: memberContextKey, text: message });
+    }
+  };
+
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
@@ -1409,6 +1458,54 @@ export function WorkspaceSettingsView({
                 <p role="alert">People with access couldn’t be loaded. Check your connection and try again.</p>
                 <button type="button" className="button button--secondary" onClick={members.reload}>Try again</button>
               </div>
+            ) : null}
+            {members.state === "ready" && members.roster ? (
+              members.roster.invitationManagement.available && members.roster.invitationManagement.invitationActionRef ? (
+                <form
+                  className="workspace-invitation-form"
+                  aria-label="Invite someone to this workspace"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void createInvitation();
+                  }}
+                >
+                  <label htmlFor="workspace-invitation-email">Email</label>
+                  <input
+                    id="workspace-invitation-email"
+                    type="email"
+                    autoComplete="email"
+                    value={inviteEmail}
+                    disabled={members.invitationPending}
+                    onChange={(event) => setInviteEmail(event.target.value)}
+                    placeholder="person@example.com"
+                    required
+                  />
+                  <label htmlFor="workspace-invitation-role">Access</label>
+                  <select
+                    id="workspace-invitation-role"
+                    value={inviteRole}
+                    disabled={members.invitationPending}
+                    onChange={(event) => setInviteRole(event.target.value as WorkspaceRole)}
+                  >
+                    {members.roster.invitationManagement.allowedRoles.map((role) => (
+                      <option value={role} key={role}>{memberRoleLabel(role)}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="submit"
+                    className="button button--primary"
+                    disabled={members.invitationPending || inviteEmail.trim() === ""}
+                    aria-busy={members.invitationPending}
+                  >
+                    {members.invitationPending ? "Inviting…" : "Invite"}
+                  </button>
+                </form>
+              ) : (
+                <p className="profile-security-note">{members.roster.invitationManagement.message}</p>
+              )
+            ) : null}
+            {inviteMessage?.contextKey === memberContextKey ? (
+              <p ref={inviteFeedbackRef} tabIndex={-1} role="status" className="profile-security-note">{inviteMessage.text}</p>
             ) : null}
             {members.state === "ready" && members.roster?.members.length === 0 ? <p>No people are listed yet.</p> : null}
             {members.state === "ready" && members.roster && members.roster.members.length > 0 ? (

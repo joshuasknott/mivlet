@@ -151,6 +151,7 @@ enum InvitationRecipientConstraint {
     },
     VerifiedIdentityAttribute {
         attribute_kind: String,
+        hash_version: String,
         normalized_value_hash: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         display_hint: Option<String>,
@@ -167,9 +168,21 @@ struct DirectInboxSelection {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct HostedPendingInvitation {
-    invitation: HostedInvitation,
+    invitation: HostedPendingInvitationSummary,
     selection: DirectInboxSelection,
     workspace_name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedPendingInvitationSummary {
+    invitation_id: String,
+    workspace_id: String,
+    status: String,
+    role: String,
+    expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_hint: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -207,7 +220,16 @@ struct HostedAccountWorkspaceMemberSummary {
 struct HostedAccountWorkspaceMemberList {
     workspace_id: String,
     actor_role: String,
+    invitation_management: HostedWorkspaceInvitationManagement,
     members: Vec<HostedAccountWorkspaceMemberSummary>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedWorkspaceInvitationManagement {
+    available: bool,
+    allowed_roles: Vec<String>,
+    message: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -239,7 +261,80 @@ struct AccountWorkspaceMemberSummary {
 pub struct AccountWorkspaceMemberList {
     workspace_id: String,
     actor_role: String,
+    invitation_management: AccountWorkspaceInvitationManagement,
     members: Vec<AccountWorkspaceMemberSummary>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountWorkspaceInvitationManagement {
+    available: bool,
+    allowed_roles: Vec<String>,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invitation_action_ref: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountWorkspaceInvitationCreateRequest {
+    invitation_action_ref: String,
+    email: String,
+    role: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AccountWorkspaceInvitationCreateOutcome {
+    Accepted {
+        role: String,
+        expires_at: String,
+        display_hint: String,
+        message: String,
+    },
+    Conflict {
+        code: String,
+        message: String,
+    },
+    Rejected {
+        code: String,
+        message: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedCreatedInvitationSummary {
+    invitation_id: String,
+    workspace_id: String,
+    status: String,
+    role: String,
+    expires_at: String,
+    display_hint: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum HostedInvitationCreateResult {
+    Accepted {
+        invitation: HostedCreatedInvitationSummary,
+        idempotency: LifecycleIdempotencyReceipt,
+    },
+    Conflict {
+        error: FailClosedAuthorizationError,
+    },
+    Rejected {
+        error: FailClosedAuthorizationError,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -357,10 +452,20 @@ struct MemberActionGrant {
     allowed_actions: BTreeSet<String>,
 }
 
+#[derive(Clone, Debug)]
+struct InvitationActionGrant {
+    identity: AccountIdentitySnapshot,
+    internal_user_id: String,
+    workspace_id: String,
+    current_member_id: String,
+    allowed_roles: BTreeSet<String>,
+}
+
 #[derive(Default)]
 struct MemberActionRegistry {
     grants: BTreeMap<String, MemberActionGrant>,
     order: VecDeque<String>,
+    invitation_grant: Option<(String, InvitationActionGrant)>,
 }
 
 impl MemberActionRegistry {
@@ -383,6 +488,29 @@ impl MemberActionRegistry {
         // refresh or context switch invalidates every previously issued ref.
         self.grants.clear();
         self.order.clear();
+        self.invitation_grant = None;
+
+        let invitation_action_ref = if roster.invitation_management.available {
+            let reference = opaque_id("invitation_action")?;
+            self.invitation_grant = Some((
+                reference.clone(),
+                InvitationActionGrant {
+                    identity: identity.clone(),
+                    internal_user_id: context.internal_user_id.clone(),
+                    workspace_id: workspace_id.to_string(),
+                    current_member_id: current_member_id.to_string(),
+                    allowed_roles: roster
+                        .invitation_management
+                        .allowed_roles
+                        .iter()
+                        .cloned()
+                        .collect(),
+                },
+            ));
+            Some(reference)
+        } else {
+            None
+        };
 
         let mut members = Vec::with_capacity(roster.members.len());
         for member in roster.members {
@@ -424,6 +552,12 @@ impl MemberActionRegistry {
         Ok(AccountWorkspaceMemberList {
             workspace_id: roster.workspace_id,
             actor_role: roster.actor_role,
+            invitation_management: AccountWorkspaceInvitationManagement {
+                available: roster.invitation_management.available,
+                allowed_roles: roster.invitation_management.allowed_roles,
+                message: roster.invitation_management.message,
+                invitation_action_ref,
+            },
             members,
         })
     }
@@ -433,6 +567,14 @@ impl MemberActionRegistry {
             .get(reference)
             .cloned()
             .ok_or_else(|| "Refresh the member list before changing access.".to_string())
+    }
+
+    fn resolve_invitation(&self, reference: &str) -> Result<InvitationActionGrant, String> {
+        self.invitation_grant
+            .as_ref()
+            .filter(|(stored, _)| stored == reference)
+            .map(|(_, grant)| grant.clone())
+            .ok_or_else(|| "Refresh the member list before inviting someone.".to_string())
     }
 }
 
@@ -629,6 +771,80 @@ fn invitation_acceptance_idempotency_key(
     ))
 }
 
+fn normalized_invitation_email(value: &str) -> Result<String, String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty()
+        || normalized.len() > 254
+        || !normalized.is_ascii()
+        || normalized
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+    {
+        return Err("Enter a valid email address.".into());
+    }
+    let mut parts = normalized.split('@');
+    let local = parts.next().unwrap_or_default();
+    let domain = parts.next().unwrap_or_default();
+    if parts.next().is_some()
+        || local.is_empty()
+        || local.len() > 64
+        || local.starts_with('.')
+        || local.ends_with('.')
+        || local.contains("..")
+        || !local.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || b".!#$%&'*+/=?^_`{|}~-".contains(&byte)
+        })
+        || domain.len() > 253
+    {
+        return Err("Enter a valid email address.".into());
+    }
+    let labels = domain.split('.').collect::<Vec<_>>();
+    if labels.len() < 2
+        || labels.iter().any(|label| {
+            label.is_empty()
+                || label.len() > 63
+                || !label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                || !label
+                    .as_bytes()
+                    .first()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+                || !label
+                    .as_bytes()
+                    .last()
+                    .is_some_and(u8::is_ascii_alphanumeric)
+        })
+    {
+        return Err("Enter a valid email address.".into());
+    }
+    Ok(normalized)
+}
+
+fn invitation_creation_idempotency_key(
+    account_binding: &str,
+    action_ref: &str,
+    email: &str,
+    role: &str,
+) -> Result<String, String> {
+    if !valid_id(account_binding) || !valid_id(action_ref) || !valid_role(role) {
+        return Err("Fable could not bind the invitation request.".into());
+    }
+    let email = normalized_invitation_email(email)?;
+    let mut digest = Sha256::new();
+    digest.update(b"fable.account-invitation.create.v1\0");
+    for value in [account_binding, action_ref, email.as_str(), role] {
+        digest.update(value.as_bytes());
+        digest.update(b"\0");
+    }
+    Ok(format!(
+        "invitation_create_{}",
+        URL_SAFE_NO_PAD.encode(digest.finalize())
+    ))
+}
+
 fn member_change_idempotency_key(
     account_binding: &str,
     request: &AccountWorkspaceMemberChangeRequest,
@@ -660,6 +876,16 @@ fn member_change_idempotency_key(
 fn context_matches_grant(
     context: &directory::AuthorizedWorkspaceContext,
     grant: &MemberActionGrant,
+) -> bool {
+    context.internal_user_id == grant.internal_user_id
+        && context.active_workspace.fable_workspace_id.as_deref()
+            == Some(grant.workspace_id.as_str())
+        && context.member_id.as_deref() == Some(grant.current_member_id.as_str())
+}
+
+fn context_matches_invitation_grant(
+    context: &directory::AuthorizedWorkspaceContext,
+    grant: &InvitationActionGrant,
 ) -> bool {
     context.internal_user_id == grant.internal_user_id
         && context.active_workspace.fable_workspace_id.as_deref()
@@ -885,14 +1111,20 @@ fn validate_invitation(record: &HostedInvitation) -> Result<(), String> {
         }
         InvitationRecipientConstraint::VerifiedIdentityAttribute {
             attribute_kind,
+            hash_version,
             normalized_value_hash,
             display_hint,
         } => {
             ["email", "phone"].contains(&attribute_kind.as_str())
-                && !normalized_value_hash.trim().is_empty()
+                && valid_id(hash_version)
+                && hash_version.len() <= 32
+                && normalized_value_hash.len() == 64
+                && normalized_value_hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                 && display_hint
                     .as_ref()
-                    .is_none_or(|hint| !hint.trim().is_empty())
+                    .is_none_or(|hint| attribute_kind != "email" || valid_email_hint(hint))
         }
     };
     if !valid_id(&record.invitation_id)
@@ -990,6 +1222,7 @@ fn validate_authorization_error(error: &FailClosedAuthorizationError) -> Result<
         "role-assignment-denied",
         "last-active-owner",
         "invitation-unavailable",
+        "invitation-targeting-unavailable",
         "invitation-expired",
         "invitation-recipient-mismatch",
         "invitation-already-consumed",
@@ -1172,26 +1405,80 @@ fn parse_member_change_result(
     }
 }
 
+fn parse_invitation_create_result(
+    value: Value,
+    grant: &InvitationActionGrant,
+    request: &AccountWorkspaceInvitationCreateRequest,
+    expected_idempotency_key: &str,
+) -> Result<AccountWorkspaceInvitationCreateOutcome, String> {
+    let result: HostedInvitationCreateResult = serde_json::from_value(value)
+        .map_err(|_| "The hosted invitation response is malformed.".to_string())?;
+    match result {
+        HostedInvitationCreateResult::Accepted {
+            invitation,
+            idempotency,
+        } => {
+            if !valid_id(&invitation.invitation_id)
+                || invitation.workspace_id != grant.workspace_id
+                || invitation.status != "pending"
+                || invitation.role != request.role
+                || !valid_iso(&invitation.expires_at)
+                || !valid_email_hint(&invitation.display_hint)
+                || idempotency.key != expected_idempotency_key
+                || !valid_iso(&idempotency.recorded_at)
+            {
+                return Err("The hosted invitation response failed validation.".into());
+            }
+            let _ = idempotency.replayed;
+            Ok(AccountWorkspaceInvitationCreateOutcome::Accepted {
+                role: invitation.role,
+                expires_at: invitation.expires_at,
+                display_hint: invitation.display_hint,
+                message:
+                    "Invitation created. They'll see it when they sign in with that verified email."
+                        .into(),
+            })
+        }
+        HostedInvitationCreateResult::Conflict { error } => {
+            validate_authorization_error(&error)?;
+            Ok(AccountWorkspaceInvitationCreateOutcome::Conflict {
+                code: error.code,
+                message: error.message,
+            })
+        }
+        HostedInvitationCreateResult::Rejected { error } => {
+            validate_authorization_error(&error)?;
+            Ok(AccountWorkspaceInvitationCreateOutcome::Rejected {
+                code: error.code,
+                message: error.message,
+            })
+        }
+    }
+}
+
 fn parse_pending_invitations(value: Value) -> Result<AccountPendingInvitationList, String> {
     let invitations: Vec<HostedPendingInvitation> = serde_json::from_value(value)
         .map_err(|_| "The hosted invitation inbox response is malformed.".to_string())?;
+    if invitations.len() > 500 {
+        return Err("The hosted invitation inbox is too large.".into());
+    }
     let mut ids = BTreeSet::new();
     for item in &invitations {
-        validate_invitation(&item.invitation)?;
-        if item.invitation.status != "pending"
+        if !valid_id(&item.invitation.invitation_id)
+            || !valid_id(&item.invitation.workspace_id)
+            || item.invitation.status != "pending"
+            || !valid_role(&item.invitation.role)
+            || !valid_iso(&item.invitation.expires_at)
+            || item
+                .invitation
+                .display_hint
+                .as_ref()
+                .is_some_and(|hint| !valid_email_hint(hint))
             || item.workspace_name.trim().is_empty()
             || item.workspace_name.chars().count() > 160
+            || item.workspace_name.chars().any(is_control_or_format)
             || item.selection.kind != "direct-inbox"
             || item.selection.invitation_id != item.invitation.invitation_id
-            || !matches!(
-                item.invitation.recipient_constraint,
-                InvitationRecipientConstraint::InternalUser { .. }
-            )
-            || item.invitation.accepted_by_internal_user_id.is_some()
-            || item.invitation.accepted_membership_id.is_some()
-            || item.invitation.accepted_at.is_some()
-            || item.invitation.revoked_by_member_id.is_some()
-            || item.invitation.revoked_at.is_some()
             || !ids.insert(item.invitation.invitation_id.clone())
         {
             return Err(
@@ -1212,8 +1499,39 @@ fn parse_workspace_members(
     if roster.workspace_id != expected_workspace_id
         || !valid_role(&roster.actor_role)
         || roster.members.len() > 500
+        || roster.invitation_management.message.trim().is_empty()
+        || roster.invitation_management.message != roster.invitation_management.message.trim()
+        || roster.invitation_management.message.chars().count() > 200
+        || roster
+            .invitation_management
+            .message
+            .chars()
+            .any(is_control_or_format)
     {
         return Err("The hosted workspace member response failed validation.".into());
+    }
+
+    let invitation_roles = roster
+        .invitation_management
+        .allowed_roles
+        .iter()
+        .collect::<BTreeSet<_>>();
+    let expected_invitation_roles: &[&str] = match roster.actor_role.as_str() {
+        "owner" => &["owner", "admin", "editor", "viewer"],
+        "admin" => &["admin", "editor", "viewer"],
+        _ => &[],
+    };
+    if invitation_roles.len() != roster.invitation_management.allowed_roles.len()
+        || if roster.invitation_management.available {
+            expected_invitation_roles.len() != invitation_roles.len()
+                || !expected_invitation_roles
+                    .iter()
+                    .all(|role| invitation_roles.iter().any(|value| value.as_str() == *role))
+        } else {
+            !invitation_roles.is_empty()
+        }
+    {
+        return Err("The hosted workspace invitation controls failed validation.".into());
     }
 
     let mut member_ids = BTreeSet::new();
@@ -1637,6 +1955,58 @@ async fn change_workspace_member_with_transport(
     parse_member_change_result(response, &grant, request, &idempotency_key)
 }
 
+async fn create_workspace_invitation_with_transport(
+    transport: &dyn HostedAccountTransport,
+    contexts: &dyn ActiveContextSource,
+    registry: &Mutex<MemberActionRegistry>,
+    request: &AccountWorkspaceInvitationCreateRequest,
+) -> Result<AccountWorkspaceInvitationCreateOutcome, String> {
+    if !valid_id(&request.invitation_action_ref) || !valid_role(&request.role) {
+        return Err("Refresh workspace access before inviting someone.".into());
+    }
+    let normalized_email = normalized_invitation_email(&request.email)?;
+    let grant = registry
+        .lock()
+        .map_err(|_| "Fable could not protect invitation references.".to_string())?
+        .resolve_invitation(&request.invitation_action_ref)?;
+    if !grant.allowed_roles.contains(&request.role) {
+        return Err("This invitation role is unavailable. Refresh workspace access.".into());
+    }
+    let identity = transport.identity_snapshot()?;
+    if identity != grant.identity {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    let before = contexts.active_context()?;
+    if !context_matches_invitation_grant(&before, &grant) {
+        return Err(WORKSPACE_CONTEXT_CHANGED_ERROR.into());
+    }
+    let idempotency_key = invitation_creation_idempotency_key(
+        &identity.account_binding,
+        &request.invitation_action_ref,
+        &normalized_email,
+        &request.role,
+    )?;
+    let response = bound_hosted_call(
+        transport,
+        &identity.account_binding,
+        ConvexFunctionType::Mutation,
+        "membership:createVerifiedEmailInvitation",
+        json!({
+            "workspaceId": grant.workspace_id,
+            "role": request.role,
+            "email": normalized_email,
+            "idempotencyKey": idempotency_key,
+        }),
+    )
+    .await?;
+    let _identity_guard = transport.lock_identity_generation(&identity)?;
+    let after = contexts.active_context()?;
+    if !context_matches_invitation_grant(&after, &grant) || after != before {
+        return Err(WORKSPACE_CONTEXT_CHANGED_ERROR.into());
+    }
+    parse_invitation_create_result(response, &grant, request, &idempotency_key)
+}
+
 async fn accept_invitation_with_transport(
     transport: &dyn HostedAccountTransport,
     expected_identity: &AccountIdentitySnapshot,
@@ -1855,6 +2225,19 @@ pub async fn account_workspace_member_change(
     request: AccountWorkspaceMemberChangeRequest,
 ) -> Result<AccountWorkspaceMemberChangeOutcome, String> {
     change_workspace_member_with_transport(
+        &NativeHostedAccountTransport,
+        &NativeActiveContextSource,
+        member_action_registry(),
+        &request,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn account_workspace_invitation_create(
+    request: AccountWorkspaceInvitationCreateRequest,
+) -> Result<AccountWorkspaceInvitationCreateOutcome, String> {
+    create_workspace_invitation_with_transport(
         &NativeHostedAccountTransport,
         &NativeActiveContextSource,
         member_action_registry(),
@@ -2140,6 +2523,14 @@ mod tests {
         value
     }
 
+    fn pending_invitation(id: &str, status: &str) -> Value {
+        json!({
+            "invitationId": id, "workspaceId": "ws_shared", "status": status,
+            "role": "editor", "expiresAt": "2026-07-12T08:00:00.000Z",
+            "displayHint": "r***@example.com"
+        })
+    }
+
     fn membership(invitation_id: &str) -> Value {
         json!({
             "workspaceId": "ws_shared", "authority": "convex", "schemaVersion": 1,
@@ -2222,6 +2613,7 @@ mod tests {
         json!({
             "workspaceId": workspace_id,
             "actorRole": "owner",
+            "invitationManagement": { "available": true, "allowedRoles": ["owner", "admin", "editor", "viewer"], "message": "Invite someone by their verified email." },
             "members": [roster_member("member_current", true)]
         })
     }
@@ -2230,6 +2622,7 @@ mod tests {
         json!({
             "workspaceId": workspace_id,
             "actorRole": "owner",
+            "invitationManagement": { "available": true, "allowedRoles": ["owner", "admin", "editor", "viewer"], "message": "Invite someone by their verified email." },
             "members": [
                 {
                     "memberId": current_member_id, "role": "owner", "status": "active",
@@ -2262,6 +2655,38 @@ mod tests {
         registry.grants.insert(reference.into(), grant.clone());
         registry.order.push_back(reference.into());
         (Mutex::new(registry), grant)
+    }
+
+    fn invitation_grant(reference: &str) -> Mutex<MemberActionRegistry> {
+        let grant = InvitationActionGrant {
+            identity: identity("bootstrap_key"),
+            internal_user_id: "usr_current".into(),
+            workspace_id: "ws_home".into(),
+            current_member_id: "member_current".into(),
+            allowed_roles: BTreeSet::from(["editor".into(), "viewer".into()]),
+        };
+        let mut registry = MemberActionRegistry::default();
+        registry.invitation_grant = Some((reference.into(), grant));
+        Mutex::new(registry)
+    }
+
+    fn invitation_created_result(idempotency_key: &str) -> Value {
+        json!({
+            "status": "accepted",
+            "invitation": {
+                "invitationId": "invitation_created",
+                "workspaceId": "ws_home",
+                "status": "pending",
+                "role": "editor",
+                "expiresAt": "2026-07-18T08:00:00.000Z",
+                "displayHint": "p***@example.com"
+            },
+            "idempotency": {
+                "key": idempotency_key,
+                "replayed": false,
+                "recordedAt": "2026-07-11T08:00:00.000Z"
+            }
+        })
     }
 
     fn changed_membership(role: &str, status: &str, revision: i64) -> Value {
@@ -2342,32 +2767,32 @@ mod tests {
     #[test]
     fn pending_invitation_parser_rejects_malformed_duplicate_and_nonpending_entries() {
         let pending = json!({
-            "invitation": invitation("inv_a", "pending"),
+            "invitation": pending_invitation("inv_a", "pending"),
             "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
             "workspaceName": "Shared"
         });
         assert!(parse_pending_invitations(json!([pending.clone()])).is_ok());
         assert!(parse_pending_invitations(json!([pending.clone(), pending])).is_err());
         assert!(parse_pending_invitations(json!([{
-            "invitation": invitation("inv_a", "accepted"),
+            "invitation": pending_invitation("inv_a", "accepted"),
             "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
             "workspaceName": "Shared"
         }]))
         .is_err());
         assert!(parse_pending_invitations(json!([{
-            "invitation": invitation("inv_a", "pending"),
+            "invitation": pending_invitation("inv_a", "pending"),
             "selection": { "kind": "direct-inbox", "invitationId": "other" },
             "workspaceName": "Shared"
         }]))
         .is_err());
         assert!(parse_pending_invitations(json!([{
-            "invitation": invitation("inv_a", "pending"),
+            "invitation": pending_invitation("inv_a", "pending"),
             "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
             "workspaceName": ""
         }]))
         .is_err());
         assert!(parse_pending_invitations(json!([{
-            "invitation": invitation("inv_a", "pending"),
+            "invitation": pending_invitation("inv_a", "pending"),
             "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
             "workspaceName": "x".repeat(161)
         }]))
@@ -2534,6 +2959,149 @@ mod tests {
         )
         .await
         .expect_err("account switch must fail");
+        assert_eq!(error, ACCOUNT_CHANGED_ERROR);
+    }
+
+    #[tokio::test]
+    async fn invitation_creation_uses_only_native_authority_and_safe_result() {
+        let action_ref = "invitation_action_safe";
+        let idempotency_key = invitation_creation_idempotency_key(
+            "bootstrap_key",
+            action_ref,
+            "person@example.com",
+            "editor",
+        )
+        .unwrap();
+        let transport = ScriptedTransport::new(vec![ScriptStep {
+            mutation: true,
+            path: "membership:createVerifiedEmailInvitation",
+            args: json!({
+                "workspaceId": "ws_home",
+                "role": "editor",
+                "email": "person@example.com",
+                "idempotencyKey": idempotency_key,
+            }),
+            result: invitation_created_result(&idempotency_key),
+        }]);
+        let contexts = ScriptedContextSource::stable(active_context(
+            "usr_current",
+            "ws_home",
+            "member_current",
+        ));
+        let registry = invitation_grant(action_ref);
+        let result = create_workspace_invitation_with_transport(
+            &transport,
+            &contexts,
+            &registry,
+            &AccountWorkspaceInvitationCreateRequest {
+                invitation_action_ref: action_ref.into(),
+                email: " Person@Example.com ".into(),
+                role: "editor".into(),
+            },
+        )
+        .await
+        .expect("valid invitation");
+        let serialized = serde_json::to_string(&result).unwrap();
+        assert!(serialized.contains("p***@example.com"));
+        assert!(!serialized.contains("person@example.com"));
+        assert!(!serialized.contains("ws_home"));
+        assert!(!serialized.contains("bootstrap_key"));
+        assert!(!serialized.contains(&idempotency_key));
+        assert!(transport.finished());
+    }
+
+    #[tokio::test]
+    async fn invitation_creation_rejects_invalid_intent_before_network() {
+        let transport = ScriptedTransport::new(vec![]);
+        let contexts = ScriptedContextSource::stable(active_context(
+            "usr_current",
+            "ws_home",
+            "member_current",
+        ));
+        let registry = invitation_grant("invitation_action_safe");
+        let invalid_email = create_workspace_invitation_with_transport(
+            &transport,
+            &contexts,
+            &registry,
+            &AccountWorkspaceInvitationCreateRequest {
+                invitation_action_ref: "invitation_action_safe".into(),
+                email: "not-an-email".into(),
+                role: "editor".into(),
+            },
+        )
+        .await
+        .expect_err("invalid email must fail");
+        assert_eq!(invalid_email, "Enter a valid email address.");
+
+        let invalid_role = create_workspace_invitation_with_transport(
+            &transport,
+            &contexts,
+            &registry,
+            &AccountWorkspaceInvitationCreateRequest {
+                invitation_action_ref: "invitation_action_safe".into(),
+                email: "person@example.com".into(),
+                role: "owner".into(),
+            },
+        )
+        .await
+        .expect_err("unprojected role must fail");
+        assert!(invalid_role.contains("role is unavailable"));
+        assert!(transport.finished());
+    }
+
+    #[tokio::test]
+    async fn invitation_creation_rejects_post_await_context_and_generation_switches() {
+        let action_ref = "invitation_action_safe";
+        let idempotency_key = invitation_creation_idempotency_key(
+            "bootstrap_key",
+            action_ref,
+            "person@example.com",
+            "editor",
+        )
+        .unwrap();
+        let step = || ScriptStep {
+            mutation: true,
+            path: "membership:createVerifiedEmailInvitation",
+            args: json!({
+                "workspaceId": "ws_home", "role": "editor", "email": "person@example.com",
+                "idempotencyKey": idempotency_key,
+            }),
+            result: invitation_created_result(&idempotency_key),
+        };
+        let request = AccountWorkspaceInvitationCreateRequest {
+            invitation_action_ref: action_ref.into(),
+            email: "person@example.com".into(),
+            role: "editor".into(),
+        };
+        let changed_contexts = ScriptedContextSource::sequence(vec![
+            active_context("usr_current", "ws_home", "member_current"),
+            active_context("usr_current", "ws_other", "member_other"),
+        ]);
+        let context_transport = ScriptedTransport::new(vec![step()]);
+        let error = create_workspace_invitation_with_transport(
+            &context_transport,
+            &changed_contexts,
+            &invitation_grant(action_ref),
+            &request,
+        )
+        .await
+        .expect_err("context switch must fail");
+        assert_eq!(error, WORKSPACE_CONTEXT_CHANGED_ERROR);
+
+        let generation_transport = ScriptedTransport::new(vec![step()]);
+        generation_transport.switch_generation_at_commit();
+        let error = create_workspace_invitation_with_transport(
+            &generation_transport,
+            &ScriptedContextSource::stable(active_context(
+                "usr_current",
+                "ws_home",
+                "member_current",
+            )),
+            &invitation_grant(action_ref),
+            &request,
+        )
+        .await
+        .expect_err("generation switch must fail");
         assert_eq!(error, ACCOUNT_CHANGED_ERROR);
     }
 
@@ -2772,7 +3340,7 @@ mod tests {
     #[tokio::test]
     async fn scripted_pending_accept_reconcile_survives_store_reopen() {
         let pending = json!({
-            "invitation": invitation("inv_a", "pending"),
+            "invitation": pending_invitation("inv_a", "pending"),
             "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
             "workspaceName": "Shared"
         });

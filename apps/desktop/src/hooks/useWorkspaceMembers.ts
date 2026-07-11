@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AccountWorkspaceInvitationCreateOutcome,
+  AccountWorkspaceInvitationCreateRequest,
   AccountWorkspaceMemberChangeOutcome,
   AccountWorkspaceMemberChangeRequest,
   AccountWorkspaceMemberList
 } from "@fable/protocol";
-import { changeRuntimeWorkspaceMember, loadRuntimeWorkspaceMembers } from "../runtime";
+import {
+  changeRuntimeWorkspaceMember,
+  createRuntimeWorkspaceInvitation,
+  loadRuntimeWorkspaceMembers
+} from "../runtime";
 
 export type WorkspaceMembersState = "loading" | "ready" | "unavailable" | "error";
 
@@ -48,6 +54,7 @@ export function useWorkspaceMembers({
   const requestRef = useRef(0);
   const currentContextRef = useRef(contextKey);
   const actionTokenRef = useRef<symbol | null>(null);
+  const invitationTokenRef = useRef<symbol | null>(null);
   const actionContextRef = useRef(contextKey);
   const mountedRef = useRef(true);
   const [pendingAction, setPendingAction] = useState<{
@@ -55,11 +62,13 @@ export function useWorkspaceMembers({
     memberActionRef: string;
     action: AccountWorkspaceMemberChangeRequest["action"];
   } | null>(null);
+  const [invitationPending, setInvitationPending] = useState(false);
 
   currentContextRef.current = contextKey;
   if (actionContextRef.current !== contextKey) {
     actionContextRef.current = contextKey;
     actionTokenRef.current = null;
+    invitationTokenRef.current = null;
   }
 
   useEffect(() => {
@@ -67,6 +76,7 @@ export function useWorkspaceMembers({
     return () => {
       mountedRef.current = false;
       actionTokenRef.current = null;
+      invitationTokenRef.current = null;
     };
   }, []);
 
@@ -143,10 +153,42 @@ export function useWorkspaceMembers({
     }
   }, []);
 
+  const createInvitation = useCallback(async (
+    request: AccountWorkspaceInvitationCreateRequest
+  ): Promise<AccountWorkspaceInvitationCreateOutcome | null> => {
+    if (invitationTokenRef.current) return null;
+    const token = Symbol(request.invitationActionRef);
+    const startedContext = currentContextRef.current;
+    invitationTokenRef.current = token;
+    setInvitationPending(true);
+    const isCurrent = () => mountedRef.current
+      && invitationTokenRef.current === token
+      && currentContextRef.current === startedContext;
+    try {
+      const outcome = await createRuntimeWorkspaceInvitation(request);
+      if (!isCurrent()) return null;
+      if (outcome === null) {
+        setSnapshot({ contextKey: startedContext, state: "unavailable", roster: null });
+        return null;
+      }
+      if (outcome.status === "accepted" || outcome.status === "conflict") {
+        setReloadVersion((current) => current + 1);
+      }
+      return outcome;
+    } finally {
+      if (invitationTokenRef.current === token) {
+        invitationTokenRef.current = null;
+        if (mountedRef.current && currentContextRef.current === startedContext) {
+          setInvitationPending(false);
+        }
+      }
+    }
+  }, []);
+
   // Effects run after render. Never expose the previous account or workspace
   // while React is switching to the new context.
   if (snapshot.contextKey !== contextKey) {
-    return { state: "loading" as const, roster: null, reload, changeMember, pendingAction: null };
+    return { state: "loading" as const, roster: null, reload, changeMember, createInvitation, pendingAction: null, invitationPending: false };
   }
 
   return {
@@ -154,6 +196,8 @@ export function useWorkspaceMembers({
     roster: snapshot.roster,
     reload,
     changeMember,
+    createInvitation,
+    invitationPending,
     pendingAction: pendingAction?.contextKey === contextKey ? pendingAction : null
   };
 }

@@ -1,7 +1,8 @@
-import { requireConvexIdentity } from "./convexAuth";
+import { requireConvexAccountIdentity } from "./convexAuth";
 
 export async function requireFableUser(ctx: any) {
-  const external = await requireConvexIdentity(ctx);
+  const account = await requireConvexAccountIdentity(ctx);
+  const external = account.external;
   const links = await ctx.db.query("external_identity_links").withIndex("by_external_identity", (q: any) => q.eq("provider", external.provider).eq("normalizedIssuer", external.normalizedIssuer).eq("subject", external.subject)).collect();
   if (links.length > 1) throw new Error("Fable identity link is ambiguous.");
   const link = links[0];
@@ -9,7 +10,7 @@ export async function requireFableUser(ctx: any) {
   const users = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", link.internalUserId)).collect();
   if (users.length !== 1 || users[0].status !== "active") throw new Error("Fable account is unavailable.");
   const user = users[0];
-  return { external, link, user };
+  return { external, link, user, ...(account.verifiedEmail ? { verifiedEmail: account.verifiedEmail } : {}) };
 }
 
 export async function requireActiveMembership(ctx: any, workspaceId: string) {

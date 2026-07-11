@@ -9,14 +9,16 @@ const mocks = vi.hoisted(() => ({
   loadInvitations: vi.fn(),
   acceptInvitation: vi.fn(),
   loadMembers: vi.fn(),
-  changeMember: vi.fn()
+  changeMember: vi.fn(),
+  createInvitation: vi.fn()
 }));
 
 vi.mock("../../runtime", () => ({
   loadRuntimePendingInvitations: mocks.loadInvitations,
   acceptRuntimePendingInvitation: mocks.acceptInvitation,
   loadRuntimeWorkspaceMembers: mocks.loadMembers,
-  changeRuntimeWorkspaceMember: mocks.changeMember
+  changeRuntimeWorkspaceMember: mocks.changeMember,
+  createRuntimeWorkspaceInvitation: mocks.createInvitation
 }));
 
 afterEach(cleanup);
@@ -59,7 +61,17 @@ function roster(
     })
   ]
 ): AccountWorkspaceMemberList {
-  return { workspaceId, actorRole: "owner", members };
+  return {
+    workspaceId,
+    actorRole: "owner",
+    invitationManagement: {
+      available: true,
+      allowedRoles: ["owner", "admin", "editor", "viewer"],
+      message: "Invite someone by their verified email.",
+      invitationActionRef: "invitation-action-a"
+    },
+    members
+  };
 }
 
 function view(props: Partial<React.ComponentProps<typeof WorkspaceSettingsView>> = {}) {
@@ -81,6 +93,7 @@ describe("workspace member roster", () => {
     mocks.acceptInvitation.mockReset();
     mocks.loadMembers.mockReset();
     mocks.changeMember.mockReset();
+    mocks.createInvitation.mockReset();
     mocks.loadInvitations.mockResolvedValue({ invitations: [] });
   });
 
@@ -95,6 +108,54 @@ describe("workspace member roster", () => {
     expect(rendered.container).not.toHaveTextContent("action-ref-current");
     expect(rendered.container).not.toHaveTextContent("action-ref-alex");
     expect(screen.getByText("Your own access is read-only here.")).toBeInTheDocument();
+  });
+
+  it("creates a verified-email invitation once without claiming an email was sent", async () => {
+    mocks.loadMembers
+      .mockResolvedValueOnce(roster())
+      .mockResolvedValueOnce(roster());
+    mocks.createInvitation.mockResolvedValue({
+      status: "accepted",
+      role: "editor",
+      expiresAt: "2026-07-18T08:00:00.000Z",
+      displayHint: "p***@example.com",
+      message: "created"
+    });
+    const rendered = render(view());
+
+    const email = await screen.findByLabelText("Email");
+    fireEvent.change(email, { target: { value: "person@example.com" } });
+    const invite = screen.getByRole("button", { name: "Invite" });
+    act(() => {
+      invite.click();
+      invite.click();
+    });
+
+    await waitFor(() => expect(mocks.createInvitation).toHaveBeenCalledTimes(1));
+    expect(mocks.createInvitation).toHaveBeenCalledWith({
+      invitationActionRef: "invitation-action-a",
+      email: "person@example.com",
+      role: "editor"
+    });
+    expect(await screen.findByText(/They’ll see it when they sign in with that verified email/i)).toHaveFocus();
+    expect(rendered.container).not.toHaveTextContent("p***@example.com");
+    expect(rendered.container).not.toHaveTextContent(/email sent/i);
+    expect(email).toHaveValue("");
+  });
+
+  it("shows the hosted capability message and no form when invitation targeting is unavailable", async () => {
+    const unavailable = roster();
+    unavailable.invitationManagement = {
+      available: false,
+      allowedRoles: [],
+      message: "Invites aren’t available in this build yet."
+    };
+    mocks.loadMembers.mockResolvedValue(unavailable);
+    render(view());
+
+    expect(await screen.findByText("Invites aren’t available in this build yet.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invite" })).not.toBeInTheDocument();
   });
 
   it("is honest when the native account service is unavailable", async () => {
