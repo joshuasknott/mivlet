@@ -1081,6 +1081,126 @@ export async function getRuntimeArtifact(artifactId: string) {
   return result;
 }
 
+export type RuntimeArtifactSearchResult = Spine.ArtifactsAndRoutines.ArtifactSearchResult;
+export type RuntimeArtifactExport = Spine.ArtifactsAndRoutines.ArtifactExport;
+
+const ARTIFACT_MATCH_FIELDS = new Set(["title", "content", "source", "decision"]);
+
+function assertArtifactSearchResult(
+  value: unknown,
+  workspaceId: string
+): asserts value is RuntimeArtifactSearchResult {
+  if (!isRecord(value) || !isRecord(value.artifact) || !isRecord(value.currentVersion) ||
+      !Array.isArray(value.matchedOn)) {
+    throw new Error("Malformed or cross-workspace artifact search response.");
+  }
+  const artifact = value.artifact;
+  const currentVersion = value.currentVersion;
+  if (typeof artifact.id !== "string" ||
+      artifact.workspaceId !== workspaceId ||
+      typeof artifact.title !== "string" ||
+      typeof artifact.kind !== "string" ||
+      typeof artifact.status !== "string" ||
+      typeof artifact.currentVersionId !== "string" ||
+      typeof artifact.revision !== "number" || !Number.isInteger(artifact.revision) || artifact.revision < 1 ||
+      !Array.isArray(artifact.sourceProvenance) || !artifact.sourceProvenance.every(isRecord) ||
+      !Array.isArray(artifact.reviews) || !artifact.reviews.every(isRecord) ||
+      typeof currentVersion.version !== "number" || !Number.isInteger(currentVersion.version) ||
+      !isArtifactVersion(currentVersion, artifact.id, currentVersion.version) ||
+      artifact.currentVersionId !== currentVersion.id ||
+      value.matchedOn.some((field) => typeof field !== "string" || !ARTIFACT_MATCH_FIELDS.has(field))) {
+    throw new Error("Malformed or cross-workspace artifact search response.");
+  }
+}
+
+function parseArtifactExport(
+  value: unknown,
+  artifactId: string,
+  versionId: string
+): RuntimeArtifactExport {
+  const allowedKeys = new Set([
+    "artifactId", "versionId", "title", "kind", "exportedAt", "content",
+    "citations", "inputs", "decisions", "lineage"
+  ]);
+  if (!isRecord(value) || Object.keys(value).some((key) => !allowedKeys.has(key)) ||
+      value.artifactId !== artifactId || value.versionId !== versionId ||
+      typeof value.title !== "string" || typeof value.kind !== "string" ||
+      typeof value.exportedAt !== "string" || Number.isNaN(Date.parse(value.exportedAt)) ||
+      !isArtifactContent(value.content) ||
+      !Array.isArray(value.citations) || !value.citations.every(isArtifactCitation) ||
+      !Array.isArray(value.inputs) || !value.inputs.every(isRecord) ||
+      !Array.isArray(value.decisions) || !value.decisions.every(isRecord) ||
+      !Array.isArray(value.lineage) || !value.lineage.every(isArtifactLineage)) {
+    throw new Error("Malformed artifact export response.");
+  }
+  return value as unknown as RuntimeArtifactExport;
+}
+
+export async function searchRuntimeArtifacts(
+  query: Spine.ArtifactsAndRoutines.ArtifactSearchQuery = {}
+): Promise<RuntimeArtifactSearchResult[]> {
+  const scope = conversationScopeOrThrow();
+  const boundedQuery = {
+    ...(query.query?.trim() ? { query: query.query.trim() } : {}),
+    ...(query.threadId ? { threadId: query.threadId } : {}),
+    ...(query.projectId ? { projectId: query.projectId } : {}),
+    ...(query.kinds ? { kinds: query.kinds } : {}),
+    ...(query.statuses ? { statuses: query.statuses } : {}),
+    limit: Math.max(1, Math.min(query.limit ?? 100, 100))
+  };
+  if (!hasTauriRuntime()) {
+    const normalized = boundedQuery.query?.toLowerCase() ?? "";
+    const records = previewArtifacts.get(scope.workspaceId) ?? [];
+    return records.flatMap((entry) => {
+      const { artifact, currentVersion } = entry;
+      if (boundedQuery.threadId && artifact.context.threadId !== boundedQuery.threadId) return [];
+      if (boundedQuery.projectId && artifact.context.projectId !== boundedQuery.projectId) return [];
+      if (boundedQuery.kinds && !boundedQuery.kinds.includes(artifact.kind)) return [];
+      if (boundedQuery.statuses && !boundedQuery.statuses.includes(artifact.status)) return [];
+      const currentText = currentVersion.content.kind === "inline" ? currentVersion.content.text : "";
+      const sourceText = currentVersion.citations.map((citation) =>
+        `${citation.label} ${citation.quotedText ?? ""}`
+      ).join(" ");
+      const decisionText = JSON.stringify(currentVersion.decisions ?? []);
+      const matchedOn: RuntimeArtifactSearchResult["matchedOn"] = normalized ? [
+        ...(artifact.title.toLowerCase().includes(normalized) ? ["title" as const] : []),
+        ...(currentText.toLowerCase().includes(normalized) ? ["content" as const] : []),
+        ...(sourceText.toLowerCase().includes(normalized) ? ["source" as const] : []),
+        ...(decisionText.toLowerCase().includes(normalized) ? ["decision" as const] : [])
+      ] : [];
+      return normalized && matchedOn.length === 0 ? [] : [{ artifact, currentVersion, matchedOn }];
+    }).slice(0, boundedQuery.limit);
+  }
+  const result = await invoke<unknown>("artifact_search", { query: boundedQuery });
+  if (!Array.isArray(result)) throw new Error("Malformed artifact search response.");
+  result.forEach((entry) => assertArtifactSearchResult(entry, scope.workspaceId));
+  return result;
+}
+
+export async function exportRuntimeArtifact(artifactId: string, versionId: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const bundle = (previewArtifacts.get(scope.workspaceId) ?? [])
+      .find((entry) => entry.artifact.id === artifactId);
+    const version = bundle?.versions.find((entry) => entry.id === versionId);
+    if (!bundle || !version) throw new Error("This artifact version is no longer available.");
+    return parseArtifactExport({
+      artifactId: bundle.artifact.id,
+      versionId: version.id,
+      title: bundle.artifact.title,
+      kind: bundle.artifact.kind,
+      exportedAt: new Date().toISOString(),
+      content: version.content,
+      citations: version.citations,
+      inputs: version.inputs ?? [],
+      decisions: version.decisions ?? [],
+      lineage: version.lineage
+    }, artifactId, versionId);
+  }
+  const result = await invoke<unknown>("artifact_export", { artifactId, versionId });
+  return parseArtifactExport(result, artifactId, versionId);
+}
+
 export async function appendRuntimeArtifactVersion(input: {
   artifactId: string;
   expectedRevision: number;

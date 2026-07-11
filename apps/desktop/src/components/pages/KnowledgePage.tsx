@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -17,6 +17,14 @@ import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { Warning } from "@phosphor-icons/react/dist/csr/Warning";
 import type { KnowledgeSource, MemoryRecord, SourceStatus } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
+import {
+  exportRuntimeArtifact,
+  getRuntimeArtifact,
+  searchRuntimeArtifacts,
+  type RuntimeArtifactBundle,
+  type RuntimeArtifactExport,
+  type RuntimeArtifactSearchResult
+} from "../../runtime";
 
 type KnowledgeSection = "sources" | "memories" | "artifacts";
 type SearchScope = "everything" | KnowledgeSection;
@@ -56,8 +64,37 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
   const [expandedMemoryId, setExpandedMemoryId] = useState<string | null>(null);
+  const [artifactResults, setArtifactResults] = useState<RuntimeArtifactSearchResult[]>([]);
+  const [artifactDetails, setArtifactDetails] = useState<Record<string, RuntimeArtifactBundle>>({});
+  const [expandedArtifactId, setExpandedArtifactId] = useState<string | null>(null);
+  const [selectedArtifactVersionId, setSelectedArtifactVersionId] = useState("");
+  const [artifactLoading, setArtifactLoading] = useState(false);
+  const [artifactError, setArtifactError] = useState("");
 
   const normalizedQuery = query.trim().toLowerCase();
+  const activeWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId;
+  const activeWorkspaceRef = useRef(activeWorkspaceId);
+  activeWorkspaceRef.current = activeWorkspaceId;
+
+  useEffect(() => {
+    if (section !== "artifacts") return;
+    let active = true;
+    setArtifactResults([]);
+    setArtifactDetails({});
+    setExpandedArtifactId(null);
+    setArtifactLoading(true);
+    setArtifactError("");
+    void searchRuntimeArtifacts({ ...(query.trim() ? { query: query.trim() } : {}), limit: 100 })
+      .then((results) => { if (active) setArtifactResults(results); })
+      .catch((cause) => {
+        if (active) {
+          setArtifactResults([]);
+          setArtifactError(cause instanceof Error ? cause.message : "Fable could not load artifacts.");
+        }
+      })
+      .finally(() => { if (active) setArtifactLoading(false); });
+    return () => { active = false; };
+  }, [activeWorkspaceId, query, section]);
 
   // Management lists: sources show disabled rows (with a badge + re-enable) so
   // the user can manage them, but disabled/forgotten material is excluded from
@@ -171,7 +208,7 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
               ? managementSources.filter((source) => !source.disabled).length
               : item.id === "memories"
                 ? managementMemories.filter((memory) => !memory.disabled).length
-                : 0;
+                : artifactResults.length;
           return (
             <button
               type="button"
@@ -192,7 +229,8 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
         })}
       </nav>
 
-      <div className="knowledge-list-toolbar">
+      <div className={`knowledge-list-toolbar${section === "artifacts" ? " knowledge-list-toolbar--artifacts" : ""}`}>
+        {section !== "artifacts" ? <>
         <label className="knowledge-pin-filter">
           <PushPin size={18} aria-hidden="true" />
           <span>Pinned only</span>
@@ -214,6 +252,7 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
           </select>
           <CaretDown size={15} aria-hidden="true" />
         </label>
+        </> : null}
         {section === "sources" && !showingGlobalResults ? (
           <SourceAddMenu runtime={runtime} />
         ) : null}
@@ -265,10 +304,37 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
           onExpand={setExpandedMemoryId}
         />
       ) : (
-        <EmptyState
-          icon={Sparkle}
-          title={pinnedOnly ? "No pinned artifacts" : "No artifacts yet"}
-          description="Useful work made by Fable can be saved here."
+        <ArtifactResults
+          results={artifactResults}
+          details={artifactDetails}
+          expandedId={expandedArtifactId}
+          selectedVersionId={selectedArtifactVersionId}
+          loading={artifactLoading}
+          error={artifactError}
+          onSelectVersion={setSelectedArtifactVersionId}
+          onToggle={(artifactId) => {
+            if (expandedArtifactId === artifactId) {
+              setExpandedArtifactId(null);
+              return;
+            }
+            setExpandedArtifactId(artifactId);
+            const existing = artifactDetails[artifactId];
+            if (existing) {
+              setSelectedArtifactVersionId(existing.currentVersion.id);
+              return;
+            }
+            setArtifactError("");
+            const requestedWorkspaceId = activeWorkspaceId;
+            void getRuntimeArtifact(artifactId).then((bundle) => {
+              if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
+              if (!bundle) throw new Error("This artifact is no longer available.");
+              setArtifactDetails((current) => ({ ...current, [artifactId]: bundle }));
+              setSelectedArtifactVersionId(bundle.currentVersion.id);
+            }).catch((cause) => {
+              if (activeWorkspaceRef.current !== requestedWorkspaceId) return;
+              setArtifactError(cause instanceof Error ? cause.message : "Fable could not open that artifact.");
+            });
+          }}
         />
       )}
 
@@ -293,6 +359,199 @@ export function KnowledgePage({ runtime }: { runtime: ShellRuntime }) {
           value={runtime.knowledgeExportText}
         />
       ) : null}
+    </section>
+  );
+}
+
+function plainArtifactStatus(status: string) {
+  const labels: Record<string, string> = {
+    draft: "Draft",
+    "in-review": "Private review",
+    "changes-requested": "Changes requested",
+    accepted: "Accepted",
+    published: "Published",
+    archived: "Archived"
+  };
+  return labels[status] ?? status.replaceAll("-", " ");
+}
+
+function safePortableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(safePortableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => !/(?:local|source)?path|locator|secret|token|credential|hidden/i.test(key))
+    .map(([key, entry]) => [key, safePortableValue(entry)]));
+}
+
+export function artifactExportText(
+  exported: RuntimeArtifactExport,
+  versionNumber: number,
+  format: "markdown" | "json"
+) {
+  const content = exported.content.kind === "inline" ? exported.content.text : "Stored content";
+  const sources = exported.citations.map((citation) => ({
+    label: citation.label,
+    ...(citation.quotedText ? { excerpt: citation.quotedText } : {})
+  }));
+  if (format === "json") {
+    return JSON.stringify({
+      format: "fable.artifact.export.v1",
+      title: exported.title,
+      kind: exported.kind,
+      version: versionNumber,
+      exportedAt: exported.exportedAt,
+      content,
+      sources,
+      inputs: safePortableValue(exported.inputs),
+      decisions: safePortableValue(exported.decisions)
+    }, null, 2);
+  }
+  return [
+    `# ${exported.title}`,
+    "",
+    `Type: ${exported.kind}`,
+    `Version: ${versionNumber}`,
+    "",
+    content,
+    ...(sources.length ? ["", "## Sources", ...sources.map((source) =>
+      `- ${source.label}${source.excerpt ? `: ${source.excerpt}` : ""}`
+    )] : [])
+  ].join("\n");
+}
+
+function downloadArtifactExport(
+  exported: RuntimeArtifactExport,
+  versionNumber: number,
+  format: "markdown" | "json"
+) {
+  const text = artifactExportText(exported, versionNumber, format);
+  const extension = format === "markdown" ? "md" : "json";
+  const safeTitle = exported.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "artifact";
+  const url = URL.createObjectURL(new Blob([text], {
+    type: format === "markdown" ? "text/markdown;charset=utf-8" : "application/json;charset=utf-8"
+  }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${safeTitle}-v${versionNumber}.${extension}`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function ArtifactResults({
+  results,
+  details,
+  expandedId,
+  selectedVersionId,
+  loading,
+  error,
+  onToggle,
+  onSelectVersion
+}: {
+  results: RuntimeArtifactSearchResult[];
+  details: Record<string, RuntimeArtifactBundle>;
+  expandedId: string | null;
+  selectedVersionId: string;
+  loading: boolean;
+  error: string;
+  onToggle: (artifactId: string) => void;
+  onSelectVersion: (versionId: string) => void;
+}) {
+  if (loading) return <p className="artifact-state" role="status">Loading artifacts...</p>;
+  if (error) return <p className="artifact-state" role="alert">{error}</p>;
+  if (results.length === 0) {
+    return <EmptyState icon={Sparkle} title="No artifacts found" description="Save a useful response to see it here." />;
+  }
+  return (
+    <ul className="artifact-list" aria-label="Artifacts">
+      {results.map((result) => {
+        const artifact = result.artifact;
+        const open = expandedId === artifact.id;
+        const detail = details[artifact.id];
+        return (
+          <li key={artifact.id}>
+            <button
+              type="button"
+              className="artifact-list__row"
+              aria-expanded={open}
+              onClick={() => onToggle(artifact.id)}
+            >
+              <span><strong>{artifact.title}</strong><small>{artifact.kind} - {plainArtifactStatus(artifact.status)}</small></span>
+              <span>Version {result.currentVersion.version}</span>
+            </button>
+            {open ? detail ? (
+              <ArtifactDetail
+                bundle={detail}
+                selectedVersionId={selectedVersionId || detail.currentVersion.id}
+                onSelectVersion={onSelectVersion}
+              />
+            ) : <p className="artifact-state" role="status">Opening artifact...</p> : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function ArtifactDetail({
+  bundle,
+  selectedVersionId,
+  onSelectVersion
+}: {
+  bundle: RuntimeArtifactBundle;
+  selectedVersionId: string;
+  onSelectVersion: (versionId: string) => void;
+}) {
+  const [exporting, setExporting] = useState(false);
+  const [exportStatus, setExportStatus] = useState("");
+  const [exportError, setExportError] = useState("");
+  const version = bundle.versions.find((entry) => entry.id === selectedVersionId) ?? bundle.currentVersion;
+  const scopeLabel = bundle.artifact.context.projectId
+    ? "Project"
+    : bundle.artifact.context.threadId
+      ? "Conversation"
+      : "Workspace";
+  const review = [...bundle.artifact.reviews].reverse().find((entry) => entry.versionId === version.id);
+  const runExport = (format: "markdown" | "json") => {
+    setExporting(true);
+    setExportError("");
+    setExportStatus("");
+    void exportRuntimeArtifact(bundle.artifact.id, version.id)
+      .then((exported) => {
+        downloadArtifactExport(exported, version.version, format);
+        setExportStatus(`${format === "markdown" ? "Markdown" : "JSON"} export ready.`);
+      })
+      .catch((cause) => setExportError(cause instanceof Error ? cause.message : "Fable could not export that version."))
+      .finally(() => setExporting(false));
+  };
+  return (
+    <section className="artifact-detail" aria-label={`Artifact details for ${bundle.artifact.title}`}>
+      <dl>
+        <div><dt>Type</dt><dd>{bundle.artifact.kind}</dd></div>
+        <div><dt>Status</dt><dd>{plainArtifactStatus(bundle.artifact.status)}</dd></div>
+        <div><dt>Scope</dt><dd>{scopeLabel}</dd></div>
+        <div><dt>Origin</dt><dd>{bundle.artifact.producingRunId ? "Created from a response" : "Saved artifact"}</dd></div>
+      </dl>
+      <label className="artifact-detail__version">
+        <span>Version</span>
+        <select value={version.id} onChange={(event) => onSelectVersion(event.target.value)} aria-label={`Version of ${bundle.artifact.title}`}>
+          {[...bundle.versions].reverse().map((entry) => (
+            <option key={entry.id} value={entry.id}>Version {entry.version}{entry.id === bundle.currentVersion.id ? " - Current" : ""}</option>
+          ))}
+        </select>
+      </label>
+      <div className="artifact-detail__content">{version.content.kind === "inline" ? version.content.text : "Stored content"}</div>
+      <p>Review: {review ? plainArtifactStatus(review.status) : "Not reviewed"}</p>
+      {version.citations.length ? (
+        <ul aria-label={`Sources for ${bundle.artifact.title}`}>
+          {version.citations.map((citation) => <li key={citation.id}>{citation.label}</li>)}
+        </ul>
+      ) : <p>No external sources were used.</p>}
+      <div className="artifact-detail__exports">
+        <button type="button" disabled={exporting} onClick={() => runExport("markdown")}>Export {bundle.artifact.title} version {version.version} as Markdown</button>
+        <button type="button" disabled={exporting} onClick={() => runExport("json")}>Export {bundle.artifact.title} version {version.version} as JSON</button>
+      </div>
+      {exportStatus ? <p role="status">{exportStatus}</p> : null}
+      {exportError ? <p role="alert">{exportError}</p> : null}
     </section>
   );
 }

@@ -902,6 +902,104 @@
   min-width: 0;
 }
 
+.knowledge-list-toolbar--artifacts {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+}
+
+.artifact-state {
+  color: var(--ink-muted);
+}
+
+.artifact-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.artifact-list > li {
+  overflow: hidden;
+  background: var(--surface-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-2);
+}
+
+.artifact-list__row {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 13px 15px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+
+.artifact-list__row > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.artifact-list__row small,
+.artifact-list__row > span:last-child {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
+.artifact-detail {
+  display: grid;
+  gap: 12px;
+  padding: 0 15px 15px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.artifact-detail dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  margin: 12px 0 0;
+}
+
+.artifact-detail dl > div,
+.artifact-detail__version {
+  display: grid;
+  gap: 3px;
+}
+
+.artifact-detail dt,
+.artifact-detail__version > span {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
+.artifact-detail dd {
+  margin: 0;
+}
+
+.artifact-detail__version select {
+  max-width: 220px;
+}
+
+.artifact-detail__content {
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-1);
+}
+
+.artifact-detail__exports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .knowledge-item {
   border-bottom: 1px solid var(--line);
 }

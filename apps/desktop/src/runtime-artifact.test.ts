@@ -3,8 +3,10 @@ import { clearActiveRuntimeDataScope, setActiveRuntimeDataScope } from "./runtim
 import {
   appendRuntimeArtifactVersion,
   createRuntimeResponseArtifact,
+  exportRuntimeArtifact,
   listRuntimeThreadArtifacts,
   reviewRuntimeArtifact,
+  searchRuntimeArtifacts,
   type RuntimeArtifactBundle
 } from "./runtime";
 
@@ -441,5 +443,106 @@ describe("artifact runtime revisions", () => {
       expectedRevision: revised.artifact.revision,
       action: "request-review"
     })).rejects.toThrow(/changed elsewhere/i);
+  });
+
+  it("searches preview artifacts by title and current content with a bounded result", async () => {
+    setActiveRuntimeDataScope("workspace-preview-search");
+    const alpha = await createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-a", runId: "run-a",
+      title: "Alpha report", content: "Original notes", citations: []
+    });
+    await appendRuntimeArtifactVersion({
+      artifactId: alpha.artifact.id,
+      expectedRevision: alpha.artifact.revision,
+      expectedCurrentVersionId: alpha.currentVersion.id,
+      content: "Current launch forecast"
+    });
+    await createRuntimeResponseArtifact({
+      threadId: "thread-2", messageId: "message-b", runId: "run-b",
+      title: "Beta report", content: "Different work", citations: []
+    });
+    const title = await searchRuntimeArtifacts({ query: "alpha", limit: 1 });
+    expect(title).toHaveLength(1);
+    expect(title[0].matchedOn).toContain("title");
+    const content = await searchRuntimeArtifacts({ query: "forecast" });
+    expect(content[0].matchedOn).toContain("content");
+    expect(await searchRuntimeArtifacts({ query: "original notes" })).toEqual([]);
+  });
+
+  it("exports one exact immutable historical preview version", async () => {
+    setActiveRuntimeDataScope("workspace-preview-export");
+    const first = await createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Report", content: "Version one", citations: []
+    });
+    const second = await appendRuntimeArtifactVersion({
+      artifactId: first.artifact.id,
+      expectedRevision: first.artifact.revision,
+      expectedCurrentVersionId: first.currentVersion.id,
+      content: "Version two"
+    });
+    const exported = await exportRuntimeArtifact(second.artifact.id, first.currentVersion.id);
+    expect(exported.versionId).toBe(first.currentVersion.id);
+    expect(exported.content.kind === "inline" ? exported.content.text : "").toBe("Version one");
+    expect(exported).not.toHaveProperty("sourceMessageId");
+    expect(exported).not.toHaveProperty("producingRunId");
+  });
+
+  it("isolates preview search and export by active workspace", async () => {
+    setActiveRuntimeDataScope("workspace-search-a");
+    const created = await createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Private alpha", content: "Workspace A", citations: []
+    });
+    setActiveRuntimeDataScope("workspace-search-b");
+    expect(await searchRuntimeArtifacts({ query: "alpha" })).toEqual([]);
+    await expect(exportRuntimeArtifact(created.artifact.id, created.currentVersion.id))
+      .rejects.toThrow(/no longer available/i);
+  });
+
+  it("sends exact native search/export requests and rejects malformed or cross-workspace results", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    const bundle = nativeBundle();
+    mocks.invoke.mockResolvedValueOnce([{
+      artifact: bundle.artifact,
+      currentVersion: bundle.currentVersion,
+      matchedOn: ["title"]
+    }]);
+    await searchRuntimeArtifacts({ query: " report ", limit: 500 });
+    expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_search", {
+      query: { query: "report", limit: 100 }
+    });
+
+    mocks.invoke.mockResolvedValueOnce([{ artifact: { ...bundle.artifact, workspaceId: "other" }, currentVersion: bundle.currentVersion, matchedOn: [] }]);
+    await expect(searchRuntimeArtifacts()).rejects.toThrow(/cross-workspace/i);
+
+    mocks.invoke.mockResolvedValueOnce({
+      artifactId: bundle.artifact.id,
+      versionId: bundle.currentVersion.id,
+      title: bundle.artifact.title,
+      kind: bundle.artifact.kind,
+      exportedAt: "2026-07-11T00:00:00.000Z",
+      content: bundle.currentVersion.content,
+      citations: [], inputs: [], decisions: [], lineage: []
+    });
+    await exportRuntimeArtifact(bundle.artifact.id, bundle.currentVersion.id);
+    expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_export", {
+      artifactId: bundle.artifact.id,
+      versionId: bundle.currentVersion.id
+    });
+
+    mocks.invoke.mockResolvedValueOnce({
+      artifactId: bundle.artifact.id,
+      versionId: bundle.currentVersion.id,
+      title: bundle.artifact.title,
+      kind: bundle.artifact.kind,
+      exportedAt: "2026-07-11T00:00:00.000Z",
+      content: bundle.currentVersion.content,
+      citations: [], inputs: [], decisions: [], lineage: [],
+      sourcePath: "C:\\private\\notes.md"
+    });
+    await expect(exportRuntimeArtifact(bundle.artifact.id, bundle.currentVersion.id))
+      .rejects.toThrow(/malformed/i);
   });
 });

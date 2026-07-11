@@ -2,8 +2,22 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { KnowledgeSource, LocalFileImport, MemoryRecord } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KnowledgePage } from "./KnowledgePage";
+import { artifactExportText, KnowledgePage } from "./KnowledgePage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
+import {
+  exportRuntimeArtifact,
+  getRuntimeArtifact,
+  searchRuntimeArtifacts,
+  type RuntimeArtifactBundle,
+  type RuntimeArtifactExport,
+  type RuntimeArtifactSearchResult
+} from "../../runtime";
+
+vi.mock("../../runtime", () => ({
+  searchRuntimeArtifacts: vi.fn(async () => []),
+  getRuntimeArtifact: vi.fn(async () => null),
+  exportRuntimeArtifact: vi.fn()
+}));
 
 /**
  * Behavioral lifecycle coverage for the Knowledge page. The page is rendered
@@ -89,6 +103,21 @@ function stubRuntime(state: StubState): ShellRuntime & { _calls: Record<string, 
     memoryExportText: state.memoryExportText,
     knowledgeExportText: state.knowledgeExportText,
     connectorManifests: state.connectorManifests,
+    accountWorkspaceStatus: {
+      configured: true,
+      state: "ready",
+      message: "Test workspace ready.",
+      accountBound: true,
+      workspaces: [],
+      activeWorkspace: {
+        localWorkspaceId: "test-workspace",
+        fableWorkspaceId: "hosted-test-workspace",
+        name: "Test workspace",
+        source: "hosted"
+      },
+      activeContextOwner: { internalUserId: "test-user" },
+      devices: []
+    },
     editingMemoryId: null,
     editingMemoryDraft: { title: "", value: "" },
     fileInputRef: { current: null },
@@ -119,6 +148,40 @@ function stubRuntime(state: StubState): ShellRuntime & { _calls: Record<string, 
 
 function renderPage(runtime: ShellRuntime) {
   return render(<KnowledgePage runtime={runtime} />);
+}
+
+function makeArtifactBundle(): RuntimeArtifactBundle {
+  const first = {
+    id: "version-1", artifactId: "artifact-1", version: 1, status: "available",
+    createdAt: "2026-07-10T09:00:00.000Z", createdByInternalUserId: "user-1",
+    content: { kind: "inline", text: "Historical conclusion", media: { mediaType: "text/markdown", byteLength: 21 }, contentHash: { algorithm: "sha-256", value: "hash-1" } },
+    media: { mediaType: "text/markdown", byteLength: 21 }, contentHash: { algorithm: "sha-256", value: "hash-1" },
+    provenance: { kind: "run", observedAt: "2026-07-10T09:00:00.000Z" },
+    citations: [{ id: "citation-1", sourceId: "source-1", label: "Launch brief", quotedText: "Approved direction" }], lineage: []
+  };
+  const current = {
+    ...first, id: "version-2", version: 2, createdAt: "2026-07-11T09:00:00.000Z",
+    content: { ...first.content, text: "Current conclusion", contentHash: { algorithm: "sha-256", value: "hash-2" } },
+    contentHash: { algorithm: "sha-256", value: "hash-2" }
+  };
+  return {
+    artifact: {
+      id: "artifact-1", workspaceId: "test-workspace", authority: "local", visibility: "member-private",
+      ownerMemberId: "member-1", schemaVersion: 1, revision: 2, createdByInternalUserId: "user-1",
+      createdAt: "2026-07-10T09:00:00.000Z", updatedAt: "2026-07-11T09:00:00.000Z",
+      kind: "document", status: "in-review", title: "Launch report", currentVersionId: "version-2",
+      sourceProvenance: [], context: { threadId: "thread-1" }, retention: { status: "active" },
+      reviews: [{ id: "review-1", artifactId: "artifact-1", versionId: "version-2", status: "requested", requestedAt: "2026-07-11T09:00:00.000Z", requestedByInternalUserId: "user-1" }]
+    },
+    currentVersion: current,
+    versions: [first, current],
+    sourceMessageId: "message-1",
+    producingRunId: "run-1"
+  } as unknown as RuntimeArtifactBundle;
+}
+
+function artifactSearchResult(bundle: RuntimeArtifactBundle): RuntimeArtifactSearchResult {
+  return { artifact: bundle.artifact, currentVersion: bundle.currentVersion, matchedOn: ["title"] };
 }
 
 describe("KnowledgePage — import lifecycle states", () => {
@@ -185,6 +248,93 @@ describe("KnowledgePage — import lifecycle states", () => {
     await user.click(screen.getByRole("button", { name: "Open Drive plan" }));
     await user.click(screen.getByRole("button", { name: "Refresh" }));
     expect(runtime.refreshKnowledgeSource).toHaveBeenCalledWith("connector-1");
+  });
+});
+
+describe("KnowledgePage — artifacts", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
+  });
+
+  it("searches on entry and query changes, shows the count, and opens plain-language details", async () => {
+    const user = userEvent.setup();
+    const bundle = makeArtifactBundle();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
+    vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
+    const runtime = stubRuntime({
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    });
+    renderPage(runtime);
+
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    expect(await screen.findByText("Launch report")).toBeInTheDocument();
+    expect(within(screen.getByRole("tab", { name: "Artifacts" })).getByText("1")).toBeInTheDocument();
+    expect(searchRuntimeArtifacts).toHaveBeenCalledWith({ limit: 100 });
+
+    const search = screen.getByRole("textbox", { name: "Search artifacts" });
+    await user.type(search, "launch");
+    await waitFor(() => expect(searchRuntimeArtifacts).toHaveBeenLastCalledWith({ query: "launch", limit: 100 }));
+    await user.click(screen.getByRole("button", { name: /Launch report.*Version 2/i }));
+    const detail = await screen.findByRole("region", { name: "Artifact details for Launch report" });
+    expect(within(detail).getByText("Private review")).toBeInTheDocument();
+    expect(within(detail).getByText("Conversation")).toBeInTheDocument();
+    expect(within(detail).getByText("Created from a response")).toBeInTheDocument();
+    expect(within(detail).getByText("Current conclusion")).toBeInTheDocument();
+    expect(within(detail).getByText("Launch brief")).toBeInTheDocument();
+  });
+
+  it("exports the selected immutable historical version without local paths or hidden fields", async () => {
+    const user = userEvent.setup();
+    const bundle = makeArtifactBundle();
+    const exported = {
+      artifactId: "artifact-1", versionId: "version-1", title: "Launch report", kind: "document",
+      exportedAt: "2026-07-11T10:00:00.000Z", content: bundle.versions[0].content,
+      citations: bundle.versions[0].citations,
+      inputs: [{ sourcePath: "C:\\private\\notes.md", label: "Safe input", hiddenToken: "secret" }],
+      decisions: [], lineage: []
+    } as unknown as RuntimeArtifactExport;
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
+    vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
+    vi.mocked(exportRuntimeArtifact).mockResolvedValue(exported);
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:artifact") });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const runtime = stubRuntime({
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    });
+    renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
+    await user.selectOptions(await screen.findByLabelText("Version of Launch report"), "version-1");
+    await user.click(screen.getByRole("button", { name: "Export Launch report version 1 as JSON" }));
+    await waitFor(() => expect(exportRuntimeArtifact).toHaveBeenCalledWith("artifact-1", "version-1"));
+
+    const json = artifactExportText(exported, 1, "json");
+    expect(json).toContain("Historical conclusion");
+    expect(json).toContain("Safe input");
+    expect(json).not.toContain("private");
+    expect(json).not.toContain("hiddenToken");
+    expect(json).not.toContain("artifact-1");
+  });
+
+  it("renders honest empty and error states", async () => {
+    const user = userEvent.setup();
+    const runtime = stubRuntime({
+      sources: [], memories: [], pinnedSourceIds: [], memoryDisabled: false,
+      importStatus: null, memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    });
+    const view = renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    expect(await screen.findByText("No artifacts found")).toBeInTheDocument();
+
+    vi.mocked(searchRuntimeArtifacts).mockRejectedValue(new Error("Artifacts are unavailable."));
+    view.unmount();
+    renderPage(runtime);
+    await user.click(screen.getByRole("tab", { name: "Artifacts" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Artifacts are unavailable.");
   });
 });
 
