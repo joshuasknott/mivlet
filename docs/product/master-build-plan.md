@@ -129,10 +129,15 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 ### Wave 2D - First multi-member slice
 
 - [ ] Complete invitation, acceptance, role, and removal lifecycle.
+  - Repo-local evidence: Convex now implements authenticated direct-inbox invitations for existing internal users, exact-recipient acceptance, pending-invite listing/revocation/expiry, role changes, suspension/restoration, terminal removal, last-owner protection, device revocation, idempotency, and hashed session audit attribution. Registered-handler tests exercise authorization-before-write and lifecycle behavior. A deployed two-account journey and member-management UI remain open.
 - [ ] Deliver one useful shared record with realtime updates and offline outbox.
+  - Repo-local evidence: the shared-project contract, Convex authority, encrypted native cache/outbox, fixed-path authenticated flush, and revision-delta pull are connected. Accepted creates, updates, and deletes settle atomically into the local shared mirror. A deployed live multi-session journey and realtime desktop subscription remain open.
 - [ ] Handle idempotency, revisions, conflicts, and tombstones.
+  - Repo-local evidence: the hosted mutation path recomputes canonical fingerprints, accepts only exact idempotent replay, appends immutable per-revision change snapshots, and returns closed conflict/rejection results. Native settlement enforces contiguous cursors, encrypted intent integrity, durable tombstone anti-resurrection, atomic conflict/shadow state, restart safety, and legacy-history backfill gating. Live deployed recovery remains open.
 - [ ] Attribute shared actions to the internal user and device/session.
+  - Repo-local evidence: hosted membership and shared-project writes derive the internal user and active member from Clerk identity, require the linked active device where applicable, persist member/device attribution, and record only a hashed session reference. React receives neither bearer credentials nor arbitrary hosted-call authority. External live-session validation remains open.
 - [ ] Prove private and shared boundaries end to end.
+  - Repo-local evidence: registered Convex handlers reject inactive, viewer-write, cross-workspace, stale, and privilege-inverting operations before durable side effects; native commands recheck the current account, workspace selection, membership, and device link before and after hosted calls. Member-private context still fails closed for shared resolution. A real two-member IPC/UI/restart journey remains open.
 
 **Phase 2 complete when:** standalone and project work, context, memory, versioned artifacts, and the first shared slice remain coherent and isolated across sessions.
 

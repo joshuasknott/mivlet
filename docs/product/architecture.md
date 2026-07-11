@@ -209,12 +209,15 @@ Convex is optional. Batch 6 selected Clerk + Convex for the first shared
 workspace MVP, documented in
 [ADR: Optional Cloud Team Backend](../adr/2026-07-05-cloud-team-backend.md).
 If `VITE_CONVEX_URL` is present, the UI can initialize a Convex client for
-realtime shared state, though collaboration schema and synchronization logic are
-not implemented on the main branch. Without it, the core desktop workspace,
-local files, approvals, runtime snapshots, memory controls, schedules, and
-API-key providers remain usable.
+realtime shared state. The first collaboration schema and synchronization slice
+now implements hosted membership lifecycle, shared-project authority, immutable
+revision history, and the authenticated native encrypted cache/outbox adapter.
+Production deployment, live multi-session validation, and a realtime desktop
+consumer remain open. Without Convex, the core desktop workspace, local files,
+approvals, runtime snapshots, memory controls, schedules, and API-key providers
+remain usable.
 
-Solo workspaces remain authoritative in encrypted local SQLite. Future shared
+Solo workspaces remain authoritative in encrypted local SQLite. Shared
 workspaces use Convex as the shared authority only after explicit enrollment,
 with a local encrypted cache/outbox, workspace-scoped authorization, device
 linking, idempotency keys, revision cursors, deterministic conflict handling,
