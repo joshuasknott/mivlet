@@ -13,7 +13,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 | 0. Product spine | One ontology, authority model, and shared contract foundation | Complete |
 | 1. Essential Fable | Account + provider + durable conversation | In progress |
 | 2. Work context | Workspaces, projects, context, memory, and artifacts | In progress |
-| 3. Connection fabric | Native connections and MCP satisfy portable capabilities | Not started |
+| 3. Connection fabric | Native connections and MCP satisfy portable capabilities | In progress |
 | 4. Dynamic missions | Fable sizes, plans, routes, and supervises work | Not started |
 | 5. Embedded routines | Successful work can run later or from events | Not started |
 | 6. Departments | Optional configurable operating contexts | Not started |
