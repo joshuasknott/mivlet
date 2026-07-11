@@ -4,12 +4,18 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::models::{ConnectorCapabilityRequest, ConnectorCapabilityResult, ConnectorCommandError};
+use crate::models::{ConnectorCapabilityRequest, ConnectorCommandError, ConnectorSearchRequest};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeReadAdapter {
+    Capability(&'static str),
+    Search,
+}
 
 struct NativeReadImplementation {
     capability_id: &'static str,
     connector_id: &'static str,
-    adapter_capability: &'static str,
+    adapter: NativeReadAdapter,
     required_scopes: &'static [&'static str],
 }
 
@@ -17,20 +23,26 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
     NativeReadImplementation {
         capability_id: "source.repository.list",
         connector_id: "github",
-        adapter_capability: "repositories.list",
+        adapter: NativeReadAdapter::Capability("repositories.list"),
         required_scopes: &["repo"],
     },
     NativeReadImplementation {
         capability_id: "software.deployment.list",
         connector_id: "vercel",
-        adapter_capability: "deployments.read",
+        adapter: NativeReadAdapter::Capability("deployments.read"),
         required_scopes: &["deployment:read"],
     },
     NativeReadImplementation {
         capability_id: "work.issue.list",
         connector_id: "linear",
-        adapter_capability: "issues.read",
+        adapter: NativeReadAdapter::Capability("issues.read"),
         required_scopes: &["read"],
+    },
+    NativeReadImplementation {
+        capability_id: "source.file.search",
+        connector_id: "google-drive",
+        adapter: NativeReadAdapter::Search,
+        required_scopes: &["https://www.googleapis.com/auth/drive.file"],
     },
 ];
 
@@ -42,7 +54,13 @@ pub(crate) struct SemanticCapabilityReadResult {
     pub connection_id: String,
     pub connector_id: String,
     pub implementation_evidence: String,
-    pub result: ConnectorCapabilityResult,
+    pub result: serde_json::Value,
+}
+
+struct ResolvedNativeRead {
+    implementation: &'static NativeReadImplementation,
+    connection_id: String,
+    availability: String,
 }
 
 fn error(code: &str, capability_id: &str, message: &str, retryable: bool) -> ConnectorCommandError {
@@ -122,10 +140,10 @@ fn availability_for(
     }
 }
 
-pub(crate) fn resolve_native_read(
+fn resolve_native_read(
     app: &tauri::AppHandle,
     capability_id: &str,
-) -> Result<(ConnectorCapabilityRequest, String, String), ConnectorCommandError> {
+) -> Result<ResolvedNativeRead, ConnectorCommandError> {
     let implementation = implementation(capability_id).ok_or_else(|| {
         error(
             "capability-unknown",
@@ -189,16 +207,11 @@ pub(crate) fn resolve_native_read(
     let availability = availability_for(implementation, &connection, &canonical)?.to_string();
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| error("connection-not-authorized", capability_id, &message, false))?;
-    Ok((
-        ConnectorCapabilityRequest {
-            connector_id: implementation.connector_id.into(),
-            capability: implementation.adapter_capability.into(),
-            input: BTreeMap::new(),
-            cursor: None,
-        },
+    Ok(ResolvedNativeRead {
+        implementation,
         connection_id,
         availability,
-    ))
+    })
 }
 
 pub(crate) async fn read(
@@ -207,17 +220,89 @@ pub(crate) async fn read(
     input: BTreeMap<String, serde_json::Value>,
     cursor: Option<String>,
 ) -> Result<SemanticCapabilityReadResult, ConnectorCommandError> {
-    let (mut request, connection_id, availability) = resolve_native_read(app, &capability_id)?;
-    request.input = input;
-    request.cursor = cursor;
-    let connector_id = request.connector_id.clone();
-    let result =
-        crate::connector_api::read_capability_for_connection(app, request, Some(&connection_id))
+    let resolved = resolve_native_read(app, &capability_id)?;
+    let connector_id = resolved.implementation.connector_id.to_string();
+    let result = match resolved.implementation.adapter {
+        NativeReadAdapter::Capability(adapter_capability) => {
+            let request = ConnectorCapabilityRequest {
+                connector_id: connector_id.clone(),
+                capability: adapter_capability.into(),
+                input,
+                cursor,
+            };
+            let result = crate::connector_api::read_capability_for_connection(
+                app,
+                request,
+                Some(&resolved.connection_id),
+            )
             .await?;
+            serde_json::to_value(result).map_err(|_| {
+                error(
+                    "implementation-unverified",
+                    &capability_id,
+                    "Fable could not encode the capability result.",
+                    false,
+                )
+            })?
+        }
+        NativeReadAdapter::Search => {
+            let query = match input.get("query") {
+                Some(value) => value.as_str().ok_or_else(|| {
+                    error(
+                        "invalid-request",
+                        &capability_id,
+                        "Capability search query must be text.",
+                        false,
+                    )
+                })?,
+                None => "",
+            };
+            let limit = match input.get("limit") {
+                Some(value) => Some(
+                    usize::try_from(value.as_u64().filter(|limit| *limit > 0).ok_or_else(
+                        || {
+                            error(
+                                "invalid-request",
+                                &capability_id,
+                                "Capability search limit must be a positive whole number.",
+                                false,
+                            )
+                        },
+                    )?)
+                    .map_err(|_| {
+                        error(
+                            "invalid-request",
+                            &capability_id,
+                            "Capability search limit is too large.",
+                            false,
+                        )
+                    })?,
+                ),
+                None => None,
+            };
+            let request = ConnectorSearchRequest {
+                connector_id: connector_id.clone(),
+                query: query.into(),
+                limit,
+                cursor,
+            };
+            let result =
+                crate::google::search_for_connection(app, request, Some(&resolved.connection_id))
+                    .await?;
+            serde_json::to_value(result).map_err(|_| {
+                error(
+                    "implementation-unverified",
+                    &capability_id,
+                    "Fable could not encode the capability result.",
+                    false,
+                )
+            })?
+        }
+    };
     Ok(SemanticCapabilityReadResult {
         capability_id,
-        availability,
-        connection_id,
+        availability: resolved.availability,
+        connection_id: resolved.connection_id,
         connector_id,
         implementation_evidence: "adapter-validated".into(),
         result,
@@ -276,12 +361,13 @@ mod tests {
     fn registry_resolves_only_declared_scope_and_health_evidence() {
         let registered = implementation("source.repository.list").unwrap();
         assert_eq!(registered.connector_id, "github");
-        assert_eq!(registered.adapter_capability, "repositories.list");
         assert_eq!(
-            implementation("software.deployment.list")
-                .unwrap()
-                .adapter_capability,
-            "deployments.read"
+            registered.adapter,
+            NativeReadAdapter::Capability("repositories.list")
+        );
+        assert_eq!(
+            implementation("software.deployment.list").unwrap().adapter,
+            NativeReadAdapter::Capability("deployments.read")
         );
         assert_eq!(
             implementation("software.deployment.list")
@@ -290,14 +376,35 @@ mod tests {
             &["deployment:read"]
         );
         assert_eq!(
-            implementation("work.issue.list")
-                .unwrap()
-                .adapter_capability,
-            "issues.read"
+            implementation("work.issue.list").unwrap().adapter,
+            NativeReadAdapter::Capability("issues.read")
         );
         assert_eq!(
             implementation("work.issue.list").unwrap().required_scopes,
             &["read"]
+        );
+        assert_eq!(
+            implementation("source.file.search").unwrap().adapter,
+            NativeReadAdapter::Search
+        );
+        assert_eq!(
+            implementation("source.file.search")
+                .unwrap()
+                .required_scopes,
+            &["https://www.googleapis.com/auth/drive.file"]
+        );
+        let mut drive_connection = connection(&["https://www.googleapis.com/auth/drive.file"]);
+        drive_connection.connector_id = "google-drive".into();
+        let mut drive_canonical = canonical("healthy");
+        drive_canonical.connector_definition_key = "google-drive".into();
+        assert_eq!(
+            availability_for(
+                implementation("source.file.search").unwrap(),
+                &drive_connection,
+                &drive_canonical,
+            )
+            .unwrap(),
+            "available"
         );
         assert_eq!(
             availability_for(

@@ -14,7 +14,7 @@ use reqwest::{header::RETRY_AFTER, Method, StatusCode, Url};
 use serde_json::{json, Value};
 
 use crate::{
-    connector_auth::{authorized_tokens, StoredTokenSet},
+    connector_auth::{authorized_tokens, authorized_tokens_for_connection, StoredTokenSet},
     models::{
         ConnectorActionRequest, ConnectorActionResult, ConnectorCommandError, ConnectorHealth,
         ConnectorImportRequest, ConnectorImportResult, ConnectorKnowledgeSource,
@@ -745,9 +745,18 @@ pub(crate) async fn search(
     app: &tauri::AppHandle,
     request: ConnectorSearchRequest,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
+    search_for_connection(app, request, None).await
+}
+
+pub(crate) async fn search_for_connection(
+    app: &tauri::AppHandle,
+    request: ConnectorSearchRequest,
+    expected_connection_id: Option<&str>,
+) -> Result<ConnectorSearchResult, ConnectorCommandError> {
     let connector_id = request.connector_id.clone();
     let call_id = new_call_id(&connector_id);
-    let (_, tokens) = authorized_tokens(app, &connector_id).await?;
+    let (_, tokens) =
+        authorized_tokens_for_connection(app, &connector_id, expected_connection_id).await?;
     let limit = request.limit.unwrap_or(20).clamp(1, 50);
     let query = normalize_spaces(&request.query);
     let (items, next_cursor) = match connector_id.as_str() {

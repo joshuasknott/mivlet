@@ -2287,6 +2287,14 @@ pub(crate) async fn refresh_connection(
     app: &tauri::AppHandle,
     connector_id: &str,
 ) -> Result<ConnectorConnection, ConnectorCommandError> {
+    refresh_connection_for_connection(app, connector_id, None).await
+}
+
+async fn refresh_connection_for_connection(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+    expected_connection_id: Option<&str>,
+) -> Result<ConnectorConnection, ConnectorCommandError> {
     let path = connector_connections_path(app)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let connections = read_connections(&path)
@@ -2304,6 +2312,14 @@ pub(crate) async fn refresh_connection(
                 false,
             )
         })?;
+    if expected_connection_id.is_some_and(|expected| selection.connection_id != expected) {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "Active Connection changed before provider access.",
+            true,
+        ));
+    }
     let active_index = connections.iter().position(|connection| {
         connection.connector_id == connector_id
             && derive_native_connection_id(
@@ -2564,7 +2580,19 @@ pub(crate) async fn authorized_tokens(
     app: &tauri::AppHandle,
     connector_id: &str,
 ) -> Result<(ConnectorConnection, StoredTokenSet), ConnectorCommandError> {
-    let connection = refresh_connection(app, connector_id).await?;
+    authorized_tokens_for_connection(app, connector_id, None).await
+}
+
+pub(crate) async fn authorized_tokens_for_connection(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+    expected_connection_id: Option<&str>,
+) -> Result<(ConnectorConnection, StoredTokenSet), ConnectorCommandError> {
+    let connection =
+        refresh_connection_for_connection(app, connector_id, expected_connection_id).await?;
+    if let Some(expected) = expected_connection_id {
+        require_expected_connection(connector_id, &connection.account.id, expected)?;
+    }
     let encoded = NativeConnectorSecretStore
         .get(&connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?
@@ -2611,10 +2639,8 @@ pub(crate) async fn provider_access_token_for_connection(
 ) -> Result<String, ConnectorCommandError> {
     let identity = crate::clerk_identity::native_identity_generation_snapshot()
         .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
-    let (connection, tokens) = authorized_tokens(app, connector_id).await?;
-    if let Some(expected) = expected_connection_id {
-        require_expected_connection(connector_id, &connection.account.id, expected)?;
-    }
+    let (_connection, tokens) =
+        authorized_tokens_for_connection(app, connector_id, expected_connection_id).await?;
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
     Ok(tokens.access_token)
