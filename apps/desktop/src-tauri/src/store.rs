@@ -990,6 +990,16 @@ mod tests {
                   payload_nonce BLOB NOT NULL
                 );
                 INSERT INTO project VALUES ('legacy', 'fp', 'now', 'now', x'01', x'02');
+                CREATE TABLE artifact (
+                  id TEXT PRIMARY KEY,
+                  run_id TEXT,
+                  kind TEXT NOT NULL,
+                  content_fingerprint TEXT NOT NULL,
+                  size_bytes INTEGER NOT NULL,
+                  created_at TEXT NOT NULL,
+                  payload BLOB NOT NULL,
+                  payload_nonce BLOB NOT NULL
+                );
                 "#,
             )
             .unwrap();
