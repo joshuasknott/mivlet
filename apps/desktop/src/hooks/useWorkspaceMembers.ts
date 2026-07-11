@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AccountWorkspaceMemberList } from "@fable/protocol";
-import { loadRuntimeWorkspaceMembers } from "../runtime";
+import type {
+  AccountWorkspaceMemberChangeOutcome,
+  AccountWorkspaceMemberChangeRequest,
+  AccountWorkspaceMemberList
+} from "@fable/protocol";
+import { changeRuntimeWorkspaceMember, loadRuntimeWorkspaceMembers } from "../runtime";
 
 export type WorkspaceMembersState = "loading" | "ready" | "unavailable" | "error";
 
@@ -42,6 +46,29 @@ export function useWorkspaceMembers({
   });
   const [reloadVersion, setReloadVersion] = useState(0);
   const requestRef = useRef(0);
+  const currentContextRef = useRef(contextKey);
+  const actionTokenRef = useRef<symbol | null>(null);
+  const actionContextRef = useRef(contextKey);
+  const mountedRef = useRef(true);
+  const [pendingAction, setPendingAction] = useState<{
+    contextKey: string;
+    memberActionRef: string;
+    action: AccountWorkspaceMemberChangeRequest["action"];
+  } | null>(null);
+
+  currentContextRef.current = contextKey;
+  if (actionContextRef.current !== contextKey) {
+    actionContextRef.current = contextKey;
+    actionTokenRef.current = null;
+  }
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      actionTokenRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     const requestKey = `${contextKey}:${reloadVersion}`;
@@ -79,11 +106,54 @@ export function useWorkspaceMembers({
     setReloadVersion((current) => current + 1);
   }, []);
 
+  const changeMember = useCallback(async (
+    change: AccountWorkspaceMemberChangeRequest
+  ): Promise<AccountWorkspaceMemberChangeOutcome | null> => {
+    if (actionTokenRef.current) return null;
+    const token = Symbol(change.memberActionRef);
+    const startedContext = currentContextRef.current;
+    actionTokenRef.current = token;
+    setPendingAction({
+      contextKey: startedContext,
+      memberActionRef: change.memberActionRef,
+      action: change.action
+    });
+    const isCurrent = () => mountedRef.current
+      && actionTokenRef.current === token
+      && currentContextRef.current === startedContext;
+
+    try {
+      const outcome = await changeRuntimeWorkspaceMember(change);
+      if (!isCurrent()) return null;
+      if (outcome === null) {
+        setSnapshot({ contextKey: startedContext, state: "unavailable", roster: null });
+        return null;
+      }
+      if (outcome.status === "accepted" || outcome.status === "conflict") {
+        setReloadVersion((current) => current + 1);
+      }
+      return outcome;
+    } finally {
+      if (actionTokenRef.current === token) {
+        actionTokenRef.current = null;
+        if (mountedRef.current && currentContextRef.current === startedContext) {
+          setPendingAction(null);
+        }
+      }
+    }
+  }, []);
+
   // Effects run after render. Never expose the previous account or workspace
   // while React is switching to the new context.
   if (snapshot.contextKey !== contextKey) {
-    return { state: "loading" as const, roster: null, reload };
+    return { state: "loading" as const, roster: null, reload, changeMember, pendingAction: null };
   }
 
-  return { state: snapshot.state, roster: snapshot.roster, reload };
+  return {
+    state: snapshot.state,
+    roster: snapshot.roster,
+    reload,
+    changeMember,
+    pendingAction: pendingAction?.contextKey === contextKey ? pendingAction : null
+  };
 }

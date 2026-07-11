@@ -557,6 +557,25 @@
     justify-content: flex-start;
   }
 
+  .workspace-member-list {
+    padding: 0 14px;
+  }
+
+  .workspace-member-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .workspace-member-row__controls,
+  .workspace-member-role-control {
+    justify-content: flex-start;
+  }
+
+  .workspace-member-row__read-only {
+    max-width: none;
+    text-align: left;
+  }
+
   .settings-local-storage {
     padding-top: 28px;
   }

@@ -14,10 +14,13 @@ import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AccountPendingInvitation,
+  AccountWorkspaceMemberAction,
+  AccountWorkspaceMemberSummary,
   ActionHistoryEvent,
   CustomApprovalSettings,
   RemoteControlStatusSnapshot,
-  VoiceCapability
+  VoiceCapability,
+  WorkspaceRole
 } from "@fable/protocol";
 import {
   CUSTOM_APPROVAL_SECTION,
@@ -1168,6 +1171,17 @@ export function WorkspaceSettingsView({
   const acceptanceTokenRef = useRef<symbol | null>(null);
   const mountedRef = useRef(true);
   const members = useWorkspaceMembers({ accountContextKey, fableWorkspaceId });
+  const memberContextKey = useMemo(
+    () => JSON.stringify([accountContextKey, fableWorkspaceId]),
+    [accountContextKey, fableWorkspaceId]
+  );
+  const [roleDrafts, setRoleDrafts] = useState<Record<string, WorkspaceRole>>({});
+  const [removeConfirmation, setRemoveConfirmation] = useState<{
+    contextKey: string;
+    member: AccountWorkspaceMemberSummary;
+  } | null>(null);
+  const [memberMessage, setMemberMessage] = useState<{ contextKey: string; text: string } | null>(null);
+  const memberFeedbackRef = useRef<HTMLParagraphElement>(null);
 
   const loadInvitations = async () => {
     setInvitationState("loading");
@@ -1218,6 +1232,19 @@ export function WorkspaceSettingsView({
     if (invitationMessage) feedbackRef.current?.focus();
   }, [invitationMessage]);
 
+  useEffect(() => {
+    setRoleDrafts({});
+    setRemoveConfirmation(null);
+  }, [memberContextKey, members.roster]);
+
+  useEffect(() => {
+    setMemberMessage(null);
+  }, [memberContextKey]);
+
+  useEffect(() => {
+    if (memberMessage?.contextKey === memberContextKey) memberFeedbackRef.current?.focus();
+  }, [memberContextKey, memberMessage]);
+
   const acceptInvitation = async (invitationId: string) => {
     if (acceptanceTokenRef.current) return;
     const requestToken = Symbol(invitationId);
@@ -1256,6 +1283,53 @@ export function WorkspaceSettingsView({
 
   const roleLabel = (role: AccountPendingInvitation["invitation"]["role"]) =>
     role === "owner" ? "Workspace owner" : role === "admin" ? "Workspace admin" : role === "editor" ? "Can edit" : "Can view";
+
+  const memberRoleLabel = (role: WorkspaceRole) =>
+    role === "owner" ? "Owner" : role === "admin" ? "Admin" : role === "editor" ? "Can edit" : "Can view";
+
+  const blockedReasonCopy = (reason: AccountWorkspaceMemberSummary["management"]["blockedReason"]) => {
+    if (reason === "current-member") return "Your own access is read-only here.";
+    if (reason === "last-active-owner") return "Every workspace needs an owner. Make someone else an owner before changing this access.";
+    if (reason === "owner-protected") return "Owners can only be managed by another owner.";
+    if (reason === "permission-denied") return "Only workspace owners and admins can manage access.";
+    return reason === "unavailable" ? "This access can’t be changed right now." : "";
+  };
+
+  const runMemberAction = async (
+    member: AccountWorkspaceMemberSummary,
+    action: AccountWorkspaceMemberAction,
+    role?: WorkspaceRole
+  ) => {
+    setMemberMessage(null);
+    try {
+      const outcome = await members.changeMember({
+        memberActionRef: member.memberActionRef,
+        action,
+        expectedRevision: member.revision,
+        ...(role ? { role } : {})
+      });
+      if (!outcome) return;
+      if (outcome.status === "accepted") {
+        const text = action === "change-role"
+          ? "Role saved."
+          : action === "suspend"
+            ? "Access paused."
+            : action === "reactivate"
+              ? "Access restored."
+              : "Access removed.";
+        setMemberMessage({ contextKey: memberContextKey, text });
+      } else if (outcome.status === "conflict") {
+        setMemberMessage({ contextKey: memberContextKey, text: "Access changed elsewhere. The list has been refreshed." });
+      } else {
+        const text = outcome.code === "last-active-owner"
+          ? "Every workspace needs an owner. Make someone else an owner before changing this access."
+          : "That access change couldn’t be completed. Nothing was changed.";
+        setMemberMessage({ contextKey: memberContextKey, text });
+      }
+    } catch {
+      setMemberMessage({ contextKey: memberContextKey, text: "That access change couldn’t be completed. Check your connection and try again." });
+    }
+  };
 
   return (
     <div className="settings-page__body">
@@ -1337,23 +1411,109 @@ export function WorkspaceSettingsView({
             ) : null}
             {members.state === "ready" && members.roster?.members.length === 0 ? <p>No people are listed yet.</p> : null}
             {members.state === "ready" && members.roster && members.roster.members.length > 0 ? (
-              <div className="provider-access-list" aria-label="People with workspace access">
-                {members.roster.members.map((member) => {
-                  const role = member.role === "owner" ? "Owner" : member.role === "admin" ? "Admin" : member.role === "editor" ? "Can edit" : "Can view";
+              <div className="workspace-member-list" aria-label="People with workspace access">
+                {members.roster.members.map((member, index) => {
+                  const role = memberRoleLabel(member.role);
                   const status = member.status === "active" ? "Active" : member.status === "suspended" ? "Paused" : "Removed";
+                  const selectedRole = roleDrafts[member.memberActionRef] ?? member.role;
+                  const roleOptions = [member.role, ...member.management.allowedRoles.filter((roleOption) => roleOption !== member.role)];
+                  const statusAction = member.management.allowedActions.find((action) => action === "suspend" || action === "reactivate");
+                  const canRemove = member.management.allowedActions.includes("remove");
+                  const hasControls = member.management.allowedRoles.length > 0 || statusAction !== undefined || canRemove;
+                  const blockedCopy = blockedReasonCopy(member.management.blockedReason);
+                  const actionPending = members.pendingAction?.memberActionRef === member.memberActionRef;
                   return (
-                    <div className="provider-access-row" key={member.memberId}>
-                      <span>
+                    <div className="workspace-member-row" key={member.memberActionRef}>
+                      <span className="workspace-member-row__identity">
                         <strong>
                           {member.displayName?.trim() || "Workspace member"}
                           {member.isCurrentUser ? " · You" : ""}
                         </strong>
                         <small>{member.emailHint ? `${member.emailHint} · ` : ""}{role} · {status}</small>
                       </span>
+                      {hasControls ? (
+                        <div className="workspace-member-row__controls">
+                          {member.management.allowedRoles.length > 0 ? (
+                            <div className="workspace-member-role-control">
+                              <label htmlFor={`workspace-member-role-${index}`}>Role</label>
+                              <select
+                                id={`workspace-member-role-${index}`}
+                                aria-label={`Role for ${member.displayName?.trim() || "workspace member"}`}
+                                value={selectedRole}
+                                disabled={members.pendingAction !== null}
+                                onChange={(event) => setRoleDrafts((current) => ({
+                                  ...current,
+                                  [member.memberActionRef]: event.target.value as WorkspaceRole
+                                }))}
+                              >
+                                {roleOptions.map((allowedRole) => (
+                                  <option value={allowedRole} key={allowedRole}>{memberRoleLabel(allowedRole)}</option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="button button--secondary"
+                                disabled={members.pendingAction !== null || selectedRole === member.role}
+                                aria-busy={actionPending && members.pendingAction?.action === "change-role"}
+                                onClick={() => void runMemberAction(member, "change-role", selectedRole)}
+                              >
+                                {actionPending && members.pendingAction?.action === "change-role" ? "Saving…" : "Save"}
+                              </button>
+                            </div>
+                          ) : null}
+                          {statusAction ? (
+                            <button
+                              type="button"
+                              className="button button--secondary"
+                              disabled={members.pendingAction !== null}
+                              aria-busy={actionPending && members.pendingAction?.action === statusAction}
+                              onClick={() => void runMemberAction(member, statusAction)}
+                            >
+                              {actionPending && members.pendingAction?.action === statusAction
+                                ? statusAction === "suspend" ? "Pausing…" : "Restoring…"
+                                : statusAction === "suspend" ? "Pause access" : "Restore access"}
+                            </button>
+                          ) : null}
+                          {canRemove ? (
+                            <button
+                              type="button"
+                              className="button button--ghost workspace-member-row__remove"
+                              disabled={members.pendingAction !== null}
+                              onClick={() => setRemoveConfirmation({ contextKey: memberContextKey, member })}
+                            >
+                              Remove
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : blockedCopy ? <small className="workspace-member-row__read-only">{blockedCopy}</small> : null}
                     </div>
                   );
                 })}
               </div>
+            ) : null}
+            {removeConfirmation?.contextKey === memberContextKey ? (
+              <section className="workspace-member-confirmation" role="dialog" aria-modal="true" aria-labelledby="remove-workspace-member-title">
+                <strong id="remove-workspace-member-title">Remove {removeConfirmation.member.displayName?.trim() || "this workspace member"} from {workspaceName}?</strong>
+                <p>This permanently removes their workspace access and revokes linked devices. It can’t be undone.</p>
+                <div className="profile-action-row">
+                  <button type="button" className="button button--secondary" autoFocus onClick={() => setRemoveConfirmation(null)}>Keep access</button>
+                  <button
+                    type="button"
+                    className="button button--destructive"
+                    disabled={members.pendingAction !== null}
+                    onClick={() => {
+                      const member = removeConfirmation.member;
+                      setRemoveConfirmation(null);
+                      void runMemberAction(member, "remove");
+                    }}
+                  >
+                    Remove access
+                  </button>
+                </div>
+              </section>
+            ) : null}
+            {memberMessage?.contextKey === memberContextKey ? (
+              <p ref={memberFeedbackRef} tabIndex={-1} role="status" className="profile-security-note">{memberMessage.text}</p>
             ) : null}
           </section>
         </div>

@@ -1,43 +1,62 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AccountWorkspaceMemberList } from "@fable/protocol";
+import type { AccountWorkspaceMemberList, AccountWorkspaceMemberSummary } from "@fable/protocol";
 import { StrictMode } from "react";
 import { WorkspaceSettingsView } from "./SettingsPage";
 
 const mocks = vi.hoisted(() => ({
   loadInvitations: vi.fn(),
   acceptInvitation: vi.fn(),
-  loadMembers: vi.fn()
+  loadMembers: vi.fn(),
+  changeMember: vi.fn()
 }));
 
 vi.mock("../../runtime", () => ({
   loadRuntimePendingInvitations: mocks.loadInvitations,
   acceptRuntimePendingInvitation: mocks.acceptInvitation,
-  loadRuntimeWorkspaceMembers: mocks.loadMembers
+  loadRuntimeWorkspaceMembers: mocks.loadMembers,
+  changeRuntimeWorkspaceMember: mocks.changeMember
 }));
 
 afterEach(cleanup);
 
+function member(overrides: Partial<AccountWorkspaceMemberSummary> = {}): AccountWorkspaceMemberSummary {
+  return {
+    memberActionRef: "action-ref-alex",
+    role: "editor",
+    status: "active",
+    revision: 4,
+    displayName: "Alex",
+    isCurrentUser: false,
+    management: {
+      allowedRoles: ["owner", "admin", "editor", "viewer"],
+      allowedActions: ["suspend", "remove"]
+    },
+    ...overrides
+  };
+}
+
 function roster(
   workspaceId = "workspace-a",
   members: AccountWorkspaceMemberList["members"] = [
-    {
-      memberId: "member-secret-1",
+    member({
+      memberActionRef: "action-ref-current",
       role: "owner",
       status: "active",
       revision: 2,
       displayName: "Josh",
       emailHint: "j***@example.com",
-      isCurrentUser: true
-    },
-    {
-      memberId: "member-secret-2",
-      role: "editor",
+      isCurrentUser: true,
+      management: { allowedRoles: [], allowedActions: [], blockedReason: "current-member" }
+    }),
+    member({
       status: "suspended",
-      isCurrentUser: false,
-      revision: 4
-    }
+      management: {
+        allowedRoles: ["owner", "admin", "editor", "viewer"],
+        allowedActions: ["reactivate", "remove"]
+      }
+    })
   ]
 ): AccountWorkspaceMemberList {
   return { workspaceId, actorRole: "owner", members };
@@ -61,20 +80,21 @@ describe("workspace member roster", () => {
     mocks.loadInvitations.mockReset();
     mocks.acceptInvitation.mockReset();
     mocks.loadMembers.mockReset();
+    mocks.changeMember.mockReset();
     mocks.loadInvitations.mockResolvedValue({ invitations: [] });
   });
 
-  it("shows a calm human-readable roster without rendering member ids", async () => {
+  it("shows a calm human-readable roster without rendering action references", async () => {
     mocks.loadMembers.mockResolvedValue(roster());
     const rendered = render(view());
 
     expect(await screen.findByText("Josh · You")).toBeInTheDocument();
     expect(screen.getByText("j***@example.com · Owner · Active")).toBeInTheDocument();
-    expect(screen.getByText("Workspace member")).toBeInTheDocument();
+    expect(screen.getByText("Alex")).toBeInTheDocument();
     expect(screen.getByText("Can edit · Paused")).toBeInTheDocument();
-    expect(rendered.container).not.toHaveTextContent("member-secret-1");
-    expect(rendered.container).not.toHaveTextContent("member-secret-2");
-    expect(screen.queryByRole("button", { name: /remove|pause|role|save/i })).not.toBeInTheDocument();
+    expect(rendered.container).not.toHaveTextContent("action-ref-current");
+    expect(rendered.container).not.toHaveTextContent("action-ref-alex");
+    expect(screen.getByText("Your own access is read-only here.")).toBeInTheDocument();
   });
 
   it("is honest when the native account service is unavailable", async () => {
@@ -125,16 +145,124 @@ describe("workspace member roster", () => {
 
     await act(async () => {
       finishB(roster("workspace-b", [{
-        memberId: "member-secret-b",
+        ...member(),
+        memberActionRef: "action-ref-b",
         role: "viewer",
         status: "active",
         revision: 1,
         displayName: "Beacon member",
-        isCurrentUser: false
+        management: { allowedRoles: [], allowedActions: [], blockedReason: "permission-denied" }
       }]));
     });
     expect(await screen.findByText("Beacon member")).toBeInTheDocument();
-    expect(rendered.container).not.toHaveTextContent("member-secret-b");
+    expect(rendered.container).not.toHaveTextContent("action-ref-b");
+  });
+
+  it("uses only projected management and requires an explicit role save", async () => {
+    mocks.loadMembers.mockResolvedValue(roster());
+    mocks.changeMember.mockResolvedValue({ status: "accepted", message: "saved" });
+    render(view());
+
+    const role = await screen.findByRole("combobox", { name: "Role for Alex" });
+    expect(role).toHaveValue("editor");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(role, { target: { value: "viewer" } });
+    expect(mocks.changeMember).not.toHaveBeenCalled();
+    const save = screen.getByRole("button", { name: "Save" });
+    act(() => {
+      save.click();
+      save.click();
+    });
+    await waitFor(() => expect(mocks.changeMember).toHaveBeenCalledTimes(1));
+    expect(mocks.changeMember).toHaveBeenCalledWith({
+      memberActionRef: "action-ref-alex",
+      action: "change-role",
+      expectedRevision: 4,
+      role: "viewer"
+    });
+    expect(await screen.findByText("Role saved.")).toHaveFocus();
+  });
+
+  it("renders projected pause and restore actions and plain blocked reasons", async () => {
+    mocks.loadMembers.mockResolvedValue(roster("workspace-a", [
+      member({ management: { allowedRoles: [], allowedActions: ["suspend"] } }),
+      member({ memberActionRef: "ref-restoring", displayName: "Morgan", status: "suspended", management: { allowedRoles: [], allowedActions: ["reactivate"] } }),
+      member({ memberActionRef: "ref-sole", displayName: "Sole owner", role: "owner", management: { allowedRoles: [], allowedActions: [], blockedReason: "last-active-owner" } }),
+      member({ memberActionRef: "ref-protected", displayName: "Protected", role: "owner", management: { allowedRoles: [], allowedActions: [], blockedReason: "owner-protected" } }),
+      member({ memberActionRef: "ref-denied", displayName: "Denied", management: { allowedRoles: [], allowedActions: [], blockedReason: "permission-denied" } })
+    ]));
+    mocks.changeMember.mockResolvedValue({ status: "accepted", message: "done" });
+    render(view());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pause access" }));
+    await waitFor(() => expect(mocks.changeMember).toHaveBeenCalledWith({
+      memberActionRef: "action-ref-alex", action: "suspend", expectedRevision: 4
+    }));
+    expect(screen.getByRole("button", { name: "Restore access" })).toBeInTheDocument();
+    expect(screen.getByText(/Every workspace needs an owner/i)).toBeInTheDocument();
+    expect(screen.getByText(/Owners can only be managed by another owner/i)).toBeInTheDocument();
+    expect(screen.getByText(/Only workspace owners and admins/i)).toBeInTheDocument();
+  });
+
+  it("requires focused confirmation before permanent removal", async () => {
+    mocks.loadMembers.mockResolvedValue(roster());
+    mocks.changeMember.mockResolvedValue({ status: "accepted", message: "removed" });
+    render(view());
+
+    fireEvent.click((await screen.findAllByRole("button", { name: "Remove" }))[0]);
+    const dialog = screen.getByRole("dialog", { name: "Remove Alex from Atlas?" });
+    expect(dialog).toHaveTextContent(/permanently removes their workspace access/i);
+    expect(dialog).toHaveTextContent(/revokes linked devices/i);
+    expect(dialog).toHaveTextContent(/can’t be undone/i);
+    expect(screen.getByRole("button", { name: "Keep access" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Keep access" }));
+    expect(mocks.changeMember).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove access" }));
+    await waitFor(() => expect(mocks.changeMember).toHaveBeenCalledWith({
+      memberActionRef: "action-ref-alex", action: "remove", expectedRevision: 4
+    }));
+  });
+
+  it("reloads conflicts without reporting success", async () => {
+    mocks.loadMembers
+      .mockResolvedValueOnce(roster("workspace-a", [member()]))
+      .mockResolvedValueOnce(roster("workspace-a", [member({ revision: 5 })]));
+    mocks.changeMember.mockResolvedValue({ status: "conflict", code: "stale-revision", message: "stale" });
+    render(view());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pause access" }));
+    expect(await screen.findByText(/Access changed elsewhere/i)).toHaveFocus();
+    await waitFor(() => expect(mocks.loadMembers).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText("Access paused.")).not.toBeInTheDocument();
+  });
+
+  it("ignores an action completion after switching account and workspace", async () => {
+    mocks.loadMembers
+      .mockResolvedValueOnce(roster("workspace-a", [member()]))
+      .mockResolvedValueOnce(roster("workspace-b", [member({
+        memberActionRef: "action-ref-b",
+        displayName: "Beacon member",
+        management: { allowedRoles: [], allowedActions: [], blockedReason: "permission-denied" }
+      })]));
+    let finishAction: (value: unknown) => void = () => {};
+    mocks.changeMember.mockImplementation(() => new Promise((resolve) => { finishAction = resolve; }));
+    const rendered = render(view());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pause access" }));
+    await waitFor(() => expect(mocks.changeMember).toHaveBeenCalledTimes(1));
+    rendered.rerender(view({
+      workspaceName: "Beacon",
+      fableWorkspaceId: "workspace-b",
+      accountContextKey: "account-b"
+    }));
+    expect(await screen.findByText("Beacon member")).toBeInTheDocument();
+    await act(async () => {
+      finishAction({ status: "accepted", message: "paused" });
+    });
+    expect(screen.queryByText("Access paused.")).not.toBeInTheDocument();
+    expect(mocks.loadMembers).toHaveBeenCalledTimes(2);
   });
 
   it("does not duplicate a same-context load through Strict Mode or an ordinary rerender", async () => {

@@ -7,13 +7,15 @@ import { WorkspaceSettingsView } from "./SettingsPage";
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   accept: vi.fn(),
-  loadMembers: vi.fn()
+  loadMembers: vi.fn(),
+  changeMember: vi.fn()
 }));
 
 vi.mock("../../runtime", () => ({
   loadRuntimePendingInvitations: mocks.load,
   acceptRuntimePendingInvitation: mocks.accept,
-  loadRuntimeWorkspaceMembers: mocks.loadMembers
+  loadRuntimeWorkspaceMembers: mocks.loadMembers,
+  changeRuntimeWorkspaceMember: mocks.changeMember
 }));
 
 afterEach(cleanup);
@@ -56,6 +58,7 @@ describe("workspace invitation inbox", () => {
     mocks.load.mockReset();
     mocks.accept.mockReset();
     mocks.loadMembers.mockReset();
+    mocks.changeMember.mockReset();
     mocks.loadMembers.mockResolvedValue(null);
   });
 
