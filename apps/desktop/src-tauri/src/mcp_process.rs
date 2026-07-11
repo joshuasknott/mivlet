@@ -7,12 +7,14 @@
 
 use std::{
     collections::HashMap,
+    net::IpAddr,
     path::{Path, PathBuf},
     process::Stdio,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
+use futures_util::StreamExt;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
@@ -22,6 +24,7 @@ use tokio::{
     sync::mpsc,
     time::timeout,
 };
+use url::Url;
 
 const MAX_MCP_FRAME_BYTES: usize = 10 * 1024 * 1024;
 const MCP_EVENT_CHANNEL_PREFIX: &str = "fable://mcp/";
@@ -39,6 +42,23 @@ type ProcessMap = HashMap<String, McpChild>;
 
 fn process_map() -> &'static Mutex<ProcessMap> {
     static MAP: OnceLock<Mutex<ProcessMap>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone)]
+struct McpRemoteSession {
+    endpoint: Url,
+    workspace_id: String,
+    owner_subject: String,
+    connection_id: String,
+    connection_revision: i64,
+    server_session_id: Option<String>,
+    initialized: bool,
+    busy: bool,
+}
+
+fn remote_sessions() -> &'static Mutex<HashMap<String, McpRemoteSession>> {
+    static MAP: OnceLock<Mutex<HashMap<String, McpRemoteSession>>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -86,6 +106,30 @@ pub struct SpawnedMcpProcess {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OpenRemoteMcpSessionRequest {
+    workspace_id: String,
+    configuration_reference: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedRemoteMcpSession {
+    session_id: String,
+    configuration_reference: String,
+    connection_id: String,
+    connection_revision: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendRemoteMcpFrameRequest {
+    workspace_id: String,
+    session_id: String,
+    frame: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WriteMcpFrameRequest {
     workspace_id: String,
     session_id: String,
@@ -105,9 +149,18 @@ pub struct McpServerConfiguration {
     workspace_id: String,
     id: String,
     display_name: String,
+    #[serde(default = "default_mcp_transport")]
+    transport: String,
+    #[serde(default)]
     command: String,
+    #[serde(default)]
     args: Vec<String>,
+    endpoint: Option<String>,
     expected_revision: Option<i64>,
+}
+
+fn default_mcp_transport() -> String {
+    "stdio".into()
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -250,20 +303,33 @@ pub fn commit_mcp_server_configuration(
                 crate::store::repos::mcp_local_server::McpLocalServerWrite {
                     id: &request.configuration.id,
                     display_name: &request.configuration.display_name,
+                    transport: &request.configuration.transport,
                     command: &request.configuration.command,
                     args: &request.configuration.args,
+                    endpoint: request.configuration.endpoint.as_deref(),
                     expected_revision: request.configuration.expected_revision,
                     updated_at: &now,
                 },
             )?;
-            crate::store::repos::connection_record::upsert_mcp_stdio(
-                tx,
-                store,
-                &scope,
-                &saved.id,
-                &saved.display_name,
-                &now,
-            )?;
+            if saved.transport == "stdio" {
+                crate::store::repos::connection_record::upsert_mcp_stdio(
+                    tx,
+                    store,
+                    &scope,
+                    &saved.id,
+                    &saved.display_name,
+                    &now,
+                )?;
+            } else {
+                crate::store::repos::connection_record::upsert_mcp_streamable_http(
+                    tx,
+                    store,
+                    &scope,
+                    &saved.id,
+                    &saved.display_name,
+                    &now,
+                )?;
+            }
             Ok(saved)
         })
         .map_err(|error| error.to_string())
@@ -286,6 +352,138 @@ pub fn list_mcp_server_configurations(
 }
 
 #[tauri::command]
+pub fn open_remote_mcp_session(
+    request: OpenRemoteMcpSessionRequest,
+) -> Result<OpenedRemoteMcpSession, String> {
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id.clone()),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let configuration = store
+        .with_conn(|tx| {
+            crate::store::repos::mcp_local_server::get_launch(
+                tx,
+                store,
+                &scope,
+                &request.configuration_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "This remote MCP server is unavailable.".to_string())?;
+    if configuration.metadata.disabled || configuration.metadata.transport != "streamable-http" {
+        return Err("This remote MCP server is unavailable.".to_string());
+    }
+    let endpoint = validate_remote_endpoint(configuration.endpoint.as_deref().unwrap_or_default())?;
+    let connection = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_details_for_remote(
+                tx,
+                store,
+                &scope,
+                &request.configuration_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    let session_id = random_session_id()?;
+    remote_sessions()
+        .lock()
+        .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?
+        .insert(
+            session_id.clone(),
+            McpRemoteSession {
+                endpoint,
+                workspace_id: scope.data.workspace_id().to_string(),
+                owner_subject: scope.private.owner_subject().to_string(),
+                connection_id: connection.connection_id.clone(),
+                connection_revision: connection.connection_revision,
+                server_session_id: None,
+                initialized: false,
+                busy: false,
+            },
+        );
+    Ok(OpenedRemoteMcpSession {
+        session_id,
+        configuration_reference: request.configuration_reference,
+        connection_id: connection.connection_id,
+        connection_revision: connection.connection_revision,
+    })
+}
+
+#[tauri::command]
+pub async fn send_remote_mcp_frame(
+    request: SendRemoteMcpFrameRequest,
+) -> Result<Vec<String>, String> {
+    if !valid_session_id(&request.session_id) || !permitted_renderer_frame(&request.frame) {
+        return Err("The remote MCP frame is invalid or not permitted.".to_string());
+    }
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let snapshot = {
+        let mut sessions = remote_sessions()
+            .lock()
+            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+        let session = sessions
+            .get_mut(&request.session_id)
+            .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        if session.busy {
+            return Err("This remote MCP session is already handling a request.".to_string());
+        }
+        session.busy = true;
+        session.clone()
+    };
+    let result = post_remote_mcp_frame(&snapshot, &request.frame).await;
+    if let Ok(mut sessions) = remote_sessions().lock() {
+        if let Some(session) = sessions.get_mut(&request.session_id) {
+            session.busy = false;
+            if let Ok(response) = &result {
+                if response.initialized {
+                    session.initialized = true;
+                }
+                if let Some(server_session_id) = &response.server_session_id {
+                    session.server_session_id = Some(server_session_id.clone());
+                }
+            }
+        }
+    }
+    result.map(|response| response.frames)
+}
+
+#[tauri::command]
+pub async fn close_remote_mcp_session(request: CloseMcpProcessRequest) -> Result<(), String> {
+    if !valid_session_id(&request.session_id) {
+        return Err("The remote MCP session id is invalid.".to_string());
+    }
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let session = {
+        let mut sessions = remote_sessions()
+            .lock()
+            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+        let session = sessions
+            .get(&request.session_id)
+            .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        sessions
+            .remove(&request.session_id)
+            .expect("session existed")
+    };
+    if session.server_session_id.is_some() {
+        delete_remote_mcp_session(&session).await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn record_mcp_server_discovery(
     request: RecordMcpDiscoveryRequest,
 ) -> Result<crate::store::repos::connection_record::SafeMcpConnectionDetails, String> {
@@ -297,15 +495,29 @@ pub fn record_mcp_server_discovery(
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )?;
-    let (connection_id, connection_revision) = {
-        let map = process_map()
+    let local = process_map()
+        .lock()
+        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .get(&request.session_id)
+        .map(|process| {
+            require_session_owner(process, &scope)?;
+            Ok::<(String, i64), String>((
+                process.connection_id.clone(),
+                process.connection_revision,
+            ))
+        })
+        .transpose()?;
+    let (connection_id, connection_revision) = if let Some(local) = local {
+        local
+    } else {
+        let sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
-        let process = map
+            .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+        let session = sessions
             .get(&request.session_id)
-            .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
-        require_session_owner(process, &scope)?;
-        (process.connection_id.clone(), process.connection_revision)
+            .ok_or_else(|| "This MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        (session.connection_id.clone(), session.connection_revision)
     };
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
@@ -329,6 +541,15 @@ pub fn record_mcp_server_discovery(
                 && process.connection_revision == connection_revision
             {
                 process.connection_revision = recorded.connection_revision;
+            }
+        }
+    }
+    if let Ok(mut sessions) = remote_sessions().lock() {
+        if let Some(session) = sessions.get_mut(&request.session_id) {
+            if session.connection_id == recorded.connection_id
+                && session.connection_revision == connection_revision
+            {
+                session.connection_revision = recorded.connection_revision;
             }
         }
     }
@@ -533,6 +754,9 @@ pub async fn spawn_mcp_process(
     if launch.metadata.disabled {
         return Err("This local MCP server is disabled.".to_string());
     }
+    if launch.metadata.transport != "stdio" {
+        return Err("This MCP server does not use the local STDIO transport.".to_string());
+    }
     let connection = store
         .with_conn(|tx| {
             crate::store::repos::connection_record::mcp_details_for_launch(
@@ -709,6 +933,18 @@ fn require_session_owner(
         || process.owner_subject != scope.private.owner_subject()
     {
         return Err("This local MCP session belongs to a different account or workspace.".into());
+    }
+    Ok(())
+}
+
+fn require_remote_session_owner(
+    session: &McpRemoteSession,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+) -> Result<(), String> {
+    if session.workspace_id != scope.data.workspace_id()
+        || session.owner_subject != scope.private.owner_subject()
+    {
+        return Err("This remote MCP session belongs to a different account or workspace.".into());
     }
     Ok(())
 }
@@ -942,6 +1178,284 @@ fn drain_session_audits(session_id: &str) {
     }
 }
 
+const MCP_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct RemotePostResponse {
+    frames: Vec<String>,
+    server_session_id: Option<String>,
+    initialized: bool,
+}
+
+fn validate_remote_endpoint(raw: &str) -> Result<Url, String> {
+    let mut endpoint =
+        Url::parse(raw).map_err(|_| "Remote MCP requires a valid HTTPS endpoint.".to_string())?;
+    if endpoint.scheme() != "https"
+        || endpoint.host().is_none()
+        || !endpoint.username().is_empty()
+        || endpoint.password().is_some()
+        || endpoint.fragment().is_some()
+    {
+        return Err(
+            "Remote MCP endpoints must use HTTPS without credentials or a fragment.".into(),
+        );
+    }
+    if endpoint.host_str().is_some_and(|host| {
+        let host = host.to_ascii_lowercase();
+        host == "localhost"
+            || host == "local"
+            || host.ends_with(".localhost")
+            || host.ends_with(".local")
+    }) {
+        return Err("Remote MCP endpoints cannot target local network names.".into());
+    }
+    if endpoint.port().is_some_and(crate::tools::is_unsafe_port) {
+        return Err("Remote MCP endpoints cannot use an unsafe port.".into());
+    }
+    const CREDENTIAL_QUERY_MARKERS: &[&str] = &[
+        "api_key",
+        "api-key",
+        "apikey",
+        "authorization",
+        "password",
+        "secret",
+        "token",
+    ];
+    if endpoint.query_pairs().any(|(key, _)| {
+        let key = key.to_ascii_lowercase();
+        CREDENTIAL_QUERY_MARKERS
+            .iter()
+            .any(|marker| key.contains(marker))
+    }) {
+        return Err("Remote MCP endpoint queries cannot contain credentials.".into());
+    }
+    match endpoint.host() {
+        Some(url::Host::Ipv4(ip)) if crate::tools::is_forbidden_ip(IpAddr::V4(ip)) => {
+            return Err("Remote MCP endpoints cannot target private or reserved networks.".into())
+        }
+        Some(url::Host::Ipv6(ip)) if crate::tools::is_forbidden_ip(IpAddr::V6(ip)) => {
+            return Err("Remote MCP endpoints cannot target private or reserved networks.".into())
+        }
+        _ => {}
+    }
+    if endpoint.port() == Some(443) {
+        let _ = endpoint.set_port(None);
+    }
+    Ok(endpoint)
+}
+
+async fn remote_http_client(endpoint: &Url) -> Result<reqwest::Client, String> {
+    crate::ensure_rustls_provider();
+    let mut builder = reqwest::Client::builder()
+        .timeout(MCP_HTTP_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
+        .user_agent("Fable/0.1 (MCP)");
+    match endpoint.host() {
+        Some(url::Host::Domain(host)) => {
+            let port = endpoint.port_or_known_default().unwrap_or(443);
+            let addrs = tokio::net::lookup_host((host, port))
+                .await
+                .map_err(|_| "Remote MCP endpoint DNS lookup failed.".to_string())?
+                .collect::<Vec<_>>();
+            if addrs.is_empty()
+                || addrs
+                    .iter()
+                    .any(|address| crate::tools::is_forbidden_ip(address.ip()))
+            {
+                return Err(
+                    "Remote MCP endpoint resolved to a private or reserved network.".into(),
+                );
+            }
+            builder = builder.resolve_to_addrs(host, &addrs);
+        }
+        Some(url::Host::Ipv4(ip)) if crate::tools::is_forbidden_ip(IpAddr::V4(ip)) => {
+            return Err("Remote MCP endpoint targets a private or reserved network.".into())
+        }
+        Some(url::Host::Ipv6(ip)) if crate::tools::is_forbidden_ip(IpAddr::V6(ip)) => {
+            return Err("Remote MCP endpoint targets a private or reserved network.".into())
+        }
+        Some(_) => {}
+        None => return Err("Remote MCP endpoint has no host.".into()),
+    }
+    builder
+        .build()
+        .map_err(|_| "Fable could not initialize the remote MCP transport.".into())
+}
+
+fn valid_server_session_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 1_024
+        && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+}
+
+fn canonical_remote_frame(payload: &str) -> Result<String, String> {
+    let value: Value = serde_json::from_str(payload)
+        .map_err(|_| "Remote MCP returned malformed JSON-RPC.".to_string())?;
+    let encoded = serde_json::to_string(&value)
+        .map_err(|_| "Remote MCP returned malformed JSON-RPC.".to_string())?;
+    if !valid_mcp_frame(&encoded) {
+        return Err("Remote MCP returned an invalid JSON-RPC message.".into());
+    }
+    Ok(encoded)
+}
+
+fn parse_remote_sse(body: &[u8]) -> Result<Vec<String>, String> {
+    let text = std::str::from_utf8(body)
+        .map_err(|_| "Remote MCP returned non-UTF-8 event data.".to_string())?;
+    let mut frames = Vec::new();
+    let mut data = Vec::new();
+    for line in text.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        if line.is_empty() {
+            if !data.is_empty() {
+                frames.push(canonical_remote_frame(&data.join("\n"))?);
+                data.clear();
+            }
+        } else if let Some(value) = line.strip_prefix("data:") {
+            data.push(value.strip_prefix(' ').unwrap_or(value).to_string());
+        }
+    }
+    if !data.is_empty() {
+        frames.push(canonical_remote_frame(&data.join("\n"))?);
+    }
+    if frames.is_empty() {
+        return Err("Remote MCP event stream returned no JSON-RPC messages.".into());
+    }
+    Ok(frames)
+}
+
+async fn read_remote_body(response: reqwest::Response) -> Result<Vec<u8>, String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_MCP_FRAME_BYTES as u64)
+    {
+        return Err("Remote MCP response exceeded the supported limit.".into());
+    }
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|_| "Remote MCP response could not be read.".to_string())?;
+        if bytes.len().saturating_add(chunk.len()) > MAX_MCP_FRAME_BYTES {
+            return Err("Remote MCP response exceeded the supported limit.".into());
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
+async fn post_remote_mcp_frame(
+    session: &McpRemoteSession,
+    frame: &str,
+) -> Result<RemotePostResponse, String> {
+    let parsed: Value =
+        serde_json::from_str(frame).map_err(|_| "The remote MCP frame is invalid.".to_string())?;
+    let is_initialize = parsed.get("method").and_then(Value::as_str) == Some("initialize");
+    let is_request = parsed.get("id").is_some();
+    let client = remote_http_client(&session.endpoint).await?;
+    let mut request = client
+        .post(session.endpoint.clone())
+        .header(
+            reqwest::header::ACCEPT,
+            "application/json, text/event-stream",
+        )
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .body(frame.to_string());
+    if session.initialized {
+        request = request.header("MCP-Protocol-Version", "2025-11-25");
+    }
+    if let Some(server_session_id) = &session.server_session_id {
+        request = request.header("MCP-Session-Id", server_session_id);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Remote MCP request failed.".to_string())?;
+    if response.status().is_redirection() {
+        return Err("Remote MCP redirects are not followed.".into());
+    }
+    if response.status() == reqwest::StatusCode::NOT_FOUND && session.server_session_id.is_some() {
+        return Err("The remote MCP session expired; reconnect the server.".into());
+    }
+    if response.status() == reqwest::StatusCode::ACCEPTED {
+        if is_request {
+            return Err("Remote MCP accepted a request without returning a response.".into());
+        }
+        return Ok(RemotePostResponse {
+            frames: Vec::new(),
+            server_session_id: None,
+            initialized: false,
+        });
+    }
+    if !response.status().is_success() {
+        return Err(format!(
+            "Remote MCP rejected the request with HTTP {}.",
+            response.status().as_u16()
+        ));
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let server_session_id = if is_initialize {
+        response
+            .headers()
+            .get("MCP-Session-Id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .map(|value| {
+                if valid_server_session_id(&value) {
+                    Ok(value)
+                } else {
+                    Err("Remote MCP returned an invalid session id.".to_string())
+                }
+            })
+            .transpose()?
+    } else {
+        None
+    };
+    let body = read_remote_body(response).await?;
+    let frames = match content_type.as_str() {
+        "application/json" => vec![canonical_remote_frame(
+            std::str::from_utf8(&body)
+                .map_err(|_| "Remote MCP returned non-UTF-8 JSON.".to_string())?,
+        )?],
+        "text/event-stream" => parse_remote_sse(&body)?,
+        _ => return Err("Remote MCP returned an unsupported content type.".into()),
+    };
+    Ok(RemotePostResponse {
+        frames,
+        server_session_id,
+        initialized: is_initialize,
+    })
+}
+
+async fn delete_remote_mcp_session(session: &McpRemoteSession) -> Result<(), String> {
+    let client = remote_http_client(&session.endpoint).await?;
+    let response = client
+        .delete(session.endpoint.clone())
+        .header("MCP-Protocol-Version", "2025-11-25")
+        .header(
+            "MCP-Session-Id",
+            session.server_session_id.as_deref().unwrap_or_default(),
+        )
+        .send()
+        .await
+        .map_err(|_| "Remote MCP session could not be closed.".to_string())?;
+    if response.status().is_success()
+        || response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+        || response.status() == reqwest::StatusCode::NOT_FOUND
+    {
+        Ok(())
+    } else {
+        Err("Remote MCP session could not be closed.".into())
+    }
+}
+
 fn validate_configuration_for_approval(
     configuration: &McpServerConfiguration,
 ) -> Result<(), String> {
@@ -953,13 +1467,19 @@ fn validate_configuration_for_approval(
     {
         return Err("MCP configuration revision is invalid.".to_string());
     }
-    crate::store::repos::mcp_local_server::validate_launch_values(
+    crate::store::repos::mcp_local_server::validate_server_values(
         &configuration.display_name,
+        &configuration.transport,
         &configuration.command,
         &configuration.args,
+        configuration.endpoint.as_deref(),
     )
     .map_err(|error| error.to_string())?;
-    validate_executable(&configuration.command)?;
+    if configuration.transport == "stdio" {
+        validate_executable(&configuration.command)?;
+    } else {
+        validate_remote_endpoint(configuration.endpoint.as_deref().unwrap_or_default())?;
+    }
     let lower_args = configuration.args.join(" ").to_ascii_lowercase();
     const SECRET_MARKERS: &[&str] = &[
         "api-key",
@@ -997,16 +1517,20 @@ fn approval_for_configuration(
     crate::models::ApprovalRequest {
         id,
         service: "MCP connections".to_string(),
-        action: format!("configure local MCP server {}", configuration.id),
+        action: format!("configure MCP server {}", configuration.id),
         mode: "full-access".to_string(),
         risk_level: "critical".to_string(),
         data_used: vec![
             format!("server: {}", configuration.display_name.trim()),
             format!("configuration fingerprint: {fingerprint}"),
         ],
-        consequence:
+        consequence: if configuration.transport == "stdio" {
             "Starts a user-managed local program that can expose tools and resources to Fable."
-                .to_string(),
+                .to_string()
+        } else {
+            "Connects to a user-managed remote service that can expose tools and resources to Fable."
+                .to_string()
+        },
         requested_at,
         decisions: vec!["once".to_string(), "deny".to_string()],
         confirmation_phrase: Some(format!("configure {}", configuration.id)),
@@ -1253,8 +1777,10 @@ mod tests {
             workspace_id: "workspace-a".into(),
             id: "files".into(),
             display_name: "Local files".into(),
+            transport: "stdio".into(),
             command: command.to_string_lossy().to_string(),
             args: vec!["--stdio".into(), "C:\\work".into()],
+            endpoint: None,
             expected_revision: None,
         };
         validate_configuration_for_approval(&configuration).unwrap();
@@ -1279,6 +1805,40 @@ mod tests {
         );
         changed.args = vec!["--api-key=secret".into()];
         assert!(validate_configuration_for_approval(&changed).is_err());
+    }
+
+    #[test]
+    fn remote_endpoint_policy_is_https_public_and_credential_free() {
+        assert_eq!(
+            validate_remote_endpoint("https://example.com:443/mcp?tenant=a")
+                .unwrap()
+                .as_str(),
+            "https://example.com/mcp?tenant=a"
+        );
+        for endpoint in [
+            "http://example.com/mcp",
+            "https://user:pass@example.com/mcp",
+            "https://localhost/mcp",
+            "https://127.0.0.1/mcp",
+            "https://169.254.169.254/mcp",
+            "https://example.com:22/mcp",
+            "https://example.com/mcp#secret",
+            "https://example.com/mcp?access_token=secret",
+        ] {
+            assert!(validate_remote_endpoint(endpoint).is_err(), "{endpoint}");
+        }
+    }
+
+    #[test]
+    fn remote_sse_parser_accepts_only_bounded_json_rpc_data_events() {
+        let frames = parse_remote_sse(
+            b": keepalive\nid: 1\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"one\",\"result\":{}}\n\n",
+        )
+        .unwrap();
+        assert_eq!(frames.len(), 1);
+        assert!(valid_mcp_frame(&frames[0]));
+        assert!(parse_remote_sse(b"data: server ready\n\n").is_err());
+        assert!(parse_remote_sse(b"event: ping\n\n").is_err());
     }
 
     fn find_node() -> PathBuf {

@@ -11,12 +11,15 @@ import {
 import type { ApprovalResolutionRequest } from "@fable/protocol";
 import {
   authorizeRuntimeMcpToolCall,
+  closeRuntimeRemoteMcpSession,
   closeRuntimeMcpProcess,
   executeRuntimeApprovedMcpToolCall,
   listenRuntimeMcpFrames,
+  openRuntimeRemoteMcpSession,
   recordRuntimeMcpDiscovery,
   prepareRuntimeMcpToolCall,
   spawnRuntimeMcpProcess,
+  sendRuntimeRemoteMcpFrame,
   writeRuntimeMcpFrame
 } from "../runtime";
 import type {
@@ -40,6 +43,10 @@ export interface DesktopMcpTransportHandle extends McpTransport {
     proposal: RuntimeMcpToolProposal,
     permitId: string
   ): Promise<unknown>;
+}
+
+export interface DesktopMcpDiscoveryTransport extends McpTransport {
+  recordDiscovery(tools: string[], resources: string[]): Promise<RuntimeMcpConnectionDetails>;
 }
 
 interface PendingToolResponse {
@@ -222,4 +229,83 @@ export async function createDesktopMcpTransport(
   transport = new DesktopMcpTransport(workspaceId, spawned.sessionId, unlisten);
   for (const line of buffered) transport.handleLine(line);
   return transport;
+}
+
+class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
+  private readonly frameHandlers = new Set<(frame: McpFrame) => void>();
+  private readonly closeHandlers = new Set<() => void>();
+  private closed = false;
+  private closePromise?: Promise<void>;
+
+  constructor(
+    private readonly workspaceId: string,
+    private readonly sessionId: string
+  ) {}
+
+  async send(frame: McpRequest | McpNotification): Promise<void> {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const lines = await sendRuntimeRemoteMcpFrame(
+      this.workspaceId,
+      this.sessionId,
+      JSON.stringify(frame)
+    );
+    if (!lines) throw new Error("Remote MCP requires the desktop app.");
+    for (const line of lines) {
+      const received = parseMcpLine(line);
+      if (received) {
+        for (const handler of this.frameHandlers) handler(received);
+      }
+    }
+  }
+
+  subscribe(handler: (frame: McpFrame) => void): () => void {
+    this.frameHandlers.add(handler);
+    return () => this.frameHandlers.delete(handler);
+  }
+
+  subscribeClose(handler: () => void): () => void {
+    if (this.closed) {
+      queueMicrotask(handler);
+      return () => undefined;
+    }
+    this.closeHandlers.add(handler);
+    return () => this.closeHandlers.delete(handler);
+  }
+
+  async recordDiscovery(tools: string[], resources: string[]) {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const recorded = await recordRuntimeMcpDiscovery(
+      this.workspaceId,
+      this.sessionId,
+      tools,
+      resources
+    );
+    if (!recorded) throw new Error("MCP discovery requires the desktop app.");
+    return recorded;
+  }
+
+  close(): Promise<void> {
+    if (!this.closed) {
+      this.closed = true;
+      for (const handler of this.closeHandlers) handler();
+      this.closeHandlers.clear();
+      this.frameHandlers.clear();
+    }
+    if (!this.closePromise) {
+      this.closePromise = closeRuntimeRemoteMcpSession(this.workspaceId, this.sessionId)
+        .catch(() => undefined)
+        .then(() => undefined);
+    }
+    return this.closePromise;
+  }
+}
+
+export async function createDesktopRemoteMcpTransport(
+  workspaceId: string,
+  configurationReference: string
+): Promise<DesktopMcpDiscoveryTransport | null> {
+  if (!hasDesktopRuntime()) return null;
+  const opened = await openRuntimeRemoteMcpSession(workspaceId, configurationReference);
+  if (!opened) return null;
+  return new RemoteDesktopMcpTransport(workspaceId, opened.sessionId);
 }

@@ -19,7 +19,8 @@ vi.mock("../../runtime", () => ({
   setRuntimeMcpEnablement: runtime.setEnablement
 }));
 vi.mock("../../lib/mcp-transport", () => ({
-  createDesktopMcpTransport: transportFactory
+  createDesktopMcpTransport: transportFactory,
+  createDesktopRemoteMcpTransport: transportFactory
 }));
 
 import { LocalMcpSettings } from "./LocalMcpSettings";
@@ -28,6 +29,7 @@ const summary = {
   id: "local-files",
   workspaceId: "workspace-a",
   displayName: "Local files",
+  transport: "stdio" as const,
   revision: 1,
   disabled: false,
   createdByInternalUserId: "user-a",
@@ -97,8 +99,8 @@ describe("LocalMcpSettings", () => {
     runtime.list.mockResolvedValueOnce([]).mockResolvedValueOnce([summary]);
     const status = vi.fn();
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={status} />);
-    fireEvent.click(screen.getByText("Manage local tool servers"));
-    await screen.findByText("No local tool servers saved.");
+    fireEvent.click(screen.getByText("Manage tool servers"));
+    await screen.findByText("No tool servers saved.");
 
     fireEvent.click(screen.getByText("Add a server"));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Local files" } });
@@ -127,7 +129,7 @@ describe("LocalMcpSettings", () => {
     runtime.list.mockResolvedValue([summary]);
     const status = vi.fn();
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={status} />);
-    fireEvent.click(screen.getByText("Manage local tool servers"));
+    fireEvent.click(screen.getByText("Manage tool servers"));
     fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
     await waitFor(() => expect(status).toHaveBeenCalledWith(
       "Local files responded with 1 tool and 1 resource. Nothing was enabled."
@@ -143,7 +145,31 @@ describe("LocalMcpSettings", () => {
   it("states that browser preview cannot configure local programs", async () => {
     runtime.list.mockResolvedValue(null);
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
-    fireEvent.click(screen.getByText("Manage local tool servers"));
-    expect(await screen.findByText("Local tool servers are available only in the desktop app.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Manage tool servers"));
+    expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeInTheDocument();
+  });
+
+  it("saves a remote HTTPS server without local command fields", async () => {
+    runtime.list.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
+    fireEvent.click(screen.getByText("Manage tool servers"));
+    await screen.findByText("No tool servers saved.");
+    fireEvent.click(screen.getByText("Add a server"));
+    fireEvent.change(screen.getByLabelText("Location"), {
+      target: { value: "streamable-http" }
+    });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Remote tools" } });
+    fireEvent.change(screen.getByLabelText("HTTPS address"), {
+      target: { value: "https://tools.example.com/mcp" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Review and save" }));
+    await screen.findByRole("dialog", { name: "Connect to Remote tools?" });
+    expect(runtime.prepare).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace-a",
+      displayName: "Remote tools",
+      transport: "streamable-http",
+      endpoint: "https://tools.example.com/mcp"
+    }));
+    expect(runtime.prepare.mock.calls.at(-1)?.[0]).not.toHaveProperty("command");
   });
 });

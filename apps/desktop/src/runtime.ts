@@ -2947,6 +2947,7 @@ export interface RuntimeSpawnedMcpProcess {
 export interface RuntimeMcpConnectionDetails {
   connectionId: string;
   connectionRevision: number;
+  transport: "stdio" | "streamable-http";
   launchReference: string;
   discoveryState: string;
   discoveredAt?: string;
@@ -2977,8 +2978,10 @@ export interface RuntimeMcpServerConfiguration {
   workspaceId: string;
   id: string;
   displayName: string;
-  command: string;
-  args: string[];
+  transport: "stdio" | "streamable-http";
+  command?: string;
+  args?: string[];
+  endpoint?: string;
   expectedRevision?: number;
 }
 
@@ -2986,6 +2989,7 @@ export interface RuntimeMcpServerSummary {
   id: string;
   workspaceId: string;
   displayName: string;
+  transport: "stdio" | "streamable-http";
   revision: number;
   disabled: boolean;
   createdByInternalUserId: string;
@@ -3032,6 +3036,41 @@ export async function spawnRuntimeMcpProcess(workspaceId: string, launchReferenc
   } catch (error) {
     throw toRuntimeError(error);
   }
+}
+
+export interface RuntimeOpenedRemoteMcpSession {
+  sessionId: string;
+  configurationReference: string;
+  connectionId: string;
+  connectionRevision: number;
+}
+
+export async function openRuntimeRemoteMcpSession(
+  workspaceId: string,
+  configurationReference: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeOpenedRemoteMcpSession>("open_remote_mcp_session", {
+    request: { workspaceId, configurationReference }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function sendRuntimeRemoteMcpFrame(
+  workspaceId: string,
+  sessionId: string,
+  frame: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<string[]>("send_remote_mcp_frame", {
+    request: { workspaceId, sessionId, frame }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function closeRuntimeRemoteMcpSession(workspaceId: string, sessionId: string) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<null>("close_remote_mcp_session", {
+    request: { workspaceId, sessionId }
+  }).catch((error) => { throw toRuntimeError(error); });
 }
 
 export async function writeRuntimeMcpFrame(

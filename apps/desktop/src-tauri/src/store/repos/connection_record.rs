@@ -91,6 +91,7 @@ enum ConnectionTransport {
 pub struct SafeMcpConnectionDetails {
     pub connection_id: String,
     pub connection_revision: i64,
+    pub transport: String,
     pub launch_reference: String,
     pub discovery_state: String,
     pub discovered_at: Option<String>,
@@ -328,6 +329,45 @@ pub fn upsert_mcp_stdio(
     display_name: &str,
     updated_at: &str,
 ) -> Result<SafeConnectionRecord> {
+    upsert_mcp_server(
+        tx,
+        store,
+        scope,
+        launch_reference,
+        display_name,
+        "stdio",
+        updated_at,
+    )
+}
+
+pub fn upsert_mcp_streamable_http(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    configuration_reference: &str,
+    display_name: &str,
+    updated_at: &str,
+) -> Result<SafeConnectionRecord> {
+    upsert_mcp_server(
+        tx,
+        store,
+        scope,
+        configuration_reference,
+        display_name,
+        "streamable-http",
+        updated_at,
+    )
+}
+
+fn upsert_mcp_server(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    launch_reference: &str,
+    display_name: &str,
+    transport: &str,
+    updated_at: &str,
+) -> Result<SafeConnectionRecord> {
     require_current_scope(tx, scope, ScopeAccess::Write)?;
     let owner_member_id = scope.private.owner_member_id().ok_or_else(|| {
         StoreError::Invalid("A workspace membership is required for an MCP Connection.".into())
@@ -339,6 +379,7 @@ pub fn upsert_mcp_stdio(
         scope.data.workspace_id(),
         scope.private.owner_subject(),
         &launch_reference,
+        transport,
     );
     let existing = tx
         .query_row(
@@ -370,7 +411,7 @@ pub fn upsert_mcp_stdio(
     let content = ConnectionContent {
         display_name,
         transport: ConnectionTransport::Mcp {
-            transport: "stdio".into(),
+            transport: transport.into(),
             local_launch_reference: launch_reference,
             discovery_state: "not-started".into(),
             discovered_at: None,
@@ -454,6 +495,7 @@ pub(crate) fn mcp_details_for_launch(
         scope.data.workspace_id(),
         scope.private.owner_subject(),
         &launch_reference,
+        "stdio",
     );
     let row = tx
         .query_row(
@@ -463,7 +505,47 @@ pub(crate) fn mcp_details_for_launch(
         )
         .optional()?
         .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
-    mcp_projection(store, &row)
+    let details = mcp_projection(store, &row)?;
+    if details.transport != "stdio" {
+        return Err(StoreError::Invalid(
+            "Local MCP Connection is unavailable.".into(),
+        ));
+    }
+    Ok(details)
+}
+
+pub(crate) fn mcp_details_for_remote(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    configuration_reference: &str,
+) -> Result<SafeMcpConnectionDetails> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let reference = crate::store::repos::scope::normalize_id(
+        configuration_reference,
+        "MCP configuration reference",
+    )?;
+    let id = derive_mcp_connection_id(
+        scope.data.workspace_id(),
+        scope.private.owner_subject(),
+        &reference,
+        "streamable-http",
+    );
+    let row = tx
+        .query_row(
+            &format!("{SELECT} WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL"),
+            rusqlite::params![scope.data.workspace_id(), id],
+            read_partial,
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::Invalid("Remote MCP Connection is unavailable.".into()))?;
+    let details = mcp_projection(store, &row)?;
+    if details.transport != "streamable-http" {
+        return Err(StoreError::Invalid(
+            "Remote MCP Connection is unavailable.".into(),
+        ));
+    }
+    Ok(details)
 }
 
 pub(crate) fn record_mcp_discovery(
@@ -901,12 +983,13 @@ fn mcp_projection(store: &Store, row: &Partial) -> Result<SafeMcpConnectionDetai
             "Connection content conflicts with its MCP identity.".into(),
         ));
     };
-    if transport != "stdio" {
+    if transport != "stdio" && transport != "streamable-http" {
         return Err(StoreError::Invalid("MCP transport is unavailable.".into()));
     }
     Ok(SafeMcpConnectionDetails {
         connection_id: row.id.clone(),
         connection_revision: row.revision,
+        transport,
         launch_reference: local_launch_reference,
         discovery_state,
         discovered_at,
@@ -975,9 +1058,14 @@ fn derive_mcp_connection_id(
     workspace_id: &str,
     owner_subject: &str,
     launch_reference: &str,
+    transport: &str,
 ) -> String {
     let mut digest = Sha256::new();
-    digest.update(b"fable.connection.mcp-stdio.v1\0");
+    if transport == "stdio" {
+        digest.update(b"fable.connection.mcp-stdio.v1\0");
+    } else {
+        digest.update(b"fable.connection.mcp-streamable-http.v1\0");
+    }
     for value in [workspace_id, owner_subject, launch_reference] {
         digest.update(value.as_bytes());
         digest.update(b"\0");

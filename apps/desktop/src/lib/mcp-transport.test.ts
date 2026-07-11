@@ -2,27 +2,33 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const runtime = vi.hoisted(() => ({
   close: vi.fn(),
+  closeRemote: vi.fn(),
   authorize: vi.fn(),
   execute: vi.fn(),
   listen: vi.fn(),
   prepare: vi.fn(),
+  openRemote: vi.fn(),
   record: vi.fn(),
   spawn: vi.fn(),
+  sendRemote: vi.fn(),
   write: vi.fn()
 }));
 
 vi.mock("../runtime", () => ({
   authorizeRuntimeMcpToolCall: runtime.authorize,
   closeRuntimeMcpProcess: runtime.close,
+  closeRuntimeRemoteMcpSession: runtime.closeRemote,
   executeRuntimeApprovedMcpToolCall: runtime.execute,
   listenRuntimeMcpFrames: runtime.listen,
   recordRuntimeMcpDiscovery: runtime.record,
   prepareRuntimeMcpToolCall: runtime.prepare,
+  openRuntimeRemoteMcpSession: runtime.openRemote,
   spawnRuntimeMcpProcess: runtime.spawn,
+  sendRuntimeRemoteMcpFrame: runtime.sendRemote,
   writeRuntimeMcpFrame: runtime.write
 }));
 
-import { createDesktopMcpTransport } from "./mcp-transport";
+import { createDesktopMcpTransport, createDesktopRemoteMcpTransport } from "./mcp-transport";
 
 let onLine: ((line: string) => void) | undefined;
 let unlisten: ReturnType<typeof vi.fn>;
@@ -47,6 +53,14 @@ beforeEach(() => {
   runtime.write.mockReset().mockResolvedValue(null);
   runtime.record.mockReset().mockResolvedValue({ discoveryState: "discovered" });
   runtime.close.mockReset().mockResolvedValue(null);
+  runtime.closeRemote.mockReset().mockResolvedValue(null);
+  runtime.openRemote.mockReset().mockResolvedValue({
+    sessionId: "mcp-fedcba0987654321fedcba0987654321",
+    configurationReference: "remote-tools"
+  });
+  runtime.sendRemote.mockReset().mockResolvedValue([
+    '{"jsonrpc":"2.0","id":"one","result":{"ok":true}}'
+  ]);
   runtime.prepare.mockReset().mockResolvedValue({
     proposalFingerprint: "fingerprint",
     approval: {
@@ -146,5 +160,24 @@ describe("desktop MCP transport", () => {
     }));
     expect(runtime.authorize).toHaveBeenCalledWith(proposal, resolution);
     expect(runtime.execute).toHaveBeenCalledWith(proposal, "permit-1", "native-mcp-tool-1");
+  });
+
+  it("routes remote frames only through the native HTTP session", async () => {
+    const transport = await createDesktopRemoteMcpTransport("workspace-a", "remote-tools");
+    const received = vi.fn();
+    transport!.subscribe(received);
+    await transport!.send({ jsonrpc: "2.0", id: "one", method: "tools/list" });
+    expect(runtime.sendRemote).toHaveBeenCalledWith(
+      "workspace-a",
+      "mcp-fedcba0987654321fedcba0987654321",
+      '{"jsonrpc":"2.0","id":"one","method":"tools/list"}'
+    );
+    expect(received).toHaveBeenCalledWith({
+      jsonrpc: "2.0", id: "one", result: { ok: true }
+    });
+    await transport!.close();
+    expect(runtime.closeRemote).toHaveBeenCalledWith(
+      "workspace-a", "mcp-fedcba0987654321fedcba0987654321"
+    );
   });
 });

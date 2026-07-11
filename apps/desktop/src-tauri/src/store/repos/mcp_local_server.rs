@@ -19,8 +19,10 @@ const MAX_ARGS: usize = 64;
 pub struct McpLocalServerWrite<'a> {
     pub id: &'a str,
     pub display_name: &'a str,
+    pub transport: &'a str,
     pub command: &'a str,
     pub args: &'a [String],
+    pub endpoint: Option<&'a str>,
     pub expected_revision: Option<i64>,
     pub updated_at: &'a str,
 }
@@ -31,6 +33,7 @@ pub struct SafeMcpLocalServer {
     pub id: String,
     pub workspace_id: String,
     pub display_name: String,
+    pub transport: String,
     pub revision: i64,
     pub disabled: bool,
     pub created_by_internal_user_id: String,
@@ -43,14 +46,25 @@ pub(crate) struct McpLocalLaunch {
     pub metadata: SafeMcpLocalServer,
     pub command: String,
     pub args: Vec<String>,
+    pub endpoint: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Content {
     display_name: String,
+    #[serde(default = "default_transport")]
+    transport: String,
+    #[serde(default)]
     command: String,
+    #[serde(default)]
     args: Vec<String>,
+    #[serde(default)]
+    endpoint: Option<String>,
+}
+
+fn default_transport() -> String {
+    "stdio".into()
 }
 
 struct Partial {
@@ -72,11 +86,23 @@ pub fn upsert(
 ) -> Result<SafeMcpLocalServer> {
     require_scope(tx, scope, ScopeAccess::Write)?;
     let id = crate::store::repos::scope::normalize_id(input.id, "MCP launch reference")?;
-    validate_launch_values(input.display_name, input.command, input.args)?;
+    validate_server_values(
+        input.display_name,
+        input.transport,
+        input.command,
+        input.args,
+        input.endpoint,
+    )?;
     let content = Content {
         display_name: bounded(input.display_name, "MCP server name", DISPLAY_NAME_MAX)?,
-        command: bounded(input.command, "MCP executable", COMMAND_MAX)?,
+        transport: input.transport.to_string(),
+        command: if input.transport == "stdio" {
+            bounded(input.command, "MCP executable", COMMAND_MAX)?
+        } else {
+            String::new()
+        },
         args: validate_args(input.args)?,
+        endpoint: input.endpoint.map(str::trim).map(str::to_string),
     };
     let existing = tx
         .query_row(
@@ -112,6 +138,8 @@ pub fn upsert(
         })?;
         if prior.command == content.command
             && prior.args == content.args
+            && prior.endpoint == content.endpoint
+            && prior.metadata.transport == content.transport
             && prior.metadata.display_name == content.display_name
         {
             return Ok(prior.metadata);
@@ -167,6 +195,36 @@ pub(crate) fn validate_launch_values(
     bounded(display_name, "MCP server name", DISPLAY_NAME_MAX)?;
     bounded(command, "MCP executable", COMMAND_MAX)?;
     validate_args(args)?;
+    Ok(())
+}
+
+pub(crate) fn validate_server_values(
+    display_name: &str,
+    transport: &str,
+    command: &str,
+    args: &[String],
+    endpoint: Option<&str>,
+) -> Result<()> {
+    bounded(display_name, "MCP server name", DISPLAY_NAME_MAX)?;
+    match transport {
+        "stdio" => {
+            validate_launch_values(display_name, command, args)?;
+            if endpoint.is_some() {
+                return Err(StoreError::Invalid(
+                    "Local MCP configuration cannot include a remote endpoint.".into(),
+                ));
+            }
+        }
+        "streamable-http" => {
+            if !command.is_empty() || !args.is_empty() {
+                return Err(StoreError::Invalid(
+                    "Remote MCP configuration cannot include a local command.".into(),
+                ));
+            }
+            bounded(endpoint.unwrap_or_default(), "MCP endpoint", COMMAND_MAX)?;
+        }
+        _ => return Err(StoreError::Invalid("MCP transport is invalid.".into())),
+    }
     Ok(())
 }
 
@@ -277,10 +335,12 @@ fn open(store: &Store, scope: &AuthorizedCommandScope, row: Partial) -> Result<M
     Ok(McpLocalLaunch {
         command: content.command,
         args: content.args,
+        endpoint: content.endpoint,
         metadata: SafeMcpLocalServer {
             id: row.id,
             workspace_id: row.workspace_id,
             display_name: content.display_name,
+            transport: content.transport,
             revision: row.revision,
             disabled: row.disabled,
             created_by_internal_user_id: row.created_by_internal_user_id,
@@ -395,8 +455,10 @@ mod tests {
                     McpLocalServerWrite {
                         id: "filesystem",
                         display_name: "Local files",
+                        transport: "stdio",
                         command: "C:\\tools\\secret-mcp.exe",
                         args: &args,
+                        endpoint: None,
                         expected_revision: None,
                         updated_at: "2026-07-11T18:00:00Z",
                     },
@@ -427,8 +489,10 @@ mod tests {
                     McpLocalServerWrite {
                         id: "filesystem",
                         display_name: "Changed",
+                        transport: "stdio",
                         command: "C:\\tools\\secret-mcp.exe",
                         args: &args,
+                        endpoint: None,
                         expected_revision: None,
                         updated_at: "later",
                     },
