@@ -157,7 +157,7 @@ pub fn commit_mcp_server_configuration(
     let now = resolution.audit_entry.decided_at;
     store
         .transaction(|tx| {
-            crate::store::repos::mcp_local_server::upsert(
+            let saved = crate::store::repos::mcp_local_server::upsert(
                 tx,
                 store,
                 &scope,
@@ -169,7 +169,16 @@ pub fn commit_mcp_server_configuration(
                     expected_revision: request.configuration.expected_revision,
                     updated_at: &now,
                 },
-            )
+            )?;
+            crate::store::repos::connection_record::upsert_mcp_stdio(
+                tx,
+                store,
+                &scope,
+                &saved.id,
+                &saved.display_name,
+                &now,
+            )?;
+            Ok(saved)
         })
         .map_err(|error| error.to_string())
 }

@@ -55,15 +55,25 @@ pub struct SafeConnectionRecord {
 #[serde(rename_all = "camelCase")]
 struct ConnectionContent {
     display_name: String,
-    transport: NativeConnectorTransport,
+    transport: ConnectionTransport,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NativeConnectorTransport {
-    kind: String,
-    connector_definition_key: String,
-    external_principal: ExternalPrincipal,
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+enum ConnectionTransport {
+    NativeConnector {
+        connector_definition_key: String,
+        external_principal: ExternalPrincipal,
+    },
+    Mcp {
+        transport: String,
+        local_launch_reference: String,
+        discovery_state: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -84,7 +94,7 @@ struct Partial {
     trust: String,
     credential_custody: String,
     credential_state: String,
-    connector_definition_key: String,
+    connector_definition_key: Option<String>,
     enabled_by_default: bool,
     revision: i64,
     created_by_internal_user_id: String,
@@ -197,8 +207,7 @@ pub fn upsert_native_connector(
 
     let content = ConnectionContent {
         display_name,
-        transport: NativeConnectorTransport {
-            kind: "native-connector".into(),
+        transport: ConnectionTransport::NativeConnector {
             connector_definition_key: connector.clone(),
             external_principal: ExternalPrincipal {
                 provider: connector.clone(),
@@ -285,6 +294,122 @@ pub fn upsert_native_connector(
     get(tx, store, scope, &id)?.ok_or_else(|| {
         StoreError::Invalid("Connection could not be read after it was saved.".into())
     })
+}
+
+pub fn upsert_mcp_stdio(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    launch_reference: &str,
+    display_name: &str,
+    updated_at: &str,
+) -> Result<SafeConnectionRecord> {
+    require_current_scope(tx, scope, ScopeAccess::Write)?;
+    let owner_member_id = scope.private.owner_member_id().ok_or_else(|| {
+        StoreError::Invalid("A workspace membership is required for an MCP Connection.".into())
+    })?;
+    let launch_reference =
+        crate::store::repos::scope::normalize_id(launch_reference, "MCP launch reference")?;
+    let display_name = bounded(display_name, "Connection name", DISPLAY_NAME_MAX)?;
+    let id = derive_mcp_connection_id(
+        scope.data.workspace_id(),
+        scope.private.owner_subject(),
+        &launch_reference,
+    );
+    let existing = tx
+        .query_row(
+            "SELECT revision,authority,kind,owner_member_id,created_by_internal_user_id
+             FROM connection_record WHERE workspace_id=?1 AND id=?2;",
+            rusqlite::params![scope.data.workspace_id(), id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    if let Some((_, authority, kind, owner, creator)) = &existing {
+        if authority != "local"
+            || kind != "mcp"
+            || owner.as_deref() != Some(owner_member_id)
+            || creator != &scope.internal_user_id
+        {
+            return Err(StoreError::Invalid(
+                "MCP Connection conflicts with existing authority.".into(),
+            ));
+        }
+    }
+    let content = ConnectionContent {
+        display_name,
+        transport: ConnectionTransport::Mcp {
+            transport: "stdio".into(),
+            local_launch_reference: launch_reference,
+            discovery_state: "not-started".into(),
+        },
+    };
+    if existing.is_some() {
+        let current = get(tx, store, scope, &id)?
+            .ok_or_else(|| StoreError::Invalid("MCP Connection disappeared before save.".into()))?;
+        if current.display_name == content.display_name {
+            return Ok(current);
+        }
+    }
+    let sealed = seal_json(
+        store,
+        &serde_json::to_value(content)
+            .map_err(|_| StoreError::Invalid("MCP Connection content is invalid.".into()))?,
+        &aad(scope.data.workspace_id(), &id),
+    )?;
+    if let Some((revision, ..)) = existing {
+        let changed = tx.execute(
+            "UPDATE connection_record SET revision=revision+1,lifecycle='authorized',
+               authorization_state='not-required',health_state='unknown',updated_at=?1,
+               payload=?2,payload_nonce=?3
+             WHERE workspace_id=?4 AND id=?5 AND revision=?6 AND kind='mcp'
+               AND authority='local' AND owner_member_id=?7 AND deleted_at IS NULL;",
+            rusqlite::params![
+                updated_at,
+                sealed.ciphertext,
+                sealed.nonce,
+                scope.data.workspace_id(),
+                id,
+                revision,
+                owner_member_id
+            ],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::Invalid(
+                "MCP Connection changed before it was saved.".into(),
+            ));
+        }
+    } else {
+        tx.execute(
+            "INSERT INTO connection_record(
+               workspace_id,id,record_type,authority,visibility,owner_member_id,schema_version,
+               revision,created_by_internal_user_id,created_by_device_id,kind,ownership,lifecycle,
+               authorization_state,health_state,trust,credential_custody,credential_state,
+               credential_ref,connector_definition_key,enabled_by_default,created_at,updated_at,
+               deleted_at,payload,payload_nonce)
+             VALUES(?1,?2,'connection','local','member-private',?3,1,1,?4,NULL,
+               'mcp','user-owned','authorized','not-required','unknown','user-managed','none',
+               'not-required','',NULL,0,?5,?5,NULL,?6,?7);",
+            rusqlite::params![
+                scope.data.workspace_id(),
+                id,
+                owner_member_id,
+                scope.internal_user_id,
+                updated_at,
+                sealed.ciphertext,
+                sealed.nonce
+            ],
+        )?;
+    }
+    get(tx, store, scope, &id)?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection could not be read after save.".into()))
 }
 
 pub fn get(
@@ -455,12 +580,26 @@ fn open_safe(store: &Store, row: Partial) -> Result<SafeConnectionRecord> {
         &aad(&row.workspace_id, &row.id),
     )?)
     .map_err(|_| StoreError::Invalid("Connection content is invalid.".into()))?;
-    if content.transport.kind != "native-connector"
-        || content.transport.connector_definition_key != row.connector_definition_key
-    {
-        return Err(StoreError::Invalid(
-            "Connection content conflicts with its storage identity.".into(),
-        ));
+    match &content.transport {
+        ConnectionTransport::NativeConnector {
+            connector_definition_key,
+            ..
+        } if row.kind == "native-connector"
+            && row.connector_definition_key.as_deref() == Some(connector_definition_key) => {}
+        ConnectionTransport::Mcp {
+            transport,
+            local_launch_reference,
+            discovery_state,
+        } if row.kind == "mcp"
+            && row.connector_definition_key.is_none()
+            && transport == "stdio"
+            && !local_launch_reference.is_empty()
+            && discovery_state == "not-started" => {}
+        _ => {
+            return Err(StoreError::Invalid(
+                "Connection content conflicts with its storage identity.".into(),
+            ))
+        }
     }
     Ok(SafeConnectionRecord {
         id: row.id,
@@ -474,7 +613,7 @@ fn open_safe(store: &Store, row: Partial) -> Result<SafeConnectionRecord> {
         trust: row.trust,
         credential_custody: row.credential_custody,
         credential_state: row.credential_state,
-        connector_definition_key: row.connector_definition_key,
+        connector_definition_key: row.connector_definition_key.unwrap_or_default(),
         enabled_by_default: row.enabled_by_default,
         revision: row.revision,
         created_by_internal_user_id: row.created_by_internal_user_id,
@@ -515,6 +654,23 @@ fn external_principal_digest(workspace_id: &str, connector_id: &str, account_id:
         digest.update(b"\0");
     }
     format!("{:x}", digest.finalize())
+}
+
+fn derive_mcp_connection_id(
+    workspace_id: &str,
+    owner_subject: &str,
+    launch_reference: &str,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"fable.connection.mcp-stdio.v1\0");
+    for value in [workspace_id, owner_subject, launch_reference] {
+        digest.update(value.as_bytes());
+        digest.update(b"\0");
+    }
+    format!(
+        "connection_mcp_{}",
+        &format!("{:x}", digest.finalize())[..32]
+    )
 }
 
 pub(crate) fn require_current_scope(
@@ -745,5 +901,105 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("workspace-scoped"));
+    }
+
+    #[test]
+    fn mcp_connection_is_private_disabled_and_credential_free() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let scope = store
+            .transaction(|tx| {
+                let workspace = upsert_authoritative_summary(
+                    tx,
+                    &summary("user-a", "workspace-a", "member-a"),
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
+                resolve(
+                    tx,
+                    Some(&workspace.local_workspace_id),
+                    None,
+                    ScopeAccess::Write,
+                )
+            })
+            .unwrap();
+        let created = store
+            .transaction(|tx| {
+                upsert_mcp_stdio(
+                    tx,
+                    &store,
+                    &scope,
+                    "local-files",
+                    "Local files",
+                    "2026-07-11T20:00:00Z",
+                )
+            })
+            .unwrap();
+        assert_eq!(created.kind, "mcp");
+        assert_eq!(created.ownership, "user-owned");
+        assert_eq!(created.trust, "user-managed");
+        assert_eq!(created.credential_custody, "none");
+        assert_eq!(created.credential_state, "not-required");
+        assert!(!created.enabled_by_default);
+        assert!(created.connector_definition_key.is_empty());
+        assert_eq!(
+            store
+                .with_conn(|tx| list(tx, &store, &scope))
+                .unwrap()
+                .len(),
+            1
+        );
+        let stored = store
+            .with_conn(|tx| {
+                tx.query_row(
+                    "SELECT visibility,owner_member_id,credential_ref,connector_definition_key,
+                            enabled_by_default FROM connection_record WHERE id=?1",
+                    [&created.id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(
+            stored,
+            (
+                "member-private".into(),
+                "member-a".into(),
+                "".into(),
+                None,
+                0
+            )
+        );
+    }
+
+    #[test]
+    fn transport_enum_preserves_existing_native_payload_shape() {
+        let content: ConnectionContent = serde_json::from_value(serde_json::json!({
+            "displayName": "Work Gmail",
+            "transport": {
+                "kind": "native-connector",
+                "connectorDefinitionKey": "gmail",
+                "externalPrincipal": {
+                    "provider": "gmail",
+                    "opaqueSubjectReference": "external_abc"
+                }
+            }
+        }))
+        .unwrap();
+        assert!(matches!(
+            content.transport,
+            ConnectionTransport::NativeConnector {
+                connector_definition_key,
+                ..
+            } if connector_definition_key == "gmail"
+        ));
     }
 }
