@@ -479,10 +479,24 @@ export interface InvitationPresentationProof {
   verifiedAt: IsoDateTime;
 }
 
+/**
+ * Direct inbox acceptance relies on the current authenticated internal user
+ * and the server-owned recipient constraint. It does not claim that a bearer
+ * invitation credential was presented or consumed.
+ */
+export type InvitationAcceptancePresentation =
+  | {
+      kind: "direct-inbox";
+      invitationId: InvitationId;
+    }
+  | {
+      kind: "bearer-proof";
+      proof: InvitationPresentationProof;
+    };
+
 export interface AcceptWorkspaceInvitationRequest {
   invitationId: InvitationId;
-  /** The bearer credential is consumed before this secret-free proof is created. */
-  presentationProof: InvitationPresentationProof;
+  presentation: InvitationAcceptancePresentation;
   authentication: ExternalAuthenticationFacts;
   recipientEvidence: InvitationRecipientEvidence;
   idempotency: IdempotencyRequest;
