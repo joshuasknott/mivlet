@@ -3634,3 +3634,233 @@ fn tauri_cand_with_junction_is_fail_closed_not_silently_preserved() {
     );
     // the link exists but we didn't use it as data root
 }
+
+/// Wave 1C's minimum-configuration gate at the native boundary. This avoids
+/// browser fixtures: the same Rust credential, discovery parsing, authoritative
+/// workspace, encrypted conversation, run, and artifact repositories used by
+/// Tauri commands must compose and survive reopening the database.
+#[test]
+fn minimum_account_provider_chat_artifact_journey_survives_native_store_reopen() {
+    use crate::backends::{list_providers_from, store_credential_into};
+    use crate::models::BackendCredentialRequest;
+    use crate::native_api::{parse_models_body, verify_outcome_for_status};
+    use crate::store::repos::{
+        artifact, message, run,
+        scope::DataScope,
+        thread,
+        workspace_directory::{
+            resolve_active_workspace_for_current_user, select_active_workspace,
+            set_current_internal_user, upsert_authoritative_summary, WorkspaceDirectoryUpsert,
+        },
+    };
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+    use serde_json::json;
+
+    let temp = tempfile::tempdir().expect("temporary native state");
+    let database = temp.path().join("fable.sqlite3");
+    let connected_backends = temp.path().join("connected-backends.json");
+    let vault = Vault::new(&MasterKey::generate().expect("master key")).expect("vault");
+    let at = "2026-07-11T12:00:00Z";
+
+    // The provider secret remains in the native credential boundary. A
+    // successful provider response maps to the explicit verified outcome, and
+    // only a discovered generation model becomes the eligible route below.
+    let mut credentials = HashMap::new();
+    store_credential_into(
+        &mut credentials,
+        &connected_backends,
+        BackendCredentialRequest {
+            provider_id: "openai".into(),
+            secret: "sk-fable-native-journey-test-key".into(),
+        },
+    )
+    .expect("store native provider credential");
+    assert_eq!(
+        verify_outcome_for_status(reqwest::StatusCode::OK),
+        "verified"
+    );
+    let provider = list_providers_from(&credentials, &connected_backends)
+        .expect("list native providers")
+        .into_iter()
+        .find(|provider| provider.id == "openai")
+        .expect("stored provider");
+    assert_eq!(provider.auth_state, "connected");
+    let discovered = parse_models_body(
+        "openai",
+        &json!({"data": [{"id": "gpt-5"}, {"id": "text-embedding-3-small"}]}),
+    );
+    assert_eq!(
+        discovered
+            .iter()
+            .filter(|model| model.available)
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["gpt-5"]
+    );
+
+    let hosted = WorkspaceDirectoryUpsert {
+        internal_user_id: "user-josh".into(),
+        fable_workspace_id: "workspace-fable".into(),
+        name: "Fable".into(),
+        workspace_status: "active".into(),
+        workspace_revision: 1,
+        policy_revision: 1,
+        member_id: "member-josh".into(),
+        role: "owner".into(),
+        membership_status: "active".into(),
+        membership_revision: 1,
+        updated_at: at.into(),
+    };
+    let local_workspace_id;
+    {
+        let store = Store::open(&database, vault.clone()).expect("open native store");
+        local_workspace_id = store
+            .transaction(|tx| {
+                let summary = upsert_authoritative_summary(tx, &hosted)?;
+                set_current_internal_user(tx, &hosted.internal_user_id, at)?;
+                let selected = select_active_workspace(
+                    tx,
+                    &hosted.internal_user_id,
+                    &hosted.fable_workspace_id,
+                    at,
+                )?;
+                assert_eq!(selected.local_workspace_id, summary.local_workspace_id);
+                Ok(selected.local_workspace_id)
+            })
+            .expect("establish authoritative account and workspace");
+        let scope = DataScope::workspace(local_workspace_id.clone()).expect("workspace scope");
+        let answer = "Fable is ready with one account and one provider.";
+        let artifact_payload = json!({
+            "artifact": {"id":"artifact-1", "producingRunId":"run-1", "context":{"threadId":"thread-1"}},
+            "version": {
+                "id":"artifact-version-1",
+                "content":{"kind":"inline", "text":answer},
+                "contentHash":{"algorithm":"sha-256", "value":"journey-hash"},
+                "citations":[{
+                    "id":"citation-1", "label":"Minimum configuration source",
+                    "source":{"kind":"import", "externalReference":"source-1", "observedAt":at},
+                    "quotedText":"one account and one provider"
+                }]
+            },
+            "sourceMessageId":"message-assistant"
+        });
+
+        store
+            .transaction(|tx| {
+                thread::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "thread-1",
+                    None,
+                    "Minimum configuration",
+                    at,
+                    &json!({"route":{"providerId":"openai", "modelId":"gpt-5"}}),
+                )?;
+                message::append(
+                    tx,
+                    &store,
+                    &scope,
+                    "thread-1",
+                    "message-user",
+                    "user",
+                    &json!({}),
+                    Some("run-1"),
+                    1,
+                    0,
+                    None,
+                    "run-1:user",
+                    "revision-user",
+                    "terminal",
+                    "initial",
+                    &json!("Prepare Fable"),
+                    at,
+                )?;
+                run::upsert_scoped(
+                    tx,
+                    &store,
+                    &scope,
+                    "run-1",
+                    Some("thread-1"),
+                    "openai",
+                    "gpt-5",
+                    "completed",
+                    1,
+                    false,
+                    0,
+                    at,
+                    at,
+                    &json!({"id":"run-1", "status":"completed", "transcript":answer}),
+                )?;
+                message::append(
+                    tx,
+                    &store,
+                    &scope,
+                    "thread-1",
+                    "message-assistant",
+                    "assistant",
+                    &json!({}),
+                    Some("run-1"),
+                    2,
+                    1,
+                    Some("message-user"),
+                    "run-1:assistant",
+                    "revision-assistant",
+                    "terminal",
+                    "completed",
+                    &json!(answer),
+                    at,
+                )?;
+                artifact::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "run-1",
+                    "thread-1",
+                    "message-assistant",
+                    "document",
+                    "journey-hash",
+                    answer.len(),
+                    at,
+                    &artifact_payload,
+                )?;
+                Ok(())
+            })
+            .expect("persist terminal response and sourced artifact");
+    }
+
+    let reopened = Store::open(&database, vault).expect("reopen native store");
+    let active = reopened
+        .with_conn(resolve_active_workspace_for_current_user)
+        .expect("resolve reopened account scope")
+        .expect("active hosted workspace");
+    assert_eq!(active.local_workspace_id, local_workspace_id);
+    assert_eq!(
+        active.fable_workspace_id.as_deref(),
+        Some("workspace-fable")
+    );
+    let scope = DataScope::workspace(active.local_workspace_id).expect("reopened scope");
+    reopened
+        .with_conn(|tx| {
+            let messages = message::list(tx, &reopened, &scope, "thread-1")?;
+            assert_eq!(messages.len(), 2);
+            assert_eq!(messages[1].kind, "assistant");
+            assert_eq!(messages[1].current_revision_state, "terminal");
+            let saved_run =
+                run::get_scoped(tx, &reopened, &scope, "run-1")?.expect("durable run after reopen");
+            assert_eq!(saved_run.status, "completed");
+            assert_eq!(saved_run.provider_id, "openai");
+            assert_eq!(saved_run.model, "gpt-5");
+            let saved_artifact = artifact::get(tx, &reopened, &scope, "artifact-1")?
+                .expect("durable artifact after reopen");
+            assert_eq!(saved_artifact["sourceMessageId"], "message-assistant");
+            assert_eq!(
+                saved_artifact["version"]["citations"][0]["source"]["externalReference"],
+                "source-1"
+            );
+            Ok(())
+        })
+        .expect("read reopened native journey");
+}
