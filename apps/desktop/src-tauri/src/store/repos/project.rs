@@ -322,6 +322,7 @@ pub fn delete(
         "schedule",
         "workflow_definition",
         "workflow_run",
+        "goal",
     ] {
         tx.execute(
             &format!("UPDATE {table} SET project_id=NULL WHERE workspace_id=?1 AND project_id=?2;"),
@@ -474,12 +475,13 @@ mod tests {
             tx.execute("INSERT INTO schedule (id,workspace_id,project_id,weekday,time,created_at,payload,payload_nonce) VALUES ('schedule-1','w1','project-1','mon','09:00','t',x'01',x'02');", [])?;
             tx.execute("INSERT INTO workflow_definition (workspace_id,project_id,id,version,created_at,updated_at,payload,payload_nonce) VALUES ('w1','project-1','definition-1',1,'t','t',x'01',x'02');", [])?;
             tx.execute("INSERT INTO workflow_run (workspace_id,project_id,id,definition_id,definition_version,status,started_at,updated_at,payload,payload_nonce) VALUES ('w1','project-1','run-1','definition-1',1,'completed','t','t',x'01',x'02');", [])?;
+            tx.execute("INSERT INTO goal (id,workspace_id,project_id,owner_member_id,created_by_internal_user_id,title_fingerprint,created_at,updated_at,payload,payload_nonce) VALUES ('goal-1','w1','project-1','member-1','user-1','fp','t','t',x'01',x'02');", [])?;
             delete(tx, &store, &scope, "member-1", "user-1", "project-1", 1, "t2")?;
             Ok(())
         }).unwrap();
 
         store.with_conn(|tx| {
-            for table in ["thread", "knowledge_source", "memory_record", "schedule", "workflow_definition", "workflow_run"] {
+            for table in ["thread", "knowledge_source", "memory_record", "schedule", "workflow_definition", "workflow_run", "goal"] {
                 let detached: i64 = tx.query_row(&format!("SELECT COUNT(*) FROM {table} WHERE workspace_id='w1' AND project_id IS NULL;"), [], |row| row.get(0))?;
                 assert_eq!(detached, 1, "{table} was not detached");
             }

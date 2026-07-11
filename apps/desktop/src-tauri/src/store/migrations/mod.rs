@@ -75,6 +75,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // ownership, optimistic revisions, lifecycle, and durable delete
             // tombstones. Existing encrypted payloads and ids are retained.
             12 => apply_v12_to_v13(conn)?,
+            // 13 -> 14: add canonical local/member-private goals. Legacy
+            // snapshot goals are deliberately not guessed into authority.
+            13 => apply_v13_to_v14(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -84,6 +87,33 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v13_to_v14(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS goal (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          project_id TEXT REFERENCES project(id) ON DELETE SET NULL,
+          authority TEXT NOT NULL DEFAULT 'local',
+          visibility TEXT NOT NULL DEFAULT 'member-private',
+          owner_member_id TEXT NOT NULL,
+          created_by_internal_user_id TEXT NOT NULL,
+          schema_version INTEGER NOT NULL DEFAULT 1,
+          revision INTEGER NOT NULL DEFAULT 1,
+          lifecycle TEXT NOT NULL DEFAULT 'active',
+          title_fingerprint TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_goal_owner
+          ON goal(workspace_id, owner_member_id, project_id, lifecycle, updated_at);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -806,9 +836,28 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v13 is current; v13 -> v14 has no registered migration.
-        let err = apply(&conn, 13, 14).unwrap_err();
+        // v14 is current; v14 -> v15 has no registered migration.
+        let err = apply(&conn, 14, 15).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v13_to_v14_adds_goals_without_reinterpreting_existing_data() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE workspace (id TEXT PRIMARY KEY,name TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL); INSERT INTO workspace VALUES ('w1','One','t','t');").unwrap();
+        apply(&conn, 13, 14).unwrap();
+        assert!(table_exists(&conn, "goal").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM workspace", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM goal", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

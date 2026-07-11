@@ -24,6 +24,7 @@ mod connector_sync;
 mod connectors;
 mod conversations;
 mod execution_approvals;
+mod goals;
 mod google;
 mod knowledge;
 mod local_model;
@@ -137,6 +138,13 @@ pub fn run() {
             projects::project_archive,
             projects::project_restore,
             projects::project_delete,
+            goals::goal_create,
+            goals::goal_list,
+            goals::goal_get,
+            goals::goal_update,
+            goals::goal_achieve,
+            goals::goal_archive,
+            goals::goal_restore,
             artifacts::artifact_create_from_response,
             artifacts::artifact_get,
             artifacts::artifact_list_for_thread,
