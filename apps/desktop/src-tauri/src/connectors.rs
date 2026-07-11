@@ -1271,9 +1271,9 @@ pub async fn clear_connector_auth(
     connector_id: String,
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&connector_id)?;
-    disconnect(&app, entry.id).await?;
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    disconnect(&app, entry.id, &identity, &scope).await?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     Ok(build_manifest(

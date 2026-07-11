@@ -1632,84 +1632,226 @@ pub(crate) fn switch_active_connection(
 pub(crate) async fn disconnect(
     app: &tauri::AppHandle,
     connector_id: &str,
+    identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
 ) -> Result<(), ConnectorCommandError> {
     let path = connector_connections_path(app)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    disconnect_with_store_and_path(connector_id, &NativeConnectorSecretStore, &path).await
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    disconnect_with_store_and_path(
+        connector_id,
+        &NativeConnectorSecretStore,
+        &path,
+        durable_store,
+        scope,
+        || {
+            crate::clerk_identity::lock_native_identity_generation(identity)
+                .map_err(|message| command_error("needs-auth", connector_id, &message, false))
+        },
+    )
+    .await
 }
 
-async fn disconnect_with_store_and_path(
+#[derive(Clone)]
+struct PreparedDisconnect {
+    connection: ConnectorConnection,
+    previous_connections: Vec<ConnectorConnection>,
+    previous_secret: Option<String>,
+}
+
+fn prepare_disconnect(
     connector_id: &str,
     store: &dyn ConnectorSecretStore,
     path: &Path,
-) -> Result<(), ConnectorCommandError> {
-    let mut connections = read_connections(path)
+) -> Result<Option<PreparedDisconnect>, ConnectorCommandError> {
+    let previous_connections = read_connections(path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    // Multi-account: disconnect only the active account, preserving any other
-    // connected accounts for this connector. If others remain, promote one to
-    // active so reads/actions still resolve.
-    let active = connections
+    let active = previous_connections
         .iter()
         .find(|item| item.connector_id == connector_id && item.is_active)
         .or_else(|| {
-            connections
+            previous_connections
                 .iter()
                 .find(|item| item.connector_id == connector_id)
         })
         .cloned();
     let Some(connection) = active else {
-        return Ok(());
+        return Ok(None);
     };
-    if let Some(encoded) = store
+    let previous_secret = store
         .get(&connection.credential_ref)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?
-    {
-        if let Ok(tokens) = serde_json::from_str::<StoredTokenSet>(&encoded) {
-            if let Some(endpoint) = tokens.revocation_endpoint.clone() {
-                let token_value = tokens
-                    .refresh_token
-                    .clone()
-                    .unwrap_or_else(|| tokens.access_token.clone());
-                let hint = if tokens.refresh_token.is_some() {
-                    "refresh_token"
-                } else {
-                    "access_token"
-                };
-                crate::ensure_rustls_provider();
-                if tokens.brokered {
-                    // Confidential broker flow: revoke through the broker's
-                    // versioned revoke endpoint (it holds the client secret).
-                    let _ = reqwest::Client::new()
-                        .post(endpoint)
-                        .json(&serde_json::json!({
-                            "contractVersion": 1,
-                            "provider": connector_id,
-                            "token": token_value,
-                            "tokenTypeHint": hint,
-                        }))
-                        .send()
-                        .await;
-                } else {
-                    // Public PKCE flow: revoke directly with the provider.
-                    let _ = reqwest::Client::new()
-                        .post(endpoint)
-                        .form(&[("token", token_value.as_str())])
-                        .send()
-                        .await;
-                }
-            }
-        }
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    Ok(Some(PreparedDisconnect {
+        connection,
+        previous_connections,
+        previous_secret,
+    }))
+}
+
+fn same_connection_snapshot(left: &[ConnectorConnection], right: &[ConnectorConnection]) -> bool {
+    serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
+}
+
+fn commit_prepared_disconnect<G>(
+    connector_id: &str,
+    store: &dyn ConnectorSecretStore,
+    path: &Path,
+    durable_store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    prepared: &PreparedDisconnect,
+    before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
+) -> Result<(), ConnectorCommandError> {
+    let _commit_guard = before_commit()?;
+    let current_connections = read_connections(path)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    if !same_connection_snapshot(&current_connections, &prepared.previous_connections) {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "Connector state changed before disconnect could be saved.",
+            true,
+        ));
+    }
+    let current_secret = store
+        .get(&prepared.connection.credential_ref)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    if current_secret != prepared.previous_secret {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "Connector credentials changed before disconnect could be saved.",
+            true,
+        ));
     }
     store
-        .remove(&connection.credential_ref)
+        .remove(&prepared.connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let rollback = CredentialRollback {
+        credential_ref: prepared.connection.credential_ref.clone(),
+        previous_secret: prepared.previous_secret.clone(),
+    };
+    let mut connections = current_connections;
     connections.retain(|item| {
-        !(item.connector_id == connector_id && item.account.id == connection.account.id)
+        !(item.connector_id == connector_id && item.account.id == prepared.connection.account.id)
     });
-    // If any account remains for this connector, make sure exactly one is active.
     promote_single_active(&mut connections, connector_id);
-    write_connections(path, &connections)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    if let Err(error) = write_connections(path, &connections) {
+        return finish_metadata_commit(Err(error), store, rollback)
+            .map(|_| unreachable!())
+            .map_err(|message| command_error("unknown", connector_id, &message, false));
+    }
+    let canonical_result = durable_store.transaction(|tx| {
+        let id = derive_native_connection_id(
+            scope.data.workspace_id(),
+            connector_id,
+            &prepared.connection.account.id,
+        );
+        let existing = crate::store::repos::connection_record::get(tx, durable_store, scope, &id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Connection is unavailable.".into())
+            })?;
+        crate::store::repos::connection_record::transition_native_connector(
+            tx,
+            durable_store,
+            scope,
+            &id,
+            existing.revision,
+            "disconnected",
+            "revoked",
+            "offline",
+            "revoked",
+            &now_epoch().to_string(),
+        )?;
+        Ok(())
+    });
+    if let Err(error) = canonical_result {
+        let metadata_restored = write_connections(path, &prepared.previous_connections).is_ok();
+        let credential_restored = rollback_credential(store, rollback).is_ok();
+        return if metadata_restored && credential_restored {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                &error.to_string(),
+                false,
+            ))
+        } else {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                "Fable could not finish or fully restore connector disconnect; reconnect this provider.",
+                false,
+            ))
+        };
+    }
+    Ok(())
+}
+
+async fn revoke_prepared_credential(connector_id: &str, encoded: Option<&str>) {
+    let Some(tokens) = encoded.and_then(|value| serde_json::from_str::<StoredTokenSet>(value).ok())
+    else {
+        return;
+    };
+    let Some(endpoint) = tokens.revocation_endpoint else {
+        return;
+    };
+    let token_value = tokens
+        .refresh_token
+        .clone()
+        .unwrap_or_else(|| tokens.access_token.clone());
+    let hint = if tokens.refresh_token.is_some() {
+        "refresh_token"
+    } else {
+        "access_token"
+    };
+    crate::ensure_rustls_provider();
+    if tokens.brokered {
+        let _ = reqwest::Client::new()
+            .post(endpoint)
+            .json(&serde_json::json!({
+                "contractVersion": 1,
+                "provider": connector_id,
+                "token": token_value,
+                "tokenTypeHint": hint,
+            }))
+            .send()
+            .await;
+    } else {
+        let _ = reqwest::Client::new()
+            .post(endpoint)
+            .form(&[("token", token_value.as_str())])
+            .send()
+            .await;
+    }
+}
+
+async fn disconnect_with_store_and_path<G>(
+    connector_id: &str,
+    store: &dyn ConnectorSecretStore,
+    path: &Path,
+    durable_store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
+) -> Result<(), ConnectorCommandError> {
+    let Some(prepared) = prepare_disconnect(connector_id, store, path)? else {
+        return Ok(());
+    };
+    commit_prepared_disconnect(
+        connector_id,
+        store,
+        path,
+        durable_store,
+        scope,
+        &prepared,
+        before_commit,
+    )?;
+    revoke_prepared_credential(connector_id, prepared.previous_secret.as_deref()).await;
     Ok(())
 }
 
@@ -3121,6 +3263,18 @@ mod tests {
     #[tokio::test]
     async fn test_disconnect_public_pkce_revocation() {
         let store = MemoryStore::default();
+        let durable =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let scope = durable
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
+                    [],
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                resolve(tx, Some("default"), None, ScopeAccess::Write)
+            })
+            .unwrap();
         let path =
             std::env::temp_dir().join(format!("fable-disconnect-test-{}.json", std::process::id()));
         let _ = fs::remove_file(&path);
@@ -3156,33 +3310,36 @@ mod tests {
         };
 
         let cred_ref = "oauth-token:google-drive:acc-123";
-        store
-            .set(cred_ref, &serde_json::to_string(&token_set).unwrap())
-            .unwrap();
-
-        let connection = ConnectorConnection {
-            connector_id: "google-drive".to_string(),
-            account: ConnectorAccountSummary {
-                id: "acc-123".to_string(),
-                display_name: "Test User".to_string(),
-                handle: None,
-                email: Some("user@example.com".to_string()),
-                workspace: None,
-                avatar_url: None,
-            },
-            status: "connected".to_string(),
-            scopes: vec!["drive.readonly".to_string()],
-            expires_at: None,
-            credential_ref: cred_ref.to_string(),
-            connected_at: "1".to_string(),
-            updated_at: "1".to_string(),
-            is_active: true,
-        };
-
-        write_connections(&path, &[connection]).unwrap();
+        let encoded = serde_json::to_string(&token_set).unwrap();
+        commit_prepared_auth_state(
+            &path,
+            &durable,
+            "google-drive",
+            &scope,
+            &store,
+            (
+                token_set,
+                ConnectorAccountSummary {
+                    id: "acc-123".to_string(),
+                    display_name: "Test User".to_string(),
+                    handle: None,
+                    email: Some("user@example.com".to_string()),
+                    workspace: None,
+                    avatar_url: None,
+                },
+                cred_ref.to_string(),
+                CredentialRollback {
+                    credential_ref: cred_ref.to_string(),
+                    previous_secret: None,
+                },
+                encoded,
+            ),
+            || Ok(()),
+        )
+        .unwrap();
 
         // Disconnect
-        disconnect_with_store_and_path("google-drive", &store, &path)
+        disconnect_with_store_and_path("google-drive", &store, &path, &durable, &scope, || Ok(()))
             .await
             .unwrap();
 
@@ -3192,6 +3349,12 @@ mod tests {
         // Check connection file is empty/does not contain this account
         let connections = read_connections(&path).unwrap();
         assert!(connections.is_empty());
+        let canonical = durable
+            .with_conn(|tx| crate::store::repos::connection_record::list(tx, &durable, &scope))
+            .unwrap();
+        assert_eq!(canonical[0].lifecycle, "disconnected");
+        assert_eq!(canonical[0].authorization_state, "revoked");
+        assert_eq!(canonical[0].credential_state, "revoked");
 
         // Verify the mock server received the expected form POST request
         let request = request_rx.await.unwrap();
@@ -3200,6 +3363,118 @@ mod tests {
         assert!(request_lower.contains("content-type: application/x-www-form-urlencoded"));
         assert!(request_lower.contains("token=google-refresh-token-456"));
 
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn canonical_disconnect_failure_restores_credential_and_metadata() {
+        let store = MemoryStore::default();
+        let durable =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let scope = durable
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
+                    [],
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                resolve(tx, Some("default"), None, ScopeAccess::Write)
+            })
+            .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "fable-disconnect-rollback-test-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let credential_ref = native_connector_credential_ref("gmail", "account-1");
+        let tokens = StoredTokenSet {
+            access_token: "rollback-access-secret".into(),
+            refresh_token: Some("rollback-refresh-secret".into()),
+            token_type: "Bearer".into(),
+            expires_at: None,
+            scopes: vec!["gmail.readonly".into()],
+            revocation_endpoint: None,
+            token_endpoint: None,
+            handoff_endpoint: None,
+            client_id: "desktop-client".into(),
+            brokered: false,
+        };
+        let encoded = serde_json::to_string(&tokens).unwrap();
+        commit_prepared_auth_state(
+            &path,
+            &durable,
+            "gmail",
+            &scope,
+            &store,
+            (
+                tokens,
+                ConnectorAccountSummary {
+                    id: "account-1".into(),
+                    display_name: "Account one".into(),
+                    handle: None,
+                    email: None,
+                    workspace: None,
+                    avatar_url: None,
+                },
+                credential_ref.clone(),
+                CredentialRollback {
+                    credential_ref: credential_ref.clone(),
+                    previous_secret: None,
+                },
+                encoded.clone(),
+            ),
+            || Ok(()),
+        )
+        .unwrap();
+        let prepared = prepare_disconnect("gmail", &store, &path).unwrap().unwrap();
+        let guard_error =
+            commit_prepared_disconnect("gmail", &store, &path, &durable, &scope, &prepared, || {
+                Err::<(), _>(command_error(
+                    "needs-auth",
+                    "gmail",
+                    "Identity changed before disconnect.",
+                    false,
+                ))
+            })
+            .unwrap_err();
+        assert_eq!(guard_error.code, "needs-auth");
+        assert_eq!(
+            store.get(&credential_ref).unwrap().as_deref(),
+            Some(encoded.as_str())
+        );
+        assert_eq!(read_connections(&path).unwrap().len(), 1);
+        store.set(&credential_ref, "newer-secret").unwrap();
+        let conflict =
+            commit_prepared_disconnect("gmail", &store, &path, &durable, &scope, &prepared, || {
+                Ok(())
+            })
+            .unwrap_err();
+        assert_eq!(conflict.code, "conflict");
+        assert_eq!(
+            store.get(&credential_ref).unwrap().as_deref(),
+            Some("newer-secret")
+        );
+        assert_eq!(read_connections(&path).unwrap().len(), 1);
+        store.set(&credential_ref, &encoded).unwrap();
+        durable
+            .transaction(|tx| clear_current_internal_user(tx))
+            .unwrap();
+
+        let error =
+            commit_prepared_disconnect("gmail", &store, &path, &durable, &scope, &prepared, || {
+                Ok(())
+            })
+            .unwrap_err();
+
+        assert_eq!(
+            store.get(&credential_ref).unwrap().as_deref(),
+            Some(encoded.as_str())
+        );
+        let connections = read_connections(&path).unwrap();
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].account.id, "account-1");
+        assert!(!error.message.contains("rollback-access-secret"));
+        assert!(!error.message.contains("rollback-refresh-secret"));
         let _ = fs::remove_file(path);
     }
 }
