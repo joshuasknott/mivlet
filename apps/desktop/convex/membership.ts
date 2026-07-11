@@ -16,6 +16,8 @@ import {
 const role = v.union(v.literal("owner"), v.literal("admin"), v.literal("editor"), v.literal("viewer"));
 const action = v.union(v.literal("change-role"), v.literal("suspend"), v.literal("reactivate"), v.literal("remove"));
 const SCHEMA_VERSION = 1;
+const MAX_ROSTER_MEMBERS = 500;
+const PROFILE_FRESHNESS_MS = 30 * 24 * 60 * 60 * 1000;
 
 function fingerprint(value: unknown) { return JSON.stringify(value); }
 function error(code: string, message = "The requested membership operation is unavailable.", details: Record<string, unknown> = {}) {
@@ -122,6 +124,32 @@ export const listRecipientPending = queryGeneric({
       });
     }
     return result.sort((a: any, b: any) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
+  },
+});
+
+/** Bounded, display-only member roster. Cached profile data never grants access. */
+export const listRoster = queryGeneric({
+  args: { workspaceId: v.string() },
+  handler: async (ctx, args) => {
+    const authz = await requireActiveMembership(ctx, args.workspaceId);
+    const memberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace", (q: any) => q.eq("workspaceId", args.workspaceId)).collect();
+    if (memberships.length > MAX_ROSTER_MEMBERS) throw new CloudPolicyError("conflict", "The workspace member list is unavailable.", true);
+    const now = Date.now();
+    const members = [];
+    for (const membership of memberships.sort((left: any, right: any) => left.memberId.localeCompare(right.memberId))) {
+      const users = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", membership.internalUserId)).collect();
+      if (users.length !== 1) throw new CloudPolicyError("conflict", "The workspace member list is unavailable.", true);
+      const profileFresh = typeof users[0].profileObservedAt === "number" && now - users[0].profileObservedAt <= PROFILE_FRESHNESS_MS;
+      members.push({
+        memberId: membership.memberId,
+        role: membership.role,
+        status: membership.status,
+        revision: membership.revision,
+        ...(profileFresh && users[0].profile ? users[0].profile : {}),
+        isCurrentUser: membership.internalUserId === authz.user.internalUserId,
+      });
+    }
+    return { workspaceId: args.workspaceId, actorRole: authz.membership.role, members };
   },
 });
 

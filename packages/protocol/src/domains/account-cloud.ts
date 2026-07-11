@@ -1,6 +1,7 @@
 import type {
   ExternalAuthenticationFacts,
   InvitationAcceptancePresentation,
+  MembershipStatus,
   WorkspaceInvitationRecord,
   WorkspaceRole,
 } from "../spine/identity.js";
@@ -157,6 +158,23 @@ export interface AccountInvitationAcceptanceOutcome {
     status: "refreshed" | "refresh-needed" | "not-needed";
     message: string;
   };
+}
+
+/** Display-only roster projection. Profile hints never grant workspace access. */
+export interface AccountWorkspaceMemberSummary {
+  memberId: string;
+  role: WorkspaceRole;
+  status: MembershipStatus;
+  revision: number;
+  displayName?: string;
+  emailHint?: string;
+  isCurrentUser: boolean;
+}
+
+export interface AccountWorkspaceMemberList {
+  workspaceId: string;
+  actorRole: WorkspaceRole;
+  members: readonly AccountWorkspaceMemberSummary[];
 }
 
 export type CloudWorkspaceRole = WorkspaceRole;

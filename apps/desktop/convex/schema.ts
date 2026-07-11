@@ -25,7 +25,10 @@ const sharedProjectTombstoneSnapshot = v.object({
 export default defineSchema({
   internal_users: defineTable({
     internalUserId: v.string(), status: v.union(v.literal("active"), v.literal("disabled"), v.literal("pending-deletion"), v.literal("deleted")),
-    initialWorkspaceId: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(), revision: v.number()
+    initialWorkspaceId: v.optional(v.string()),
+    profile: v.optional(v.object({ displayName: v.optional(v.string()), emailHint: v.optional(v.string()) })),
+    profileObservedAt: v.optional(v.number()),
+    createdAt: v.number(), updatedAt: v.number(), revision: v.number()
   }).index("by_internal_user", ["internalUserId"]),
   external_identity_links: defineTable({
     externalIdentityId: v.string(), provider: v.string(), normalizedIssuer: v.string(), subject: v.string(), internalUserId: v.string(),

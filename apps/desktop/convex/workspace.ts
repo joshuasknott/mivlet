@@ -1,10 +1,20 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
-import { requireConvexIdentity } from "./convexAuth";
+import { requireConvexAccountIdentity, type ValidatedDisplayProfile } from "./convexAuth";
 import { requireFableUser } from "./authorization";
 
 const device = v.object({ deviceId: v.string(), kind: v.union(v.literal("desktop"), v.literal("mobile"), v.literal("web")), label: v.string(), publicKey: v.string() });
 const opaqueId = (kind: string) => `${kind}_${crypto.randomUUID()}`;
+const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+async function refreshDisplayProfile(ctx: any, user: any, profile: ValidatedDisplayProfile | undefined, now: number) {
+  const changed = JSON.stringify(user.profile ?? null) !== JSON.stringify(profile ?? null);
+  const refreshDue = typeof user.profileObservedAt !== "number" || now - user.profileObservedAt >= PROFILE_REFRESH_INTERVAL_MS;
+  if (!changed && !refreshDue) return user;
+  const patch = { profile, profileObservedAt: now, updatedAt: now, revision: user.revision + 1 };
+  await ctx.db.patch(user._id, patch);
+  return { ...user, ...patch };
+}
 
 function normalizedWorkspaceName(name: string | undefined) {
   const value = name?.trim() || "Fable workspace";
@@ -16,7 +26,8 @@ function normalizedWorkspaceName(name: string | undefined) {
 export const bootstrapAccount = mutationGeneric({
   args: { idempotencyKey: v.string(), initialWorkspaceName: v.optional(v.string()), device: v.optional(device) },
   handler: async (ctx, args) => {
-    const identity = await requireConvexIdentity(ctx);
+    const accountIdentity = await requireConvexAccountIdentity(ctx);
+    const identity = accountIdentity.external;
     const now = Date.now();
     const initialWorkspaceName = normalizedWorkspaceName(args.initialWorkspaceName);
     const fingerprint = JSON.stringify({ initialWorkspaceName, device: args.device });
@@ -25,6 +36,23 @@ export const bootstrapAccount = mutationGeneric({
     const replay = replays[0];
     if (replay) {
       if (replay.fingerprint !== fingerprint) return { status: "conflict", code: "idempotency-conflict" };
+      const replayLinks = await ctx.db.query("external_identity_links").withIndex("by_external_identity", (q: any) => q.eq("provider", identity.provider).eq("normalizedIssuer", identity.normalizedIssuer).eq("subject", identity.subject)).collect();
+      if (replayLinks.length !== 1 || replayLinks[0].status !== "active") return { status: "rejected", code: "identity-link-inactive" };
+      const replayUsers = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", replayLinks[0].internalUserId)).collect();
+      if (replayUsers.length !== 1 || replayUsers[0].status !== "active") return { status: "rejected", code: "internal-user-inactive" };
+      const replayResult = replay.result as any;
+      if (!replayResult || replayResult.internalUserId !== replayUsers[0].internalUserId || typeof replayResult.workspaceId !== "string" || typeof replayResult.memberId !== "string") return { status: "rejected", code: "workspace-unavailable" };
+      const replayWorkspaces = await ctx.db.query("workspaces").withIndex("by_workspace", (q: any) => q.eq("workspaceId", replayResult.workspaceId)).collect();
+      const replayMemberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace_user", (q: any) => q.eq("workspaceId", replayResult.workspaceId).eq("internalUserId", replayUsers[0].internalUserId)).collect();
+      if (replayWorkspaces.length !== 1 || replayWorkspaces[0].status !== "active" || replayMemberships.length !== 1 || replayMemberships[0].memberId !== replayResult.memberId || replayMemberships[0].status !== "active") return { status: "rejected", code: "workspace-unavailable" };
+      if (replayResult.device) {
+        const deviceId = replayResult.device.deviceId;
+        if (typeof deviceId !== "string") return { status: "rejected", code: "device-unavailable" };
+        const replayDevices = await ctx.db.query("account_devices").withIndex("by_device", (q: any) => q.eq("deviceId", deviceId)).collect();
+        const replayDeviceLinks = await ctx.db.query("workspace_device_links").withIndex("by_workspace_device", (q: any) => q.eq("workspaceId", replayResult.workspaceId).eq("deviceId", deviceId)).collect();
+        if (replayDevices.length !== 1 || replayDevices[0].internalUserId !== replayUsers[0].internalUserId || replayDevices[0].status !== "active" || replayDeviceLinks.length !== 1 || replayDeviceLinks[0].internalUserId !== replayUsers[0].internalUserId || replayDeviceLinks[0].memberId !== replayResult.memberId || replayDeviceLinks[0].status !== "active") return { status: "rejected", code: "device-unavailable" };
+      }
+      await refreshDisplayProfile(ctx, replayUsers[0], accountIdentity.profile, now);
       return { ...(replay.result as object), idempotency: { key: args.idempotencyKey, replayed: true } };
     }
 
@@ -37,8 +65,9 @@ export const bootstrapAccount = mutationGeneric({
     let created = false;
     if (!link) {
       internalUserId = opaqueId("usr");
-      const userId = await ctx.db.insert("internal_users", { internalUserId, status: "active", createdAt: now, updatedAt: now, revision: 1 });
-      user = { _id: userId, internalUserId, status: "active", revision: 1 };
+      const profileFields = { ...(accountIdentity.profile ? { profile: accountIdentity.profile } : {}), profileObservedAt: now };
+      const userId = await ctx.db.insert("internal_users", { internalUserId, status: "active", ...profileFields, createdAt: now, updatedAt: now, revision: 1 });
+      user = { _id: userId, internalUserId, status: "active", revision: 1, ...profileFields };
       await ctx.db.insert("external_identity_links", { externalIdentityId: opaqueId("identity"), provider: identity.provider, normalizedIssuer: identity.normalizedIssuer, subject: identity.subject, internalUserId, status: "active", lastValidatedAt: now, createdAt: now, updatedAt: now, revision: 1 });
       created = true;
     } else {
@@ -46,14 +75,14 @@ export const bootstrapAccount = mutationGeneric({
       const users = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", link!.internalUserId)).collect();
       if (users.length !== 1 || users[0].status !== "active") return { status: "rejected", code: "internal-user-inactive" };
       internalUserId = link.internalUserId;
-      user = users[0];
+      user = await refreshDisplayProfile(ctx, users[0], accountIdentity.profile, now);
     }
 
     let membership: any;
     if (user.initialWorkspaceId) {
       const workspaces = await ctx.db.query("workspaces").withIndex("by_workspace", (q: any) => q.eq("workspaceId", user.initialWorkspaceId)).collect();
       const memberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace_user", (q: any) => q.eq("workspaceId", user.initialWorkspaceId).eq("internalUserId", internalUserId)).collect();
-      if (workspaces.length !== 1 || workspaces[0].status !== "active" || memberships.length !== 1 || memberships[0].status !== "active" || memberships[0].role !== "owner") return { status: "rejected", code: "workspace-unavailable" };
+      if (workspaces.length !== 1 || workspaces[0].status !== "active" || memberships.length !== 1 || memberships[0].status !== "active") return { status: "rejected", code: "workspace-unavailable" };
       membership = memberships[0];
     } else {
       const workspaceId = opaqueId("ws");
