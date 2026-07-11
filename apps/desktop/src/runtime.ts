@@ -2931,6 +2931,70 @@ export async function listenRuntimeAcpFrames(
 }
 
 // ---------------------------------------------------------------------------
+// MCP local STDIO process bridge. Rust resolves an opaque encrypted launch
+// reference, owns the child and validates every frame; TypeScript sees only
+// protocol messages and secret-free session metadata.
+// ---------------------------------------------------------------------------
+
+export interface RuntimeSpawnedMcpProcess {
+  sessionId: string;
+  channel: string;
+  launchReference: string;
+}
+
+export async function spawnRuntimeMcpProcess(workspaceId: string, launchReference: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeSpawnedMcpProcess>("spawn_mcp_process", {
+      request: { workspaceId, launchReference }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function writeRuntimeMcpFrame(
+  workspaceId: string,
+  sessionId: string,
+  frame: string
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("write_mcp_frame", {
+      request: { workspaceId, sessionId, frame }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function closeRuntimeMcpProcess(workspaceId: string, sessionId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("close_mcp_process", {
+      request: { workspaceId, sessionId }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listenRuntimeMcpFrames(
+  channel: string,
+  onFrame: (line: string) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  if (!/^fable:\/\/mcp\/mcp-[0-9a-f]{32}$/.test(channel)) {
+    throw new Error("The MCP event channel is invalid.");
+  }
+  try {
+    return await listen<string>(channel, (event) => onFrame(event.payload));
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Fable-owned tool execution boundary.
 //
 // Each approved tool call crosses back into Rust, which re-validates the

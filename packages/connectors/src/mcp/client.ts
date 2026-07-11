@@ -13,6 +13,7 @@ import {
 export interface McpTransport {
   send(frame: McpRequest | McpNotification): Promise<void>;
   subscribe(handler: (frame: McpFrame) => void): () => void;
+  subscribeClose(handler: () => void): () => void;
   close(): Promise<void>;
 }
 
@@ -97,6 +98,7 @@ export class McpClient {
   private nextId = 1;
   private readonly pending = new Map<McpRequestId, PendingRequest>();
   private readonly unsubscribe: () => void;
+  private readonly unsubscribeClose: () => void;
   private initialized?: McpInitializeResult;
   private closed = false;
 
@@ -105,6 +107,7 @@ export class McpClient {
     private readonly options: McpClientOptions
   ) {
     this.unsubscribe = transport.subscribe((frame) => this.receive(frame));
+    this.unsubscribeClose = transport.subscribeClose(() => this.markTransportClosed());
   }
 
   async initialize(): Promise<McpInitializeResult> {
@@ -153,12 +156,25 @@ export class McpClient {
     if (this.closed) return;
     this.closed = true;
     this.unsubscribe();
+    this.unsubscribeClose();
+    this.rejectPendingClosed();
+    await this.transport.close();
+  }
+
+  private markTransportClosed(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.unsubscribe();
+    this.unsubscribeClose();
+    this.rejectPendingClosed();
+  }
+
+  private rejectPendingClosed(): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("MCP transport closed."));
     }
     this.pending.clear();
-    await this.transport.close();
   }
 
   private receive(frame: McpFrame): void {

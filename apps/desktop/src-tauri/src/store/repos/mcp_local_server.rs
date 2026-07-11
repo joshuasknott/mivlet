@@ -72,6 +72,7 @@ pub fn upsert(
 ) -> Result<SafeMcpLocalServer> {
     require_scope(tx, scope, ScopeAccess::Write)?;
     let id = crate::store::repos::scope::normalize_id(input.id, "MCP launch reference")?;
+    validate_launch_values(input.display_name, input.command, input.args)?;
     let content = Content {
         display_name: bounded(input.display_name, "MCP server name", DISPLAY_NAME_MAX)?,
         command: bounded(input.command, "MCP executable", COMMAND_MAX)?,
@@ -156,6 +157,17 @@ pub fn upsert(
     get_launch(tx, store, scope, &id)?
         .map(|record| record.metadata)
         .ok_or_else(|| StoreError::Invalid("MCP server configuration could not be read.".into()))
+}
+
+pub(crate) fn validate_launch_values(
+    display_name: &str,
+    command: &str,
+    args: &[String],
+) -> Result<()> {
+    bounded(display_name, "MCP server name", DISPLAY_NAME_MAX)?;
+    bounded(command, "MCP executable", COMMAND_MAX)?;
+    validate_args(args)?;
+    Ok(())
 }
 
 pub fn list(

@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { McpClient, type McpTransport } from "./client";
+import { McpClient, type McpToolCallProposal, type McpTransport } from "./client";
 import type { McpFrame, McpNotification, McpRequest } from "./protocol";
 
 class FakeTransport implements McpTransport {
   sent: Array<McpRequest | McpNotification> = [];
   closed = false;
   private handler?: (frame: McpFrame) => void;
+  private closeHandler?: () => void;
 
   constructor(private readonly respond: (frame: McpRequest | McpNotification) => McpFrame | void) {}
 
@@ -19,6 +20,13 @@ class FakeTransport implements McpTransport {
     this.handler = handler;
     return () => { this.handler = undefined; };
   }
+
+  subscribeClose(handler: () => void): () => void {
+    this.closeHandler = handler;
+    return () => { this.closeHandler = undefined; };
+  }
+
+  exit(): void { this.closeHandler?.(); }
 
   async close(): Promise<void> { this.closed = true; }
 }
@@ -68,7 +76,7 @@ describe("McpClient", () => {
   it("binds execution to an authorized immutable argument snapshot", async () => {
     let release!: (approved: boolean) => void;
     const approval = new Promise<boolean>((resolve) => { release = resolve; });
-    const authorize = vi.fn(async () => approval);
+    const authorize = vi.fn(async (_proposal: McpToolCallProposal) => approval);
     const transport = new FakeTransport(responseFor);
     const client = new McpClient(transport, { authorizeToolCall: authorize });
     await client.initialize();
@@ -104,6 +112,16 @@ describe("McpClient", () => {
     await client.close();
     expect(transport.closed).toBe(true);
     vi.useRealTimers();
+  });
+
+  it("rejects pending work immediately when the process exits", async () => {
+    const transport = new FakeTransport((frame) => frame.method === "initialize" ? responseFor(frame) : undefined);
+    const client = new McpClient(transport, { requestTimeoutMs: 60_000, authorizeToolCall: async () => false });
+    await client.initialize();
+    const pending = client.listTools();
+    const rejected = expect(pending).rejects.toThrow("transport closed");
+    transport.exit();
+    await rejected;
   });
 
   it("rejects unsupported protocol versions and malformed discovery", async () => {

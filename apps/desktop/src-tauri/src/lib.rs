@@ -30,6 +30,7 @@ mod goals;
 mod google;
 mod knowledge;
 mod local_model;
+mod mcp_process;
 mod memory;
 mod models;
 mod native_api;
@@ -246,6 +247,12 @@ pub fn run() {
             acp_process::write_acp_frame,
             acp_process::close_acp_process,
             acp_process::detect_acp_cli,
+            mcp_process::spawn_mcp_process,
+            mcp_process::write_mcp_frame,
+            mcp_process::close_mcp_process,
+            mcp_process::prepare_mcp_server_configuration,
+            mcp_process::commit_mcp_server_configuration,
+            mcp_process::list_mcp_server_configurations,
             google::cancel_google_call,
             tools::execute_tool_call,
             store::encrypted_store_status,
