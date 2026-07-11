@@ -2292,6 +2292,20 @@ impl Store {
 // Tauri command surface (the UI seam)
 // ---------------------------------------------------------------------------
 
+fn authorized_workspace_id(
+    store: &Store,
+    _caller_workspace_id: Option<String>,
+) -> std::result::Result<String, String> {
+    store
+        .with_conn(|conn| {
+            crate::store::repos::workspace_directory::require_active_workspace_for_current_user(
+                conn,
+            )
+            .map(|active| active.local_workspace_id)
+        })
+        .map_err(|error| error.to_string())
+}
+
 /// Export the workspace as a pretty-printed portable manifest string. Secrets
 /// are structurally absent; the artifact never touches the network or keyring.
 #[tauri::command]
@@ -2300,8 +2314,9 @@ pub fn export_workspace_archive(
 ) -> std::result::Result<String, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let workspace_id = workspace_id
-        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    // Kept in the wire shape for compatibility, but never trusted as
+    // authorization input. The authenticated native binding owns the scope.
+    let workspace_id = authorized_workspace_id(store, workspace_id)?;
     let manifest = export_workspace_for(store, &workspace_id).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&manifest)
         .map_err(|_| "Fable could not encode the workspace archive.".into())
@@ -2317,8 +2332,9 @@ pub fn import_workspace_archive(
 ) -> std::result::Result<ImportReport, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let workspace_id = workspace_id
-        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    // A caller-provided workspace id is deliberately ignored. This prevents a
+    // forged IPC request from importing into another locally mirrored tenant.
+    let workspace_id = authorized_workspace_id(store, workspace_id)?;
     import_workspace_for(
         store,
         &workspace_id,
@@ -2345,6 +2361,46 @@ mod tests {
 
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn archive_scope_requires_sign_in_and_ignores_caller_selected_workspace() {
+        use crate::store::repos::workspace_directory::{
+            clear_current_internal_user, select_active_workspace_for_current_user,
+            set_current_internal_user, upsert_authoritative_summary, WorkspaceDirectoryUpsert,
+        };
+
+        let store = store();
+        assert!(authorized_workspace_id(&store, Some("arbitrary-workspace".into())).is_err());
+        let input = WorkspaceDirectoryUpsert {
+            internal_user_id: "user-alpha".into(),
+            fable_workspace_id: "workspace-alpha".into(),
+            name: "Alpha".into(),
+            workspace_status: "active".into(),
+            workspace_revision: 1,
+            policy_revision: 1,
+            member_id: "member-alpha".into(),
+            role: "owner".into(),
+            membership_status: "active".into(),
+            membership_revision: 1,
+            updated_at: "now".into(),
+        };
+        let selected = store
+            .transaction(|conn| {
+                upsert_authoritative_summary(conn, &input)?;
+                set_current_internal_user(conn, "user-alpha", "now")?;
+                select_active_workspace_for_current_user(conn, "workspace-alpha", "now")
+            })
+            .unwrap();
+
+        assert_eq!(
+            authorized_workspace_id(&store, Some("arbitrary-workspace".into())).unwrap(),
+            selected.local_workspace_id
+        );
+        store
+            .transaction(|tx| clear_current_internal_user(tx))
+            .unwrap();
+        assert!(authorized_workspace_id(&store, None).is_err());
     }
 
     /// Insert a small but referentially-complete dataset directly via SQL,

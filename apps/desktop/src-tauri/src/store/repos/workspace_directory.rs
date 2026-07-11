@@ -57,6 +57,16 @@ pub struct ActiveWorkspaceSelection {
     pub source: String,
 }
 
+/// Native-only authorization context for commands that read or mutate
+/// workspace-owned data. The current user binding is established by the
+/// authenticated bootstrap and can never be supplied by a webview caller.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizedWorkspaceContext {
+    pub active_workspace: ActiveWorkspaceSelection,
+    pub internal_user_id: String,
+    pub member_id: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountDeviceMirrorUpsert {
@@ -576,6 +586,38 @@ pub fn resolve_active_workspace_for_current_user(
         .transpose()
 }
 
+/// Resolves the active workspace only when an authenticated internal user is
+/// currently bound. Unlike the legacy resolver, this deliberately fails closed
+/// after sign-out instead of silently granting access to the default workspace.
+pub fn require_active_workspace_context_for_current_user(
+    conn: &Connection,
+) -> Result<AuthorizedWorkspaceContext> {
+    let internal_user_id = current_internal_user_id(conn)?
+        .ok_or_else(|| StoreError::Invalid("Sign in to access workspace data.".into()))?;
+    let active_workspace = resolve_active_workspace(conn, &internal_user_id)?;
+    let member_id = match active_workspace.fable_workspace_id.as_deref() {
+        Some(fable_workspace_id) => Some(
+            selectable_summary(conn, &internal_user_id, fable_workspace_id)?
+                .ok_or_else(|| {
+                    StoreError::Invalid("The active workspace is unavailable for this user.".into())
+                })?
+                .member_id,
+        ),
+        None => None,
+    };
+    Ok(AuthorizedWorkspaceContext {
+        active_workspace,
+        internal_user_id,
+        member_id,
+    })
+}
+
+pub fn require_active_workspace_for_current_user(
+    conn: &Connection,
+) -> Result<ActiveWorkspaceSelection> {
+    require_active_workspace_context_for_current_user(conn).map(|context| context.active_workspace)
+}
+
 pub fn legacy_default_workspace(conn: &Connection) -> Result<ActiveWorkspaceSelection> {
     workspace::ensure_default(conn)?;
     let default = workspace::get(conn, crate::store::repos::scope::DEFAULT_WORKSPACE_ID)?
@@ -1085,6 +1127,50 @@ mod tests {
                 .as_deref(),
             Some("workspace-alpha")
         );
+    }
+
+    #[test]
+    fn workspace_data_authorization_fails_closed_after_sign_out_and_preserves_identity() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let alpha = summary("user-alpha", "workspace-alpha", "Alpha");
+        let beta = summary("user-beta", "workspace-beta", "Beta");
+        store
+            .transaction(|conn| {
+                upsert_authoritative_summary(conn, &alpha)?;
+                upsert_authoritative_summary(conn, &beta)?;
+                set_current_internal_user(conn, "user-alpha", "now")?;
+                select_active_workspace_for_current_user(conn, "workspace-alpha", "now")?;
+                Ok(())
+            })
+            .unwrap();
+
+        let context = store
+            .with_conn(require_active_workspace_context_for_current_user)
+            .unwrap();
+        assert_eq!(context.internal_user_id, "user-alpha");
+        assert_eq!(context.member_id.as_deref(), Some(alpha.member_id.as_str()));
+        assert_eq!(
+            context.active_workspace.fable_workspace_id.as_deref(),
+            Some("workspace-alpha")
+        );
+
+        store
+            .transaction(|tx| clear_current_internal_user(tx))
+            .unwrap();
+        let error = store
+            .with_conn(require_active_workspace_for_current_user)
+            .unwrap_err();
+        assert!(error.to_string().contains("Sign in"));
+
+        store
+            .transaction(|conn| set_current_internal_user(conn, "user-beta", "later"))
+            .unwrap();
+        let beta_context = store
+            .with_conn(require_active_workspace_context_for_current_user)
+            .unwrap();
+        assert_eq!(beta_context.internal_user_id, "user-beta");
+        assert_eq!(beta_context.member_id, None);
+        assert_eq!(beta_context.active_workspace.source, "legacy-default");
     }
 
     #[test]

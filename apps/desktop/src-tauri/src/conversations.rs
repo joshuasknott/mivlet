@@ -14,8 +14,7 @@ fn scope() -> Result<DataScope, String> {
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| {
-            let active = workspace_directory::resolve_active_workspace_for_current_user(tx)?
-                .unwrap_or(workspace_directory::legacy_default_workspace(tx)?);
+            let active = workspace_directory::require_active_workspace_for_current_user(tx)?;
             DataScope::workspace(active.local_workspace_id)
         })
         .map_err(|e| e.to_string())
