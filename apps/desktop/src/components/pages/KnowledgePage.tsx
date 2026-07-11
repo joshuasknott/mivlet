@@ -529,7 +529,7 @@ function ArtifactDetail({
         <div><dt>Type</dt><dd>{bundle.artifact.kind}</dd></div>
         <div><dt>Status</dt><dd>{plainArtifactStatus(bundle.artifact.status)}</dd></div>
         <div><dt>Scope</dt><dd>{scopeLabel}</dd></div>
-        <div><dt>Origin</dt><dd>{bundle.artifact.producingRunId ? "Created from a response" : "Saved artifact"}</dd></div>
+        <div><dt>Origin</dt><dd>{bundle.artifact.producingRunId || bundle.currentVersion.provenance.kind === "run" ? "Created from a response" : "Saved artifact"}</dd></div>
       </dl>
       <label className="artifact-detail__version">
         <span>Version</span>
