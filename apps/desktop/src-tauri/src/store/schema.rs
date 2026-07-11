@@ -859,9 +859,8 @@ CREATE TABLE IF NOT EXISTS artifact_handoff (
   FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
     REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_handoff_open
-  ON artifact_handoff(workspace_id,owner_subject,artifact_id,version_id,target_project_id)
-  WHERE status='proposed';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_handoff_exact
+  ON artifact_handoff(workspace_id,owner_subject,artifact_id,version_id,target_project_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_handoff_target
   ON artifact_handoff(workspace_id,owner_subject,target_project_id,status,resolved_at,id);
 

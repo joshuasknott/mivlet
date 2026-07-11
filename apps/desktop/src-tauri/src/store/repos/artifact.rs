@@ -552,22 +552,53 @@ pub fn propose_handoff(
             "Artifact source and target project must be different.".into(),
         ));
     }
-    let duplicate: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM artifact_handoff WHERE workspace_id=?1 AND owner_subject=?2
-           AND artifact_id=?3 AND version_id=?4 AND target_project_id=?5 AND status='proposed')",
-        rusqlite::params![
-            scope.workspace_id(),
-            scope.owner_subject(),
-            artifact_id,
+    let duplicate = tx
+        .query_row(
+            "SELECT id,status,revision,proposed_by_internal_user_id,payload,payload_nonce
+         FROM artifact_handoff WHERE workspace_id=?1 AND owner_subject=?2
+           AND artifact_id=?3 AND version_id=?4 AND target_project_id=?5",
+            rusqlite::params![
+                scope.workspace_id(),
+                scope.owner_subject(),
+                artifact_id,
+                version_id,
+                target_project_id
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    payload_of(row)?,
+                ))
+            },
+        )
+        .optional()?;
+    if let Some((id, status, revision, proposed_by, sealed)) = duplicate {
+        if status == "accepted" {
+            return Err(StoreError::Invalid(
+                "This exact artifact version is already associated with the target project.".into(),
+            ));
+        }
+        if status != "proposed" {
+            return Err(StoreError::Invalid(
+                "Artifact handoff status is invalid.".into(),
+            ));
+        }
+        let payload = open_json(store, &sealed, &handoff_aad(scope, &id))?;
+        validate_proposed_handoff(
+            &payload,
+            scope,
+            &id,
             version_id,
-            target_project_id
-        ],
-        |row| row.get(0),
-    )?;
-    if duplicate {
-        return Err(StoreError::Invalid(
-            "An identical artifact handoff is already awaiting acceptance.".into(),
-        ));
+            &source.0,
+            source.1.as_deref(),
+            target_project_id,
+            &proposed_by,
+            revision,
+        )?;
+        return Ok(payload);
     }
     let digest = format!(
         "{:x}",
@@ -828,7 +859,7 @@ pub fn search(
     let mut sql = if let Some(project_id) = filter.project_id {
         params.push(rusqlite::types::Value::Text(project_id.into()));
         String::from(
-            "SELECT a.id,COALESCE(h.version_id,a.current_version_id),a.payload,a.payload_nonce,v.payload,v.payload_nonce
+            "SELECT a.id,COALESCE(h.version_id,a.current_version_id),a.payload,a.payload_nonce,v.payload,v.payload_nonce,h.id IS NOT NULL
              FROM artifact a
              LEFT JOIN artifact_handoff h ON h.workspace_id=a.workspace_id AND h.owner_subject=a.owner_subject
                AND h.artifact_id=a.id AND h.target_project_id=? AND h.status='accepted'
@@ -844,7 +875,7 @@ pub fn search(
         )
     } else {
         String::from(
-            "SELECT a.id,a.current_version_id,a.payload,a.payload_nonce,v.payload,v.payload_nonce
+            "SELECT a.id,a.current_version_id,a.payload,a.payload_nonce,v.payload,v.payload_nonce,0
              FROM artifact a
              JOIN artifact_version v ON v.workspace_id=a.workspace_id AND v.owner_subject=a.owner_subject
                AND v.artifact_id=a.id AND v.id=a.current_version_id
@@ -934,13 +965,20 @@ pub fn search(
                         ciphertext: row.get(4)?,
                         nonce: row.get(5)?,
                     },
+                    row.get::<_, bool>(6)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let page_len = candidates.len();
-        for (artifact_id, version_id, artifact_sealed, version_sealed) in candidates {
-            let artifact_value =
+        for (artifact_id, version_id, artifact_sealed, version_sealed, handed_off) in candidates {
+            let mut artifact_value =
                 open_json(store, &artifact_sealed, &artifact_aad(scope, &artifact_id))?;
+            if handed_off {
+                let object = artifact_value
+                    .as_object_mut()
+                    .ok_or_else(|| StoreError::Invalid("Artifact payload is invalid.".into()))?;
+                object.insert("currentVersionId".into(), Value::String(version_id.clone()));
+            }
             let version_value = open_json(
                 store,
                 &version_sealed,
@@ -1916,19 +1954,40 @@ mod tests {
             assert_eq!(proposed["authorityTransfer"], "none");
             assert_eq!(proposed["proposedByInternalUserId"], "user-member-a");
             assert!(proposed.get("resolvedByInternalUserId").is_none());
-            assert!(store
-                .transaction(|tx| propose_handoff(
-                    tx,
-                    &store,
-                    &scope,
-                    "artifact-1",
-                    "version-1",
-                    "project-2",
-                    "user-member-a",
-                    None,
-                    "2026-07-11T01:01:01Z"
-                ))
-                .is_err());
+            let resumed = store
+                .transaction(|tx| {
+                    propose_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        "version-1",
+                        "project-2",
+                        "user-member-a",
+                        Some("Share the approved snapshot"),
+                        "2026-07-11T01:01:01Z",
+                    )
+                })
+                .unwrap();
+            assert_eq!(resumed, proposed);
+            drop(store);
+            let store = Store::open(&path, vault.clone()).unwrap();
+            let resumed_after_reopen = store
+                .transaction(|tx| {
+                    propose_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        "version-1",
+                        "project-2",
+                        "user-member-a",
+                        Some("Share the approved snapshot"),
+                        "2026-07-11T01:01:02Z",
+                    )
+                })
+                .unwrap();
+            assert_eq!(resumed_after_reopen, proposed);
             assert!(store
                 .transaction(|tx| accept_handoff(
                     tx,
@@ -1967,6 +2026,19 @@ mod tests {
             assert_eq!(accepted["status"], "accepted");
             assert_eq!(accepted["revision"], 2);
             assert_eq!(accepted["resolvedByInternalUserId"], "user-member-a");
+            assert!(store
+                .transaction(|tx| propose_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "version-1",
+                    "project-2",
+                    "user-member-a",
+                    None,
+                    "2026-07-11T01:02:30Z"
+                ))
+                .is_err());
             assert!(store
                 .transaction(|tx| accept_handoff(
                     tx,
@@ -2008,6 +2080,12 @@ mod tests {
             let target = search_project("project-2");
             assert_eq!(target.len(), 1);
             assert_eq!(target[0]["currentVersion"]["id"], "version-1");
+            assert_eq!(target[0]["artifact"]["currentVersionId"], "version-1");
+            let serialized_target = serde_json::to_value(&target[0]).unwrap();
+            assert_eq!(
+                serialized_target["artifact"]["currentVersionId"],
+                serialized_target["currentVersion"]["id"]
+            );
             assert_eq!(
                 search_project("project-1")[0]["currentVersion"]["id"],
                 "artifact-1:v2"
@@ -2044,6 +2122,19 @@ mod tests {
                 Ok(())
             }).unwrap();
             assert!(store
+                .transaction(|tx| propose_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "artifact-1:v2",
+                    "project-3",
+                    "user-member-a",
+                    None,
+                    "2026-07-11T01:04:30Z"
+                ))
+                .is_err());
+            assert!(store
                 .transaction(|tx| accept_handoff(
                     tx,
                     &store,
@@ -2075,6 +2166,20 @@ mod tests {
             })
             .unwrap();
         assert_eq!(target[0]["currentVersion"]["id"], "version-1");
+        assert_eq!(target[0]["artifact"]["currentVersionId"], "version-1");
+        assert!(store
+            .transaction(|tx| propose_handoff(
+                tx,
+                &store,
+                &scope,
+                "artifact-1",
+                "version-1",
+                "project-2",
+                "user-member-a",
+                None,
+                "2026-07-11T01:07:00Z"
+            ))
+            .is_err());
         assert!(store
             .transaction(|tx| accept_handoff(
                 tx,
