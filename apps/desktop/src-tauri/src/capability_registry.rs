@@ -13,12 +13,26 @@ struct NativeReadImplementation {
     required_scopes: &'static [&'static str],
 }
 
-const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[NativeReadImplementation {
-    capability_id: "source.repository.list",
-    connector_id: "github",
-    adapter_capability: "repositories.list",
-    required_scopes: &["repo"],
-}];
+const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
+    NativeReadImplementation {
+        capability_id: "source.repository.list",
+        connector_id: "github",
+        adapter_capability: "repositories.list",
+        required_scopes: &["repo"],
+    },
+    NativeReadImplementation {
+        capability_id: "software.deployment.list",
+        connector_id: "vercel",
+        adapter_capability: "deployments.read",
+        required_scopes: &["deployment:read"],
+    },
+    NativeReadImplementation {
+        capability_id: "work.issue.list",
+        connector_id: "linear",
+        adapter_capability: "issues.read",
+        required_scopes: &["read"],
+    },
+];
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,6 +66,32 @@ fn availability_for(
     connection: &crate::connector_auth::ConnectorConnection,
     canonical: &crate::store::repos::connection_record::SafeConnectionRecord,
 ) -> Result<&'static str, ConnectorCommandError> {
+    if connection.connector_id != implementation.connector_id
+        || canonical.connector_definition_key != implementation.connector_id
+    {
+        return Err(error(
+            "provider-boundary",
+            implementation.capability_id,
+            "Resolved Connection does not match the declared capability implementation.",
+            false,
+        ));
+    }
+    if canonical.lifecycle != "authorized" || canonical.authorization_state != "authorized" {
+        return Err(error(
+            "connection-not-authorized",
+            implementation.capability_id,
+            "The selected Connection is not authorized for this capability.",
+            false,
+        ));
+    }
+    if canonical.credential_state != "available" {
+        return Err(error(
+            "credential-unavailable",
+            implementation.capability_id,
+            "The selected Connection credential is unavailable.",
+            false,
+        ));
+    }
     if implementation
         .required_scopes
         .iter()
@@ -237,6 +277,38 @@ mod tests {
         let registered = implementation("source.repository.list").unwrap();
         assert_eq!(registered.connector_id, "github");
         assert_eq!(registered.adapter_capability, "repositories.list");
+        assert_eq!(
+            implementation("software.deployment.list")
+                .unwrap()
+                .adapter_capability,
+            "deployments.read"
+        );
+        assert_eq!(
+            implementation("software.deployment.list")
+                .unwrap()
+                .required_scopes,
+            &["deployment:read"]
+        );
+        assert_eq!(
+            implementation("work.issue.list")
+                .unwrap()
+                .adapter_capability,
+            "issues.read"
+        );
+        assert_eq!(
+            implementation("work.issue.list").unwrap().required_scopes,
+            &["read"]
+        );
+        assert_eq!(
+            availability_for(
+                implementation("software.deployment.list").unwrap(),
+                &connection(&["deployment:read"]),
+                &canonical("healthy"),
+            )
+            .unwrap_err()
+            .code,
+            "provider-boundary"
+        );
         assert_eq!(
             availability_for(registered, &connection(&["repo"]), &canonical("healthy")).unwrap(),
             "available"

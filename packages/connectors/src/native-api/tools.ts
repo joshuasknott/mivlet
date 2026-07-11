@@ -63,7 +63,10 @@ const TOOLS: Record<string, BackendTool> = {
     parameters: JSON.stringify({
       type: "object",
       properties: {
-        capability: { type: "string", enum: ["source.repository.list"] },
+        capability: {
+          type: "string",
+          enum: ["source.repository.list", "software.deployment.list", "work.issue.list"]
+        },
         input: { type: "object", additionalProperties: true },
         cursor: { type: "string" }
       },

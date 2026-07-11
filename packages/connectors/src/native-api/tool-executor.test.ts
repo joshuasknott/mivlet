@@ -249,7 +249,9 @@ describe("semantic Connection read tool", () => {
     expect(JSON.parse(tool!.parameters)).toMatchObject({
       required: ["capability", "input"],
       properties: {
-        capability: { enum: ["source.repository.list"] }
+        capability: {
+          enum: ["source.repository.list", "software.deployment.list", "work.issue.list"]
+        }
       }
     });
     expect(tool!.description.toLowerCase()).not.toContain("github");
