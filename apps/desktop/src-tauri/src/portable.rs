@@ -237,15 +237,44 @@ record!(AuditEventRecord {
     payload: Value,
 });
 
-record!(ArtifactRecord {
-    id: String,
-    run_id: Option<String>,
-    kind: String,
-    content_fingerprint: String,
-    size_bytes: i64,
-    created_at: String,
-    payload: Value,
-});
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactVersionRecord {
+    pub id: String,
+    pub artifact_id: String,
+    pub version: i64,
+    pub status: String,
+    pub content_fingerprint: String,
+    pub size_bytes: i64,
+    pub created_at: String,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactRecord {
+    pub id: String,
+    pub owner_subject: String,
+    pub authority: String,
+    pub visibility: String,
+    pub owner_member_id: Option<String>,
+    pub owner_internal_user_id: Option<String>,
+    pub run_id: Option<String>,
+    pub thread_id: Option<String>,
+    pub source_message_id: Option<String>,
+    pub kind: String,
+    pub status: String,
+    pub revision: i64,
+    pub current_version_id: String,
+    pub title_fingerprint: String,
+    pub content_fingerprint: String,
+    pub size_bytes: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    pub payload: Value,
+    #[serde(default)]
+    pub versions: Vec<ArtifactVersionRecord>,
+}
 
 // Connector account metadata. NOTE: `credential_ref` is intentionally absent
 // — it is an opaque per-installation keyring key, not a secret and not
@@ -441,6 +470,148 @@ fn open_json_value(store: &Store, sealed: &Sealed, aad: &str) -> Result<Value> {
     let bytes = store.open_payload(sealed, aad)?;
     serde_json::from_slice::<Value>(&bytes)
         .map_err(|_| StoreError::Invalid("Could not decode a portable record.".into()))
+}
+
+fn read_artifact_records(
+    conn: &Connection,
+    store: &Store,
+    workspace_id: &str,
+) -> Result<Vec<ArtifactRecord>> {
+    let mut stmt=conn.prepare(
+        "SELECT owner_subject,authority,visibility,owner_member_id,owner_internal_user_id,id,run_id,
+                thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,
+                content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce
+         FROM artifact WHERE workspace_id=?1 ORDER BY created_at,id")?;
+    let rows = stmt
+        .query_map([workspace_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                row.get::<_, i64>(11)?,
+                row.get::<_, String>(12)?,
+                row.get::<_, String>(13)?,
+                row.get::<_, String>(14)?,
+                row.get::<_, i64>(15)?,
+                row.get::<_, String>(16)?,
+                row.get::<_, String>(17)?,
+                Sealed {
+                    ciphertext: row.get(18)?,
+                    nonce: row.get(19)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut output = Vec::new();
+    for (
+        owner_subject,
+        authority,
+        visibility,
+        owner_member_id,
+        owner_internal_user_id,
+        id,
+        run_id,
+        thread_id,
+        source_message_id,
+        kind,
+        status,
+        revision,
+        current_version_id,
+        title_fingerprint,
+        content_fingerprint,
+        size_bytes,
+        created_at,
+        updated_at,
+        sealed,
+    ) in rows
+    {
+        let payload = open_json_value(
+            store,
+            &sealed,
+            &format!("artifact:{workspace_id}:{owner_subject}:{id}"),
+        )?;
+        let mut versions_stmt=conn.prepare(
+            "SELECT id,artifact_id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce
+             FROM artifact_version WHERE workspace_id=?1 AND owner_subject=?2 AND artifact_id=?3 ORDER BY version,id")?;
+        let partials = versions_stmt
+            .query_map(rusqlite::params![workspace_id, owner_subject, id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    Sealed {
+                        ciphertext: row.get(7)?,
+                        nonce: row.get(8)?,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut versions = Vec::new();
+        for (
+            version_id,
+            artifact_id,
+            version,
+            status,
+            version_fingerprint,
+            version_size,
+            version_created,
+            sealed,
+        ) in partials
+        {
+            let version_payload = open_json_value(
+                store,
+                &sealed,
+                &format!(
+                    "artifact_version:{workspace_id}:{owner_subject}:{artifact_id}:{version_id}"
+                ),
+            )?;
+            versions.push(ArtifactVersionRecord {
+                id: version_id,
+                artifact_id,
+                version,
+                status,
+                content_fingerprint: version_fingerprint,
+                size_bytes: version_size,
+                created_at: version_created,
+                payload: version_payload,
+            });
+        }
+        output.push(ArtifactRecord {
+            id,
+            owner_subject,
+            authority,
+            visibility,
+            owner_member_id,
+            owner_internal_user_id,
+            run_id,
+            thread_id,
+            source_message_id,
+            kind,
+            status,
+            revision,
+            current_version_id,
+            title_fingerprint,
+            content_fingerprint,
+            size_bytes,
+            created_at,
+            updated_at,
+            payload,
+            versions,
+        });
+    }
+    Ok(output)
 }
 
 // ---------------------------------------------------------------------------
@@ -679,29 +850,9 @@ fn read_sections(conn: &Connection, store: &Store, workspace_id: &str) -> Result
     .map(|v| record_from::<AuditEventRecord>(v, "audit_event"))
     .collect::<Result<_>>()?;
 
-    let artifacts = read_rows(
-        conn,
-        store,
-        "artifact",
-        "SELECT a.id, a.run_id, a.kind, a.content_fingerprint, a.size_bytes, a.created_at,
-                a.payload, a.payload_nonce
-         FROM artifact a LEFT JOIN run r ON r.id=a.run_id
-         LEFT JOIN thread t ON t.id=r.thread_id LEFT JOIN project p ON p.id=t.project_id
-         WHERE p.workspace_id=?1 OR (a.run_id IS NULL AND ?1='default')
-         ORDER BY a.created_at, a.id;",
-        &[&workspace_id],
-        &[
-            (0, "id", Cast::Text),
-            (1, "runId", Cast::NullableText),
-            (2, "kind", Cast::Text),
-            (3, "contentFingerprint", Cast::Text),
-            (4, "sizeBytes", Cast::Int),
-            (5, "createdAt", Cast::Text),
-        ],
-    )?
-    .into_iter()
-    .map(|v| record_from::<ArtifactRecord>(v, "artifact"))
-    .collect::<Result<_>>()?;
+    // Artifact workspace authority comes directly from the durable artifact
+    // row/run workspace, so projectless threads are included.
+    let artifacts = read_artifact_records(conn, store, &workspace_id)?;
 
     // connector_account — credential_ref is intentionally NOT selected.
     let connector_accounts = read_rows(
@@ -1002,6 +1153,31 @@ fn validate_integrity(s: &Sections) -> Result<()> {
                 errors.push(format!(
                     "Artifact {} references unknown run {}.",
                     ar.id, rid
+                ));
+            }
+        }
+        if ar.authority != "local"
+            || ar.visibility != "member-private"
+            || (ar.owner_member_id.is_some() == ar.owner_internal_user_id.is_some())
+        {
+            errors.push(format!(
+                "Artifact {} has invalid private owner authority.",
+                ar.id
+            ));
+        }
+        if ar.versions.is_empty()
+            || !ar
+                .versions
+                .iter()
+                .any(|version| version.id == ar.current_version_id)
+        {
+            errors.push(format!("Artifact {} has no exact current version.", ar.id));
+        }
+        for (index, version) in ar.versions.iter().enumerate() {
+            if version.artifact_id != ar.id || version.version != (index as i64 + 1) {
+                errors.push(format!(
+                    "Artifact {} has invalid immutable version order.",
+                    ar.id
                 ));
             }
         }
@@ -1731,22 +1907,71 @@ fn plan_and_apply(
         "id",
         report,
         |tx, store, r| {
-            let sealed = store.seal_json_owned(&r.payload, &format!("artifact:{}", r.id))?;
+            let context=crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            if context.active_workspace.local_workspace_id != workspace_id {
+                return Err(StoreError::Invalid(
+                    "Artifact import requires the active workspace owner.".into(),
+                ));
+            }
+            let data = crate::store::repos::scope::DataScope::workspace(workspace_id.to_string())?;
+            let owner = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+                data,
+                &context.internal_user_id,
+                context.member_id.as_deref(),
+            )?;
+            if r.owner_subject != owner.owner_subject()
+                || r.owner_member_id.as_deref() != owner.owner_member_id()
+                || r.owner_internal_user_id.as_deref() != owner.owner_internal_user_id()
+                || r.authority != "local"
+                || r.visibility != "member-private"
+            {
+                return Err(StoreError::Invalid(
+                    "Artifact archive owner does not match the active private owner.".into(),
+                ));
+            }
+            let mut artifact_payload = r.payload.clone();
+            if let Some(object) = artifact_payload.as_object_mut() {
+                object.insert(
+                    "workspaceId".into(),
+                    Value::String(workspace_id.to_string()),
+                );
+            }
+            let sealed = store.seal_json_owned(
+                &artifact_payload,
+                &format!("artifact:{workspace_id}:{}:{}", owner.owner_subject(), r.id),
+            )?;
             tx.execute(
-                "INSERT INTO artifact (id, run_id, kind, content_fingerprint, size_bytes, created_at,
-                          payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
+                "INSERT INTO artifact (workspace_id,owner_subject,authority,visibility,owner_member_id,
+                          owner_internal_user_id,id,run_id,thread_id,source_message_id,kind,status,revision,
+                          current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,
+                          payload,payload_nonce)
+                 VALUES (?1,?2,'local','member-private',?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19);",
                 rusqlite::params![
-                    r.id,
-                    r.run_id,
-                    r.kind,
-                    r.content_fingerprint,
-                    r.size_bytes,
-                    r.created_at,
+                    workspace_id,owner.owner_subject(),owner.owner_member_id(),owner.owner_internal_user_id(),
+                    r.id,r.run_id,r.thread_id,r.source_message_id,r.kind,r.status,r.revision,r.current_version_id,
+                    r.title_fingerprint,r.content_fingerprint,r.size_bytes,r.created_at,r.updated_at,
                     sealed.ciphertext,
                     sealed.nonce
                 ],
             )?;
+            for version in &r.versions {
+                let sealed = store.seal_json_owned(
+                    &version.payload,
+                    &format!(
+                        "artifact_version:{workspace_id}:{}:{}:{}",
+                        owner.owner_subject(),
+                        r.id,
+                        version.id
+                    ),
+                )?;
+                tx.execute(
+                    "INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,
+                      content_fingerprint,size_bytes,created_at,payload,payload_nonce)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                    rusqlite::params![workspace_id,owner.owner_subject(),r.id,version.id,version.version,
+                        version.status,version.content_fingerprint,version.size_bytes,version.created_at,
+                        sealed.ciphertext,sealed.nonce])?;
+            }
             Ok(())
         },
     )?;
@@ -2225,7 +2450,13 @@ impl_keyed_str!(RunRecord, id, "run", "id");
 impl_keyed_str!(ToolCallRecord, id, "tool_call", "id");
 impl_keyed_str!(ApprovalRecord, id, "approval", "id");
 impl_keyed_str!(AuditEventRecord, id, "audit_event", "id");
-impl_keyed_str!(ArtifactRecord, id, "artifact", "id");
+impl KeyedRecord for ArtifactRecord {
+    fn exists(&self, tx: &Connection, _table: &str, workspace_id: &str) -> Result<bool> {
+        Ok(tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM artifact WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3)",
+            rusqlite::params![workspace_id,self.owner_subject,self.id],|row|row.get(0))?)
+    }
+}
 impl KeyedRecord for ConnectorAccountRecord {
     fn exists(&self, tx: &Connection, _table: &str, workspace_id: &str) -> Result<bool> {
         Ok(tx.query_row(
@@ -2426,12 +2657,9 @@ mod tests {
                      VALUES ('tc1','r1','web','ok','t',?1,?2);",
                     rusqlite::params![tcp.ciphertext, tcp.nonce],
                 )?;
-                let ap = store.seal_json_owned(&serde_json::json!({}), "artifact:a1")?;
-                tx.execute(
-                    "INSERT INTO artifact (id, run_id, kind, content_fingerprint, size_bytes, created_at, payload, payload_nonce)
-                     VALUES ('a1','r1','file','fp',10,'t',?1,?2);",
-                    rusqlite::params![ap.ciphertext, ap.nonce],
-                )?;
+                // Private artifacts require an authenticated owner and exact
+                // immutable versions. The dedicated artifact round-trip test
+                // below supplies that authority; this generic fixture does not.
                 // connector account WITH credential_ref (must be omitted from export)
                 let cap = store.seal_json_owned(&serde_json::json!({"account":{"id":"u"}}), "connector_account:default:github")?;
                 tx.execute(
@@ -2490,6 +2718,51 @@ mod tests {
         assert!(manifest_b.sections.memory_records.is_empty());
         assert_eq!(manifest_b.sections.schedules.len(), 1);
         assert_eq!(manifest_b.sections.drafts.len(), 1);
+    }
+
+    fn bind_local_user(store: &Store) {
+        store.transaction(|tx|{
+            tx.execute("INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES ('user-local','active',1,'t')",[])?;
+            crate::store::repos::workspace_directory::set_current_internal_user(tx,"user-local","t")
+        }).unwrap();
+    }
+
+    #[test]
+    fn projectless_artifact_exports_all_versions_and_round_trips_for_exact_owner() {
+        let source = store();
+        bind_local_user(&source);
+        source.transaction(|tx|{
+            let thread=source.seal_json_owned(&serde_json::json!({}),"thread:artifact-thread")?;
+            tx.execute("INSERT INTO thread(id,workspace_id,title,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-thread','default','T','t','t',?1,?2)",rusqlite::params![thread.ciphertext,thread.nonce])?;
+            let run=source.seal_json_owned(&serde_json::json!({}),"run:artifact-run")?;
+            tx.execute("INSERT INTO run(id,workspace_id,thread_id,provider_id,model,status,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-run','default','artifact-thread','p','m','completed','t','t',?1,?2)",rusqlite::params![run.ciphertext,run.nonce])?;
+            let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerInternalUserId":"user-local","revision":2,"title":"Artifact","currentVersionId":"artifact-1:v2"});
+            let artifact=source.seal_json_owned(&artifact_payload,"artifact:default:user:user-local:artifact-1")?;
+            tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_internal_user_id,id,run_id,thread_id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('default','user:user-local','local','member-private','user-local','artifact-1','artifact-run','artifact-thread','document','draft',2,'artifact-1:v2','title','hash-2',3,'t','t2',?1,?2)",rusqlite::params![artifact.ciphertext,artifact.nonce])?;
+            for (id,version,text) in [("artifact-1:v1",1,"One"),("artifact-1:v2",2,"Two")] {
+                let payload=serde_json::json!({"id":id,"artifactId":"artifact-1","version":version,"content":{"kind":"inline","text":text}});
+                let sealed=source.seal_json_owned(&payload,&format!("artifact_version:default:user:user-local:artifact-1:{id}"))?;
+                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('default','user:user-local','artifact-1',?1,?2,'available',?3,3,'t',?4,?5)",rusqlite::params![id,version,format!("hash-{version}"),sealed.ciphertext,sealed.nonce])?;
+            }
+            Ok(())
+        }).unwrap();
+        let manifest = export_workspace(&source).unwrap();
+        assert_eq!(manifest.sections.artifacts.len(), 1);
+        assert_eq!(manifest.sections.artifacts[0].versions.len(), 2);
+        assert_eq!(
+            manifest.sections.artifacts[0].thread_id.as_deref(),
+            Some("artifact-thread")
+        );
+        let json = serde_json::to_string(&manifest).unwrap();
+        let destination = store();
+        bind_local_user(&destination);
+        import_workspace(&destination, &json, ImportOptions::default()).unwrap();
+        let roundtrip = export_workspace(&destination).unwrap();
+        assert_eq!(roundtrip.sections.artifacts[0].versions.len(), 2);
+        assert_eq!(
+            roundtrip.sections.artifacts[0].current_version_id,
+            "artifact-1:v2"
+        );
     }
 
     #[test]

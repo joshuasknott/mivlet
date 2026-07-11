@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 15;
+pub const CURRENT_SCHEMA_VERSION: u32 = 16;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -764,16 +764,65 @@ CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_event(status);
 CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_event(correlation_id);
 
 CREATE TABLE IF NOT EXISTS artifact (
-  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  authority TEXT NOT NULL CHECK(authority='local'),
+  visibility TEXT NOT NULL CHECK(visibility='member-private'),
+  owner_member_id TEXT,
+  owner_internal_user_id TEXT,
+  id TEXT NOT NULL,
   run_id TEXT REFERENCES run(id) ON DELETE CASCADE,
+  thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+  source_message_id TEXT,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  revision INTEGER NOT NULL DEFAULT 1,
+  current_version_id TEXT NOT NULL,
+  title_fingerprint TEXT NOT NULL,
+  content_fingerprint TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  CHECK ((owner_member_id IS NOT NULL) != (owner_internal_user_id IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_run ON artifact(workspace_id,owner_subject,run_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_thread ON artifact(workspace_id,owner_subject,thread_id,created_at);
+
+CREATE TABLE IF NOT EXISTS artifact_version (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  artifact_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'available',
+  content_fingerprint TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,artifact_id,version),
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_version_history
+  ON artifact_version(workspace_id,owner_subject,artifact_id,version);
+
+CREATE TABLE IF NOT EXISTS artifact_legacy_unowned (
+  id TEXT PRIMARY KEY,
+  run_id TEXT,
   kind TEXT NOT NULL,
   content_fingerprint TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
   created_at TEXT NOT NULL,
   payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
+  payload_nonce BLOB NOT NULL,
+  quarantined_at TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'legacy artifact had no authenticated owner'
 );
-CREATE INDEX IF NOT EXISTS idx_artifact_run ON artifact(run_id);
 
 -- connectors (non-secret metadata only)
 CREATE TABLE IF NOT EXISTS connector_account (

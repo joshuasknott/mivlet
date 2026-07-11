@@ -395,13 +395,23 @@ mod tests {
                 let sealed = seal_json(
                     &store,
                     &serde_json::json!({"secret":"alpha-artifact"}),
-                    "artifact:artifact-alpha",
+                    "artifact:alpha:user:legacy-test-user:artifact-alpha",
                 )?;
                 tx.execute(
-                    "INSERT INTO artifact(id,run_id,kind,content_fingerprint,size_bytes,created_at,payload,payload_nonce)
-                     VALUES ('artifact-alpha','shared-run','document','hash',1,'t',?1,?2)",
+                    "INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_internal_user_id,
+                      id,run_id,thread_id,kind,status,revision,current_version_id,title_fingerprint,
+                      content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce)
+                     VALUES ('alpha','user:legacy-test-user','local','member-private','legacy-test-user',
+                      'artifact-alpha','shared-run','thread-alpha','document','draft',1,'artifact-alpha:v1','title',
+                      'hash',1,'t','t',?1,?2)",
                     rusqlite::params![sealed.ciphertext, sealed.nonce],
                 )?;
+                let version=seal_json(&store,&serde_json::json!({"id":"artifact-alpha:v1"}),
+                    "artifact_version:alpha:user:legacy-test-user:artifact-alpha:artifact-alpha:v1")?;
+                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,
+                  content_fingerprint,size_bytes,created_at,payload,payload_nonce)
+                  VALUES ('alpha','user:legacy-test-user','artifact-alpha','artifact-alpha:v1',1,'available',
+                  'hash',1,'t',?1,?2)",rusqlite::params![version.ciphertext,version.nonce])?;
                 Ok(())
             })
             .unwrap();

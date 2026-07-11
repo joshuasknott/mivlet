@@ -83,6 +83,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // Only project rows with a provable private owner are adopted;
             // ambiguous rows and opaque documents are quarantined.
             14 => apply_v14_to_v15(conn)?,
+            // 15 -> 16: artifacts gain an authenticated private owner and
+            // immutable owner-bound version history. Legacy ciphertext cannot
+            // be safely rebound to an owner, so it remains quarantined.
+            15 => apply_v15_to_v16(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -92,6 +96,52 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v15_to_v16(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "artifact")? || table_has_column(conn, "artifact", "owner_subject")? {
+        return Ok(());
+    }
+    conn.execute_batch(r#"
+      CREATE TABLE artifact_legacy_unowned (
+        id TEXT PRIMARY KEY, run_id TEXT, kind TEXT NOT NULL, content_fingerprint TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL, payload BLOB NOT NULL,
+        payload_nonce BLOB NOT NULL, quarantined_at TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT 'legacy artifact had no authenticated owner'
+      );
+      INSERT INTO artifact_legacy_unowned
+      SELECT id,run_id,kind,content_fingerprint,size_bytes,created_at,payload,payload_nonce,
+             strftime('%Y-%m-%dT%H:%M:%fZ','now'),'legacy artifact had no authenticated owner'
+      FROM artifact;
+      DROP TABLE artifact;
+      CREATE TABLE artifact (
+        workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+        owner_subject TEXT NOT NULL, authority TEXT NOT NULL CHECK(authority='local'),
+        visibility TEXT NOT NULL CHECK(visibility='member-private'), owner_member_id TEXT,
+        owner_internal_user_id TEXT, id TEXT NOT NULL, run_id TEXT REFERENCES run(id) ON DELETE CASCADE,
+        thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE, source_message_id TEXT,
+        kind TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', revision INTEGER NOT NULL DEFAULT 1,
+        current_version_id TEXT NOT NULL, title_fingerprint TEXT NOT NULL,
+        content_fingerprint TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+        PRIMARY KEY(workspace_id,owner_subject,id),
+        CHECK((owner_member_id IS NOT NULL)!=(owner_internal_user_id IS NOT NULL))
+      );
+      CREATE TABLE artifact_version (
+        workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, artifact_id TEXT NOT NULL,
+        id TEXT NOT NULL, version INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'available',
+        content_fingerprint TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL,
+        payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+        PRIMARY KEY(workspace_id,owner_subject,id),
+        UNIQUE(workspace_id,owner_subject,artifact_id,version),
+        FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+          REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_artifact_run ON artifact(workspace_id,owner_subject,run_id);
+      CREATE INDEX idx_artifact_thread ON artifact(workspace_id,owner_subject,thread_id,created_at);
+      CREATE INDEX idx_artifact_version_history ON artifact_version(workspace_id,owner_subject,artifact_id,version);
+    "#)?;
     Ok(())
 }
 
@@ -942,9 +992,40 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v15 is current; v15 -> v16 has no registered migration.
-        let err = apply(&conn, 15, 16).unwrap_err();
+        // v16 is current; v16 -> v17 has no registered migration.
+        let err = apply(&conn, 16, 17).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v15_to_v16_quarantines_unowned_artifacts_and_adds_versions() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+          CREATE TABLE workspace(id TEXT PRIMARY KEY); INSERT INTO workspace VALUES('w');
+          CREATE TABLE run(id TEXT PRIMARY KEY);
+          CREATE TABLE thread(id TEXT PRIMARY KEY);
+          CREATE TABLE artifact(id TEXT PRIMARY KEY,run_id TEXT,kind TEXT NOT NULL,
+            content_fingerprint TEXT NOT NULL,size_bytes INTEGER NOT NULL,created_at TEXT NOT NULL,
+            payload BLOB NOT NULL,payload_nonce BLOB NOT NULL);
+          INSERT INTO artifact VALUES('legacy',NULL,'document','fp',3,'t',x'01',x'02');
+        "#,
+        )
+        .unwrap();
+        apply(&conn, 15, 16).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM artifact", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM artifact_legacy_unowned", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert!(table_has_column(&conn, "artifact", "owner_subject").unwrap());
+        assert!(table_exists(&conn, "artifact_version").unwrap());
     }
 
     #[test]
