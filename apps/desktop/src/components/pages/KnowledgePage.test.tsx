@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { KnowledgeSource, LocalFileImport, MemoryRecord } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -345,14 +345,17 @@ describe("KnowledgePage — artifacts", () => {
 
     const otherWorkspaceRuntime = stubRuntime(state);
     otherWorkspaceRuntime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId = "other-workspace";
-    view.rerender(<KnowledgePage runtime={otherWorkspaceRuntime} />);
-    resolveExport({
-      artifactId: "artifact-1", versionId: "version-2", title: "Launch report", kind: "document",
-      exportedAt: "2026-07-11T10:00:00.000Z", content: bundle.currentVersion.content,
-      citations: [], inputs: [], decisions: [], lineage: []
-    } as unknown as RuntimeArtifactExport);
-    await pendingExport;
-    await Promise.resolve();
+    await act(async () => {
+      view.rerender(<KnowledgePage runtime={otherWorkspaceRuntime} />);
+    });
+    await act(async () => {
+      resolveExport({
+        artifactId: "artifact-1", versionId: "version-2", title: "Launch report", kind: "document",
+        exportedAt: "2026-07-11T10:00:00.000Z", content: bundle.currentVersion.content,
+        citations: [], inputs: [], decisions: [], lineage: []
+      } as unknown as RuntimeArtifactExport);
+      await pendingExport;
+    });
     await waitFor(() => expect(searchRuntimeArtifacts).toHaveBeenCalledTimes(2));
     expect(createObjectUrl).not.toHaveBeenCalled();
     expect(screen.queryByText("JSON export ready.")).not.toBeInTheDocument();
