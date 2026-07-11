@@ -12,14 +12,16 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::clerk_identity::{self, ConvexFunctionType, ConvexIdentityCallRequest};
 use crate::store::repos::workspace_directory as directory;
 
 const DEVICE_KEYRING_SERVICE: &str = "com.fable.workspace.account-device";
 const DEVICE_KEYRING_ENTRY: &str = "install-device-id";
+const ACCOUNT_CHANGED_ERROR: &str = "Fable account changed during the request. Please try again.";
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountWorkspaceStatus {
     configured: bool,
@@ -33,7 +35,7 @@ pub struct AccountWorkspaceStatus {
     devices: Vec<directory::AccountDeviceSummary>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ActiveContextOwner {
     internal_user_id: String,
@@ -163,6 +165,7 @@ struct DirectInboxSelection {
 struct HostedPendingInvitation {
     invitation: HostedInvitation,
     selection: DirectInboxSelection,
+    workspace_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -240,7 +243,7 @@ enum HostedAcceptanceResult {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountInvitationAcceptanceOutcome {
-    result: HostedAcceptanceResult,
+    result: AccountInvitationAcceptanceDecision,
     account_workspace: AccountWorkspaceStatus,
     reconciliation: InvitationReconciliation,
 }
@@ -252,14 +255,38 @@ struct InvitationReconciliation {
     message: String,
 }
 
+#[derive(Debug)]
 struct AcceptanceWithReconciliation {
     result: HostedAcceptanceResult,
     reconciliation: InvitationReconciliation,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+enum AccountInvitationAcceptanceDecision {
+    Accepted {
+        invitation_id: String,
+        workspace_id: String,
+        role: String,
+    },
+    Conflict {
+        code: String,
+        message: String,
+    },
+    Rejected {
+        code: String,
+        message: String,
+    },
+}
+
 type HostedFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 
 trait HostedAccountTransport: Send + Sync {
+    fn account_binding<'a>(&'a self) -> HostedStringFuture<'a>;
     fn call<'a>(
         &'a self,
         function_type: ConvexFunctionType,
@@ -268,9 +295,14 @@ trait HostedAccountTransport: Send + Sync {
     ) -> HostedFuture<'a>;
 }
 
+type HostedStringFuture<'a> = Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
+
 struct NativeHostedAccountTransport;
 
 impl HostedAccountTransport for NativeHostedAccountTransport {
+    fn account_binding<'a>(&'a self) -> HostedStringFuture<'a> {
+        Box::pin(clerk_identity::native_bootstrap_idempotency_key())
+    }
     fn call<'a>(
         &'a self,
         function_type: ConvexFunctionType,
@@ -290,6 +322,49 @@ fn opaque_id(prefix: &str) -> Result<String, String> {
     getrandom::fill(&mut bytes)
         .map_err(|_| "Fable could not create a secure account request.".to_string())?;
     Ok(format!("{prefix}_{}", URL_SAFE_NO_PAD.encode(bytes)))
+}
+
+fn invitation_acceptance_idempotency_key(
+    account_binding: &str,
+    invitation_id: &str,
+) -> Result<String, String> {
+    if !valid_id(account_binding) || !valid_id(invitation_id) {
+        return Err("Fable could not bind the invitation request.".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(b"fable.account-invitation.accept.v1\0");
+    digest.update(account_binding.as_bytes());
+    digest.update(b"\0");
+    digest.update(invitation_id.as_bytes());
+    Ok(format!(
+        "invitation_accept_{}",
+        URL_SAFE_NO_PAD.encode(digest.finalize())
+    ))
+}
+
+async fn bound_hosted_call(
+    transport: &dyn HostedAccountTransport,
+    expected_binding: &str,
+    function_type: ConvexFunctionType,
+    path: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let before = transport
+        .account_binding()
+        .await
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    if before != expected_binding {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    let response = transport.call(function_type, path, args).await;
+    let after = transport
+        .account_binding()
+        .await
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    if after != expected_binding {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    response
 }
 
 /// A stable installation identifier is held in OS secure storage. The current
@@ -548,6 +623,8 @@ fn parse_pending_invitations(value: Value) -> Result<AccountPendingInvitationLis
     for item in &invitations {
         validate_invitation(&item.invitation)?;
         if item.invitation.status != "pending"
+            || item.workspace_name.trim().is_empty()
+            || item.workspace_name.chars().count() > 160
             || item.selection.kind != "direct-inbox"
             || item.selection.invitation_id != item.invitation.invitation_id
             || !matches!(
@@ -669,19 +746,25 @@ async fn reconcile_hosted_with_transport(
     // register it with the hosted `publicKey`-requiring endpoint.
     let _install_device_id = ensure_install_device_id();
     let bootstrap = parse_bootstrap(
-        transport
-            .call(
-                ConvexFunctionType::Mutation,
-                "workspace:bootstrapAccount",
-                json!({ "idempotencyKey": idempotency_key }),
-            )
-            .await?,
+        bound_hosted_call(
+            transport,
+            idempotency_key,
+            ConvexFunctionType::Mutation,
+            "workspace:bootstrapAccount",
+            json!({ "idempotencyKey": idempotency_key }),
+        )
+        .await?,
         idempotency_key,
     )?;
     let workspaces = parse_workspaces(
-        transport
-            .call(ConvexFunctionType::Query, "workspace:listMine", json!({}))
-            .await?,
+        bound_hosted_call(
+            transport,
+            idempotency_key,
+            ConvexFunctionType::Query,
+            "workspace:listMine",
+            json!({}),
+        )
+        .await?,
     )?;
     let initial = workspaces
         .iter()
@@ -691,9 +774,14 @@ async fn reconcile_hosted_with_transport(
         return Err("The hosted workspace list did not match the bootstrap membership.".into());
     }
     let devices = parse_devices(
-        transport
-            .call(ConvexFunctionType::Query, "device:listMine", json!({}))
-            .await?,
+        bound_hosted_call(
+            transport,
+            idempotency_key,
+            ConvexFunctionType::Query,
+            "device:listMine",
+            json!({}),
+        )
+        .await?,
     )?;
     let observed_at = now();
     store
@@ -774,36 +862,43 @@ async fn reconcile_hosted() -> Result<(), String> {
 async fn pending_invitations_with_transport(
     transport: &dyn HostedAccountTransport,
 ) -> Result<AccountPendingInvitationList, String> {
+    let account_binding = transport
+        .account_binding()
+        .await
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
     parse_pending_invitations(
-        transport
-            .call(
-                ConvexFunctionType::Query,
-                "membership:listRecipientPending",
-                json!({}),
-            )
-            .await?,
+        bound_hosted_call(
+            transport,
+            &account_binding,
+            ConvexFunctionType::Query,
+            "membership:listRecipientPending",
+            json!({}),
+        )
+        .await?,
     )
 }
 
 async fn accept_invitation_with_transport(
     transport: &dyn HostedAccountTransport,
+    account_binding: &str,
     invitation_id: &str,
     idempotency_key: &str,
     bootstrap_idempotency_key: &str,
     store: &crate::store::Store,
 ) -> Result<AcceptanceWithReconciliation, String> {
     let result = parse_acceptance_result(
-        transport
-            .call(
-                ConvexFunctionType::Mutation,
-                "membership:acceptInvitation",
-                json!({
-                    "invitationId": invitation_id,
-                    "presentation": { "kind": "direct-inbox", "invitationId": invitation_id },
-                    "idempotencyKey": idempotency_key,
-                }),
-            )
-            .await?,
+        bound_hosted_call(
+            transport,
+            account_binding,
+            ConvexFunctionType::Mutation,
+            "membership:acceptInvitation",
+            json!({
+                "invitationId": invitation_id,
+                "presentation": { "kind": "direct-inbox", "invitationId": invitation_id },
+                "idempotencyKey": idempotency_key,
+            }),
+        )
+        .await?,
         invitation_id,
         idempotency_key,
     )?;
@@ -813,6 +908,7 @@ async fn accept_invitation_with_transport(
                 status: "refreshed".into(),
                 message: "Workspace list is up to date.".into(),
             },
+            Err(message) if message == ACCOUNT_CHANGED_ERROR => return Err(message),
             Err(_message) => InvitationReconciliation {
                 status: "refresh-needed".into(),
                 message: "Invitation accepted, but Fable could not refresh the workspace list yet."
@@ -829,6 +925,80 @@ async fn accept_invitation_with_transport(
         result,
         reconciliation,
     })
+}
+
+fn project_acceptance_decision(
+    result: &HostedAcceptanceResult,
+) -> AccountInvitationAcceptanceDecision {
+    match result {
+        HostedAcceptanceResult::Accepted { invitation, .. } => {
+            AccountInvitationAcceptanceDecision::Accepted {
+                invitation_id: invitation.invitation_id.clone(),
+                workspace_id: invitation.workspace_id.clone(),
+                role: invitation.role.clone(),
+            }
+        }
+        HostedAcceptanceResult::Conflict { error, .. } => {
+            AccountInvitationAcceptanceDecision::Conflict {
+                code: error.code.clone(),
+                message: "Invitation could not be accepted because it changed.".into(),
+            }
+        }
+        HostedAcceptanceResult::Rejected { error } => {
+            AccountInvitationAcceptanceDecision::Rejected {
+                code: error.code.clone(),
+                message: "Invitation could not be accepted.".into(),
+            }
+        }
+    }
+}
+
+fn finalize_acceptance_outcome(
+    accepted: AcceptanceWithReconciliation,
+    preflight_status: AccountWorkspaceStatus,
+    final_status: Result<AccountWorkspaceStatus, String>,
+) -> Result<AccountInvitationAcceptanceOutcome, String> {
+    let was_accepted = matches!(&accepted.result, HostedAcceptanceResult::Accepted { .. });
+    let (account_workspace, reconciliation) = match final_status {
+        Ok(status) => (status, accepted.reconciliation),
+        Err(message) if message == ACCOUNT_CHANGED_ERROR => return Err(message),
+        Err(_message) if was_accepted => (
+            preflight_status,
+            InvitationReconciliation {
+                status: "refresh-needed".into(),
+                message: "Invitation accepted, but Fable could not refresh the workspace list yet."
+                    .into(),
+            },
+        ),
+        Err(_message) => (preflight_status, accepted.reconciliation),
+    };
+    Ok(AccountInvitationAcceptanceOutcome {
+        result: project_acceptance_decision(&accepted.result),
+        account_workspace,
+        reconciliation,
+    })
+}
+
+async fn bound_account_workspace_status(
+    transport: &dyn HostedAccountTransport,
+    expected_binding: &str,
+) -> Result<AccountWorkspaceStatus, String> {
+    let before = transport
+        .account_binding()
+        .await
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    if before != expected_binding {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    let status = account_workspace_status().await;
+    let after = transport
+        .account_binding()
+        .await
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    if after != expected_binding {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    status
 }
 
 fn local_status(
@@ -902,24 +1072,30 @@ pub async fn account_membership_accept_invitation(
     if !valid_id(&invitation_id) {
         return Err("Invitation id is invalid.".into());
     }
-    let idempotency_key = opaque_id("invitation_accept")?;
-    let bootstrap_idempotency_key = clerk_identity::native_bootstrap_idempotency_key().await?;
+    let transport = NativeHostedAccountTransport;
+    let account_binding = transport
+        .account_binding()
+        .await
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    let preflight_status = bound_account_workspace_status(&transport, &account_binding).await?;
+    let idempotency_key = invitation_acceptance_idempotency_key(&account_binding, &invitation_id)?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let accepted = accept_invitation_with_transport(
-        &NativeHostedAccountTransport,
+        &transport,
+        &account_binding,
         &invitation_id,
         &idempotency_key,
-        &bootstrap_idempotency_key,
+        &account_binding,
         store,
     )
     .await?;
-    let account_workspace = account_workspace_status().await?;
-    Ok(AccountInvitationAcceptanceOutcome {
-        result: accepted.result,
-        account_workspace,
-        reconciliation: accepted.reconciliation,
-    })
+    let final_status = if matches!(&accepted.result, HostedAcceptanceResult::Accepted { .. }) {
+        bound_account_workspace_status(&transport, &account_binding).await
+    } else {
+        Ok(preflight_status.clone())
+    };
+    finalize_acceptance_outcome(accepted, preflight_status, final_status)
 }
 
 #[tauri::command]
@@ -1029,12 +1205,21 @@ mod tests {
 
     struct ScriptedTransport {
         steps: Mutex<VecDeque<ScriptStep>>,
+        bindings: Mutex<VecDeque<String>>,
     }
 
     impl ScriptedTransport {
         fn new(steps: Vec<ScriptStep>) -> Self {
             Self {
                 steps: Mutex::new(steps.into()),
+                bindings: Mutex::new(VecDeque::new()),
+            }
+        }
+
+        fn with_bindings(steps: Vec<ScriptStep>, bindings: Vec<&str>) -> Self {
+            Self {
+                steps: Mutex::new(steps.into()),
+                bindings: Mutex::new(bindings.into_iter().map(str::to_string).collect()),
             }
         }
 
@@ -1044,6 +1229,16 @@ mod tests {
     }
 
     impl HostedAccountTransport for ScriptedTransport {
+        fn account_binding<'a>(&'a self) -> HostedStringFuture<'a> {
+            let binding = self
+                .bindings
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| "bootstrap_key".into());
+            Box::pin(async move { Ok(binding) })
+        }
+
         fn call<'a>(
             &'a self,
             function_type: ConvexFunctionType,
@@ -1093,6 +1288,32 @@ mod tests {
             "status": "active", "joinedFromInvitationId": invitation_id,
             "activatedAt": "2026-07-11T08:01:00.000Z"
         })
+    }
+
+    fn accepted_result(invitation_id: &str, idempotency_key: &str, replayed: bool) -> Value {
+        json!({
+            "status": "accepted", "invitation": accepted_invitation(invitation_id),
+            "membership": membership(invitation_id),
+            "idempotency": { "key": idempotency_key, "replayed": replayed, "recordedAt": "2026-07-11T08:01:00.000Z" }
+        })
+    }
+
+    fn test_account_status() -> AccountWorkspaceStatus {
+        AccountWorkspaceStatus {
+            configured: true,
+            state: "ready".into(),
+            message: "Ready.".into(),
+            account_bound: true,
+            workspaces: Vec::new(),
+            active_workspace: directory::ActiveWorkspaceSelection {
+                local_workspace_id: "local_home".into(),
+                fable_workspace_id: Some("ws_home".into()),
+                name: "Home".into(),
+                source: "hosted".into(),
+            },
+            active_context_owner: None,
+            devices: Vec::new(),
+        }
     }
 
     #[test]
@@ -1155,20 +1376,81 @@ mod tests {
     fn pending_invitation_parser_rejects_malformed_duplicate_and_nonpending_entries() {
         let pending = json!({
             "invitation": invitation("inv_a", "pending"),
-            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" }
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
+            "workspaceName": "Shared"
         });
         assert!(parse_pending_invitations(json!([pending.clone()])).is_ok());
         assert!(parse_pending_invitations(json!([pending.clone(), pending])).is_err());
         assert!(parse_pending_invitations(json!([{
             "invitation": invitation("inv_a", "accepted"),
-            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" }
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
+            "workspaceName": "Shared"
         }]))
         .is_err());
         assert!(parse_pending_invitations(json!([{
             "invitation": invitation("inv_a", "pending"),
-            "selection": { "kind": "direct-inbox", "invitationId": "other" }
+            "selection": { "kind": "direct-inbox", "invitationId": "other" },
+            "workspaceName": "Shared"
         }]))
         .is_err());
+        assert!(parse_pending_invitations(json!([{
+            "invitation": invitation("inv_a", "pending"),
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
+            "workspaceName": ""
+        }]))
+        .is_err());
+        assert!(parse_pending_invitations(json!([{
+            "invitation": invitation("inv_a", "pending"),
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
+            "workspaceName": "x".repeat(161)
+        }]))
+        .is_err());
+    }
+
+    #[test]
+    fn acceptance_idempotency_is_stable_and_account_scoped() {
+        let first = invitation_acceptance_idempotency_key("bootstrap_account_a", "inv_a").unwrap();
+        assert_eq!(
+            first,
+            invitation_acceptance_idempotency_key("bootstrap_account_a", "inv_a").unwrap()
+        );
+        assert_ne!(
+            first,
+            invitation_acceptance_idempotency_key("bootstrap_account_a", "inv_b").unwrap()
+        );
+        assert_ne!(
+            first,
+            invitation_acceptance_idempotency_key("bootstrap_account_b", "inv_a").unwrap()
+        );
+        assert!(!first.contains("bootstrap_account_a"));
+        assert!(!first.contains("inv_a"));
+    }
+
+    #[tokio::test]
+    async fn account_change_before_or_after_inbox_call_fails_generically() {
+        let step = || ScriptStep {
+            mutation: false,
+            path: "membership:listRecipientPending",
+            args: json!({}),
+            result: json!([]),
+        };
+        let before = ScriptedTransport::with_bindings(vec![step()], vec!["account_a", "account_b"]);
+        assert_eq!(
+            pending_invitations_with_transport(&before)
+                .await
+                .unwrap_err(),
+            ACCOUNT_CHANGED_ERROR
+        );
+        let after = ScriptedTransport::with_bindings(
+            vec![step()],
+            vec!["account_a", "account_a", "account_b"],
+        );
+        assert_eq!(
+            pending_invitations_with_transport(&after)
+                .await
+                .unwrap_err(),
+            ACCOUNT_CHANGED_ERROR
+        );
     }
 
     #[test]
@@ -1198,7 +1480,8 @@ mod tests {
     async fn scripted_pending_accept_reconcile_survives_store_reopen() {
         let pending = json!({
             "invitation": invitation("inv_a", "pending"),
-            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" }
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" },
+            "workspaceName": "Shared"
         });
         let transport = ScriptedTransport::new(vec![
             ScriptStep {
@@ -1259,6 +1542,7 @@ mod tests {
                 .unwrap();
         let accepted = accept_invitation_with_transport(
             &transport,
+            "bootstrap_key",
             "inv_a",
             "native_accept_key",
             "bootstrap_key",
@@ -1286,8 +1570,12 @@ mod tests {
                 && entry.member_id == "member_shared"
                 && entry.role == "editor"
         }));
-        let serialized = serde_json::to_string(&accepted.result).unwrap();
+        let serialized =
+            serde_json::to_string(&project_acceptance_decision(&accepted.result)).unwrap();
         assert!(!serialized.contains("token"));
+        assert!(!serialized.contains("native_accept_key"));
+        assert!(!serialized.contains("usr_recipient"));
+        assert!(!serialized.contains("member_shared"));
     }
 
     #[tokio::test]
@@ -1320,6 +1608,7 @@ mod tests {
                 .unwrap();
         let accepted = accept_invitation_with_transport(
             &transport,
+            "bootstrap_key",
             "inv_a",
             "native_accept_key",
             "bootstrap_key",
@@ -1340,5 +1629,197 @@ mod tests {
             .unwrap()
             .contains("refresh unavailable"));
         assert!(transport.finished());
+    }
+
+    #[tokio::test]
+    async fn lost_acceptance_response_retries_same_key_and_reconciles_replay() {
+        let binding = "bootstrap_key";
+        let stable_key = invitation_acceptance_idempotency_key(binding, "inv_a").unwrap();
+        let transport = ScriptedTransport::new(vec![
+            ScriptStep {
+                mutation: true,
+                path: "membership:acceptInvitation",
+                args: json!({
+                    "invitationId": "inv_a",
+                    "presentation": { "kind": "direct-inbox", "invitationId": "inv_a" },
+                    "idempotencyKey": stable_key.clone()
+                }),
+                result: json!({ "__error": "response lost" }),
+            },
+            ScriptStep {
+                mutation: true,
+                path: "membership:acceptInvitation",
+                args: json!({
+                    "invitationId": "inv_a",
+                    "presentation": { "kind": "direct-inbox", "invitationId": "inv_a" },
+                    "idempotencyKey": stable_key.clone()
+                }),
+                result: accepted_result("inv_a", &stable_key, true),
+            },
+            ScriptStep {
+                mutation: true,
+                path: "workspace:bootstrapAccount",
+                args: json!({ "idempotencyKey": binding }),
+                result: json!({
+                    "status": "existing", "internalUserId": "usr_recipient", "workspaceId": "ws_home", "memberId": "member_home",
+                    "idempotency": { "key": binding, "replayed": true }
+                }),
+            },
+            ScriptStep {
+                mutation: false,
+                path: "workspace:listMine",
+                args: json!({}),
+                result: json!([
+                    { "workspaceId": "ws_home", "name": "Home", "revision": 0, "policyRevision": 1, "memberId": "member_home", "role": "owner", "membershipRevision": 1 },
+                    { "workspaceId": "ws_shared", "name": "Shared", "revision": 2, "policyRevision": 1, "memberId": "member_shared", "role": "editor", "membershipRevision": 1 }
+                ]),
+            },
+            ScriptStep {
+                mutation: false,
+                path: "device:listMine",
+                args: json!({}),
+                result: json!([]),
+            },
+        ]);
+        let key = crate::store::vault::MasterKey::generate().unwrap();
+        let store =
+            crate::store::Store::open_in_memory(crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        assert!(accept_invitation_with_transport(
+            &transport,
+            binding,
+            "inv_a",
+            &stable_key,
+            binding,
+            &store,
+        )
+        .await
+        .is_err());
+        let replay = accept_invitation_with_transport(
+            &transport,
+            binding,
+            "inv_a",
+            &stable_key,
+            binding,
+            &store,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            replay.result,
+            HostedAcceptanceResult::Accepted { .. }
+        ));
+        assert_eq!(replay.reconciliation.status, "refreshed");
+        assert!(transport.finished());
+    }
+
+    #[test]
+    fn accepted_status_failure_uses_preflight_and_secret_free_projection() {
+        let stable_key = invitation_acceptance_idempotency_key("bootstrap_a", "inv_a").unwrap();
+        let hosted = parse_acceptance_result(
+            accepted_result("inv_a", &stable_key, false),
+            "inv_a",
+            &stable_key,
+        )
+        .unwrap();
+        let outcome = finalize_acceptance_outcome(
+            AcceptanceWithReconciliation {
+                result: hosted,
+                reconciliation: InvitationReconciliation {
+                    status: "refreshed".into(),
+                    message: "Workspace list is up to date.".into(),
+                },
+            },
+            test_account_status(),
+            Err("local status failed".into()),
+        )
+        .unwrap();
+        assert_eq!(outcome.reconciliation.status, "refresh-needed");
+        let serialized = serde_json::to_string(&outcome).unwrap();
+        assert!(serialized.contains("\"status\":\"accepted\""));
+        for forbidden in [
+            stable_key.as_str(),
+            "usr_recipient",
+            "member_shared",
+            "authorization-error",
+        ] {
+            assert!(!serialized.contains(forbidden));
+        }
+    }
+
+    #[tokio::test]
+    async fn account_switch_during_reconciliation_returns_no_accepted_dto() {
+        let transport = ScriptedTransport::with_bindings(
+            vec![
+                ScriptStep {
+                    mutation: true,
+                    path: "membership:acceptInvitation",
+                    args: json!({
+                        "invitationId": "inv_a",
+                        "presentation": { "kind": "direct-inbox", "invitationId": "inv_a" },
+                        "idempotencyKey": "native_key"
+                    }),
+                    result: accepted_result("inv_a", "native_key", false),
+                },
+                ScriptStep {
+                    mutation: true,
+                    path: "workspace:bootstrapAccount",
+                    args: json!({ "idempotencyKey": "account_a" }),
+                    result: json!({ "status": "existing" }),
+                },
+            ],
+            vec!["account_a", "account_a", "account_a", "account_b"],
+        );
+        let key = crate::store::vault::MasterKey::generate().unwrap();
+        let store =
+            crate::store::Store::open_in_memory(crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        assert_eq!(
+            accept_invitation_with_transport(
+                &transport,
+                "account_a",
+                "inv_a",
+                "native_key",
+                "account_a",
+                &store,
+            )
+            .await
+            .unwrap_err(),
+            ACCOUNT_CHANGED_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn account_switch_after_accept_call_returns_no_hosted_dto() {
+        let transport = ScriptedTransport::with_bindings(
+            vec![ScriptStep {
+                mutation: true,
+                path: "membership:acceptInvitation",
+                args: json!({
+                    "invitationId": "inv_a",
+                    "presentation": { "kind": "direct-inbox", "invitationId": "inv_a" },
+                    "idempotencyKey": "native_key"
+                }),
+                result: accepted_result("inv_a", "native_key", false),
+            }],
+            vec!["account_a", "account_b"],
+        );
+        let key = crate::store::vault::MasterKey::generate().unwrap();
+        let store =
+            crate::store::Store::open_in_memory(crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        assert_eq!(
+            accept_invitation_with_transport(
+                &transport,
+                "account_a",
+                "inv_a",
+                "native_key",
+                "account_a",
+                &store,
+            )
+            .await
+            .unwrap_err(),
+            ACCOUNT_CHANGED_ERROR
+        );
     }
 }
