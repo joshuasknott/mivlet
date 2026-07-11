@@ -1403,6 +1403,40 @@ fn project_canonical_account_options(
         .collect()
 }
 
+fn require_selectable_canonical_connection(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    connection_id: &str,
+) -> Result<crate::store::repos::connection_record::SafeConnectionRecord, ConnectorCommandError> {
+    let record = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::get(tx, store, scope, connection_id)
+        })
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
+        .ok_or_else(|| {
+            command_error(
+                "not-found",
+                connector_id,
+                "The selected Connection is unavailable.",
+                false,
+            )
+        })?;
+    if record.connector_definition_key != connector_id
+        || record.lifecycle != "authorized"
+        || record.authorization_state != "authorized"
+        || record.credential_state != "available"
+    {
+        return Err(command_error(
+            "needs-auth",
+            connector_id,
+            "The selected Connection must be reauthorized before it can be used.",
+            false,
+        ));
+    }
+    Ok(record)
+}
+
 fn reconcile_canonical_connector_accounts(
     store: &crate::store::Store,
     scope: &crate::authorized_scope::AuthorizedCommandScope,
@@ -1466,8 +1500,19 @@ pub fn switch_connector_account(
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let workspace_id = workspace_id
         .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
-    require_connector_workspace(Some(workspace_id.clone()))?;
     let entry = require_connector(&connector_id)?;
+    let (identity, scope) = connector_authorization_context(Some(workspace_id.clone()), entry.id)?;
+    let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            entry.id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    require_selectable_canonical_connection(durable_store, &scope, entry.id, &connection_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     crate::connector_auth::switch_active_connection(
@@ -2011,6 +2056,10 @@ mod workspace_scope_tests {
             .unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].revision, 1);
+        assert!(
+            require_selectable_canonical_connection(&store, &scope_a, "gmail", &records[0].id,)
+                .is_ok()
+        );
         assert!(!serde_json::to_string(&records)
             .unwrap()
             .contains("provider-account-secret"));
@@ -2072,6 +2121,34 @@ mod workspace_scope_tests {
             .unwrap();
         assert_eq!(degraded[0].health_state, "degraded");
         assert_eq!(degraded[0].revision, 3);
+        assert!(require_selectable_canonical_connection(
+            &store,
+            &scope_a,
+            "gmail",
+            &degraded[0].id,
+        )
+        .is_ok());
+        store
+            .transaction(|tx| {
+                crate::store::repos::connection_record::transition_native_connector(
+                    tx,
+                    &store,
+                    &scope_a,
+                    &degraded[0].id,
+                    degraded[0].revision,
+                    "refresh-required",
+                    "expired",
+                    "unhealthy",
+                    "refresh-required",
+                    "5",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let unavailable =
+            require_selectable_canonical_connection(&store, &scope_a, "gmail", &degraded[0].id)
+                .unwrap_err();
+        assert_eq!(unavailable.code, "needs-auth");
 
         store
             .transaction(|tx| {
