@@ -30,11 +30,13 @@ export interface ProjectKnowledgeView {
   sources: ProjectKnowledgeSourceView[];
   loading: boolean;
   error: string | null;
+  actionStatus: string | null;
   refresh: () => void | Promise<unknown>;
   importFile: (file: File) => Promise<unknown>;
   search: (query: string) => Promise<ProjectKnowledgeSourceView[]>;
   toggleDisabled: (sourceId: string) => Promise<unknown>;
   remove: (sourceId: string) => Promise<unknown>;
+  updateFile: (sourceId: string, file: File) => Promise<unknown>;
 }
 
 export interface ProjectMemoryRecordView {
@@ -337,6 +339,7 @@ export function ProjectPage({
           </div>
         ) : null}
         {knowledgeActionError ? <p className="project-knowledge__state project-knowledge__state--error" role="alert">{knowledgeActionError}</p> : null}
+        {knowledge.actionStatus ? <p className="project-knowledge__state" role="status">{knowledge.actionStatus}</p> : null}
         {knowledge.loading ? <p className="project-knowledge__state" role="status">Loading project knowledge…</p> : null}
         {!knowledge.loading && !knowledge.error && visibleKnowledge.length === 0 ? (
           <p className="project-page__empty">{knowledgeResults ? "No matching project knowledge." : "No files added yet."}</p>
@@ -354,7 +357,23 @@ export function ProjectPage({
                   {source.statusMessage ? <span title={source.statusMessage}>{source.statusMessage}</span> : null}
                 </div>
                 {project.lifecycle === "active" ? (
+                  <>
                   <div className="project-knowledge__actions">
+                    <label className="project-knowledge__update-file">
+                      <span>{knowledgeActionId === source.id ? "Updatingâ€¦" : "Update file"}</span>
+                      <input
+                        className="sr-only"
+                        type="file"
+                        aria-label={`Choose the current version of ${source.title}`}
+                        disabled={knowledgeActionId === source.id}
+                        accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml,text/plain,text/markdown,application/json,text/csv,application/yaml"
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          event.currentTarget.value = "";
+                          if (file) void runKnowledgeAction(source.id, () => knowledge.updateFile(source.id, file));
+                        }}
+                      />
+                    </label>
                     {!source.disabled ? (
                       <button
                         type="button"
@@ -380,6 +399,8 @@ export function ProjectPage({
                       }}
                     >Delete</button>
                   </div>
+                  <p className="project-knowledge__update-help">Choose the current version of this file. Fable wonâ€™t keep access to its location.</p>
+                  </>
                 ) : null}
               </li>
             ))}

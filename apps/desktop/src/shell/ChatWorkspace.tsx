@@ -310,10 +310,12 @@ export function ChatWorkspace() {
     })),
     loading: projectKnowledge.loading,
     error: projectKnowledge.error,
+    actionStatus: projectKnowledge.actionStatus,
     refresh: projectKnowledge.refresh,
     importFile: projectKnowledge.importFile,
     toggleDisabled: projectKnowledge.toggleDisabled,
     remove: projectKnowledge.remove,
+    updateFile: projectKnowledge.updateFile,
     search: async (query: string) => {
       const result = await projectKnowledge.search(query);
       return result.citations.map((citation: KnowledgeCitation) => ({
@@ -323,7 +325,7 @@ export function ChatWorkspace() {
         freshness: citation.freshness
       }));
     }
-  }), [projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.remove, projectKnowledge.search, projectKnowledge.sources, projectKnowledge.toggleDisabled]);
+  }), [projectKnowledge.actionStatus, projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.remove, projectKnowledge.search, projectKnowledge.sources, projectKnowledge.toggleDisabled, projectKnowledge.updateFile]);
   const projectMemory = useProjectMemory({
     workspaceId: boundWorkspaceId ?? "",
     projectId: scopedProjectId ?? "",

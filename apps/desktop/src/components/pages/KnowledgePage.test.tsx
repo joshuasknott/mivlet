@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { KnowledgeSource, LocalFileImport, MemoryRecord } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -158,6 +158,33 @@ describe("KnowledgePage — import lifecycle states", () => {
     expect(screen.getByText(/could not import that file/i)).toBeInTheDocument();
     // No phantom source row.
     expect(screen.queryByText("Quarterly plan")).not.toBeInTheDocument();
+  });
+
+  it("uses an explicit one-shot file chooser for local refresh while connectors keep Refresh", async () => {
+    const user = userEvent.setup();
+    const runtime = stubRuntime({
+      sources: [makeLocalImport(), makeSource({ id: "connector-1", title: "Drive plan", connectorId: "google-drive" })],
+      memories: [], pinnedSourceIds: [], memoryDisabled: false, importStatus: null,
+      memoryStatus: "", memoryExportText: "", knowledgeExportText: "", connectorManifests: []
+    });
+    let finishUpdate!: () => void;
+    runtime.refreshKnowledgeSource = vi.fn((sourceId: string, file?: File) => {
+      if (!file) return Promise.resolve();
+      return new Promise<void>((resolve) => { finishUpdate = resolve; });
+    });
+    renderPage(runtime);
+    await user.click(screen.getByRole("button", { name: "Open Quarterly plan" }));
+    expect(screen.getByText("Choose the current version of this file. Fable wonâ€™t keep access to its location.")).toBeInTheDocument();
+    const file = new File(["new plan"], "quarterly-plan.md", { type: "text/markdown" });
+    await user.upload(screen.getByLabelText("Choose the current version of Quarterly plan"), file);
+    expect(runtime.refreshKnowledgeSource).toHaveBeenCalledWith("source-1", file);
+    expect(screen.getByText("Updatingâ€¦")).toBeInTheDocument();
+    finishUpdate();
+    await waitFor(() => expect(screen.queryByText("Updatingâ€¦")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Open Drive plan" }));
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(runtime.refreshKnowledgeSource).toHaveBeenCalledWith("connector-1");
   });
 });
 

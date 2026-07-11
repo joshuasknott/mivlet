@@ -58,6 +58,7 @@ vi.mock("../runtime", async (importOriginal) => {
     loadRuntimeSnapshot: vi.fn(async () => null),
     prepareRuntimeConnectorAction: vi.fn(async () => null),
     promoteRuntimeKnowledgeSourceToMemory: vi.fn(async () => null),
+    refreshRuntimeLocalKnowledgeSource: vi.fn(async () => null),
     recordRuntimeBackendEvent: vi.fn(async () => null),
     refreshRuntimeIdentity: vi.fn(async () => null),
     reconcileRuntimeAccountWorkspace: vi.fn(async () => null),
@@ -88,6 +89,15 @@ vi.mock("../runtime", async (importOriginal) => {
     startRuntimeConnectorAuth: vi.fn(async () => null)
   };
 });
+
+vi.mock("../lib/local-knowledge-refresh", () => ({
+  buildLocalKnowledgeRefreshRequest: vi.fn(async (source: LocalFileImport, file: File) => ({
+    sourceId: source.id,
+    expectedTitle: source.title,
+    expectedFingerprint: source.contentFingerprint,
+    candidate: { name: file.name, content: "selected content", sizeBytes: file.size, importedAt: "2026-07-11T00:00:00.000Z" }
+  }))
+}));
 
 function renderHook<Result>(callback: () => Result) {
   return rtlRenderHook(callback, {
@@ -1222,6 +1232,36 @@ describe("useShellRuntime — source lifecycle (disable / delete / pin guard)", 
     expect(result.current.importStatus).toMatch(/could not save source changes|disk full/i);
 
     vi.mocked(runtime.saveRuntimeImportedKnowledgeSources).mockResolvedValue(null);
+  });
+
+  it("updates a workspace local source only after native success and preserves lifecycle state", async () => {
+    seedShellState({ importedKnowledgeSources: [seedImport({ pinned: true, disabled: true })] });
+    vi.mocked(runtime.refreshRuntimeLocalKnowledgeSource).mockResolvedValueOnce({
+      outcome: "updated",
+      source: seedImport({ contentPreview: "New content", contentFingerprint: "fp-new", freshness: "Updated now", pinned: false, disabled: false })
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+    const file = new File(["New content"], "quarterly-plan.md", { type: "text/markdown" });
+    await act(async () => { await result.current.refreshKnowledgeSource("source-seed", file); });
+    expect(runtime.refreshRuntimeLocalKnowledgeSource).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "source-seed" }));
+    const updated = result.current.workspaceKnowledgeSources.find((source) => source.id === "source-seed");
+    expect(updated).toMatchObject({ contentPreview: "New content", contentFingerprint: "fp-new", pinned: true, disabled: true });
+    expect(result.current.importStatus).toBe("Updated from quarterly-plan.md.");
+  });
+
+  it("keeps old workspace content on unchanged and native failure", async () => {
+    seedShellState({ importedKnowledgeSources: [seedImport()] });
+    vi.mocked(runtime.refreshRuntimeLocalKnowledgeSource).mockResolvedValueOnce({ outcome: "unchanged", source: seedImport() });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+    const file = new File(["Plan content"], "quarterly-plan.md", { type: "text/markdown" });
+    await act(async () => { await result.current.refreshKnowledgeSource("source-seed", file); });
+    expect(result.current.importStatus).toBe("This source is already up to date.");
+    vi.mocked(runtime.refreshRuntimeLocalKnowledgeSource).mockRejectedValueOnce(new Error("This source changed elsewhere. Reload Knowledge and try again."));
+    await act(async () => { await expect(result.current.refreshKnowledgeSource("source-seed", file)).rejects.toThrow(/changed elsewhere/i); });
+    expect(result.current.workspaceKnowledgeSources[0].contentPreview).toBe("Plan content");
+    expect(result.current.importStatus).toBe("This source changed elsewhere. Reload Knowledge and try again.");
   });
 });
 

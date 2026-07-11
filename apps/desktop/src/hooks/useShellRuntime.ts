@@ -161,6 +161,7 @@ import {
   executeRuntimeConnectorAction,
   prepareRuntimeConnectorAction,
   promoteRuntimeKnowledgeSourceToMemory,
+  refreshRuntimeLocalKnowledgeSource,
   refreshRuntimeConnectorHealth,
   resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
@@ -175,6 +176,7 @@ import {
   verifyRuntimeBackend,
   wireToWorkflowRun
 } from "../runtime";
+import { buildLocalKnowledgeRefreshRequest } from "../lib/local-knowledge-refresh";
 import { useRuntimeSchedules } from "./useRuntimeSchedules";
 import {
   clearActiveRuntimeDataScope,
@@ -1605,7 +1607,37 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     });
   };
 
-  const refreshKnowledgeSource = async (sourceId: string) => {
+  const refreshKnowledgeSource = async (sourceId: string, file?: File) => {
+    const localTarget = importedKnowledgeSources.find((source) => source.id === sourceId);
+    if (localTarget) {
+      if (!file) throw new Error(`Choose the current version of ${localTarget.title}.`);
+      try {
+        const request = await buildLocalKnowledgeRefreshRequest(localTarget, file);
+        const response = await refreshRuntimeLocalKnowledgeSource(request);
+        if (!response) throw new Error("Fable could not update that file.");
+        if (response.outcome === "updated") {
+          setImportedKnowledgeSources((current) => current.map((source) => source.id === sourceId
+            ? {
+                ...response.source,
+                pinned: source.pinned,
+                disabled: source.disabled,
+                ...(source.deletedAt ? { deletedAt: source.deletedAt } : {})
+              }
+            : source));
+          setImportStatus(`Updated from ${file.name}.`);
+        } else {
+          setImportStatus("This source is already up to date.");
+        }
+        setLastAction(response.outcome === "updated" ? `Updated from ${file.name}.` : "This source is already up to date.");
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Fable could not update that file.";
+        setImportStatus(message);
+        setLastAction(message);
+        throw error;
+      }
+    }
+
     const refreshedAt = new Date().toISOString();
     const refresh = <T extends KnowledgeSource>(sources: T[]) =>
       sources.map((source) =>

@@ -24,11 +24,13 @@ const emptyKnowledge: ProjectKnowledgeView = {
   sources: [],
   loading: false,
   error: null,
+  actionStatus: null,
   refresh: async () => undefined,
   importFile: async () => undefined,
   search: async () => [],
   toggleDisabled: async () => undefined,
-  remove: async () => undefined
+  remove: async () => undefined,
+  updateFile: async () => undefined
 };
 
 const emptyMemory: ProjectMemoryView = {
@@ -387,6 +389,7 @@ describe("ProjectPage", () => {
     expect(screen.getByText("Not in use")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Use again" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose the current version of Launch brief")).not.toBeInTheDocument();
   });
 
   it("surfaces native project source lifecycle rejections", async () => {
@@ -408,5 +411,29 @@ describe("ProjectPage", () => {
     );
     await user.click(screen.getByRole("button", { name: "Stop using" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Archived projects are read-only.");
+  });
+
+  it("chooses a one-shot current file for project source updates", async () => {
+    const user = userEvent.setup();
+    let finishUpdate!: () => void;
+    const updateFile = vi.fn(() => new Promise<void>((resolve) => { finishUpdate = resolve; }));
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={{ ...emptyKnowledge, sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today" }], updateFile }}
+        memory={emptyMemory}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Choose the current version of this file. Fable wonâ€™t keep access to its location.")).toBeInTheDocument();
+    const file = new File(["new"], "launch.md", { type: "text/markdown" });
+    await user.upload(screen.getByLabelText("Choose the current version of Launch brief"), file);
+    expect(screen.getByText("Updatingâ€¦")).toBeInTheDocument();
+    await waitFor(() => expect(updateFile).toHaveBeenCalledWith("source-1", file));
+    finishUpdate();
+    await waitFor(() => expect(screen.queryByText("Updatingâ€¦")).not.toBeInTheDocument());
   });
 });

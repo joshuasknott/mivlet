@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   load: vi.fn(),
   save: vi.fn(),
   importSource: vi.fn(),
+  refreshSource: vi.fn(),
+  buildRefresh: vi.fn(),
   search: vi.fn(),
   getProject: vi.fn()
 }));
@@ -16,8 +18,10 @@ vi.mock("../runtime", () => ({
   loadRuntimeImportedKnowledgeSources: mocks.load,
   saveRuntimeImportedKnowledgeSources: mocks.save,
   importRuntimeLocalKnowledgeSource: mocks.importSource,
+  refreshRuntimeLocalKnowledgeSource: mocks.refreshSource,
   searchRuntimeKnowledgeSources: mocks.search
 }));
+vi.mock("../lib/local-knowledge-refresh", () => ({ buildLocalKnowledgeRefreshRequest: mocks.buildRefresh }));
 vi.mock("../lib/project-runtime", () => ({ getRuntimeProject: mocks.getProject }));
 
 const imported = {
@@ -51,6 +55,7 @@ describe("useProjectKnowledge", () => {
     mocks.load.mockResolvedValue([]);
     mocks.importSource.mockResolvedValue(imported);
     mocks.save.mockImplementation(async (sources) => sources);
+    mocks.buildRefresh.mockImplementation(async (source, file: File) => ({ sourceId: source.id, candidate: { name: file.name, content: "selected content" } }));
     mocks.search.mockResolvedValue({ query: "notes", mode: "lexical-fallback", citations: [] });
     mocks.getProject.mockResolvedValue({ id: "project-a", lifecycle: "active" });
   });
@@ -105,7 +110,7 @@ describe("useProjectKnowledge", () => {
     const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.sources).toHaveLength(1));
     await act(async () => { await result.current.toggleDisabled("source-1"); });
-    expect(result.current.sources[0].disabled).toBe(true);
+    await waitFor(() => expect(result.current.sources[0].disabled).toBe(true));
     expect(result.current.liveSources).toEqual([]);
     await act(async () => { await result.current.search("notes"); });
     expect(mocks.search).toHaveBeenLastCalledWith("notes", [], undefined, { workspaceId: "workspace-a", projectId: "project-a" });
@@ -119,7 +124,7 @@ describe("useProjectKnowledge", () => {
     const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.sources).toHaveLength(1));
     await act(async () => { await result.current.remove("source-1"); });
-    expect(result.current.sources).toEqual([]);
+    await waitFor(() => expect(result.current.sources).toEqual([]));
     expect(result.current.liveSources).toEqual([]);
     expect(mocks.save).toHaveBeenCalledWith([
       expect.objectContaining({ id: "source-1", disabled: true, pinned: false, deletedAt: expect.any(String) })
@@ -148,7 +153,7 @@ describe("useProjectKnowledge", () => {
     await waitFor(() => expect(b.result.current.sources).toHaveLength(1));
     await waitFor(() => expect(otherWorkspace.result.current.sources).toHaveLength(1));
     await act(async () => { await a.result.current.toggleDisabled("source-project-a"); });
-    expect(a.result.current.sources[0].disabled).toBe(true);
+    await waitFor(() => expect(a.result.current.sources[0].disabled).toBe(true));
     expect(b.result.current.sources[0].disabled).toBeFalsy();
     expect(otherWorkspace.result.current.sources[0].disabled).toBeFalsy();
     expect(mocks.save).toHaveBeenLastCalledWith(expect.any(Array), { workspaceId: "workspace-a", projectId: "project-a" });
@@ -162,5 +167,33 @@ describe("useProjectKnowledge", () => {
     await act(async () => { await expect(result.current.toggleDisabled("source-1")).rejects.toThrow(/read-only/i); });
     expect(mocks.save).not.toHaveBeenCalled();
     expect(result.current.sources[0].disabled).toBeFalsy();
+  });
+
+  it("updates only the exact project after native success and searches new content", async () => {
+    mocks.load.mockResolvedValue([{ ...imported, pinned: true, disabled: false }]);
+    mocks.refreshSource.mockResolvedValue({ outcome: "updated", source: { ...imported, contentPreview: "New launch content", contentFingerprint: "new-fp", freshness: "Updated now", pinned: false, disabled: true } });
+    const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    const file = new File(["New launch content"], "notes.md", { type: "text/markdown" });
+    await act(async () => { await result.current.updateFile("source-1", file); });
+    expect(mocks.refreshSource).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "source-1" }), { workspaceId: "workspace-a", projectId: "project-a" });
+    expect(result.current.sources[0]).toMatchObject({ contentPreview: "New launch content", contentFingerprint: "new-fp", pinned: true, disabled: false });
+    expect(result.current.actionStatus).toBe("Updated from notes.md.");
+    await act(async () => { await result.current.search("launch"); });
+    expect(mocks.search).toHaveBeenLastCalledWith("launch", [expect.objectContaining({ contentPreview: "New launch content" })], undefined, { workspaceId: "workspace-a", projectId: "project-a" });
+  });
+
+  it("keeps old project state on unchanged and stale responses", async () => {
+    mocks.load.mockResolvedValue([imported]);
+    mocks.refreshSource.mockResolvedValueOnce({ outcome: "unchanged", source: imported });
+    const { result } = renderHook(() => useProjectKnowledge({ workspaceId: "workspace-a", projectId: "project-a", enabled: true }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(1));
+    const file = new File(["Useful notes"], "notes.md", { type: "text/markdown" });
+    await act(async () => { await result.current.updateFile("source-1", file); });
+    expect(result.current.actionStatus).toBe("This source is already up to date.");
+    mocks.refreshSource.mockRejectedValueOnce(new Error("This source changed elsewhere. Reload Knowledge and try again."));
+    await act(async () => { await expect(result.current.updateFile("source-1", file)).rejects.toThrow(/changed elsewhere/i); });
+    expect(result.current.sources[0].contentFingerprint).toBe("fingerprint");
+    expect(result.current.error).toMatch(/changed elsewhere/i);
   });
 });

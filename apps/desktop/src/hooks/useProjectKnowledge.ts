@@ -1,16 +1,18 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { validateLocalFileCandidate, type LocalTextFileCandidate } from "@fable/connectors";
 import type { LocalFileImport } from "@fable/protocol";
 import {
   importRuntimeLocalKnowledgeSource,
   loadRuntimeImportedKnowledgeSources,
+  refreshRuntimeLocalKnowledgeSource,
   saveRuntimeImportedKnowledgeSources,
   searchRuntimeKnowledgeSources,
   type RuntimeKnowledgeScopeOverride
 } from "../runtime";
 import { getRuntimeProject } from "../lib/project-runtime";
 import { readFileAsText } from "../lib/helpers";
+import { buildLocalKnowledgeRefreshRequest } from "../lib/local-knowledge-refresh";
 
 export interface UseProjectKnowledgeOptions {
   workspaceId: string;
@@ -33,6 +35,11 @@ export function useProjectKnowledge(options: UseProjectKnowledgeOptions) {
   const queryKey = projectKnowledgeQueryKeys.scope(workspaceId, projectId);
   const queryClient = useQueryClient();
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+  useEffect(() => {
+    setMutationError(null);
+    setActionStatus(null);
+  }, [projectId, workspaceId]);
   const query = useQuery({
     queryKey,
     queryFn: async () => (await loadRuntimeImportedKnowledgeSources(scope)) ?? [],
@@ -128,6 +135,27 @@ export function useProjectKnowledge(options: UseProjectKnowledgeOptions) {
       : source));
   }, [allSources, persist]);
 
+  const updateFile = useCallback((sourceId: string, file: File) => surfaceError(async () => {
+    await ensureWritable();
+    const target = allSources.find((source) => source.id === sourceId && !source.deletedAt);
+    if (!target) throw new Error("That project source is no longer available.");
+    setActionStatus(null);
+    const request = await buildLocalKnowledgeRefreshRequest(target, file);
+    const response = await refreshRuntimeLocalKnowledgeSource(request, scope);
+    if (!response) throw new Error("Fable could not update that file.");
+    const authoritative = {
+      ...response.source,
+      pinned: target.pinned,
+      disabled: target.disabled,
+      ...(target.deletedAt ? { deletedAt: target.deletedAt } : {})
+    };
+    queryClient.setQueryData(queryKey, allSources.map((source) => source.id === sourceId ? authoritative : source));
+    setActionStatus(response.outcome === "unchanged"
+      ? "This source is already up to date."
+      : `Updated from ${file.name}.`);
+    return response;
+  }), [allSources, ensureWritable, queryClient, queryKey, scope, surfaceError]);
+
   const sources = useMemo(() => allSources.filter((source) => !source.deletedAt), [allSources]);
   const liveSources = useMemo(
     () => allSources.filter((source) => !source.deletedAt && !source.disabled),
@@ -144,10 +172,12 @@ export function useProjectKnowledge(options: UseProjectKnowledgeOptions) {
     liveSources,
     loading: options.enabled && query.isPending,
     error: mutationError ?? (query.error instanceof Error ? query.error.message : null),
+    actionStatus,
     refresh,
     importFile,
     search,
+    updateFile,
     toggleDisabled,
     remove
-  }), [importFile, liveSources, mutationError, options.enabled, query.error, query.isPending, refresh, remove, search, sources, toggleDisabled]);
+  }), [actionStatus, importFile, liveSources, mutationError, options.enabled, query.error, query.isPending, refresh, remove, search, sources, toggleDisabled, updateFile]);
 }

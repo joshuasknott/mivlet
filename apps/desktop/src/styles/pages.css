@@ -372,6 +372,7 @@
 
 .project-knowledge__list li > button,
 .project-knowledge__actions button,
+.project-knowledge__update-file,
 .project-memory button {
   min-height: 30px;
   padding: 0 10px;
@@ -380,6 +381,28 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
   font-size: var(--text-12);
+}
+
+.project-knowledge__update-file,
+.knowledge-item__update-file {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.knowledge-item__update-file > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-knowledge__update-help,
+.knowledge-item__update-help {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  line-height: 1.45;
 }
 
 .project-knowledge__item--disabled {
@@ -754,6 +777,7 @@
 .knowledge-add summary,
 .knowledge-memory-actions button,
 .knowledge-item__actions button,
+.knowledge-item__actions .knowledge-item__update-file,
 .knowledge-memory-edit button {
   display: inline-flex;
   align-items: center;
@@ -776,7 +800,8 @@
 
 .knowledge-add summary:hover,
 .knowledge-memory-actions button:hover,
-.knowledge-item__actions button:hover {
+.knowledge-item__actions button:hover,
+.knowledge-item__actions .knowledge-item__update-file:hover {
   color: var(--ink);
   background: var(--surface-hover);
 }

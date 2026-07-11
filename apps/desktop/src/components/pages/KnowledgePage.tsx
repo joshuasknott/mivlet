@@ -412,6 +412,8 @@ function SourceList({
   expandedId: string | null;
   onExpand: (id: string | null) => void;
 }) {
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState("");
   if (sources.length === 0) {
     return (
       <EmptyState
@@ -424,6 +426,7 @@ function SourceList({
 
   return (
     <div className="knowledge-list" role="list">
+      {updateError ? <p className="knowledge-notice knowledge-notice--error" role="alert">{updateError}</p> : null}
       {sources.map((source) => {
         const expanded = expandedId === source.id;
         const pinned = runtime.pinnedSourceIds.includes(source.id);
@@ -503,10 +506,32 @@ function SourceList({
                     <Database size={16} />
                     Save to memories
                   </button>
-                  <button type="button" onClick={() => void runtime.refreshKnowledgeSource(source.id)}>
-                    <ArrowClockwise size={16} />
-                    Refresh
-                  </button>
+                  {source.connectorId === "local-files" ? (
+                    <label className="knowledge-item__update-file">
+                      <span><ArrowClockwise size={16} /> {updatingId === source.id ? "Updatingâ€¦" : "Update file"}</span>
+                      <input
+                        className="sr-only"
+                        type="file"
+                        aria-label={`Choose the current version of ${source.title}`}
+                        disabled={updatingId === source.id}
+                        accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml,text/plain,text/markdown,application/json,text/csv,application/yaml"
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.[0];
+                          event.currentTarget.value = "";
+                          if (!file) return;
+                          setUpdatingId(source.id);
+                          setUpdateError("");
+                          void runtime.refreshKnowledgeSource(source.id, file)
+                            .catch((cause) => setUpdateError(cause instanceof Error ? cause.message : "Fable could not update that file."))
+                            .finally(() => setUpdatingId(null));
+                        }}
+                      />
+                    </label>
+                  ) : (
+                    <button type="button" onClick={() => void runtime.refreshKnowledgeSource(source.id)}>
+                      <ArrowClockwise size={16} /> Refresh
+                    </button>
+                  )}
                   <button type="button" onClick={() => runtime.toggleKnowledgeSourceDisabled(source.id)}>
                     {source.disabled ? "Use source" : "Stop using"}
                   </button>
@@ -519,6 +544,9 @@ function SourceList({
                     onConfirm={() => runtime.deleteKnowledgeSource(source.id)}
                   />
                 </div>
+                {source.connectorId === "local-files" ? (
+                  <p className="knowledge-item__update-help">Choose the current version of this file. Fable wonâ€™t keep access to its location.</p>
+                ) : null}
               </div>
             ) : null}
           </article>

@@ -133,7 +133,7 @@ export interface ShellRuntime {
   knowledgeExportText: string;
   cancelMemoryEdit: () => void;
   searchKnowledge: (query: string) => Promise<void>;
-  refreshKnowledgeSource: (sourceId: string) => Promise<void>;
+  refreshKnowledgeSource: (sourceId: string, file?: File) => Promise<void>;
   toggleKnowledgeSourceDisabled: (sourceId: string) => void;
   /** Permanently remove a source from search, citations, pins, and context. */
   deleteKnowledgeSource: (sourceId: string) => void;
