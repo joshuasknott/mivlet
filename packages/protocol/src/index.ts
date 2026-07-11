@@ -17,7 +17,7 @@ import type {
   PermissionMode,
   PermissionProfileId
 } from "./domains/approvals.js";
-import type { BackendProvider } from "./domains/agent-runtime.js";
+import type { BackendProvider, ContextRecordAuthorityScope } from "./domains/agent-runtime.js";
 import type { AutomationStatus, ScheduleEntry } from "./domains/scheduling-workflows.js";
 
 export type MemoryKind = "fact" | "inference" | "preference" | "imported";
@@ -45,6 +45,8 @@ export interface MemoryProvenance {
 export interface MemoryRecord {
   /** Explicit durable owner; legacy snapshots are assigned during migration. */
   workspaceId?: WorkspaceId;
+  /** Native-canonical access facts; absent legacy records are never shared. */
+  authorityScope?: ContextRecordAuthorityScope;
   id: string;
   kind: MemoryKind;
   title: string;
@@ -768,6 +770,8 @@ export type SourceStatus = "ok" | "indexing" | "stale" | "error";
 export interface KnowledgeSource {
   /** Explicit durable owner; legacy snapshots are assigned during migration. */
   workspaceId?: WorkspaceId;
+  /** Native-canonical access facts; absent legacy records are never shared. */
+  authorityScope?: ContextRecordAuthorityScope;
   id: string;
   title: string;
   kind: KnowledgeSourceKind;

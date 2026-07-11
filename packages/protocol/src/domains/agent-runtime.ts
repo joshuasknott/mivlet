@@ -4,6 +4,7 @@ import type {
   ApprovalRiskLevel,
   PermissionMode
 } from "./approvals.js";
+import type { MemberId } from "../spine/primitives.js";
 
 export type AgentRunStatus =
   | "queued"
@@ -48,6 +49,32 @@ export interface RunContextScope {
   threadId?: string;
 }
 
+/** Portable access boundary for Knowledge and Memory records. */
+export type ContextRecordAuthorityScope =
+  | {
+      authority: "local";
+      visibility: "member-private";
+      ownerMemberId: MemberId;
+    }
+  | {
+      authority: "convex";
+      visibility: "workspace-shared";
+      ownerMemberId?: never;
+    };
+
+/** Audience the context was assembled for; it never expands record authority. */
+export type RunContextAudience =
+  | {
+      authority: "local";
+      visibility: "member-private";
+      actingMemberId: MemberId;
+    }
+  | {
+      authority: "convex";
+      visibility: "workspace-shared";
+      actingMemberId: MemberId;
+    };
+
 /** Immutable citation snapshot: later source changes cannot rewrite run history. */
 export interface RunContextCitation {
   sourceId: string;
@@ -70,13 +97,15 @@ export interface RunContextCitation {
   sourcePath?: string;
   mediaType?: string;
   scope?: RunContextScope;
+  /** Access facts snapshotted from the authorized source. */
+  authorityScope?: ContextRecordAuthorityScope;
 }
 
 /**
  * Non-secret evidence captured before provider egress. It records what bounded
  * context was selected and why, without storing hidden reasoning.
  */
-export interface RunContextReceipt {
+export interface RunContextReceiptV1 {
   version: 1;
   runId: string;
   assembledAt: string;
@@ -84,6 +113,18 @@ export interface RunContextReceipt {
   citations: RunContextCitation[];
   contributions: RunContextContribution[];
 }
+
+export interface RunContextReceiptV2 {
+  version: 2;
+  runId: string;
+  assembledAt: string;
+  scope: RunContextScope;
+  audience: RunContextAudience;
+  citations: RunContextCitation[];
+  contributions: RunContextContribution[];
+}
+
+export type RunContextReceipt = RunContextReceiptV1 | RunContextReceiptV2;
 
 /** Transient prepared context handed to the run boundary before egress. */
 export interface PreparedRunContext {
