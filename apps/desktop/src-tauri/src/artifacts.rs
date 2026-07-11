@@ -5,7 +5,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use crate::store::repos::{artifact, knowledge_source, scope::DataScope, workspace_directory};
+use crate::agent_runs::normalize_agent_run;
+use crate::models::{PersistedAgentRun, RunContextReceipt};
+use crate::store::repos::{artifact, run, scope::DataScope, workspace_directory};
 
 const MAX_INLINE_BYTES: usize = 65_536;
 
@@ -38,12 +40,6 @@ fn authority() -> Result<ArtifactAuthority, String> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SourceCitation {
-    source_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct CreateArtifact {
     artifact_id: String,
     version_id: String,
@@ -52,8 +48,21 @@ pub struct CreateArtifact {
     message_id: String,
     title: String,
     content: String,
-    #[serde(default)]
-    citations: Vec<SourceCitation>,
+}
+
+fn citations_from_receipt(receipt: &RunContextReceipt, artifact_id: &str) -> Vec<Value> {
+    receipt
+        .citations
+        .iter()
+        .enumerate()
+        .map(|(index, citation)| json!({
+            "id": format!("citation-{artifact_id}-{}", index + 1),
+            "label": citation.title,
+            "source": {"kind":"import","externalReference":citation.source_id,"observedAt":receipt.assembled_at},
+            "locator": citation.chunk_id.as_deref().or(citation.source_path.as_deref()),
+            "quotedText": citation.snippet,
+        }))
+        .collect()
 }
 
 #[tauri::command]
@@ -70,55 +79,9 @@ pub fn artifact_create_from_response(input: CreateArtifact) -> Result<Value, Str
     if bytes.is_empty() || bytes.len() > MAX_INLINE_BYTES {
         return Err("Artifact content must be between 1 byte and 64 KiB.".into());
     }
-    if input.citations.len() > 100 {
-        return Err("An artifact can preserve at most 100 sources.".into());
-    }
     let at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let hash = format!("{:x}", Sha256::digest(bytes));
     let provenance = json!({"kind":"run","runId":input.run_id,"externalReference":format!("message:{}", input.message_id),"observedAt":at});
-    let citations = store
-        .with_conn(|tx| {
-            let sources = knowledge_source::list_scoped(tx, store, scope)?;
-            input
-                .citations
-                .iter()
-                .enumerate()
-                .map(|(index, citation)| {
-                    let source = sources
-                        .iter()
-                        .find(|source| source.id == citation.source_id)
-                        .ok_or_else(|| {
-                            crate::store::StoreError::Invalid(
-                                "An artifact source is unavailable in this workspace.".into(),
-                            )
-                        })?;
-                    let title = source
-                        .payload
-                        .get("title")
-                        .and_then(Value::as_str)
-                        .filter(|title| !title.trim().is_empty())
-                        .unwrap_or(&source.id);
-                    let quoted_text = source
-                        .payload
-                        .get("contentPreview")
-                        .and_then(Value::as_str)
-                        .filter(|text| !text.trim().is_empty())
-                        .or_else(|| source.payload.get("provenance").and_then(Value::as_str))
-                        .unwrap_or("");
-                    let locator = (!source.external_id.is_empty())
-                        .then_some(source.external_id.as_str())
-                        .or_else(|| (!source.origin.is_empty()).then_some(source.origin.as_str()));
-                    Ok(json!({
-                        "id": format!("citation-{}-{}", input.artifact_id, index + 1),
-                        "label": title,
-                        "source": {"kind":"import","externalReference":source.id,"observedAt":at},
-                        "locator": locator,
-                        "quotedText": quoted_text,
-                    }))
-                })
-                .collect::<crate::store::Result<Vec<_>>>()
-        })
-        .map_err(|error| error.to_string())?;
     let media = json!({"mediaType":"text/markdown","byteLength":bytes.len(),"encoding":"utf-8"});
     let content_hash = json!({"algorithm":"sha-256","value":hash});
     let artifact_record = json!({
@@ -128,15 +91,29 @@ pub fn artifact_create_from_response(input: CreateArtifact) -> Result<Value, Str
         "currentVersionId":input.version_id,"producingRunId":input.run_id,"sourceProvenance":[provenance.clone()],
         "context":{"threadId":input.thread_id},"reviews":[],"retention":{"status":"active"}
     });
-    let version = json!({
-        "id":input.version_id,"artifactId":input.artifact_id,"version":1,"status":"available","createdAt":at,
-        "createdByInternalUserId":authority.internal_user_id,"content":{"kind":"inline","text":input.content,"media":media,"contentHash":content_hash},
-        "media":media,"contentHash":content_hash,"provenance":provenance,"citations":citations,"lineage":[]
-    });
-    let payload =
-        json!({"artifact":artifact_record,"version":version,"sourceMessageId":input.message_id});
     store
         .transaction(|tx| {
+            let run_row = run::get_scoped(tx, store, scope, &input.run_id)?
+                .ok_or_else(|| crate::store::StoreError::Invalid("Artifact run is unavailable.".into()))?;
+            if run_row.status != "completed" || run_row.thread_id.as_deref() != Some(&input.thread_id) {
+                return Err(crate::store::StoreError::Invalid(
+                    "Only the matching completed run can provide artifact context.".into(),
+                ));
+            }
+            let persisted: PersistedAgentRun = serde_json::from_value(run_row.payload)
+                .map_err(|_| crate::store::StoreError::Invalid("Agent run payload is invalid.".into()))?;
+            let persisted = normalize_agent_run(persisted).map_err(crate::store::StoreError::Invalid)?;
+            let citations = persisted
+                .context_receipt
+                .as_ref()
+                .map(|receipt| citations_from_receipt(receipt, &input.artifact_id))
+                .unwrap_or_default();
+            let version = json!({
+                "id":input.version_id,"artifactId":input.artifact_id,"version":1,"status":"available","createdAt":at,
+                "createdByInternalUserId":authority.internal_user_id,"content":{"kind":"inline","text":input.content,"media":media,"contentHash":content_hash},
+                "media":media,"contentHash":content_hash,"provenance":provenance,"citations":citations,"lineage":[]
+            });
+            let payload = json!({"artifact":artifact_record,"version":version,"sourceMessageId":input.message_id});
             artifact::create(
                 tx,
                 store,
@@ -153,6 +130,72 @@ pub fn artifact_create_from_response(input: CreateArtifact) -> Result<Value, Str
             )
         })
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn persisted(source_id: &str, title: &str) -> PersistedAgentRun {
+        serde_json::from_value(json!({
+            "id":"run-1","providerId":"openai","model":"gpt-5","status":"completed",
+            "transcript":"Answer","threadId":"thread-1","exchanges":[],"turn":1,
+            "pendingApprovalIds":[],"recoverable":false,"retryCount":0,
+            "createdAt":"2026-07-11T10:00:00Z","updatedAt":"2026-07-11T10:01:00Z",
+            "contextReceipt":{
+                "version":1,"runId":"run-1","assembledAt":"2026-07-11T09:59:00Z",
+                "scope":{"level":"thread","threadId":"thread-1"},
+                "citations":[{
+                    "sourceId":source_id,"title":title,"snippet":"Historical excerpt",
+                    "provenance":"Local file","freshness":"Before refresh","trust":"untrusted",
+                    "pinned":false,"score":0.8,"chunkId":"source#0","sourcePath":"docs/source.md",
+                    "ranking":{"relevance":0.8,"recency":0.1,"authority":0.2,"pin":0.0,"feedback":0.0}
+                }],
+                "contributions":[{"id":source_id,"kind":"source","reason":"retrieved","citationId":"source#0"}]
+            }
+        })).unwrap()
+    }
+
+    #[test]
+    fn artifact_citations_use_only_the_immutable_run_snapshot() {
+        let run_a = normalize_agent_run(persisted("source-a", "Original A")).unwrap();
+        let run_b = normalize_agent_run(persisted("source-b", "Other run B")).unwrap();
+        let citations =
+            citations_from_receipt(run_a.context_receipt.as_ref().unwrap(), "artifact-a");
+        assert_eq!(citations[0]["source"]["externalReference"], "source-a");
+        assert_eq!(citations[0]["label"], "Original A");
+        assert_eq!(citations[0]["quotedText"], "Historical excerpt");
+        assert_ne!(
+            citations[0]["source"]["externalReference"],
+            run_b.context_receipt.unwrap().citations[0].source_id
+        );
+    }
+
+    #[test]
+    fn renderer_supplied_citations_are_not_part_of_the_native_input() {
+        let input: CreateArtifact = serde_json::from_value(json!({
+            "artifactId":"artifact-a","versionId":"version-a","runId":"run-1",
+            "threadId":"thread-1","messageId":"message-1","title":"Answer","content":"Answer",
+            "citations":[{"sourceId":"forged-source"}]
+        }))
+        .unwrap();
+        assert_eq!(input.run_id, "run-1");
+        let encoded = serde_json::to_value(&json!({"runId":input.run_id})).unwrap();
+        assert!(encoded.get("citations").is_none());
+    }
+
+    #[test]
+    fn legacy_completed_run_without_receipt_produces_no_citations() {
+        let mut legacy = persisted("source-a", "A");
+        legacy.context_receipt = None;
+        let normalized = normalize_agent_run(legacy).unwrap();
+        let citations = normalized
+            .context_receipt
+            .as_ref()
+            .map(|receipt| citations_from_receipt(receipt, "artifact-a"))
+            .unwrap_or_default();
+        assert!(citations.is_empty());
+    }
 }
 
 #[tauri::command]

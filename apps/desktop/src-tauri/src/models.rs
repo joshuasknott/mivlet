@@ -422,6 +422,71 @@ pub struct PersistedAgentExchange {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RunContextRanking {
+    pub relevance: f64,
+    pub recency: f64,
+    pub authority: f64,
+    pub pin: f64,
+    pub feedback: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContextScope {
+    pub level: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContextCitation {
+    pub source_id: String,
+    pub title: String,
+    pub snippet: String,
+    pub provenance: String,
+    pub freshness: String,
+    pub trust: String,
+    pub pinned: bool,
+    pub score: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chunk_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
+    pub ranking: RunContextRanking,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<RunContextScope>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContextContribution {
+    pub id: String,
+    pub kind: String,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub citation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContextReceipt {
+    pub version: u32,
+    pub run_id: String,
+    pub assembled_at: String,
+    pub scope: RunContextScope,
+    pub citations: Vec<RunContextCitation>,
+    pub contributions: Vec<RunContextContribution>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedAgentRun {
     pub id: String,
     pub provider_id: String,
@@ -434,6 +499,8 @@ pub struct PersistedAgentRun {
     pub exchanges: Vec<PersistedAgentExchange>,
     #[serde(default)]
     pub parent_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_receipt: Option<RunContextReceipt>,
     pub turn: usize,
     pub usage: Option<AgentRunUsage>,
     pub pending_approval_ids: Vec<String>,
