@@ -23,6 +23,74 @@ export interface PersistedAgentExchange {
   ok?: boolean;
 }
 
+/** Stable, user-visible reason an item entered a run's bounded context. */
+export type RunContextContributionReason =
+  | "system-instruction"
+  | "conversation"
+  | "project-context"
+  | "pinned"
+  | "memory-approved"
+  | "memory-pinned"
+  | "retrieved"
+  | "tool-result";
+
+export interface RunContextContribution {
+  id: string;
+  kind: "memory" | "source" | "tool-result" | "conversation" | "instruction";
+  reason: RunContextContributionReason;
+  citationId?: string;
+}
+
+/** Scope snapshot used for a run. Authority still comes from the native store. */
+export interface RunContextScope {
+  level: "global" | "project" | "thread";
+  projectId?: string;
+  threadId?: string;
+}
+
+/** Immutable citation snapshot: later source changes cannot rewrite run history. */
+export interface RunContextCitation {
+  sourceId: string;
+  title: string;
+  snippet: string;
+  provenance: string;
+  freshness: string;
+  trust: "trusted" | "untrusted";
+  pinned: boolean;
+  score: number;
+  chunkId?: string;
+  account?: string;
+  ranking: {
+    relevance: number;
+    recency: number;
+    authority: number;
+    pin: number;
+    feedback: number;
+  };
+  sourcePath?: string;
+  mediaType?: string;
+  scope?: RunContextScope;
+}
+
+/**
+ * Non-secret evidence captured before provider egress. It records what bounded
+ * context was selected and why, without storing hidden reasoning.
+ */
+export interface RunContextReceipt {
+  version: 1;
+  runId: string;
+  assembledAt: string;
+  scope: RunContextScope;
+  citations: RunContextCitation[];
+  contributions: RunContextContribution[];
+}
+
+/** Transient prepared context handed to the run boundary before egress. */
+export interface PreparedRunContext {
+  systemPrefix: string;
+  receipt: RunContextReceipt;
+}
+
 export interface PersistedAgentRun {
   id: string;
   providerId: string;
@@ -35,6 +103,8 @@ export interface PersistedAgentRun {
   exchanges?: PersistedAgentExchange[];
   /** Prior interrupted/failed run when this run is an explicit retry. */
   parentRunId?: string;
+  /** Immutable bounded-context evidence captured before provider egress. */
+  contextReceipt?: RunContextReceipt;
   turn: number;
   usage?: {
     inputTokens: number;
