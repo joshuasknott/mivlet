@@ -1,10 +1,13 @@
 {
-  "contractVersion": "1.1.0",
+  "contractVersion": "1.2.0",
   "schemaVersion": 1,
   "limits": {
     "ARTIFACT_MAX_INLINE_CONTENT_BYTES": 65536,
     "MESSAGE_CONTENT_MAX_CHARACTERS": 262144,
     "MESSAGE_REVISIONS_MAX_PER_MESSAGE": 1024,
+    "PROJECT_DESCRIPTION_MAX_CHARACTERS": 4000,
+    "PROJECT_INSTRUCTIONS_MAX_CHARACTERS": 32000,
+    "PROJECT_TITLE_MAX_CHARACTERS": 200,
     "SHARED_MUTATION_DEPENDENCIES_MAX": 64,
     "THREAD_TITLE_MAX_CHARACTERS": 256
   },
@@ -13,7 +16,8 @@
     { "name": "Connections", "source": "connections.ts" },
     { "name": "Missions", "source": "missions.ts" },
     { "name": "Conversations", "source": "conversations.ts" },
+    { "name": "Projects", "source": "projects.ts" },
     { "name": "ArtifactsAndRoutines", "source": "artifacts-routines.ts" }
   ],
-  "expectedCanonicalSha256": "1d59865b9e63016f81c341eca229f19e9c032b703774999fbd80346ea7c03843"
+  "expectedCanonicalSha256": "3cdd45851002ee1f567ac83f2a3283989e1d4326d0807e80efee3f40c1a838f2"
 }

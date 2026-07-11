@@ -15,12 +15,13 @@ const CONNECTIONS: &str = include_str!("../../../../packages/protocol/src/spine/
 const MISSIONS: &str = include_str!("../../../../packages/protocol/src/spine/missions.ts");
 const CONVERSATIONS: &str =
     include_str!("../../../../packages/protocol/src/spine/conversations.ts");
+const PROJECTS: &str = include_str!("../../../../packages/protocol/src/spine/projects.ts");
 const ARTIFACTS_AND_ROUTINES: &str =
     include_str!("../../../../packages/protocol/src/spine/artifacts-routines.ts");
 
 /// Rust's reviewed mirror of the canonical TypeScript vocabulary payload.
 const RUST_CANONICAL_SHA256: &str =
-    "1d59865b9e63016f81c341eca229f19e9c032b703774999fbd80346ea7c03843";
+    "3cdd45851002ee1f567ac83f2a3283989e1d4326d0807e80efee3f40c1a838f2";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -148,6 +149,7 @@ fn product_spine_typescript_and_rust_parity_hold() {
         ("Connections", "connections.ts", CONNECTIONS),
         ("Missions", "missions.ts", MISSIONS),
         ("Conversations", "conversations.ts", CONVERSATIONS),
+        ("Projects", "projects.ts", PROJECTS),
         (
             "ArtifactsAndRoutines",
             "artifacts-routines.ts",
