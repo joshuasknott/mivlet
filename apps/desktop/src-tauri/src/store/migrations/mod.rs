@@ -105,6 +105,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // observations. Evidence never grants authority and is usable only
             // while its exact canonical Connection revision remains current.
             20 => apply_v20_to_v21(conn)?,
+            // 21 -> 22: add encrypted, member-private launch configuration for
+            // local STDIO MCP servers. Migration creates no launch authority.
+            21 => apply_v21_to_v22(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -114,6 +117,29 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v21_to_v22(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mcp_local_server_config (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_subject TEXT NOT NULL,
+          id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK(revision >= 1),
+          disabled INTEGER NOT NULL CHECK(disabled IN (0,1)),
+          created_by_internal_user_id TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_subject,id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mcp_local_server_owner
+          ON mcp_local_server_config(workspace_id,owner_subject,disabled,updated_at,id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1187,8 +1213,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v21 is current; v21 -> v22 has no registered migration.
-        let err = apply(&conn, 21, 22).unwrap_err();
+        // v22 is current; v22 -> v23 has no registered migration.
+        let err = apply(&conn, 22, 23).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1304,6 +1330,30 @@ mod tests {
                 [],
                 |row| row.get::<_, i64>(0),
             )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn v21_to_v22_adds_empty_private_mcp_launch_config_without_guessing() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE workspace(id TEXT PRIMARY KEY);
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 21, 22).unwrap();
+        apply(&conn, 21, 22).unwrap();
+
+        assert!(table_exists(&conn, "mcp_local_server_config").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM mcp_local_server_config", [], |row| {
+                row.get::<_, i64>(0)
+            })
             .unwrap(),
             0
         );

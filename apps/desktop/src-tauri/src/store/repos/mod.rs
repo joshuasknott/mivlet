@@ -28,6 +28,7 @@ pub mod connector_cache_settings;
 pub mod draft;
 pub mod goal;
 pub mod knowledge_source;
+pub mod mcp_local_server;
 pub mod memory_record;
 pub mod message;
 pub mod preferences;

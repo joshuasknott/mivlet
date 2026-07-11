@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 21;
+pub const CURRENT_SCHEMA_VERSION: u32 = 22;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -977,6 +977,25 @@ CREATE INDEX IF NOT EXISTS idx_capability_evidence_connection
   ON capability_implementation_evidence(workspace_id,connection_id,connection_revision);
 CREATE INDEX IF NOT EXISTS idx_capability_evidence_capability
   ON capability_implementation_evidence(workspace_id,capability_key,availability);
+
+-- Machine-local launch configuration for user-managed STDIO MCP servers.
+-- Executable paths and arguments are encrypted; plaintext columns contain only
+-- authenticated ownership, lifecycle, and optimistic revision metadata.
+CREATE TABLE IF NOT EXISTS mcp_local_server_config (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  disabled INTEGER NOT NULL CHECK(disabled IN (0,1)),
+  created_by_internal_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id)
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_local_server_owner
+  ON mcp_local_server_config(workspace_id,owner_subject,disabled,updated_at,id);
 
 -- Compatibility rows stay live in connector_account until an authenticated
 -- writer can prove the canonical creator/scope. This ledger records the stable
