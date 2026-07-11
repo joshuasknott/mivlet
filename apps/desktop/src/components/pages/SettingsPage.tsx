@@ -1160,6 +1160,8 @@ export function WorkspaceSettingsView({
   const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const [invitationMessage, setInvitationMessage] = useState("");
   const feedbackRef = useRef<HTMLParagraphElement>(null);
+  const acceptanceTokenRef = useRef<symbol | null>(null);
+  const mountedRef = useRef(true);
 
   const loadInvitations = async () => {
     setInvitationState("loading");
@@ -1178,6 +1180,14 @@ export function WorkspaceSettingsView({
       setInvitationState("error");
     }
   };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      acceptanceTokenRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -1203,11 +1213,15 @@ export function WorkspaceSettingsView({
   }, [invitationMessage]);
 
   const acceptInvitation = async (invitationId: string) => {
-    if (acceptingId) return;
+    if (acceptanceTokenRef.current) return;
+    const requestToken = Symbol(invitationId);
+    acceptanceTokenRef.current = requestToken;
     setAcceptingId(invitationId);
     setInvitationMessage("");
+    const isCurrent = () => mountedRef.current && acceptanceTokenRef.current === requestToken;
     try {
       const outcome = await acceptRuntimePendingInvitation(invitationId);
+      if (!isCurrent()) return;
       if (outcome === null) {
         setInvitationState("unavailable");
       } else if (outcome.result.status !== "accepted") {
@@ -1216,15 +1230,21 @@ export function WorkspaceSettingsView({
         setInvitations((current) => current.filter((entry) => entry.invitation.invitationId !== invitationId));
         try {
           await onInvitationAccepted();
+          if (!isCurrent()) return;
           setInvitationMessage("Invitation accepted. The workspace is now available from the workspace selector.");
         } catch {
+          if (!isCurrent()) return;
           setInvitationMessage("Invitation accepted. The workspace list couldn’t refresh yet; try refreshing your account.");
         }
       }
     } catch {
+      if (!isCurrent()) return;
       setInvitationMessage("That invitation couldn’t be accepted. Check your connection and try again.");
     } finally {
-      setAcceptingId(null);
+      if (acceptanceTokenRef.current === requestToken) {
+        acceptanceTokenRef.current = null;
+        if (mountedRef.current) setAcceptingId(null);
+      }
     }
   };
 
@@ -1273,13 +1293,13 @@ export function WorkspaceSettingsView({
             {invitationState === "ready" && invitations.length === 0 ? <p>No pending invitations.</p> : null}
             {invitationState === "ready" && invitations.length > 0 ? (
               <div className="provider-access-list" aria-label="Pending workspace invitations">
-                {invitations.map(({ invitation }) => (
+                {invitations.map(({ invitation, workspaceName: invitationWorkspaceName }) => (
                   <div className="provider-access-row" key={invitation.invitationId}>
                     <span>
-                      <strong>Workspace invitation</strong>
+                      <strong>{invitationWorkspaceName}</strong>
                       <small>{roleLabel(invitation.role)} · Expires {new Date(invitation.expiresAt).toLocaleDateString()}</small>
                     </span>
-                    <button type="button" className="button button--primary" disabled={acceptingId !== null} onClick={() => void acceptInvitation(invitation.invitationId)}>
+                    <button type="button" className="button button--primary" aria-label={`Accept invitation to ${invitationWorkspaceName}`} disabled={acceptingId !== null} onClick={() => void acceptInvitation(invitation.invitationId)}>
                       {acceptingId === invitation.invitationId ? "Accepting…" : "Accept invitation"}
                     </button>
                   </div>

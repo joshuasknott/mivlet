@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountPendingInvitation } from "@fable/protocol";
@@ -16,7 +16,7 @@ vi.mock("../../runtime", () => ({
 
 afterEach(cleanup);
 
-function pending(invitationId = "invite-1"): AccountPendingInvitation {
+function pending(invitationId = "invite-1", workspaceName = "Atlas Studio"): AccountPendingInvitation {
   return {
     invitation: {
       workspaceId: "workspace-1" as never,
@@ -33,7 +33,8 @@ function pending(invitationId = "invite-1"): AccountPendingInvitation {
       recipientConstraint: { kind: "internal-user", internalUserId: "user-2" as never },
       expiresAt: "2026-07-18T09:00:00.000Z" as never
     },
-    selection: { kind: "direct-inbox", invitationId: invitationId as never }
+    selection: { kind: "direct-inbox", invitationId: invitationId as never },
+    workspaceName
   };
 }
 
@@ -60,13 +61,16 @@ describe("workspace invitation inbox", () => {
     mocks.accept.mockImplementation(() => new Promise((resolve) => { finishAccept = resolve; }));
     const refreshed = renderInbox();
 
-    expect(await screen.findByText("Workspace invitation")).toBeInTheDocument();
-    const button = screen.getByRole("button", { name: "Accept invitation" });
-    fireEvent.click(button);
-    fireEvent.click(button);
+    expect(await screen.findByText("Atlas Studio")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Accept invitation to Atlas Studio" });
+    act(() => {
+      button.click();
+      button.click();
+    });
     expect(mocks.accept).toHaveBeenCalledTimes(1);
     expect(mocks.accept).toHaveBeenCalledWith("invite-1");
-    expect(screen.getByRole("button", { name: "Accepting…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Accept invitation to Atlas Studio" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Accept invitation to Atlas Studio" })).toHaveTextContent("Accepting…");
 
     finishAccept({ result: { status: "accepted" }, accountWorkspace: {} });
     await waitFor(() => expect(refreshed).toHaveBeenCalledTimes(1));
@@ -79,10 +83,10 @@ describe("workspace invitation inbox", () => {
     mocks.accept.mockResolvedValue({ result: { status: "rejected", error: {} }, accountWorkspace: {} });
     const refreshed = renderInbox();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation to Atlas Studio" }));
     expect(await screen.findByText(/invitation is no longer available/i)).toBeInTheDocument();
     expect(refreshed).not.toHaveBeenCalled();
-    expect(screen.getByText("Workspace invitation")).toBeInTheDocument();
+    expect(screen.getByText("Atlas Studio")).toBeInTheDocument();
     expect(screen.queryByText(/workspace is now available/i)).not.toBeInTheDocument();
   });
 
@@ -99,9 +103,9 @@ describe("workspace invitation inbox", () => {
     mocks.load.mockResolvedValue({ invitations: [pending("invite-offline")] });
     mocks.accept.mockRejectedValue(new Error("offline"));
     renderInbox();
-    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation to Atlas Studio" }));
     expect(await screen.findByText(/couldn’t be accepted/i)).toBeInTheDocument();
-    expect(screen.getByText("Workspace invitation")).toBeInTheDocument();
+    expect(screen.getByText("Atlas Studio")).toBeInTheDocument();
   });
 
   it("keeps accepted truth when the parent workspace refresh fails", async () => {
@@ -109,9 +113,23 @@ describe("workspace invitation inbox", () => {
     mocks.accept.mockResolvedValue({ result: { status: "accepted" }, accountWorkspace: {} });
     const refreshed = vi.fn().mockRejectedValue(new Error("refresh offline"));
     renderInbox(refreshed);
-    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation to Atlas Studio" }));
     expect(await screen.findByText(/invitation accepted.*couldn’t refresh yet/i)).toBeInTheDocument();
     expect(screen.getByText("No pending invitations.")).toBeInTheDocument();
     expect(screen.queryByText(/invitation couldn’t be accepted/i)).not.toBeInTheDocument();
+  });
+
+  it("ignores an acceptance completion after the inbox unmounts", async () => {
+    mocks.load.mockResolvedValue({ invitations: [pending("invite-stale", "Roadmap Team")] });
+    let finishAccept: (value: unknown) => void = () => {};
+    mocks.accept.mockImplementation(() => new Promise((resolve) => { finishAccept = resolve; }));
+    const refreshed = vi.fn().mockResolvedValue(undefined);
+    const view = render(
+      <WorkspaceSettingsView workspaceName="My workspace" onStatus={() => {}} onInvitationAccepted={refreshed} />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation to Roadmap Team" }));
+    view.unmount();
+    await act(async () => { finishAccept({ result: { status: "accepted" }, accountWorkspace: {} }); });
+    expect(refreshed).not.toHaveBeenCalled();
   });
 });
