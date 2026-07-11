@@ -1256,7 +1256,11 @@ pub(crate) fn accounts_for_connector(
     matching
         .into_iter()
         .map(|connection| ConnectorAccountOption {
-            connection_id: connection_id(workspace_id, connector_id, &connection.account.id),
+            connection_id: derive_native_connection_id(
+                workspace_id,
+                connector_id,
+                &connection.account.id,
+            ),
             account: connection.account.clone(),
             active: connection.is_active,
             lifecycle: match connection.status.as_str() {
@@ -1283,7 +1287,15 @@ pub(crate) fn accounts_for_connector(
         .collect()
 }
 
-fn connection_id(workspace_id: &str, connector_id: &str, account_id: &str) -> String {
+/// Derive the stable Fable identity used by both the compatibility runtime and
+/// the durable Connection migration. Keeping this in one native boundary
+/// prevents a storage backfill from minting identities the selector cannot
+/// later resolve.
+pub(crate) fn derive_native_connection_id(
+    workspace_id: &str,
+    connector_id: &str,
+    account_id: &str,
+) -> String {
     let mut digest = Sha256::new();
     digest.update(b"fable.connection.native-connector.v1\0");
     for value in [workspace_id, connector_id, account_id] {
@@ -1310,8 +1322,9 @@ pub(crate) fn switch_active_connection(
             continue;
         }
         saw_connector = true;
-        let matches = connection_id(workspace_id, connector_id, &connection.account.id)
-            == requested_connection_id;
+        let matches =
+            derive_native_connection_id(workspace_id, connector_id, &connection.account.id)
+                == requested_connection_id;
         connection.is_active = matches;
         connection.updated_at = now_epoch().to_string();
         if matches {

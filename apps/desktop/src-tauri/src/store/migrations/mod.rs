@@ -92,6 +92,11 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             16 => apply_v16_to_v17(conn)?,
             // 17 -> 18: exact-version, owner-qualified artifact handoffs.
             17 => apply_v17_to_v18(conn)?,
+            // 18 -> 19: establish the canonical Connection storage boundary.
+            // Legacy connector-account metadata remains the compatibility
+            // source because it has no authenticated creator; only a stable,
+            // secret-free proposed identity is recorded for later adoption.
+            18 => apply_v18_to_v19(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -101,6 +106,86 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v18_to_v19(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(r#"
+      CREATE TABLE IF NOT EXISTS connection_record (
+        workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+        id TEXT NOT NULL, record_type TEXT NOT NULL CHECK(record_type='connection'),
+        authority TEXT NOT NULL CHECK(authority IN ('local','convex')),
+        visibility TEXT NOT NULL CHECK(visibility IN ('member-private','workspace-shared')),
+        owner_member_id TEXT, schema_version INTEGER NOT NULL CHECK(schema_version >= 1),
+        revision INTEGER NOT NULL CHECK(revision >= 1), created_by_internal_user_id TEXT NOT NULL,
+        created_by_device_id TEXT,
+        kind TEXT NOT NULL CHECK(kind IN ('native-connector','provider-runtime','local-service','mcp','router','custom-route')),
+        ownership TEXT NOT NULL CHECK(ownership IN ('user-owned','workspace-shared')),
+        lifecycle TEXT NOT NULL CHECK(lifecycle IN ('pending-authorization','authorizing','authorized','refresh-required','revoked','disconnected','removed')),
+        authorization_state TEXT NOT NULL CHECK(authorization_state IN ('not-required','pending','authorized','expired','denied','revoked','unavailable')),
+        health_state TEXT NOT NULL CHECK(health_state IN ('unknown','healthy','degraded','unhealthy','offline')),
+        trust TEXT NOT NULL CHECK(trust IN ('first-party','fable-reviewed','verified-publisher','user-managed','untrusted')),
+        credential_custody TEXT NOT NULL CHECK(credential_custody IN ('os-secure-store','managed-secret-store','provider-owned-session','external-runtime','none')),
+        credential_state TEXT NOT NULL CHECK(credential_state IN ('not-required','available','refresh-required','unavailable','revoked','unknown')),
+        credential_ref TEXT NOT NULL DEFAULT '', connector_definition_key TEXT,
+        enabled_by_default INTEGER NOT NULL CHECK(enabled_by_default IN (0,1)),
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+        payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+        PRIMARY KEY(workspace_id,id),
+        CHECK((visibility='member-private' AND owner_member_id IS NOT NULL) OR
+              (visibility='workspace-shared' AND owner_member_id IS NULL))
+      );
+      CREATE INDEX IF NOT EXISTS idx_connection_record_workspace
+        ON connection_record(workspace_id,lifecycle,updated_at,id);
+      CREATE INDEX IF NOT EXISTS idx_connection_record_connector
+        ON connection_record(workspace_id,connector_definition_key,lifecycle);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_record_credential
+        ON connection_record(credential_ref) WHERE credential_ref <> '';
+      CREATE TABLE IF NOT EXISTS connection_legacy_unattributed (
+        workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+        connector_id TEXT NOT NULL, proposed_connection_id TEXT, quarantined_at TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT 'legacy connector account had no authenticated creator',
+        PRIMARY KEY(workspace_id,connector_id)
+      );
+    "#)?;
+
+    if !table_exists(conn, "connector_account")? {
+        return Ok(());
+    }
+    let mut stmt = conn.prepare(
+        "SELECT workspace_id,connector_id,account_id FROM connector_account ORDER BY workspace_id,connector_id;",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(stmt);
+    for (workspace_id, connector_id, account_id) in rows {
+        let proposed_connection_id =
+            account_id
+                .as_deref()
+                .filter(|value| !value.is_empty())
+                .map(|account_id| {
+                    crate::connector_auth::derive_native_connection_id(
+                        &workspace_id,
+                        &connector_id,
+                        account_id,
+                    )
+                });
+        conn.execute(
+            "INSERT INTO connection_legacy_unattributed
+               (workspace_id,connector_id,proposed_connection_id,quarantined_at)
+             VALUES (?1,?2,?3,strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             ON CONFLICT(workspace_id,connector_id) DO UPDATE SET
+               proposed_connection_id=excluded.proposed_connection_id;",
+            rusqlite::params![workspace_id, connector_id, proposed_connection_id],
+        )?;
+    }
     Ok(())
 }
 
@@ -1047,9 +1132,68 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v18 is current; v18 -> v19 has no registered migration.
-        let err = apply(&conn, 18, 19).unwrap_err();
+        // v19 is current; v19 -> v20 has no registered migration.
+        let err = apply(&conn, 19, 20).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v18_to_v19_quarantines_legacy_connector_identity_without_claiming_authority() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+          PRAGMA foreign_keys = ON;
+          CREATE TABLE workspace(id TEXT PRIMARY KEY);
+          INSERT INTO workspace VALUES('workspace-a');
+          CREATE TABLE connector_account(
+            workspace_id TEXT NOT NULL, connector_id TEXT NOT NULL, account_id TEXT,
+            status TEXT NOT NULL, expires_at INTEGER, credential_ref TEXT NOT NULL,
+            connected_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+            PRIMARY KEY(workspace_id,connector_id)
+          );
+          INSERT INTO connector_account VALUES(
+            'workspace-a','gmail','provider-account-secret','connected',NULL,
+            'oauth-token:gmail:provider-account-secret','now','now',x'01',x'02'
+          );
+        "#,
+        )
+        .unwrap();
+
+        apply(&conn, 18, 19).unwrap();
+        apply(&conn, 18, 19).unwrap();
+
+        assert!(table_exists(&conn, "connection_record").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM connection_record", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let proposed: String = conn.query_row(
+            "SELECT proposed_connection_id FROM connection_legacy_unattributed WHERE workspace_id='workspace-a' AND connector_id='gmail'",
+            [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(
+            proposed,
+            crate::connector_auth::derive_native_connection_id(
+                "workspace-a",
+                "gmail",
+                "provider-account-secret"
+            )
+        );
+        assert!(!proposed.contains("provider-account-secret"));
+        let copied_raw:i64=conn.query_row(
+            "SELECT COUNT(*) FROM connection_legacy_unattributed WHERE proposed_connection_id LIKE '%provider-account-secret%'",
+            [], |row| row.get(0)
+        ).unwrap();
+        assert_eq!(copied_raw, 0);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM connector_account", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

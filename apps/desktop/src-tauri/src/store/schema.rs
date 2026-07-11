@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 18;
+pub const CURRENT_SCHEMA_VERSION: u32 = 19;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -898,6 +898,61 @@ CREATE INDEX IF NOT EXISTS idx_connector_account_workspace ON connector_account(
 -- because empty credential refs are valid and never matched.
 CREATE INDEX IF NOT EXISTS idx_connector_account_credential
   ON connector_account(credential_ref) WHERE credential_ref <> '';
+
+-- Canonical, secret-free Connection control-plane records. Human-readable and
+-- external-principal metadata belongs in the encrypted payload; credential_ref
+-- is only an opaque local secure-store binding and never a credential value.
+-- Legacy connector_account rows are not silently adopted because they lack the
+-- authenticated creator/scope evidence required by the product-spine contract.
+CREATE TABLE IF NOT EXISTS connection_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  record_type TEXT NOT NULL CHECK(record_type='connection'),
+  authority TEXT NOT NULL CHECK(authority IN ('local','convex')),
+  visibility TEXT NOT NULL CHECK(visibility IN ('member-private','workspace-shared')),
+  owner_member_id TEXT,
+  schema_version INTEGER NOT NULL CHECK(schema_version >= 1),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  created_by_internal_user_id TEXT NOT NULL,
+  created_by_device_id TEXT,
+  kind TEXT NOT NULL CHECK(kind IN ('native-connector','provider-runtime','local-service','mcp','router','custom-route')),
+  ownership TEXT NOT NULL CHECK(ownership IN ('user-owned','workspace-shared')),
+  lifecycle TEXT NOT NULL CHECK(lifecycle IN ('pending-authorization','authorizing','authorized','refresh-required','revoked','disconnected','removed')),
+  authorization_state TEXT NOT NULL CHECK(authorization_state IN ('not-required','pending','authorized','expired','denied','revoked','unavailable')),
+  health_state TEXT NOT NULL CHECK(health_state IN ('unknown','healthy','degraded','unhealthy','offline')),
+  trust TEXT NOT NULL CHECK(trust IN ('first-party','fable-reviewed','verified-publisher','user-managed','untrusted')),
+  credential_custody TEXT NOT NULL CHECK(credential_custody IN ('os-secure-store','managed-secret-store','provider-owned-session','external-runtime','none')),
+  credential_state TEXT NOT NULL CHECK(credential_state IN ('not-required','available','refresh-required','unavailable','revoked','unknown')),
+  credential_ref TEXT NOT NULL DEFAULT '',
+  connector_definition_key TEXT,
+  enabled_by_default INTEGER NOT NULL CHECK(enabled_by_default IN (0,1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,id),
+  CHECK((visibility='member-private' AND owner_member_id IS NOT NULL) OR
+        (visibility='workspace-shared' AND owner_member_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_connection_record_workspace
+  ON connection_record(workspace_id,lifecycle,updated_at,id);
+CREATE INDEX IF NOT EXISTS idx_connection_record_connector
+  ON connection_record(workspace_id,connector_definition_key,lifecycle);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_record_credential
+  ON connection_record(credential_ref) WHERE credential_ref <> '';
+
+-- Compatibility rows stay live in connector_account until an authenticated
+-- writer can prove the canonical creator/scope. This ledger records the stable
+-- proposed identity without copying raw external account ids or ciphertext.
+CREATE TABLE IF NOT EXISTS connection_legacy_unattributed (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  connector_id TEXT NOT NULL,
+  proposed_connection_id TEXT,
+  quarantined_at TEXT NOT NULL,
+  reason TEXT NOT NULL DEFAULT 'legacy connector account had no authenticated creator',
+  PRIMARY KEY(workspace_id,connector_id)
+);
 
 CREATE TABLE IF NOT EXISTS backend_connection (
   internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
