@@ -241,7 +241,6 @@ export function ChatWorkspace() {
   useEffect(() => {
     const hydrated = durableConversation.state.conversation;
     if (!selectedConversationThreadId || !hydrated || hydrated.thread.id !== selectedConversationThreadId) {
-      if (!selectedConversationThreadId) setConversationMessages([]);
       return;
     }
     // A freshly created thread hydrates before its serialized run writer has
@@ -260,7 +259,9 @@ export function ChatWorkspace() {
     if (durableConversation.state.loading || submissionInFlight) return;
     if (draftHydrationKey.current === durableConversation.draftKey) return;
     draftHydrationKey.current = durableConversation.draftKey;
-    runtime.setComposerValue(durableConversation.state.draft?.content ?? "");
+    if (durableConversation.state.draft) {
+      runtime.setComposerValue(durableConversation.state.draft.content);
+    }
   }, [durableConversation.draftKey, durableConversation.state.draft, durableConversation.state.loading, runtime.setComposerValue, submissionInFlight]);
 
   useEffect(() => {
@@ -708,6 +709,7 @@ export function ChatWorkspace() {
           setSelectedConversationThreadId(undefined);
           activeAssistantMessageId.current = null;
           setConversationMessages([]);
+          runtime.setComposerValue("");
           runtime.startNewChat();
         }}
         onAddProject={() => {
@@ -772,6 +774,7 @@ export function ChatWorkspace() {
           setSelectedConversationThreadId(thread.id);
           activeAssistantMessageId.current = null;
           setConversationMessages([]);
+          runtime.setComposerValue("");
           runtime.openThread(thread, "chat");
         }}
         onAccountMenu={(item) => {

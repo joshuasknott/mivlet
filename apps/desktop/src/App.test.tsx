@@ -21,6 +21,7 @@ const runtimeMocks = vi.hoisted(() => ({
   cancelCalls: [] as string[],
   connectorOAuthCalls: [] as string[],
   agentRuns: [] as PersistedAgentRun[],
+  conversationThreads: [] as Array<Record<string, unknown>>,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
   savedScheduledJobs: [] as unknown[],
@@ -84,13 +85,58 @@ const connectedCodex: BackendProvider = {
 };
 
 vi.mock("./runtime", () => ({
-  createRuntimeConversationThread: vi.fn(async () => null),
-  listRuntimeConversationThreads: vi.fn(async () => []),
-  getRuntimeConversationThread: vi.fn(async () => null),
+  createRuntimeConversationThread: vi.fn(async (input: { title?: string }) => {
+    const thread = {
+      id: "test-durable-thread",
+      title: input.title ?? "New chat",
+      lifecycle: "active",
+      messageHead: { lastSequence: 0 }
+    };
+    runtimeMocks.conversationThreads = [thread];
+    return thread;
+  }),
+  listRuntimeConversationThreads: vi.fn(async () => runtimeMocks.conversationThreads),
+  getRuntimeConversationThread: vi.fn(async (threadId: string) =>
+    runtimeMocks.conversationThreads.find((thread) => thread.id === threadId) ?? null),
   updateRuntimeConversationThread: vi.fn(async () => null),
   listRuntimeConversationMessages: vi.fn(async () => []),
-  appendRuntimeConversationMessage: vi.fn(async () => null),
-  reviseRuntimeConversationMessage: vi.fn(async () => null),
+  appendRuntimeConversationMessage: vi.fn(async (input: any) => ({
+    message: {
+      id: input.messageId,
+      threadId: input.threadId,
+      kind: input.kind,
+      sequence: input.sequence,
+      currentRevisionId: input.initialRevision.revisionId,
+      currentRevisionNumber: 1,
+      currentRevisionState: input.initialRevision.state
+    },
+    currentRevision: {
+      id: input.initialRevision.revisionId,
+      threadId: input.threadId,
+      messageId: input.messageId,
+      messageRevisionNumber: 1,
+      state: input.initialRevision.state,
+      content: input.initialRevision.content
+    }
+  })),
+  reviseRuntimeConversationMessage: vi.fn(async (input: any) => ({
+    message: {
+      id: input.messageId,
+      threadId: input.threadId,
+      sequence: input.sequence ?? 1,
+      currentRevisionId: input.revisionId,
+      currentRevisionNumber: input.baseMessageRevisionNumber + 1,
+      currentRevisionState: input.state
+    },
+    currentRevision: {
+      id: input.revisionId,
+      threadId: input.threadId,
+      messageId: input.messageId,
+      messageRevisionNumber: input.baseMessageRevisionNumber + 1,
+      state: input.state,
+      content: input.content
+    }
+  })),
   loadRuntimeConversationDraft: vi.fn(async () => null),
   saveRuntimeConversationDraft: vi.fn(async (draft: unknown) => draft),
   deleteRuntimeConversationDraft: vi.fn(async () => undefined),
@@ -309,6 +355,7 @@ describe("Fable home", () => {
     runtimeMocks.cancelCalls = [];
     runtimeMocks.connectorOAuthCalls = [];
     runtimeMocks.agentRuns = [];
+    runtimeMocks.conversationThreads = [];
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
     connectRuntimeBackendSpy.mockClear();
@@ -1100,7 +1147,7 @@ describe("Fable home", () => {
     );
     // The command created an approved memory, visible on the Knowledge page.
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
-    await user.click(screen.getByRole("tab", { name: /^memories$/i }));
+    await user.click(await screen.findByRole("tab", { name: /^memories$/i }));
     // The memory is created and rendered (title appears in list + detail).
     expect((await screen.findAllByText(/Prefers dark mode/i)).length).toBeGreaterThan(0);
   });
