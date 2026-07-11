@@ -106,10 +106,12 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 - [ ] Complete source ingestion, provenance, trust, freshness, and lifecycle.
   - Repo-local evidence: supported local text files now have authenticated workspace/project import, provenance, trust, search, disable/re-enable, tombstone delete, and explicit one-shot content refresh. Connection-backed source ingestion and lifecycle remain open with Wave 3.
 - [ ] Filter retrieval by member, workspace, project, department, and Connection before ranking.
+  - Repo-local evidence: member, workspace, and project authority now filter Knowledge and Memory before ranking, including pins, explicit source requests, and promoted memory. Department and Connection authority remain open with their later waves.
 - [x] Complete citations and explain why important context was selected.
   - Evidence: every new provider run persists an immutable pre-egress receipt with exact scope, ranked citation snapshots, and closed reason codes. Each response can reopen its own `Context used` evidence after restart, and artifact citations are derived natively from that producing run rather than mutable renderer state.
 - [x] Complete visible, editable, scoped, exportable, disableable, and forgettable memory.
 - [ ] Prevent private member context from entering shared context automatically.
+  - Repo-local evidence: SQLite schema v15 qualifies Knowledge, Memory, chunks, pins, and tombstones by a proven member or local-user owner; new private runs carry that exact audience through retrieval, immutable receipts, and visible disclosure. Legacy unowned context is quarantined rather than guessed. Native shared context currently fails closed; the first real shared run and its resolver remain open in Wave 2D.
 
 ### Wave 2C - Artifact system
 
