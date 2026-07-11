@@ -63,6 +63,12 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
         adapter: NativeReadAdapter::Search(NativeSearchAdapter::Notion),
         required_scopes: &["read_content"],
     },
+    NativeReadImplementation {
+        capability_id: "communication.email.search",
+        connector_id: "gmail",
+        adapter: NativeReadAdapter::Search(NativeSearchAdapter::Google),
+        required_scopes: &["https://www.googleapis.com/auth/gmail.readonly"],
+    },
 ];
 
 #[derive(Clone, Debug, Serialize)]
@@ -459,6 +465,18 @@ mod tests {
                 .required_scopes,
             &["read_content"]
         );
+        assert_eq!(
+            implementation("communication.email.search")
+                .unwrap()
+                .adapter,
+            NativeReadAdapter::Search(NativeSearchAdapter::Google)
+        );
+        assert_eq!(
+            implementation("communication.email.search")
+                .unwrap()
+                .required_scopes,
+            &["https://www.googleapis.com/auth/gmail.readonly"]
+        );
         let mut drive_connection = connection(&["https://www.googleapis.com/auth/drive.file"]);
         drive_connection.connector_id = "google-drive".into();
         let mut drive_canonical = canonical("healthy");
@@ -494,6 +512,19 @@ mod tests {
                 implementation("knowledge.content.search").unwrap(),
                 &notion_connection,
                 &notion_canonical,
+            )
+            .unwrap(),
+            "available"
+        );
+        let mut gmail_connection = connection(&["https://www.googleapis.com/auth/gmail.readonly"]);
+        gmail_connection.connector_id = "gmail".into();
+        let mut gmail_canonical = canonical("healthy");
+        gmail_canonical.connector_definition_key = "gmail".into();
+        assert_eq!(
+            availability_for(
+                implementation("communication.email.search").unwrap(),
+                &gmail_connection,
+                &gmail_canonical,
             )
             .unwrap(),
             "available"
