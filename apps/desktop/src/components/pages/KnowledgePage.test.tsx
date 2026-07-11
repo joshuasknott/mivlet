@@ -474,10 +474,11 @@ describe("KnowledgePage — artifacts", () => {
     await user.click(await screen.findByRole("button", { name: "Confirm add version 2" }));
     const otherWorkspaceRuntime = stubRuntime(state);
     otherWorkspaceRuntime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId = "other-workspace";
-    view.rerender(<KnowledgePage runtime={otherWorkspaceRuntime} />);
-    resolveAccept(makeHandoff("accepted"));
-    await pendingAccept;
-    await Promise.resolve();
+    await act(async () => {
+      view.rerender(<KnowledgePage runtime={otherWorkspaceRuntime} />);
+      resolveAccept(makeHandoff("accepted"));
+      await pendingAccept;
+    });
     expect(screen.queryByText(/added to project/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
