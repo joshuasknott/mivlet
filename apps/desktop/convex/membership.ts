@@ -114,9 +114,7 @@ export const listRecipientPending = queryGeneric({
     const result = [];
     for (const entry of pending) {
       const workspace = await uniqueByIndex(ctx, "workspaces", "by_workspace", (q: any) => q.eq("workspaceId", entry.workspaceId));
-      if (!workspace || workspace.status !== "active" || typeof workspace.name !== "string" || !workspace.name.trim() || workspace.name.length > 160) {
-        throw new CloudPolicyError("workspace-unavailable", "The invitation workspace is unavailable.", true);
-      }
+      if (!workspace || workspace.status !== "active" || typeof workspace.name !== "string" || !workspace.name.trim() || workspace.name.length > 160) continue;
       result.push({
         invitation: invitationRecord(entry),
         selection: { kind: "direct-inbox" as const, invitationId: entry.invitationId },

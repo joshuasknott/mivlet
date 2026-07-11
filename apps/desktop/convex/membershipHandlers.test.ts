@@ -80,15 +80,24 @@ describe("registered hosted membership handlers", () => {
     expect(f.writes()).toBe(before);
   });
 
-  it("fails closed rather than inventing a workspace name for an inbox item", async () => {
+  it("omits an unavailable invitation workspace without hiding valid invitations", async () => {
     const f = fixture("recipient");
     f.tables.workspace_invitations.push({
-      _id: "invite:active", invitationId: "inv-active", workspaceId: "ws-missing", role: "editor",
+      _id: "invite:missing", invitationId: "inv-missing", workspaceId: "ws-missing", role: "editor",
+      inviterMemberId: "m-owner", recipientKind: "internal-user", recipientInternalUserId: "u-recipient",
+      status: "pending", expiresAt: f.now + 60_000, createdAt: 1, updatedAt: 1,
+      createdByInternalUserId: "u-owner",
+    }, {
+      _id: "invite:valid", invitationId: "inv-valid", workspaceId: "ws-a", role: "viewer",
       inviterMemberId: "m-owner", recipientKind: "internal-user", recipientInternalUserId: "u-recipient",
       status: "pending", expiresAt: f.now + 60_000, createdAt: 1, updatedAt: 1,
       createdByInternalUserId: "u-owner",
     });
-    await expect((listRecipientPending as any)._handler(f.ctx, {})).rejects.toThrow(/workspace/i);
+    const result = await (listRecipientPending as any)._handler(f.ctx, {});
+    expect(result).toEqual([expect.objectContaining({
+      workspaceName: "A",
+      invitation: expect.objectContaining({ invitationId: "inv-valid" }),
+    })]);
     expect(f.writes()).toBe(0);
   });
 
