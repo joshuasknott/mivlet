@@ -256,6 +256,7 @@ pub fn run() {
             mcp_process::open_remote_mcp_session,
             mcp_process::inspect_remote_mcp_authorization,
             mcp_process::send_remote_mcp_frame,
+            mcp_process::poll_remote_mcp_messages,
             mcp_process::close_remote_mcp_session,
             mcp_process::record_mcp_server_discovery,
             mcp_process::set_mcp_server_enablement,

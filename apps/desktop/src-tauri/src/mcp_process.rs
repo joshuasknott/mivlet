@@ -54,8 +54,11 @@ struct McpRemoteSession {
     connection_id: String,
     connection_revision: i64,
     server_session_id: Option<String>,
+    last_event_id: Option<String>,
+    retry_after_ms: u64,
     initialized: bool,
     busy: bool,
+    poll_busy: bool,
 }
 
 #[derive(Clone)]
@@ -146,6 +149,14 @@ pub struct SendRemoteMcpFrameRequest {
     workspace_id: String,
     session_id: String,
     frame: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteMcpPollResult {
+    supported: bool,
+    frames: Vec<String>,
+    retry_after_ms: u64,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -438,8 +449,11 @@ pub fn open_remote_mcp_session(
                 connection_id: connection.connection_id.clone(),
                 connection_revision: connection.connection_revision,
                 server_session_id: None,
+                last_event_id: None,
+                retry_after_ms: 1_000,
                 initialized: false,
                 busy: false,
+                poll_busy: false,
             },
         );
     Ok(OpenedRemoteMcpSession {
@@ -553,6 +567,10 @@ pub async fn send_remote_mcp_frame(
                 if let Some(server_session_id) = &response.server_session_id {
                     session.server_session_id = Some(server_session_id.clone());
                 }
+                if let Some(event_id) = &response.last_event_id {
+                    session.last_event_id = Some(event_id.clone());
+                }
+                session.retry_after_ms = response.retry_after_ms;
             }
         }
     }
@@ -563,6 +581,55 @@ pub async fn send_remote_mcp_frame(
         },
         Err(error) => Err(error),
     }
+}
+
+#[tauri::command]
+pub async fn poll_remote_mcp_messages(
+    request: CloseMcpProcessRequest,
+) -> Result<RemoteMcpPollResult, String> {
+    if !valid_session_id(&request.session_id) {
+        return Err("The remote MCP session id is invalid.".into());
+    }
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let snapshot = {
+        let mut sessions = remote_sessions()
+            .lock()
+            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+        let session = sessions
+            .get_mut(&request.session_id)
+            .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        if !session.initialized {
+            return Err("Remote MCP listening requires an initialized session.".into());
+        }
+        if session.poll_busy {
+            return Err("This remote MCP session is already listening.".into());
+        }
+        session.poll_busy = true;
+        session.clone()
+    };
+    tokio::time::sleep(Duration::from_millis(snapshot.retry_after_ms)).await;
+    let result = get_remote_mcp_messages(&snapshot).await;
+    if let Ok(mut sessions) = remote_sessions().lock() {
+        if let Some(session) = sessions.get_mut(&request.session_id) {
+            session.poll_busy = false;
+            if let Ok(polled) = &result {
+                if let Some(event_id) = &polled.last_event_id {
+                    session.last_event_id = Some(event_id.clone());
+                }
+                session.retry_after_ms = polled.retry_after_ms;
+            }
+        }
+    }
+    result.map(|polled| RemoteMcpPollResult {
+        supported: polled.supported,
+        frames: polled.frames,
+        retry_after_ms: polled.retry_after_ms,
+    })
 }
 
 #[tauri::command]
@@ -1296,6 +1363,8 @@ struct RemotePostResponse {
     initialized: bool,
     authorization_challenge: Option<RemoteAuthorizationChallenge>,
     error: Option<String>,
+    last_event_id: Option<String>,
+    retry_after_ms: u64,
 }
 
 fn validate_remote_endpoint(raw: &str) -> Result<Url, String> {
@@ -1547,28 +1616,72 @@ fn canonical_remote_frame(payload: &str) -> Result<String, String> {
     Ok(encoded)
 }
 
-fn parse_remote_sse(body: &[u8]) -> Result<Vec<String>, String> {
+struct ParsedRemoteSse {
+    frames: Vec<String>,
+    last_event_id: Option<String>,
+    retry_after_ms: u64,
+}
+
+fn valid_event_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 1_024
+        && value.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+}
+
+fn parse_remote_sse(body: &[u8], require_frame: bool) -> Result<ParsedRemoteSse, String> {
     let text = std::str::from_utf8(body)
         .map_err(|_| "Remote MCP returned non-UTF-8 event data.".to_string())?;
     let mut frames = Vec::new();
     let mut data = Vec::new();
+    let mut event_id = None;
+    let mut last_event_id = None;
+    let mut retry_after_ms = 1_000;
+    let dispatch = |data: &mut Vec<String>,
+                    event_id: &mut Option<String>,
+                    frames: &mut Vec<String>,
+                    last_event_id: &mut Option<String>|
+     -> Result<(), String> {
+        if !data.is_empty() {
+            let payload = data.join("\n");
+            if !payload.is_empty() {
+                frames.push(canonical_remote_frame(&payload)?);
+            }
+        }
+        if let Some(id) = event_id.take() {
+            *last_event_id = Some(id);
+        }
+        data.clear();
+        Ok(())
+    };
     for line in text.replace("\r\n", "\n").replace('\r', "\n").lines() {
         if line.is_empty() {
-            if !data.is_empty() {
-                frames.push(canonical_remote_frame(&data.join("\n"))?);
-                data.clear();
-            }
+            dispatch(&mut data, &mut event_id, &mut frames, &mut last_event_id)?;
         } else if let Some(value) = line.strip_prefix("data:") {
             data.push(value.strip_prefix(' ').unwrap_or(value).to_string());
+        } else if let Some(value) = line.strip_prefix("id:") {
+            let value = value.strip_prefix(' ').unwrap_or(value);
+            if !valid_event_id(value) {
+                return Err("Remote MCP returned an invalid event id.".into());
+            }
+            event_id = Some(value.to_string());
+        } else if let Some(value) = line.strip_prefix("retry:") {
+            retry_after_ms = value
+                .trim()
+                .parse::<u64>()
+                .ok()
+                .filter(|value| (250..=30_000).contains(value))
+                .ok_or_else(|| "Remote MCP returned an invalid retry interval.".to_string())?;
         }
     }
-    if !data.is_empty() {
-        frames.push(canonical_remote_frame(&data.join("\n"))?);
-    }
-    if frames.is_empty() {
+    dispatch(&mut data, &mut event_id, &mut frames, &mut last_event_id)?;
+    if require_frame && frames.is_empty() {
         return Err("Remote MCP event stream returned no JSON-RPC messages.".into());
     }
-    Ok(frames)
+    Ok(ParsedRemoteSse {
+        frames,
+        last_event_id,
+        retry_after_ms,
+    })
 }
 
 async fn read_remote_body(
@@ -1634,6 +1747,8 @@ async fn post_remote_mcp_frame(
             initialized: false,
             authorization_challenge: authorization_challenge_from_headers(response.headers())?,
             error: Some("Remote MCP rejected the request with HTTP 401.".into()),
+            last_event_id: None,
+            retry_after_ms: 1_000,
         });
     }
     if response.status() == reqwest::StatusCode::ACCEPTED {
@@ -1646,6 +1761,8 @@ async fn post_remote_mcp_frame(
             initialized: false,
             authorization_challenge: None,
             error: None,
+            last_event_id: None,
+            retry_after_ms: 1_000,
         });
     }
     if !response.status().is_success() {
@@ -1682,12 +1799,19 @@ async fn post_remote_mcp_frame(
         None
     };
     let body = read_remote_body(response, MAX_MCP_FRAME_BYTES).await?;
-    let frames = match content_type.as_str() {
-        "application/json" => vec![canonical_remote_frame(
-            std::str::from_utf8(&body)
-                .map_err(|_| "Remote MCP returned non-UTF-8 JSON.".to_string())?,
-        )?],
-        "text/event-stream" => parse_remote_sse(&body)?,
+    let (frames, last_event_id, retry_after_ms) = match content_type.as_str() {
+        "application/json" => (
+            vec![canonical_remote_frame(
+                std::str::from_utf8(&body)
+                    .map_err(|_| "Remote MCP returned non-UTF-8 JSON.".to_string())?,
+            )?],
+            None,
+            1_000,
+        ),
+        "text/event-stream" => {
+            let parsed = parse_remote_sse(&body, true)?;
+            (parsed.frames, parsed.last_event_id, parsed.retry_after_ms)
+        }
         _ => return Err("Remote MCP returned an unsupported content type.".into()),
     };
     Ok(RemotePostResponse {
@@ -1696,6 +1820,8 @@ async fn post_remote_mcp_frame(
         initialized: is_initialize,
         authorization_challenge: None,
         error: None,
+        last_event_id,
+        retry_after_ms,
     })
 }
 
@@ -1719,6 +1845,66 @@ async fn delete_remote_mcp_session(session: &McpRemoteSession) -> Result<(), Str
     } else {
         Err("Remote MCP session could not be closed.".into())
     }
+}
+
+struct RemotePollResponse {
+    supported: bool,
+    frames: Vec<String>,
+    last_event_id: Option<String>,
+    retry_after_ms: u64,
+}
+
+async fn get_remote_mcp_messages(session: &McpRemoteSession) -> Result<RemotePollResponse, String> {
+    let client = remote_http_client(&session.endpoint).await?;
+    let mut request = client
+        .get(session.endpoint.clone())
+        .header(reqwest::header::ACCEPT, "text/event-stream")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .header("MCP-Protocol-Version", "2025-11-25");
+    if let Some(server_session_id) = &session.server_session_id {
+        request = request.header("MCP-Session-Id", server_session_id);
+    }
+    if let Some(last_event_id) = &session.last_event_id {
+        request = request.header("Last-Event-ID", last_event_id);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Remote MCP listening request failed.".to_string())?;
+    if response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+        return Ok(RemotePollResponse {
+            supported: false,
+            frames: Vec::new(),
+            last_event_id: None,
+            retry_after_ms: 1_000,
+        });
+    }
+    if response.status() == reqwest::StatusCode::NOT_FOUND && session.server_session_id.is_some() {
+        return Err("The remote MCP session expired; reconnect the server.".into());
+    }
+    if response.status().is_redirection() || !response.status().is_success() {
+        return Err("Remote MCP listening was rejected.".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if content_type != "text/event-stream" {
+        return Err("Remote MCP listening returned an unsupported content type.".into());
+    }
+    let body = read_remote_body(response, MAX_MCP_FRAME_BYTES).await?;
+    let parsed = parse_remote_sse(&body, false)?;
+    Ok(RemotePollResponse {
+        supported: true,
+        frames: parsed.frames,
+        last_event_id: parsed.last_event_id,
+        retry_after_ms: parsed.retry_after_ms,
+    })
 }
 
 const MCP_AUTH_METADATA_MAX_BYTES: usize = 256 * 1024;
@@ -2346,14 +2532,21 @@ mod tests {
 
     #[test]
     fn remote_sse_parser_accepts_only_bounded_json_rpc_data_events() {
-        let frames = parse_remote_sse(
-            b": keepalive\nid: 1\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"one\",\"result\":{}}\n\n",
+        let parsed = parse_remote_sse(
+            b": keepalive\nid: 1\nretry: 500\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"one\",\"result\":{}}\n\n",
+            true,
         )
         .unwrap();
-        assert_eq!(frames.len(), 1);
-        assert!(valid_mcp_frame(&frames[0]));
-        assert!(parse_remote_sse(b"data: server ready\n\n").is_err());
-        assert!(parse_remote_sse(b"event: ping\n\n").is_err());
+        assert_eq!(parsed.frames.len(), 1);
+        assert!(valid_mcp_frame(&parsed.frames[0]));
+        assert_eq!(parsed.last_event_id.as_deref(), Some("1"));
+        assert_eq!(parsed.retry_after_ms, 500);
+        let primed = parse_remote_sse(b"id: cursor-1\ndata: \n\n", false).unwrap();
+        assert!(primed.frames.is_empty());
+        assert_eq!(primed.last_event_id.as_deref(), Some("cursor-1"));
+        assert!(parse_remote_sse(b"data: server ready\n\n", true).is_err());
+        assert!(parse_remote_sse(b"event: ping\n\n", true).is_err());
+        assert!(parse_remote_sse(b"id: bad\tvalue\n\n", false).is_err());
     }
 
     #[test]

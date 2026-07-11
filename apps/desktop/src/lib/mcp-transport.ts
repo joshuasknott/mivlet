@@ -16,6 +16,7 @@ import {
   executeRuntimeApprovedMcpToolCall,
   listenRuntimeMcpFrames,
   openRuntimeRemoteMcpSession,
+  pollRuntimeRemoteMcpMessages,
   recordRuntimeMcpDiscovery,
   prepareRuntimeMcpToolCall,
   spawnRuntimeMcpProcess,
@@ -236,6 +237,7 @@ class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
   private readonly closeHandlers = new Set<() => void>();
   private closed = false;
   private closePromise?: Promise<void>;
+  private polling = false;
 
   constructor(
     private readonly workspaceId: string,
@@ -256,6 +258,7 @@ class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
         for (const handler of this.frameHandlers) handler(received);
       }
     }
+    if ("id" in frame && frame.method === "initialize") this.beginPolling();
   }
 
   subscribe(handler: (frame: McpFrame) => void): () => void {
@@ -297,6 +300,32 @@ class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
         .then(() => undefined);
     }
     return this.closePromise;
+  }
+
+  private beginPolling(): void {
+    if (this.polling || this.closed) return;
+    this.polling = true;
+    void this.pollLoop();
+  }
+
+  private async pollLoop(): Promise<void> {
+    try {
+      while (!this.closed) {
+        try {
+          const result = await pollRuntimeRemoteMcpMessages(this.workspaceId, this.sessionId);
+          if (!result || !result.supported || this.closed) break;
+          for (const line of result.frames) {
+            const received = parseMcpLine(line);
+            if (received) for (const handler of this.frameHandlers) handler(received);
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("session expired")) break;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+      }
+    } finally {
+      this.polling = false;
+    }
   }
 }
 

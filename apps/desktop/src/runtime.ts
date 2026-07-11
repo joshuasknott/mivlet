@@ -3084,6 +3084,19 @@ export async function sendRuntimeRemoteMcpFrame(
   }).catch((error) => { throw toRuntimeError(error); });
 }
 
+export interface RuntimeRemoteMcpPollResult {
+  supported: boolean;
+  frames: string[];
+  retryAfterMs: number;
+}
+
+export async function pollRuntimeRemoteMcpMessages(workspaceId: string, sessionId: string) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeRemoteMcpPollResult>("poll_remote_mcp_messages", {
+    request: { workspaceId, sessionId }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
 export async function closeRuntimeRemoteMcpSession(workspaceId: string, sessionId: string) {
   if (!hasTauriRuntime()) return null;
   return invoke<null>("close_remote_mcp_session", {

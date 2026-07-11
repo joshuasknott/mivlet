@@ -8,6 +8,7 @@ const runtime = vi.hoisted(() => ({
   listen: vi.fn(),
   prepare: vi.fn(),
   openRemote: vi.fn(),
+  pollRemote: vi.fn(),
   record: vi.fn(),
   spawn: vi.fn(),
   sendRemote: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("../runtime", () => ({
   recordRuntimeMcpDiscovery: runtime.record,
   prepareRuntimeMcpToolCall: runtime.prepare,
   openRuntimeRemoteMcpSession: runtime.openRemote,
+  pollRuntimeRemoteMcpMessages: runtime.pollRemote,
   spawnRuntimeMcpProcess: runtime.spawn,
   sendRuntimeRemoteMcpFrame: runtime.sendRemote,
   writeRuntimeMcpFrame: runtime.write
@@ -61,6 +63,7 @@ beforeEach(() => {
   runtime.sendRemote.mockReset().mockResolvedValue([
     '{"jsonrpc":"2.0","id":"one","result":{"ok":true}}'
   ]);
+  runtime.pollRemote.mockReset().mockResolvedValue({ supported: false, frames: [], retryAfterMs: 1000 });
   runtime.prepare.mockReset().mockResolvedValue({
     proposalFingerprint: "fingerprint",
     approval: {
@@ -179,5 +182,22 @@ describe("desktop MCP transport", () => {
     expect(runtime.closeRemote).toHaveBeenCalledWith(
       "workspace-a", "mcp-fedcba0987654321fedcba0987654321"
     );
+  });
+
+  it("starts optional standalone listening only after remote initialization", async () => {
+    runtime.sendRemote.mockResolvedValueOnce([
+      '{"jsonrpc":"2.0","id":"initialize-1","result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"remote","version":"1"}}}'
+    ]);
+    const transport = await createDesktopRemoteMcpTransport("workspace-a", "remote-tools");
+    await transport!.send({
+      jsonrpc: "2.0",
+      id: "initialize-1",
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Fable", version: "0.1.0" } }
+    });
+    await vi.waitFor(() => expect(runtime.pollRemote).toHaveBeenCalledWith(
+      "workspace-a", "mcp-fedcba0987654321fedcba0987654321"
+    ));
+    await transport!.close();
   });
 });
