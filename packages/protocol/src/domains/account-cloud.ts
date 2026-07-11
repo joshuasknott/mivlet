@@ -190,6 +190,7 @@ export type CloudMutationResult =
         | "device-inactive"
         | "stale-revision"
         | "idempotency-conflict"
+        | "backfill-required"
         | "conflict";
       message: string;
       currentRecord?: SharedProjectRecord;

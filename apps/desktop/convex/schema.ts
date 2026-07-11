@@ -33,7 +33,7 @@ export default defineSchema({
   }).index("by_external_identity", ["provider", "normalizedIssuer", "subject"]).index("by_internal_user", ["internalUserId"]),
   workspaces: defineTable({
     workspaceId: v.string(), name: v.string(), status: workspaceStatus, revision: v.number(), policyRevision: v.number(),
-    createdByInternalUserId: v.string(), createdAt: v.number(), updatedAt: v.number()
+    sharedHistoryRevision: v.optional(v.number()), createdByInternalUserId: v.string(), createdAt: v.number(), updatedAt: v.number()
   }).index("by_workspace", ["workspaceId"]),
   workspace_memberships: defineTable({
     memberId: v.string(), workspaceId: v.string(), internalUserId: v.string(), role, status: membershipStatus, revision: v.number(),
