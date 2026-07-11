@@ -19,8 +19,7 @@ import type {
   ActionHistoryEvent,
   CustomApprovalSettings,
   RemoteControlStatusSnapshot,
-  VoiceCapability,
-  WorkspaceRole
+  VoiceCapability
 } from "@fable/protocol";
 import {
   CUSTOM_APPROVAL_SECTION,
@@ -43,6 +42,8 @@ export type { SettingsTab } from "./settings-tabs";
 export { tabs } from "./settings-tabs";
 import { tabs } from "./settings-tabs";
 import type { SettingsTab } from "./settings-tabs";
+
+type WorkspaceRole = AccountWorkspaceMemberSummary["role"];
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
