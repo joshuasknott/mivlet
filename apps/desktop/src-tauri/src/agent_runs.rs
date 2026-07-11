@@ -437,7 +437,14 @@ pub(crate) fn recover_agent_runs_at(
 
 fn validate_context_receipt_authority(receipt: &RunContextReceipt) -> Result<(), String> {
     if receipt.version == 1 {
-        return Ok(());
+        return if receipt.citations.is_empty() && receipt.contributions.is_empty() {
+            Ok(())
+        } else {
+            Err(
+                "New sourced runs require a version 2 context receipt with an audience."
+                    .to_string(),
+            )
+        };
     }
     let audience = receipt
         .audience
@@ -774,6 +781,15 @@ mod tests {
 
     #[test]
     fn v2_receipts_require_the_active_private_audience_and_citation_owner() {
+        let legacy_sourced = receipt();
+        assert!(validate_context_receipt_authority(&legacy_sourced)
+            .unwrap_err()
+            .contains("version 2"));
+        let mut legacy_empty = receipt();
+        legacy_empty.citations.clear();
+        legacy_empty.contributions.clear();
+        validate_context_receipt_authority(&legacy_empty).unwrap();
+
         let mut receipt = receipt();
         receipt.version = 2;
         receipt.audience = Some(crate::models::RunContextAudience {
