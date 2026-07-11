@@ -953,6 +953,48 @@ async fn probe_connector_health(
     }
 }
 
+fn canonical_health_state(state: &str) -> &'static str {
+    match state {
+        "healthy" => "healthy",
+        "degraded" => "degraded",
+        "error" => "unhealthy",
+        _ => "unknown",
+    }
+}
+
+fn persist_connector_health_state(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    provider_account_id: &str,
+    health: &ConnectorHealth,
+) -> crate::store::Result<()> {
+    store.transaction(|tx| {
+        let id = crate::connector_auth::derive_native_connection_id(
+            scope.data.workspace_id(),
+            connector_id,
+            provider_account_id,
+        );
+        let existing = crate::store::repos::connection_record::get(tx, store, scope, &id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Connection is unavailable.".into())
+            })?;
+        crate::store::repos::connection_record::transition_native_connector(
+            tx,
+            store,
+            scope,
+            &id,
+            existing.revision,
+            &existing.lifecycle,
+            &existing.authorization_state,
+            canonical_health_state(&health.state),
+            &existing.credential_state,
+            &health.checked_at,
+        )?;
+        Ok(())
+    })
+}
+
 pub(crate) fn list_connector_statuses_with(
     boundary: &dyn ConnectorCredentialBoundary,
 ) -> Vec<ConnectorManifest> {
@@ -1448,18 +1490,56 @@ pub async fn refresh_connector_health(
     connector_id: String,
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&connector_id)?;
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
     // Refresh first: this rotates expiring tokens and fails closed when the
     // connection is missing or the refresh is rejected. A failed refresh is a
     // real provider error, not a fixture fallback.
-    let _ = refresh_connection(&app, entry.id).await?;
+    let expected_connection = refresh_connection(&app, entry.id).await?;
     let connections_path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     // Probe live provider health through the authenticated token boundary. A
     // probe failure is surfaced as a degraded/error health state, never as a
     // fixture or a fake "connected" claim.
     let health = probe_connector_health(&app, entry.id).await;
+    if let Some(health) = health.as_ref() {
+        let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+            .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+        let current_connection = connection_for(&connections_path, entry.id).ok_or_else(|| {
+            command_error(
+                "conflict",
+                entry.id,
+                "Connector selection changed before health could be saved.",
+                true,
+            )
+        })?;
+        if current_connection.account.id != expected_connection.account.id
+            || current_connection.credential_ref != expected_connection.credential_ref
+        {
+            return Err(command_error(
+                "conflict",
+                entry.id,
+                "Connector selection changed before health could be saved.",
+                true,
+            ));
+        }
+        let durable_store = crate::store::try_global().ok_or_else(|| {
+            command_error(
+                "unknown",
+                entry.id,
+                "Fable's encrypted store is not initialized.",
+                false,
+            )
+        })?;
+        persist_connector_health_state(
+            durable_store,
+            &scope,
+            entry.id,
+            &expected_connection.account.id,
+            health,
+        )
+        .map_err(|error| command_error("unknown", entry.id, &error.to_string(), false))?;
+    }
     Ok(build_manifest_with_health(
         entry,
         &NativeCredentialBoundary { connections_path },
@@ -1934,8 +2014,24 @@ mod workspace_scope_tests {
         assert!(!serde_json::to_string(&records)
             .unwrap()
             .contains("provider-account-secret"));
-        let mut canonical_health = records.clone();
-        canonical_health[0].health_state = "healthy".into();
+        persist_connector_health_state(
+            &store,
+            &scope_a,
+            "gmail",
+            "provider-account-secret",
+            &ConnectorHealth {
+                state: "healthy".into(),
+                summary: "Provider identity verified.".into(),
+                checked_at: "3".into(),
+                retry_after: None,
+            },
+        )
+        .unwrap();
+        let canonical_health = store
+            .with_conn(|tx| crate::store::repos::connection_record::list(tx, &store, &scope_a))
+            .unwrap();
+        assert_eq!(canonical_health[0].health_state, "healthy");
+        assert_eq!(canonical_health[0].revision, 2);
         let projected = project_canonical_account_options(
             account_options_from_connections(
                 std::slice::from_ref(&connection),
@@ -1958,6 +2054,25 @@ mod workspace_scope_tests {
         )
         .is_err());
 
+        persist_connector_health_state(
+            &store,
+            &scope_a,
+            "gmail",
+            "provider-account-secret",
+            &ConnectorHealth {
+                state: "degraded".into(),
+                summary: "Provider temporarily unavailable.".into(),
+                checked_at: "4".into(),
+                retry_after: Some("later".into()),
+            },
+        )
+        .unwrap();
+        let degraded = store
+            .with_conn(|tx| crate::store::repos::connection_record::list(tx, &store, &scope_a))
+            .unwrap();
+        assert_eq!(degraded[0].health_state, "degraded");
+        assert_eq!(degraded[0].revision, 3);
+
         store
             .transaction(|tx| {
                 set_current_internal_user(tx, "user-b", "t")?;
@@ -1973,5 +2088,18 @@ mod workspace_scope_tests {
             reconcile_canonical_connector_accounts(&store, &scope_a, "gmail", &[connection])
                 .is_err()
         );
+        assert!(persist_connector_health_state(
+            &store,
+            &scope_a,
+            "gmail",
+            "provider-account-secret",
+            &ConnectorHealth {
+                state: "degraded".into(),
+                summary: "Provider temporarily unavailable.".into(),
+                checked_at: "4".into(),
+                retry_after: Some("later".into()),
+            },
+        )
+        .is_err());
     }
 }
