@@ -6,10 +6,12 @@ import {
   buildContextPrefixForRun,
   DEFAULT_PERMISSION_LABEL,
   findApprovalJargon,
+  knowledgeScopeForRun,
   PERMISSION_PROFILES,
   permissionLabelFor,
   permissionModeFor,
-  resolveSelectedModel
+  resolveSelectedModel,
+  selectMemoryForRun
 } from "./agent-run";
 
 const memory = (over: Partial<MemoryRecord> = {}): MemoryRecord => ({
@@ -98,6 +100,94 @@ describe("buildContextPrefixForRun", () => {
     });
     expect(prefix).toContain("in");
     expect(prefix).not.toContain("out");
+  });
+});
+
+describe("selectMemoryForRun", () => {
+  it("keeps workspace-global memory and includes only the exact project", () => {
+    const workspace = memory({ id: "workspace", scope: { level: "global" } });
+    const exact = memory({ id: "exact", scope: { level: "project", projectId: "project-a" } });
+    const foreign = memory({ id: "foreign", scope: { level: "project", projectId: "project-b" } });
+    const unscopedProjectInput = memory({ id: "unscoped", scope: undefined });
+
+    expect(selectMemoryForRun([workspace], {
+      projectId: "project-a",
+      projectMemoryRecords: [exact, foreign, unscopedProjectInput]
+    }).map((record) => record.id)).toEqual(["workspace", "exact"]);
+  });
+
+  it("does not admit project memory for a standalone run", () => {
+    const workspace = memory({ id: "workspace", scope: undefined });
+    const legacyScopedWorkspace = memory({
+      id: "legacy-scoped-workspace",
+      scope: { level: "project", projectId: "project-a" }
+    });
+    const project = memory({ id: "project", scope: { level: "project", projectId: "project-a" } });
+
+    expect(selectMemoryForRun([workspace, legacyScopedWorkspace], {
+      projectId: null,
+      projectMemoryRecords: [project]
+    }).map((record) => record.id)).toEqual(["workspace"]);
+  });
+
+  it("excludes disabled and forgotten records from both inputs", () => {
+    const projectScope = { level: "project" as const, projectId: "project-a" };
+    expect(selectMemoryForRun([
+      memory({ id: "workspace-live" }),
+      memory({ id: "workspace-disabled", disabled: true }),
+      memory({ id: "workspace-forgotten", forgottenAt: "2026-07-11T00:00:00.000Z" })
+    ], {
+      projectId: "project-a",
+      projectMemoryRecords: [
+        memory({ id: "project-live", scope: projectScope }),
+        memory({ id: "project-disabled", scope: projectScope, disabled: true }),
+        memory({ id: "project-forgotten", scope: projectScope, forgottenAt: "2026-07-11T00:00:00.000Z" })
+      ]
+    }).map((record) => record.id)).toEqual(["workspace-live", "project-live"]);
+  });
+
+  it("does not let project input replace workspace authority on an id collision", () => {
+    const workspace = memory({ id: "shared", value: "workspace value" });
+    const project = memory({
+      id: "shared",
+      value: "project value",
+      scope: { level: "project", projectId: "project-a" }
+    });
+
+    expect(selectMemoryForRun([workspace], {
+      projectId: "project-a",
+      projectMemoryRecords: [project]
+    })).toEqual([workspace]);
+  });
+
+  it("keeps the existing workspace-only call path", () => {
+    const workspace = memory({ id: "workspace" });
+    const scoped = memory({ id: "scoped", scope: { level: "project", projectId: "project-a" } });
+
+    expect(selectMemoryForRun([workspace, scoped])).toEqual([workspace, scoped]);
+  });
+});
+
+describe("knowledgeScopeForRun", () => {
+  it("uses the explicit durable project rather than inferred fixture membership", () => {
+    expect(knowledgeScopeForRun("thread-1", { projectId: "project-durable" })).toEqual({
+      level: "thread",
+      threadId: "thread-1",
+      projectId: "project-durable"
+    });
+    expect(knowledgeScopeForRun(undefined, { projectId: "project-durable" })).toEqual({
+      level: "project",
+      projectId: "project-durable"
+    });
+  });
+
+  it("keeps the existing one-argument workspace call path", () => {
+    expect(knowledgeScopeForRun(undefined)).toEqual({ level: "global" });
+    expect(knowledgeScopeForRun("thread-1")).toEqual({
+      level: "thread",
+      threadId: "thread-1",
+      projectId: "workspace"
+    });
   });
 });
 

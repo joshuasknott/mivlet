@@ -24,7 +24,6 @@ import type {
   FableCommandRequest,
   FableCommandResult,
   KnowledgeCitation,
-  KnowledgeScope,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
@@ -95,8 +94,11 @@ import {
 import {
   DEFAULT_PERMISSION_LABEL,
   isApprovalPresetLabel,
+  knowledgeScopeForRun,
   permissionLabelFor,
-  permissionModeFor
+  permissionModeFor,
+  selectMemoryForRun,
+  type ProjectMemoryRunContext
 } from "../lib/agent-run";
 import {
   modelsForProvider,
@@ -1509,7 +1511,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const runKnowledgeSearch = async (query: string) => {
     const result = await retrieve(knowledgeRetrievalSources(), {
       query,
-      scope: currentKnowledgeScope(),
+      scope: knowledgeScopeForRun(activeThread?.id),
       limit: 8,
       budgetChars: 6_000
     });
@@ -1521,18 +1523,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         ? `Found ${result.citations.length} cited workspace sources`
         : "No matching workspace sources found"
     );
-  };
-
-  const currentKnowledgeScope = (): KnowledgeScope => {
-    if (!activeThread) return { level: "global" };
-    const project = projects.find((candidate) =>
-      candidate.threads.some((thread) => thread.id === activeThread.id)
-    );
-    return {
-      level: "thread",
-      threadId: activeThread.id,
-      projectId: project?.id ?? "workspace"
-    };
   };
 
   const sourceIsAuthorized = (source: KnowledgeSource) => {
@@ -1563,10 +1553,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }))
       .filter((record) => record.chunks.length > 0);
 
-  const assembleKnowledgeContext = async (query: string) => {
+  const assembleKnowledgeContext = async (
+    query: string,
+    context?: ProjectMemoryRunContext
+  ) => {
+    const scope = knowledgeScopeForRun(activeThread?.id, context);
     const result = await retrieve(knowledgeRetrievalSources(), {
       query,
-      scope: currentKnowledgeScope(),
+      scope,
       limit: 8,
       budgetChars: 6_000
     });
@@ -1574,11 +1568,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setKnowledgeSearchMode(result.mode);
     return assembleContext({
       runId: `run-${Date.now()}`,
-      scope: currentKnowledgeScope(),
+      scope,
       // Only live memories enter context: forgotten/disabled records are
       // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
       // switch) excludes everything.
-      memory: memoryDisabled ? [] : managedMemoryRecords.filter(isLiveMemory),
+      memory: memoryDisabled ? [] : selectMemoryForRun(managedMemoryRecords, context),
       citations: result.citations,
       authorization: {
         isSourceAuthorized: (connectorId: string, account?: string) =>

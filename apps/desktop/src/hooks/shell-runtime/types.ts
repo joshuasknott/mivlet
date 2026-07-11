@@ -13,6 +13,7 @@ import type {
 import type { ToolApprovalGate } from "@fable/connectors";
 import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
 import type { ProviderModelOption } from "../../lib/provider-models";
+import type { ProjectMemoryRunContext } from "../../lib/agent-run";
 import type { ApprovalModificationDraft, ComposerAttachment, PendingApprovalConfirmation, Schedule, Weekday, WorkspacePage } from "../../lib/types";
 
 export interface ShellRuntime {
@@ -136,7 +137,7 @@ export interface ShellRuntime {
   toggleKnowledgeSourceDisabled: (sourceId: string) => void;
   /** Permanently remove a source from search, citations, pins, and context. */
   deleteKnowledgeSource: (sourceId: string) => void;
-  assembleKnowledgeContext: (query: string) => Promise<string>;
+  assembleKnowledgeContext: (query: string, context?: ProjectMemoryRunContext) => Promise<string>;
   // schedules
   schedules: Schedule[];
   createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;

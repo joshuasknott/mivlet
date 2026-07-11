@@ -11,6 +11,7 @@ import type {
   AgentRunRequest,
   ApprovalPresetLabel,
   BackendModel,
+  KnowledgeScope,
   KnowledgeSource,
   MemoryRecord,
   PermissionMode,
@@ -103,6 +104,68 @@ export interface BuildContextPrefixForRunInput {
   pinnedSourceIds: string[];
   /** When true, memory is skipped entirely (behavior unchanged). */
   memoryDisabled: boolean;
+}
+
+/** Optional durable project context supplied by the conversation shell. */
+export interface ProjectMemoryRunContext {
+  projectId?: string | null;
+  projectMemoryRecords?: MemoryRecord[];
+}
+
+function isLiveMemoryRecord(record: MemoryRecord) {
+  return !record.disabled && !record.forgottenAt;
+}
+
+/**
+ * Select memory for one run without copying project records into workspace
+ * state. Workspace-global records remain authoritative when ids collide;
+ * project input is accepted only for the exact explicitly selected project.
+ */
+export function selectMemoryForRun(
+  workspaceMemoryRecords: readonly MemoryRecord[],
+  context?: ProjectMemoryRunContext
+): MemoryRecord[] {
+  if (context === undefined) {
+    return workspaceMemoryRecords.filter(isLiveMemoryRecord);
+  }
+  const selected = workspaceMemoryRecords.filter(
+    (record) =>
+      isLiveMemoryRecord(record) &&
+      (!record.scope || record.scope.level === "global")
+  );
+  const projectId = context.projectId?.trim();
+  if (!projectId) return selected;
+
+  const seen = new Set(selected.map((record) => record.id));
+  for (const record of context.projectMemoryRecords ?? []) {
+    if (
+      seen.has(record.id) ||
+      !isLiveMemoryRecord(record) ||
+      record.scope?.level !== "project" ||
+      record.scope.projectId !== projectId
+    ) {
+      continue;
+    }
+    selected.push(record);
+    seen.add(record.id);
+  }
+  return selected;
+}
+
+/** Resolve run scope from the durable context supplied by the caller. */
+export function knowledgeScopeForRun(
+  activeThreadId: string | undefined,
+  context?: ProjectMemoryRunContext
+): KnowledgeScope {
+  const projectId = context?.projectId?.trim();
+  if (!activeThreadId) {
+    return projectId ? { level: "project", projectId } : { level: "global" };
+  }
+  return {
+    level: "thread",
+    threadId: activeThreadId,
+    projectId: projectId || "workspace"
+  };
 }
 
 /**
