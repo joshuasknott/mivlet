@@ -824,29 +824,130 @@ export interface CreateResponseArtifactInput {
 const previewArtifacts = new Map<string, RuntimeArtifactBundle[]>();
 const ARTIFACT_MAX_INLINE_CONTENT_BYTES = 65_536;
 
+function isArtifactMedia(value: unknown): value is Spine.ArtifactsAndRoutines.ArtifactMediaMetadata {
+  return isRecord(value) &&
+    typeof value.mediaType === "string" &&
+    typeof value.byteLength === "number" &&
+    Number.isInteger(value.byteLength) &&
+    value.byteLength >= 0;
+}
+
+function isContentHash(value: unknown): value is Spine.ArtifactsAndRoutines.ContentHash {
+  return isRecord(value) &&
+    typeof value.algorithm === "string" &&
+    typeof value.value === "string" &&
+    value.value.length > 0;
+}
+
+function isArtifactContent(value: unknown): value is Spine.ArtifactsAndRoutines.ArtifactContent {
+  if (!isRecord(value) || !isArtifactMedia(value.media) || !isContentHash(value.contentHash)) return false;
+  if (value.kind === "inline") return typeof value.text === "string";
+  return value.kind === "locator" && typeof value.locator === "string";
+}
+
+function isArtifactCitation(value: unknown) {
+  return isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.label === "string" &&
+    isRecord(value.source) &&
+    typeof value.source.kind === "string" &&
+    typeof value.source.observedAt === "string" &&
+    (value.locator === undefined || typeof value.locator === "string") &&
+    (value.quotedText === undefined || typeof value.quotedText === "string");
+}
+
+function isArtifactLineage(value: unknown) {
+  return isRecord(value) &&
+    typeof value.relation === "string" &&
+    typeof value.artifactId === "string" &&
+    typeof value.recordedAt === "string" &&
+    (value.artifactVersionId === undefined || typeof value.artifactVersionId === "string");
+}
+
+function isArtifactVersion(value: unknown, artifactId: string, expectedNumber: number) {
+  return isRecord(value) &&
+    typeof value.id === "string" &&
+    value.artifactId === artifactId &&
+    value.version === expectedNumber &&
+    typeof value.status === "string" &&
+    typeof value.createdAt === "string" &&
+    typeof value.createdByInternalUserId === "string" &&
+    isArtifactContent(value.content) &&
+    isArtifactMedia(value.media) &&
+    isContentHash(value.contentHash) &&
+    structurallyEqual(value.content.media, value.media) &&
+    structurallyEqual(value.content.contentHash, value.contentHash) &&
+    isRecord(value.provenance) &&
+    typeof value.provenance.kind === "string" &&
+    typeof value.provenance.observedAt === "string" &&
+    Array.isArray(value.citations) &&
+    value.citations.every(isArtifactCitation) &&
+    Array.isArray(value.lineage) &&
+    value.lineage.every(isArtifactLineage) &&
+    (value.inputs === undefined || (Array.isArray(value.inputs) && value.inputs.every(isRecord))) &&
+    (value.decisions === undefined || (Array.isArray(value.decisions) && value.decisions.every(isRecord)));
+}
+
+function structurallyEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((entry, index) => structurallyEqual(entry, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) => key === rightKeys[index] && structurallyEqual(left[key], right[key]));
+}
+
 function assertArtifactBundle(value: unknown, workspaceId: string): asserts value is RuntimeArtifactBundle {
   if (!isRecord(value) || !isRecord(value.artifact) || !isRecord(value.currentVersion) || !Array.isArray(value.versions)) {
     throw new Error("Malformed or cross-workspace artifact response.");
   }
   const artifact = value.artifact;
   const currentVersion = value.currentVersion;
+  const finalVersion = value.versions[value.versions.length - 1];
+  if (typeof artifact.id !== "string") {
+    throw new Error("Malformed or cross-workspace artifact response.");
+  }
+  const artifactId = artifact.id;
   const malformed =
     artifact.workspaceId !== workspaceId ||
-    typeof artifact.id !== "string" ||
-    typeof currentVersion.id !== "string" ||
+    typeof artifact.authority !== "string" ||
+    typeof artifact.visibility !== "string" ||
+    typeof artifact.schemaVersion !== "number" ||
+    !Number.isInteger(artifact.schemaVersion) ||
+    typeof artifact.title !== "string" ||
+    typeof artifact.kind !== "string" ||
+    typeof artifact.status !== "string" ||
+    typeof artifact.createdByInternalUserId !== "string" ||
+    typeof artifact.createdAt !== "string" ||
+    typeof artifact.updatedAt !== "string" ||
+    typeof artifact.currentVersionId !== "string" ||
+    typeof artifact.revision !== "number" ||
+    !Number.isInteger(artifact.revision) ||
+    artifact.revision < 1 ||
+    !Array.isArray(artifact.sourceProvenance) ||
+    !artifact.sourceProvenance.every(isRecord) ||
+    !isRecord(artifact.context) ||
+    !Array.isArray(artifact.reviews) ||
+    !artifact.reviews.every(isRecord) ||
+    !isRecord(artifact.retention) ||
+    typeof artifact.retention.status !== "string" ||
     (value.sourceMessageId !== undefined && typeof value.sourceMessageId !== "string") ||
     value.versions.length === 0 ||
-    artifact.currentVersionId !== currentVersion.id ||
-    value.versions[value.versions.length - 1]?.id !== currentVersion.id ||
-    value.versions.some((version, index) =>
-      !isRecord(version) ||
-      typeof version.id !== "string" ||
-      version.artifactId !== artifact.id ||
-      version.version !== index + 1
-    );
+    value.versions.some((version, index) => !isArtifactVersion(version, artifactId, index + 1)) ||
+    !isRecord(finalVersion) ||
+    artifact.currentVersionId !== finalVersion.id ||
+    !structurallyEqual(currentVersion, finalVersion);
   if (malformed) {
     throw new Error("Malformed or cross-workspace artifact response.");
   }
+  // Consumers receive the canonical final version object, never a divergent
+  // duplicate supplied alongside the immutable ordered history.
+  value.currentVersion = finalVersion as unknown as RuntimeArtifactBundle["currentVersion"];
 }
 
 function validateArtifactText(content: string) {
@@ -893,20 +994,20 @@ export async function createRuntimeResponseArtifact(input: CreateResponseArtifac
   };
   if (!hasTauriRuntime()) {
     const now = new Date().toISOString();
-    const media = { mediaType: "text/markdown", byteLength: new TextEncoder().encode(input.content).byteLength, encoding: "utf-8" };
-    const contentHash = { algorithm: "sha-256" as const, value: `preview-${input.content.length}` };
+    const content = await inlineArtifactContent(input.content);
     const provenance = { kind: "run" as const, runId: input.runId as never, externalReference: `message:${input.messageId}`, observedAt: now };
     const currentVersion = {
       id: versionId, artifactId, version: 1, status: "available", createdAt: now,
-      createdByInternalUserId: "preview-user", content: { kind: "inline", text: input.content, media, contentHash },
-      media, contentHash, provenance, citations: input.citations.map((citation, index) => ({ id: `citation-${index + 1}`, label: citation.title, source: { kind: "import", externalReference: citation.sourceId, observedAt: now }, locator: citation.chunkId ?? citation.sourcePath, quotedText: citation.snippet })), lineage: []
+      createdByInternalUserId: "preview-user", content,
+      media: content.media, contentHash: content.contentHash, provenance, citations: [], lineage: []
     };
     const bundle = {
-      artifact: { id: artifactId, workspaceId: scope.workspaceId, authority: "local", visibility: "member-private", ownerMemberId: "preview-member", schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user", createdAt: now, updatedAt: now, kind: "document", status: "draft", title: input.title, currentVersionId: versionId, producingRunId: input.runId, sourceProvenance: [provenance], context: { threadId: input.threadId }, reviews: [], retention: { status: "active" } },
+      artifact: { id: artifactId, workspaceId: scope.workspaceId, authority: "local", visibility: "member-private", ownerMemberId: "preview-member", schemaVersion: 1, revision: 1, createdByInternalUserId: "preview-user", createdAt: now, updatedAt: now, kind: "document", status: "draft", title: input.title, currentVersionId: versionId, producingRunId: input.runId, sourceProvenance: [provenance], context: { threadId: input.threadId }, reviews: [], retention: { status: "active" } },
       currentVersion,
       versions: [currentVersion],
       sourceMessageId: input.messageId
     } as unknown as RuntimeArtifactBundle;
+    assertArtifactBundle(bundle, scope.workspaceId);
     const records = previewArtifacts.get(scope.workspaceId) ?? [];
     previewArtifacts.set(scope.workspaceId, [...records, bundle]);
     return bundle;

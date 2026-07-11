@@ -41,7 +41,7 @@ function nativeBundle(workspaceId = "workspace-native"): RuntimeArtifactBundle {
       visibility: "member-private",
       ownerMemberId: "member-1",
       schemaVersion: 1,
-      revision: 0,
+      revision: 1,
       createdByInternalUserId: "user-1",
       createdAt: "2026-07-11T00:00:00.000Z",
       updatedAt: "2026-07-11T00:00:00.000Z",
@@ -97,7 +97,7 @@ describe("artifact runtime revisions", () => {
     mocks.invoke.mockResolvedValue(revised);
     await appendRuntimeArtifactVersion({
       artifactId: "artifact-1",
-      expectedRevision: 0,
+      expectedRevision: 1,
       expectedCurrentVersionId: "version-1",
       content: "Revised"
     });
@@ -115,7 +115,79 @@ describe("artifact runtime revisions", () => {
     expect(payload.input).not.toHaveProperty("actor");
   });
 
-  it("appends v2 immutably in preview, retains sources, and enforces CAS", async () => {
+  it("creates a native-equivalent bounded preview artifact without renderer evidence", async () => {
+    setActiveRuntimeDataScope("workspace-preview-create-parity");
+    const created = await createRuntimeResponseArtifact({
+      threadId: "thread-1",
+      messageId: "message-1",
+      runId: "run-1",
+      title: "Answer",
+      content: "Answer",
+      citations: [{ sourceId: "forged", title: "Forged", snippet: "Not receipt evidence" } as never]
+    });
+    expect(created.artifact.revision).toBe(1);
+    expect(created.currentVersion.version).toBe(1);
+    expect(created.currentVersion.citations).toEqual([]);
+    expect(created.currentVersion.content.kind).toBe("inline");
+    if (created.currentVersion.content.kind === "inline") {
+      expect(created.currentVersion.content.media.byteLength).toBe(6);
+      expect(created.currentVersion.content.contentHash).toEqual({
+        algorithm: "sha-256",
+        value: "b2a3aa602762a782e47a4f8e93bb5ae1b8819d1b92b7e6ceb3ef46a3c7077eb0"
+      });
+      expect(created.currentVersion.contentHash).toEqual(created.currentVersion.content.contentHash);
+    }
+  });
+
+  it("rejects empty and oversized initial preview content", async () => {
+    setActiveRuntimeDataScope("workspace-preview-create-bounds");
+    const input = {
+      threadId: "thread-1",
+      messageId: "message-1",
+      runId: "run-1",
+      title: "Answer",
+      citations: []
+    };
+    await expect(createRuntimeResponseArtifact({ ...input, content: "" })).rejects.toThrow(/add some content/i);
+    await expect(createRuntimeResponseArtifact({ ...input, content: "x".repeat(65_537) })).rejects.toThrow(/too large/i);
+    expect(await listRuntimeThreadArtifacts("thread-1")).toEqual([]);
+  });
+
+  it("rejects malformed content and citations before UI consumption", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    const malformedContent = JSON.parse(JSON.stringify(nativeBundle()));
+    malformedContent.versions[0].content = { kind: "inline", text: "Answer" };
+    malformedContent.currentVersion = malformedContent.versions[0];
+    mocks.invoke.mockResolvedValueOnce(malformedContent);
+    await expect(createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    })).rejects.toThrow(/malformed/i);
+
+    const malformedCitation = JSON.parse(JSON.stringify(nativeBundle()));
+    malformedCitation.versions[0].citations = [{ id: "citation-1", label: "Missing source" }];
+    malformedCitation.currentVersion = malformedCitation.versions[0];
+    mocks.invoke.mockResolvedValueOnce(malformedCitation);
+    await expect(createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    })).rejects.toThrow(/malformed/i);
+  });
+
+  it("rejects a divergent current version duplicate", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    const divergent = JSON.parse(JSON.stringify(nativeBundle()));
+    divergent.currentVersion.content.text = "Divergent text";
+    mocks.invoke.mockResolvedValue(divergent);
+    await expect(createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    })).rejects.toThrow(/malformed/i);
+  });
+
+  it("appends v2 immutably in preview without inventing sources and enforces CAS", async () => {
     setActiveRuntimeDataScope("workspace-preview-revision");
     const first = await createRuntimeResponseArtifact({
       threadId: "thread-1",
@@ -133,7 +205,7 @@ describe("artifact runtime revisions", () => {
       content: "Version two"
     });
     expect(second.versions.map((version) => version.version)).toEqual([1, 2]);
-    expect(second.currentVersion.citations).toEqual(first.currentVersion.citations);
+    expect(second.currentVersion.citations).toEqual([]);
     expect(first.currentVersion.content.kind === "inline" ? first.currentVersion.content.text : "").toBe(originalText);
     await expect(appendRuntimeArtifactVersion({
       artifactId: first.artifact.id,
