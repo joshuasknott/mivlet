@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 20;
+pub const CURRENT_SCHEMA_VERSION: u32 = 21;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -953,6 +953,30 @@ CREATE TABLE IF NOT EXISTS connection_selection (
   FOREIGN KEY(workspace_id,connection_id)
     REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE
 );
+
+-- Durable, secret-free observations that a canonical Connection can implement
+-- a semantic capability. These rows are discovery evidence only: resolution
+-- still re-checks current Connection authority, scopes, health, and approval.
+CREATE TABLE IF NOT EXISTS capability_implementation_evidence (
+  workspace_id TEXT NOT NULL,
+  capability_key TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  availability TEXT NOT NULL CHECK(availability IN ('available','degraded')),
+  consequence_class TEXT NOT NULL CHECK(consequence_class='read'),
+  evidence_kind TEXT NOT NULL CHECK(evidence_kind='adapter-validated'),
+  adapter_reference TEXT NOT NULL,
+  connection_revision INTEGER NOT NULL CHECK(connection_revision >= 1),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  observed_by_internal_user_id TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  PRIMARY KEY(workspace_id,capability_key,connection_id),
+  FOREIGN KEY(workspace_id,connection_id)
+    REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_connection
+  ON capability_implementation_evidence(workspace_id,connection_id,connection_revision);
+CREATE INDEX IF NOT EXISTS idx_capability_evidence_capability
+  ON capability_implementation_evidence(workspace_id,capability_key,availability);
 
 -- Compatibility rows stay live in connector_account until an authenticated
 -- writer can prove the canonical creator/scope. This ledger records the stable

@@ -1476,6 +1476,20 @@ fn commit_prepared_auth_state<G>(
         connections.insert(0, connection);
     }
     promote_single_active(&mut connections, connector_id);
+    let canonical_connection = connections
+        .iter()
+        .find(|candidate| {
+            candidate.connector_id == connector_id && candidate.account.id == account.id
+        })
+        .cloned()
+        .ok_or_else(|| {
+            command_error(
+                "unknown",
+                connector_id,
+                "Connector metadata could not be prepared.",
+                false,
+            )
+        })?;
     if let Err(error) = write_connections(path, &connections) {
         return finish_metadata_commit(Err(error), secret_store, rollback)
             .map(|_| unreachable!())
@@ -1514,6 +1528,13 @@ fn commit_prepared_auth_state<G>(
             connector_id,
             &saved.id,
             selection.as_ref().map(|value| value.revision),
+            &timestamp,
+        )?;
+        crate::capability_registry::persist_native_discovery_evidence(
+            tx,
+            scope,
+            &canonical_connection,
+            &saved,
             &timestamp,
         )?;
         Ok(())

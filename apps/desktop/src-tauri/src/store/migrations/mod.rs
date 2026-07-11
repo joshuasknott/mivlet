@@ -101,6 +101,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // the authenticated canonical store. Legacy active flags are not
             // guessed into authority by the migration.
             19 => apply_v19_to_v20(conn)?,
+            // 20 -> 21: persist secret-free semantic capability implementation
+            // observations. Evidence never grants authority and is usable only
+            // while its exact canonical Connection revision remains current.
+            20 => apply_v20_to_v21(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -110,6 +114,34 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v20_to_v21(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS capability_implementation_evidence (
+          workspace_id TEXT NOT NULL,
+          capability_key TEXT NOT NULL,
+          connection_id TEXT NOT NULL,
+          availability TEXT NOT NULL CHECK(availability IN ('available','degraded')),
+          consequence_class TEXT NOT NULL CHECK(consequence_class='read'),
+          evidence_kind TEXT NOT NULL CHECK(evidence_kind='adapter-validated'),
+          adapter_reference TEXT NOT NULL,
+          connection_revision INTEGER NOT NULL CHECK(connection_revision >= 1),
+          revision INTEGER NOT NULL CHECK(revision >= 1),
+          observed_by_internal_user_id TEXT NOT NULL,
+          observed_at TEXT NOT NULL,
+          PRIMARY KEY(workspace_id,capability_key,connection_id),
+          FOREIGN KEY(workspace_id,connection_id)
+            REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_capability_evidence_connection
+          ON capability_implementation_evidence(workspace_id,connection_id,connection_revision);
+        CREATE INDEX IF NOT EXISTS idx_capability_evidence_capability
+          ON capability_implementation_evidence(workspace_id,capability_key,availability);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1155,8 +1187,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v20 is current; v20 -> v21 has no registered migration.
-        let err = apply(&conn, 20, 21).unwrap_err();
+        // v21 is current; v21 -> v22 has no registered migration.
+        let err = apply(&conn, 21, 22).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1242,6 +1274,36 @@ mod tests {
             conn.query_row("SELECT COUNT(*) FROM connection_selection", [], |row| {
                 row.get::<_, i64>(0)
             })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn v20_to_v21_adds_empty_capability_evidence_without_guessing() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE connection_record(
+              workspace_id TEXT NOT NULL,
+              id TEXT NOT NULL,
+              PRIMARY KEY(workspace_id,id)
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 20, 21).unwrap();
+        apply(&conn, 20, 21).unwrap();
+
+        assert!(table_exists(&conn, "capability_implementation_evidence").unwrap());
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM capability_implementation_evidence",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
             .unwrap(),
             0
         );

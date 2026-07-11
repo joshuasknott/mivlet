@@ -1469,7 +1469,7 @@ fn reconcile_canonical_connector_accounts(
                         "expired" => ("refresh-required", "expired", "refresh-required"),
                         _ => ("pending-authorization", "pending", "unknown"),
                     };
-                crate::store::repos::connection_record::upsert_native_connector(
+                let saved = crate::store::repos::connection_record::upsert_native_connector(
                     tx,
                     store,
                     scope,
@@ -1487,6 +1487,13 @@ fn reconcile_canonical_connector_accounts(
                         expected_revision,
                         updated_at: &connection.updated_at,
                     },
+                )?;
+                crate::capability_registry::persist_native_discovery_evidence(
+                    tx,
+                    scope,
+                    connection,
+                    &saved,
+                    &connection.updated_at,
                 )?;
             }
             let selection =
@@ -2117,7 +2124,7 @@ mod workspace_scope_tests {
                 avatar_url: None,
             },
             status: "connected".into(),
-            scopes: vec!["gmail.readonly".into()],
+            scopes: vec!["https://www.googleapis.com/auth/gmail.readonly".into()],
             expires_at: None,
             credential_ref: crate::connector_auth::native_connector_credential_ref(
                 "gmail",
@@ -2147,6 +2154,22 @@ mod workspace_scope_tests {
             .unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].revision, 1);
+        let evidence = store
+            .with_conn(|tx| {
+                crate::store::repos::capability_evidence::list_current_for_connection(
+                    tx,
+                    &scope_a,
+                    &records[0].id,
+                )
+            })
+            .unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].capability_key, "communication.email.search");
+        assert_eq!(evidence[0].availability, "degraded");
+        assert_eq!(evidence[0].revision, 1);
+        assert!(!serde_json::to_string(&evidence)
+            .unwrap()
+            .contains("provider-account-secret"));
         assert!(
             require_selectable_canonical_connection(&store, &scope_a, "gmail", &records[0].id,)
                 .is_ok()
@@ -2172,6 +2195,16 @@ mod workspace_scope_tests {
             .unwrap();
         assert_eq!(canonical_health[0].health_state, "healthy");
         assert_eq!(canonical_health[0].revision, 2);
+        assert!(store
+            .with_conn(|tx| {
+                crate::store::repos::capability_evidence::list_current_for_connection(
+                    tx,
+                    &scope_a,
+                    &canonical_health[0].id,
+                )
+            })
+            .unwrap()
+            .is_empty());
         let projected = project_canonical_account_options(
             account_options_from_connections(
                 std::slice::from_ref(&connection),

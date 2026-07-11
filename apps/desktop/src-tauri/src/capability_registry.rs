@@ -28,6 +28,26 @@ struct NativeReadImplementation {
     required_scopes: &'static [&'static str],
 }
 
+impl NativeReadImplementation {
+    fn adapter_reference(&self) -> String {
+        let adapter = match self.adapter {
+            NativeReadAdapter::Capability(capability) => capability,
+            NativeReadAdapter::Search(NativeSearchAdapter::Google) => "google.search",
+            NativeReadAdapter::Search(NativeSearchAdapter::GoogleCalendarEvents) => {
+                "google.calendar-events.search"
+            }
+            NativeReadAdapter::Search(NativeSearchAdapter::GoogleCalendarList) => {
+                "google.calendar-list.search"
+            }
+            NativeReadAdapter::Search(NativeSearchAdapter::Notion) => "notion.search",
+            NativeReadAdapter::Search(NativeSearchAdapter::SlackChannels) => {
+                "slack.channels.search"
+            }
+        };
+        format!("native:{}:{adapter}", self.connector_id)
+    }
+}
+
 const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
     NativeReadImplementation {
         capability_id: "source.repository.list",
@@ -93,6 +113,9 @@ pub(crate) struct SemanticCapabilityReadResult {
     pub connection_id: String,
     pub connector_id: String,
     pub implementation_evidence: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discovery_evidence:
+        Option<crate::store::repos::capability_evidence::CapabilityImplementationEvidence>,
     pub result: serde_json::Value,
 }
 
@@ -100,6 +123,8 @@ struct ResolvedNativeRead {
     implementation: &'static NativeReadImplementation,
     connection_id: String,
     availability: String,
+    discovery_evidence:
+        Option<crate::store::repos::capability_evidence::CapabilityImplementationEvidence>,
 }
 
 fn error(code: &str, capability_id: &str, message: &str, retryable: bool) -> ConnectorCommandError {
@@ -179,6 +204,55 @@ fn availability_for(
     }
 }
 
+pub(crate) fn persist_native_discovery_evidence(
+    tx: &rusqlite::Connection,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connection: &crate::connector_auth::ConnectorConnection,
+    canonical: &crate::store::repos::connection_record::SafeConnectionRecord,
+    observed_at: &str,
+) -> crate::store::Result<
+    Vec<crate::store::repos::capability_evidence::CapabilityImplementationEvidence>,
+> {
+    if connection.connector_id != canonical.connector_definition_key {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection discovery evidence crosses its provider boundary.".into(),
+        ));
+    }
+    let observations = NATIVE_READ_IMPLEMENTATIONS
+        .iter()
+        .filter(|implementation| implementation.connector_id == connection.connector_id)
+        .filter_map(|implementation| {
+            availability_for(implementation, connection, canonical)
+                .ok()
+                .map(|availability| {
+                    (
+                        implementation.capability_id,
+                        availability,
+                        implementation.adapter_reference(),
+                    )
+                })
+        })
+        .collect::<Vec<_>>();
+    let writes = observations
+        .iter()
+        .map(|(capability_key, availability, adapter_reference)| {
+            crate::store::repos::capability_evidence::NativeCapabilityObservation {
+                capability_key,
+                availability,
+                adapter_reference,
+            }
+        })
+        .collect::<Vec<_>>();
+    crate::store::repos::capability_evidence::replace_native_observations(
+        tx,
+        scope,
+        &canonical.id,
+        canonical.revision,
+        observed_at,
+        &writes,
+    )
+}
+
 fn resolve_native_read(
     app: &tauri::AppHandle,
     capability_id: &str,
@@ -244,12 +318,36 @@ fn resolve_native_read(
             )
         })?;
     let availability = availability_for(implementation, &connection, &canonical)?.to_string();
+    let expected_adapter = implementation.adapter_reference();
+    let discovery_evidence = store
+        .with_conn(|tx| {
+            crate::store::repos::capability_evidence::list_current_for_connection(
+                tx,
+                &scope,
+                &connection_id,
+            )
+        })
+        .map_err(|store_error| {
+            error(
+                "implementation-unverified",
+                capability_id,
+                &store_error.to_string(),
+                false,
+            )
+        })?
+        .into_iter()
+        .find(|evidence| {
+            evidence.capability_key == capability_id
+                && evidence.adapter_reference == expected_adapter
+                && evidence.availability == availability
+        });
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| error("connection-not-authorized", capability_id, &message, false))?;
     Ok(ResolvedNativeRead {
         implementation,
         connection_id,
         availability,
+        discovery_evidence,
     })
 }
 
@@ -383,6 +481,7 @@ pub(crate) async fn read(
         connection_id: resolved.connection_id,
         connector_id,
         implementation_evidence: "adapter-validated".into(),
+        discovery_evidence: resolved.discovery_evidence,
         result,
     })
 }

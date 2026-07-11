@@ -18,6 +18,7 @@ pub mod approval;
 pub mod artifact;
 pub mod audit_event;
 pub mod backend_connection;
+pub mod capability_evidence;
 pub mod cloud_sync;
 pub mod connection_record;
 pub mod connection_selection;
