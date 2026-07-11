@@ -2955,6 +2955,13 @@ export interface RuntimeMcpConnectionDetails {
   discoveredResources: string[];
   enabledTools: string[];
   enabledResources: string[];
+  capabilityBindings: Array<{
+    capabilityId: "knowledge.content.search";
+    toolName: string;
+    contractVersion: "fable.connected-source-search.v1";
+    consequence: "read";
+    trust: "untrusted";
+  }>;
 }
 
 export interface RuntimeMcpToolProposal {
@@ -3235,12 +3242,20 @@ export async function setRuntimeMcpEnablement(
   connectionId: string,
   expectedRevision: number,
   enabledTools: string[],
-  enabledResources: string[]
+  enabledResources: string[],
+  capabilityBindings: Array<{ capabilityId: "knowledge.content.search"; toolName: string }>
 ) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<RuntimeMcpConnectionDetails>("set_mcp_server_enablement", {
-      request: { workspaceId, connectionId, expectedRevision, enabledTools, enabledResources }
+      request: {
+        workspaceId,
+        connectionId,
+        expectedRevision,
+        enabledTools,
+        enabledResources,
+        capabilityBindings
+      }
     });
   } catch (error) {
     throw toRuntimeError(error);

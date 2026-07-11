@@ -77,7 +77,8 @@ class FixtureTransport implements McpTransport {
       discoveredTools: ["read"],
       discoveredResources: ["file:///safe"],
       enabledTools: [],
-      enabledResources: []
+      enabledResources: [],
+      capabilityBindings: []
     };
   }
   async close(): Promise<void> {}
@@ -89,10 +90,17 @@ beforeEach(() => {
   runtime.list.mockReset().mockResolvedValue([]);
   runtime.prepare.mockReset().mockResolvedValue({ configurationFingerprint: "abc", approval });
   runtime.resolve.mockReset().mockResolvedValue({ persisted: true });
-  runtime.setEnablement.mockReset().mockImplementation(async (_workspace, _connection, revision, tools, resources) => ({
+  runtime.setEnablement.mockReset().mockImplementation(async (_workspace, _connection, revision, tools, resources, bindings) => ({
     connectionId: "connection-mcp", connectionRevision: revision + 1, launchReference: "local-files",
     discoveryState: "discovered", discoveredTools: ["read"], discoveredResources: ["file:///safe"],
-    enabledTools: tools, enabledResources: resources
+    enabledTools: tools, enabledResources: resources, capabilityBindings: bindings.map(
+      (binding: { capabilityId: string; toolName: string }) => ({
+        ...binding,
+        contractVersion: "fable.connected-source-search.v1",
+        consequence: "read",
+        trust: "untrusted"
+      })
+    )
   }));
   transportFactory.mockReset().mockResolvedValue(new FixtureTransport());
 });
@@ -141,7 +149,27 @@ describe("LocalMcpSettings", () => {
     fireEvent.click(within(access).getByLabelText("read"));
     fireEvent.click(within(access).getByRole("button", { name: "Save access" }));
     await waitFor(() => expect(runtime.setEnablement).toHaveBeenCalledWith(
-      "workspace-a", "connection-mcp", 2, ["read"], []
+      "workspace-a", "connection-mcp", 2, ["read"], [], []
+    ));
+  });
+
+  it("explicitly binds one enabled tool to connected-source search", async () => {
+    runtime.list.mockResolvedValue([summary]);
+    render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
+    fireEvent.click(screen.getByText("Manage tool servers"));
+    fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
+    const access = await screen.findByLabelText("Local files access");
+    fireEvent.change(within(access).getByRole("combobox", { name: /Connected-source search tool/ }), {
+      target: { value: "read" }
+    });
+    fireEvent.click(within(access).getByRole("button", { name: "Save access" }));
+    await waitFor(() => expect(runtime.setEnablement).toHaveBeenCalledWith(
+      "workspace-a",
+      "connection-mcp",
+      2,
+      ["read"],
+      [],
+      [{ capabilityId: "knowledge.content.search", toolName: "read" }]
     ));
   });
 

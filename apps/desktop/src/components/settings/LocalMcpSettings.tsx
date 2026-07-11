@@ -42,7 +42,11 @@ export function LocalMcpSettings({
   const [busy, setBusy] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [discoveries, setDiscoveries] = useState<Record<string, RuntimeMcpConnectionDetails>>({});
-  const [enablementDrafts, setEnablementDrafts] = useState<Record<string, { tools: string[]; resources: string[] }>>({});
+  const [enablementDrafts, setEnablementDrafts] = useState<Record<string, {
+    tools: string[];
+    resources: string[];
+    knowledgeSearchTool: string;
+  }>>({});
 
   const refresh = async () => {
     const loaded = await listRuntimeMcpServerConfigurations(workspaceId);
@@ -132,7 +136,10 @@ export function LocalMcpSettings({
         ...current,
         [server.id]: {
           tools: discovery.enabledTools,
-          resources: discovery.enabledResources
+          resources: discovery.enabledResources,
+          knowledgeSearchTool: (discovery.capabilityBindings ?? []).find(
+            (binding) => binding.capabilityId === "knowledge.content.search"
+          )?.toolName ?? ""
         }
       }));
       onStatus(
@@ -171,7 +178,7 @@ export function LocalMcpSettings({
 
   const toggleDraft = (serverId: string, kind: "tools" | "resources", value: string) => {
     setEnablementDrafts((current) => {
-      const draft = current[serverId] ?? { tools: [], resources: [] };
+      const draft = current[serverId] ?? { tools: [], resources: [], knowledgeSearchTool: "" };
       const values = draft[kind];
       return {
         ...current,
@@ -179,7 +186,10 @@ export function LocalMcpSettings({
           ...draft,
           [kind]: values.includes(value)
             ? values.filter((candidate) => candidate !== value)
-            : [...values, value]
+            : [...values, value],
+          ...(kind === "tools" && draft.knowledgeSearchTool === value
+            ? { knowledgeSearchTool: "" }
+            : {})
         }
       };
     });
@@ -196,7 +206,10 @@ export function LocalMcpSettings({
         discovery.connectionId,
         discovery.connectionRevision,
         draft.tools,
-        draft.resources
+        draft.resources,
+        draft.knowledgeSearchTool
+          ? [{ capabilityId: "knowledge.content.search", toolName: draft.knowledgeSearchTool }]
+          : []
       );
       if (!saved) throw new Error("Local tool access requires the desktop app.");
       setDiscoveries((current) => ({ ...current, [server.id]: saved }));
@@ -266,6 +279,31 @@ export function LocalMcpSettings({
                               <span>{item.value}</span>
                             </label>
                           ))}
+                          <label className="settings-field">
+                            <span>Connected-source search tool</span>
+                            <select
+                              value={draft.knowledgeSearchTool}
+                              onChange={(event) => {
+                                const toolName = event.target.value;
+                                setEnablementDrafts((current) => ({
+                                  ...current,
+                                  [server.id]: {
+                                    ...draft,
+                                    knowledgeSearchTool: toolName,
+                                    tools: toolName && !draft.tools.includes(toolName)
+                                      ? [...draft.tools, toolName]
+                                      : draft.tools
+                                  }
+                                }));
+                              }}
+                            >
+                              <option value="">Not used for connected-source search</option>
+                              {discovery.discoveredTools.map((toolName) => (
+                                <option key={toolName} value={toolName}>{toolName}</option>
+                              ))}
+                            </select>
+                            <small>The tool must return Fable's cited-search contract. Results stay untrusted.</small>
+                          </label>
                           <button type="button" className="button button--secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
                         </div>
                       ) : null}

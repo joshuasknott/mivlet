@@ -275,6 +275,8 @@ pub struct SetMcpEnablementRequest {
     expected_revision: i64,
     enabled_tools: Vec<String>,
     enabled_resources: Vec<String>,
+    #[serde(default)]
+    capability_bindings: Vec<crate::store::repos::connection_record::McpCapabilityBindingWrite>,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -800,6 +802,7 @@ pub fn set_mcp_server_enablement(
                 request.expected_revision,
                 request.enabled_tools,
                 request.enabled_resources,
+                request.capability_bindings,
                 &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             )
         })

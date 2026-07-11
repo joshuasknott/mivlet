@@ -83,7 +83,36 @@ enum ConnectionTransport {
         enabled_tools: Vec<String>,
         #[serde(default)]
         enabled_resources: Vec<String>,
+        #[serde(default)]
+        capability_bindings: Vec<McpCapabilityBinding>,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct McpCapabilityBinding {
+    capability_id: String,
+    tool_name: String,
+    contract_version: String,
+    consequence: String,
+    trust: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpCapabilityBindingWrite {
+    pub capability_id: String,
+    pub tool_name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SafeMcpCapabilityBinding {
+    pub capability_id: String,
+    pub tool_name: String,
+    pub contract_version: String,
+    pub consequence: String,
+    pub trust: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -99,6 +128,7 @@ pub struct SafeMcpConnectionDetails {
     pub discovered_resources: Vec<String>,
     pub enabled_tools: Vec<String>,
     pub enabled_resources: Vec<String>,
+    pub capability_bindings: Vec<SafeMcpCapabilityBinding>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -419,6 +449,7 @@ fn upsert_mcp_server(
             discovered_resources: Vec::new(),
             enabled_tools: Vec::new(),
             enabled_resources: Vec::new(),
+            capability_bindings: Vec::new(),
         },
     };
     if existing.is_some() {
@@ -582,6 +613,7 @@ pub(crate) fn record_mcp_discovery(
         discovered_resources,
         enabled_tools,
         enabled_resources,
+        capability_bindings,
         ..
     } = &mut content.transport
     else {
@@ -595,6 +627,10 @@ pub(crate) fn record_mcp_discovery(
     *discovered_resources = resources;
     enabled_tools.retain(|name| discovered_tools.binary_search(name).is_ok());
     enabled_resources.retain(|uri| discovered_resources.binary_search(uri).is_ok());
+    capability_bindings.retain(|binding| {
+        discovered_tools.binary_search(&binding.tool_name).is_ok()
+            && enabled_tools.binary_search(&binding.tool_name).is_ok()
+    });
     let sealed = seal_json(
         store,
         &serde_json::to_value(content)
@@ -631,6 +667,7 @@ pub(crate) fn set_mcp_enablement(
     expected_revision: i64,
     enabled_tools: Vec<String>,
     enabled_resources: Vec<String>,
+    capability_bindings: Vec<McpCapabilityBindingWrite>,
     updated_at: &str,
 ) -> Result<SafeMcpConnectionDetails> {
     require_current_scope(tx, scope, ScopeAccess::Write)?;
@@ -654,6 +691,7 @@ pub(crate) fn set_mcp_enablement(
         discovered_resources,
         enabled_tools: stored_tools,
         enabled_resources: stored_resources,
+        capability_bindings: stored_bindings,
         ..
     } = &mut content.transport
     else {
@@ -681,6 +719,7 @@ pub(crate) fn set_mcp_enablement(
     }
     *stored_tools = enabled_tools;
     *stored_resources = enabled_resources;
+    *stored_bindings = normalize_mcp_capability_bindings(capability_bindings, stored_tools)?;
     let sealed = seal_json(
         store,
         &serde_json::to_value(content)
@@ -977,6 +1016,7 @@ fn mcp_projection(store: &Store, row: &Partial) -> Result<SafeMcpConnectionDetai
         discovered_resources,
         enabled_tools,
         enabled_resources,
+        capability_bindings,
     } = content.transport
     else {
         return Err(StoreError::Invalid(
@@ -997,7 +1037,83 @@ fn mcp_projection(store: &Store, row: &Partial) -> Result<SafeMcpConnectionDetai
         discovered_resources,
         enabled_tools,
         enabled_resources,
+        capability_bindings: capability_bindings
+            .into_iter()
+            .map(|binding| SafeMcpCapabilityBinding {
+                capability_id: binding.capability_id,
+                tool_name: binding.tool_name,
+                contract_version: binding.contract_version,
+                consequence: binding.consequence,
+                trust: binding.trust,
+            })
+            .collect(),
     })
+}
+
+fn normalize_mcp_capability_bindings(
+    values: Vec<McpCapabilityBindingWrite>,
+    enabled_tools: &[String],
+) -> Result<Vec<McpCapabilityBinding>> {
+    if values.len() > 8 {
+        return Err(StoreError::Invalid(
+            "MCP capability bindings exceed the supported limit.".into(),
+        ));
+    }
+    let mut bindings = Vec::with_capacity(values.len());
+    for value in values {
+        let capability_id = bounded(&value.capability_id, "MCP capability", 160)?;
+        if capability_id != "knowledge.content.search" {
+            return Err(StoreError::Invalid(
+                "This MCP semantic capability is not supported.".into(),
+            ));
+        }
+        let tool_name = bounded(&value.tool_name, "MCP tool", 256)?;
+        if enabled_tools.binary_search(&tool_name).is_err() {
+            return Err(StoreError::Invalid(
+                "An MCP semantic binding must name an enabled discovered tool.".into(),
+            ));
+        }
+        if bindings
+            .iter()
+            .any(|binding: &McpCapabilityBinding| binding.capability_id == capability_id)
+        {
+            return Err(StoreError::Invalid(
+                "An MCP semantic capability can bind to only one tool on a Connection.".into(),
+            ));
+        }
+        bindings.push(McpCapabilityBinding {
+            capability_id,
+            tool_name,
+            contract_version: "fable.connected-source-search.v1".into(),
+            consequence: "read".into(),
+            trust: "untrusted".into(),
+        });
+    }
+    bindings.sort_by(|left, right| left.capability_id.cmp(&right.capability_id));
+    Ok(bindings)
+}
+
+pub(crate) fn require_mcp_capability_binding(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+    expected_revision: i64,
+    capability_id: &str,
+) -> Result<SafeMcpCapabilityBinding> {
+    let details = mcp_details_for_id(tx, store, scope, connection_id)?;
+    if details.connection_revision != expected_revision || details.discovery_state != "discovered" {
+        return Err(StoreError::Invalid(
+            "The MCP semantic binding is stale or unavailable.".into(),
+        ));
+    }
+    details
+        .capability_bindings
+        .into_iter()
+        .find(|binding| binding.capability_id == capability_id)
+        .ok_or_else(|| {
+            StoreError::Invalid("No MCP tool is bound to this semantic capability.".into())
+        })
 }
 
 fn normalized_discovery_values(
@@ -1410,6 +1526,7 @@ mod tests {
                     discovered.connection_revision,
                     vec!["not-discovered".into()],
                     Vec::new(),
+                    Vec::new(),
                     "2026-07-11T20:01:30Z",
                 )
             })
@@ -1424,6 +1541,10 @@ mod tests {
                     discovered.connection_revision,
                     vec!["read".into()],
                     vec!["file:///safe".into()],
+                    vec![McpCapabilityBindingWrite {
+                        capability_id: "knowledge.content.search".into(),
+                        tool_name: "read".into(),
+                    }],
                     "2026-07-11T20:01:30Z",
                 )
             })
@@ -1431,6 +1552,30 @@ mod tests {
         assert_eq!(enabled.connection_revision, 3);
         assert_eq!(enabled.enabled_tools, ["read"]);
         assert_eq!(enabled.enabled_resources, ["file:///safe"]);
+        assert_eq!(enabled.capability_bindings.len(), 1);
+        assert_eq!(
+            enabled.capability_bindings[0],
+            SafeMcpCapabilityBinding {
+                capability_id: "knowledge.content.search".into(),
+                tool_name: "read".into(),
+                contract_version: "fable.connected-source-search.v1".into(),
+                consequence: "read".into(),
+                trust: "untrusted".into(),
+            }
+        );
+        let binding = store
+            .with_conn(|tx| {
+                require_mcp_capability_binding(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    enabled.connection_revision,
+                    "knowledge.content.search",
+                )
+            })
+            .unwrap();
+        assert_eq!(binding.tool_name, "read");
         assert!(store
             .transaction(|tx| {
                 record_mcp_discovery(
@@ -1445,6 +1590,22 @@ mod tests {
                 )
             })
             .is_err());
+        let rediscovered = store
+            .transaction(|tx| {
+                record_mcp_discovery(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    enabled.connection_revision,
+                    vec!["write".into()],
+                    Vec::new(),
+                    "2026-07-11T20:03:00Z",
+                )
+            })
+            .unwrap();
+        assert!(rediscovered.enabled_tools.is_empty());
+        assert!(rediscovered.capability_bindings.is_empty());
     }
 
     #[test]
