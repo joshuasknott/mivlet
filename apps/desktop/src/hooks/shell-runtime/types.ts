@@ -7,7 +7,7 @@ import type {
   ConnectorSearchResult, CustomApprovalSettings, FableCommandRequest, FableCommandResult,
   IdentityStatus, KnowledgeCitation, KnowledgeSource, LocalFileImport, MemoryControlState,
   MemoryRecord, MissedRunPolicy, NotificationRecord, PermissionMode, ScheduledExecutionRoute,
-  ScheduledJob, SchedulerQueueEntry, ScheduleTrigger, ThreadSummary, WorkflowDefinition,
+  PreparedRunContext, ScheduledJob, SchedulerQueueEntry, ScheduleTrigger, ThreadSummary, WorkflowDefinition,
   WorkflowRun, WorkspaceDirective, WorkspaceGoal, WorkspacePlan
 } from "@fable/protocol";
 import type { ToolApprovalGate } from "@fable/connectors";
@@ -137,7 +137,7 @@ export interface ShellRuntime {
   toggleKnowledgeSourceDisabled: (sourceId: string) => void;
   /** Permanently remove a source from search, citations, pins, and context. */
   deleteKnowledgeSource: (sourceId: string) => void;
-  assembleKnowledgeContext: (query: string, context?: ProjectMemoryRunContext) => Promise<string>;
+  assembleKnowledgeContext: (query: string, context?: ProjectMemoryRunContext) => Promise<PreparedRunContext>;
   // schedules
   schedules: Schedule[];
   createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;

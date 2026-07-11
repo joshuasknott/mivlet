@@ -136,6 +136,74 @@ describe("assembleContext — citations + usage", () => {
     expect(assembled.citations).toHaveLength(1);
     expect(assembled.citations[0].chunkId).toBe("s1#0");
   });
+
+  it("captures an immutable versioned receipt with exact ranking and reasons", () => {
+    const citation = makeCitation({
+      sourceId: "s-receipt",
+      ranking: { ...ranking },
+      scope: { level: "project", projectId: "p1" }
+    });
+    const assembled = assembleContext({
+      runId: "run-stable",
+      assembledAt: NOW,
+      scope: { level: "project", projectId: "p1" },
+      systemInstructions: "base",
+      memory: [makeMemory()],
+      citations: [citation]
+    });
+
+    expect(assembled.receipt).toEqual({
+      version: 1,
+      runId: "run-stable",
+      assembledAt: NOW,
+      scope: { level: "project", projectId: "p1" },
+      citations: [expect.objectContaining({
+        sourceId: "s-receipt",
+        ranking,
+        scope: { level: "project", projectId: "p1" }
+      })],
+      contributions: expect.arrayContaining([
+        expect.objectContaining({ reason: "system-instruction" }),
+        expect.objectContaining({ reason: "memory-approved" }),
+        expect.objectContaining({ reason: "retrieved", citationId: "s1#0" })
+      ])
+    });
+    expect(Object.isFrozen(assembled.receipt)).toBe(true);
+    expect(Object.isFrozen(assembled.receipt.citations)).toBe(true);
+    expect(Object.isFrozen(assembled.receipt.citations[0].ranking)).toBe(true);
+    expect(Object.isFrozen(assembled.receipt.contributions)).toBe(true);
+
+    citation.title = "Changed later";
+    citation.ranking!.relevance = 999;
+    expect(assembled.receipt.citations[0].title).toBe("Launch plan");
+    expect(assembled.receipt.citations[0].ranking.relevance).toBe(2);
+  });
+
+  it("does not snapshot excluded inputs in the receipt", () => {
+    const assembled = assembleContext({
+      runId: "run-exclusions",
+      assembledAt: NOW,
+      memory: [
+        makeMemory({ id: "disabled", disabled: true }),
+        makeMemory({ id: "forgotten", forgottenAt: NOW })
+      ],
+      citations: [makeCitation({ sourceId: "source-github-secret", provenance: "Connector: github" })],
+      authorization: { isSourceAuthorized: () => false }
+    });
+
+    expect(assembled.receipt.citations).toEqual([]);
+    expect(assembled.receipt.contributions).toEqual([]);
+  });
+
+  it("rejects missing receipt identity or an invalid assembly timestamp", () => {
+    expect(() => assembleContext({ runId: " ", memory: [], citations: [] })).toThrow(/run id/i);
+    expect(() => assembleContext({
+      runId: "run-valid",
+      assembledAt: "not-a-date",
+      memory: [],
+      citations: []
+    })).toThrow(/assembledAt/i);
+  });
 });
 
 describe("assembleContext — conversation", () => {

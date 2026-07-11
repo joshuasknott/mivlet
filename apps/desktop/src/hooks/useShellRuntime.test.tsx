@@ -1382,3 +1382,38 @@ describe("useShellRuntime — search excludes disabled sources", () => {
     expect(citedIds).not.toContain("disabled-match");
   });
 });
+
+describe("useShellRuntime — prepared run context", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("creates one stable run id and immutable receipt before returning context", async () => {
+    seedShellState({
+      importedKnowledgeSources: [seedImport({ contentPreview: "Plan content for launch" })],
+      memoryRecords: [seedMemory()]
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    let prepared: Awaited<ReturnType<typeof result.current.assembleKnowledgeContext>> | undefined;
+    await act(async () => {
+      prepared = await result.current.assembleKnowledgeContext("launch plan");
+    });
+
+    expect(prepared).toBeDefined();
+    expect(prepared!.receipt.version).toBe(1);
+    expect(prepared!.receipt.runId).toMatch(/^run-[a-z0-9-]+$/i);
+    expect(Number.isNaN(Date.parse(prepared!.receipt.assembledAt))).toBe(false);
+    expect(prepared!.receipt.scope).toEqual({ level: "global" });
+    expect(prepared!.receipt.citations[0]).toEqual(expect.objectContaining({
+      sourceId: "source-seed",
+      ranking: expect.objectContaining({ relevance: expect.any(Number) })
+    }));
+    expect(prepared!.receipt.contributions.map((entry) => entry.reason)).toEqual(
+      expect.arrayContaining(["memory-approved", "retrieved"])
+    );
+    expect(Object.isFrozen(prepared!.receipt)).toBe(true);
+  });
+});

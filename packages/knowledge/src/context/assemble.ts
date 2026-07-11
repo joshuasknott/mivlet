@@ -25,7 +25,9 @@ import type {
   KnowledgeScope,
   MemoryRecord,
   NativeMessage,
-  PinnedContextEntry
+  PinnedContextEntry,
+  PreparedRunContext,
+  RunContextReceipt
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { isLiveMemory, scopeSatisfies } from "../store";
@@ -53,7 +55,7 @@ export interface AssembledCitation extends KnowledgeCitation {
   ranking: CitationRanking;
 }
 
-export interface AssembledContext {
+export interface AssembledContext extends PreparedRunContext {
   /** The full system-message prefix text, in deterministic order. */
   systemPrefix: string;
   /** The conversation messages carried into the run (budget-boxed). */
@@ -75,6 +77,8 @@ export interface ContextAuthorizationRules {
 
 export interface AssembleContextInput {
   runId: string;
+  /** Receipt timestamp; injectable for deterministic tests. */
+  assembledAt?: string;
   scope?: KnowledgeScope;
   /** Static system instruction text (the agent's base instructions). */
   systemInstructions?: string;
@@ -110,6 +114,11 @@ const MAX_TOOL_RESULT_CHARS = 1_200;
  * reason for every contribution.
  */
 export function assembleContext(input: AssembleContextInput): AssembledContext {
+  if (!input.runId.trim()) throw new Error("Context assembly requires a stable run id.");
+  const assembledAt = input.assembledAt ?? new Date().toISOString();
+  if (!Number.isFinite(Date.parse(assembledAt))) {
+    throw new Error("Context assembly requires a valid assembledAt timestamp.");
+  }
   const scope = input.scope ?? GLOBAL_SCOPE;
   const usage: ContextContribution[] = [];
   const parts: string[] = [];
@@ -237,7 +246,32 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
   }
 
   const systemPrefix = parts.filter(Boolean).join("\n\n");
-  return { systemPrefix, messages: conversation, citations, usage };
+  const receipt = immutableReceipt({
+    version: 1,
+    runId: input.runId,
+    assembledAt,
+    scope: { ...scope },
+    citations: citations.map((citation) => ({
+      ...citation,
+      ranking: { ...citation.ranking },
+      ...(citation.scope ? { scope: { ...citation.scope } } : {})
+    })),
+    contributions: usage.map((contribution) => ({ ...contribution }))
+  });
+  return { systemPrefix, receipt, messages: conversation, citations, usage };
+}
+
+function immutableReceipt(receipt: RunContextReceipt): RunContextReceipt {
+  Object.freeze(receipt.scope);
+  for (const citation of receipt.citations) {
+    Object.freeze(citation.ranking);
+    if (citation.scope) Object.freeze(citation.scope);
+    Object.freeze(citation);
+  }
+  for (const contribution of receipt.contributions) Object.freeze(contribution);
+  Object.freeze(receipt.citations);
+  Object.freeze(receipt.contributions);
+  return Object.freeze(receipt);
 }
 
 /** A memory is authorized when its provenance source (if any) is authorized. */

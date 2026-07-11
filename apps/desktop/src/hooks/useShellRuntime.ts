@@ -31,6 +31,7 @@ import type {
   MemoryPromotionRequest,
   MemoryRecord,
   PermissionMode,
+  PreparedRunContext,
   RuntimeSnapshot,
   ScheduledExecutionRoute,
   ScheduledJob,
@@ -325,6 +326,12 @@ async function mergeLocalLoopbackProbeResults(
       };
     })
   );
+}
+
+function createRunContextId() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `run-${uuid}`;
+  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRuntime {
@@ -1558,7 +1565,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const assembleKnowledgeContext = async (
     query: string,
     context?: ProjectMemoryRunContext
-  ) => {
+  ): Promise<PreparedRunContext> => {
+    const runId = createRunContextId();
+    const assembledAt = new Date().toISOString();
     const scope = knowledgeScopeForRun(activeThread?.id, context);
     const result = await retrieve(knowledgeRetrievalSources(), {
       query,
@@ -1568,8 +1577,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     });
     setKnowledgeCitations(result.citations);
     setKnowledgeSearchMode(result.mode);
-    return assembleContext({
-      runId: `run-${Date.now()}`,
+    const assembled = assembleContext({
+      runId,
+      assembledAt,
       scope,
       // Only live memories enter context: forgotten/disabled records are
       // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
@@ -1587,7 +1597,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
               (!account || connector.account?.id === account)
           )
       }
-    }).systemPrefix;
+    });
+    return Object.freeze({
+      systemPrefix: assembled.systemPrefix,
+      receipt: assembled.receipt
+    });
   };
 
   /**
