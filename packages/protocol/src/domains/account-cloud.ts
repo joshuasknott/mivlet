@@ -139,6 +139,10 @@ export interface AccountPendingInvitationList {
 export interface AccountInvitationAcceptanceOutcome {
   result: AcceptWorkspaceInvitationResult;
   accountWorkspace: AccountWorkspaceStatus;
+  reconciliation: {
+    status: "refreshed" | "refresh-needed";
+    message: string;
+  };
 }
 
 export type CloudWorkspaceRole = WorkspaceRole;
