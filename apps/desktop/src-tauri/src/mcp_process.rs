@@ -28,6 +28,7 @@ use url::Url;
 
 const MAX_MCP_FRAME_BYTES: usize = 10 * 1024 * 1024;
 const MCP_EVENT_CHANNEL_PREFIX: &str = "fable://mcp/";
+const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 
 struct McpChild {
     child: Child,
@@ -36,6 +37,7 @@ struct McpChild {
     owner_subject: String,
     connection_id: String,
     connection_revision: i64,
+    initialized: bool,
     discovery_current: bool,
 }
 
@@ -56,6 +58,7 @@ struct DiscoveryCollection {
 
 #[derive(Default)]
 struct DiscoveryProof {
+    initializing: Option<String>,
     pending: HashMap<String, DiscoveryKind>,
     tools: DiscoveryCollection,
     resources: DiscoveryCollection,
@@ -556,7 +559,7 @@ pub async fn send_remote_mcp_frame(
         if session.busy {
             return Err("This remote MCP session is already handling a request.".to_string());
         }
-        register_discovery_request(&request.session_id, &request.frame)?;
+        register_discovery_request(&request.session_id, &request.frame, session.initialized)?;
         session.busy = true;
         session.clone()
     };
@@ -1136,6 +1139,7 @@ pub async fn spawn_mcp_process(
                 owner_subject: scope.private.owner_subject().to_string(),
                 connection_id: connection.connection_id.clone(),
                 connection_revision: connection.connection_revision,
+                initialized: false,
                 discovery_current: false,
             },
         );
@@ -1158,7 +1162,7 @@ pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String
         None,
         crate::authorized_scope::ScopeAccess::Read,
     )?;
-    let sender = {
+    let (sender, initialized) = {
         let map = process_map()
             .lock()
             .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
@@ -1166,12 +1170,15 @@ pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String
             .get(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
         require_session_owner(process, &scope)?;
-        process
-            .stdin
-            .clone()
-            .ok_or_else(|| "This local MCP session is closed.".to_string())?
+        (
+            process
+                .stdin
+                .clone()
+                .ok_or_else(|| "This local MCP session is closed.".to_string())?,
+            process.initialized,
+        )
     };
-    register_discovery_request(&request.session_id, &request.frame)?;
+    register_discovery_request(&request.session_id, &request.frame, initialized)?;
     if sender.send(request.frame).await.is_err() {
         mark_discovery_changed(&request.session_id);
         return Err("This local MCP session is closed.".into());
@@ -1361,17 +1368,46 @@ fn discovery_collection_mut(
     }
 }
 
-fn register_discovery_request(session_id: &str, frame: &str) -> Result<(), String> {
+fn register_discovery_request(
+    session_id: &str,
+    frame: &str,
+    initialized: bool,
+) -> Result<(), String> {
     let Value::Object(object) = serde_json::from_str::<Value>(frame)
         .map_err(|_| "The MCP discovery request is invalid.".to_string())?
     else {
         return Err("The MCP discovery request is invalid.".into());
     };
-    let kind = match object.get("method").and_then(Value::as_str) {
+    let method = object.get("method").and_then(Value::as_str);
+    if method == Some("initialize") {
+        if initialized {
+            return Err("This MCP session is already initialized.".into());
+        }
+        let id = object
+            .get("id")
+            .and_then(discovery_request_id)
+            .ok_or_else(|| "MCP initialization requires a request id.".to_string())?;
+        let mut proofs = discovery_proofs()
+            .lock()
+            .map_err(|_| "Fable could not verify MCP initialization.".to_string())?;
+        let proof = proofs.entry(session_id.to_string()).or_default();
+        if proof.initializing.is_some() {
+            return Err("MCP initialization is already pending.".into());
+        }
+        *proof = DiscoveryProof {
+            initializing: Some(id),
+            ..DiscoveryProof::default()
+        };
+        return Ok(());
+    }
+    let kind = match method {
         Some("tools/list") => DiscoveryKind::Tools,
         Some("resources/list") => DiscoveryKind::Resources,
         _ => return Ok(()),
     };
+    if !initialized {
+        return Err("MCP discovery requires successful initialization.".into());
+    }
     let id = object
         .get("id")
         .and_then(discovery_request_id)
@@ -1450,6 +1486,50 @@ fn mark_discovery_changed(session_id: &str) {
     }
 }
 
+fn set_session_initialized(session_id: &str, initialized: bool) {
+    if let Ok(mut sessions) = remote_sessions().lock() {
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.initialized = initialized;
+            if !initialized {
+                session.discovery_current = false;
+            }
+        }
+    }
+    if let Ok(mut processes) = process_map().lock() {
+        if let Some(process) = processes.get_mut(session_id) {
+            process.initialized = initialized;
+            if !initialized {
+                process.discovery_current = false;
+            }
+        }
+    }
+}
+
+fn successful_initialize_response(object: &serde_json::Map<String, Value>, id: &str) -> bool {
+    fn valid_identity_field(value: Option<&Value>) -> bool {
+        value.and_then(Value::as_str).is_some_and(|value| {
+            !value.is_empty()
+                && value.chars().count() <= 256
+                && !value.chars().any(char::is_control)
+        })
+    }
+    if object.get("id").and_then(discovery_request_id).as_deref() != Some(id)
+        || object.contains_key("error")
+    {
+        return false;
+    }
+    let Some(result) = object.get("result").and_then(Value::as_object) else {
+        return false;
+    };
+    let Some(server_info) = result.get("serverInfo").and_then(Value::as_object) else {
+        return false;
+    };
+    result.get("protocolVersion").and_then(Value::as_str) == Some(MCP_PROTOCOL_VERSION)
+        && result.get("capabilities").is_some_and(Value::is_object)
+        && valid_identity_field(server_info.get("name"))
+        && valid_identity_field(server_info.get("version"))
+}
+
 fn observe_discovery_frame(session_id: &str, frame: &str) {
     let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
         return;
@@ -1464,6 +1544,21 @@ fn observe_discovery_frame(session_id: &str, frame: &str) {
     let Some(id) = object.get("id").and_then(discovery_request_id) else {
         return;
     };
+    let initialization = discovery_proofs().lock().ok().and_then(|mut proofs| {
+        let proof = proofs.get_mut(session_id)?;
+        if proof.initializing.as_deref() != Some(id.as_str()) {
+            return None;
+        }
+        proof.initializing = None;
+        Some(successful_initialize_response(&object, &id))
+    });
+    if let Some(initialized) = initialization {
+        set_session_initialized(session_id, initialized);
+        if !initialized {
+            mark_discovery_changed(session_id);
+        }
+        return;
+    }
     let Ok(mut proofs) = discovery_proofs().lock() else {
         return;
     };
@@ -2245,7 +2340,7 @@ async fn post_remote_mcp_frame(
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .body(frame.to_string());
     if session.initialized {
-        request = request.header("MCP-Protocol-Version", "2025-11-25");
+        request = request.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
     }
     if let Some(server_session_id) = &session.server_session_id {
         request = request.header("MCP-Session-Id", server_session_id);
@@ -2301,7 +2396,7 @@ async fn post_remote_mcp_frame(
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    let server_session_id = if is_initialize {
+    let offered_server_session_id = if is_initialize {
         response
             .headers()
             .get("MCP-Session-Id")
@@ -2334,10 +2429,20 @@ async fn post_remote_mcp_frame(
         }
         _ => return Err("Remote MCP returned an unsupported content type.".into()),
     };
+    let initialize_request_id = parsed.get("id").and_then(discovery_request_id);
+    let initialized = is_initialize
+        && initialize_request_id.as_deref().is_some_and(|id| {
+            frames.iter().any(|frame| {
+                serde_json::from_str::<Value>(frame)
+                    .ok()
+                    .and_then(|value| value.as_object().cloned())
+                    .is_some_and(|object| successful_initialize_response(&object, id))
+            })
+        });
     Ok(RemotePostResponse {
         frames,
-        server_session_id,
-        initialized: is_initialize,
+        server_session_id: initialized.then_some(offered_server_session_id).flatten(),
+        initialized,
         authorization_challenge: None,
         error: None,
         last_event_id,
@@ -2349,7 +2454,7 @@ async fn delete_remote_mcp_session(session: &McpRemoteSession) -> Result<(), Str
     let client = remote_http_client(&session.endpoint).await?;
     let response = client
         .delete(session.endpoint.clone())
-        .header("MCP-Protocol-Version", "2025-11-25")
+        .header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION)
         .header(
             "MCP-Session-Id",
             session.server_session_id.as_deref().unwrap_or_default(),
@@ -2380,7 +2485,7 @@ async fn get_remote_mcp_messages(session: &McpRemoteSession) -> Result<RemotePol
         .get(session.endpoint.clone())
         .header(reqwest::header::ACCEPT, "text/event-stream")
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
-        .header("MCP-Protocol-Version", "2025-11-25");
+        .header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION);
     if let Some(server_session_id) = &session.server_session_id {
         request = request.header("MCP-Session-Id", server_session_id);
     }
@@ -3209,12 +3314,63 @@ mod tests {
     }
 
     #[test]
+    fn initialization_requires_the_exact_successful_protocol_response() {
+        let session = "mcp-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        mark_discovery_changed(session);
+        let request = r#"{"jsonrpc":"2.0","id":"init-1","method":"initialize","params":{"protocolVersion":"2025-11-25"}}"#;
+        register_discovery_request(session, request, false).unwrap();
+        assert!(register_discovery_request(session, request, false).is_err());
+        assert!(register_discovery_request(
+            session,
+            r#"{"jsonrpc":"2.0","id":"list-early","method":"tools/list","params":{}}"#,
+            false,
+        )
+        .is_err());
+
+        let valid = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "init-1",
+            "result": {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": { "tools": {} },
+                "serverInfo": { "name": "fixture", "version": "1.0" }
+            }
+        });
+        let valid = valid.as_object().unwrap();
+        assert!(successful_initialize_response(valid, "\"init-1\""));
+        let wrong_protocol = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "init-1",
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "serverInfo": { "name": "fixture", "version": "1.0" }
+            }
+        });
+        assert!(!successful_initialize_response(
+            wrong_protocol.as_object().unwrap(),
+            "\"init-1\""
+        ));
+        let rejected = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": "init-1",
+            "error": { "code": -32602, "message": "rejected" }
+        });
+        assert!(!successful_initialize_response(
+            rejected.as_object().unwrap(),
+            "\"init-1\""
+        ));
+        mark_discovery_changed(session);
+    }
+
+    #[test]
     fn discovery_proof_tracks_exact_pages_and_list_change_invalidation() {
         let session = "mcp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         mark_discovery_changed(session);
         register_discovery_request(
             session,
             r#"{"jsonrpc":"2.0","id":"tools-1","method":"tools/list","params":{}}"#,
+            true,
         )
         .unwrap();
         observe_discovery_frame(
@@ -3225,11 +3381,13 @@ mod tests {
         assert!(register_discovery_request(
             session,
             r#"{"jsonrpc":"2.0","id":"tools-bad","method":"tools/list","params":{"cursor":"wrong"}}"#,
+            true,
         )
         .is_err());
         register_discovery_request(
             session,
             r#"{"jsonrpc":"2.0","id":"tools-2","method":"tools/list","params":{"cursor":"page-2"}}"#,
+            true,
         )
         .unwrap();
         observe_discovery_frame(
