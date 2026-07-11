@@ -222,6 +222,15 @@ bounded-plan validation before persistence rather than trusting the renderer.
 Worker execution, run events, and the inspectable product journey remain open,
 so the Wave 4A boxes stay unchecked.
 
+The next repository slice compiles one selected step into a scope-matched,
+budget-clamped worker only when all context was declared by the mission and
+every required capability has one explicit grant reference. A provider-neutral
+local driver runs that worker through any live `AgentBackend`, requires an exact
+tool set, enforces duration/token/tool/attempt ceilings at the boundary, cancels
+on overrun, and preserves partial streamed work. Durable worker/run records,
+grant revalidation at execution time, handoff execution, and product wiring are
+still open; this evidence therefore does not complete the worker or driver box.
+
 ### Wave 4B - Routing and experience
 
 - [ ] Route by capability, quality, cost, speed, privacy, context, tools, health, preference, and risk.
