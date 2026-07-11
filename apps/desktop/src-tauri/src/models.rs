@@ -462,6 +462,19 @@ pub struct RunContextCitation {
     pub media_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope: Option<RunContextScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_scope: Option<ContextRecordAuthorityScope>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunContextAudience {
+    pub authority: String,
+    pub visibility: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting_member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting_internal_user_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -481,6 +494,8 @@ pub struct RunContextReceipt {
     pub run_id: String,
     pub assembled_at: String,
     pub scope: RunContextScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<RunContextAudience>,
     pub citations: Vec<RunContextCitation>,
     pub contributions: Vec<RunContextContribution>,
 }
@@ -767,7 +782,22 @@ pub struct LocalKnowledgeRefreshResponse {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ContextRecordAuthorityScope {
+    pub authority: String,
+    pub visibility: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_internal_user_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalFileImport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_scope: Option<ContextRecordAuthorityScope>,
     pub id: String,
     pub title: String,
     pub kind: String,
@@ -798,6 +828,12 @@ pub struct LocalFileImport {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeSource {
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    #[serde(default)]
+    pub authority_scope: Option<ContextRecordAuthorityScope>,
+    #[serde(default)]
+    pub scope: Option<serde_json::Value>,
     pub id: String,
     pub title: String,
     pub provenance: String,
@@ -913,6 +949,10 @@ pub struct ApprovalResolutionResponse {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_scope: Option<ContextRecordAuthorityScope>,
     pub id: String,
     pub kind: String,
     pub title: String,

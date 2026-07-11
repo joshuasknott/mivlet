@@ -112,6 +112,8 @@ pub fn import_local_text_file(
     let short_fingerprint = &fingerprint[..8];
 
     Ok(LocalFileImport {
+        workspace_id: None,
+        authority_scope: None,
         id: format!("local-{}-{}", file_slug(&file_name), short_fingerprint),
         title: file_name,
         kind: "document".to_string(),
@@ -241,7 +243,44 @@ pub fn search_knowledge_sources(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<KnowledgeSearchResponse, String> {
-    let _scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
+    for source in &sources {
+        let authority = source
+            .authority_scope
+            .as_ref()
+            .ok_or_else(|| "Knowledge search requires native authority facts.".to_string())?;
+        let owner_matches = match authorized.private.owner_member_id() {
+            Some(member_id) => {
+                authority.owner_member_id.as_deref() == Some(member_id)
+                    && authority.owner_internal_user_id.is_none()
+            }
+            None => {
+                authority.owner_internal_user_id.as_deref()
+                    == authorized.private.owner_internal_user_id()
+                    && authority.owner_member_id.is_none()
+            }
+        };
+        let scope_matches = match authorized.private.project_id() {
+            Some(project_id) => source.scope.as_ref().is_some_and(|scope| {
+                scope.get("level").and_then(serde_json::Value::as_str) == Some("project")
+                    && scope.get("projectId").and_then(serde_json::Value::as_str)
+                        == Some(project_id)
+            }),
+            None => source.scope.as_ref().is_some_and(|scope| {
+                scope.get("level").and_then(serde_json::Value::as_str) == Some("global")
+            }),
+        };
+        if source.workspace_id.as_deref() != Some(authorized.private.workspace_id())
+            || authority.authority != "local"
+            || authority.visibility != "member-private"
+            || !owner_matches
+            || !scope_matches
+        {
+            return Err(
+                "Knowledge search source is outside the active private owner scope.".to_string(),
+            );
+        }
+    }
     Ok(search_knowledge_sources_inner(query, sources, limit))
 }
 

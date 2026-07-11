@@ -6,11 +6,92 @@ use crate::store::{Result, StoreError};
 
 pub const DEFAULT_WORKSPACE_ID: &str = "default";
 pub const MAX_OWNER_ID_LEN: usize = 128;
+pub const LOCAL_AUTHORITY: &str = "local";
+pub const MEMBER_PRIVATE_VISIBILITY: &str = "member-private";
+pub const LEGACY_UNOWNED_SUBJECT: &str = "legacy-unowned";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DataScope {
     workspace_id: String,
     project_id: Option<String>,
+}
+
+/// Native-only access boundary for member-private Knowledge and Memory data.
+/// Renderer payloads never construct this value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrivateDataScope {
+    data: DataScope,
+    owner_subject: String,
+    owner_member_id: Option<String>,
+    owner_internal_user_id: Option<String>,
+}
+
+impl PrivateDataScope {
+    pub fn for_authenticated_user(
+        data: DataScope,
+        internal_user_id: &str,
+        member_id: Option<&str>,
+    ) -> Result<Self> {
+        let internal_user_id = normalize_id(internal_user_id, "Internal user")?;
+        let owner_member_id = member_id
+            .map(|value| normalize_id(value, "Member"))
+            .transpose()?;
+        let owner_subject = owner_member_id
+            .as_ref()
+            .map(|id| format!("member:{id}"))
+            .unwrap_or_else(|| format!("user:{internal_user_id}"));
+        Ok(Self {
+            data,
+            owner_subject,
+            owner_internal_user_id: owner_member_id.is_none().then_some(internal_user_id),
+            owner_member_id,
+        })
+    }
+
+    pub(crate) fn legacy_unowned(data: DataScope) -> Self {
+        Self {
+            data,
+            owner_subject: LEGACY_UNOWNED_SUBJECT.into(),
+            owner_member_id: None,
+            owner_internal_user_id: None,
+        }
+    }
+
+    pub fn data(&self) -> &DataScope {
+        &self.data
+    }
+
+    pub fn workspace_id(&self) -> &str {
+        self.data.workspace_id()
+    }
+
+    pub fn project_id(&self) -> Option<&str> {
+        self.data.project_id()
+    }
+
+    pub fn owner_subject(&self) -> &str {
+        &self.owner_subject
+    }
+
+    pub fn owner_member_id(&self) -> Option<&str> {
+        self.owner_member_id.as_deref()
+    }
+
+    pub fn owner_internal_user_id(&self) -> Option<&str> {
+        self.owner_internal_user_id.as_deref()
+    }
+
+    pub fn authority(&self) -> &'static str {
+        LOCAL_AUTHORITY
+    }
+
+    pub fn visibility(&self) -> &'static str {
+        MEMBER_PRIVATE_VISIBILITY
+    }
+
+    pub fn ensure_exists(&self, conn: &Connection) -> Result<()> {
+        self.data.ensure_exists(conn)
+    }
 }
 
 impl DataScope {
@@ -132,6 +213,7 @@ mod tests {
     };
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
+    use serde_json::json;
 
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
@@ -141,6 +223,142 @@ mod tests {
         store
             .transaction(|tx| workspace::upsert(tx, id, id, "2026-01-01T00:00:00Z"))
             .unwrap();
+    }
+
+    #[test]
+    fn private_knowledge_and_tombstones_are_owner_qualified() {
+        let store = store();
+        add_workspace(&store, "shared");
+        let data = DataScope::workspace("shared").unwrap();
+        let alpha =
+            PrivateDataScope::for_authenticated_user(data.clone(), "user-a", Some("member-a"))
+                .unwrap();
+        let beta =
+            PrivateDataScope::for_authenticated_user(data, "user-b", Some("member-b")).unwrap();
+        let source = |title: &str| {
+            json!({
+                "id":"same-content-id", "title":title, "kind":"document", "connectorId":"local-files",
+                "trust":"untrusted", "contentFingerprint":"fp", "sizeBytes":1, "origin":"local-import"
+            })
+        };
+        store
+            .transaction(|tx| {
+                knowledge_source::upsert_private(tx, &store, &alpha, source("Alpha"), "now")?;
+                knowledge_source::upsert_private(tx, &store, &beta, source("Beta"), "now")?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .with_conn(|tx| knowledge_source::list_private(tx, &store, &alpha))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            store
+                .with_conn(|tx| knowledge_source::list_private(tx, &store, &beta))
+                .unwrap()
+                .len(),
+            1
+        );
+
+        store
+            .transaction(|tx| knowledge_source::delete_private(tx, &alpha, "same-content-id"))
+            .unwrap();
+        assert!(store
+            .with_conn(|tx| knowledge_source::list_private(tx, &store, &alpha))
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .with_conn(|tx| knowledge_source::list_private(tx, &store, &beta))
+                .unwrap()
+                .len(),
+            1
+        );
+        store
+            .transaction(|tx| {
+                let blocked =
+                    knowledge_source::upsert_private(tx, &store, &alpha, source("Again"), "later");
+                assert!(blocked
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Deleted knowledge"));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn private_ciphertext_cannot_be_substituted_between_owners() {
+        let store = store();
+        add_workspace(&store, "shared");
+        let data = DataScope::workspace("shared").unwrap();
+        let alpha =
+            PrivateDataScope::for_authenticated_user(data.clone(), "user-a", Some("member-a"))
+                .unwrap();
+        let beta =
+            PrivateDataScope::for_authenticated_user(data, "user-b", Some("member-b")).unwrap();
+        let source = |title: &str| {
+            json!({
+                "id":"same", "title":title, "kind":"document", "connectorId":"local-files",
+                "trust":"untrusted", "contentFingerprint":"fp", "sizeBytes":1, "origin":"local-import"
+            })
+        };
+        store.transaction(|tx| {
+            knowledge_source::upsert_private(tx, &store, &alpha, source("Alpha"), "now")?;
+            knowledge_source::upsert_private(tx, &store, &beta, source("Beta"), "now")?;
+            let sealed: (Vec<u8>, Vec<u8>) = tx.query_row(
+                "SELECT payload,payload_nonce FROM knowledge_source WHERE workspace_id='shared' AND owner_subject='member:member-a' AND id='same'",
+                [], |row| Ok((row.get(0)?,row.get(1)?)))?;
+            tx.execute(
+                "UPDATE knowledge_source SET payload=?1,payload_nonce=?2 WHERE workspace_id='shared' AND owner_subject='member:member-b' AND id='same'",
+                rusqlite::params![sealed.0,sealed.1])?;
+            Ok(())
+        }).unwrap();
+        assert!(store
+            .with_conn(|tx| knowledge_source::list_private(tx, &store, &beta))
+            .is_err());
+    }
+
+    #[test]
+    fn private_memory_owner_survives_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.sqlite3");
+        let vault = Vault::new(&MasterKey::generate().unwrap()).unwrap();
+        let store = Store::open(&path, vault.clone()).unwrap();
+        add_workspace(&store, "shared");
+        let owner = PrivateDataScope::for_authenticated_user(
+            DataScope::workspace("shared").unwrap(),
+            "user-a",
+            Some("member-a"),
+        )
+        .unwrap();
+        store
+            .transaction(|tx| {
+                memory_record::upsert_private(
+                    tx,
+                    &store,
+                    &owner,
+                    json!({
+                        "id":"memory", "kind":"fact", "title":"Private", "value":"Value",
+                        "approved":true, "createdAt":"now"
+                    }),
+                    "now",
+                )
+            })
+            .unwrap();
+        drop(store);
+        let reopened = Store::open(&path, vault).unwrap();
+        let rows = reopened
+            .with_conn(|tx| memory_record::list_private(tx, &reopened, &owner))
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].payload["authorityScope"]["ownerMemberId"],
+            "member-a"
+        );
     }
 
     #[test]
@@ -330,14 +548,14 @@ mod tests {
                 )?;
                 tx.execute(
                     "INSERT INTO knowledge_chunk
-                       (workspace_id, source_id, id, ordinal, content_fingerprint, payload, payload_nonce)
-                     VALUES ('alpha', 'source', 'chunk', 0, 'fp', x'01', x'02');",
+                       (workspace_id, owner_subject, source_id, id, ordinal, content_fingerprint, payload, payload_nonce)
+                     VALUES ('alpha', 'legacy-unowned', 'source', 'chunk', 0, 'fp', x'01', x'02');",
                     [],
                 )?;
                 tx.execute(
                     "INSERT INTO pinned_context
-                       (workspace_id, id, source_id, scope_level, pinned_at)
-                     VALUES ('alpha', 'pin', 'source', 'global', 'now');",
+                       (workspace_id, owner_subject, id, source_id, scope_level, pinned_at)
+                     VALUES ('alpha', 'legacy-unowned', 'pin', 'source', 'global', 'now');",
                     [],
                 )?;
                 knowledge_source::delete_scoped(tx, &scope, "source")

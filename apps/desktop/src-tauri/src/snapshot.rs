@@ -17,21 +17,41 @@ use crate::knowledge::import_local_text_file;
 use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
-    ApprovalAuditEntry, ApprovalGrant, LocalFileImport, LocalKnowledgeRefreshResponse,
-    LocalTextFileCandidate, PlanStep, RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot,
-    RuntimeStatus, Schedule, WorkspaceGoal, WorkspacePlan, APPROVAL_MODES, AUTOMATION_STATUSES,
-    GOAL_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES, MAX_GOAL_FIELD_CHARACTERS,
-    MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILE_PREVIEW_CHARACTERS,
-    MAX_MEMORY_TITLE_CHARACTERS, MAX_PLAN_STEPS, MAX_PLAN_STEP_DESCRIPTION_CHARACTERS,
-    MAX_PLAN_TITLE_CHARACTERS, MAX_RUNTIME_SNAPSHOT_AUTOMATIONS,
-    MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS, MAX_RUNTIME_SNAPSHOT_GOALS, MAX_RUNTIME_SNAPSHOT_IDS,
-    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS, MAX_RUNTIME_SNAPSHOT_PLANS, MAX_RUNTIME_SNAPSHOT_SCHEDULES,
-    MAX_SCHEDULE_FIELD_CHARACTERS, PLAN_STATUSES, RUNTIME_SNAPSHOT_VERSION, SCHEDULE_WEEKDAYS,
+    ApprovalAuditEntry, ApprovalGrant, ContextRecordAuthorityScope, LocalFileImport,
+    LocalKnowledgeRefreshResponse, LocalTextFileCandidate, PlanStep,
+    RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot, RuntimeStatus, Schedule, WorkspaceGoal,
+    WorkspacePlan, APPROVAL_MODES, AUTOMATION_STATUSES, GOAL_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES,
+    MAX_GOAL_FIELD_CHARACTERS, MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES,
+    MAX_LOCAL_FILE_PREVIEW_CHARACTERS, MAX_MEMORY_TITLE_CHARACTERS, MAX_PLAN_STEPS,
+    MAX_PLAN_STEP_DESCRIPTION_CHARACTERS, MAX_PLAN_TITLE_CHARACTERS,
+    MAX_RUNTIME_SNAPSHOT_AUTOMATIONS, MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS,
+    MAX_RUNTIME_SNAPSHOT_GOALS, MAX_RUNTIME_SNAPSHOT_IDS, MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    MAX_RUNTIME_SNAPSHOT_PLANS, MAX_RUNTIME_SNAPSHOT_SCHEDULES, MAX_SCHEDULE_FIELD_CHARACTERS,
+    PLAN_STATUSES, RUNTIME_SNAPSHOT_VERSION, SCHEDULE_WEEKDAYS,
 };
 use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
 };
-use crate::store::repos::scope::DataScope;
+use crate::store::repos::scope::{DataScope, PrivateDataScope};
+
+pub(crate) fn canonicalize_private_source(
+    mut source: LocalFileImport,
+    scope: &PrivateDataScope,
+) -> Result<LocalFileImport, String> {
+    source = normalize_imported_knowledge_source(source)?;
+    source.workspace_id = Some(scope.workspace_id().to_string());
+    source.authority_scope = Some(ContextRecordAuthorityScope {
+        authority: "local".into(),
+        visibility: "member-private".into(),
+        owner_member_id: scope.owner_member_id().map(str::to_string),
+        owner_internal_user_id: scope.owner_internal_user_id().map(str::to_string),
+    });
+    source.scope = Some(match scope.project_id() {
+        Some(project_id) => serde_json::json!({"level":"project","projectId":project_id}),
+        None => serde_json::json!({"level":"global"}),
+    });
+    Ok(source)
+}
 
 fn data_scope(
     workspace_id: Option<String>,
@@ -101,6 +121,8 @@ fn normalize_imported_knowledge_source(source: LocalFileImport) -> Result<LocalF
     }
 
     Ok(LocalFileImport {
+        workspace_id: source.workspace_id,
+        authority_scope: source.authority_scope,
         id,
         title,
         kind: "document".to_string(),
@@ -167,6 +189,18 @@ pub(crate) fn read_imported_knowledge_sources_scoped(
         return Ok(Vec::new());
     }
     read_imported_knowledge_sources(path)
+}
+
+pub(crate) fn read_imported_knowledge_sources_private(
+    path: &Path,
+    scope: &PrivateDataScope,
+) -> Result<Vec<LocalFileImport>, String> {
+    let sources: Vec<LocalFileImport> =
+        crate::store::read_private_workspace_document(path, scope)?.unwrap_or_default();
+    sources
+        .into_iter()
+        .map(|source| canonicalize_private_source(source, scope))
+        .collect()
 }
 
 fn append_imported_knowledge_source(
@@ -364,11 +398,16 @@ pub fn save_imported_knowledge_sources(
         }
     }
     let path = imported_knowledge_path(&app)?;
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let scope = &authorized.private;
+    let normalized = normalized
+        .into_iter()
+        .map(|source| canonicalize_private_source(source, scope))
+        .collect::<Result<Vec<_>, _>>()?;
     let existing: Vec<LocalFileImport> =
-        crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();
+        crate::store::read_private_workspace_document(&path, scope)?.unwrap_or_default();
     let normalized = merge_deleted_imported_tombstones(normalized, existing)?;
-    if !crate::store::write_workspace_document(&path, &scope, &normalized)? {
+    if !crate::store::write_private_workspace_document(&path, scope, &normalized)? {
         write_imported_knowledge_sources(&path, &normalized)?;
     }
     Ok(normalized)
@@ -811,8 +850,8 @@ pub fn list_imported_knowledge_sources(
     project_id: Option<String>,
 ) -> Result<Vec<LocalFileImport>, String> {
     let path = imported_knowledge_path(&app)?;
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
-    read_imported_knowledge_sources_scoped(&path, &scope)
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
+    read_imported_knowledge_sources_private(&path, &authorized.private)
 }
 
 #[tauri::command]
@@ -822,17 +861,15 @@ pub fn import_local_knowledge_source(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<LocalFileImport, String> {
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
-    let mut imported = import_local_text_file(candidate)?;
-    if let Some(project_id) = scope.project_id() {
-        imported.scope = Some(serde_json::json!({ "level": "project", "projectId": project_id }));
-    }
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let scope = &authorized.private;
+    let imported = canonicalize_private_source(import_local_text_file(candidate)?, scope)?;
     let path = imported_knowledge_path(&app)?;
     if crate::store::try_global().is_some() {
         let mut sources: Vec<LocalFileImport> =
-            crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();
+            crate::store::read_private_workspace_document(&path, scope)?.unwrap_or_default();
         sources = append_imported_knowledge_source(sources, imported.clone())?;
-        crate::store::write_workspace_document(&path, &scope, &sources)?;
+        crate::store::write_private_workspace_document(&path, scope, &sources)?;
         return Ok(imported);
     }
     persist_imported_knowledge_source(&path, imported)
@@ -845,10 +882,11 @@ pub fn refresh_local_knowledge_source(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<LocalKnowledgeRefreshResponse, String> {
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let scope = authorized.private;
     let path = imported_knowledge_path(&app)?;
     let update_scope = scope.clone();
-    crate::store::update_workspace_document(
+    crate::store::update_private_workspace_document(
         &path,
         &scope,
         move |current: Option<Vec<LocalFileImport>>| {
@@ -857,7 +895,9 @@ pub fn refresh_local_knowledge_source(
                 .iter()
                 .position(|source| source.id == request.source_id.trim())
                 .ok_or_else(|| "That local knowledge source is no longer available.".to_string())?;
-            let response = apply_local_knowledge_refresh(&sources[index], request, &update_scope)?;
+            let mut response =
+                apply_local_knowledge_refresh(&sources[index], request, update_scope.data())?;
+            response.source = canonicalize_private_source(response.source, &update_scope)?;
             if response.outcome == "unchanged" {
                 return Ok((None, response));
             }

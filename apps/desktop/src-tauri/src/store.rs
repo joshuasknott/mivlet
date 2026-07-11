@@ -321,6 +321,23 @@ fn scoped_document_location(
     }
 }
 
+fn private_document_location(
+    path: &Path,
+    scope: &repos::scope::PrivateDataScope,
+) -> std::result::Result<(repos::scope::DataScope, String), String> {
+    let (_, scoped_key) = scoped_document_location(path, scope.data())?;
+    let owner_digest = format!("{:x}", Sha256::digest(scope.owner_subject().as_bytes()));
+    let workspace = repos::scope::DataScope::workspace(scope.workspace_id().to_string())
+        .map_err(|error| error.to_string())?;
+    Ok((
+        workspace,
+        format!(
+            "document:owner:{owner_digest}:{}",
+            scoped_key.trim_start_matches("document:")
+        ),
+    ))
+}
+
 fn timestamp() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -514,6 +531,23 @@ pub fn read_workspace_document<T: serde::de::DeserializeOwned>(
         .map_err(|_| "Fable could not decode an encrypted local document.".to_string())
 }
 
+pub fn read_private_workspace_document<T: serde::de::DeserializeOwned>(
+    path: &Path,
+    scope: &repos::scope::PrivateDataScope,
+) -> std::result::Result<Option<T>, String> {
+    let Some(store) = GLOBAL_STORE.get() else {
+        return Ok(None);
+    };
+    let (storage_scope, key) = private_document_location(path, scope)?;
+    let value = store
+        .with_conn(|conn| repos::preferences::get_scoped(conn, store, &storage_scope, &key))
+        .map_err(|error| error.to_string())?;
+    value
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| "Fable could not decode an encrypted private document.".to_string())
+}
+
 /// Write a production document to encrypted SQLite. Returns `false` only when
 /// the global store is not initialized, allowing isolated path-based tests to
 /// retain their temporary-file fixtures.
@@ -535,6 +569,25 @@ pub fn write_workspace_document<T: serde::Serialize>(
     let (storage_scope, key) = scoped_document_location(path, scope)?;
     let value = serde_json::to_value(value)
         .map_err(|_| "Fable could not encode an encrypted local document.".to_string())?;
+    store
+        .transaction(|tx| {
+            repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+pub fn write_private_workspace_document<T: serde::Serialize>(
+    path: &Path,
+    scope: &repos::scope::PrivateDataScope,
+    value: &T,
+) -> std::result::Result<bool, String> {
+    let Some(store) = GLOBAL_STORE.get() else {
+        return Ok(false);
+    };
+    let (storage_scope, key) = private_document_location(path, scope)?;
+    let value = serde_json::to_value(value)
+        .map_err(|_| "Fable could not encode an encrypted private document.".to_string())?;
     store
         .transaction(|tx| {
             repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
@@ -572,6 +625,49 @@ where
                 let value = serde_json::to_value(replacement).map_err(|_| {
                     StoreError::Invalid(
                         "Fable could not encode an encrypted local document.".into(),
+                    )
+                })?;
+                repos::preferences::upsert_scoped(
+                    tx,
+                    store,
+                    &storage_scope,
+                    &key,
+                    &value,
+                    &timestamp(),
+                )?;
+            }
+            Ok(result)
+        })
+        .map_err(|error| error.to_string())
+}
+
+pub fn update_private_workspace_document<T, R>(
+    path: &Path,
+    scope: &repos::scope::PrivateDataScope,
+    update: impl FnOnce(Option<T>) -> std::result::Result<(Option<T>, R), String>,
+) -> std::result::Result<R, String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let store = GLOBAL_STORE
+        .get()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let (storage_scope, key) = private_document_location(path, scope)?;
+    store
+        .transaction(|tx| {
+            let current = repos::preferences::get_scoped(tx, store, &storage_scope, &key)?
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| {
+                    StoreError::Invalid(
+                        "Fable could not decode an encrypted private document.".into(),
+                    )
+                })?;
+            let (replacement, result) = update(current).map_err(StoreError::Invalid)?;
+            if let Some(replacement) = replacement {
+                let value = serde_json::to_value(replacement).map_err(|_| {
+                    StoreError::Invalid(
+                        "Fable could not encode an encrypted private document.".into(),
                     )
                 })?;
                 repos::preferences::upsert_scoped(

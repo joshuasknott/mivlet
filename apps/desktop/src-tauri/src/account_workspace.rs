@@ -26,7 +26,17 @@ pub struct AccountWorkspaceStatus {
     account_bound: bool,
     workspaces: Vec<directory::WorkspaceDirectorySummary>,
     active_workspace: directory::ActiveWorkspaceSelection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active_context_owner: Option<ActiveContextOwner>,
     devices: Vec<directory::AccountDeviceSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveContextOwner {
+    internal_user_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    member_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -351,12 +361,19 @@ fn local_status(
 ) -> Result<AccountWorkspaceStatus, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let (workspaces, active_workspace, devices) = store
+    let (workspaces, active_workspace, active_context_owner, devices) = store
         .with_conn(|conn| {
             let workspaces = directory::list_authoritative_summaries_for_current_user(conn)?;
             let devices = directory::list_account_device_summaries_for_current_user(conn)?;
             let active_workspace = directory::resolve_active_workspace_for_current_user(conn)?;
-            Ok((workspaces, active_workspace, devices))
+            let active_context_owner =
+                directory::require_active_workspace_context_for_current_user(conn)
+                    .ok()
+                    .map(|context| ActiveContextOwner {
+                        internal_user_id: context.internal_user_id,
+                        member_id: context.member_id,
+                    });
+            Ok((workspaces, active_workspace, active_context_owner, devices))
         })
         .map_err(|error| error.to_string())?;
     let account_bound = workspaces.is_some();
@@ -380,6 +397,7 @@ fn local_status(
         account_bound,
         workspaces: workspaces.unwrap_or_default(),
         active_workspace: active_workspace.unwrap_or(fallback),
+        active_context_owner,
         devices: devices.unwrap_or_default(),
     })
 }

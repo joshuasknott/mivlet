@@ -223,7 +223,7 @@ fn normalize_context_receipt(
     run_id: &str,
     thread_id: Option<&str>,
 ) -> Result<RunContextReceipt, String> {
-    if receipt.version != 1 || receipt.run_id != run_id {
+    if !matches!(receipt.version, 1 | 2) || receipt.run_id != run_id {
         return Err("Run context receipt identity is invalid.".to_string());
     }
     receipt.run_id = bounded_id(&receipt.run_id, MAX_CONTEXT_ID, "run id")?;
@@ -233,6 +233,12 @@ fn normalize_context_receipt(
         .with_timezone(&Utc)
         .to_rfc3339_opts(SecondsFormat::Millis, true);
     receipt.scope = normalize_context_scope(receipt.scope)?;
+    if receipt.version == 1 && receipt.audience.is_some() {
+        return Err("Legacy context receipts cannot declare an audience.".to_string());
+    }
+    if receipt.version == 2 && receipt.audience.is_none() {
+        return Err("Private context receipts need an audience.".to_string());
+    }
     if receipt.scope.level == "thread" && receipt.scope.thread_id.as_deref() != thread_id {
         return Err("Run context receipt thread does not match the run.".to_string());
     }
@@ -429,6 +435,90 @@ pub(crate) fn recover_agent_runs_at(
     Ok(runs)
 }
 
+fn validate_context_receipt_authority(receipt: &RunContextReceipt) -> Result<(), String> {
+    if receipt.version == 1 {
+        return Ok(());
+    }
+    let audience = receipt
+        .audience
+        .as_ref()
+        .ok_or_else(|| "Private context receipts need an audience.".to_string())?;
+    if audience.authority != "local" || audience.visibility != "member-private" {
+        return Err(
+            "Shared context audiences are unavailable until native sharing authority exists."
+                .to_string(),
+        );
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let context = store
+        .with_conn(workspace_directory::require_active_workspace_context_for_current_user)
+        .map_err(|error| error.to_string())?;
+    validate_context_receipt_for_owner(
+        receipt,
+        &context.internal_user_id,
+        context.member_id.as_deref(),
+    )
+}
+
+fn validate_context_receipt_for_owner(
+    receipt: &RunContextReceipt,
+    internal_user_id: &str,
+    member_id: Option<&str>,
+) -> Result<(), String> {
+    if receipt.version == 1 {
+        return Ok(());
+    }
+    let audience = receipt
+        .audience
+        .as_ref()
+        .ok_or_else(|| "Private context receipts need an audience.".to_string())?;
+    if audience.authority != "local" || audience.visibility != "member-private" {
+        return Err(
+            "Shared context audiences are unavailable until native sharing authority exists."
+                .to_string(),
+        );
+    }
+    let audience_matches = match member_id {
+        Some(member_id) => {
+            audience.acting_member_id.as_deref() == Some(member_id)
+                && audience.acting_internal_user_id.is_none()
+        }
+        None => {
+            audience.acting_internal_user_id.as_deref() == Some(internal_user_id)
+                && audience.acting_member_id.is_none()
+        }
+    };
+    if !audience_matches {
+        return Err("Run context audience does not match the active private owner.".to_string());
+    }
+    for citation in &receipt.citations {
+        let authority = citation.authority_scope.as_ref().ok_or_else(|| {
+            "Private context citations need canonical authority facts.".to_string()
+        })?;
+        let owner_matches = match member_id {
+            Some(member_id) => {
+                authority.owner_member_id.as_deref() == Some(member_id)
+                    && authority.owner_internal_user_id.is_none()
+            }
+            None => {
+                authority.owner_internal_user_id.as_deref() == Some(internal_user_id)
+                    && authority.owner_member_id.is_none()
+            }
+        };
+        if authority.authority != "local"
+            || authority.visibility != "member-private"
+            || !owner_matches
+        {
+            return Err(
+                "Run context citation authority does not match the active private owner."
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn save_agent_run(
     _app: tauri::AppHandle,
@@ -438,6 +528,9 @@ pub fn save_agent_run(
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
+    if let Some(receipt) = run.context_receipt.as_ref() {
+        validate_context_receipt_authority(receipt)?;
+    }
     store
         .transaction(|tx| {
             if let Some(existing) = run::get_scoped(tx, store, &scope, &run.id)? {
@@ -642,6 +735,7 @@ mod tests {
                 project_id: Some("project-1".into()),
                 thread_id: Some("thread-1".into()),
             },
+            audience: None,
             citations: vec![RunContextCitation {
                 source_id: "source-1".into(),
                 title: "Launch plan".into(),
@@ -667,6 +761,7 @@ mod tests {
                     project_id: Some("project-1".into()),
                     thread_id: None,
                 }),
+                authority_scope: None,
             }],
             contributions: vec![RunContextContribution {
                 id: "source-1".into(),
@@ -675,6 +770,58 @@ mod tests {
                 citation_id: Some("source-1#0".into()),
             }],
         }
+    }
+
+    #[test]
+    fn v2_receipts_require_the_active_private_audience_and_citation_owner() {
+        let mut receipt = receipt();
+        receipt.version = 2;
+        receipt.audience = Some(crate::models::RunContextAudience {
+            authority: "local".into(),
+            visibility: "member-private".into(),
+            acting_member_id: Some("member-a".into()),
+            acting_internal_user_id: None,
+        });
+        receipt.citations[0].authority_scope = Some(crate::models::ContextRecordAuthorityScope {
+            authority: "local".into(),
+            visibility: "member-private".into(),
+            owner_member_id: Some("member-a".into()),
+            owner_internal_user_id: None,
+        });
+        validate_context_receipt_for_owner(&receipt, "user-a", Some("member-a")).unwrap();
+        assert!(
+            validate_context_receipt_for_owner(&receipt, "user-b", Some("member-b"))
+                .unwrap_err()
+                .contains("audience")
+        );
+
+        receipt.audience.as_mut().unwrap().authority = "convex".into();
+        receipt.audience.as_mut().unwrap().visibility = "workspace-shared".into();
+        assert!(
+            validate_context_receipt_for_owner(&receipt, "user-a", Some("member-a"))
+                .unwrap_err()
+                .contains("Shared")
+        );
+
+        receipt.audience = Some(crate::models::RunContextAudience {
+            authority: "local".into(),
+            visibility: "member-private".into(),
+            acting_member_id: None,
+            acting_internal_user_id: Some("user-local".into()),
+        });
+        receipt.citations[0].authority_scope = Some(crate::models::ContextRecordAuthorityScope {
+            authority: "local".into(),
+            visibility: "member-private".into(),
+            owner_member_id: None,
+            owner_internal_user_id: Some("user-local".into()),
+        });
+        validate_context_receipt_for_owner(&receipt, "user-local", None).unwrap();
+        receipt.citations[0].authority_scope = None;
+        assert!(
+            validate_context_receipt_for_owner(&receipt, "user-local", None)
+                .unwrap_err()
+                .contains("canonical authority")
+        );
     }
 
     #[test]

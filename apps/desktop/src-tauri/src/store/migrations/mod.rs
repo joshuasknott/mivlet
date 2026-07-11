@@ -78,6 +78,11 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 13 -> 14: add canonical local/member-private goals. Legacy
             // snapshot goals are deliberately not guessed into authority.
             13 => apply_v13_to_v14(conn)?,
+            // 14 -> 15: Knowledge and Memory become explicitly owned by the
+            // authenticated member (or stable local internal-user subject).
+            // Only project rows with a provable private owner are adopted;
+            // ambiguous rows and opaque documents are quarantined.
+            14 => apply_v14_to_v15(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -87,6 +92,107 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v14_to_v15(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "knowledge_source")?
+        || table_has_column(conn, "knowledge_source", "owner_subject")?
+    {
+        return Ok(());
+    }
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS private_context_legacy_unowned (
+          record_type TEXT NOT NULL, workspace_id TEXT NOT NULL, record_id TEXT NOT NULL,
+          project_id TEXT, payload BLOB, payload_nonce BLOB, quarantined_at TEXT NOT NULL,
+          reason TEXT NOT NULL, PRIMARY KEY(record_type, workspace_id, record_id)
+        );
+
+        INSERT OR REPLACE INTO private_context_legacy_unowned
+          (record_type, workspace_id, record_id, project_id, payload, payload_nonce, quarantined_at, reason)
+        SELECT 'knowledge', k.workspace_id, k.id, k.project_id, k.payload, k.payload_nonce,
+               strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'legacy Knowledge record had no provable private project owner'
+        FROM knowledge_source k;
+        INSERT OR REPLACE INTO private_context_legacy_unowned
+          (record_type, workspace_id, record_id, project_id, payload, payload_nonce, quarantined_at, reason)
+        SELECT 'memory', m.workspace_id, m.id, m.project_id, m.payload, m.payload_nonce,
+               strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'legacy Memory record had no provable private project owner'
+        FROM memory_record m;
+        INSERT OR REPLACE INTO private_context_legacy_unowned
+          (record_type, workspace_id, record_id, project_id, payload, payload_nonce, quarantined_at, reason)
+        SELECT 'document', workspace_id, key, NULL, payload, payload_nonce,
+               strftime('%Y-%m-%dT%H:%M:%fZ','now'), 'legacy private document had no authenticated owner envelope'
+        FROM preferences
+        WHERE key LIKE 'document:%imported-knowledge.json' OR key LIKE 'document:%memory-state.json';
+        DELETE FROM preferences
+        WHERE key LIKE 'document:%imported-knowledge.json' OR key LIKE 'document:%memory-state.json';
+
+        ALTER TABLE pinned_context RENAME TO pinned_context_v14;
+        ALTER TABLE knowledge_chunk RENAME TO knowledge_chunk_v14;
+        ALTER TABLE knowledge_tombstone RENAME TO knowledge_tombstone_v14;
+        ALTER TABLE memory_tombstone RENAME TO memory_tombstone_v14;
+        ALTER TABLE knowledge_source RENAME TO knowledge_source_v14;
+        ALTER TABLE memory_record RENAME TO memory_record_v14;
+
+        CREATE TABLE knowledge_source (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_subject TEXT NOT NULL, authority TEXT NOT NULL CHECK(authority='local'),
+          visibility TEXT NOT NULL CHECK(visibility='member-private'), owner_member_id TEXT,
+          id TEXT NOT NULL, project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+          connector_id TEXT NOT NULL, connector_account_id TEXT NOT NULL DEFAULT '',
+          external_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, trust TEXT NOT NULL,
+          pinned INTEGER NOT NULL DEFAULT 0, disabled INTEGER NOT NULL DEFAULT 0,
+          content_fingerprint TEXT NOT NULL, size_bytes INTEGER NOT NULL, imported_at TEXT NOT NULL,
+          origin TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id, owner_subject, id)
+        );
+        CREATE TABLE memory_record (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_subject TEXT NOT NULL, authority TEXT NOT NULL CHECK(authority='local'),
+          visibility TEXT NOT NULL CHECK(visibility='member-private'), owner_member_id TEXT,
+          id TEXT NOT NULL, project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, approved INTEGER NOT NULL DEFAULT 0,
+          disabled INTEGER NOT NULL DEFAULT 0, forgotten_at TEXT, created_at TEXT NOT NULL,
+          payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id, owner_subject, id)
+        );
+
+        CREATE TABLE knowledge_chunk (
+          workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, source_id TEXT NOT NULL, id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL, content_fingerprint TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id, owner_subject, id),
+          FOREIGN KEY(workspace_id, owner_subject, source_id) REFERENCES knowledge_source(workspace_id, owner_subject, id) ON DELETE CASCADE
+        );
+        CREATE TABLE pinned_context (
+          workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, id TEXT NOT NULL, source_id TEXT, memory_id TEXT,
+          scope_level TEXT NOT NULL, project_id TEXT, thread_id TEXT, pinned_at TEXT NOT NULL,
+          PRIMARY KEY(workspace_id, owner_subject, id), CHECK((source_id IS NOT NULL)!=(memory_id IS NOT NULL)),
+          FOREIGN KEY(workspace_id, owner_subject, source_id) REFERENCES knowledge_source(workspace_id, owner_subject, id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id, owner_subject, memory_id) REFERENCES memory_record(workspace_id, owner_subject, id) ON DELETE CASCADE
+        );
+        CREATE TABLE knowledge_tombstone (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE, owner_subject TEXT NOT NULL,
+          id TEXT NOT NULL, deleted_at TEXT NOT NULL, PRIMARY KEY(workspace_id,owner_subject,id)
+        );
+        CREATE TABLE memory_tombstone (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE, owner_subject TEXT NOT NULL,
+          id TEXT NOT NULL, forgotten_at TEXT NOT NULL, PRIMARY KEY(workspace_id,owner_subject,id)
+        );
+
+        DROP TABLE pinned_context_v14; DROP TABLE knowledge_chunk_v14;
+        DROP TABLE knowledge_tombstone_v14; DROP TABLE memory_tombstone_v14;
+        DROP TABLE knowledge_source_v14; DROP TABLE memory_record_v14;
+        CREATE INDEX idx_knowledge_connector ON knowledge_source(connector_id);
+        CREATE INDEX idx_knowledge_pinned ON knowledge_source(pinned);
+        CREATE INDEX idx_knowledge_workspace ON knowledge_source(workspace_id,owner_subject,project_id);
+        CREATE INDEX idx_memory_kind ON memory_record(kind);
+        CREATE INDEX idx_memory_pinned ON memory_record(pinned);
+        CREATE INDEX idx_memory_workspace ON memory_record(workspace_id,owner_subject,project_id);
+        CREATE INDEX idx_knowledge_chunk_source ON knowledge_chunk(workspace_id,owner_subject,source_id,ordinal);
+        CREATE INDEX idx_pinned_context_scope ON pinned_context(workspace_id,owner_subject,scope_level,project_id,thread_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -836,9 +942,59 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v14 is current; v14 -> v15 has no registered migration.
-        let err = apply(&conn, 14, 15).unwrap_err();
+        // v15 is current; v15 -> v16 has no registered migration.
+        let err = apply(&conn, 15, 16).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v14_to_v15_quarantines_unowned_private_context_and_owner_qualifies_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(r#"
+          CREATE TABLE workspace(id TEXT PRIMARY KEY);
+          INSERT INTO workspace VALUES('w');
+          CREATE TABLE project(id TEXT PRIMARY KEY,workspace_id TEXT,authority TEXT,visibility TEXT,owner_member_id TEXT);
+          CREATE TABLE preferences(workspace_id TEXT,key TEXT,payload BLOB,payload_nonce BLOB,updated_at TEXT,PRIMARY KEY(workspace_id,key));
+          INSERT INTO preferences VALUES('w','document:imported-knowledge.json',x'01',x'02','t');
+          CREATE TABLE knowledge_source(workspace_id TEXT,id TEXT,project_id TEXT,connector_id TEXT,connector_account_id TEXT,external_id TEXT,kind TEXT,trust TEXT,pinned INTEGER,disabled INTEGER,content_fingerprint TEXT,size_bytes INTEGER,imported_at TEXT,origin TEXT,payload BLOB,payload_nonce BLOB,PRIMARY KEY(workspace_id,id));
+          INSERT INTO knowledge_source VALUES('w','same',NULL,'local-files','','','document','untrusted',0,0,'fp',1,'t','local-import',x'03',x'04');
+          CREATE TABLE memory_record(workspace_id TEXT,id TEXT,project_id TEXT,kind TEXT,pinned INTEGER,approved INTEGER,disabled INTEGER,forgotten_at TEXT,created_at TEXT,payload BLOB,payload_nonce BLOB,PRIMARY KEY(workspace_id,id));
+          INSERT INTO memory_record VALUES('w','same',NULL,'fact',0,1,0,NULL,'t',x'05',x'06');
+          CREATE TABLE knowledge_chunk(workspace_id TEXT,source_id TEXT,id TEXT,ordinal INTEGER,content_fingerprint TEXT,payload BLOB,payload_nonce BLOB,PRIMARY KEY(workspace_id,id));
+          CREATE TABLE pinned_context(workspace_id TEXT,id TEXT,source_id TEXT,memory_id TEXT,scope_level TEXT,project_id TEXT,thread_id TEXT,pinned_at TEXT,PRIMARY KEY(workspace_id,id));
+          CREATE TABLE knowledge_tombstone(workspace_id TEXT,id TEXT,deleted_at TEXT,PRIMARY KEY(workspace_id,id));
+          CREATE TABLE memory_tombstone(workspace_id TEXT,id TEXT,forgotten_at TEXT,PRIMARY KEY(workspace_id,id));
+        "#).unwrap();
+        apply(&conn, 14, 15).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM knowledge_source", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM memory_record", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT COUNT(*) FROM private_context_legacy_unowned",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
+        );
+        assert!(table_has_column(&conn, "knowledge_source", "owner_subject").unwrap());
+        assert!(table_has_column(&conn, "memory_tombstone", "owner_subject").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM preferences", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]

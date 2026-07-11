@@ -340,6 +340,9 @@ fn rejects_changed_local_file_payloads() {
 fn knowledge_search_requires_actual_matches_before_boosts() {
     let sources = vec![
         KnowledgeSource {
+            workspace_id: None,
+            authority_scope: None,
+            scope: None,
             id: "memory".to_string(),
             title: "Launch plan".to_string(),
             provenance: "Approved memory".to_string(),
@@ -352,6 +355,9 @@ fn knowledge_search_requires_actual_matches_before_boosts() {
             account: None,
         },
         KnowledgeSource {
+            workspace_id: None,
+            authority_scope: None,
+            scope: None,
             id: "design".to_string(),
             title: "Design direction".to_string(),
             provenance: "Product design".to_string(),
@@ -640,6 +646,8 @@ fn deduplicates_and_caps_imported_knowledge_sources() {
 
 fn memory_record(id: &str, value: &str) -> MemoryRecord {
     MemoryRecord {
+        workspace_id: None,
+        authority_scope: None,
         id: id.to_string(),
         kind: "preference".to_string(),
         title: format!("Memory {id}"),
@@ -662,6 +670,9 @@ fn memory_record(id: &str, value: &str) -> MemoryRecord {
 
 fn knowledge_source(id: &str, trust: &str, preview: Option<&str>) -> KnowledgeSource {
     KnowledgeSource {
+        workspace_id: None,
+        authority_scope: None,
+        scope: None,
         id: id.to_string(),
         title: "Launch notes".to_string(),
         provenance: "Imported source fixture".to_string(),

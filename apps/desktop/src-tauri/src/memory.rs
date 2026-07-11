@@ -12,7 +12,9 @@ use crate::approvals::{
     persist_approval_audit_entry_scoped,
 };
 use crate::authorized_scope::{command_scope, ScopeAccess};
-use crate::models::{ApprovalAuditEntry, KnowledgeSource, LocalFileImport};
+use crate::models::{
+    ApprovalAuditEntry, ContextRecordAuthorityScope, KnowledgeSource, LocalFileImport,
+};
 use crate::models::{
     MemoryControlState, MemoryExportEnvelope, MemoryPromotionRequest, MemoryPromotionResponse,
     MemoryRecord, MAX_MEMORY_RECORDS, MAX_MEMORY_TITLE_CHARACTERS, MAX_MEMORY_VALUE_CHARACTERS,
@@ -22,6 +24,7 @@ use crate::paths::approval_audit_path;
 use crate::paths::{
     file_slug, imported_knowledge_path, memory_state_path, normalize_spaces, truncate_characters,
 };
+use crate::store::repos::scope::PrivateDataScope;
 
 fn default_memory_state() -> MemoryControlState {
     MemoryControlState {
@@ -59,6 +62,8 @@ pub(crate) fn normalize_memory_record(record: MemoryRecord) -> Result<MemoryReco
     }
 
     Ok(MemoryRecord {
+        workspace_id: record.workspace_id,
+        authority_scope: record.authority_scope,
         id,
         kind,
         title,
@@ -258,6 +263,27 @@ fn canonicalize_project_memory_state(
     Ok(state)
 }
 
+fn canonicalize_private_memory_state(
+    state: MemoryControlState,
+    scope: &PrivateDataScope,
+) -> Result<MemoryControlState, String> {
+    let mut state = normalize_memory_state(state)?;
+    for record in &mut state.records {
+        record.workspace_id = Some(scope.workspace_id().to_string());
+        record.authority_scope = Some(ContextRecordAuthorityScope {
+            authority: "local".into(),
+            visibility: "member-private".into(),
+            owner_member_id: scope.owner_member_id().map(str::to_string),
+            owner_internal_user_id: scope.owner_internal_user_id().map(str::to_string),
+        });
+        record.scope = Some(match scope.project_id() {
+            Some(project_id) => project_scope_value(project_id),
+            None => serde_json::json!({"level":"global"}),
+        });
+    }
+    Ok(state)
+}
+
 fn validate_project_source(source: &LocalFileImport, project_id: &str) -> Result<(), String> {
     if source.disabled {
         return Err("Disabled knowledge cannot be promoted to memory.".to_string());
@@ -296,6 +322,9 @@ fn promote_project_knowledge_source(
         return Err("Forgotten memory cannot be restored by promotion.".to_string());
     }
     request.source = KnowledgeSource {
+        workspace_id: canonical_source.workspace_id.clone(),
+        authority_scope: canonical_source.authority_scope.clone(),
+        scope: canonical_source.scope.clone(),
         id: canonical_source.id.clone(),
         title: canonical_source.title.clone(),
         provenance: canonical_source.provenance.clone(),
@@ -406,6 +435,8 @@ pub(crate) fn promote_knowledge_source(
         format!("Approved from trusted source: {provenance}")
     };
     let record = normalize_memory_record(MemoryRecord {
+        workspace_id: None,
+        authority_scope: None,
         id: record_id.clone(),
         kind: "imported".to_string(),
         title,
@@ -463,19 +494,10 @@ pub fn list_memory_state(
     project_id: Option<String>,
 ) -> Result<MemoryControlState, String> {
     let path = memory_state_path(&app)?;
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
-    if let Some(state) = crate::store::read_workspace_document(&path, &scope)? {
-        let state = if let Some(project_id) = scope.project_id() {
-            canonicalize_project_memory_state(state, scope.workspace_id(), project_id)?
-        } else {
-            normalize_memory_state(state)?
-        };
-        return Ok(live_memory_state(state));
-    }
-    if scope.project_id().is_some() {
-        return Ok(default_memory_state());
-    }
-    read_memory_state(&path)
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
+    let state = crate::store::read_private_workspace_document(&path, &authorized.private)?
+        .unwrap_or_else(default_memory_state);
+    canonicalize_private_memory_state(state, &authorized.private).map(live_memory_state)
 }
 
 #[tauri::command]
@@ -486,14 +508,11 @@ pub fn save_memory_state(
     project_id: Option<String>,
 ) -> Result<MemoryControlState, String> {
     let path = memory_state_path(&app)?;
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
-    let mut normalized = if let Some(project_id) = scope.project_id() {
-        canonicalize_project_memory_state(state, scope.workspace_id(), project_id)?
-    } else {
-        normalize_memory_state(state)?
-    };
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let scope = &authorized.private;
+    let mut normalized = canonicalize_private_memory_state(state, scope)?;
     if let Some(existing) =
-        crate::store::read_workspace_document::<MemoryControlState>(&path, &scope)?
+        crate::store::read_private_workspace_document::<MemoryControlState>(&path, scope)?
     {
         for record in existing
             .records
@@ -514,11 +533,8 @@ pub fn save_memory_state(
             }
         }
     }
-    if let Some(project_id) = scope.project_id() {
-        normalized =
-            canonicalize_project_memory_state(normalized, scope.workspace_id(), project_id)?;
-    }
-    if crate::store::write_workspace_document(&path, &scope, &normalized)? {
+    normalized = canonicalize_private_memory_state(normalized, scope)?;
+    if crate::store::write_private_workspace_document(&path, scope, &normalized)? {
         return Ok(live_memory_state(normalized));
     }
     write_memory_state(&path, normalized).map(live_memory_state)
@@ -531,14 +547,11 @@ pub fn export_memory_state(
     project_id: Option<String>,
 ) -> Result<String, String> {
     let path = memory_state_path(&app)?;
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
-    let state =
-        crate::store::read_workspace_document(&path, &scope)?.unwrap_or_else(default_memory_state);
-    let state = if let Some(project_id) = scope.project_id() {
-        canonicalize_project_memory_state(state, scope.workspace_id(), project_id)?
-    } else {
-        normalize_memory_state(state)?
-    };
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
+    let scope = &authorized.private;
+    let state = crate::store::read_private_workspace_document(&path, scope)?
+        .unwrap_or_else(default_memory_state);
+    let state = canonicalize_private_memory_state(state, scope)?;
     encode_memory_export_scoped(state, scope.workspace_id())
 }
 
@@ -550,18 +563,19 @@ pub fn promote_knowledge_source_to_memory(
     project_id: Option<String>,
 ) -> Result<MemoryPromotionResponse, String> {
     let memory_path = memory_state_path(&app)?;
-    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
+    let authorized = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let scope = &authorized.private;
     let response = if let Some(project_id) = scope.project_id() {
         let source_id = normalize_spaces(&request.source.id);
         let knowledge_path = imported_knowledge_path(&app)?;
         let sources =
-            crate::snapshot::read_imported_knowledge_sources_scoped(&knowledge_path, &scope)?;
+            crate::snapshot::read_imported_knowledge_sources_private(&knowledge_path, scope)?;
         let canonical_source = sources
             .iter()
             .find(|source| source.id == source_id)
             .ok_or_else(|| "Knowledge source is unavailable in this project.".to_string())?;
         let current_state: MemoryControlState =
-            crate::store::read_workspace_document(&memory_path, &scope)?
+            crate::store::read_private_workspace_document(&memory_path, scope)?
                 .unwrap_or_else(default_memory_state);
         promote_project_knowledge_source(
             request,
@@ -571,16 +585,45 @@ pub fn promote_knowledge_source_to_memory(
             project_id,
         )?
     } else {
-        promote_knowledge_source(request)?
+        let source_id = normalize_spaces(&request.source.id);
+        let knowledge_path = imported_knowledge_path(&app)?;
+        let sources =
+            crate::snapshot::read_imported_knowledge_sources_private(&knowledge_path, scope)?;
+        let canonical_source = sources
+            .iter()
+            .find(|source| source.id == source_id)
+            .ok_or_else(|| "Knowledge source is unavailable in this workspace.".to_string())?;
+        let mut canonical_request = request;
+        canonical_request.source = KnowledgeSource {
+            workspace_id: canonical_source.workspace_id.clone(),
+            authority_scope: canonical_source.authority_scope.clone(),
+            scope: canonical_source.scope.clone(),
+            id: canonical_source.id.clone(),
+            title: canonical_source.title.clone(),
+            provenance: canonical_source.provenance.clone(),
+            freshness: canonical_source.freshness.clone(),
+            pinned: canonical_source.pinned,
+            trust: Some(canonical_source.trust.clone()),
+            content_preview: Some(canonical_source.content_preview.clone()),
+            disabled: canonical_source.disabled,
+            deleted_at: canonical_source.deleted_at.clone(),
+            account: canonical_source.account.clone(),
+        };
+        canonical_request.state =
+            crate::store::read_private_workspace_document(&memory_path, scope)?
+                .unwrap_or_else(default_memory_state);
+        promote_knowledge_source(canonical_request)?
     };
-    let state = if crate::store::write_workspace_document(&memory_path, &scope, &response.state)? {
-        response.state
-    } else {
-        write_memory_state(&memory_path, response.state)?
-    };
+    let canonical_state = canonicalize_private_memory_state(response.state, scope)?;
+    let state =
+        if crate::store::write_private_workspace_document(&memory_path, scope, &canonical_state)? {
+            canonical_state
+        } else {
+            write_memory_state(&memory_path, canonical_state)?
+        };
     let audit_path = approval_audit_path(&app)?;
     let audit_response = if scope.project_id().is_some() {
-        persist_approval_audit_entry_scoped(&audit_path, &scope, response.audit_entry)?
+        persist_approval_audit_entry_scoped(&audit_path, scope.data(), response.audit_entry)?
     } else {
         persist_approval_audit_entry(&audit_path, response.audit_entry)?
     };
@@ -599,6 +642,8 @@ mod tests {
 
     fn source(id: &str) -> LocalFileImport {
         LocalFileImport {
+            workspace_id: None,
+            authority_scope: None,
             id: id.into(),
             title: "Canonical title".into(),
             kind: "document".into(),
@@ -624,6 +669,9 @@ mod tests {
     fn request(id: &str) -> MemoryPromotionRequest {
         MemoryPromotionRequest {
             source: KnowledgeSource {
+                workspace_id: None,
+                authority_scope: None,
+                scope: None,
                 id: id.into(),
                 title: "Forged title".into(),
                 provenance: "Forged source".into(),
@@ -646,6 +694,8 @@ mod tests {
 
     fn record(id: &str) -> MemoryRecord {
         MemoryRecord {
+            workspace_id: None,
+            authority_scope: None,
             id: id.into(),
             kind: "fact".into(),
             title: "Title".into(),

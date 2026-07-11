@@ -4,7 +4,10 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::store::repos::{scope::DataScope, workspace_directory};
+use crate::store::repos::{
+    scope::{DataScope, PrivateDataScope},
+    workspace_directory,
+};
 use crate::store::StoreError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +19,7 @@ pub enum ScopeAccess {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorizedCommandScope {
     pub data: DataScope,
+    pub private: PrivateDataScope,
     pub internal_user_id: String,
     pub member_id: Option<String>,
 }
@@ -62,8 +66,14 @@ pub fn resolve(
     }
     let data = DataScope::new(requested.to_string(), project_id.map(str::to_string))?;
     data.ensure_exists(conn)?;
+    let private = PrivateDataScope::for_authenticated_user(
+        data.clone(),
+        &context.internal_user_id,
+        context.member_id.as_deref(),
+    )?;
     Ok(AuthorizedCommandScope {
         data,
+        private,
         internal_user_id: context.internal_user_id,
         member_id: context.member_id,
     })
