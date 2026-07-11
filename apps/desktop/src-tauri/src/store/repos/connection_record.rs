@@ -485,7 +485,7 @@ fn external_principal_digest(workspace_id: &str, connector_id: &str, account_id:
     format!("{:x}", digest.finalize())
 }
 
-fn require_current_scope(
+pub(crate) fn require_current_scope(
     tx: &Connection,
     scope: &AuthorizedCommandScope,
     access: ScopeAccess,

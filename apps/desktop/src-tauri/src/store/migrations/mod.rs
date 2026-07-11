@@ -97,6 +97,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // source because it has no authenticated creator; only a stable,
             // secret-free proposed identity is recorded for later adoption.
             18 => apply_v18_to_v19(conn)?,
+            // 19 -> 20: persist the exact active Connection per connector in
+            // the authenticated canonical store. Legacy active flags are not
+            // guessed into authority by the migration.
+            19 => apply_v19_to_v20(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -106,6 +110,25 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v19_to_v20(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS connection_selection (
+          workspace_id TEXT NOT NULL,
+          connector_definition_key TEXT NOT NULL,
+          connection_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK(revision >= 1),
+          selected_by_internal_user_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY(workspace_id,connector_definition_key),
+          FOREIGN KEY(workspace_id,connection_id)
+            REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE
+        );
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1132,8 +1155,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v19 is current; v19 -> v20 has no registered migration.
-        let err = apply(&conn, 19, 20).unwrap_err();
+        // v20 is current; v20 -> v21 has no registered migration.
+        let err = apply(&conn, 20, 21).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1193,6 +1216,34 @@ mod tests {
                 .get::<_, i64>(0))
                 .unwrap(),
             1
+        );
+    }
+
+    #[test]
+    fn v19_to_v20_adds_empty_canonical_connection_selection_without_guessing() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE connection_record(
+              workspace_id TEXT NOT NULL,
+              id TEXT NOT NULL,
+              PRIMARY KEY(workspace_id,id)
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 19, 20).unwrap();
+        apply(&conn, 19, 20).unwrap();
+
+        assert!(table_exists(&conn, "connection_selection").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM connection_selection", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
         );
     }
 

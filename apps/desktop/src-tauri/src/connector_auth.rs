@@ -1206,7 +1206,10 @@ fn normalize_active_accounts(connections: &mut [ConnectorConnection]) {
     }
 }
 
-fn write_connections(path: &Path, connections: &[ConnectorConnection]) -> Result<(), String> {
+pub(crate) fn write_connections(
+    path: &Path,
+    connections: &[ConnectorConnection],
+) -> Result<(), String> {
     if crate::store::write_document(path, &connections)? {
         return Ok(());
     }
@@ -1222,18 +1225,71 @@ fn write_connections(path: &Path, connections: &[ConnectorConnection]) -> Result
 /// support several accounts may be connected; reads/actions resolve against the
 /// one flagged active. Falls back to the first connection if none is flagged
 /// (legacy files / invariant drift) so an account never becomes unreachable.
-pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
+fn selected_connection_id(path: &Path, connector_id: &str) -> Option<String> {
+    let identity = crate::clerk_identity::native_identity_generation_snapshot().ok()?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .ok()?;
+    let _guard = crate::clerk_identity::lock_native_identity_generation(&identity).ok()?;
+    let durable_store = crate::store::try_global()?;
+    let existing = durable_store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, connector_id))
+        .ok()?;
+    if let Some(selection) = existing {
+        return Some(selection.connection_id);
+    }
+
     let connections = read_connections(path).ok()?;
-    let matching: Vec<&ConnectorConnection> = connections
+    let compatibility_active = connections
         .iter()
-        .filter(|connection| connection.connector_id == connector_id)
-        .collect();
-    matching
-        .iter()
-        .copied()
-        .find(|connection| connection.is_active)
-        .or_else(|| matching.first().copied())
-        .cloned()
+        .find(|connection| connection.connector_id == connector_id && connection.is_active)
+        .or_else(|| {
+            connections
+                .iter()
+                .find(|connection| connection.connector_id == connector_id)
+        })?;
+    let record = canonical_connection_for_refresh(
+        durable_store,
+        &scope,
+        connector_id,
+        &compatibility_active.account.id,
+    )
+    .ok()?;
+    if record.lifecycle != "authorized"
+        || record.authorization_state != "authorized"
+        || record.credential_state != "available"
+    {
+        return None;
+    }
+    durable_store
+        .transaction(|tx| {
+            crate::store::repos::connection_selection::select(
+                tx,
+                durable_store,
+                &scope,
+                connector_id,
+                &record.id,
+                None,
+                &now_epoch().to_string(),
+            )
+        })
+        .ok()
+        .map(|selection| selection.connection_id)
+}
+
+pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
+    let selected = selected_connection_id(path, connector_id)?;
+    read_connections(path).ok()?.into_iter().find(|connection| {
+        connection.connector_id == connector_id
+            && derive_native_connection_id(
+                crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+                connector_id,
+                &connection.account.id,
+            ) == selected
+    })
 }
 
 pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
@@ -1431,7 +1487,7 @@ fn commit_prepared_auth_state<G>(
             .as_ref()
             .map(|record| record.health_state.as_str())
             .unwrap_or("unknown");
-        crate::store::repos::connection_record::upsert_native_connector(
+        let saved = crate::store::repos::connection_record::upsert_native_connector(
             tx,
             durable_store,
             scope,
@@ -1446,6 +1502,16 @@ fn commit_prepared_auth_state<G>(
                 expected_revision,
                 updated_at: &timestamp,
             },
+        )?;
+        let selection = crate::store::repos::connection_selection::get(tx, scope, connector_id)?;
+        crate::store::repos::connection_selection::select(
+            tx,
+            durable_store,
+            scope,
+            connector_id,
+            &saved.id,
+            selection.as_ref().map(|value| value.revision),
+            &timestamp,
         )?;
         Ok(())
     });
@@ -1656,6 +1722,7 @@ pub(crate) async fn disconnect(
             false,
         )
     })?;
+    let _ = selected_connection_id(&path, connector_id);
     disconnect_with_store_and_path(
         connector_id,
         &NativeConnectorSecretStore,
@@ -1681,18 +1748,27 @@ fn prepare_disconnect(
     connector_id: &str,
     store: &dyn ConnectorSecretStore,
     path: &Path,
+    durable_store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
 ) -> Result<Option<PreparedDisconnect>, ConnectorCommandError> {
     let previous_connections = read_connections(path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    let active = previous_connections
-        .iter()
-        .find(|item| item.connector_id == connector_id && item.is_active)
-        .or_else(|| {
-            previous_connections
-                .iter()
-                .find(|item| item.connector_id == connector_id)
-        })
-        .cloned();
+    let selection = durable_store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, scope, connector_id))
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?;
+    let active = selection.and_then(|selection| {
+        previous_connections
+            .iter()
+            .find(|item| {
+                item.connector_id == connector_id
+                    && derive_native_connection_id(
+                        scope.data.workspace_id(),
+                        connector_id,
+                        &item.account.id,
+                    ) == selection.connection_id
+            })
+            .cloned()
+    });
     let Some(connection) = active else {
         return Ok(None);
     };
@@ -1780,6 +1856,37 @@ fn commit_prepared_disconnect<G>(
             "revoked",
             &now_epoch().to_string(),
         )?;
+        if let Some(selection) =
+            crate::store::repos::connection_selection::get(tx, scope, connector_id)?
+        {
+            if selection.connection_id == id {
+                if let Some(next) = connections.iter().find(|connection| {
+                    connection.connector_id == connector_id && connection.is_active
+                }) {
+                    let next_id = derive_native_connection_id(
+                        scope.data.workspace_id(),
+                        connector_id,
+                        &next.account.id,
+                    );
+                    crate::store::repos::connection_selection::select(
+                        tx,
+                        durable_store,
+                        scope,
+                        connector_id,
+                        &next_id,
+                        Some(selection.revision),
+                        &now_epoch().to_string(),
+                    )?;
+                } else {
+                    crate::store::repos::connection_selection::clear(
+                        tx,
+                        scope,
+                        connector_id,
+                        selection.revision,
+                    )?;
+                }
+            }
+        }
         Ok(())
     });
     if let Err(error) = canonical_result {
@@ -1850,7 +1957,8 @@ async fn disconnect_with_store_and_path<G>(
     scope: &crate::authorized_scope::AuthorizedCommandScope,
     before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
 ) -> Result<(), ConnectorCommandError> {
-    let Some(prepared) = prepare_disconnect(connector_id, store, path)? else {
+    let Some(prepared) = prepare_disconnect(connector_id, store, path, durable_store, scope)?
+    else {
         return Ok(());
     };
     commit_prepared_disconnect(
@@ -2163,16 +2271,27 @@ pub(crate) async fn refresh_connection(
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    // Multi-account: refresh the active account for this connector, falling
-    // back to the first connected account if none is flagged active.
-    let active_index = connections
-        .iter()
-        .position(|connection| connection.connector_id == connector_id && connection.is_active)
-        .or_else(|| {
-            connections
-                .iter()
-                .position(|connection| connection.connector_id == connector_id)
-        });
+    let (identity, scope, durable_store) = refresh_authorization_context(connector_id)?;
+    let _ = selected_connection_id(&path, connector_id);
+    let selection = durable_store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, connector_id))
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
+        .ok_or_else(|| {
+            command_error(
+                "needs-auth",
+                connector_id,
+                "Active Connection selection is unavailable.",
+                false,
+            )
+        })?;
+    let active_index = connections.iter().position(|connection| {
+        connection.connector_id == connector_id
+            && derive_native_connection_id(
+                scope.data.workspace_id(),
+                connector_id,
+                &connection.account.id,
+            ) == selection.connection_id
+    });
     let active_index = active_index.ok_or_else(|| {
         command_error(
             "needs-auth",
@@ -2202,7 +2321,6 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
-    let (identity, scope, durable_store) = refresh_authorization_context(connector_id)?;
     let canonical = canonical_connection_for_refresh(
         durable_store,
         &scope,
@@ -2895,7 +3013,8 @@ mod tests {
             || Ok(()),
         )
         .unwrap();
-        assert!(result.account.unwrap().id.starts_with("connection_"));
+        let result_connection_id = result.account.as_ref().unwrap().id.clone();
+        assert!(result_connection_id.starts_with("connection_"));
         assert_eq!(read_connections(&path).unwrap().len(), 1);
         assert_eq!(
             durable
@@ -2904,6 +3023,11 @@ mod tests {
                 .len(),
             1
         );
+        let selection = durable
+            .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, "gmail"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(selection.connection_id, result_connection_id);
 
         durable
             .transaction(|tx| clear_current_internal_user(tx))
@@ -2927,6 +3051,9 @@ mod tests {
             .is_none());
         assert!(!error.message.contains("access-account-2"));
         assert!(!error.message.contains("refresh-account-2"));
+        let selection_after_failure = durable
+            .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, "gmail"));
+        assert!(selection_after_failure.is_err());
         let _ = fs::remove_file(path);
     }
 
@@ -3712,6 +3839,12 @@ mod tests {
         assert_eq!(canonical[0].lifecycle, "disconnected");
         assert_eq!(canonical[0].authorization_state, "revoked");
         assert_eq!(canonical[0].credential_state, "revoked");
+        assert!(durable
+            .with_conn(|tx| {
+                crate::store::repos::connection_selection::get(tx, &scope, "google-drive")
+            })
+            .unwrap()
+            .is_none());
 
         // Verify the mock server received the expected form POST request
         let request = request_rx.await.unwrap();
@@ -3783,7 +3916,9 @@ mod tests {
             || Ok(()),
         )
         .unwrap();
-        let prepared = prepare_disconnect("gmail", &store, &path).unwrap().unwrap();
+        let prepared = prepare_disconnect("gmail", &store, &path, &durable, &scope)
+            .unwrap()
+            .unwrap();
         let guard_error =
             commit_prepared_disconnect("gmail", &store, &path, &durable, &scope, &prepared, || {
                 Err::<(), _>(command_error(

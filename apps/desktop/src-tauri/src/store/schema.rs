@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 19;
+pub const CURRENT_SCHEMA_VERSION: u32 = 20;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -941,6 +941,18 @@ CREATE INDEX IF NOT EXISTS idx_connection_record_connector
   ON connection_record(workspace_id,connector_definition_key,lifecycle);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_connection_record_credential
   ON connection_record(credential_ref) WHERE credential_ref <> '';
+
+CREATE TABLE IF NOT EXISTS connection_selection (
+  workspace_id TEXT NOT NULL,
+  connector_definition_key TEXT NOT NULL,
+  connection_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  selected_by_internal_user_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(workspace_id,connector_definition_key),
+  FOREIGN KEY(workspace_id,connection_id)
+    REFERENCES connection_record(workspace_id,id) ON DELETE CASCADE
+);
 
 -- Compatibility rows stay live in connector_account until an authenticated
 -- writer can prove the canonical creator/scope. This ledger records the stable

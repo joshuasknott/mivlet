@@ -1364,10 +1364,14 @@ pub fn list_connector_accounts(
         )
     })?;
     let canonical = reconcile_canonical_connector_accounts(store, &scope, entry.id, &connections)?;
+    let selection = store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, entry.id))
+        .map_err(|error| command_error("unknown", entry.id, &error.to_string(), false))?;
     project_canonical_account_options(
         account_options_from_connections(&connections, entry.id, &workspace_id),
         &canonical,
         entry.id,
+        selection.as_ref().map(|value| value.connection_id.as_str()),
     )
 }
 
@@ -1375,6 +1379,7 @@ fn project_canonical_account_options(
     options: Vec<crate::models::ConnectorAccountOption>,
     canonical: &[crate::store::repos::connection_record::SafeConnectionRecord],
     connector_id: &str,
+    selected_connection_id: Option<&str>,
 ) -> Result<Vec<crate::models::ConnectorAccountOption>, ConnectorCommandError> {
     let records: BTreeMap<&str, &crate::store::repos::connection_record::SafeConnectionRecord> =
         canonical
@@ -1398,6 +1403,7 @@ fn project_canonical_account_options(
             option.health_state = record.health_state.clone();
             option.credential_custody = record.credential_custody.clone();
             option.credential_state = record.credential_state.clone();
+            option.active = selected_connection_id == Some(option.connection_id.as_str());
             Ok(option)
         })
         .collect()
@@ -1483,6 +1489,56 @@ fn reconcile_canonical_connector_accounts(
                     },
                 )?;
             }
+            let selection =
+                crate::store::repos::connection_selection::get(tx, scope, connector_id)?;
+            let selection_is_present = selection.as_ref().is_some_and(|selection| {
+                connections.iter().any(|connection| {
+                    connection.connector_id == connector_id
+                        && crate::connector_auth::derive_native_connection_id(
+                            scope.data.workspace_id(),
+                            connector_id,
+                            &connection.account.id,
+                        ) == selection.connection_id
+                })
+            });
+            if !selection_is_present {
+                let active = connections
+                    .iter()
+                    .find(|connection| {
+                        connection.connector_id == connector_id
+                            && connection.is_active
+                            && connection.status == "connected"
+                    })
+                    .or_else(|| {
+                        connections.iter().find(|connection| {
+                            connection.connector_id == connector_id
+                                && connection.status == "connected"
+                        })
+                    });
+                if let Some(active) = active {
+                    let id = crate::connector_auth::derive_native_connection_id(
+                        scope.data.workspace_id(),
+                        connector_id,
+                        &active.account.id,
+                    );
+                    crate::store::repos::connection_selection::select(
+                        tx,
+                        store,
+                        scope,
+                        connector_id,
+                        &id,
+                        selection.as_ref().map(|value| value.revision),
+                        &active.updated_at,
+                    )?;
+                } else if let Some(selection) = selection {
+                    crate::store::repos::connection_selection::clear(
+                        tx,
+                        scope,
+                        connector_id,
+                        selection.revision,
+                    )?;
+                }
+            }
             crate::store::repos::connection_record::list(tx, store, scope)
         })
         .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))
@@ -1515,12 +1571,47 @@ pub fn switch_connector_account(
     require_selectable_canonical_connection(durable_store, &scope, entry.id, &connection_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    let previous_connections = read_connections(&path)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    let previous_selection = durable_store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, entry.id))
+        .map_err(|error| command_error("unknown", entry.id, &error.to_string(), false))?;
     crate::connector_auth::switch_active_connection(
         &path,
         entry.id,
         &workspace_id,
         &connection_id,
     )?;
+    let updated_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string();
+    if let Err(error) = durable_store.transaction(|tx| {
+        crate::store::repos::connection_selection::select(
+            tx,
+            durable_store,
+            &scope,
+            entry.id,
+            &connection_id,
+            previous_selection.as_ref().map(|value| value.revision),
+            &updated_at,
+        )?;
+        Ok(())
+    }) {
+        let restored =
+            crate::connector_auth::write_connections(&path, &previous_connections).is_ok();
+        return Err(if restored {
+            command_error("unknown", entry.id, &error.to_string(), false)
+        } else {
+            command_error(
+                "unknown",
+                entry.id,
+                "Fable could not save or fully restore the active Connection.",
+                false,
+            )
+        });
+    }
     Ok(build_manifest(
         entry,
         &NativeCredentialBoundary {
@@ -2089,6 +2180,7 @@ mod workspace_scope_tests {
             ),
             &canonical_health,
             "gmail",
+            Some(&canonical_health[0].id),
         )
         .unwrap();
         assert_eq!(projected[0].health_state, "healthy");
@@ -2100,6 +2192,7 @@ mod workspace_scope_tests {
             ),
             &[],
             "gmail",
+            None,
         )
         .is_err());
 
