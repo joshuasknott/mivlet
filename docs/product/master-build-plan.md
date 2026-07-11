@@ -106,7 +106,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 - [ ] Complete source ingestion, provenance, trust, freshness, and lifecycle.
 - [ ] Filter retrieval by member, workspace, project, department, and Connection before ranking.
 - [ ] Complete citations and explain why important context was selected.
-- [ ] Complete visible, editable, scoped, exportable, disableable, and forgettable memory.
+- [x] Complete visible, editable, scoped, exportable, disableable, and forgettable memory.
 - [ ] Prevent private member context from entering shared context automatically.
 
 ### Wave 2C - Artifact system
