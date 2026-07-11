@@ -132,4 +132,48 @@ describe("workspace invitation inbox", () => {
     await act(async () => { finishAccept({ result: { status: "accepted" }, accountWorkspace: {} }); });
     expect(refreshed).not.toHaveBeenCalled();
   });
+
+  it("clears account A immediately and ignores its stale load after switching to B", async () => {
+    let finishA: (value: unknown) => void = () => {};
+    let finishB: (value: unknown) => void = () => {};
+    mocks.load
+      .mockImplementationOnce(() => new Promise((resolve) => { finishA = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { finishB = resolve; }));
+    const view = render(
+      <WorkspaceSettingsView key="user-a" workspaceName="A" onStatus={() => {}} onInvitationAccepted={vi.fn()} />
+    );
+    view.rerender(
+      <WorkspaceSettingsView key="user-b" workspaceName="B" onStatus={() => {}} onInvitationAccepted={vi.fn()} />
+    );
+    expect(screen.queryByText("Atlas Studio")).not.toBeInTheDocument();
+    await act(async () => { finishA({ invitations: [pending("invite-a", "Atlas Studio")] }); });
+    expect(screen.queryByText("Atlas Studio")).not.toBeInTheDocument();
+    await act(async () => { finishB({ invitations: [pending("invite-b", "Beacon Studio")] }); });
+    expect(await screen.findByText("Beacon Studio")).toBeInTheDocument();
+    expect(mocks.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears loaded A and ignores its stale accept completion after switching to B", async () => {
+    mocks.load
+      .mockResolvedValueOnce({ invitations: [pending("invite-a", "Atlas Studio")] })
+      .mockResolvedValueOnce({ invitations: [pending("invite-b", "Beacon Studio")] });
+    let finishA: (value: unknown) => void = () => {};
+    mocks.accept.mockImplementation(() => new Promise((resolve) => { finishA = resolve; }));
+    const refreshedA = vi.fn().mockResolvedValue(undefined);
+    const refreshedB = vi.fn().mockResolvedValue(undefined);
+    const view = render(
+      <WorkspaceSettingsView key="user-a" workspaceName="A" onStatus={() => {}} onInvitationAccepted={refreshedA} />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Accept invitation to Atlas Studio" }));
+    view.rerender(
+      <WorkspaceSettingsView key="user-b" workspaceName="B" onStatus={() => {}} onInvitationAccepted={refreshedB} />
+    );
+    expect(screen.queryByText("Atlas Studio")).not.toBeInTheDocument();
+    expect(await screen.findByText("Beacon Studio")).toBeInTheDocument();
+    await act(async () => { finishA({ result: { status: "accepted" }, accountWorkspace: {} }); });
+    expect(refreshedA).not.toHaveBeenCalled();
+    expect(refreshedB).not.toHaveBeenCalled();
+    expect(screen.queryByText(/invitation accepted/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Beacon Studio")).toBeInTheDocument();
+  });
 });

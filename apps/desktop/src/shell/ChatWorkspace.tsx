@@ -92,6 +92,15 @@ export function ChatWorkspace() {
   const projectStore = useProjects(boundWorkspaceId);
   const conversationWorkspaceId = useRef<string | null>(boundWorkspaceId);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
+  // Account identity and native ownership can settle at different moments.
+  // Include both boundaries so either A->B transition clears A immediately;
+  // workspace selection is deliberately absent so same-user switches stay put.
+  const invitationAccountContextKey = [
+    runtime.identityStatus.authentication?.subject ?? "signed-out",
+    runtime.identityStatus.state,
+    runtime.accountWorkspaceStatus.activeContextOwner?.internalUserId ?? "unbound",
+    runtime.accountWorkspaceStatus.state
+  ].join(":");
   const verifiedProfile = useMemo(() => {
     const display = runtime.identityStatus.authentication?.verifiedDisplayAttributes;
     return { name: display?.displayName ?? display?.email ?? "Fable account", email: display?.email ?? "" };
@@ -1176,6 +1185,7 @@ export function ChatWorkspace() {
                   </div>
                   <Suspense fallback={null}>
                     <WorkspaceSettingsView
+                      key={invitationAccountContextKey}
                       workspaceName={workspaceName}
                       onInvitationAccepted={async () => {
                         await runtime.reconcileAccountWorkspace();
