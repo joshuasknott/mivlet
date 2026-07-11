@@ -4,15 +4,14 @@ import { editMemory, exportMemories, forgetMemory, isLiveMemory } from "@fable/k
 import type {
   KnowledgeSource,
   MemoryControlState,
-  MemoryPromotionRequest,
-  MemoryPromotionResponse,
   MemoryRecord
 } from "@fable/protocol";
 import {
   exportRuntimeMemoryState,
   loadRuntimeMemoryState,
   promoteRuntimeKnowledgeSourceToMemory,
-  saveRuntimeMemoryState
+  saveRuntimeMemoryState,
+  type RuntimeMemoryScopeOverride
 } from "../runtime";
 
 export interface UseProjectMemoryOptions {
@@ -20,20 +19,6 @@ export interface UseProjectMemoryOptions {
   projectId: string;
   enabled: boolean;
 }
-
-type ProjectScope = { workspaceId: string; projectId: string };
-
-// Runtime scope parameters land with the native project-memory slice. These
-// structural signatures keep this independent hook compatible before and
-// after that integration without weakening the public runtime contract.
-const loadScopedMemory = loadRuntimeMemoryState as unknown as
-  (scope: ProjectScope) => Promise<MemoryControlState | null>;
-const saveScopedMemory = saveRuntimeMemoryState as unknown as
-  (state: MemoryControlState, scope: ProjectScope) => Promise<MemoryControlState | null>;
-const exportScopedMemory = exportRuntimeMemoryState as unknown as
-  (state: MemoryControlState, scope: ProjectScope) => Promise<string | null>;
-const promoteScopedSource = promoteRuntimeKnowledgeSourceToMemory as unknown as
-  (request: MemoryPromotionRequest, scope: ProjectScope) => Promise<MemoryPromotionResponse | null>;
 
 const EMPTY_STATE: MemoryControlState = { disabled: false, records: [] };
 
@@ -45,14 +30,14 @@ export const projectMemoryQueryKeys = {
 export function useProjectMemory(options: UseProjectMemoryOptions) {
   const workspaceId = options.workspaceId.trim();
   const projectId = options.projectId.trim();
-  const scope = useMemo<ProjectScope>(() => ({ workspaceId, projectId }), [projectId, workspaceId]);
+  const scope = useMemo<RuntimeMemoryScopeOverride>(() => ({ workspaceId, projectId }), [projectId, workspaceId]);
   const queryKey = projectMemoryQueryKeys.scope(workspaceId, projectId);
   const queryClient = useQueryClient();
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const query = useQuery({
     queryKey,
-    queryFn: async () => (await loadScopedMemory(scope)) ?? EMPTY_STATE,
+    queryFn: async () => (await loadRuntimeMemoryState(scope)) ?? EMPTY_STATE,
     enabled: options.enabled && Boolean(workspaceId && projectId),
     networkMode: "always",
     retry: 1,
@@ -64,7 +49,7 @@ export function useProjectMemory(options: UseProjectMemoryOptions) {
   const refresh = useCallback(async () => {
     if (!options.enabled || !workspaceId || !projectId) return EMPTY_STATE;
     setMutationError(null);
-    const loaded = (await loadScopedMemory(scope)) ?? EMPTY_STATE;
+    const loaded = (await loadRuntimeMemoryState(scope)) ?? EMPTY_STATE;
     queryClient.setQueryData(queryKey, loaded);
     return loaded;
   }, [options.enabled, projectId, queryClient, queryKey, scope, workspaceId]);
@@ -74,7 +59,7 @@ export function useProjectMemory(options: UseProjectMemoryOptions) {
     setMutationError(null);
     queryClient.setQueryData(queryKey, next);
     try {
-      const saved = await saveScopedMemory(next, scope);
+      const saved = await saveRuntimeMemoryState(next, scope);
       const authoritative = saved ?? next;
       queryClient.setQueryData(queryKey, authoritative);
       return authoritative;
@@ -90,7 +75,7 @@ export function useProjectMemory(options: UseProjectMemoryOptions) {
     const previous = queryClient.getQueryData<MemoryControlState>(queryKey) ?? EMPTY_STATE;
     setMutationError(null);
     try {
-      const result = await promoteScopedSource({
+      const result = await promoteRuntimeKnowledgeSourceToMemory({
         source,
         decision: "once",
         decidedAt: new Date().toISOString(),
@@ -157,7 +142,7 @@ export function useProjectMemory(options: UseProjectMemoryOptions) {
   const exportText = useCallback(async () => {
     setMutationError(null);
     try {
-      return (await exportScopedMemory(state, scope)) ?? exportMemories(state.records);
+      return (await exportRuntimeMemoryState(state, scope)) ?? exportMemories(state.records);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Fable could not export this project memory.";
       setMutationError(message);
@@ -169,7 +154,7 @@ export function useProjectMemory(options: UseProjectMemoryOptions) {
     if (!options.enabled || !workspaceId || !projectId) return [];
     setMutationError(null);
     try {
-      const loaded = (await loadScopedMemory(scope)) ?? EMPTY_STATE;
+      const loaded = (await loadRuntimeMemoryState(scope)) ?? EMPTY_STATE;
       queryClient.setQueryData(queryKey, loaded);
       return loaded.disabled ? [] : loaded.records.filter(isLiveMemory);
     } catch (cause) {

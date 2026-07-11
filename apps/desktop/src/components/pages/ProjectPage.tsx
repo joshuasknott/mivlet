@@ -58,6 +58,11 @@ export interface ProjectMemoryView {
   exportText: () => Promise<string>;
 }
 
+function memoryPreview(value: string) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  return compact.length > 280 ? `${compact.slice(0, 277).trimEnd()}...` : compact;
+}
+
 const EMPTY_PROJECT_MEMORY: ProjectMemoryView = {
   records: [], disabled: false, loading: false, error: null,
   refresh: async () => undefined,
@@ -276,18 +281,20 @@ export function ProjectPage({
           ) : <span className="project-knowledge__read-only">Read only</span>}
         </div>
 
-        <input
-          ref={knowledgeFileRef}
-          className="sr-only"
-          type="file"
-          aria-label="Choose a project knowledge file"
-          accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml,text/plain,text/markdown,application/json,text/csv,application/yaml"
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            event.currentTarget.value = "";
-            if (file) void importKnowledgeFile(file);
-          }}
-        />
+        {project.lifecycle === "active" ? (
+          <input
+            ref={knowledgeFileRef}
+            className="sr-only"
+            type="file"
+            aria-label="Choose a project knowledge file"
+            accept=".txt,.md,.markdown,.json,.csv,.yaml,.yml,text/plain,text/markdown,application/json,text/csv,application/yaml"
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = "";
+              if (file) void importKnowledgeFile(file);
+            }}
+          />
+        ) : null}
 
         <form className="project-knowledge__search" role="search" onSubmit={(event) => { event.preventDefault(); void runKnowledgeSearch(); }}>
           <MagnifyingGlass size={15} aria-hidden="true" />
@@ -401,8 +408,8 @@ export function ProjectPage({
                   <>
                     <div className="project-memory__copy">
                       <strong>{record.title}</strong>
-                      <p>{record.value}</p>
-                      <span>{record.source} Â· {record.freshness}</span>
+                      <p>{memoryPreview(record.value)}</p>
+                      <span>{record.source} / {record.freshness}</span>
                       <div className="project-memory__badges">
                         {record.pinned ? <span>Pinned</span> : null}
                         {record.disabled ? <span>Not in use</span> : null}

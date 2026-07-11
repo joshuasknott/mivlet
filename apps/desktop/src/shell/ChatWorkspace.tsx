@@ -724,13 +724,9 @@ export function ChatWorkspace() {
     const assistantMessageId = appendConversationMessage("assistant", "Working...");
     activeAssistantMessageId.current = assistantMessageId;
     resetCancellation();
-    const assembleProjectContext = runtime.assembleKnowledgeContext as unknown as (
-      input: string,
-      project: { projectId: string | null; projectMemoryRecords: typeof projectMemory.contextRecords }
-    ) => Promise<string>;
     const projectContext = runProjectId ? projectMemory.loadContextRecords() : Promise.resolve([]);
     void projectContext
-      .then((projectMemoryRecords) => assembleProjectContext(prompt, {
+      .then((projectMemoryRecords) => runtime.assembleKnowledgeContext(prompt, {
         projectId: runProjectId,
         projectMemoryRecords
       }))

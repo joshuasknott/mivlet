@@ -270,6 +270,28 @@ describe("ProjectPage", () => {
     expect(forget).toHaveBeenCalledWith("memory-1");
   });
 
+  it("keeps long remembered documents calm until the user edits them", () => {
+    const longValue = `Important launch context ${"with supporting detail ".repeat(30)}`;
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        memory={{
+          ...emptyMemory,
+          records: [{ id: "memory-1", title: "Launch brief", value: longValue, source: "Local file", freshness: "Approved now", pinned: true, disabled: false }]
+        }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    const summary = screen.getByText((content) => content.startsWith("Important launch context"));
+    expect(summary.textContent?.length).toBeLessThanOrEqual(280);
+    expect(summary).toHaveTextContent(/\.\.\.$/);
+    expect(screen.queryByText(longValue)).not.toBeInTheDocument();
+  });
+
   it("keeps archived memory readable and exportable but hides every mutation", async () => {
     const user = userEvent.setup();
     const exportText = vi.fn().mockResolvedValue("# Memory export\n\nLaunch date");
@@ -292,6 +314,7 @@ describe("ProjectPage", () => {
     expect(screen.queryByRole("button", { name: "New chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit guidance" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remember" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Choose a project knowledge file")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Export" }));
