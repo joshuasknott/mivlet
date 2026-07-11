@@ -36,6 +36,7 @@ struct McpChild {
     owner_subject: String,
     connection_id: String,
     connection_revision: i64,
+    discovery_current: bool,
 }
 
 type ProcessMap = HashMap<String, McpChild>;
@@ -53,6 +54,7 @@ struct McpRemoteSession {
     owner_subject: String,
     connection_id: String,
     connection_revision: i64,
+    discovery_current: bool,
     server_session_id: Option<String>,
     last_event_id: Option<String>,
     retry_after_ms: u64,
@@ -448,6 +450,7 @@ pub fn open_remote_mcp_session(
                 owner_subject: scope.private.owner_subject().to_string(),
                 connection_id: connection.connection_id.clone(),
                 connection_revision: connection.connection_revision,
+                discovery_current: false,
                 server_session_id: None,
                 last_event_id: None,
                 retry_after_ms: 1_000,
@@ -718,6 +721,7 @@ pub fn record_mcp_server_discovery(
                 && process.connection_revision == connection_revision
             {
                 process.connection_revision = recorded.connection_revision;
+                process.discovery_current = true;
             }
         }
     }
@@ -727,6 +731,7 @@ pub fn record_mcp_server_discovery(
                 && session.connection_revision == connection_revision
             {
                 session.connection_revision = recorded.connection_revision;
+                session.discovery_current = true;
             }
         }
     }
@@ -1095,6 +1100,7 @@ pub async fn spawn_mcp_process(
                 owner_subject: scope.private.owner_subject().to_string(),
                 connection_id: connection.connection_id.clone(),
                 connection_revision: connection.connection_revision,
+                discovery_current: false,
             },
         );
     Ok(SpawnedMcpProcess {
@@ -1220,6 +1226,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         .get(&proposal.session_id)
         .map(|process| {
             require_session_owner(process, &scope)?;
+            require_current_session_discovery(process.discovery_current)?;
             Ok::<(String, i64, String), String>((
                 process.connection_id.clone(),
                 process.connection_revision,
@@ -1240,6 +1247,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         if !session.initialized {
             return Err("Remote MCP execution requires an initialized session.".into());
         }
+        require_current_session_discovery(session.discovery_current)?;
         (
             session.connection_id.clone(),
             session.connection_revision,
@@ -1285,6 +1293,13 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         arguments_fingerprint,
         proposal_fingerprint,
     })
+}
+
+fn require_current_session_discovery(discovery_current: bool) -> Result<(), String> {
+    if !discovery_current {
+        return Err("MCP tools must be rediscovered in this session before execution.".into());
+    }
+    Ok(())
 }
 
 fn approval_for_tool_proposal(
@@ -2876,6 +2891,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(status.success());
+    }
+
+    #[test]
+    fn every_session_requires_fresh_discovery_before_tool_execution() {
+        assert!(require_current_session_discovery(false).is_err());
+        assert!(require_current_session_discovery(true).is_ok());
     }
 
     #[test]
