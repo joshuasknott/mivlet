@@ -198,6 +198,25 @@ export interface ArtifactLineageLink {
   recordedAt: IsoDateTime;
 }
 
+/** A durable input reference, never hidden conversation history or an authority grant. */
+export interface ArtifactInputReference {
+  kind: "user-input" | "source" | "artifact-version" | "connection-record";
+  referenceId: string;
+  label: string;
+  recordedAt: IsoDateTime;
+  contentHash?: ContentHash;
+}
+
+/** A compact factual decision record. Hidden reasoning is intentionally excluded. */
+export interface ArtifactDecisionReference {
+  id: string;
+  kind: "user" | "approval" | "review" | "policy";
+  summary: string;
+  decidedAt: IsoDateTime;
+  decidedByInternalUserId?: InternalUserId;
+  approvalId?: string;
+}
+
 export interface ExactApprovalReference {
   /** Opaque approval record identity. A broad grant is never an approval reference. */
   approvalId: string;
@@ -252,6 +271,8 @@ export interface ArtifactVersion {
   provenance: ArtifactSourceProvenance;
   citations: readonly ArtifactCitation[];
   lineage: readonly ArtifactLineageLink[];
+  inputs?: readonly ArtifactInputReference[];
+  decisions?: readonly ArtifactDecisionReference[];
 }
 
 /** Durable artifact identity and mutable presentation/lifecycle state. */
@@ -289,6 +310,61 @@ export interface HandoffContextReference {
   departmentId?: DepartmentId;
   pipelineId?: PipelineId;
   routineId?: RoutineId;
+}
+
+/** Canonical native/read-model bundle. Versions are ordered oldest to newest. */
+export interface ArtifactBundle {
+  artifact: Artifact;
+  currentVersion: ArtifactVersion;
+  versions: readonly ArtifactVersion[];
+  sourceMessageId?: string;
+}
+
+/** Editing content appends a version; it never mutates prior content or evidence. */
+export interface AppendArtifactVersionInput {
+  artifactId: ArtifactId;
+  expectedRevision: number;
+  expectedCurrentVersionId: ArtifactVersionId;
+  title?: string;
+  content: ArtifactContent;
+}
+
+export interface ArtifactReviewActionInput {
+  artifactId: ArtifactId;
+  versionId: ArtifactVersionId;
+  expectedRevision: number;
+  action: "request-review" | "request-changes" | "accept" | "reject" | "withdraw";
+  note?: string;
+  requestedChanges?: readonly string[];
+}
+
+export interface ArtifactSearchQuery {
+  query?: string;
+  threadId?: ThreadId;
+  projectId?: ProjectId;
+  kinds?: readonly ArtifactKind[];
+  statuses?: readonly ArtifactStatus[];
+  limit?: number;
+}
+
+export interface ArtifactSearchResult {
+  artifact: Artifact;
+  currentVersion: ArtifactVersion;
+  matchedOn: readonly ("title" | "content" | "source" | "decision")[];
+}
+
+/** A secret-free, user-requested export of one exact immutable version. */
+export interface ArtifactExport {
+  artifactId: ArtifactId;
+  versionId: ArtifactVersionId;
+  title: string;
+  kind: ArtifactKind;
+  exportedAt: IsoDateTime;
+  content: ArtifactContent;
+  citations: readonly ArtifactCitation[];
+  inputs: readonly ArtifactInputReference[];
+  decisions: readonly ArtifactDecisionReference[];
+  lineage: readonly ArtifactLineageLink[];
 }
 
 /**
@@ -553,6 +629,11 @@ export type ArtifactUpdateEnvelope = UpdateEnvelope<Artifact, CanonicalRecordImm
 export type ArtifactTransitionEnvelope = TransitionEnvelope<ArtifactStatus>;
 export type ArtifactCreateResult = ContractResult<Artifact>;
 export type ArtifactTransitionResult = ContractResult<Artifact>;
+export type ArtifactBundleResult = ContractResult<ArtifactBundle>;
+export type ArtifactAppendVersionResult = ContractResult<ArtifactBundle>;
+export type ArtifactReviewActionResult = ContractResult<ArtifactBundle>;
+export type ArtifactSearchResultPage = ContractResult<readonly ArtifactSearchResult[]>;
+export type ArtifactExportResult = ContractResult<ArtifactExport>;
 
 export type ArtifactHandoffCreateEnvelope = CreateEnvelope<ArtifactHandoff>;
 export type ArtifactHandoffTransitionEnvelope = TransitionEnvelope<HandoffStatus>;
