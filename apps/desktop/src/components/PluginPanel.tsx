@@ -29,7 +29,7 @@ export function PluginPanel({
   onRefresh: (connectorId: string) => void;
   onSelect: (connector: ConnectorManifest) => void;
   accounts: Record<string, ConnectorAccountOption[]>;
-  onSwitchAccount: (connectorId: string, accountId: string) => void;
+  onSwitchAccount: (connectorId: string, connectionId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
@@ -169,7 +169,7 @@ function ConnectorDetails({
   onDisconnect: (connectorId: string) => void;
   onRefresh: (connectorId: string) => void;
   accounts: ConnectorAccountOption[];
-  onSwitchAccount: (connectorId: string, accountId: string) => void;
+  onSwitchAccount: (connectorId: string, connectionId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
   onConnect: (connector: ConnectorManifest) => void;
   titleId?: string;
@@ -214,13 +214,13 @@ function ConnectorDetails({
 
       {connector.status === "connected" && accounts.length > 1 ? (
         <label className="connector-detail__account">
-          <span>Active account</span>
+          <span>Active connection</span>
           <select
-            value={accounts.find((option) => option.active)?.account.id ?? connector.account?.id}
+            value={accounts.find((option) => option.active)?.connectionId ?? ""}
             onChange={(event) => onSwitchAccount(connector.id, event.target.value)}
           >
-            {accounts.map(({ account }) => (
-              <option key={account.id} value={account.id}>
+            {accounts.map(({ account, connectionId }) => (
+              <option key={connectionId} value={connectionId}>
                 {account.email ?? account.displayName}
               </option>
             ))}

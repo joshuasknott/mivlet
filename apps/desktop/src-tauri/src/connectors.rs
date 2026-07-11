@@ -1250,31 +1250,41 @@ pub fn list_connector_accounts(
     connector_id: String,
     workspace_id: Option<String>,
 ) -> Result<Vec<crate::models::ConnectorAccountOption>, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
+    let workspace_id = workspace_id
+        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    require_connector_workspace(Some(workspace_id.clone()))?;
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     Ok(crate::connector_auth::accounts_for_connector(
-        &path, entry.id,
+        &path,
+        entry.id,
+        &workspace_id,
     ))
 }
 
-/// Make `account_id` the active account for a connector. Other accounts for the
-/// same connector are deactivated but their credentials are preserved, so the
-/// user can switch back. Returns the refreshed manifest reflecting the new
-/// active account. Fails closed if the account is not connected.
+/// Make the workspace-bound Fable Connection active for a connector. Other
+/// accounts are deactivated but their credentials remain available, so the
+/// user can switch back. Provider account ids are never selection authority.
 #[tauri::command]
 pub fn switch_connector_account(
     app: tauri::AppHandle,
     connector_id: String,
-    account_id: String,
+    connection_id: String,
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
+    let workspace_id = workspace_id
+        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
+    require_connector_workspace(Some(workspace_id.clone()))?;
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
-    crate::connector_auth::switch_active_account(&path, entry.id, &account_id)?;
+    crate::connector_auth::switch_active_connection(
+        &path,
+        entry.id,
+        &workspace_id,
+        &connection_id,
+    )?;
     Ok(build_manifest(
         entry,
         &NativeCredentialBoundary {

@@ -2328,7 +2328,7 @@ export async function listRuntimeConnectorAccounts(connectorId: string) {
   }
 }
 
-export async function switchRuntimeConnectorAccount(connectorId: string, accountId: string) {
+export async function switchRuntimeConnectorAccount(connectorId: string, connectionId: string) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -2337,7 +2337,7 @@ export async function switchRuntimeConnectorAccount(connectorId: string, account
   try {
     return await invoke<ConnectorManifest>("switch_connector_account", {
       connectorId,
-      accountId,
+      connectionId,
       workspaceId: scope.workspaceId
     });
   } catch (error) {

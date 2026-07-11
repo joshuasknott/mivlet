@@ -1242,6 +1242,7 @@ fn promote_single_active(connections: &mut [ConnectorConnection], connector_id: 
 pub(crate) fn accounts_for_connector(
     path: &Path,
     connector_id: &str,
+    workspace_id: &str,
 ) -> Vec<ConnectorAccountOption> {
     let Ok(connections) = read_connections(path) else {
         return Vec::new();
@@ -1255,20 +1256,50 @@ pub(crate) fn accounts_for_connector(
     matching
         .into_iter()
         .map(|connection| ConnectorAccountOption {
+            connection_id: connection_id(workspace_id, connector_id, &connection.account.id),
             account: connection.account.clone(),
             active: connection.is_active,
+            lifecycle: match connection.status.as_str() {
+                "connected" => "authorized",
+                "expired" => "refresh-required",
+                _ => "pending-authorization",
+            }
+            .into(),
+            authorization_state: match connection.status.as_str() {
+                "connected" => "authorized",
+                "expired" => "expired",
+                _ => "pending",
+            }
+            .into(),
+            health_state: "unknown".into(),
+            credential_custody: "os-secure-store".into(),
+            credential_state: match connection.status.as_str() {
+                "connected" => "available",
+                "expired" => "refresh-required",
+                _ => "unknown",
+            }
+            .into(),
         })
         .collect()
 }
 
-/// Make `account_id` the active account for `connector_id`. Other accounts for
-/// the same connector are deactivated; their credentials are preserved so the
-/// user can switch back. Returns the now-active account, or an error if the
-/// account is unknown. Used by the account-switcher command.
-pub(crate) fn switch_active_account(
+fn connection_id(workspace_id: &str, connector_id: &str, account_id: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"fable.connection.native-connector.v1\0");
+    for value in [workspace_id, connector_id, account_id] {
+        digest.update(value.as_bytes());
+        digest.update(b"\0");
+    }
+    format!("connection_{}", URL_SAFE_NO_PAD.encode(digest.finalize()))
+}
+
+/// Select the workspace-bound Fable Connection for `connector_id`. Provider
+/// account ids are compatibility metadata and are never accepted as authority.
+pub(crate) fn switch_active_connection(
     path: &Path,
     connector_id: &str,
-    account_id: &str,
+    workspace_id: &str,
+    requested_connection_id: &str,
 ) -> Result<ConnectorAccountSummary, ConnectorCommandError> {
     let mut connections = read_connections(path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
@@ -1279,7 +1310,8 @@ pub(crate) fn switch_active_account(
             continue;
         }
         saw_connector = true;
-        let matches = connection.account.id == account_id;
+        let matches = connection_id(workspace_id, connector_id, &connection.account.id)
+            == requested_connection_id;
         connection.is_active = matches;
         connection.updated_at = now_epoch().to_string();
         if matches {
@@ -1994,13 +2026,31 @@ mod tests {
             &[connection("first", true), connection("second", true)],
         )
         .unwrap();
-        let accounts = accounts_for_connector(&path, "gmail");
+        let accounts = accounts_for_connector(&path, "gmail", "workspace-a");
         assert_eq!(accounts.iter().filter(|option| option.active).count(), 1);
         assert_eq!(accounts[0].account.id, "first");
-        switch_active_account(&path, "gmail", "second").unwrap();
-        let accounts = accounts_for_connector(&path, "gmail");
+        assert!(accounts[0].connection_id.starts_with("connection_"));
+        assert!(!accounts[0].connection_id.contains("first"));
+        assert_ne!(
+            accounts[0].connection_id,
+            accounts_for_connector(&path, "gmail", "workspace-b")[0].connection_id
+        );
+        let second = accounts
+            .iter()
+            .find(|option| option.account.id == "second")
+            .unwrap()
+            .connection_id
+            .clone();
+        assert!(switch_active_connection(&path, "gmail", "workspace-a", "second").is_err());
+        switch_active_connection(&path, "gmail", "workspace-a", &second).unwrap();
+        let accounts = accounts_for_connector(&path, "gmail", "workspace-a");
         assert_eq!(accounts.iter().filter(|option| option.active).count(), 1);
         assert_eq!(accounts[0].account.id, "second");
+        assert_eq!(accounts[0].lifecycle, "authorized");
+        assert_eq!(accounts[0].authorization_state, "authorized");
+        assert_eq!(accounts[0].health_state, "unknown");
+        assert_eq!(accounts[0].credential_custody, "os-secure-store");
+        assert_eq!(accounts[0].credential_state, "available");
         let _ = fs::remove_file(path);
     }
 

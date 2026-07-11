@@ -148,6 +148,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 ### Wave 3A - Connection and capability control plane
 
 - [ ] Migrate connector-account records and product language to Connection.
+  - Repo-local evidence: the native multi-account compatibility boundary now projects each connected external account as a stable opaque Fable Connection ID bound to the exact workspace and connector definition. Selection accepts only that Connection ID, never the provider account id; the renderer labels the control `Active connection` and receives truthful lifecycle, authorization, health, credential-custody, and credential-state vocabulary. Durable connector-account storage and the wider connector catalogue still require migration to canonical Connection records before this item is complete.
 - [ ] Implement Connection authorization, health, refresh, degradation, revocation, removal, and recovery.
 - [ ] Implement the semantic capability registry and resolver.
 - [ ] Implement scoped, consequence-aware capability grants.

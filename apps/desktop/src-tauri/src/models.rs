@@ -323,8 +323,16 @@ pub struct ConnectorAccountSummary {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorAccountOption {
+    /// Stable, workspace-bound Fable reference. Provider account ids are never
+    /// accepted back as selection authority.
+    pub connection_id: String,
     pub account: ConnectorAccountSummary,
     pub active: bool,
+    pub lifecycle: String,
+    pub authorization_state: String,
+    pub health_state: String,
+    pub credential_custody: String,
+    pub credential_state: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

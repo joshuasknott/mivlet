@@ -300,8 +300,15 @@ export interface ConnectorAccountSummary {
 }
 
 export interface ConnectorAccountOption {
+  /** Stable workspace-bound Fable Connection id; provider ids never authorize selection. */
+  connectionId: string;
   account: ConnectorAccountSummary;
   active: boolean;
+  lifecycle: import("./spine/connections.js").ConnectionLifecycleState;
+  authorizationState: import("./spine/connections.js").ConnectionAuthorizationState;
+  healthState: import("./spine/connections.js").ConnectionHealthState;
+  credentialCustody: import("./spine/connections.js").CredentialCustodyKind;
+  credentialState: import("./spine/connections.js").CredentialBindingState;
 }
 
 export interface ConnectorManifest {

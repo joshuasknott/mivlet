@@ -2100,13 +2100,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
   };
 
-  const switchConnectorAccount = async (connectorId: string, accountId: string) => {
+  const switchConnectorAccount = async (connectorId: string, connectionId: string) => {
     if (!isFirstWaveConnectorId(connectorId)) return;
     try {
-      const manifest = await switchRuntimeConnectorAccount(connectorId, accountId);
+      const manifest = await switchRuntimeConnectorAccount(connectorId, connectionId);
       if (manifest) {
         replaceConnectorManifest(manifest);
-        await loadConnectorAccounts(connectorId);
         await loadConnectorAccounts(connectorId);
         setConnectorStatus(`Using ${manifest.account?.email ?? manifest.account?.displayName ?? "selected account"}.`);
       }
