@@ -26,7 +26,7 @@ The `default` workspace is Fable's stable compatibility workspace. During the v4
 | **Connectors** | Workspace-Only | `connector_account` | Metadata for third-party connector configurations. Project-scoped configurations are rejected. |
 | **Connector Cache** | Workspace-Only | `connector_cache`, `connector_cache_settings` | Secret-free cached item data. Rebuilt per workspace from sources. |
 | **Projects** | Workspace-Level Root | `project` | Top-level project entities. Carry a `workspace_id`. |
-| **Threads & Messages** | Project-Scoped | `thread`, `message` | Conversations belong strictly to a project. |
+| **Threads, Messages & Runs** | Workspace-Owned; Project Optional | `thread`, `message`, `message_revision`, `run` | Conversations may live directly in a workspace or optionally link to a project. |
 | **Runs & Tool Calls** | Project-Scoped | `run`, `tool_call`, `approval` | Execution runs and approval records inherit the project scope. |
 | **Knowledge Sources** | Workspace or Project | `knowledge_source` | Sources can belong to the entire workspace or be scoped to a specific project. |
 | **Memory Records** | Workspace or Project | `memory_record` | Fact memories can belong to the entire workspace or be scoped to a specific project. |
@@ -43,7 +43,7 @@ Isolation is enforced at the domain and repository layers using the `DataScope` 
 Repositories validate the workspace and, when supplied, the workspace/project relationship before permitting database access.
 - For **Workspace-scoped** operations, queries filter on `workspace_id = ? AND project_id IS NULL` (in SQL, `project_id IS ?` where the parameter is `None`).
 - For **Project-scoped** operations, queries filter on `workspace_id = ? AND project_id = ?`.
-- **Workspace-level queries intentionally do not return project-scoped rows.** Callers must explicitly specify the target project scope to fetch project-scoped records.
+- **Workspace-level conversation queries include standalone and project-linked threads owned by that workspace.** Project filters are optional views and never replace workspace authorization.
 
 ### Cross-Workspace Protection Invariants
 1. **No Shared Keyring References**: A connector account's keyring reference (`credential_ref`, pointing to OS secure credentials) cannot be shared across workspaces. Attempts to register the same credential reference in a different workspace are rejected at the storage layer to prevent cross-workspace identity theft.

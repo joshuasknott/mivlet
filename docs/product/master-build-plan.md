@@ -73,11 +73,11 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 1B - Durable chat
 
-- [ ] Support standalone workspace threads without requiring a project.
-- [ ] Persist user, assistant, tool, approval, interruption, and error records correctly.
-- [ ] Complete streaming, stop, retry, failure recovery, and continuation.
-- [ ] Recover drafts, threads, runs, and pending states after restart.
-- [ ] Keep the composer calm and free of optional setup requirements.
+- [x] Support standalone workspace threads without requiring a project.
+- [x] Persist user, assistant, tool, approval, interruption, and error records correctly.
+- [x] Complete streaming, stop, retry, failure recovery, and continuation.
+- [x] Recover drafts, threads, runs, and pending states after restart.
+- [x] Keep the composer calm and free of optional setup requirements.
 
 ### Wave 1C - Provider and first artifact
 

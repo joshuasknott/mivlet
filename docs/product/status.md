@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-07-10.
+Last audited: 2026-07-11.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
@@ -18,7 +18,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 ## Implemented
 
-- Account and workspace (**Wave 1A implementation complete; live validation open**): accepted ADRs and `@fable/protocol` contracts govern identity and tenancy. Clerk supplies authentication facts only; Convex owns stable internal users, identity links, workspaces, memberships, invitations, devices, and hosted authorization. Encrypted SQLite schema v10 stores the per-account workspace directory, active selection, device mirror, and workspace-scoped sync state. The native adapter bootstraps an initial workspace idempotently, reconciles and creates workspaces, switches isolated runtime scope, and revokes account devices without exposing bearer tokens or arbitrary hosted calls to React.
+- Account and workspace (**Wave 1A implementation complete; live validation open**): accepted ADRs and `@fable/protocol` contracts govern identity and tenancy. Clerk supplies authentication facts only; Convex owns stable internal users, identity links, workspaces, memberships, invitations, devices, and hosted authorization. Encrypted SQLite schema v11 stores the per-account workspace directory, active selection, device mirror, workspace-scoped sync state, and durable conversations. The native adapter bootstraps an initial workspace idempotently, reconciles and creates workspaces, switches isolated runtime scope, and revokes account devices without exposing bearer tokens or arbitrary hosted calls to React.
+- Durable chat (**Wave 1B implemented**): standalone or project-linked threads, typed encrypted messages and immutable revisions, workspace-scoped drafts and runs, streaming checkpoints, stop, retry, interruption/error recovery, and restart hydration are wired through the canonical Conversations contract. Empty or late hydration is fenced so it cannot bleed or erase another thread's optimistic exchange; workspace changes clear the selected conversation.
 - Structural boundaries (**Wave 0D implemented**): the desktop `App` is now a small query-provider/composition entry over typed shell modules; agent/approval/voice wiring, lazy routes, model selection, and workspace presentation have explicit seams. `useShellRuntime` retains its stable facade while public types, default/preview policy, and backend normalization live in focused modules with regression tests. The Rust scheduler keeps its public command facade while state, events, pure transitions, persistence, orchestration, and tests are separated. The legacy protocol root is a compatibility barrel over account/cloud, approvals, agent-runtime, scheduling/workflow, and remote-control domains; executable checks preserve root/direct-domain exports and Spine parity.
 - Desktop shell: Clerk account and provider onboarding, verified account display, workspace creation/switching, sidebar navigation, universal composer, theme toggle, model picker, permission picker, add menu, connector page, interactive Knowledge page, schedules page, profile page, and settings page.
 - Composer: supports text entry, slash command insertion, local file import, opt-in browser dictation where the runtime exposes speech recognition, model selection, permission selection, and native-agent submit path when a connected native backend exists.
