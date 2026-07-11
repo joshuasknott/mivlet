@@ -828,7 +828,7 @@ pub fn authorize_mcp_tool_call(
 #[tauri::command]
 pub async fn execute_approved_mcp_tool_call(
     request: ExecuteMcpToolCallRequest,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     if !valid_request_id(&request.request_id) {
         return Err("The MCP request id is invalid.".into());
     }
@@ -854,19 +854,6 @@ pub async fn execute_approved_mcp_tool_call(
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )?;
-    let sender = {
-        let map = process_map()
-            .lock()
-            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
-        let process = map
-            .get(&request.proposal.session_id)
-            .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
-        require_session_owner(process, &scope)?;
-        process
-            .stdin
-            .clone()
-            .ok_or_else(|| "This local MCP session is closed.".to_string())?
-    };
     let frame = serde_json::json!({
         "jsonrpc": "2.0",
         "id": request.request_id,
@@ -889,10 +876,34 @@ pub async fn execute_approved_mcp_tool_call(
             PendingMcpAudit {
                 tool_name: request.proposal.tool_name,
                 connection_id: context.connection_id,
-                actor: scope.internal_user_id,
+                actor: scope.internal_user_id.clone(),
             },
         );
-    if sender.send(frame).await.is_err() {
+    if context.transport == "stdio" {
+        let sender = (|| -> Result<mpsc::Sender<String>, String> {
+            let map = process_map()
+                .lock()
+                .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+            let process = map
+                .get(&request.proposal.session_id)
+                .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
+            require_session_owner(process, &scope)?;
+            let sender = process
+                .stdin
+                .clone()
+                .ok_or_else(|| "This local MCP session is closed.".to_string())?;
+            Ok(sender)
+        })();
+        let sender = match sender {
+            Ok(sender) => sender,
+            Err(error) => {
+                fail_pending_mcp_audit(&audit_key, &request.request_id, "transport-closed");
+                return Err(error);
+            }
+        };
+        if sender.send(frame).await.is_ok() {
+            return Ok(Vec::new());
+        }
         if let Some(pending) = pending_audits()
             .lock()
             .ok()
@@ -902,7 +913,65 @@ pub async fn execute_approved_mcp_tool_call(
         }
         return Err("This local MCP session is closed.".into());
     }
-    Ok(())
+    let snapshot = (|| -> Result<McpRemoteSession, String> {
+        let mut sessions = remote_sessions()
+            .lock()
+            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+        let session = sessions
+            .get_mut(&request.proposal.session_id)
+            .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        if session.busy {
+            return Err("This remote MCP session is already handling a request.".into());
+        }
+        session.busy = true;
+        Ok(session.clone())
+    })();
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            fail_pending_mcp_audit(&audit_key, &request.request_id, "transport-unavailable");
+            return Err(error);
+        }
+    };
+    let response = post_remote_mcp_frame(&snapshot, &frame).await;
+    if let Ok(mut sessions) = remote_sessions().lock() {
+        if let Some(session) = sessions.get_mut(&request.proposal.session_id) {
+            session.busy = false;
+            if let Ok(response) = &response {
+                if let Some(event_id) = &response.last_event_id {
+                    session.last_event_id = Some(event_id.clone());
+                }
+                session.retry_after_ms = response.retry_after_ms;
+            }
+        }
+    }
+    let response = match response {
+        Ok(response) if response.error.is_none() => response,
+        Ok(response) => {
+            let error = response
+                .error
+                .unwrap_or_else(|| "Remote MCP tool call failed.".into());
+            fail_pending_mcp_audit(&audit_key, &request.request_id, "transport-rejected");
+            return Err(error);
+        }
+        Err(error) => {
+            fail_pending_mcp_audit(&audit_key, &request.request_id, "transport-failed");
+            return Err(error);
+        }
+    };
+    let mut matched = false;
+    for response_frame in &response.frames {
+        if is_mcp_response_for(response_frame, &request.request_id) {
+            matched = true;
+        }
+        audit_mcp_response(&request.proposal.session_id, response_frame);
+    }
+    if !matched {
+        fail_pending_mcp_audit(&audit_key, &request.request_id, "missing-response");
+        return Err("Remote MCP did not return the approved tool response.".into());
+    }
+    Ok(response.frames)
 }
 
 #[tauri::command]
@@ -1129,6 +1198,7 @@ fn require_remote_session_owner(
 struct ToolProposalContext {
     connection_id: String,
     connection_revision: i64,
+    transport: String,
     arguments_fingerprint: String,
     proposal_fingerprint: String,
 }
@@ -1144,15 +1214,37 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )?;
-    let (connection_id, connection_revision) = {
-        let map = process_map()
+    let local = process_map()
+        .lock()
+        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .get(&proposal.session_id)
+        .map(|process| {
+            require_session_owner(process, &scope)?;
+            Ok::<(String, i64, String), String>((
+                process.connection_id.clone(),
+                process.connection_revision,
+                "stdio".into(),
+            ))
+        })
+        .transpose()?;
+    let (connection_id, connection_revision, transport) = if let Some(local) = local {
+        local
+    } else {
+        let sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
-        let process = map
+            .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+        let session = sessions
             .get(&proposal.session_id)
-            .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
-        require_session_owner(process, &scope)?;
-        (process.connection_id.clone(), process.connection_revision)
+            .ok_or_else(|| "This MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        if !session.initialized {
+            return Err("Remote MCP execution requires an initialized session.".into());
+        }
+        (
+            session.connection_id.clone(),
+            session.connection_revision,
+            "streamable-http".into(),
+        )
     };
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
@@ -1175,6 +1267,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         "sessionId": proposal.session_id,
         "connectionId": connection_id,
         "connectionRevision": connection_revision,
+        "transport": transport,
         "toolName": proposal.tool_name,
         "argumentsFingerprint": arguments_fingerprint
     });
@@ -1188,6 +1281,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
     Ok(ToolProposalContext {
         connection_id,
         connection_revision,
+        transport,
         arguments_fingerprint,
         proposal_fingerprint,
     })
@@ -1206,7 +1300,7 @@ fn approval_for_tool_proposal(
         mode: "full-access".into(),
         risk_level: "critical".into(),
         data_used: vec![format!("proposal fingerprint: {fingerprint}")],
-        consequence: "Runs an enabled tool in user-managed local software.".into(),
+        consequence: "Runs an enabled tool in a user-managed MCP server.".into(),
         requested_at,
         decisions: vec!["once".into(), "deny".into()],
         confirmation_phrase: Some(format!("run {}", proposal.tool_name)),
@@ -1284,6 +1378,15 @@ fn pending_audit_key(session_id: &str, request_id: &str) -> String {
     format!("{session_id}:{request_id}")
 }
 
+fn is_mcp_response_for(frame: &str, request_id: &str) -> bool {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
+        return false;
+    };
+    !object.contains_key("method")
+        && object.get("id").and_then(Value::as_str) == Some(request_id)
+        && (object.contains_key("result") ^ object.contains_key("error"))
+}
+
 fn audit_mcp_response(session_id: &str, frame: &str) {
     let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
         return;
@@ -1332,6 +1435,16 @@ fn record_mcp_audit(pending: PendingMcpAudit, request_id: &str, failed: bool, er
         recorder = recorder.error(error_code);
     }
     recorder.record();
+}
+
+fn fail_pending_mcp_audit(audit_key: &str, request_id: &str, error_code: &str) {
+    if let Some(pending) = pending_audits()
+        .lock()
+        .ok()
+        .and_then(|mut audits| audits.remove(audit_key))
+    {
+        record_mcp_audit(pending, request_id, true, error_code);
+    }
 }
 
 fn drain_session_audits(session_id: &str) {
@@ -2726,5 +2839,13 @@ mod tests {
             .unwrap()
             .get(&pending_audit_key(session, request))
             .is_none());
+        assert!(is_mcp_response_for(
+            r#"{"jsonrpc":"2.0","id":"native-mcp-tool-1","result":{}}"#,
+            "native-mcp-tool-1"
+        ));
+        assert!(!is_mcp_response_for(
+            r#"{"jsonrpc":"2.0","id":"native-mcp-tool-1","method":"sampling/createMessage"}"#,
+            "native-mcp-tool-1"
+        ));
     }
 }

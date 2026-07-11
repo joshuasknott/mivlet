@@ -232,12 +232,13 @@ export async function createDesktopMcpTransport(
   return transport;
 }
 
-class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
+class RemoteDesktopMcpTransport implements DesktopMcpTransportHandle {
   private readonly frameHandlers = new Set<(frame: McpFrame) => void>();
   private readonly closeHandlers = new Set<() => void>();
   private closed = false;
   private closePromise?: Promise<void>;
   private polling = false;
+  private nextToolRequest = 1;
 
   constructor(
     private readonly workspaceId: string,
@@ -287,6 +288,51 @@ class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
     return recorded;
   }
 
+  async prepareToolCall(toolName: string, args: Record<string, unknown>) {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const proposal: RuntimeMcpToolProposal = {
+      workspaceId: this.workspaceId,
+      sessionId: this.sessionId,
+      toolName,
+      arguments: JSON.parse(JSON.stringify(args)) as Record<string, unknown>
+    };
+    const prepared = await prepareRuntimeMcpToolCall(proposal);
+    if (!prepared) throw new Error("MCP tool approval requires the desktop app.");
+    return { proposal, prepared };
+  }
+
+  async authorizeToolCall(
+    proposal: RuntimeMcpToolProposal,
+    resolution: ApprovalResolutionRequest
+  ): Promise<RuntimeAuthorizedMcpToolCall> {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const authorized = await authorizeRuntimeMcpToolCall(proposal, resolution);
+    if (!authorized) throw new Error("MCP tool approval requires the desktop app.");
+    return authorized;
+  }
+
+  async executeAuthorizedToolCall(
+    proposal: RuntimeMcpToolProposal,
+    permitId: string
+  ): Promise<unknown> {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const requestId = `native-mcp-tool-${this.nextToolRequest++}`;
+    const lines = await executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId);
+    if (!lines) throw new Error("MCP tool execution requires the desktop app.");
+    let response: Extract<McpFrame, { id: string | number }> | undefined;
+    for (const line of lines) {
+      const frame = parseMcpLine(line);
+      if (!frame) continue;
+      if (isMcpResponse(frame) && frame.id === requestId) response = frame;
+      for (const handler of this.frameHandlers) handler(frame);
+    }
+    if (!response || !isMcpResponse(response)) {
+      throw new Error("Remote MCP did not return the approved tool response.");
+    }
+    if (response.error) throw new Error(`MCP ${response.error.code}: ${response.error.message}`);
+    return response.result;
+  }
+
   close(): Promise<void> {
     if (!this.closed) {
       this.closed = true;
@@ -332,7 +378,7 @@ class RemoteDesktopMcpTransport implements DesktopMcpDiscoveryTransport {
 export async function createDesktopRemoteMcpTransport(
   workspaceId: string,
   configurationReference: string
-): Promise<DesktopMcpDiscoveryTransport | null> {
+): Promise<DesktopMcpTransportHandle | null> {
   if (!hasDesktopRuntime()) return null;
   const opened = await openRuntimeRemoteMcpSession(workspaceId, configurationReference);
   if (!opened) return null;

@@ -75,8 +75,14 @@ beforeEach(() => {
   });
   runtime.authorize.mockReset().mockResolvedValue({ permitId: "permit-1", expiresInSeconds: 60 });
   runtime.execute.mockReset().mockImplementation(async (_proposal, _permit, requestId) => {
+    if (_proposal.sessionId === "mcp-fedcba0987654321fedcba0987654321") {
+      return [JSON.stringify({
+        jsonrpc: "2.0", id: requestId,
+        result: { content: [{ type: "text", text: "remote-ok" }] }
+      })];
+    }
     queueMicrotask(() => onLine?.(JSON.stringify({ jsonrpc: "2.0", id: requestId, result: { content: [{ type: "text", text: "ok" }] } })));
-    return null;
+    return [];
   });
 });
 
@@ -198,6 +204,23 @@ describe("desktop MCP transport", () => {
     await vi.waitFor(() => expect(runtime.pollRemote).toHaveBeenCalledWith(
       "workspace-a", "mcp-fedcba0987654321fedcba0987654321"
     ));
+    await transport!.close();
+  });
+
+  it("prepares, authorizes, and returns an exact remote tool response", async () => {
+    const transport = await createDesktopRemoteMcpTransport("workspace-a", "remote-tools");
+    const { proposal, prepared } = await transport!.prepareToolCall("read", { path: "safe.txt" });
+    const resolution = {
+      request: prepared.approval,
+      decision: "once" as const,
+      decidedAt: "2026-07-11T20:00:01Z",
+      confirmationText: "run read"
+    };
+    const authorized = await transport!.authorizeToolCall(proposal, resolution);
+    await expect(transport!.executeAuthorizedToolCall(proposal, authorized.permitId)).resolves.toEqual({
+      content: [{ type: "text", text: "remote-ok" }]
+    });
+    expect(runtime.execute).toHaveBeenCalledWith(proposal, "permit-1", "native-mcp-tool-1");
     await transport!.close();
   });
 });

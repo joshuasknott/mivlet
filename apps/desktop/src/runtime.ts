@@ -3193,7 +3193,7 @@ export async function executeRuntimeApprovedMcpToolCall(
 ) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<null>("execute_approved_mcp_tool_call", {
+    return await invoke<string[]>("execute_approved_mcp_tool_call", {
       request: { proposal, permitId, requestId }
     });
   } catch (error) {
