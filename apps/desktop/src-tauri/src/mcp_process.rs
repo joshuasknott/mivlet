@@ -48,6 +48,7 @@ fn process_map() -> &'static Mutex<ProcessMap> {
 #[derive(Clone)]
 struct McpRemoteSession {
     endpoint: Url,
+    configuration_reference: String,
     workspace_id: String,
     owner_subject: String,
     connection_id: String,
@@ -55,6 +56,25 @@ struct McpRemoteSession {
     server_session_id: Option<String>,
     initialized: bool,
     busy: bool,
+}
+
+#[derive(Clone)]
+struct RemoteAuthorizationChallenge {
+    resource_metadata: Url,
+    scopes: Vec<String>,
+}
+
+fn authorization_challenges() -> &'static Mutex<HashMap<String, RemoteAuthorizationChallenge>> {
+    static MAP: OnceLock<Mutex<HashMap<String, RemoteAuthorizationChallenge>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn authorization_challenge_key(
+    workspace_id: &str,
+    owner_subject: &str,
+    configuration_reference: &str,
+) -> String {
+    format!("{workspace_id}\0{owner_subject}\0{configuration_reference}")
 }
 
 fn remote_sessions() -> &'static Mutex<HashMap<String, McpRemoteSession>> {
@@ -412,6 +432,7 @@ pub fn open_remote_mcp_session(
             session_id.clone(),
             McpRemoteSession {
                 endpoint,
+                configuration_reference: request.configuration_reference.clone(),
                 workspace_id: scope.data.workspace_id().to_string(),
                 owner_subject: scope.private.owner_subject().to_string(),
                 connection_id: connection.connection_id.clone(),
@@ -455,7 +476,19 @@ pub async fn inspect_remote_mcp_authorization(
         return Err("This remote MCP server is unavailable.".into());
     }
     let endpoint = validate_remote_endpoint(configuration.endpoint.as_deref().unwrap_or_default())?;
-    discover_remote_authorization(&endpoint).await
+    let challenge = authorization_challenges()
+        .lock()
+        .ok()
+        .and_then(|challenges| {
+            challenges
+                .get(&authorization_challenge_key(
+                    scope.data.workspace_id(),
+                    scope.private.owner_subject(),
+                    &request.configuration_reference,
+                ))
+                .cloned()
+        });
+    discover_remote_authorization(&endpoint, challenge.as_ref()).await
 }
 
 #[tauri::command]
@@ -489,6 +522,31 @@ pub async fn send_remote_mcp_frame(
         if let Some(session) = sessions.get_mut(&request.session_id) {
             session.busy = false;
             if let Ok(response) = &result {
+                if let Some(challenge) = &response.authorization_challenge {
+                    if let Ok(mut challenges) = authorization_challenges().lock() {
+                        if challenges.len() >= 64 {
+                            if let Some(first) = challenges.keys().next().cloned() {
+                                challenges.remove(&first);
+                            }
+                        }
+                        challenges.insert(
+                            authorization_challenge_key(
+                                &snapshot.workspace_id,
+                                &snapshot.owner_subject,
+                                &snapshot.configuration_reference,
+                            ),
+                            challenge.clone(),
+                        );
+                    }
+                } else if response.error.is_none() {
+                    if let Ok(mut challenges) = authorization_challenges().lock() {
+                        challenges.remove(&authorization_challenge_key(
+                            &snapshot.workspace_id,
+                            &snapshot.owner_subject,
+                            &snapshot.configuration_reference,
+                        ));
+                    }
+                }
                 if response.initialized {
                     session.initialized = true;
                 }
@@ -498,7 +556,13 @@ pub async fn send_remote_mcp_frame(
             }
         }
     }
-    result.map(|response| response.frames)
+    match result {
+        Ok(response) => match response.error {
+            Some(error) => Err(error),
+            None => Ok(response.frames),
+        },
+        Err(error) => Err(error),
+    }
 }
 
 #[tauri::command]
@@ -1230,6 +1294,8 @@ struct RemotePostResponse {
     frames: Vec<String>,
     server_session_id: Option<String>,
     initialized: bool,
+    authorization_challenge: Option<RemoteAuthorizationChallenge>,
+    error: Option<String>,
 }
 
 fn validate_remote_endpoint(raw: &str) -> Result<Url, String> {
@@ -1333,6 +1399,143 @@ fn valid_server_session_id(value: &str) -> bool {
         && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
 }
 
+fn split_auth_parameters(value: &str) -> Result<Vec<&str>, String> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, character) in value.char_indices() {
+        if escaped {
+            escaped = false;
+        } else if character == '\\' && quoted {
+            escaped = true;
+        } else if character == '"' {
+            quoted = !quoted;
+        } else if character == ',' && !quoted {
+            parts.push(value[start..index].trim());
+            start = index + 1;
+        }
+    }
+    if quoted || escaped {
+        return Err("Remote MCP returned a malformed authorization challenge.".into());
+    }
+    parts.push(value[start..].trim());
+    Ok(parts)
+}
+
+fn decode_auth_parameter(value: &str) -> Result<String, String> {
+    let quoted = value
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .ok_or_else(|| {
+            "Remote MCP authorization challenge parameters must be quoted.".to_string()
+        })?;
+    let mut decoded = String::new();
+    let mut escaped = false;
+    for character in quoted.chars() {
+        if escaped {
+            if character != '"' && character != '\\' {
+                return Err("Remote MCP returned a malformed authorization challenge.".into());
+            }
+            decoded.push(character);
+            escaped = false;
+        } else if character == '\\' {
+            escaped = true;
+        } else if character.is_control() {
+            return Err("Remote MCP returned a malformed authorization challenge.".into());
+        } else {
+            decoded.push(character);
+        }
+    }
+    if escaped {
+        return Err("Remote MCP returned a malformed authorization challenge.".into());
+    }
+    Ok(decoded)
+}
+
+fn parse_bearer_challenge(value: &str) -> Result<Option<RemoteAuthorizationChallenge>, String> {
+    if value.len() > 8 * 1024 || value.chars().any(char::is_control) {
+        return Err("Remote MCP returned an invalid authorization challenge.".into());
+    }
+    let trimmed = value.trim();
+    let Some(separator) = trimmed.find(char::is_whitespace) else {
+        return Ok(None);
+    };
+    if !trimmed[..separator].eq_ignore_ascii_case("bearer") {
+        return Ok(None);
+    }
+    let mut resource_metadata = None;
+    let mut scopes = Vec::new();
+    for part in split_auth_parameters(trimmed[separator..].trim())? {
+        let Some((key, raw)) = part.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        if key.chars().any(char::is_whitespace) {
+            break;
+        }
+        match key.as_str() {
+            "resource_metadata" => {
+                if resource_metadata.is_some() {
+                    return Err("Remote MCP repeated authorization metadata.".into());
+                }
+                resource_metadata = Some(validate_remote_endpoint(&decode_auth_parameter(
+                    raw.trim(),
+                )?)?);
+            }
+            "scope" => {
+                if !scopes.is_empty() {
+                    return Err("Remote MCP repeated authorization scopes.".into());
+                }
+                let decoded = decode_auth_parameter(raw.trim())?;
+                if decoded.len() > 4_096 {
+                    return Err(
+                        "Remote MCP authorization scopes exceeded the supported limit.".into(),
+                    );
+                }
+                scopes = decoded
+                    .split_ascii_whitespace()
+                    .map(|scope| {
+                        if scope.is_empty() || scope.chars().count() > 200 {
+                            Err("Remote MCP authorization scopes were malformed.".to_string())
+                        } else {
+                            Ok(scope.to_string())
+                        }
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                if scopes.len() > 64 {
+                    return Err(
+                        "Remote MCP authorization scopes exceeded the supported limit.".into(),
+                    );
+                }
+                scopes.sort();
+                scopes.dedup();
+            }
+            _ => {}
+        }
+    }
+    Ok(
+        resource_metadata.map(|resource_metadata| RemoteAuthorizationChallenge {
+            resource_metadata,
+            scopes,
+        }),
+    )
+}
+
+fn authorization_challenge_from_headers(
+    headers: &reqwest::header::HeaderMap,
+) -> Result<Option<RemoteAuthorizationChallenge>, String> {
+    for value in headers.get_all(reqwest::header::WWW_AUTHENTICATE) {
+        let value = value
+            .to_str()
+            .map_err(|_| "Remote MCP returned an invalid authorization challenge.".to_string())?;
+        if let Some(challenge) = parse_bearer_challenge(value)? {
+            return Ok(Some(challenge));
+        }
+    }
+    Ok(None)
+}
+
 fn canonical_remote_frame(payload: &str) -> Result<String, String> {
     let value: Value = serde_json::from_str(payload)
         .map_err(|_| "Remote MCP returned malformed JSON-RPC.".to_string())?;
@@ -1424,6 +1627,15 @@ async fn post_remote_mcp_frame(
     if response.status() == reqwest::StatusCode::NOT_FOUND && session.server_session_id.is_some() {
         return Err("The remote MCP session expired; reconnect the server.".into());
     }
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        return Ok(RemotePostResponse {
+            frames: Vec::new(),
+            server_session_id: None,
+            initialized: false,
+            authorization_challenge: authorization_challenge_from_headers(response.headers())?,
+            error: Some("Remote MCP rejected the request with HTTP 401.".into()),
+        });
+    }
     if response.status() == reqwest::StatusCode::ACCEPTED {
         if is_request {
             return Err("Remote MCP accepted a request without returning a response.".into());
@@ -1432,6 +1644,8 @@ async fn post_remote_mcp_frame(
             frames: Vec::new(),
             server_session_id: None,
             initialized: false,
+            authorization_challenge: None,
+            error: None,
         });
     }
     if !response.status().is_success() {
@@ -1480,6 +1694,8 @@ async fn post_remote_mcp_frame(
         frames,
         server_session_id,
         initialized: is_initialize,
+        authorization_challenge: None,
+        error: None,
     })
 }
 
@@ -1725,9 +1941,13 @@ fn parse_authorization_server_metadata(
 
 async fn discover_remote_authorization(
     endpoint: &Url,
+    challenge: Option<&RemoteAuthorizationChallenge>,
 ) -> Result<RemoteMcpAuthorizationSummary, String> {
     let mut protected = None;
-    for candidate in protected_resource_metadata_candidates(endpoint) {
+    let candidates = challenge
+        .map(|challenge| vec![challenge.resource_metadata.clone()])
+        .unwrap_or_else(|| protected_resource_metadata_candidates(endpoint));
+    for candidate in candidates {
         if let Some(value) = fetch_remote_metadata(&candidate).await? {
             protected = Some(value);
             break;
@@ -1736,7 +1956,11 @@ async fn discover_remote_authorization(
     let protected = protected.ok_or_else(|| {
         "Remote MCP server did not publish protected-resource metadata.".to_string()
     })?;
-    let (servers, scopes) = parse_protected_resource_metadata(endpoint, &protected)?;
+    let (servers, metadata_scopes) = parse_protected_resource_metadata(endpoint, &protected)?;
+    let scopes = challenge
+        .filter(|challenge| !challenge.scopes.is_empty())
+        .map(|challenge| challenge.scopes.clone())
+        .unwrap_or(metadata_scopes);
     for issuer in servers {
         for candidate in authorization_metadata_candidates(&issuer) {
             if let Some(value) = fetch_remote_metadata(&candidate).await? {
@@ -2187,6 +2411,35 @@ mod tests {
         let mut no_pkce = metadata;
         no_pkce["code_challenge_methods_supported"] = serde_json::json!(["plain"]);
         assert!(parse_authorization_server_metadata(&servers[0], vec![], &no_pkce).is_err());
+    }
+
+    #[test]
+    fn bearer_challenge_is_bounded_exact_and_secret_free() {
+        let challenge = parse_bearer_challenge(
+            r#"Bearer resource_metadata="https://example.com/auth/resource", scope="files:write files:read files:read""#,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            challenge.resource_metadata.as_str(),
+            "https://example.com/auth/resource"
+        );
+        assert_eq!(challenge.scopes, ["files:read", "files:write"]);
+        assert!(parse_bearer_challenge("Basic realm=\"tools\"")
+            .unwrap()
+            .is_none());
+        assert!(parse_bearer_challenge(
+            r#"Bearer resource_metadata="https://example.com/one", resource_metadata="https://example.com/two""#
+        )
+        .is_err());
+        assert!(
+            parse_bearer_challenge(r#"Bearer resource_metadata="http://127.0.0.1/private""#)
+                .is_err()
+        );
+        assert!(parse_bearer_challenge(
+            r#"Bearer resource_metadata="https://example.com/mcp?access_token=secret""#
+        )
+        .is_err());
     }
 
     fn find_node() -> PathBuf {
