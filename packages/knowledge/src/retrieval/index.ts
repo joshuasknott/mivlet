@@ -31,5 +31,7 @@ export {
   type RetrievalFilterOptions,
   type RetrievalRankingWeights,
   type RetrievalSource,
+  type AuthorityScopedKnowledgeCitation,
+  type KnowledgeRetrievalResponse,
   type RetrieveOptions
 } from "./retrieve";

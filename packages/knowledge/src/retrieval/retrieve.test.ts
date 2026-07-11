@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, SourceChunk } from "@fable/protocol";
+import type { KnowledgeSource, RunContextAudience, SourceChunk } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { filterRetrievable, retrieve, type RetrievalSource } from "./retrieve";
 import { cosineSimilarity, type EmbeddingProvider } from "./semantic";
@@ -34,6 +34,36 @@ function makeChunk(sourceId: string, ordinal: number, text: string, overrides: P
 function src(source: KnowledgeSource, chunks: SourceChunk[]): RetrievalSource {
   return { source, chunks };
 }
+
+const PRIVATE_A: RunContextAudience = {
+  authority: "local",
+  visibility: "member-private",
+  actingMemberId: "member-a" as never
+};
+const SHARED_A: RunContextAudience = {
+  authority: "convex",
+  visibility: "workspace-shared",
+  actingMemberId: "member-a" as never
+};
+const PRIVATE_USER: RunContextAudience = {
+  authority: "local",
+  visibility: "member-private",
+  actingInternalUserId: "user-local" as never
+};
+const privateAuthority = (ownerMemberId: string) => ({
+  authority: "local" as const,
+  visibility: "member-private" as const,
+  ownerMemberId: ownerMemberId as never
+});
+const sharedAuthority = {
+  authority: "convex" as const,
+  visibility: "workspace-shared" as const
+};
+const privateUserAuthority = {
+  authority: "local" as const,
+  visibility: "member-private" as const,
+  ownerInternalUserId: "user-local" as never
+};
 
 describe("retrieve — ranking", () => {
   it("ranks a title-matching chunk above incidental content matches", async () => {
@@ -486,5 +516,58 @@ describe("retrieve — lexical fallback after embedding failure", () => {
     });
     expect(result.mode).toBe("lexical-fallback");
     expect(result.citations.length).toBeGreaterThan(0);
+  });
+});
+
+describe("retrieve — audience privacy", () => {
+  const sources = () => [
+    src(makeSource({ id: "private-a", authorityScope: privateAuthority("member-a"), pinned: true }), [
+      makeChunk("private-a", 0, "connector private a")
+    ]),
+    src(makeSource({ id: "private-b", authorityScope: privateAuthority("member-b") }), [
+      makeChunk("private-b", 0, "connector private b")
+    ]),
+    src(makeSource({ id: "shared", authorityScope: sharedAuthority }), [
+      makeChunk("shared", 0, "connector shared")
+    ]),
+    src(makeSource({ id: "private-user", authorityScope: privateUserAuthority }), [
+      makeChunk("private-user", 0, "connector private user")
+    ]),
+    src(makeSource({ id: "legacy-missing" }), [
+      makeChunk("legacy-missing", 0, "connector legacy")
+    ]),
+    src(makeSource({
+      id: "invalid-authority",
+      authorityScope: { authority: "local", visibility: "workspace-shared" } as never
+    }), [
+      makeChunk("invalid-authority", 0, "connector invalid")
+    ])
+  ];
+
+  it("admits own private plus shared records for a private audience", async () => {
+    const result = await retrieve(sources(), { query: "connector", audience: PRIVATE_A });
+    expect(result.citations.map((citation) => citation.sourceId).sort()).toEqual(["private-a", "shared"]);
+    expect(result.citations.every((citation) => citation.authorityScope)).toBe(true);
+  });
+
+  it("admits only shared records for a shared audience despite pins and explicit ids", async () => {
+    const result = await retrieve(sources(), {
+      query: "connector",
+      audience: SHARED_A,
+      sourceIds: ["private-a", "shared"],
+      userSelectedSourceIds: ["private-a", "shared"]
+    });
+    expect(result.citations.map((citation) => citation.sourceId)).toEqual(["shared"]);
+    expect(result.citations[0].authorityScope).toEqual(sharedAuthority);
+  });
+
+  it("matches legacy-default private records by internal user exactly", async () => {
+    const result = await retrieve(sources(), { query: "connector", audience: PRIVATE_USER });
+    expect(result.citations.map((citation) => citation.sourceId).sort()).toEqual(["private-user", "shared"]);
+  });
+
+  it("retains legacy filtering only when no audience is supplied", async () => {
+    const result = await retrieve(sources(), { query: "legacy" });
+    expect(result.citations.map((citation) => citation.sourceId)).toContain("legacy-missing");
   });
 });

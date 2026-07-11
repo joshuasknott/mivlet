@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type {
   CitationRanking,
-  KnowledgeCitation,
   MemoryRecord,
   NativeMessage,
-  PinnedContextEntry
+  PinnedContextEntry,
+  RunContextAudience
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { artifactFromRun, assembleContext } from "./assemble";
+import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
 
 const NOW = "2026-06-28T12:00:00.000Z";
 
@@ -31,7 +32,7 @@ function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {
 
 const ranking: CitationRanking = { relevance: 2, recency: 0.1, authority: 0.1, pin: 0, feedback: 0 };
 
-function makeCitation(overrides: Partial<KnowledgeCitation> = {}): KnowledgeCitation {
+function makeCitation(overrides: Partial<AuthorityScopedKnowledgeCitation> = {}): AuthorityScopedKnowledgeCitation {
   return {
     sourceId: "s1",
     title: "Launch plan",
@@ -46,6 +47,26 @@ function makeCitation(overrides: Partial<KnowledgeCitation> = {}): KnowledgeCita
     ...overrides
   };
 }
+
+const PRIVATE_A: RunContextAudience = {
+  authority: "local",
+  visibility: "member-private",
+  actingMemberId: "member-a" as never
+};
+const SHARED_A: RunContextAudience = {
+  authority: "convex",
+  visibility: "workspace-shared",
+  actingMemberId: "member-a" as never
+};
+const privateAuthority = (ownerMemberId: string) => ({
+  authority: "local" as const,
+  visibility: "member-private" as const,
+  ownerMemberId: ownerMemberId as never
+});
+const sharedAuthority = {
+  authority: "convex" as const,
+  visibility: "workspace-shared" as const
+};
 
 describe("assembleContext — deterministic order", () => {
   it("emits system instructions, memory, then sources in order", () => {
@@ -217,6 +238,115 @@ describe("assembleContext — citations + usage", () => {
       memory: [],
       citations: []
     })).toThrow(/assembledAt/i);
+  });
+});
+
+describe("assembleContext — audience privacy", () => {
+  it("admits own private and shared memory but excludes another member and missing ownership", () => {
+    const assembled = assembleContext({
+      runId: "run-private-a",
+      assembledAt: NOW,
+      audience: PRIVATE_A,
+      memory: [
+        makeMemory({ id: "private-a", authorityScope: privateAuthority("member-a") }),
+        makeMemory({ id: "private-b", authorityScope: privateAuthority("member-b") }),
+        makeMemory({ id: "shared", authorityScope: sharedAuthority }),
+        makeMemory({ id: "legacy-missing" })
+      ],
+      citations: []
+    });
+
+    expect(assembled.receipt.version).toBe(2);
+    expect(assembled.usage.map((entry) => entry.id).sort()).toEqual(["private-a", "shared"]);
+  });
+
+  it("prevents pinned private memory and private citations from entering a shared run", () => {
+    const privateMemory = makeMemory({
+      id: "private-pinned",
+      pinned: true,
+      scope: { level: "project", projectId: "p1" },
+      authorityScope: privateAuthority("member-a")
+    });
+    const pin: PinnedContextEntry = {
+      id: "pin-private",
+      scope: { level: "project", projectId: "p1" },
+      memoryId: privateMemory.id,
+      pinnedAt: NOW
+    };
+    const assembled = assembleContext({
+      runId: "run-shared",
+      assembledAt: NOW,
+      scope: { level: "project", projectId: "p1" },
+      audience: SHARED_A,
+      memory: [
+        privateMemory,
+        makeMemory({
+          id: "shared-memory",
+          scope: { level: "project", projectId: "p1" },
+          authorityScope: sharedAuthority
+        })
+      ],
+      pinned: [pin],
+      citations: [
+        makeCitation({
+          sourceId: "private-source",
+          scope: { level: "project", projectId: "p1" },
+          authorityScope: privateAuthority("member-a")
+        }),
+        makeCitation({
+          sourceId: "shared-source",
+          scope: { level: "project", projectId: "p1" },
+          authorityScope: sharedAuthority
+        })
+      ]
+    });
+
+    expect(assembled.usage.map((entry) => entry.id)).not.toContain("private-pinned");
+    expect(assembled.citations.map((citation) => citation.sourceId)).toEqual(["shared-source"]);
+    expect(assembled.receipt).toEqual(expect.objectContaining({
+      version: 2,
+      audience: SHARED_A
+    }));
+    if (assembled.receipt.version !== 2) throw new Error("Expected a v2 receipt.");
+    expect(assembled.receipt.citations[0].authorityScope).toEqual(sharedAuthority);
+  });
+
+  it("keeps promotion-derived private memory private", () => {
+    const promoted = makeMemory({
+      id: "promoted-private",
+      kind: "imported",
+      authorityScope: privateAuthority("member-a"),
+      provenance: { origin: "source", sourceId: "private-source", note: "Approved source" }
+    });
+
+    const privateRun = assembleContext({
+      runId: "run-private-promotion",
+      assembledAt: NOW,
+      audience: PRIVATE_A,
+      memory: [promoted],
+      citations: []
+    });
+    const sharedRun = assembleContext({
+      runId: "run-shared-promotion",
+      assembledAt: NOW,
+      audience: SHARED_A,
+      memory: [promoted],
+      citations: []
+    });
+
+    expect(privateRun.usage.map((entry) => entry.id)).toContain("promoted-private");
+    expect(sharedRun.usage.map((entry) => entry.id)).not.toContain("promoted-private");
+  });
+
+  it("retains v1 legacy behavior only when no audience is supplied", () => {
+    const assembled = assembleContext({
+      runId: "run-legacy",
+      assembledAt: NOW,
+      memory: [makeMemory({ id: "legacy-missing" })],
+      citations: [makeCitation({ sourceId: "legacy-source" })]
+    });
+    expect(assembled.receipt.version).toBe(1);
+    expect(assembled.usage.map((entry) => entry.id)).toEqual(expect.arrayContaining(["legacy-missing", "legacy-source"]));
   });
 });
 

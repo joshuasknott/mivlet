@@ -21,16 +21,17 @@
 import type {
   Artifact,
   CitationRanking,
-  KnowledgeCitation,
   KnowledgeScope,
   MemoryRecord,
   NativeMessage,
   PinnedContextEntry,
   PreparedRunContext,
+  RunContextAudience,
   RunContextReceipt
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
-import { isLiveMemory, scopeSatisfies } from "../store";
+import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
+import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
 
 /** Why a given memory or source entered the assembled context. */
 export type ContextContributionReason =
@@ -51,7 +52,7 @@ export interface ContextContribution {
   citationId?: string;
 }
 
-export interface AssembledCitation extends KnowledgeCitation {
+export interface AssembledCitation extends AuthorityScopedKnowledgeCitation {
   ranking: CitationRanking;
 }
 
@@ -80,6 +81,8 @@ export interface AssembleContextInput {
   /** Receipt timestamp; injectable for deterministic tests. */
   assembledAt?: string;
   scope?: KnowledgeScope;
+  /** Explicit run audience. Missing record ownership fails closed when supplied. */
+  audience?: RunContextAudience;
   /** Static system instruction text (the agent's base instructions). */
   systemInstructions?: string;
   /** Current conversation messages (assembled in step 2). */
@@ -93,7 +96,7 @@ export interface AssembleContextInput {
   /** Approved memory (step 5 filters to scope + live + authorized). */
   memory: MemoryRecord[];
   /** Retrieved citations to surface as excerpts (step 6). */
-  citations: KnowledgeCitation[];
+  citations: AuthorityScopedKnowledgeCitation[];
   /** Most recent tool results (step 7). */
   toolResults?: { id: string; text: string }[];
   /** Authorization rules for excluding unauthorized sources/memory. */
@@ -165,6 +168,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     if (!entry.memoryId || pinnedMemorySeen.has(entry.memoryId)) continue;
     const record = input.memory.find((m) => m.id === entry.memoryId);
     if (!record || !isLiveMemory(record)) continue;
+    if (!authorityScopeAllowsAudience(record.authorityScope, input.audience)) continue;
     if (!isMemoryAuthorized(record, isAuthorized)) continue;
     pinnedMemorySeen.add(record.id);
     pushPart(`Pinned memory — ${record.title}: ${record.value}`);
@@ -178,6 +182,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     (record) =>
       isLiveMemory(record) &&
       (record.approvalState === "approved" || record.approved) &&
+      authorityScopeAllowsAudience(record.authorityScope, input.audience) &&
       isMemoryAuthorized(record, isAuthorized) &&
       scopeSatisfies(record.scope ?? GLOBAL_SCOPE, scope)
   );
@@ -217,6 +222,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
   for (const citation of input.citations) {
     // Authorization gate: connector/account must be authorized.
     if (!isAuthorized(citationConnector(citation), citation.account)) continue;
+    if (!authorityScopeAllowsAudience(citation.authorityScope, input.audience)) continue;
     if (usedLength + excerptUsed + citation.snippet.length > budget) break;
     const excerpt = truncate(citation.snippet, MAX_EXCERPT_CHARS);
     const line = `- [${citation.sourceId}] ${citation.title}: ${excerpt}`;
@@ -250,16 +256,29 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
   }
 
   const systemPrefix = parts.filter(Boolean).join("\n\n");
-  const receipt = immutableReceipt({
+  const receiptCitations = citations.map((citation) => ({
+    ...citation,
+    ranking: { ...citation.ranking },
+    ...(citation.scope ? { scope: { ...citation.scope } } : {}),
+    ...(citation.authorityScope ? { authorityScope: { ...citation.authorityScope } } : {})
+  }));
+  const receipt = immutableReceipt(input.audience ? {
+    version: 2,
+    runId: input.runId,
+    assembledAt,
+    scope: { ...scope },
+    audience: { ...input.audience },
+    citations: receiptCitations.map((citation) => ({
+      ...citation,
+      authorityScope: { ...citation.authorityScope! }
+    })),
+    contributions: usage.map((contribution) => ({ ...contribution }))
+  } : {
     version: 1,
     runId: input.runId,
     assembledAt,
     scope: { ...scope },
-    citations: citations.map((citation) => ({
-      ...citation,
-      ranking: { ...citation.ranking },
-      ...(citation.scope ? { scope: { ...citation.scope } } : {})
-    })),
+    citations: receiptCitations,
     contributions: usage.map((contribution) => ({ ...contribution }))
   });
   return { systemPrefix, receipt, messages: conversation, citations, usage };
@@ -267,9 +286,11 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
 
 function immutableReceipt(receipt: RunContextReceipt): RunContextReceipt {
   Object.freeze(receipt.scope);
+  if (receipt.version === 2) Object.freeze(receipt.audience);
   for (const citation of receipt.citations) {
     Object.freeze(citation.ranking);
     if (citation.scope) Object.freeze(citation.scope);
+    if (citation.authorityScope) Object.freeze(citation.authorityScope);
     Object.freeze(citation);
   }
   for (const contribution of receipt.contributions) Object.freeze(contribution);
@@ -296,7 +317,7 @@ function isMemoryAuthorized(
   return isAuthorized(connector, undefined);
 }
 
-function citationConnector(citation: KnowledgeCitation): string {
+function citationConnector(citation: AuthorityScopedKnowledgeCitation): string {
   // Derive connector id from provenance; the store carries the authoritative
   // value. Recognizes "Connector: <id>" (connector imports) and falls back to
   // "local-files" (always authorized locally) for local imports.

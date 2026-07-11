@@ -20,15 +20,17 @@
 import type {
   CitationRanking,
   CitationRanking as RankingType,
+  ContextRecordAuthorityScope,
   KnowledgeCitation,
   KnowledgeScope,
   KnowledgeSource,
   KnowledgeSearchResponse,
+  RunContextAudience,
   SourceChunk,
   SourceStatus
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
-import { isLiveSource, scopeSatisfies } from "../store";
+import { authorityScopeAllowsAudience, isLiveSource, scopeSatisfies } from "../store";
 import { buildLexicalCorpus, scoreChunkLexical, tokenize, tokenSet } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
 
@@ -93,6 +95,16 @@ export interface RetrieveOptions {
    * account exclusion. Undefined = no extra authorization filter.
    */
   isAuthorized?: (source: KnowledgeSource) => boolean;
+  /** Explicit run audience. Missing record ownership fails closed when supplied. */
+  audience?: RunContextAudience;
+}
+
+export interface AuthorityScopedKnowledgeCitation extends KnowledgeCitation {
+  authorityScope?: ContextRecordAuthorityScope;
+}
+
+export interface KnowledgeRetrievalResponse extends Omit<KnowledgeSearchResponse, "citations"> {
+  citations: AuthorityScopedKnowledgeCitation[];
 }
 
 /** Days recent content gets a recency boost for. */
@@ -115,6 +127,7 @@ export interface RetrievalFilterOptions {
   sourceIds?: string[];
   userSelectedSourceIds?: string[];
   isAuthorized?: (source: KnowledgeSource) => boolean;
+  audience?: RunContextAudience;
 }
 
 /**
@@ -143,6 +156,7 @@ export function filterRetrievable(
 
   return sources.filter(({ source }) => {
     if (!isLiveSource(source)) return false;
+    if (!authorityScopeAllowsAudience(source.authorityScope, filters.audience)) return false;
     if (source.status && EXCLUDED_STATUSES.has(source.status)) return false;
     const sourceScope = source.scope ?? GLOBAL_SCOPE;
     if (!scopeSatisfies(sourceScope, scope)) return false;
@@ -181,7 +195,7 @@ function feedbackWeight(source: KnowledgeSource, feedback?: RetrievalFeedback): 
 export async function retrieve(
   sources: RetrievalSource[],
   options: RetrieveOptions
-): Promise<KnowledgeSearchResponse> {
+): Promise<KnowledgeRetrievalResponse> {
   const scope = options.scope ?? GLOBAL_SCOPE;
   const limit = options.limit ?? 8;
   const budgetChars = options.budgetChars ?? 6_000;
@@ -194,7 +208,8 @@ export async function retrieve(
     account: options.account,
     sourceIds: options.sourceIds,
     userSelectedSourceIds: options.userSelectedSourceIds,
-    isAuthorized: options.isAuthorized
+    isAuthorized: options.isAuthorized,
+    audience: options.audience
   });
   const queryTokens = tokenize(query);
 
@@ -325,7 +340,7 @@ export async function retrieve(
 
   // Apply the limit, then the character budget across snippets.
   const limited = deduped.slice(0, limit);
-  const citations: KnowledgeCitation[] = [];
+  const citations: AuthorityScopedKnowledgeCitation[] = [];
   let used = 0;
   for (const scored0 of limited) {
     const snippet = makeSnippet(scored0.chunk.text, queryTokens, snippetChars);
@@ -393,8 +408,8 @@ function makeSnippet(text: string, queryTokens: string[], maxChars: number): str
   return `${prefix}${clean.slice(start, end).trim()}${suffix}`;
 }
 
-function toCitation(scored: ScoredChunk, snippet: string): KnowledgeCitation {
-  const citation: KnowledgeCitation = {
+function toCitation(scored: ScoredChunk, snippet: string): AuthorityScopedKnowledgeCitation {
+  const citation: AuthorityScopedKnowledgeCitation = {
     sourceId: scored.source.id,
     title: scored.source.title,
     snippet,
@@ -407,6 +422,7 @@ function toCitation(scored: ScoredChunk, snippet: string): KnowledgeCitation {
     ranking: scored.ranking,
     scope: scored.source.scope ?? GLOBAL_SCOPE
   };
+  if (scored.source.authorityScope) citation.authorityScope = { ...scored.source.authorityScope };
   if (scored.source.account) citation.account = scored.source.account;
   if (scored.source.sourcePath) citation.sourcePath = scored.source.sourcePath;
   if (scored.source.mediaType) citation.mediaType = scored.source.mediaType;

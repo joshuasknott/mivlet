@@ -16,10 +16,12 @@
 
 import type {
   Artifact,
+  ContextRecordAuthorityScope,
   KnowledgeScope,
   KnowledgeSource,
   MemoryRecord,
   PinnedContextEntry,
+  RunContextAudience,
   SourceChunk
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
@@ -32,6 +34,49 @@ export function isLiveMemory(record: MemoryRecord): boolean {
 /** True when a source is live (not disabled and not in an error-excluded state). */
 export function isLiveSource(source: KnowledgeSource): boolean {
   return !source.disabled && !source.deletedAt;
+}
+
+/**
+ * Whether a record may enter context for an explicit run audience. Omitted
+ * audiences retain the legacy non-run behavior; supplied audiences fail closed
+ * for absent or malformed ownership.
+ */
+export function authorityScopeAllowsAudience(
+  authorityScope: ContextRecordAuthorityScope | undefined,
+  audience?: RunContextAudience
+): boolean {
+  if (!audience) return true;
+  const actingMemberId = audience.actingMemberId?.trim();
+  const actingInternalUserId = audience.actingInternalUserId?.trim();
+  const hasOneActor = Boolean(actingMemberId) !== Boolean(actingInternalUserId);
+  if (!hasOneActor) return false;
+
+  const sharedAudience =
+    audience.authority === "convex" &&
+    audience.visibility === "workspace-shared" &&
+    Boolean(actingMemberId) &&
+    !actingInternalUserId;
+  const privateAudience = audience.authority === "local" && audience.visibility === "member-private";
+  if (!sharedAudience && !privateAudience) return false;
+  if (!authorityScope) return false;
+
+  const sharedRecord =
+    authorityScope.authority === "convex" &&
+    authorityScope.visibility === "workspace-shared" &&
+    authorityScope.ownerMemberId === undefined &&
+    authorityScope.ownerInternalUserId === undefined;
+  if (sharedRecord) return true;
+
+  const ownerMemberId = authorityScope.ownerMemberId?.trim();
+  const ownerInternalUserId = authorityScope.ownerInternalUserId?.trim();
+  const privateRecord =
+    authorityScope.authority === "local" &&
+    authorityScope.visibility === "member-private" &&
+    Boolean(ownerMemberId) !== Boolean(ownerInternalUserId);
+  return privateAudience && privateRecord && (
+    (Boolean(ownerMemberId) && ownerMemberId === actingMemberId) ||
+    (Boolean(ownerInternalUserId) && ownerInternalUserId === actingInternalUserId)
+  );
 }
 
 /** Two scopes are the same effective scope. */

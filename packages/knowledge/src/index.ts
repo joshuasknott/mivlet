@@ -16,6 +16,7 @@ export {
   emptyKnowledgeStoreState,
   isLiveMemory,
   isLiveSource,
+  authorityScopeAllowsAudience,
   scopeSatisfies,
   scopesMatch,
   type KnowledgeStore,
@@ -59,6 +60,8 @@ export {
   retrieve,
   type EmbeddingProvider,
   type RetrievalFeedback,
+  type AuthorityScopedKnowledgeCitation,
+  type KnowledgeRetrievalResponse,
   type RetrievalRankingWeights,
   type RetrievalSource,
   type RetrieveOptions
