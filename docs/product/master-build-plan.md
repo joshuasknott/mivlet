@@ -211,6 +211,14 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 - [ ] Implement the portable local execution driver.
 - [ ] Implement acceptance criteria, evaluation, and partial outcomes.
 
+Repository evidence so far: the portable planner validates bounded acyclic
+generated plans, required deliverable and acceptance coverage, useful parallel
+width, worker budgets, immutable initial/replacement revisions, and optimistic
+conflicts. Encrypted SQLite schema v24 persists the member-private mission,
+selected plan, and immutable revision atomically and restores it after process
+restart. Authenticated native commands, worker execution, run events, and the
+inspectable product journey remain open, so the Wave 4A boxes stay unchecked.
+
 ### Wave 4B - Routing and experience
 
 - [ ] Route by capability, quality, cost, speed, privacy, context, tools, health, preference, and risk.

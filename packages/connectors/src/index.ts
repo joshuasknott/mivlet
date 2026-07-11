@@ -274,6 +274,10 @@ export * from "./mcp/client";
 export * from "./mcp/protocol";
 export * from "./mcp/connected-source-search";
 
+// Portable mission planning: bounded generated-plan validation, dynamic sizing,
+// and immutable plan-revision selection. Persistence/execution remain adapters.
+export * from "./missions";
+
 // Browser automation foundation: pure run/session binding, shared permission
 // policy classification, and redacted audit shaping. Live transport is supplied
 // by a future native/browser boundary; unavailable runtimes fail closed.

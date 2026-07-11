@@ -111,6 +111,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 22 -> 23: add explicit, owner-qualified capability grants. The
             // migration creates no implicit authority or inferred rows.
             22 => apply_v22_to_v23(conn)?,
+            // 23 -> 24: persist member-private missions and immutable generated
+            // plan revisions. No mission or execution authority is inferred.
+            23 => apply_v23_to_v24(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -120,6 +123,46 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v23_to_v24(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mission_record (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, id TEXT NOT NULL,
+          status TEXT NOT NULL CHECK(status IN ('planning','ready','running','waiting','completed','partially-completed','failed','cancelled','archived')),
+          execution_depth TEXT NOT NULL CHECK(execution_depth IN ('delegated','multi-worker')),
+          revision INTEGER NOT NULL CHECK(revision >= 1),
+          current_plan_id TEXT NOT NULL, current_plan_revision_id TEXT NOT NULL,
+          created_by_internal_user_id TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_record_owner
+          ON mission_record(workspace_id,owner_member_id,status,updated_at);
+        CREATE TABLE IF NOT EXISTS mission_plan_record (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, id TEXT NOT NULL, mission_id TEXT NOT NULL,
+          revision INTEGER NOT NULL CHECK(revision >= 1), current_revision_id TEXT NOT NULL,
+          current_revision_number INTEGER NOT NULL CHECK(current_revision_number >= 1),
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,id), UNIQUE(workspace_id,owner_member_id,mission_id)
+        );
+        CREATE TABLE IF NOT EXISTS mission_plan_revision (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, id TEXT NOT NULL, plan_id TEXT NOT NULL, mission_id TEXT NOT NULL,
+          revision_number INTEGER NOT NULL CHECK(revision_number >= 1), reason TEXT NOT NULL,
+          created_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,id),
+          UNIQUE(workspace_id,owner_member_id,plan_id,revision_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_plan_revision_plan
+          ON mission_plan_revision(workspace_id,owner_member_id,plan_id,revision_number);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1259,8 +1302,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v23 is current; v23 -> v24 has no registered migration.
-        let err = apply(&conn, 23, 24).unwrap_err();
+        // v24 is current; v24 -> v25 has no registered migration.
+        let err = apply(&conn, 24, 25).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 

@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 23;
+pub const CURRENT_SCHEMA_VERSION: u32 = 24;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -1495,6 +1495,59 @@ CREATE TABLE IF NOT EXISTS cloud_record_tombstone (
   PRIMARY KEY (local_workspace_id, record_type, record_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_tombstone_workspace_revision ON cloud_record_tombstone(local_workspace_id, server_revision);
+
+-- Mission-generated plans are member-private, bounded snapshots. Mission and
+-- plan rows point to one selected immutable revision; free-text objectives,
+-- constraints, steps, and acceptance criteria remain encrypted.
+CREATE TABLE IF NOT EXISTS mission_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('planning','ready','running','waiting','completed','partially-completed','failed','cancelled','archived')),
+  execution_depth TEXT NOT NULL CHECK(execution_depth IN ('delegated','multi-worker')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  current_plan_id TEXT NOT NULL,
+  current_plan_revision_id TEXT NOT NULL,
+  created_by_internal_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,id)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_record_owner
+  ON mission_record(workspace_id,owner_member_id,status,updated_at);
+CREATE TABLE IF NOT EXISTS mission_plan_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  mission_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  current_revision_id TEXT NOT NULL,
+  current_revision_number INTEGER NOT NULL CHECK(current_revision_number >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,id),
+  UNIQUE(workspace_id,owner_member_id,mission_id)
+);
+CREATE TABLE IF NOT EXISTS mission_plan_revision (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  plan_id TEXT NOT NULL,
+  mission_id TEXT NOT NULL,
+  revision_number INTEGER NOT NULL CHECK(revision_number >= 1),
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,id),
+  UNIQUE(workspace_id,owner_member_id,plan_id,revision_number)
+);
+CREATE INDEX IF NOT EXISTS idx_mission_plan_revision_plan
+  ON mission_plan_revision(workspace_id,owner_member_id,plan_id,revision_number);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (
