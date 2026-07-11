@@ -5,6 +5,8 @@
 //! per-install device identity remain native concerns.
 
 use std::collections::BTreeSet;
+use std::future::Future;
+use std::pin::Pin;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{SecondsFormat, TimeZone, Utc};
@@ -98,6 +100,185 @@ struct DeviceRevokeResult {
     device_id: String,
     status: String,
     revoked_workspace_links: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedInvitation {
+    invitation_id: String,
+    workspace_id: String,
+    authority: String,
+    schema_version: i64,
+    revision: i64,
+    created_by_internal_user_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_by_device_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+    status: String,
+    role: String,
+    inviter_member_id: String,
+    recipient_constraint: InvitationRecipientConstraint,
+    expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_by_internal_user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_membership_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    accepted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    revoked_by_member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    revoked_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum InvitationRecipientConstraint {
+    InternalUser {
+        internal_user_id: String,
+    },
+    VerifiedIdentityAttribute {
+        attribute_kind: String,
+        normalized_value_hash: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display_hint: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectInboxSelection {
+    kind: String,
+    invitation_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedPendingInvitation {
+    invitation: HostedInvitation,
+    selection: DirectInboxSelection,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountPendingInvitationList {
+    invitations: Vec<HostedPendingInvitation>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedMembership {
+    workspace_id: String,
+    authority: String,
+    schema_version: i64,
+    revision: i64,
+    created_by_internal_user_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    created_by_device_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+    member_id: String,
+    internal_user_id: String,
+    role: String,
+    status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    joined_from_invitation_id: Option<String>,
+    activated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    suspended_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    removed_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LifecycleIdempotencyReceipt {
+    key: String,
+    replayed: bool,
+    recorded_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FailClosedAuthorizationError {
+    r#type: String,
+    code: String,
+    message: String,
+    retryable: bool,
+    disclosure: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum HostedAcceptanceResult {
+    Accepted {
+        invitation: HostedInvitation,
+        membership: HostedMembership,
+        idempotency: LifecycleIdempotencyReceipt,
+    },
+    Conflict {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invitation_status: Option<String>,
+        error: FailClosedAuthorizationError,
+    },
+    Rejected {
+        error: FailClosedAuthorizationError,
+    },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountInvitationAcceptanceOutcome {
+    result: HostedAcceptanceResult,
+    account_workspace: AccountWorkspaceStatus,
+    reconciliation: InvitationReconciliation,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct InvitationReconciliation {
+    status: String,
+    message: String,
+}
+
+struct AcceptanceWithReconciliation {
+    result: HostedAcceptanceResult,
+    reconciliation: InvitationReconciliation,
+}
+
+type HostedFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
+
+trait HostedAccountTransport: Send + Sync {
+    fn call<'a>(
+        &'a self,
+        function_type: ConvexFunctionType,
+        path: &'a str,
+        args: Value,
+    ) -> HostedFuture<'a>;
+}
+
+struct NativeHostedAccountTransport;
+
+impl HostedAccountTransport for NativeHostedAccountTransport {
+    fn call<'a>(
+        &'a self,
+        function_type: ConvexFunctionType,
+        path: &'a str,
+        args: Value,
+    ) -> HostedFuture<'a> {
+        Box::pin(hosted_call(function_type, path, args))
+    }
 }
 
 fn now() -> String {
@@ -216,6 +397,226 @@ fn epoch_millis_to_iso(value: i64) -> Result<String, String> {
         .ok_or_else(|| "The hosted account device timestamp is invalid.".into())
 }
 
+fn valid_iso(value: &str) -> bool {
+    chrono::DateTime::parse_from_rfc3339(value).is_ok()
+}
+
+fn valid_role(value: &str) -> bool {
+    ["owner", "admin", "editor", "viewer"].contains(&value)
+}
+
+fn validate_invitation(record: &HostedInvitation) -> Result<(), String> {
+    let recipient_is_valid = match &record.recipient_constraint {
+        InvitationRecipientConstraint::InternalUser { internal_user_id } => {
+            valid_id(internal_user_id)
+        }
+        InvitationRecipientConstraint::VerifiedIdentityAttribute {
+            attribute_kind,
+            normalized_value_hash,
+            display_hint,
+        } => {
+            ["email", "phone"].contains(&attribute_kind.as_str())
+                && !normalized_value_hash.trim().is_empty()
+                && display_hint
+                    .as_ref()
+                    .is_none_or(|hint| !hint.trim().is_empty())
+        }
+    };
+    if !valid_id(&record.invitation_id)
+        || !valid_id(&record.workspace_id)
+        || record.authority != "convex"
+        || record.schema_version != 1
+        || record.revision < 1
+        || !valid_id(&record.created_by_internal_user_id)
+        || record
+            .created_by_device_id
+            .as_ref()
+            .is_some_and(|value| !valid_id(value))
+        || !valid_iso(&record.created_at)
+        || !valid_iso(&record.updated_at)
+        || !valid_iso(&record.expires_at)
+        || !valid_role(&record.role)
+        || !valid_id(&record.inviter_member_id)
+        || !["pending", "accepted", "revoked", "expired"].contains(&record.status.as_str())
+        || !recipient_is_valid
+        || record
+            .accepted_by_internal_user_id
+            .as_ref()
+            .is_some_and(|value| !valid_id(value))
+        || record
+            .accepted_membership_id
+            .as_ref()
+            .is_some_and(|value| !valid_id(value))
+        || record
+            .accepted_at
+            .as_ref()
+            .is_some_and(|value| !valid_iso(value))
+        || record
+            .revoked_by_member_id
+            .as_ref()
+            .is_some_and(|value| !valid_id(value))
+        || record
+            .revoked_at
+            .as_ref()
+            .is_some_and(|value| !valid_iso(value))
+    {
+        return Err("The hosted invitation record failed validation.".into());
+    }
+    Ok(())
+}
+
+fn validate_membership(record: &HostedMembership) -> Result<(), String> {
+    if !valid_id(&record.workspace_id)
+        || record.authority != "convex"
+        || record.schema_version != 1
+        || record.revision < 1
+        || !valid_id(&record.created_by_internal_user_id)
+        || record
+            .created_by_device_id
+            .as_ref()
+            .is_some_and(|value| !valid_id(value))
+        || !valid_iso(&record.created_at)
+        || !valid_iso(&record.updated_at)
+        || !valid_id(&record.member_id)
+        || !valid_id(&record.internal_user_id)
+        || !valid_role(&record.role)
+        || !["active", "suspended", "removed"].contains(&record.status.as_str())
+        || record
+            .joined_from_invitation_id
+            .as_ref()
+            .is_some_and(|value| !valid_id(value))
+        || !valid_iso(&record.activated_at)
+        || record
+            .suspended_at
+            .as_ref()
+            .is_some_and(|value| !valid_iso(value))
+        || record
+            .removed_at
+            .as_ref()
+            .is_some_and(|value| !valid_iso(value))
+    {
+        return Err("The hosted membership record failed validation.".into());
+    }
+    Ok(())
+}
+
+fn validate_authorization_error(error: &FailClosedAuthorizationError) -> Result<(), String> {
+    const CODES: &[&str] = &[
+        "unauthenticated",
+        "invalid-authentication",
+        "authentication-expired",
+        "authentication-revoked",
+        "identity-link-not-found",
+        "identity-link-inactive",
+        "identity-link-conflict",
+        "internal-user-inactive",
+        "workspace-unavailable",
+        "membership-required",
+        "membership-inactive",
+        "permission-denied",
+        "role-assignment-denied",
+        "last-active-owner",
+        "invitation-unavailable",
+        "invitation-expired",
+        "invitation-recipient-mismatch",
+        "invitation-already-consumed",
+        "device-required",
+        "device-unavailable",
+        "device-inactive",
+        "session-ineligible",
+        "online-reauthentication-required",
+        "stale-policy",
+        "stale-revision",
+        "idempotency-conflict",
+        "conflict",
+    ];
+    if error.r#type != "authorization-error"
+        || !CODES.contains(&error.code.as_str())
+        || error.message.trim().is_empty()
+        || !["opaque", "safe"].contains(&error.disclosure.as_str())
+    {
+        return Err("The hosted authorization outcome failed validation.".into());
+    }
+    let _ = error.retryable;
+    Ok(())
+}
+
+fn parse_pending_invitations(value: Value) -> Result<AccountPendingInvitationList, String> {
+    let invitations: Vec<HostedPendingInvitation> = serde_json::from_value(value)
+        .map_err(|_| "The hosted invitation inbox response is malformed.".to_string())?;
+    let mut ids = BTreeSet::new();
+    for item in &invitations {
+        validate_invitation(&item.invitation)?;
+        if item.invitation.status != "pending"
+            || item.selection.kind != "direct-inbox"
+            || item.selection.invitation_id != item.invitation.invitation_id
+            || !matches!(
+                item.invitation.recipient_constraint,
+                InvitationRecipientConstraint::InternalUser { .. }
+            )
+            || item.invitation.accepted_by_internal_user_id.is_some()
+            || item.invitation.accepted_membership_id.is_some()
+            || item.invitation.accepted_at.is_some()
+            || item.invitation.revoked_by_member_id.is_some()
+            || item.invitation.revoked_at.is_some()
+            || !ids.insert(item.invitation.invitation_id.clone())
+        {
+            return Err(
+                "The hosted invitation inbox contains an invalid or ambiguous entry.".into(),
+            );
+        }
+    }
+    Ok(AccountPendingInvitationList { invitations })
+}
+
+fn parse_acceptance_result(
+    value: Value,
+    expected_invitation_id: &str,
+    expected_idempotency_key: &str,
+) -> Result<HostedAcceptanceResult, String> {
+    let result: HostedAcceptanceResult = serde_json::from_value(value)
+        .map_err(|_| "The hosted invitation acceptance response is malformed.".to_string())?;
+    match &result {
+        HostedAcceptanceResult::Accepted {
+            invitation,
+            membership,
+            idempotency,
+        } => {
+            validate_invitation(invitation)?;
+            validate_membership(membership)?;
+            if invitation.invitation_id != expected_invitation_id
+                || invitation.status != "accepted"
+                || membership.status != "active"
+                || invitation.workspace_id != membership.workspace_id
+                || invitation.role != membership.role
+                || invitation.accepted_by_internal_user_id.as_deref()
+                    != Some(membership.internal_user_id.as_str())
+                || invitation.accepted_membership_id.as_deref()
+                    != Some(membership.member_id.as_str())
+                || invitation.accepted_at.is_none()
+                || idempotency.key != expected_idempotency_key
+                || !valid_iso(&idempotency.recorded_at)
+            {
+                return Err("The hosted invitation acceptance failed validation.".into());
+            }
+            let _ = idempotency.replayed;
+        }
+        HostedAcceptanceResult::Conflict {
+            invitation_status,
+            error,
+        } => {
+            validate_authorization_error(error)?;
+            if invitation_status.as_ref().is_some_and(|status| {
+                !["pending", "accepted", "revoked", "expired"].contains(&status.as_str())
+            }) {
+                return Err("The hosted invitation conflict failed validation.".into());
+            }
+        }
+        HostedAcceptanceResult::Rejected { error } => validate_authorization_error(error)?,
+    }
+    Ok(result)
+}
+
 fn parse_devices(value: Value) -> Result<Vec<directory::AccountDeviceMirrorUpsert>, String> {
     let entries: Vec<HostedDevice> = serde_json::from_value(value)
         .map_err(|_| "The hosted account device list response is malformed.".to_string())?;
@@ -259,22 +660,28 @@ fn parse_device_revoke(value: Value, expected_device_id: &str) -> Result<(), Str
     Ok(())
 }
 
-async fn reconcile_hosted() -> Result<(), String> {
+async fn reconcile_hosted_with_transport(
+    transport: &dyn HostedAccountTransport,
+    idempotency_key: &str,
+    store: &crate::store::Store,
+) -> Result<(), String> {
     // Create the stable local ID now even though this version cannot honestly
     // register it with the hosted `publicKey`-requiring endpoint.
     let _install_device_id = ensure_install_device_id();
-    let idempotency_key = clerk_identity::native_bootstrap_idempotency_key().await?;
     let bootstrap = parse_bootstrap(
-        hosted_call(
-            ConvexFunctionType::Mutation,
-            "workspace:bootstrapAccount",
-            json!({ "idempotencyKey": idempotency_key }),
-        )
-        .await?,
-        &idempotency_key,
+        transport
+            .call(
+                ConvexFunctionType::Mutation,
+                "workspace:bootstrapAccount",
+                json!({ "idempotencyKey": idempotency_key }),
+            )
+            .await?,
+        idempotency_key,
     )?;
     let workspaces = parse_workspaces(
-        hosted_call(ConvexFunctionType::Query, "workspace:listMine", json!({})).await?,
+        transport
+            .call(ConvexFunctionType::Query, "workspace:listMine", json!({}))
+            .await?,
     )?;
     let initial = workspaces
         .iter()
@@ -283,11 +690,12 @@ async fn reconcile_hosted() -> Result<(), String> {
     if initial.member_id != bootstrap.member_id {
         return Err("The hosted workspace list did not match the bootstrap membership.".into());
     }
-    let devices =
-        parse_devices(hosted_call(ConvexFunctionType::Query, "device:listMine", json!({})).await?)?;
+    let devices = parse_devices(
+        transport
+            .call(ConvexFunctionType::Query, "device:listMine", json!({}))
+            .await?,
+    )?;
     let observed_at = now();
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|conn| {
             // Preserve the locally observed timestamp for exact replayed
@@ -356,6 +764,73 @@ async fn reconcile_hosted() -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+async fn reconcile_hosted() -> Result<(), String> {
+    let idempotency_key = clerk_identity::native_bootstrap_idempotency_key().await?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    reconcile_hosted_with_transport(&NativeHostedAccountTransport, &idempotency_key, store).await
+}
+
+async fn pending_invitations_with_transport(
+    transport: &dyn HostedAccountTransport,
+) -> Result<AccountPendingInvitationList, String> {
+    parse_pending_invitations(
+        transport
+            .call(
+                ConvexFunctionType::Query,
+                "membership:listRecipientPending",
+                json!({}),
+            )
+            .await?,
+    )
+}
+
+async fn accept_invitation_with_transport(
+    transport: &dyn HostedAccountTransport,
+    invitation_id: &str,
+    idempotency_key: &str,
+    bootstrap_idempotency_key: &str,
+    store: &crate::store::Store,
+) -> Result<AcceptanceWithReconciliation, String> {
+    let result = parse_acceptance_result(
+        transport
+            .call(
+                ConvexFunctionType::Mutation,
+                "membership:acceptInvitation",
+                json!({
+                    "invitationId": invitation_id,
+                    "presentation": { "kind": "direct-inbox", "invitationId": invitation_id },
+                    "idempotencyKey": idempotency_key,
+                }),
+            )
+            .await?,
+        invitation_id,
+        idempotency_key,
+    )?;
+    let reconciliation = if matches!(result, HostedAcceptanceResult::Accepted { .. }) {
+        match reconcile_hosted_with_transport(transport, bootstrap_idempotency_key, store).await {
+            Ok(()) => InvitationReconciliation {
+                status: "refreshed".into(),
+                message: "Workspace list is up to date.".into(),
+            },
+            Err(_message) => InvitationReconciliation {
+                status: "refresh-needed".into(),
+                message: "Invitation accepted, but Fable could not refresh the workspace list yet."
+                    .into(),
+            },
+        }
+    } else {
+        InvitationReconciliation {
+            status: "not-needed".into(),
+            message: "Workspace list did not need to change.".into(),
+        }
+    };
+    Ok(AcceptanceWithReconciliation {
+        result,
+        reconciliation,
+    })
+}
+
 fn local_status(
     identity: &clerk_identity::IdentityStatus,
 ) -> Result<AccountWorkspaceStatus, String> {
@@ -412,6 +887,39 @@ pub async fn account_workspace_status() -> Result<AccountWorkspaceStatus, String
 pub async fn account_workspace_reconcile() -> Result<AccountWorkspaceStatus, String> {
     reconcile_hosted().await?;
     account_workspace_status().await
+}
+
+#[tauri::command]
+pub async fn account_membership_pending_invitations() -> Result<AccountPendingInvitationList, String>
+{
+    pending_invitations_with_transport(&NativeHostedAccountTransport).await
+}
+
+#[tauri::command]
+pub async fn account_membership_accept_invitation(
+    invitation_id: String,
+) -> Result<AccountInvitationAcceptanceOutcome, String> {
+    if !valid_id(&invitation_id) {
+        return Err("Invitation id is invalid.".into());
+    }
+    let idempotency_key = opaque_id("invitation_accept")?;
+    let bootstrap_idempotency_key = clerk_identity::native_bootstrap_idempotency_key().await?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let accepted = accept_invitation_with_transport(
+        &NativeHostedAccountTransport,
+        &invitation_id,
+        &idempotency_key,
+        &bootstrap_idempotency_key,
+        store,
+    )
+    .await?;
+    let account_workspace = account_workspace_status().await?;
+    Ok(AccountInvitationAcceptanceOutcome {
+        result: accepted.result,
+        account_workspace,
+        reconciliation: accepted.reconciliation,
+    })
 }
 
 #[tauri::command]
@@ -509,6 +1017,83 @@ pub async fn account_workspace_clear_session() -> Result<AccountWorkspaceStatus,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    struct ScriptStep {
+        mutation: bool,
+        path: &'static str,
+        args: Value,
+        result: Value,
+    }
+
+    struct ScriptedTransport {
+        steps: Mutex<VecDeque<ScriptStep>>,
+    }
+
+    impl ScriptedTransport {
+        fn new(steps: Vec<ScriptStep>) -> Self {
+            Self {
+                steps: Mutex::new(steps.into()),
+            }
+        }
+
+        fn finished(&self) -> bool {
+            self.steps.lock().unwrap().is_empty()
+        }
+    }
+
+    impl HostedAccountTransport for ScriptedTransport {
+        fn call<'a>(
+            &'a self,
+            function_type: ConvexFunctionType,
+            path: &'a str,
+            args: Value,
+        ) -> HostedFuture<'a> {
+            let step = self.steps.lock().unwrap().pop_front().unwrap();
+            let is_mutation = matches!(function_type, ConvexFunctionType::Mutation);
+            Box::pin(async move {
+                assert_eq!(is_mutation, step.mutation);
+                assert_eq!(path, step.path);
+                assert_eq!(args, step.args);
+                if let Some(message) = step.result.get("__error").and_then(Value::as_str) {
+                    return Err(message.to_string());
+                }
+                Ok(step.result)
+            })
+        }
+    }
+
+    fn invitation(id: &str, status: &str) -> Value {
+        json!({
+            "invitationId": id, "workspaceId": "ws_shared", "authority": "convex",
+            "schemaVersion": 1, "revision": if status == "pending" { 1 } else { 2 },
+            "createdByInternalUserId": "usr_owner", "createdAt": "2026-07-11T08:00:00.000Z",
+            "updatedAt": "2026-07-11T08:01:00.000Z", "status": status, "role": "editor",
+            "inviterMemberId": "member_owner", "recipientConstraint": { "kind": "internal-user", "internalUserId": "usr_recipient" },
+            "expiresAt": "2026-07-12T08:00:00.000Z"
+        })
+    }
+
+    fn accepted_invitation(id: &str) -> Value {
+        let mut value = invitation(id, "accepted");
+        let object = value.as_object_mut().unwrap();
+        object.insert("acceptedByInternalUserId".into(), json!("usr_recipient"));
+        object.insert("acceptedMembershipId".into(), json!("member_shared"));
+        object.insert("acceptedAt".into(), json!("2026-07-11T08:01:00.000Z"));
+        value
+    }
+
+    fn membership(invitation_id: &str) -> Value {
+        json!({
+            "workspaceId": "ws_shared", "authority": "convex", "schemaVersion": 1,
+            "revision": 1, "createdByInternalUserId": "usr_owner",
+            "createdAt": "2026-07-11T08:01:00.000Z", "updatedAt": "2026-07-11T08:01:00.000Z",
+            "memberId": "member_shared", "internalUserId": "usr_recipient", "role": "editor",
+            "status": "active", "joinedFromInvitationId": invitation_id,
+            "activatedAt": "2026-07-11T08:01:00.000Z"
+        })
+    }
 
     #[test]
     fn convex_envelopes_fail_closed() {
@@ -564,5 +1149,196 @@ mod tests {
             "dev_a",
         )
         .is_err());
+    }
+
+    #[test]
+    fn pending_invitation_parser_rejects_malformed_duplicate_and_nonpending_entries() {
+        let pending = json!({
+            "invitation": invitation("inv_a", "pending"),
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" }
+        });
+        assert!(parse_pending_invitations(json!([pending.clone()])).is_ok());
+        assert!(parse_pending_invitations(json!([pending.clone(), pending])).is_err());
+        assert!(parse_pending_invitations(json!([{
+            "invitation": invitation("inv_a", "accepted"),
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" }
+        }]))
+        .is_err());
+        assert!(parse_pending_invitations(json!([{
+            "invitation": invitation("inv_a", "pending"),
+            "selection": { "kind": "direct-inbox", "invitationId": "other" }
+        }]))
+        .is_err());
+    }
+
+    #[test]
+    fn acceptance_parser_preserves_validated_rejection_and_fails_closed() {
+        let rejected = json!({
+            "status": "rejected",
+            "error": { "type": "authorization-error", "code": "invitation-recipient-mismatch", "message": "Unavailable.", "retryable": false, "disclosure": "opaque" }
+        });
+        assert!(matches!(
+            parse_acceptance_result(rejected, "inv_a", "native_key").unwrap(),
+            HostedAcceptanceResult::Rejected { .. }
+        ));
+        let mut mismatched_membership = membership("historical_invitation");
+        mismatched_membership
+            .as_object_mut()
+            .unwrap()
+            .insert("internalUserId".into(), json!("usr_other"));
+        let malformed = json!({
+            "status": "accepted", "invitation": accepted_invitation("inv_a"),
+            "membership": mismatched_membership,
+            "idempotency": { "key": "native_key", "replayed": false, "recordedAt": "2026-07-11T08:01:00.000Z" }
+        });
+        assert!(parse_acceptance_result(malformed, "inv_a", "native_key").is_err());
+    }
+
+    #[tokio::test]
+    async fn scripted_pending_accept_reconcile_survives_store_reopen() {
+        let pending = json!({
+            "invitation": invitation("inv_a", "pending"),
+            "selection": { "kind": "direct-inbox", "invitationId": "inv_a" }
+        });
+        let transport = ScriptedTransport::new(vec![
+            ScriptStep {
+                mutation: false,
+                path: "membership:listRecipientPending",
+                args: json!({}),
+                result: json!([pending]),
+            },
+            ScriptStep {
+                mutation: true,
+                path: "membership:acceptInvitation",
+                args: json!({
+                    "invitationId": "inv_a",
+                    "presentation": { "kind": "direct-inbox", "invitationId": "inv_a" },
+                    "idempotencyKey": "native_accept_key"
+                }),
+                result: json!({
+                    "status": "accepted", "invitation": accepted_invitation("inv_a"),
+                    "membership": membership("inv_a"),
+                    "idempotency": { "key": "native_accept_key", "replayed": false, "recordedAt": "2026-07-11T08:01:00.000Z" }
+                }),
+            },
+            ScriptStep {
+                mutation: true,
+                path: "workspace:bootstrapAccount",
+                args: json!({ "idempotencyKey": "bootstrap_key" }),
+                result: json!({
+                    "status": "existing", "internalUserId": "usr_recipient", "workspaceId": "ws_home", "memberId": "member_home",
+                    "idempotency": { "key": "bootstrap_key", "replayed": true }
+                }),
+            },
+            ScriptStep {
+                mutation: false,
+                path: "workspace:listMine",
+                args: json!({}),
+                result: json!([
+                    { "workspaceId": "ws_home", "name": "Home", "revision": 0, "policyRevision": 1, "memberId": "member_home", "role": "owner", "membershipRevision": 1 },
+                    { "workspaceId": "ws_shared", "name": "Shared", "revision": 2, "policyRevision": 1, "memberId": "member_shared", "role": "editor", "membershipRevision": 1 }
+                ]),
+            },
+            ScriptStep {
+                mutation: false,
+                path: "device:listMine",
+                args: json!({}),
+                result: json!([]),
+            },
+        ]);
+        let inbox = pending_invitations_with_transport(&transport)
+            .await
+            .unwrap();
+        assert_eq!(inbox.invitations.len(), 1);
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("invitation-native.db");
+        let key = crate::store::vault::MasterKey::generate().unwrap();
+        let store =
+            crate::store::Store::open(&path, crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        let accepted = accept_invitation_with_transport(
+            &transport,
+            "inv_a",
+            "native_accept_key",
+            "bootstrap_key",
+            &store,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            &accepted.result,
+            HostedAcceptanceResult::Accepted { .. }
+        ));
+        assert_eq!(accepted.reconciliation.status, "refreshed");
+        assert!(transport.finished());
+        drop(store);
+
+        let reopened =
+            crate::store::Store::open(&path, crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        let summaries = reopened
+            .with_conn(|conn| directory::list_authoritative_summaries(conn, "usr_recipient"))
+            .unwrap();
+        assert_eq!(summaries.len(), 2);
+        assert!(summaries.iter().any(|entry| {
+            entry.fable_workspace_id == "ws_shared"
+                && entry.member_id == "member_shared"
+                && entry.role == "editor"
+        }));
+        let serialized = serde_json::to_string(&accepted.result).unwrap();
+        assert!(!serialized.contains("token"));
+    }
+
+    #[tokio::test]
+    async fn accepted_outcome_survives_reconciliation_failure() {
+        let transport = ScriptedTransport::new(vec![
+            ScriptStep {
+                mutation: true,
+                path: "membership:acceptInvitation",
+                args: json!({
+                    "invitationId": "inv_a",
+                    "presentation": { "kind": "direct-inbox", "invitationId": "inv_a" },
+                    "idempotencyKey": "native_accept_key"
+                }),
+                result: json!({
+                    "status": "accepted", "invitation": accepted_invitation("inv_a"),
+                    "membership": membership("inv_a"),
+                    "idempotency": { "key": "native_accept_key", "replayed": false, "recordedAt": "2026-07-11T08:01:00.000Z" }
+                }),
+            },
+            ScriptStep {
+                mutation: true,
+                path: "workspace:bootstrapAccount",
+                args: json!({ "idempotencyKey": "bootstrap_key" }),
+                result: json!({ "__error": "refresh unavailable" }),
+            },
+        ]);
+        let key = crate::store::vault::MasterKey::generate().unwrap();
+        let store =
+            crate::store::Store::open_in_memory(crate::store::vault::Vault::new(&key).unwrap())
+                .unwrap();
+        let accepted = accept_invitation_with_transport(
+            &transport,
+            "inv_a",
+            "native_accept_key",
+            "bootstrap_key",
+            &store,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            &accepted.result,
+            HostedAcceptanceResult::Accepted { .. }
+        ));
+        assert_eq!(accepted.reconciliation.status, "refresh-needed");
+        assert_eq!(
+            accepted.reconciliation.message,
+            "Invitation accepted, but Fable could not refresh the workspace list yet."
+        );
+        assert!(!serde_json::to_string(&accepted.reconciliation)
+            .unwrap()
+            .contains("refresh unavailable"));
+        assert!(transport.finished());
     }
 }
