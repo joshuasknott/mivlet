@@ -696,8 +696,7 @@ describe("Fable home", () => {
   it("prepares connector writes as approval requests instead of executing them", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^connectors$/i }));
-    const gmailCard = screen
-      .getAllByText("Gmail")
+    const gmailCard = (await screen.findAllByText("Gmail"))
       .map((node) => node.closest("article"))
       .find(Boolean);
     expect(gmailCard).not.toBeNull();
