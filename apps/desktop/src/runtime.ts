@@ -60,6 +60,8 @@ import type {
   CloudSyncPullResult,
   CloudSyncStatus,
   CloudWorkspaceLinkState,
+  AccountInvitationAcceptanceOutcome,
+  AccountPendingInvitationList,
   AccountWorkspaceStatus
 } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
@@ -2019,6 +2021,26 @@ export async function clearRuntimeAccountWorkspaceSession() {
   if (!hasTauriRuntime()) return null;
   try {
     await invoke<void>("account_workspace_clear_session");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function loadRuntimePendingInvitations() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountPendingInvitationList>("account_membership_pending_invitations");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function acceptRuntimePendingInvitation(invitationId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<AccountInvitationAcceptanceOutcome>("account_membership_accept_invitation", {
+      invitationId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
