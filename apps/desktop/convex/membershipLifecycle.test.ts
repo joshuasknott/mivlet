@@ -31,7 +31,7 @@ function state(): MembershipLifecycleState {
   };
 }
 function create(s: MembershipLifecycleState, overrides: Partial<Parameters<typeof createInvitationToState>[2]> = {}, now = 100) {
-  return createInvitationToState(s, owner, { workspaceId: "ws-a", role: "editor", recipientInternalUserId: "u-recipient", expiresAt: 1_000, idempotencyKey: "create-1", invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", ...overrides }, now);
+  return createInvitationToState(s, owner, { workspaceId: "ws-a", role: "editor", recipientInternalUserId: "u-recipient", expiresAt: 1_000, idempotencyKey: "create-1", invitationId: "inv-1", ...overrides }, now);
 }
 
 describe("hosted membership lifecycle", () => {
@@ -40,12 +40,12 @@ describe("hosted membership lifecycle", () => {
     expect(created).toMatchObject({ status: "accepted", invitation: { authority: "convex", status: "pending", recipientConstraint: { kind: "internal-user", internalUserId: "u-recipient" } }, idempotency: { replayed: false } });
     expect(create(s)).toMatchObject({ status: "accepted", idempotency: { replayed: true } });
     expect(create(s, { role: "viewer" })).toMatchObject({ status: "conflict", code: "idempotency-conflict" });
-    expect(listRecipientPendingInvitationsToState(s, recipient, 110)[0]).toMatchObject({ presentationProof: { invitationId: "inv-1", proofRef: "direct-inbox:inv-1" } });
+    expect(listRecipientPendingInvitationsToState(s, recipient, 110)[0]).toMatchObject({ selection: { kind: "direct-inbox", invitationId: "inv-1" } });
 
-    const accepted = acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", idempotencyKey: "accept-1" }, 120);
+    const accepted = acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "inv-1" }, idempotencyKey: "accept-1" }, 120);
     expect(accepted).toMatchObject({ status: "accepted", invitation: { status: "accepted", acceptedByInternalUserId: "u-recipient" }, membership: { role: "editor", status: "active", revision: 1 } });
     const memberId = accepted.status === "accepted" ? accepted.membership!.memberId : "";
-    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", idempotencyKey: "accept-2" }, 121)).toMatchObject({ status: "conflict", code: "invitation-already-consumed" });
+    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "inv-1" }, idempotencyKey: "accept-2" }, 121)).toMatchObject({ status: "conflict", code: "invitation-already-consumed" });
 
     expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId, action: "change-role", role: "viewer", baseRevision: 1, idempotencyKey: "role-1" }, 130)).toMatchObject({ status: "accepted", membership: { role: "viewer", status: "active", revision: 2 } });
     s.deviceLinks.push({ workspaceId: "ws-a", deviceId: "d-recipient", internalUserId: "u-recipient", memberId, status: "active" });
@@ -66,7 +66,7 @@ describe("hosted membership lifecycle", () => {
   it("allows invitation acceptance to reactivate one suspended membership but never a removed one", () => {
     const suspended = state(); suspended.memberships.push({ memberId: "m-recipient", workspaceId: "ws-a", internalUserId: "u-recipient", role: "viewer", status: "suspended", revision: 4, createdAt: 1, updatedAt: 50, activatedAt: 1, suspendedAt: 50 });
     expect(create(suspended)).toMatchObject({ status: "accepted" });
-    expect(acceptInvitationToState(suspended, recipient, { invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", idempotencyKey: "accept" }, 120)).toMatchObject({ status: "accepted", membership: { memberId: "m-recipient", role: "editor", status: "active", revision: 5 } });
+    expect(acceptInvitationToState(suspended, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "inv-1" }, idempotencyKey: "accept" }, 120)).toMatchObject({ status: "accepted", membership: { memberId: "m-recipient", role: "editor", status: "active", revision: 5 } });
     const removed = state(); removed.memberships.push({ memberId: "m-recipient", workspaceId: "ws-a", internalUserId: "u-recipient", role: "viewer", status: "removed", revision: 4, createdAt: 1, updatedAt: 50, activatedAt: 1, removedAt: 50 });
     expect(create(removed)).toMatchObject({ status: "rejected", code: "invitation-unavailable" });
   });
@@ -75,30 +75,32 @@ describe("hosted membership lifecycle", () => {
     const s = state(); create(s, { expiresAt: 150 });
     expect(listWorkspaceInvitationsToState(s, owner, "ws-a", 151)).toMatchObject([{ status: "expired" }]);
     expect(listRecipientPendingInvitationsToState(s, recipient, 151)).toEqual([]);
-    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", idempotencyKey: "accept" }, 151)).toMatchObject({ status: "conflict", code: "invitation-expired" });
+    expect(s.invitations[0].status).toBe("pending");
+    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "inv-1" }, idempotencyKey: "accept" }, 151)).toMatchObject({ status: "conflict", code: "invitation-expired" });
+    expect(s.invitations[0].status).toBe("expired");
   });
 
   it("rejects wrong recipient and wrong presentation reference without consuming the invitation", () => {
     const s = state(); create(s);
-    expect(acceptInvitationToState(s, outsider, { invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", idempotencyKey: "wrong-user" }, 120)).toMatchObject({ status: "rejected", code: "invitation-recipient-mismatch" });
-    const rejected = acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentationRef: "caller-chosen", idempotencyKey: "wrong-ref" }, 120);
+    expect(acceptInvitationToState(s, outsider, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "inv-1" }, idempotencyKey: "wrong-user" }, 120)).toMatchObject({ status: "rejected", code: "invitation-recipient-mismatch" });
+    const rejected = acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "other" }, idempotencyKey: "wrong-ref" }, 120);
     expect(rejected).toMatchObject({ status: "rejected", code: "invitation-unavailable" });
-    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentationRef: "caller-chosen", idempotencyKey: "wrong-ref" }, 121)).toEqual(rejected);
+    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "other" }, idempotencyKey: "wrong-ref" }, 121)).toEqual(rejected);
     expect(s.invitations[0].status).toBe("pending");
   });
 
   it("rejects duplicate pending targets and supports explicit revocation", () => {
     const s = state(); create(s);
-    expect(create(s, { idempotencyKey: "create-2", invitationId: "inv-2", presentationRef: "direct-inbox:inv-2" })).toMatchObject({ status: "rejected", code: "invitation-unavailable" });
+    expect(create(s, { idempotencyKey: "create-2", invitationId: "inv-2" })).toMatchObject({ status: "rejected", code: "invitation-unavailable" });
     expect(revokeInvitationToState(s, owner, { workspaceId: "ws-a", invitationId: "inv-1", idempotencyKey: "revoke" }, 120)).toMatchObject({ status: "accepted", invitation: { status: "revoked", revokedByMemberId: "m-owner" } });
-    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentationRef: "direct-inbox:inv-1", idempotencyKey: "accept" }, 130)).toMatchObject({ status: "conflict", code: "invitation-already-consumed" });
+    expect(acceptInvitationToState(s, recipient, { invitationId: "inv-1", presentation: { kind: "direct-inbox", invitationId: "inv-1" }, idempotencyKey: "accept" }, 130)).toMatchObject({ status: "conflict", code: "invitation-already-consumed" });
   });
 
   it("enforces admin owner boundaries, final-owner safety, stale revisions, and workspace scope", () => {
     const s = state();
-    expect(createInvitationToState(s, admin, { workspaceId: "ws-a", role: "owner", recipientInternalUserId: "u-recipient", expiresAt: 1_000, idempotencyKey: "admin-owner", invitationId: "inv-admin", presentationRef: "direct-inbox:inv-admin" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
+    expect(createInvitationToState(s, admin, { workspaceId: "ws-a", role: "owner", recipientInternalUserId: "u-recipient", expiresAt: 1_000, idempotencyKey: "admin-owner", invitationId: "inv-admin" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
     s.memberships.push({ memberId: "m-outsider-owner", workspaceId: "ws-a", internalUserId: "u-outsider", role: "owner", status: "suspended", revision: 2, createdAt: 1, updatedAt: 50, activatedAt: 1, suspendedAt: 50 });
-    expect(createInvitationToState(s, admin, { workspaceId: "ws-a", role: "editor", recipientInternalUserId: "u-outsider", expiresAt: 1_000, idempotencyKey: "admin-existing-owner", invitationId: "inv-existing-owner", presentationRef: "direct-inbox:inv-existing-owner" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
+    expect(createInvitationToState(s, admin, { workspaceId: "ws-a", role: "editor", recipientInternalUserId: "u-outsider", expiresAt: 1_000, idempotencyKey: "admin-existing-owner", invitationId: "inv-existing-owner" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
     expect(changeMembershipToState(s, admin, { workspaceId: "ws-a", memberId: "m-owner", action: "change-role", role: "admin", baseRevision: 1, idempotencyKey: "manage-owner" }, 100)).toMatchObject({ status: "rejected", code: "role-assignment-denied" });
     expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId: "m-owner", action: "remove", baseRevision: 1, idempotencyKey: "last-owner" }, 100)).toMatchObject({ status: "rejected", code: "last-active-owner" });
     expect(changeMembershipToState(s, owner, { workspaceId: "ws-a", memberId: "m-admin", action: "suspend", baseRevision: 99, idempotencyKey: "stale" }, 100)).toMatchObject({ status: "conflict", code: "stale-revision" });

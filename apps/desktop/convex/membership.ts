@@ -26,7 +26,6 @@ function invitationRecord(invitation: any) {
   return canonicalInvitation({
     ...invitation,
     recipientInternalUserId: invitation.recipientInternalUserId ?? "",
-    presentationRef: invitation.presentationRef ?? `direct-inbox:${invitation.invitationId}`,
     createdByInternalUserId: invitation.createdByInternalUserId ?? invitation.inviterMemberId,
   });
 }
@@ -111,7 +110,7 @@ export const listRecipientPending = queryGeneric({
   handler: async (ctx) => {
     const { user } = await requireFableUser(ctx); const now = Date.now();
     const invitations = await ctx.db.query("workspace_invitations").withIndex("by_recipient", (q: any) => q.eq("recipientInternalUserId", user.internalUserId)).collect();
-    return invitations.filter((entry: any) => entry.status === "pending" && entry.expiresAt > now).map((entry: any) => ({ invitation: invitationRecord(entry), presentationProof: { invitationId: entry.invitationId, proofRef: entry.presentationRef, verifiedAt: new Date(now).toISOString() } })).sort((a: any, b: any) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
+    return invitations.filter((entry: any) => entry.status === "pending" && entry.expiresAt > now).map((entry: any) => ({ invitation: invitationRecord(entry), selection: { kind: "direct-inbox" as const, invitationId: entry.invitationId } })).sort((a: any, b: any) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
   },
 });
 
@@ -139,8 +138,8 @@ export const createInvitation = mutationGeneric({
       const invitations = await ctx.db.query("workspace_invitations").withIndex("by_workspace", (q: any) => q.eq("workspaceId", args.workspaceId)).collect();
       for (const entry of invitations) await normalizePendingInvitation(ctx, entry, now, true);
       const duplicate = invitations.some((entry: any) => entry.recipientInternalUserId === args.recipientInternalUserId && entry.status === "pending" && entry.expiresAt > now); ensureInvitationTarget(recipient?.status, duplicate, memberships[0]?.status); if (memberships[0]) ensureMemberManagement(authz.membership.role, memberships[0].role, args.role);
-      invitationId = await allocateInvitationId(ctx); const presentationRef = `direct-inbox:${invitationId}`;
-      const invitation = { invitationId, workspaceId: args.workspaceId, role: args.role, inviterMemberId: authz.membership.memberId, recipientKind: "internal-user" as const, recipientInternalUserId: args.recipientInternalUserId, status: "pending" as const, expiresAt: args.expiresAt, presentationRef, createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, createdByInternalUserId: authz.user.internalUserId };
+      invitationId = await allocateInvitationId(ctx);
+      const invitation = { invitationId, workspaceId: args.workspaceId, role: args.role, inviterMemberId: authz.membership.memberId, recipientKind: "internal-user" as const, recipientInternalUserId: args.recipientInternalUserId, status: "pending" as const, expiresAt: args.expiresAt, createdAt: now, updatedAt: now, schemaVersion: SCHEMA_VERSION, createdByInternalUserId: authz.user.internalUserId };
       await ctx.db.insert("workspace_invitations", invitation); result = { status: "accepted", invitation: invitationRecord(invitation) };
     } catch (caught) { result = caught instanceof CloudPolicyError ? error(caught.code, caught.message) : error("conflict"); }
     return store(ctx, { actorInternalUserId: authz.user.internalUserId, actorMemberId: authz.membership.memberId, workspaceId: args.workspaceId, invitationId, idempotencyKey: args.idempotencyKey, operation: "invitation.create", intentFingerprint, result, now });
@@ -148,15 +147,15 @@ export const createInvitation = mutationGeneric({
 });
 
 export const acceptInvitation = mutationGeneric({
-  args: { invitationId: v.string(), presentationRef: v.string(), idempotencyKey: v.string() },
+  args: { invitationId: v.string(), presentation: v.object({ kind: v.literal("direct-inbox"), invitationId: v.string() }), idempotencyKey: v.string() },
   handler: async (ctx, args) => {
-    const { user } = await requireFableUser(ctx); const now = Date.now(); const intentFingerprint = fingerprint(["invitation.accept", args.invitationId, args.presentationRef]);
+    const { user } = await requireFableUser(ctx); const now = Date.now(); const intentFingerprint = fingerprint(["invitation.accept", args.invitationId, args.presentation]);
     const prior = await replay(ctx, user.internalUserId, args.idempotencyKey, "invitation.accept", intentFingerprint); if (prior) return prior;
     let result: any; let workspaceId: string | undefined; let targetMemberId: string | undefined;
     try {
       let invitation = await uniqueByIndex(ctx, "workspace_invitations", "by_invitation", (q) => q.eq("invitationId", args.invitationId)); if (!invitation) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true); workspaceId = invitation.workspaceId;
       invitation = await normalizePendingInvitation(ctx, invitation, now, true); if (invitation.status === "expired") throw new CloudPolicyError("invitation-expired", "The invitation is unavailable.", true); if (invitation.status !== "pending") throw new CloudPolicyError("invitation-already-consumed", "The invitation is unavailable.", true);
-      if (invitation.recipientKind !== "internal-user" || invitation.recipientInternalUserId !== user.internalUserId) throw new CloudPolicyError("invitation-recipient-mismatch", "The invitation is unavailable.", true); if (invitation.presentationRef !== args.presentationRef) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
+      if (invitation.recipientKind !== "internal-user" || invitation.recipientInternalUserId !== user.internalUserId) throw new CloudPolicyError("invitation-recipient-mismatch", "The invitation is unavailable.", true); if (args.presentation.kind !== "direct-inbox" || args.presentation.invitationId !== args.invitationId) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
       const workspace = await uniqueByIndex(ctx, "workspaces", "by_workspace", (q) => q.eq("workspaceId", invitation.workspaceId)); if (!workspace || workspace.status !== "active") throw new CloudPolicyError("workspace-unavailable", "The invitation is unavailable.", true);
       const memberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace_user", (q: any) => q.eq("workspaceId", invitation.workspaceId).eq("internalUserId", user.internalUserId)).collect(); if (memberships.length > 1) throw new CloudPolicyError("conflict", "The invitation is unavailable.", true); let membership = memberships[0];
       if (membership && membership.status !== "suspended") throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);

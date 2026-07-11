@@ -152,7 +152,6 @@ export interface CloudInvitation {
   recipientInternalUserId: string;
   status: "pending" | "accepted" | "revoked" | "expired";
   expiresAt: number;
-  presentationRef: string;
   acceptedByInternalUserId?: string;
   acceptedMembershipId?: string;
   acceptedAt?: number;
@@ -237,18 +236,19 @@ function recordLifecycle(state: MembershipLifecycleState, identity: CloudIdentit
   return receiptResult;
 }
 function expireInvitations(state: MembershipLifecycleState, now: number) { for (const invitation of state.invitations) if (invitation.status === "pending" && invitation.expiresAt <= now) { invitation.status = "expired"; invitation.updatedAt = now; } }
+function projectedInvitation(invitation: CloudInvitation, now: number) { return invitation.status === "pending" && invitation.expiresAt <= now ? { ...invitation, status: "expired" as const, updatedAt: now } : invitation; }
 function uniqueInvitation(state: MembershipLifecycleState, invitationId: string) { const found = state.invitations.filter((entry) => entry.invitationId === invitationId); if (found.length !== 1) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true); return found[0]; }
 function activeOwnerCount(state: MembershipLifecycleState, workspaceId: string, exceptMemberId?: string) { return state.memberships.filter((member) => member.workspaceId === workspaceId && member.memberId !== exceptMemberId && member.status === "active" && member.role === "owner").length; }
 
 export function listWorkspaceInvitationsToState(state: MembershipLifecycleState, identity: CloudIdentity, workspaceId: string, now = Date.now()) {
-  requireCanManageMembers(state, identity, workspaceId); expireInvitations(state, now);
-  return state.invitations.filter((entry) => entry.workspaceId === workspaceId).map(canonicalInvitation).sort((a, b) => a.invitationId.localeCompare(b.invitationId));
+  requireCanManageMembers(state, identity, workspaceId);
+  return state.invitations.filter((entry) => entry.workspaceId === workspaceId).map((entry) => canonicalInvitation(projectedInvitation(entry, now))).sort((a, b) => a.invitationId.localeCompare(b.invitationId));
 }
 export function listRecipientPendingInvitationsToState(state: MembershipLifecycleState, identity: CloudIdentity, now = Date.now()) {
-  const { user } = resolveInternalUser(state, identity); expireInvitations(state, now);
-  return state.invitations.filter((entry) => entry.recipientInternalUserId === user.internalUserId && entry.status === "pending").map((entry) => ({ invitation: canonicalInvitation(entry), presentationProof: { invitationId: entry.invitationId, proofRef: entry.presentationRef, verifiedAt: iso(now)! } })).sort((a, b) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
+  const { user } = resolveInternalUser(state, identity);
+  return state.invitations.filter((entry) => entry.recipientInternalUserId === user.internalUserId && entry.status === "pending" && entry.expiresAt > now).map((entry) => ({ invitation: canonicalInvitation(entry), selection: { kind: "direct-inbox" as const, invitationId: entry.invitationId } })).sort((a, b) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
 }
-export function createInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { workspaceId: string; role: CloudRole; recipientInternalUserId: string; expiresAt: number; idempotencyKey: string; invitationId: string; presentationRef: string }, now = Date.now()): LifecycleResult {
+export function createInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { workspaceId: string; role: CloudRole; recipientInternalUserId: string; expiresAt: number; idempotencyKey: string; invitationId: string }, now = Date.now()): LifecycleResult {
   const actor = requireCanManageMembers(state, identity, args.workspaceId); const intent = fingerprint(["invitation.create", args.workspaceId, args.role, args.recipientInternalUserId, args.expiresAt]);
   const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "invitation.create", intent); if (replay) return replay;
   let result: LifecycleResult;
@@ -258,20 +258,20 @@ export function createInvitationToState(state: MembershipLifecycleState, identit
     const recipient = state.users.find((entry) => entry.internalUserId === args.recipientInternalUserId); const membership = state.memberships.find((entry) => entry.workspaceId === args.workspaceId && entry.internalUserId === args.recipientInternalUserId);
     const duplicate = state.invitations.some((entry) => entry.workspaceId === args.workspaceId && entry.recipientInternalUserId === args.recipientInternalUserId && entry.status === "pending"); ensureInvitationTarget(recipient?.status, duplicate, membership?.status);
     if (membership) ensureMemberManagement(actor.membership.role, membership.role, args.role);
-    const invitation: CloudInvitation = { invitationId: args.invitationId, workspaceId: args.workspaceId, role: args.role, inviterMemberId: actor.membership.memberId, recipientInternalUserId: args.recipientInternalUserId, status: "pending", expiresAt: args.expiresAt, presentationRef: args.presentationRef, createdAt: now, updatedAt: now, createdByInternalUserId: actor.user.internalUserId }; state.invitations.push(invitation);
+    const invitation: CloudInvitation = { invitationId: args.invitationId, workspaceId: args.workspaceId, role: args.role, inviterMemberId: actor.membership.memberId, recipientInternalUserId: args.recipientInternalUserId, status: "pending", expiresAt: args.expiresAt, createdAt: now, updatedAt: now, createdByInternalUserId: actor.user.internalUserId }; state.invitations.push(invitation);
     result = { status: "accepted", invitation: canonicalInvitation(invitation), idempotency: { key: args.idempotencyKey, replayed: false, recordedAt: iso(now)! } };
   } catch (error) { result = error instanceof CloudPolicyError ? lifecycleError(error.code, error.message) : lifecycleError("conflict"); }
   return recordLifecycle(state, identity, actor, args.idempotencyKey, "invitation.create", intent, result, { workspaceId: args.workspaceId, invitationId: args.invitationId }, now);
 }
-export function acceptInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { invitationId: string; presentationRef: string; idempotencyKey: string }, now = Date.now()): LifecycleResult {
-  const actor = resolveInternalUser(state, identity); const intent = fingerprint(["invitation.accept", args.invitationId, args.presentationRef]); const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "invitation.accept", intent); if (replay) return replay;
+export function acceptInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { invitationId: string; presentation: { kind: "direct-inbox"; invitationId: string }; idempotencyKey: string }, now = Date.now()): LifecycleResult {
+  const actor = resolveInternalUser(state, identity); const intent = fingerprint(["invitation.accept", args.invitationId, args.presentation]); const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "invitation.accept", intent); if (replay) return replay;
   let workspaceId = "unavailable"; let targetMemberId: string | undefined; let result: LifecycleResult;
   try {
     expireInvitations(state, now); const invitation = uniqueInvitation(state, args.invitationId); workspaceId = invitation.workspaceId;
     if (invitation.status === "expired") throw new CloudPolicyError("invitation-expired", "The invitation is unavailable.", true);
     if (invitation.status !== "pending") throw new CloudPolicyError("invitation-already-consumed", "The invitation is unavailable.", true);
     if (invitation.recipientInternalUserId !== actor.user.internalUserId) throw new CloudPolicyError("invitation-recipient-mismatch", "The invitation is unavailable.", true);
-    if (invitation.presentationRef !== args.presentationRef) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
+    if (args.presentation.kind !== "direct-inbox" || args.presentation.invitationId !== args.invitationId) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
     const workspace = state.workspaces.filter((entry) => entry.workspaceId === invitation.workspaceId && entry.status === "active"); if (workspace.length !== 1) throw new CloudPolicyError("workspace-unavailable", "The invitation is unavailable.", true);
     const memberships = state.memberships.filter((entry) => entry.workspaceId === invitation.workspaceId && entry.internalUserId === actor.user.internalUserId); if (memberships.length > 1) throw new CloudPolicyError("conflict", "The invitation is unavailable.", true);
     let membership = memberships[0];
