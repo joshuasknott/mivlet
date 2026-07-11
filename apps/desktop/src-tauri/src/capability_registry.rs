@@ -9,7 +9,13 @@ use crate::models::{ConnectorCapabilityRequest, ConnectorCommandError, Connector
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeReadAdapter {
     Capability(&'static str),
-    Search,
+    Search(NativeSearchAdapter),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeSearchAdapter {
+    Google,
+    SlackChannels,
 }
 
 struct NativeReadImplementation {
@@ -41,8 +47,14 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
     NativeReadImplementation {
         capability_id: "source.file.search",
         connector_id: "google-drive",
-        adapter: NativeReadAdapter::Search,
+        adapter: NativeReadAdapter::Search(NativeSearchAdapter::Google),
         required_scopes: &["https://www.googleapis.com/auth/drive.file"],
+    },
+    NativeReadImplementation {
+        capability_id: "communication.channel.list",
+        connector_id: "slack",
+        adapter: NativeReadAdapter::Search(NativeSearchAdapter::SlackChannels),
+        required_scopes: &["channels:read", "groups:read"],
     },
 ];
 
@@ -245,7 +257,7 @@ pub(crate) async fn read(
                 )
             })?
         }
-        NativeReadAdapter::Search => {
+        NativeReadAdapter::Search(search_adapter) => {
             let query = match input.get("query") {
                 Some(value) => value.as_str().ok_or_else(|| {
                     error(
@@ -286,9 +298,34 @@ pub(crate) async fn read(
                 limit,
                 cursor,
             };
-            let result =
-                crate::google::search_for_connection(app, request, Some(&resolved.connection_id))
-                    .await?;
+            if search_adapter == NativeSearchAdapter::SlackChannels
+                && !request.query.trim().is_empty()
+            {
+                return Err(error(
+                    "invalid-request",
+                    &capability_id,
+                    "Channel listing does not accept a search query.",
+                    false,
+                ));
+            }
+            let result = match search_adapter {
+                NativeSearchAdapter::Google => {
+                    crate::google::search_for_connection(
+                        app,
+                        request,
+                        Some(&resolved.connection_id),
+                    )
+                    .await?
+                }
+                NativeSearchAdapter::SlackChannels => {
+                    crate::collaboration_connectors::search_for_connection(
+                        app,
+                        request,
+                        Some(&resolved.connection_id),
+                    )
+                    .await?
+                }
+            };
             serde_json::to_value(result).map_err(|_| {
                 error(
                     "implementation-unverified",
@@ -385,13 +422,25 @@ mod tests {
         );
         assert_eq!(
             implementation("source.file.search").unwrap().adapter,
-            NativeReadAdapter::Search
+            NativeReadAdapter::Search(NativeSearchAdapter::Google)
         );
         assert_eq!(
             implementation("source.file.search")
                 .unwrap()
                 .required_scopes,
             &["https://www.googleapis.com/auth/drive.file"]
+        );
+        assert_eq!(
+            implementation("communication.channel.list")
+                .unwrap()
+                .adapter,
+            NativeReadAdapter::Search(NativeSearchAdapter::SlackChannels)
+        );
+        assert_eq!(
+            implementation("communication.channel.list")
+                .unwrap()
+                .required_scopes,
+            &["channels:read", "groups:read"]
         );
         let mut drive_connection = connection(&["https://www.googleapis.com/auth/drive.file"]);
         drive_connection.connector_id = "google-drive".into();
@@ -402,6 +451,19 @@ mod tests {
                 implementation("source.file.search").unwrap(),
                 &drive_connection,
                 &drive_canonical,
+            )
+            .unwrap(),
+            "available"
+        );
+        let mut slack_connection = connection(&["channels:read", "groups:read"]);
+        slack_connection.connector_id = "slack".into();
+        let mut slack_canonical = canonical("healthy");
+        slack_canonical.connector_definition_key = "slack".into();
+        assert_eq!(
+            availability_for(
+                implementation("communication.channel.list").unwrap(),
+                &slack_connection,
+                &slack_canonical,
             )
             .unwrap(),
             "available"

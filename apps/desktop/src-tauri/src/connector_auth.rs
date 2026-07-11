@@ -2673,7 +2673,16 @@ pub(crate) async fn access_token(
     app: &tauri::AppHandle,
     connector_id: &str,
 ) -> Result<(ConnectorConnection, String), ConnectorCommandError> {
-    let (connection, tokens) = authorized_tokens(app, connector_id).await?;
+    access_token_for_connection(app, connector_id, None).await
+}
+
+pub(crate) async fn access_token_for_connection(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+    expected_connection_id: Option<&str>,
+) -> Result<(ConnectorConnection, String), ConnectorCommandError> {
+    let (connection, tokens) =
+        authorized_tokens_for_connection(app, connector_id, expected_connection_id).await?;
     Ok((connection, tokens.access_token))
 }
 

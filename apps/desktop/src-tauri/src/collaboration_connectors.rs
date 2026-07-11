@@ -4,7 +4,7 @@ use reqwest::{Client, Response, StatusCode};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-use crate::connector_auth::access_token;
+use crate::connector_auth::{access_token, access_token_for_connection};
 use crate::models::{
     ConnectorActionRequest, ConnectorActionResult, ConnectorCommandError, ConnectorHealth,
     ConnectorSearchItem, ConnectorSearchRequest, ConnectorSearchResult,
@@ -81,7 +81,16 @@ pub(crate) async fn search(
     app: &tauri::AppHandle,
     request: ConnectorSearchRequest,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
-    let (_, token) = access_token(app, &request.connector_id).await?;
+    search_for_connection(app, request, None).await
+}
+
+pub(crate) async fn search_for_connection(
+    app: &tauri::AppHandle,
+    request: ConnectorSearchRequest,
+    expected_connection_id: Option<&str>,
+) -> Result<ConnectorSearchResult, ConnectorCommandError> {
+    let (_, token) =
+        access_token_for_connection(app, &request.connector_id, expected_connection_id).await?;
     match request.connector_id.as_str() {
         "notion" => search_notion(request, &token).await,
         "slack" => search_slack(request, &token).await,
