@@ -1145,9 +1145,7 @@ pub fn apply_workspace_delta(
                 || record.created_by_internal_user_id.trim().is_empty()
                 || record.created_by_device_id.trim().is_empty()
                 || record.title.trim().is_empty()
-                || tombstoned
-                    .get(&record.id)
-                    .is_some_and(|deleted_revision| *deleted_revision <= record.revision)
+                || tombstoned.contains_key(&record.id)
             {
                 return Err(StoreError::Invalid(
                     "Cloud workspace record would resurrect a tombstone.".into(),
@@ -1760,6 +1758,72 @@ mod tests {
             .unwrap();
         assert_eq!(project.authority, "local");
         assert_eq!(project.title, "Private local");
+    }
+
+    #[test]
+    fn later_tombstone_in_one_delta_cannot_reinsert_an_earlier_record() {
+        let store = store();
+        store
+            .transaction(|tx| upsert_link(tx, &link(), "t0"))
+            .unwrap();
+        let delta = WorkspaceDelta {
+            workspace_id: "fable-ws".into(),
+            after_revision: 3,
+            workspace_revision: 5,
+            changes: vec![
+                DeltaChange::Record {
+                    record: AcceptedSharedProject {
+                        id: "project-a".into(),
+                        workspace_id: "fable-ws".into(),
+                        authority: "convex".into(),
+                        visibility: "workspace-shared".into(),
+                        schema_version: 1,
+                        revision: 4,
+                        workspace_revision: 4,
+                        created_by_internal_user_id: "user-a".into(),
+                        created_by_device_id: "device-a".into(),
+                        created_at: "t1".into(),
+                        updated_at: "t1".into(),
+                        title: "Stale".into(),
+                        description: None,
+                        instructions: None,
+                        lifecycle: "active".into(),
+                    },
+                },
+                DeltaChange::Tombstone {
+                    tombstone: AcceptedSharedTombstone {
+                        workspace_id: "fable-ws".into(),
+                        record_type: "project".into(),
+                        record_id: "project-a".into(),
+                        revision: 5,
+                        deleted_at: "t2".into(),
+                        actor_internal_user_id: "user-a".into(),
+                        actor_member_id: "member-a".into(),
+                        actor_device_id: "device-a".into(),
+                        reason_class: "user-delete".into(),
+                    },
+                },
+            ],
+        };
+        store
+            .transaction(|tx| apply_workspace_delta(tx, &store, "default", &delta, "t3"))
+            .unwrap_err();
+        let cursor = store
+            .with_conn(|conn| get_cursor(conn, "default", "device-a"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(cursor.last_pulled_revision, 3);
+        let count: i64 = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM project WHERE id='project-a';",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

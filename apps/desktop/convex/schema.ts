@@ -9,6 +9,17 @@ const identityStatus = v.union(v.literal("active"), v.literal("disabled"), v.lit
 const invitationStatus = v.union(v.literal("pending"), v.literal("accepted"), v.literal("revoked"), v.literal("expired"));
 const mutationStatus = v.union(v.literal("accepted"), v.literal("rejected"));
 const operation = v.union(v.literal("create"), v.literal("update"), v.literal("delete"));
+const sharedProjectSnapshot = v.object({
+  id: v.string(), workspaceId: v.string(), authority: v.literal("convex"), visibility: v.literal("workspace-shared"),
+  schemaVersion: v.literal(1), revision: v.number(), workspaceRevision: v.number(), createdByInternalUserId: v.string(),
+  createdByDeviceId: v.string(), createdAt: v.string(), updatedAt: v.string(), title: v.string(),
+  description: v.optional(v.string()), instructions: v.optional(v.string()), lifecycle: v.literal("active")
+});
+const sharedProjectTombstoneSnapshot = v.object({
+  workspaceId: v.string(), recordType: v.literal("project"), recordId: v.string(), revision: v.number(), deletedAt: v.string(),
+  actorInternalUserId: v.string(), actorMemberId: v.string(), actorDeviceId: v.string(),
+  reasonClass: v.union(v.literal("user-delete"), v.literal("member-removed"), v.literal("workspace-deleted"))
+});
 
 /** Fable owns these records. External providers authenticate only. */
 export default defineSchema({
@@ -63,6 +74,14 @@ export default defineSchema({
   tombstones: defineTable({
     workspaceId: v.string(), recordType: v.literal("project"), recordId: v.string(), revision: v.number(), deletedAt: v.number(), actorInternalUserId: v.string(), actorMemberId: v.optional(v.string()), actorDeviceId: v.string(), reasonClass: v.string()
   }).index("by_workspace_revision", ["workspaceId", "revision"]).index("by_record", ["workspaceId", "recordType", "recordId"]),
+  shared_record_changes: defineTable({
+    workspaceId: v.string(), revision: v.number(), recordType: v.literal("project"), recordId: v.string(),
+    change: v.union(
+      v.object({ kind: v.literal("record"), record: sharedProjectSnapshot }),
+      v.object({ kind: v.literal("tombstone"), tombstone: sharedProjectTombstoneSnapshot })
+    ),
+    createdAt: v.number()
+  }).index("by_workspace_revision", ["workspaceId", "revision"]),
   idempotency_keys: defineTable({
     workspaceId: v.string(), deviceId: v.string(), clientMutationId: v.string(), idempotencyKey: v.string(), intentFingerprint: v.optional(v.string()), status: mutationStatus, result: v.any(), createdAt: v.number()
   }).index("by_mutation", ["workspaceId", "deviceId", "clientMutationId"]),
