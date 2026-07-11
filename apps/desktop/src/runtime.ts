@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getActiveRuntimeDataScope } from "./runtime-scope";
 import { importLocalTextFile, searchKnowledgeSources } from "@fable/connectors";
 import type { LocalTextFileCandidate } from "@fable/connectors";
+import { applyLocalKnowledgeRefresh } from "./lib/local-knowledge-refresh";
 import type {
   ActionHistoryCategory,
   ActionHistoryEvent,
@@ -32,6 +33,8 @@ import type {
   KnowledgeCitation,
   KnowledgeSource,
   LocalFileImport,
+  LocalKnowledgeRefreshResponse,
+  RefreshLocalKnowledgeSourceRequest,
   MemoryControlState,
   MemoryPromotionRequest,
   MemoryPromotionResponse,
@@ -281,6 +284,41 @@ export async function importRuntimeLocalKnowledgeSource(
   try {
     return await invoke<LocalFileImport>("import_local_knowledge_source", {
       candidate,
+      ...scope
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function refreshRuntimeLocalKnowledgeSource(
+  request: RefreshLocalKnowledgeSourceRequest,
+  scopeOverride?: RuntimeKnowledgeScopeOverride
+) {
+  const scope = knowledgeScope(scopeOverride);
+  if (!scope) return null;
+  if (!hasTauriRuntime()) {
+    if (!scopeOverride) return null;
+    const key = previewKnowledgeKey(scopeOverride);
+    const sources = previewProjectKnowledge.get(key) ?? [];
+    const index = sources.findIndex((source) => source.id === request.sourceId.trim());
+    if (index < 0) throw new Error("That local knowledge source is no longer available.");
+    const source = sources[index];
+    if (source.workspaceId !== scopeOverride.workspaceId ||
+        source.scope?.level !== "project" || source.scope.projectId !== scopeOverride.projectId) {
+      throw new Error("Knowledge source does not belong to this project.");
+    }
+    const response = applyLocalKnowledgeRefresh(source, request);
+    if (response.outcome === "updated") {
+      const next = [...sources];
+      next[index] = response.source;
+      previewProjectKnowledge.set(key, next);
+    }
+    return response;
+  }
+  try {
+    return await invoke<LocalKnowledgeRefreshResponse>("refresh_local_knowledge_source", {
+      request,
       ...scope
     });
   } catch (error) {

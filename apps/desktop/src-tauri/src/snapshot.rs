@@ -17,9 +17,10 @@ use crate::knowledge::import_local_text_file;
 use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
-    ApprovalAuditEntry, ApprovalGrant, LocalFileImport, LocalTextFileCandidate, PlanStep,
-    RuntimeSnapshot, RuntimeStatus, Schedule, WorkspaceGoal, WorkspacePlan, APPROVAL_MODES,
-    AUTOMATION_STATUSES, GOAL_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES, MAX_GOAL_FIELD_CHARACTERS,
+    ApprovalAuditEntry, ApprovalGrant, LocalFileImport, LocalKnowledgeRefreshResponse,
+    LocalTextFileCandidate, PlanStep, RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot,
+    RuntimeStatus, Schedule, WorkspaceGoal, WorkspacePlan, APPROVAL_MODES, AUTOMATION_STATUSES,
+    GOAL_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES, MAX_GOAL_FIELD_CHARACTERS,
     MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES, MAX_LOCAL_FILE_PREVIEW_CHARACTERS,
     MAX_MEMORY_TITLE_CHARACTERS, MAX_PLAN_STEPS, MAX_PLAN_STEP_DESCRIPTION_CHARACTERS,
     MAX_PLAN_TITLE_CHARACTERS, MAX_RUNTIME_SNAPSHOT_AUTOMATIONS,
@@ -182,6 +183,122 @@ fn append_imported_knowledge_source(
     sources.insert(0, source);
     sources.truncate(MAX_IMPORTED_KNOWLEDGE_SOURCES);
     Ok(sources)
+}
+
+fn apply_local_knowledge_refresh(
+    existing: &LocalFileImport,
+    request: RefreshLocalKnowledgeSourceRequest,
+    scope: &DataScope,
+) -> Result<LocalKnowledgeRefreshResponse, String> {
+    if request.source_id.trim() != existing.id
+        || request.expected_content_fingerprint.trim() != existing.content_fingerprint
+    {
+        return Err("This source changed elsewhere. Reload Knowledge and try again.".to_string());
+    }
+    if existing.deleted_at.is_some() {
+        return Err("Deleted knowledge cannot be refreshed.".to_string());
+    }
+    if existing.kind != "document"
+        || existing.connector_id != "local-files"
+        || existing.origin != "local-import"
+        || existing.trust != "untrusted"
+    {
+        return Err("Only local file imports can be refreshed.".to_string());
+    }
+    if let Some(source_scope) = existing.scope.as_ref() {
+        let exact = match scope.project_id() {
+            Some(project_id) => {
+                source_scope
+                    .get("level")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("project")
+                    && source_scope
+                        .get("projectId")
+                        .and_then(serde_json::Value::as_str)
+                        == Some(project_id)
+            }
+            None => {
+                source_scope
+                    .get("level")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("project")
+            }
+        };
+        if !exact {
+            return Err("Knowledge source does not belong to this scope.".to_string());
+        }
+    }
+
+    let raw_name = request.file.name.trim();
+    let basename = raw_name.rsplit(['/', '\\']).next().unwrap_or_default();
+    if raw_name != basename || basename != existing.title {
+        return Err(format!("Choose the current version of {}.", existing.title));
+    }
+    let selected_at = normalize_spaces(&request.file.selected_at);
+    if selected_at.is_empty() {
+        return Err("Refresh needs a selection time.".to_string());
+    }
+    if request
+        .file
+        .modified_at
+        .as_deref()
+        .is_some_and(|value| normalize_spaces(value).is_empty())
+    {
+        return Err("File modification time is invalid.".to_string());
+    }
+    let actual_size = request.file.content.as_bytes().len();
+    if actual_size != request.file.size_bytes {
+        return Err(
+            "The selected file changed while Fable was reading it. Choose it again.".to_string(),
+        );
+    }
+    if request.file.content.contains('\0')
+        || request
+            .file
+            .content
+            .chars()
+            .take(8_192)
+            .filter(|character| character.is_control() && !matches!(character, '\t' | '\n' | '\r'))
+            .count()
+            * 20
+            > request.file.content.chars().take(8_192).count().max(1)
+    {
+        return Err("The selected file appears to be binary.".to_string());
+    }
+    if basename.to_ascii_lowercase().ends_with(".json")
+        && serde_json::from_str::<serde_json::Value>(&request.file.content).is_err()
+    {
+        return Err("The selected JSON file is malformed.".to_string());
+    }
+    let content = request.file.content;
+    let legacy_size = content.len();
+    let imported = import_local_text_file(LocalTextFileCandidate {
+        name: basename.to_string(),
+        content,
+        // import_local_text_file predates UTF-8 byte accounting. The exact byte
+        // length was checked above; supply its legacy character unit here.
+        size_bytes: legacy_size,
+        imported_at: Some(selected_at),
+    })?;
+    if imported.content_fingerprint == existing.content_fingerprint {
+        return Ok(LocalKnowledgeRefreshResponse {
+            outcome: "unchanged",
+            source: existing.clone(),
+        });
+    }
+    let mut source = existing.clone();
+    source.content_preview = imported.content_preview;
+    source.content_fingerprint = imported.content_fingerprint;
+    source.size_bytes = actual_size;
+    source.imported_at = imported.imported_at;
+    source.provenance = imported.provenance;
+    source.freshness = "Refreshed now".to_string();
+    source.status = Some("ok".to_string());
+    source.status_message = None;
+    Ok(LocalKnowledgeRefreshResponse {
+        outcome: "updated",
+        source,
+    })
 }
 
 fn merge_deleted_imported_tombstones(
@@ -706,7 +823,10 @@ pub fn import_local_knowledge_source(
     project_id: Option<String>,
 ) -> Result<LocalFileImport, String> {
     let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
-    let imported = import_local_text_file(candidate)?;
+    let mut imported = import_local_text_file(candidate)?;
+    if let Some(project_id) = scope.project_id() {
+        imported.scope = Some(serde_json::json!({ "level": "project", "projectId": project_id }));
+    }
     let path = imported_knowledge_path(&app)?;
     if crate::store::try_global().is_some() {
         let mut sources: Vec<LocalFileImport> =
@@ -716,6 +836,35 @@ pub fn import_local_knowledge_source(
         return Ok(imported);
     }
     persist_imported_knowledge_source(&path, imported)
+}
+
+#[tauri::command]
+pub fn refresh_local_knowledge_source(
+    app: tauri::AppHandle,
+    request: RefreshLocalKnowledgeSourceRequest,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<LocalKnowledgeRefreshResponse, String> {
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
+    let path = imported_knowledge_path(&app)?;
+    let update_scope = scope.clone();
+    crate::store::update_workspace_document(
+        &path,
+        &scope,
+        move |current: Option<Vec<LocalFileImport>>| {
+            let mut sources = current.unwrap_or_default();
+            let index = sources
+                .iter()
+                .position(|source| source.id == request.source_id.trim())
+                .ok_or_else(|| "That local knowledge source is no longer available.".to_string())?;
+            let response = apply_local_knowledge_refresh(&sources[index], request, &update_scope)?;
+            if response.outcome == "unchanged" {
+                return Ok((None, response));
+            }
+            sources[index] = response.source.clone();
+            Ok((Some(sources), response))
+        },
+    )
 }
 
 #[tauri::command]
@@ -783,6 +932,115 @@ mod tests {
             custom_approval_settings: None,
             saved_at: "2026-06-29T12:00:00Z".to_string(),
         }
+    }
+
+    fn refresh_source(name: &str, content: &str) -> LocalFileImport {
+        import_local_text_file(LocalTextFileCandidate {
+            name: name.into(),
+            content: content.into(),
+            size_bytes: content.len(),
+            imported_at: Some("before".into()),
+        })
+        .unwrap()
+    }
+
+    fn refresh_request(
+        source: &LocalFileImport,
+        content: &str,
+    ) -> RefreshLocalKnowledgeSourceRequest {
+        RefreshLocalKnowledgeSourceRequest {
+            source_id: source.id.clone(),
+            expected_content_fingerprint: source.content_fingerprint.clone(),
+            file: crate::models::RefreshLocalKnowledgeSourceFile {
+                name: source.title.clone(),
+                content: content.into(),
+                size_bytes: content.len(),
+                selected_at: "now".into(),
+                modified_at: Some("modified".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn local_refresh_updates_content_but_preserves_identity_and_controls() {
+        let mut source = refresh_source("notes.md", "old notes");
+        source.pinned = false;
+        source.disabled = true;
+        source.scope = Some(serde_json::json!({"level":"project","projectId":"p"}));
+        let response = apply_local_knowledge_refresh(
+            &source,
+            refresh_request(&source, "new searchable notes"),
+            &DataScope::new("w", Some("p".into())).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(response.outcome, "updated");
+        assert_eq!(response.source.id, source.id);
+        assert_eq!(response.source.scope, source.scope);
+        assert!(!response.source.pinned);
+        assert!(response.source.disabled);
+        assert_eq!(response.source.content_preview, "new searchable notes");
+        assert_ne!(
+            response.source.content_fingerprint,
+            source.content_fingerprint
+        );
+        assert_eq!(response.source.status.as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn local_refresh_identical_and_stale_cas_do_not_replace_canonical_source() {
+        let source = refresh_source("notes.md", "same");
+        let response = apply_local_knowledge_refresh(
+            &source,
+            refresh_request(&source, "same"),
+            &DataScope::legacy_default(),
+        )
+        .unwrap();
+        assert_eq!(response.outcome, "unchanged");
+        assert_eq!(response.source, source);
+        let mut stale = refresh_request(&source, "different");
+        stale.expected_content_fingerprint = "stale".into();
+        assert!(
+            apply_local_knowledge_refresh(&source, stale, &DataScope::legacy_default())
+                .unwrap_err()
+                .contains("changed elsewhere")
+        );
+    }
+
+    #[test]
+    fn local_refresh_rejects_invalid_file_tombstone_and_foreign_scope() {
+        let source = refresh_source("data.json", "{}");
+        let mut malformed = refresh_request(&source, "{");
+        malformed.file.size_bytes = 1;
+        assert!(
+            apply_local_knowledge_refresh(&source, malformed, &DataScope::legacy_default())
+                .unwrap_err()
+                .contains("malformed")
+        );
+        let mut wrong_size = refresh_request(&source, "new");
+        wrong_size.file.size_bytes = 99;
+        assert!(
+            apply_local_knowledge_refresh(&source, wrong_size, &DataScope::legacy_default())
+                .unwrap_err()
+                .contains("changed while")
+        );
+        let mut deleted = source.clone();
+        deleted.deleted_at = Some("then".into());
+        assert!(apply_local_knowledge_refresh(
+            &deleted,
+            refresh_request(&deleted, "new"),
+            &DataScope::legacy_default()
+        )
+        .unwrap_err()
+        .contains("Deleted"));
+        let mut foreign = source.clone();
+        foreign.scope = Some(serde_json::json!({"level":"project","projectId":"other"}));
+        assert!(apply_local_knowledge_refresh(
+            &foreign,
+            refresh_request(&foreign, "new"),
+            &DataScope::new("w", Some("p".into())).unwrap(),
+        )
+        .unwrap_err()
+        .contains("does not belong"));
     }
 
     #[test]

@@ -673,6 +673,31 @@ pub struct LocalTextFileCandidate {
     pub imported_at: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshLocalKnowledgeSourceFile {
+    pub name: String,
+    pub content: String,
+    pub size_bytes: usize,
+    pub selected_at: String,
+    pub modified_at: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshLocalKnowledgeSourceRequest {
+    pub source_id: String,
+    pub expected_content_fingerprint: String,
+    pub file: RefreshLocalKnowledgeSourceFile,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalKnowledgeRefreshResponse {
+    pub outcome: &'static str,
+    pub source: LocalFileImport,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalFileImport {

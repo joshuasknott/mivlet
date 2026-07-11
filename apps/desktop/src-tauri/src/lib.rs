@@ -160,6 +160,7 @@ pub fn run() {
             snapshot::list_imported_knowledge_sources,
             snapshot::save_imported_knowledge_sources,
             snapshot::import_local_knowledge_source,
+            snapshot::refresh_local_knowledge_source,
             memory::list_memory_state,
             memory::save_memory_state,
             memory::export_memory_state,

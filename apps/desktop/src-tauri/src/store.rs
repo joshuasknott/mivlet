@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use rusqlite::{Connection, OptionalExtension};
+use sha2::{Digest, Sha256};
 
 use crate::store::schema::{CURRENT_SCHEMA_VERSION, SCHEMA_V1};
 use crate::store::vault::{Sealed, Vault};
@@ -298,6 +299,28 @@ fn document_key(path: &Path) -> std::result::Result<String, String> {
         .ok_or_else(|| "Fable could not identify the local document.".to_string())
 }
 
+fn scoped_document_location(
+    path: &Path,
+    scope: &repos::scope::DataScope,
+) -> std::result::Result<(repos::scope::DataScope, String), String> {
+    let base = document_key(path)?;
+    match scope.project_id() {
+        None => Ok((scope.clone(), base)),
+        Some(project_id) => {
+            let digest = format!("{:x}", Sha256::digest(project_id.as_bytes()));
+            let workspace = repos::scope::DataScope::workspace(scope.workspace_id().to_string())
+                .map_err(|error| error.to_string())?;
+            Ok((
+                workspace,
+                format!(
+                    "document:project:{digest}:{}",
+                    base.trim_start_matches("document:")
+                ),
+            ))
+        }
+    }
+}
+
 fn timestamp() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -481,9 +504,9 @@ pub fn read_workspace_document<T: serde::de::DeserializeOwned>(
     let Some(store) = GLOBAL_STORE.get() else {
         return Ok(None);
     };
-    let key = document_key(path)?;
+    let (storage_scope, key) = scoped_document_location(path, scope)?;
     let value = store
-        .with_conn(|conn| repos::preferences::get_scoped(conn, store, scope, &key))
+        .with_conn(|conn| repos::preferences::get_scoped(conn, store, &storage_scope, &key))
         .map_err(|error| error.to_string())?;
     value
         .map(serde_json::from_value)
@@ -509,15 +532,60 @@ pub fn write_workspace_document<T: serde::Serialize>(
     let Some(store) = GLOBAL_STORE.get() else {
         return Ok(false);
     };
-    let key = document_key(path)?;
+    let (storage_scope, key) = scoped_document_location(path, scope)?;
     let value = serde_json::to_value(value)
         .map_err(|_| "Fable could not encode an encrypted local document.".to_string())?;
     store
         .transaction(|tx| {
-            repos::preferences::upsert_scoped(tx, store, scope, &key, &value, &timestamp())
+            repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
         })
         .map_err(|error| error.to_string())?;
     Ok(true)
+}
+
+/// Atomically read, compare, and optionally replace one encrypted scoped
+/// document. `None` from the updater means the canonical document is unchanged.
+pub fn update_workspace_document<T, R>(
+    path: &Path,
+    scope: &repos::scope::DataScope,
+    update: impl FnOnce(Option<T>) -> std::result::Result<(Option<T>, R), String>,
+) -> std::result::Result<R, String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let store = GLOBAL_STORE
+        .get()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let (storage_scope, key) = scoped_document_location(path, scope)?;
+    store
+        .transaction(|tx| {
+            let current = repos::preferences::get_scoped(tx, store, &storage_scope, &key)?
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| {
+                    StoreError::Invalid(
+                        "Fable could not decode an encrypted local document.".into(),
+                    )
+                })?;
+            let (replacement, result) = update(current).map_err(StoreError::Invalid)?;
+            if let Some(replacement) = replacement {
+                let value = serde_json::to_value(replacement).map_err(|_| {
+                    StoreError::Invalid(
+                        "Fable could not encode an encrypted local document.".into(),
+                    )
+                })?;
+                repos::preferences::upsert_scoped(
+                    tx,
+                    store,
+                    &storage_scope,
+                    &key,
+                    &value,
+                    &timestamp(),
+                )?;
+            }
+            Ok(result)
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -699,6 +767,60 @@ mod tests {
 
     fn vault() -> Vault {
         Vault::new(&vault::MasterKey::generate().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn scoped_document_locations_isolate_workspace_and_projects() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO workspace(id,name,created_at,updated_at) VALUES('w','W','t','t')", [])?;
+            for id in ["a", "b"] {
+                tx.execute(
+                    "INSERT INTO project(id,workspace_id,title_fingerprint,created_at,updated_at,payload,payload_nonce) VALUES(?1,'w','fp','t','t',x'00',x'00')",
+                    [id],
+                )?;
+            }
+            Ok(())
+        }).unwrap();
+        let path = Path::new("imported-knowledge.json");
+        let workspace = repos::scope::DataScope::workspace("w").unwrap();
+        let project_a = repos::scope::DataScope::new("w", Some("a".into())).unwrap();
+        let project_b = repos::scope::DataScope::new("w", Some("b".into())).unwrap();
+        let locations = [
+            (
+                scoped_document_location(path, &workspace).unwrap(),
+                serde_json::json!(["workspace"]),
+            ),
+            (
+                scoped_document_location(path, &project_a).unwrap(),
+                serde_json::json!(["a"]),
+            ),
+            (
+                scoped_document_location(path, &project_b).unwrap(),
+                serde_json::json!(["b"]),
+            ),
+        ];
+        assert_ne!(locations[0].0 .1, locations[1].0 .1);
+        assert_ne!(locations[1].0 .1, locations[2].0 .1);
+        store
+            .transaction(|tx| {
+                for ((scope, key), value) in &locations {
+                    repos::preferences::upsert_scoped(tx, &store, scope, key, value, "t")?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        store
+            .with_conn(|tx| {
+                for ((scope, key), expected) in &locations {
+                    assert_eq!(
+                        repos::preferences::get_scoped(tx, &store, scope, key)?.as_ref(),
+                        Some(expected)
+                    );
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

@@ -825,6 +825,23 @@ export interface LocalFileImport extends KnowledgeSource {
   origin: "local-import";
 }
 
+export interface RefreshLocalKnowledgeSourceRequest {
+  sourceId: string;
+  expectedContentFingerprint: string;
+  file: {
+    name: string;
+    content: string;
+    sizeBytes: number;
+    selectedAt: string;
+    modifiedAt?: string;
+  };
+}
+
+export interface LocalKnowledgeRefreshResponse {
+  outcome: "updated" | "unchanged";
+  source: LocalFileImport;
+}
+
 export interface KnowledgeCitation {
   sourceId: string;
   title: string;
