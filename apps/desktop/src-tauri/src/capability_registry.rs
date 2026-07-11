@@ -15,6 +15,7 @@ enum NativeReadAdapter {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeSearchAdapter {
     Google,
+    Notion,
     SlackChannels,
 }
 
@@ -55,6 +56,12 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
         connector_id: "slack",
         adapter: NativeReadAdapter::Search(NativeSearchAdapter::SlackChannels),
         required_scopes: &["channels:read", "groups:read"],
+    },
+    NativeReadImplementation {
+        capability_id: "knowledge.content.search",
+        connector_id: "notion",
+        adapter: NativeReadAdapter::Search(NativeSearchAdapter::Notion),
+        required_scopes: &["read_content"],
     },
 ];
 
@@ -317,7 +324,7 @@ pub(crate) async fn read(
                     )
                     .await?
                 }
-                NativeSearchAdapter::SlackChannels => {
+                NativeSearchAdapter::Notion | NativeSearchAdapter::SlackChannels => {
                     crate::collaboration_connectors::search_for_connection(
                         app,
                         request,
@@ -442,6 +449,16 @@ mod tests {
                 .required_scopes,
             &["channels:read", "groups:read"]
         );
+        assert_eq!(
+            implementation("knowledge.content.search").unwrap().adapter,
+            NativeReadAdapter::Search(NativeSearchAdapter::Notion)
+        );
+        assert_eq!(
+            implementation("knowledge.content.search")
+                .unwrap()
+                .required_scopes,
+            &["read_content"]
+        );
         let mut drive_connection = connection(&["https://www.googleapis.com/auth/drive.file"]);
         drive_connection.connector_id = "google-drive".into();
         let mut drive_canonical = canonical("healthy");
@@ -464,6 +481,19 @@ mod tests {
                 implementation("communication.channel.list").unwrap(),
                 &slack_connection,
                 &slack_canonical,
+            )
+            .unwrap(),
+            "available"
+        );
+        let mut notion_connection = connection(&["read_content"]);
+        notion_connection.connector_id = "notion".into();
+        let mut notion_canonical = canonical("healthy");
+        notion_canonical.connector_definition_key = "notion".into();
+        assert_eq!(
+            availability_for(
+                implementation("knowledge.content.search").unwrap(),
+                &notion_connection,
+                &notion_canonical,
             )
             .unwrap(),
             "available"

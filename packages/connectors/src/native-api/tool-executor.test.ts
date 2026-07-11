@@ -250,7 +250,7 @@ describe("semantic Connection read tool", () => {
       required: ["capability", "input"],
       properties: {
         capability: {
-          enum: ["source.repository.list", "source.file.search", "communication.channel.list", "software.deployment.list", "work.issue.list"]
+          enum: ["source.repository.list", "source.file.search", "knowledge.content.search", "communication.channel.list", "software.deployment.list", "work.issue.list"]
         }
       }
     });

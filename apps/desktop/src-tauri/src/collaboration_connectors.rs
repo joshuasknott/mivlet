@@ -176,9 +176,10 @@ async fn search_notion(
     request: ConnectorSearchRequest,
     token: &str,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
+    let page_size = request.limit.unwrap_or(20).clamp(1, 100);
     let response = checked("notion", Client::new().post("https://api.notion.com/v1/search")
         .bearer_auth(token).header("Notion-Version", "2022-06-28")
-        .json(&json!({"query": request.query, "page_size": request.limit.unwrap_or(20), "start_cursor": request.cursor})).send().await).await?;
+        .json(&json!({"query": request.query, "page_size": page_size, "start_cursor": request.cursor})).send().await).await?;
     let value = body("notion", response).await?;
     let items = value
         .get("results")
