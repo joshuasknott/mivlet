@@ -1238,6 +1238,28 @@ pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<Connecto
 
 pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
     let connection = connection_for(path, connector_id)?;
+    let identity = crate::clerk_identity::native_identity_generation_snapshot().ok()?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .ok()?;
+    let _guard = crate::clerk_identity::lock_native_identity_generation(&identity).ok()?;
+    let durable_store = crate::store::try_global()?;
+    let canonical = canonical_connection_for_refresh(
+        durable_store,
+        &scope,
+        connector_id,
+        &connection.account.id,
+    )
+    .ok()?;
+    if canonical.lifecycle != "authorized"
+        || canonical.authorization_state != "authorized"
+        || canonical.credential_state != "available"
+    {
+        return None;
+    }
     NativeConnectorSecretStore
         .get(&connection.credential_ref)
         .ok()
@@ -1873,6 +1895,42 @@ fn refresh_authorization_context(
     Ok((identity, scope, durable_store))
 }
 
+fn canonical_connection_for_refresh(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    provider_account_id: &str,
+) -> Result<crate::store::repos::connection_record::SafeConnectionRecord, ConnectorCommandError> {
+    let id =
+        derive_native_connection_id(scope.data.workspace_id(), connector_id, provider_account_id);
+    let record = store
+        .with_conn(|tx| crate::store::repos::connection_record::get(tx, store, scope, &id))
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
+        .ok_or_else(|| {
+            command_error(
+                "needs-auth",
+                connector_id,
+                "Canonical Connection authorization is unavailable.",
+                false,
+            )
+        })?;
+    let authorized = record.lifecycle == "authorized"
+        && record.authorization_state == "authorized"
+        && record.credential_state == "available";
+    let refreshable = record.lifecycle == "refresh-required"
+        && record.authorization_state == "expired"
+        && record.credential_state == "refresh-required";
+    if record.connector_definition_key != connector_id || (!authorized && !refreshable) {
+        return Err(command_error(
+            "needs-auth",
+            connector_id,
+            "Canonical Connection authorization must be recovered before use.",
+            false,
+        ));
+    }
+    Ok(record)
+}
+
 fn verify_refresh_snapshot(
     connector_id: &str,
     store: &dyn ConnectorSecretStore,
@@ -1904,6 +1962,8 @@ fn transition_refreshed_canonical(
     scope: &crate::authorized_scope::AuthorizedCommandScope,
     connector_id: &str,
     account_id: &str,
+    expected_revision: i64,
+    previous_health_state: &str,
     lifecycle: &str,
     authorization_state: &str,
     health_state: Option<&str>,
@@ -1912,19 +1972,15 @@ fn transition_refreshed_canonical(
 ) -> crate::store::Result<()> {
     durable_store.transaction(|tx| {
         let id = derive_native_connection_id(scope.data.workspace_id(), connector_id, account_id);
-        let existing = crate::store::repos::connection_record::get(tx, durable_store, scope, &id)?
-            .ok_or_else(|| {
-                crate::store::StoreError::Invalid("Connection is unavailable.".into())
-            })?;
         crate::store::repos::connection_record::transition_native_connector(
             tx,
             durable_store,
             scope,
             &id,
-            existing.revision,
+            expected_revision,
             lifecycle,
             authorization_state,
-            health_state.unwrap_or(&existing.health_state),
+            health_state.unwrap_or(previous_health_state),
             credential_state,
             updated_at,
         )?;
@@ -1940,6 +1996,8 @@ fn commit_refresh_success<G>(
     scope: &crate::authorized_scope::AuthorizedCommandScope,
     previous_connections: &[ConnectorConnection],
     previous_secret: &str,
+    canonical_revision: i64,
+    canonical_health_state: &str,
     updated_connection: ConnectorConnection,
     updated_secret: &str,
     before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
@@ -1984,6 +2042,8 @@ fn commit_refresh_success<G>(
         scope,
         connector_id,
         &updated_connection.account.id,
+        canonical_revision,
+        canonical_health_state,
         "authorized",
         "authorized",
         None,
@@ -2021,6 +2081,8 @@ fn commit_refresh_rejection<G>(
     previous_connections: &[ConnectorConnection],
     previous_secret: &str,
     account_id: &str,
+    canonical_revision: i64,
+    canonical_health_state: &str,
     before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
 ) -> Result<ConnectorConnection, ConnectorCommandError> {
     let _guard = before_commit()?;
@@ -2061,6 +2123,8 @@ fn commit_refresh_rejection<G>(
         scope,
         connector_id,
         account_id,
+        canonical_revision,
+        canonical_health_state,
         "refresh-required",
         "expired",
         Some("unhealthy"),
@@ -2138,11 +2202,38 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
+    let (identity, scope, durable_store) = refresh_authorization_context(connector_id)?;
+    let canonical = canonical_connection_for_refresh(
+        durable_store,
+        &scope,
+        connector_id,
+        &connection.account.id,
+    )?;
     if tokens.expires_at.is_none()
         || tokens
             .expires_at
             .is_some_and(|expires_at| expires_at > now_epoch() + 60)
     {
+        let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+            .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
+        let current = canonical_connection_for_refresh(
+            durable_store,
+            &scope,
+            connector_id,
+            &connection.account.id,
+        )?;
+        if current.revision != canonical.revision
+            || current.lifecycle != "authorized"
+            || current.authorization_state != "authorized"
+            || current.credential_state != "available"
+        {
+            return Err(command_error(
+                "conflict",
+                connector_id,
+                "Canonical Connection authorization changed before use.",
+                true,
+            ));
+        }
         return Ok(connection.clone());
     }
     let refresh_token = tokens.refresh_token.clone().ok_or_else(|| {
@@ -2153,7 +2244,6 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
-    let (identity, scope, durable_store) = refresh_authorization_context(connector_id)?;
     crate::ensure_rustls_provider();
     let refreshed: TokenResponse = if tokens.brokered {
         // Confidential broker flow: rotate through the broker's refresh endpoint,
@@ -2204,6 +2294,8 @@ pub(crate) async fn refresh_connection(
                     &connections,
                     &encoded,
                     &connection.account.id,
+                    canonical.revision,
+                    &canonical.health_state,
                     || {
                         crate::clerk_identity::lock_native_identity_generation(&identity).map_err(
                             |message| command_error("needs-auth", connector_id, &message, false),
@@ -2261,6 +2353,8 @@ pub(crate) async fn refresh_connection(
                 &connections,
                 &encoded,
                 &connection.account.id,
+                canonical.revision,
+                &canonical.health_state,
                 || {
                     crate::clerk_identity::lock_native_identity_generation(&identity).map_err(
                         |message| command_error("needs-auth", connector_id, &message, false),
@@ -2313,6 +2407,8 @@ pub(crate) async fn refresh_connection(
         &scope,
         &connections,
         &encoded,
+        canonical.revision,
+        &canonical.health_state,
         connection,
         &updated_secret,
         || {
@@ -3800,6 +3896,8 @@ mod tests {
         )
         .unwrap();
         let previous_connections = read_connections(&path).unwrap();
+        let canonical_before =
+            canonical_connection_for_refresh(&durable, &scope, "gmail", "account-1").unwrap();
         let mut updated_connection = previous_connections[0].clone();
         updated_connection.expires_at = Some(now_epoch() + 3600);
         updated_connection.updated_at = now_epoch().to_string();
@@ -3816,6 +3914,46 @@ mod tests {
             brokered: false,
         };
         let new_encoded = serde_json::to_string(&new_tokens).unwrap();
+        durable
+            .transaction(|tx| {
+                crate::store::repos::connection_record::transition_native_connector(
+                    tx,
+                    &durable,
+                    &scope,
+                    &canonical_before.id,
+                    canonical_before.revision,
+                    "authorized",
+                    "authorized",
+                    "degraded",
+                    "available",
+                    "health-raced",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let stale = commit_refresh_success(
+            "gmail",
+            &store,
+            &path,
+            &durable,
+            &scope,
+            &previous_connections,
+            &old_encoded,
+            canonical_before.revision,
+            &canonical_before.health_state,
+            updated_connection.clone(),
+            &new_encoded,
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, "unknown");
+        assert_eq!(
+            store.get(&credential_ref).unwrap().as_deref(),
+            Some(old_encoded.as_str())
+        );
+        assert_eq!(read_connections(&path).unwrap()[0].expires_at, Some(1));
+        let canonical_current =
+            canonical_connection_for_refresh(&durable, &scope, "gmail", "account-1").unwrap();
         commit_refresh_success(
             "gmail",
             &store,
@@ -3824,6 +3962,8 @@ mod tests {
             &scope,
             &previous_connections,
             &old_encoded,
+            canonical_current.revision,
+            &canonical_current.health_state,
             updated_connection,
             &new_encoded,
             || Ok(()),
@@ -3834,6 +3974,8 @@ mod tests {
             Some(new_encoded.as_str())
         );
         let refreshed_connections = read_connections(&path).unwrap();
+        let canonical_after =
+            canonical_connection_for_refresh(&durable, &scope, "gmail", "account-1").unwrap();
 
         durable
             .transaction(|tx| clear_current_internal_user(tx))
@@ -3847,6 +3989,8 @@ mod tests {
             &refreshed_connections,
             &new_encoded,
             "account-1",
+            canonical_after.revision,
+            &canonical_after.health_state,
             || Ok(()),
         )
         .unwrap_err();
@@ -3869,6 +4013,8 @@ mod tests {
             &refreshed_connections,
             &new_encoded,
             "account-1",
+            canonical_after.revision,
+            &canonical_after.health_state,
             || Ok(()),
         )
         .unwrap_err();
