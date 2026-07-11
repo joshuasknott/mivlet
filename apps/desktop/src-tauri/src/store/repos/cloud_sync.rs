@@ -1146,7 +1146,9 @@ pub fn apply_workspace_delta(
                 || record.created_by_internal_user_id.trim().is_empty()
                 || record.created_by_device_id.trim().is_empty()
                 || record.title.trim().is_empty()
-                || tombstoned.contains_key(&record.id)
+                || tombstoned
+                    .get(&record.id)
+                    .is_some_and(|deleted_revision| *deleted_revision <= record.revision)
             {
                 return Err(StoreError::Invalid(
                     "Cloud workspace record would resurrect a tombstone.".into(),
@@ -1185,6 +1187,15 @@ pub fn apply_workspace_delta(
     }
     for change in &delta.changes {
         if let DeltaChange::Record { record } = change {
+            // A later deletion in the same ordered history supersedes this
+            // intermediate snapshot. Advance through both revisions without
+            // reinstalling content after deletes have been applied.
+            if tombstoned
+                .get(&record.id)
+                .is_some_and(|deleted_revision| *deleted_revision > record.revision)
+            {
+                continue;
+            }
             project::upsert_shared_mirror(
                 tx,
                 store,
@@ -1815,7 +1826,7 @@ mod tests {
     }
 
     #[test]
-    fn later_tombstone_in_one_delta_cannot_reinsert_an_earlier_record() {
+    fn later_tombstone_in_one_delta_supersedes_an_earlier_record() {
         let store = store();
         store
             .transaction(|tx| upsert_link(tx, &link(), "t0"))
@@ -1861,12 +1872,12 @@ mod tests {
         };
         store
             .transaction(|tx| apply_workspace_delta(tx, &store, "default", &delta, "t3"))
-            .unwrap_err();
+            .unwrap();
         let cursor = store
             .with_conn(|conn| get_cursor(conn, "default", "device-a"))
             .unwrap()
             .unwrap();
-        assert_eq!(cursor.last_pulled_revision, 3);
+        assert_eq!(cursor.last_pulled_revision, 5);
         let count: i64 = store
             .with_conn(|conn| {
                 conn.query_row(
