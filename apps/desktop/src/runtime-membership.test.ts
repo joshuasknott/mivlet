@@ -1,0 +1,51 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  acceptRuntimePendingInvitation,
+  loadRuntimePendingInvitations
+} from "./runtime";
+
+const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
+
+function setNative(enabled: boolean) {
+  Object.defineProperty(window, "__TAURI_INTERNALS__", {
+    configurable: true,
+    value: enabled ? {} : undefined
+  });
+}
+
+describe("membership invitation runtime boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setNative(false);
+  });
+
+  it("does not simulate an invitation inbox outside Tauri", async () => {
+    await expect(loadRuntimePendingInvitations()).resolves.toBeNull();
+    await expect(acceptRuntimePendingInvitation("invitation-a")).resolves.toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("invokes only the fixed inbox commands with the allowed invitation id", async () => {
+    setNative(true);
+    mocks.invoke
+      .mockResolvedValueOnce({ invitations: [] })
+      .mockResolvedValueOnce({ result: { status: "rejected" }, accountWorkspace: {} });
+
+    await loadRuntimePendingInvitations();
+    await acceptRuntimePendingInvitation("invitation-a");
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["account_membership_pending_invitations"],
+      ["account_membership_accept_invitation", { invitationId: "invitation-a" }]
+    ]);
+  });
+
+  it("surfaces native failures without inventing a successful outcome", async () => {
+    setNative(true);
+    mocks.invoke.mockRejectedValueOnce({ message: "The invitation is unavailable." });
+    await expect(acceptRuntimePendingInvitation("invitation-a"))
+      .rejects.toThrow("The invitation is unavailable.");
+  });
+});
