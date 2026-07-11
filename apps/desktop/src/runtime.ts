@@ -839,13 +839,16 @@ export async function createRuntimeResponseArtifact(input: CreateResponseArtifac
   const scope = conversationScopeOrThrow();
   const artifactId = `artifact-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
   const versionId = `artifact-version-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  // The native boundary derives citations from the immutable completed-run
+  // receipt. Renderer citation state is intentionally not part of this request.
   const nativeInput = {
-    ...input,
     artifactId,
     versionId,
-    citations: input.citations.map((citation) => ({
-      sourceId: citation.sourceId
-    }))
+    runId: input.runId,
+    threadId: input.threadId,
+    messageId: input.messageId,
+    title: input.title,
+    content: input.content
   };
   if (!hasTauriRuntime()) {
     const now = new Date().toISOString();
