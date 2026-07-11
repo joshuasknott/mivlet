@@ -2,6 +2,7 @@ import { useState } from "react";
 import { McpClient } from "@fable/connectors";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
+  beginRuntimeRemoteMcpAuthorization,
   commitRuntimeMcpServerConfiguration,
   inspectRuntimeRemoteMcpAuthorization,
   listRuntimeMcpServerConfigurations,
@@ -41,6 +42,7 @@ export function LocalMcpSettings({
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
+  const [authorizingId, setAuthorizingId] = useState<string | null>(null);
   const [discoveries, setDiscoveries] = useState<Record<string, RuntimeMcpConnectionDetails>>({});
   const [enablementDrafts, setEnablementDrafts] = useState<Record<string, {
     tools: string[];
@@ -155,7 +157,7 @@ export function LocalMcpSettings({
           const authorization = await inspectRuntimeRemoteMcpAuthorization(workspaceId, server.id);
           if (authorization) {
             onStatus(
-              `${server.displayName} requires sign-in and advertises secure S256 authorization. Connecting an account isn’t available yet.`
+              `${server.displayName} requires sign-in and advertises secure S256 authorization. Connecting an account is ready through Connect account.`
             );
           } else {
             onStatus("Remote tool-server sign-in requires the desktop app.");
@@ -193,6 +195,19 @@ export function LocalMcpSettings({
         }
       };
     });
+  };
+
+  const authorize = async (server: RuntimeMcpServerSummary) => {
+    setAuthorizingId(server.id);
+    try {
+      const result = await beginRuntimeRemoteMcpAuthorization(workspaceId, server.id);
+      if (!result) throw new Error("Remote tool-server sign-in requires the desktop app.");
+      onStatus(`${server.displayName} account connected. Check the server before enabling any access.`);
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : `${server.displayName} sign-in didnâ€™t finish.`);
+    } finally {
+      setAuthorizingId(null);
+    }
   };
 
   const saveEnablement = async (server: RuntimeMcpServerSummary) => {
@@ -264,6 +279,16 @@ export function LocalMcpSettings({
                         >
                           {checkingId === server.id ? "Checking…" : "Check server"}
                         </button>
+                        {server.transport === "streamable-http" ? (
+                          <button
+                            type="button"
+                            className="button button--secondary"
+                            disabled={authorizingId === server.id || server.disabled}
+                            onClick={() => void authorize(server)}
+                          >
+                            {authorizingId === server.id ? "Connectingâ€¦" : "Connect account"}
+                          </button>
+                        ) : null}
                       </div>
                       {discovery && draft ? (
                         <div className="mcp-settings__access" aria-label={`${server.displayName} access`}>

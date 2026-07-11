@@ -539,9 +539,11 @@ pub(crate) fn mcp_grant_target(
                     .ok_or_else(|| {
                         crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
                     })?;
-            if connection.kind != "mcp"
-                || connection.lifecycle != "authorized"
-                || connection.authorization_state != "not-required"
+            let credential_ready = (connection.authorization_state == "not-required"
+                && connection.credential_state == "not-required")
+                || (connection.authorization_state == "authorized"
+                    && connection.credential_state == "available");
+            if connection.kind != "mcp" || connection.lifecycle != "authorized" || !credential_ready
             {
                 return Err(crate::store::StoreError::Invalid(
                     "MCP Connection is not authorized.".into(),

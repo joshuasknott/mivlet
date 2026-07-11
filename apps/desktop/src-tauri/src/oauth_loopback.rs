@@ -61,7 +61,7 @@ fn command_error(
 /// Open the user's default browser to an authorization URL. Best-effort: if no
 /// platform opener is available the returned URL still lets the user complete
 /// the flow manually (the loopback receiver listens regardless).
-fn open_browser(authorization_url: &str) {
+pub(crate) fn open_browser(authorization_url: &str) {
     // `std::process::Command` keeps the OS process launcher entirely on the
     // Rust side; no shell interpolation of the (provider-built) URL occurs.
     #[cfg(target_os = "windows")]
@@ -594,6 +594,57 @@ fn callback_page(status: &str, message: &str) -> String {
     )
 }
 
+/// Bind the shared hardened desktop OAuth receiver. Callers build their
+/// authorization request only after receiving this exact redirect URI.
+pub(crate) async fn bind_loopback_callback() -> Result<(TcpListener, String), String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|_| "Fable could not bind a loopback OAuth listener.".to_string())?;
+    let redirect_uri = bound_redirect(&listener).map_err(|error| error.message)?;
+    Ok((listener, redirect_uri))
+}
+
+/// Accept one callback through the shared bounded parser, acknowledge the
+/// browser with inert HTML, and return the complete loopback URL.
+pub(crate) async fn accept_loopback_callback(
+    listener: TcpListener,
+    redirect_uri: &str,
+) -> Result<String, String> {
+    let (mut stream, _) = tokio::time::timeout(CALLBACK_TIMEOUT, listener.accept())
+        .await
+        .map_err(|_| "OAuth authorization timed out; try connecting again.".to_string())?
+        .map_err(|_| "Fable could not accept the OAuth callback.".to_string())?;
+    let target = read_callback_target(&mut stream)
+        .await
+        .map_err(|error| error.message)?;
+    let callback_origin = redirect_uri
+        .strip_suffix("/callback")
+        .unwrap_or(redirect_uri);
+    let callback_url = format!("{callback_origin}{target}");
+    let (page_status, page_message) = if callback_url.contains("error=") {
+        (
+            "Authorization incomplete",
+            "The provider did not grant access.",
+        )
+    } else {
+        (
+            "Authorization received",
+            "Finishing the connection in Fable...",
+        )
+    };
+    let _ = stream
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
+                callback_page(page_status, page_message)
+            )
+            .as_bytes(),
+        )
+        .await;
+    let _ = stream.shutdown().await;
+    Ok(callback_url)
+}
+
 /// Drive the full loopback OAuth flow for a connector:
 /// 1. bind a loopback listener and derive its redirect URI,
 /// 2. start the OAuth transaction (writes PKCE verifier to secure storage),
@@ -609,15 +660,9 @@ pub(crate) async fn run_loopback_oauth(
     identity: crate::clerk_identity::NativeIdentityGenerationSnapshot,
     scope: crate::authorized_scope::AuthorizedCommandScope,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|_| {
-        command_error(
-            "unknown",
-            connector_id,
-            "Fable could not bind a loopback OAuth listener.",
-            false,
-        )
-    })?;
-    let redirect_uri = bound_redirect(&listener)?;
+    let (listener, redirect_uri) = bind_loopback_callback()
+        .await
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
 
     // Start the OAuth transaction with the real, bound loopback redirect URI.
     // `start_auth` stores the PKCE verifier + pending state in secure storage.

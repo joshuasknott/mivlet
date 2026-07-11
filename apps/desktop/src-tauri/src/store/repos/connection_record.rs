@@ -468,7 +468,7 @@ fn upsert_mcp_server(
     if let Some((revision, ..)) = existing {
         let changed = tx.execute(
             "UPDATE connection_record SET revision=revision+1,lifecycle='authorized',
-               authorization_state='not-required',health_state='unknown',updated_at=?1,
+               health_state='unknown',updated_at=?1,
                payload=?2,payload_nonce=?3
              WHERE workspace_id=?4 AND id=?5 AND revision=?6 AND kind='mcp'
                AND authority='local' AND owner_member_id=?7 AND deleted_at IS NULL;",
@@ -511,6 +511,104 @@ fn upsert_mcp_server(
     }
     get(tx, store, scope, &id)?
         .ok_or_else(|| StoreError::Invalid("MCP Connection could not be read after save.".into()))
+}
+
+pub fn authorize_mcp_oauth(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    id: &str,
+    expected_revision: i64,
+    credential_ref: &str,
+    updated_at: &str,
+) -> Result<SafeConnectionRecord> {
+    require_current_scope(tx, scope, ScopeAccess::Write)?;
+    if credential_ref.is_empty()
+        || credential_ref.len() > CREDENTIAL_REF_MAX
+        || !credential_ref.starts_with("mcp-oauth-")
+        || credential_ref.chars().any(char::is_control)
+    {
+        return Err(StoreError::Invalid(
+            "MCP OAuth credential binding is invalid.".into(),
+        ));
+    }
+    let current = get(tx, store, scope, id)?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
+    if current.kind != "mcp" || current.revision != expected_revision {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before authorization completed.".into(),
+        ));
+    }
+    let binding_owned_elsewhere: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM connection_record WHERE credential_ref=?1 AND (workspace_id<>?2 OR id<>?3));",
+        rusqlite::params![credential_ref, scope.data.workspace_id(), id],
+        |row| row.get(0),
+    )?;
+    if binding_owned_elsewhere {
+        return Err(StoreError::Invalid(
+            "MCP OAuth credential binding is already assigned elsewhere.".into(),
+        ));
+    }
+    let changed = tx.execute(
+        "UPDATE connection_record SET revision=revision+1,lifecycle='authorized',
+           authorization_state='authorized',health_state='unknown',
+           credential_custody='os-secure-store',credential_state='available',credential_ref=?1,
+           updated_at=?2
+         WHERE workspace_id=?3 AND id=?4 AND revision=?5 AND kind='mcp'
+           AND authority='local' AND deleted_at IS NULL;",
+        rusqlite::params![
+            credential_ref,
+            updated_at,
+            scope.data.workspace_id(),
+            id,
+            expected_revision,
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "MCP Connection changed before authorization was saved.".into(),
+        ));
+    }
+    get(tx, store, scope, id)?.ok_or_else(|| {
+        StoreError::Invalid("MCP Connection could not be read after authorization.".into())
+    })
+}
+
+pub(crate) fn mcp_oauth_credential_binding(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    id: &str,
+) -> Result<Option<String>> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let current = get(tx, store, scope, id)?
+        .ok_or_else(|| StoreError::Invalid("MCP Connection is unavailable.".into()))?;
+    let credential_ref: String = tx.query_row(
+        "SELECT credential_ref FROM connection_record
+         WHERE workspace_id=?1 AND id=?2 AND kind='mcp' AND deleted_at IS NULL;",
+        rusqlite::params![scope.data.workspace_id(), id],
+        |row| row.get(0),
+    )?;
+    if current.authorization_state == "not-required"
+        && current.credential_state == "not-required"
+        && current.credential_custody == "none"
+        && credential_ref.is_empty()
+    {
+        return Ok(None);
+    }
+    if current.authorization_state != "authorized"
+        || current.credential_state != "available"
+        || current.credential_custody != "os-secure-store"
+        || credential_ref.is_empty()
+        || credential_ref.len() > CREDENTIAL_REF_MAX
+        || !credential_ref.starts_with("mcp-oauth-")
+        || credential_ref.chars().any(char::is_control)
+    {
+        return Err(StoreError::Invalid(
+            "MCP Connection credential metadata is inconsistent.".into(),
+        ));
+    }
+    Ok(Some(credential_ref))
 }
 
 pub(crate) fn mcp_details_for_launch(
@@ -947,9 +1045,9 @@ fn open_safe(store: &Store, row: Partial) -> Result<SafeConnectionRecord> {
             ..
         } if row.kind == "mcp"
             && row.connector_definition_key.is_none()
-            && transport == "stdio"
+            && matches!(transport.as_str(), "stdio" | "streamable-http")
             && !local_launch_reference.is_empty()
-            && discovery_state == "not-started" => {}
+            && matches!(discovery_state.as_str(), "not-started" | "discovered") => {}
         _ => {
             return Err(StoreError::Invalid(
                 "Connection content conflicts with its storage identity.".into(),
@@ -1459,6 +1557,10 @@ mod tests {
         assert_eq!(created.trust, "user-managed");
         assert_eq!(created.credential_custody, "none");
         assert_eq!(created.credential_state, "not-required");
+        assert!(store
+            .with_conn(|tx| mcp_oauth_credential_binding(tx, &store, &scope, &created.id))
+            .unwrap()
+            .is_none());
         assert!(!created.enabled_by_default);
         assert!(created.connector_definition_key.is_empty());
         assert_eq!(
@@ -1606,6 +1708,45 @@ mod tests {
             .unwrap();
         assert!(rediscovered.enabled_tools.is_empty());
         assert!(rediscovered.capability_bindings.is_empty());
+        let authorized = store
+            .transaction(|tx| {
+                authorize_mcp_oauth(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    rediscovered.connection_revision,
+                    "mcp-oauth-opaque-binding",
+                    "2026-07-11T20:04:00Z",
+                )
+            })
+            .unwrap();
+        assert_eq!(authorized.authorization_state, "authorized");
+        assert_eq!(authorized.credential_custody, "os-secure-store");
+        assert_eq!(authorized.credential_state, "available");
+        assert_eq!(
+            store
+                .with_conn(|tx| { mcp_oauth_credential_binding(tx, &store, &scope, &created.id) })
+                .unwrap()
+                .as_deref(),
+            Some("mcp-oauth-opaque-binding")
+        );
+        assert!(!serde_json::to_string(&authorized)
+            .unwrap()
+            .contains("mcp-oauth-opaque-binding"));
+        assert!(store
+            .transaction(|tx| {
+                authorize_mcp_oauth(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    rediscovered.connection_revision,
+                    "mcp-oauth-other-binding",
+                    "2026-07-11T20:05:00Z",
+                )
+            })
+            .is_err());
     }
 
     #[test]

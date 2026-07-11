@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@fable/connectors";
 
 const runtime = vi.hoisted(() => ({
+  beginAuth: vi.fn(),
   commit: vi.fn(),
   inspectAuth: vi.fn(),
   list: vi.fn(),
@@ -13,6 +14,7 @@ const runtime = vi.hoisted(() => ({
 const transportFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("../../runtime", () => ({
+  beginRuntimeRemoteMcpAuthorization: runtime.beginAuth,
   commitRuntimeMcpServerConfiguration: runtime.commit,
   inspectRuntimeRemoteMcpAuthorization: runtime.inspectAuth,
   listRuntimeMcpServerConfigurations: runtime.list,
@@ -85,8 +87,20 @@ class FixtureTransport implements McpTransport {
 }
 
 beforeEach(() => {
+  runtime.beginAuth.mockReset().mockResolvedValue({
+    status: "connected",
+    issuer: "https://auth.example.com",
+    scopes: ["files:read"],
+    clientRegistrationStrategy: "dynamic-client-registration",
+    message: "stored"
+  });
   runtime.commit.mockReset().mockResolvedValue(summary);
-  runtime.inspectAuth.mockReset().mockResolvedValue({ issuer: "https://auth.example.com", pkceMethod: "S256", scopes: [] });
+  runtime.inspectAuth.mockReset().mockResolvedValue({
+    issuer: "https://auth.example.com",
+    pkceMethod: "S256",
+    scopes: [],
+    clientRegistrationStrategy: "dynamic-client-registration"
+  });
   runtime.list.mockReset().mockResolvedValue([]);
   runtime.prepare.mockReset().mockResolvedValue({ configurationFingerprint: "abc", approval });
   runtime.resolve.mockReset().mockResolvedValue({ persisted: true });
@@ -219,8 +233,11 @@ describe("LocalMcpSettings", () => {
     fireEvent.click(screen.getByText("Manage tool servers"));
     fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
     await waitFor(() => expect(runtime.inspectAuth).toHaveBeenCalledWith("workspace-a", "remote-tools"));
+    expect(status.mock.calls.at(-1)?.[0]).toContain("Connecting an account");
+    fireEvent.click(screen.getByRole("button", { name: "Connect account" }));
+    await waitFor(() => expect(runtime.beginAuth).toHaveBeenCalledWith("workspace-a", "remote-tools"));
     expect(status).toHaveBeenCalledWith(
-      "Remote tools requires sign-in and advertises secure S256 authorization. Connecting an account isn’t available yet."
+      "Remote tools account connected. Check the server before enabling any access."
     );
   });
 });

@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use futures_util::StreamExt;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -82,6 +83,7 @@ struct McpRemoteSession {
     owner_subject: String,
     connection_id: String,
     connection_revision: i64,
+    oauth_credential_key: Option<String>,
     discovery_current: bool,
     server_session_id: Option<String>,
     last_event_id: Option<String>,
@@ -95,6 +97,8 @@ struct McpRemoteSession {
 struct RemoteAuthorizationChallenge {
     resource_metadata: Url,
     scopes: Vec<String>,
+    observed_endpoint: Option<Url>,
+    connection_revision: Option<i64>,
 }
 
 fn authorization_challenges() -> &'static Mutex<HashMap<String, RemoteAuthorizationChallenge>> {
@@ -110,9 +114,61 @@ fn authorization_challenge_key(
     format!("{workspace_id}\0{owner_subject}\0{configuration_reference}")
 }
 
+const MCP_OAUTH_KEYRING_SERVICE: &str = "com.fable.mcp.oauth";
+
+fn mcp_oauth_credential_key(
+    workspace_id: &str,
+    owner_subject: &str,
+    configuration_reference: &str,
+) -> String {
+    let encoded = format!("{workspace_id}\0{owner_subject}\0{configuration_reference}");
+    format!("mcp-oauth-{:x}", Sha256::digest(encoded.as_bytes()))
+}
+
+fn mcp_oauth_entry(key: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, key)
+        .map_err(|_| "Fable could not access MCP OAuth credentials.".to_string())
+}
+
+fn store_mcp_oauth_tokens(key: &str, tokens: &RemoteMcpOAuthTokens) -> Result<(), String> {
+    let encoded = serde_json::to_string(tokens)
+        .map_err(|_| "Fable could not encode MCP OAuth credentials.".to_string())?;
+    mcp_oauth_entry(key)?
+        .set_password(&encoded)
+        .map_err(|_| "Fable could not store MCP OAuth credentials.".to_string())
+}
+
+fn load_mcp_oauth_tokens(key: &str) -> Result<Option<RemoteMcpOAuthTokens>, String> {
+    let encoded = match mcp_oauth_entry(key)?.get_password() {
+        Ok(value) => value,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(_) => return Err("Fable could not read MCP OAuth credentials.".into()),
+    };
+    serde_json::from_str(&encoded)
+        .map(Some)
+        .map_err(|_| "Stored MCP OAuth credentials are invalid; reconnect this server.".into())
+}
+
+fn remove_mcp_oauth_tokens(key: &str) -> Result<(), String> {
+    match mcp_oauth_entry(key)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(_) => Err("Fable could not remove MCP OAuth credentials.".into()),
+    }
+}
+
 fn remote_sessions() -> &'static Mutex<HashMap<String, McpRemoteSession>> {
     static MAP: OnceLock<Mutex<HashMap<String, McpRemoteSession>>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn oauth_refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+fn oauth_authorization_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 struct McpToolPermit {
@@ -196,6 +252,23 @@ pub struct InspectRemoteMcpAuthorizationRequest {
     configuration_reference: String,
 }
 
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BeginRemoteMcpAuthorizationRequest {
+    workspace_id: String,
+    configuration_reference: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteMcpAuthorizationResult {
+    status: &'static str,
+    issuer: String,
+    scopes: Vec<String>,
+    client_registration_strategy: String,
+    message: String,
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteMcpAuthorizationSummary {
@@ -207,6 +280,25 @@ pub struct RemoteMcpAuthorizationSummary {
     client_registration_strategy: String,
     client_registration_status: String,
     client_registration_reason: String,
+}
+
+struct RemoteMcpAuthorizationDiscovery {
+    summary: RemoteMcpAuthorizationSummary,
+    authorization_endpoint: Url,
+    token_endpoint: Url,
+    registration_endpoint: Option<Url>,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct RemoteMcpOAuthTokens {
+    access_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_token: Option<String>,
+    expires_at: i64,
+    scopes: Vec<String>,
+    token_endpoint: String,
+    client_id: String,
+    resource: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -505,6 +597,16 @@ pub fn open_remote_mcp_session(
         })
         .map_err(|error| error.to_string())?;
     let session_id = random_session_id()?;
+    let oauth_credential_key = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_oauth_credential_binding(
+                tx,
+                store,
+                &scope,
+                &connection.connection_id,
+            )
+        })
+        .map_err(|error| error.to_string())?;
     remote_sessions()
         .lock()
         .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?
@@ -517,6 +619,7 @@ pub fn open_remote_mcp_session(
                 owner_subject: scope.private.owner_subject().to_string(),
                 connection_id: connection.connection_id.clone(),
                 connection_revision: connection.connection_revision,
+                oauth_credential_key,
                 discovery_current: false,
                 server_session_id: None,
                 last_event_id: None,
@@ -560,6 +663,16 @@ pub async fn inspect_remote_mcp_authorization(
         return Err("This remote MCP server is unavailable.".into());
     }
     let endpoint = validate_remote_endpoint(configuration.endpoint.as_deref().unwrap_or_default())?;
+    let connection = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_details_for_remote(
+                tx,
+                store,
+                &scope,
+                &request.configuration_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?;
     let challenge = authorization_challenges()
         .lock()
         .ok()
@@ -570,9 +683,142 @@ pub async fn inspect_remote_mcp_authorization(
                     scope.private.owner_subject(),
                     &request.configuration_reference,
                 ))
+                .filter(|challenge| {
+                    challenge.observed_endpoint.as_ref() == Some(&endpoint)
+                        && challenge.connection_revision == Some(connection.connection_revision)
+                })
                 .cloned()
         });
-    discover_remote_authorization(&endpoint, challenge.as_ref()).await
+    discover_remote_authorization(&endpoint, challenge.as_ref())
+        .await
+        .map(|discovery| discovery.summary)
+}
+
+#[tauri::command]
+pub async fn begin_remote_mcp_authorization(
+    request: BeginRemoteMcpAuthorizationRequest,
+) -> Result<RemoteMcpAuthorizationResult, String> {
+    let _authorization_guard = oauth_authorization_lock().lock().await;
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let configuration = store
+        .with_conn(|tx| {
+            crate::store::repos::mcp_local_server::get_launch(
+                tx,
+                store,
+                &scope,
+                &request.configuration_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "This remote MCP server is unavailable.".to_string())?;
+    if configuration.metadata.disabled || configuration.metadata.transport != "streamable-http" {
+        return Err("This remote MCP server is unavailable.".into());
+    }
+    let endpoint = validate_remote_endpoint(configuration.endpoint.as_deref().unwrap_or_default())?;
+    let connection = store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::mcp_details_for_remote(
+                tx,
+                store,
+                &scope,
+                &request.configuration_reference,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    let challenge = authorization_challenges()
+        .lock()
+        .ok()
+        .and_then(|challenges| {
+            challenges
+                .get(&authorization_challenge_key(
+                    scope.data.workspace_id(),
+                    scope.private.owner_subject(),
+                    &request.configuration_reference,
+                ))
+                .filter(|challenge| {
+                    challenge.observed_endpoint.as_ref() == Some(&endpoint)
+                        && challenge.connection_revision == Some(connection.connection_revision)
+                })
+                .cloned()
+        });
+    let discovery = discover_remote_authorization(&endpoint, challenge.as_ref()).await?;
+    if discovery.summary.client_registration_status != "selected" {
+        return Err(discovery.summary.client_registration_reason.clone());
+    }
+    let (listener, redirect_uri) = crate::oauth_loopback::bind_loopback_callback().await?;
+    let client_id = resolve_public_oauth_client(&discovery, &redirect_uri).await?;
+    let state = random_oauth_value(32)?;
+    let verifier = random_oauth_value(64)?;
+    let challenge = crate::connector_auth::pkce_challenge(&verifier);
+    let mut authorization_url = discovery.authorization_endpoint.clone();
+    authorization_url
+        .query_pairs_mut()
+        .append_pair("response_type", "code")
+        .append_pair("client_id", &client_id)
+        .append_pair("redirect_uri", &redirect_uri)
+        .append_pair("state", &state)
+        .append_pair("code_challenge", &challenge)
+        .append_pair("code_challenge_method", "S256")
+        .append_pair("resource", endpoint.as_str());
+    if !discovery.summary.scopes.is_empty() {
+        authorization_url
+            .query_pairs_mut()
+            .append_pair("scope", &discovery.summary.scopes.join(" "));
+    }
+    crate::oauth_loopback::open_browser(authorization_url.as_str());
+    let callback_url =
+        crate::oauth_loopback::accept_loopback_callback(listener, &redirect_uri).await?;
+    let code = authorization_code_from_callback(&callback_url, &redirect_uri, &state)?;
+    let tokens = exchange_mcp_authorization_code(
+        &discovery,
+        &endpoint,
+        &client_id,
+        &redirect_uri,
+        &code,
+        &verifier,
+    )
+    .await?;
+    let credential_key = mcp_oauth_credential_key(
+        scope.data.workspace_id(),
+        scope.private.owner_subject(),
+        &request.configuration_reference,
+    );
+    let previous_tokens = load_mcp_oauth_tokens(&credential_key)?;
+    store_mcp_oauth_tokens(&credential_key, &tokens)?;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    if let Err(error) = store.transaction(|tx| {
+        crate::store::repos::connection_record::authorize_mcp_oauth(
+            tx,
+            store,
+            &scope,
+            &connection.connection_id,
+            connection.connection_revision,
+            &credential_key,
+            &now,
+        )
+    }) {
+        let rollback = match previous_tokens.as_ref() {
+            Some(previous) => store_mcp_oauth_tokens(&credential_key, previous),
+            None => remove_mcp_oauth_tokens(&credential_key),
+        };
+        return match rollback {
+            Ok(()) => Err(error.to_string()),
+            Err(_) => Err("MCP authorization could not be saved or safely rolled back; reconnect this server.".into()),
+        };
+    }
+    Ok(RemoteMcpAuthorizationResult {
+        status: "connected",
+        issuer: discovery.summary.issuer,
+        scopes: tokens.scopes,
+        client_registration_strategy: discovery.summary.client_registration_strategy,
+        message: "MCP account credentials are stored in the native credential boundary.".into(),
+    })
 }
 
 #[tauri::command]
@@ -2505,18 +2751,23 @@ fn parse_bearer_challenge(value: &str) -> Result<Option<RemoteAuthorizationChall
         resource_metadata.map(|resource_metadata| RemoteAuthorizationChallenge {
             resource_metadata,
             scopes,
+            observed_endpoint: None,
+            connection_revision: None,
         }),
     )
 }
 
 fn authorization_challenge_from_headers(
     headers: &reqwest::header::HeaderMap,
+    session: &McpRemoteSession,
 ) -> Result<Option<RemoteAuthorizationChallenge>, String> {
     for value in headers.get_all(reqwest::header::WWW_AUTHENTICATE) {
         let value = value
             .to_str()
             .map_err(|_| "Remote MCP returned an invalid authorization challenge.".to_string())?;
-        if let Some(challenge) = parse_bearer_challenge(value)? {
+        if let Some(mut challenge) = parse_bearer_challenge(value)? {
+            challenge.observed_endpoint = Some(session.endpoint.clone());
+            challenge.connection_revision = Some(session.connection_revision);
             return Ok(Some(challenge));
         }
     }
@@ -2624,6 +2875,79 @@ async fn read_remote_body(
     Ok(bytes)
 }
 
+async fn usable_mcp_access_token(session: &McpRemoteSession) -> Result<Option<String>, String> {
+    let Some(credential_key) = session.oauth_credential_key.as_deref() else {
+        return Ok(None);
+    };
+    let Some(tokens) = load_mcp_oauth_tokens(credential_key)? else {
+        return Err("MCP Connection credentials are unavailable; reconnect this server.".into());
+    };
+    let resource = validate_remote_endpoint(&tokens.resource)?;
+    if resource != session.endpoint {
+        return Err("Stored MCP OAuth credentials target a different server.".into());
+    }
+    if tokens.expires_at > chrono::Utc::now().timestamp() + 30 {
+        return Ok(Some(tokens.access_token));
+    }
+    let _refresh_guard = oauth_refresh_lock().lock().await;
+    let Some(mut tokens) = load_mcp_oauth_tokens(credential_key)? else {
+        return Err("MCP Connection credentials are unavailable; reconnect this server.".into());
+    };
+    if tokens.expires_at > chrono::Utc::now().timestamp() + 30 {
+        return Ok(Some(tokens.access_token));
+    }
+    let refresh_token = tokens
+        .refresh_token
+        .clone()
+        .ok_or_else(|| "MCP account authorization expired; reconnect this server.".to_string())?;
+    let token_endpoint = validate_remote_endpoint(&tokens.token_endpoint)?;
+    let client = remote_http_client(&token_endpoint).await?;
+    let response = client
+        .post(token_endpoint.clone())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token.as_str()),
+            ("client_id", tokens.client_id.as_str()),
+            ("resource", resource.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "MCP OAuth token refresh failed.".to_string())?;
+    if response.status().is_redirection() || !response.status().is_success() {
+        return Err(
+            "MCP account authorization could not be renewed; reconnect this server.".into(),
+        );
+    }
+    let bytes = read_remote_body(response, MCP_AUTH_METADATA_MAX_BYTES).await?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "MCP OAuth refresh response was malformed.".to_string())?;
+    let mut refreshed = parse_mcp_token_response(
+        &value,
+        &tokens.scopes,
+        &token_endpoint,
+        &tokens.client_id,
+        &resource,
+    )?;
+    if refreshed.refresh_token.is_none() {
+        refreshed.refresh_token = tokens.refresh_token.take();
+    }
+    let access_token = refreshed.access_token.clone();
+    store_mcp_oauth_tokens(credential_key, &refreshed)?;
+    Ok(Some(access_token))
+}
+
+async fn authorize_remote_request(
+    request: reqwest::RequestBuilder,
+    session: &McpRemoteSession,
+) -> Result<reqwest::RequestBuilder, String> {
+    let Some(access_token) = usable_mcp_access_token(session).await? else {
+        return Ok(request);
+    };
+    Ok(request.bearer_auth(access_token))
+}
+
 async fn post_remote_mcp_frame(
     session: &McpRemoteSession,
     frame: &str,
@@ -2648,7 +2972,8 @@ async fn post_remote_mcp_frame(
     if let Some(server_session_id) = &session.server_session_id {
         request = request.header("MCP-Session-Id", server_session_id);
     }
-    let response = request
+    let response = authorize_remote_request(request, session)
+        .await?
         .send()
         .await
         .map_err(|_| "Remote MCP request failed.".to_string())?;
@@ -2663,7 +2988,10 @@ async fn post_remote_mcp_frame(
             frames: Vec::new(),
             server_session_id: None,
             initialized: false,
-            authorization_challenge: authorization_challenge_from_headers(response.headers())?,
+            authorization_challenge: authorization_challenge_from_headers(
+                response.headers(),
+                session,
+            )?,
             error: Some("Remote MCP rejected the request with HTTP 401.".into()),
             last_event_id: None,
             retry_after_ms: 1_000,
@@ -2755,13 +3083,15 @@ async fn post_remote_mcp_frame(
 
 async fn delete_remote_mcp_session(session: &McpRemoteSession) -> Result<(), String> {
     let client = remote_http_client(&session.endpoint).await?;
-    let response = client
+    let request = client
         .delete(session.endpoint.clone())
         .header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION)
         .header(
             "MCP-Session-Id",
             session.server_session_id.as_deref().unwrap_or_default(),
-        )
+        );
+    let response = authorize_remote_request(request, session)
+        .await?
         .send()
         .await
         .map_err(|_| "Remote MCP session could not be closed.".to_string())?;
@@ -2795,7 +3125,8 @@ async fn get_remote_mcp_messages(session: &McpRemoteSession) -> Result<RemotePol
     if let Some(last_event_id) = &session.last_event_id {
         request = request.header("Last-Event-ID", last_event_id);
     }
-    let response = request
+    let response = authorize_remote_request(request, session)
+        .await?
         .send()
         .await
         .map_err(|_| "Remote MCP listening request failed.".to_string())?;
@@ -2990,7 +3321,7 @@ fn parse_authorization_server_metadata(
     issuer: &Url,
     scopes: Vec<String>,
     value: &Value,
-) -> Result<RemoteMcpAuthorizationSummary, String> {
+) -> Result<RemoteMcpAuthorizationDiscovery, String> {
     let object = value
         .as_object()
         .ok_or_else(|| "Remote MCP authorization-server metadata was malformed.".to_string())?;
@@ -3003,12 +3334,14 @@ fn parse_authorization_server_metadata(
     if validate_remote_endpoint(metadata_issuer)? != *issuer {
         return Err("Remote MCP authorization-server metadata changed issuer.".into());
     }
-    for field in ["authorization_endpoint", "token_endpoint"] {
+    let required_endpoint = |field: &str| {
         let endpoint = object.get(field).and_then(Value::as_str).ok_or_else(|| {
             "Remote MCP authorization-server metadata omitted a required endpoint.".to_string()
         })?;
-        validate_remote_endpoint(endpoint)?;
-    }
+        validate_remote_endpoint(endpoint)
+    };
+    let authorization_endpoint = required_endpoint("authorization_endpoint")?;
+    let token_endpoint = required_endpoint("token_endpoint")?;
     let supports_s256 = object
         .get("code_challenge_methods_supported")
         .and_then(Value::as_array)
@@ -3035,12 +3368,12 @@ fn parse_authorization_server_metadata(
             "Remote MCP authorization server does not support authorization code flow.".into(),
         );
     }
-    let dynamic_registration_supported = object
+    let registration_endpoint = object
         .get("registration_endpoint")
         .and_then(Value::as_str)
         .map(validate_remote_endpoint)
-        .transpose()?
-        .is_some();
+        .transpose()?;
+    let dynamic_registration_supported = registration_endpoint.is_some();
     let client_id_metadata_document_supported = object
         .get("client_id_metadata_document_supported")
         .and_then(Value::as_bool)
@@ -3050,15 +3383,20 @@ fn parse_authorization_server_metadata(
         client_id_metadata_document_supported,
         dynamic_registration_supported,
     )?;
-    Ok(RemoteMcpAuthorizationSummary {
-        issuer: issuer.to_string(),
-        scopes,
-        pkce_method: "S256".into(),
-        client_id_metadata_document_supported,
-        dynamic_registration_supported,
-        client_registration_strategy: registration.strategy.into(),
-        client_registration_status: registration.status.into(),
-        client_registration_reason: registration.reason.into(),
+    Ok(RemoteMcpAuthorizationDiscovery {
+        summary: RemoteMcpAuthorizationSummary {
+            issuer: issuer.to_string(),
+            scopes,
+            pkce_method: "S256".into(),
+            client_id_metadata_document_supported,
+            dynamic_registration_supported,
+            client_registration_strategy: registration.strategy.into(),
+            client_registration_status: registration.status.into(),
+            client_registration_reason: registration.reason.into(),
+        },
+        authorization_endpoint,
+        token_endpoint,
+        registration_endpoint,
     })
 }
 
@@ -3101,9 +3439,9 @@ fn select_client_registration_from_availability(
     }
 }
 
-fn configured_preregistered_client(issuer: &Url) -> Result<bool, String> {
+fn configured_preregistered_client_id(issuer: &Url) -> Result<Option<String>, String> {
     let Some(raw) = std::env::var_os("FABLE_MCP_OAUTH_PREREGISTERED_CLIENTS") else {
-        return Ok(false);
+        return Ok(None);
     };
     let raw = raw
         .into_string()
@@ -3114,31 +3452,32 @@ fn configured_preregistered_client(issuer: &Url) -> Result<bool, String> {
     let registrations: serde_json::Map<String, Value> = serde_json::from_str(&raw)
         .map_err(|_| "MCP OAuth pre-registration configuration is invalid.".to_string())?;
     let Some(client_id) = registrations.get(issuer.as_str()) else {
-        return Ok(false);
+        return Ok(None);
     };
-    client_id
+    let client_id = client_id
         .as_str()
         .filter(|value| {
             !value.trim().is_empty() && value.len() <= 2_048 && !value.chars().any(char::is_control)
         })
         .ok_or_else(|| "MCP OAuth pre-registered client information is invalid.".to_string())?;
-    Ok(true)
+    Ok(Some(client_id.to_string()))
 }
 
-fn configured_client_metadata_document() -> Result<bool, String> {
+fn configured_client_metadata_document_url() -> Result<Option<Url>, String> {
     let Some(raw) = std::env::var_os("FABLE_MCP_OAUTH_CLIENT_METADATA_DOCUMENT_URL") else {
-        return Ok(false);
+        return Ok(None);
     };
     let raw = raw
         .into_string()
         .map_err(|_| "MCP OAuth client metadata configuration is invalid.".to_string())?;
     let url = validate_remote_endpoint(raw.trim())?;
-    if url.query().is_some() || url.fragment().is_some() {
+    if url.query().is_some() || url.fragment().is_some() || url.path().trim_matches('/').is_empty()
+    {
         return Err(
-            "MCP OAuth Client ID Metadata Document URL cannot contain a query or fragment.".into(),
+            "MCP OAuth Client ID Metadata Document URL requires a path and cannot contain a query or fragment.".into(),
         );
     }
-    Ok(true)
+    Ok(Some(url))
 }
 
 fn select_client_registration(
@@ -3146,9 +3485,9 @@ fn select_client_registration(
     client_metadata_document_supported: bool,
     dynamic_registration_supported: bool,
 ) -> Result<ClientRegistrationDecision, String> {
-    let pre_registered = configured_preregistered_client(issuer)?;
+    let pre_registered = configured_preregistered_client_id(issuer)?.is_some();
     let metadata_document =
-        client_metadata_document_supported && configured_client_metadata_document()?;
+        client_metadata_document_supported && configured_client_metadata_document_url()?.is_some();
     Ok(select_client_registration_from_availability(
         pre_registered,
         metadata_document,
@@ -3156,10 +3495,336 @@ fn select_client_registration(
     ))
 }
 
+fn validate_dynamic_client_response(value: &Value, redirect_uri: &str) -> Result<String, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "MCP OAuth client registration response was malformed.".to_string())?;
+    if object.contains_key("client_secret") || object.contains_key("client_secret_expires_at") {
+        return Err("MCP OAuth refused a confidential dynamic client registration.".into());
+    }
+    if object
+        .get("token_endpoint_auth_method")
+        .and_then(Value::as_str)
+        != Some("none")
+    {
+        return Err(
+            "MCP OAuth dynamic registration did not preserve public-client authentication.".into(),
+        );
+    }
+    let includes = |field: &str, expected: &str| {
+        object
+            .get(field)
+            .and_then(Value::as_array)
+            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some(expected)))
+    };
+    if !includes("redirect_uris", redirect_uri)
+        || !includes("grant_types", "authorization_code")
+        || !includes("response_types", "code")
+    {
+        return Err(
+            "MCP OAuth dynamic registration changed the requested public-client contract.".into(),
+        );
+    }
+    let client_id = object
+        .get("client_id")
+        .and_then(Value::as_str)
+        .filter(|value| {
+            !value.trim().is_empty() && value.len() <= 2_048 && !value.chars().any(char::is_control)
+        })
+        .ok_or_else(|| "MCP OAuth dynamic registration omitted a valid client id.".to_string())?;
+    Ok(client_id.to_string())
+}
+
+async fn register_dynamic_public_client(
+    registration_endpoint: &Url,
+    redirect_uri: &str,
+) -> Result<String, String> {
+    let client = remote_http_client(registration_endpoint).await?;
+    let response = client
+        .post(registration_endpoint.clone())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .json(&serde_json::json!({
+            "client_name": "Fable Desktop",
+            "application_type": "native",
+            "redirect_uris": [redirect_uri],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none"
+        }))
+        .send()
+        .await
+        .map_err(|_| "MCP OAuth dynamic client registration failed.".to_string())?;
+    if response.status().is_redirection() || response.status() != reqwest::StatusCode::CREATED {
+        return Err("MCP OAuth dynamic client registration was rejected.".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim();
+    if content_type != "application/json" {
+        return Err("MCP OAuth client registration response was not JSON.".into());
+    }
+    let bytes = read_remote_body(response, MCP_AUTH_METADATA_MAX_BYTES).await?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "MCP OAuth client registration response was malformed.".to_string())?;
+    validate_dynamic_client_response(&value, redirect_uri)
+}
+
+fn validate_client_metadata_document(
+    value: &Value,
+    document_url: &Url,
+    redirect_uri: &str,
+) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "MCP OAuth Client ID Metadata Document was malformed.".to_string())?;
+    if object.get("client_id").and_then(Value::as_str) != Some(document_url.as_str())
+        || object
+            .get("token_endpoint_auth_method")
+            .and_then(Value::as_str)
+            != Some("none")
+    {
+        return Err(
+            "MCP OAuth Client ID Metadata Document did not declare the exact public client.".into(),
+        );
+    }
+    let includes = |field: &str, expected: &str| {
+        object
+            .get(field)
+            .and_then(Value::as_array)
+            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some(expected)))
+    };
+    if !includes("grant_types", "authorization_code") || !includes("response_types", "code") {
+        return Err(
+            "MCP OAuth Client ID Metadata Document does not support authorization code flow."
+                .into(),
+        );
+    }
+    let requested = Url::parse(redirect_uri)
+        .map_err(|_| "MCP OAuth loopback redirect was invalid.".to_string())?;
+    let redirect_allowed = object
+        .get("redirect_uris")
+        .and_then(Value::as_array)
+        .is_some_and(|values| {
+            values.iter().filter_map(Value::as_str).any(|value| {
+                Url::parse(value).ok().is_some_and(|declared| {
+                    declared.scheme() == "http"
+                        && declared.host_str() == Some("127.0.0.1")
+                        && declared.path() == requested.path()
+                        && (declared.port().is_none() || declared.port() == requested.port())
+                })
+            })
+        });
+    if !redirect_allowed {
+        return Err(
+            "MCP OAuth Client ID Metadata Document does not allow Fable's loopback redirect."
+                .into(),
+        );
+    }
+    Ok(())
+}
+
+async fn resolve_public_oauth_client(
+    discovery: &RemoteMcpAuthorizationDiscovery,
+    redirect_uri: &str,
+) -> Result<String, String> {
+    let issuer = validate_remote_endpoint(&discovery.summary.issuer)?;
+    match discovery.summary.client_registration_strategy.as_str() {
+        "pre-registered" => configured_preregistered_client_id(&issuer)?
+            .ok_or_else(|| "MCP OAuth pre-registered client information is unavailable.".into()),
+        "client-id-metadata-document" => {
+            let url = configured_client_metadata_document_url()?.ok_or_else(|| {
+                "MCP OAuth Client ID Metadata Document is unavailable.".to_string()
+            })?;
+            let value = fetch_remote_metadata(&url).await?.ok_or_else(|| {
+                "MCP OAuth Client ID Metadata Document is unavailable.".to_string()
+            })?;
+            validate_client_metadata_document(&value, &url, redirect_uri)?;
+            Ok(url.to_string())
+        }
+        "dynamic-client-registration" => {
+            let endpoint = discovery.registration_endpoint.as_ref().ok_or_else(|| {
+                "MCP OAuth dynamic registration endpoint is unavailable.".to_string()
+            })?;
+            register_dynamic_public_client(endpoint, redirect_uri).await
+        }
+        _ => Err("This MCP authorization server requires manual public client information.".into()),
+    }
+}
+
+fn random_oauth_value(bytes: usize) -> Result<String, String> {
+    let mut value = vec![0_u8; bytes];
+    getrandom::fill(&mut value)
+        .map_err(|_| "Fable could not create secure MCP OAuth state.".to_string())?;
+    Ok(URL_SAFE_NO_PAD.encode(value))
+}
+
+fn authorization_code_from_callback(
+    callback_url: &str,
+    redirect_uri: &str,
+    expected_state: &str,
+) -> Result<String, String> {
+    let callback =
+        Url::parse(callback_url).map_err(|_| "MCP OAuth callback was invalid.".to_string())?;
+    let redirect = Url::parse(redirect_uri)
+        .map_err(|_| "MCP OAuth redirect state was invalid.".to_string())?;
+    if callback.scheme() != redirect.scheme()
+        || callback.host_str() != redirect.host_str()
+        || callback.port_or_known_default() != redirect.port_or_known_default()
+        || callback.path() != redirect.path()
+        || callback.fragment().is_some()
+    {
+        return Err("MCP OAuth callback did not match the bound loopback redirect.".into());
+    }
+    let mut state = Vec::new();
+    let mut code = Vec::new();
+    let mut errors = Vec::new();
+    for (key, value) in callback.query_pairs() {
+        match key.as_ref() {
+            "state" => state.push(value.into_owned()),
+            "code" => code.push(value.into_owned()),
+            "error" => errors.push(value.into_owned()),
+            _ => {}
+        }
+    }
+    if state.len() != 1 || state[0] != expected_state {
+        return Err("MCP OAuth callback state did not match the active attempt.".into());
+    }
+    if !errors.is_empty() {
+        return Err("The MCP authorization server did not grant access.".into());
+    }
+    if code.len() != 1
+        || code[0].trim().is_empty()
+        || code[0].len() > 8_192
+        || code[0].chars().any(char::is_control)
+    {
+        return Err("MCP OAuth callback omitted a valid authorization code.".into());
+    }
+    Ok(code.remove(0))
+}
+
+fn parse_mcp_token_response(
+    value: &Value,
+    requested_scopes: &[String],
+    token_endpoint: &Url,
+    client_id: &str,
+    resource: &Url,
+) -> Result<RemoteMcpOAuthTokens, String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "MCP OAuth token response was malformed.".to_string())?;
+    let access_token = object
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 32 * 1024)
+        .ok_or_else(|| "MCP OAuth token response omitted an access token.".to_string())?;
+    if access_token.chars().any(char::is_control)
+        || object
+            .get("token_type")
+            .and_then(Value::as_str)
+            .is_none_or(|value| !value.eq_ignore_ascii_case("bearer"))
+    {
+        return Err("MCP OAuth token response did not provide a usable Bearer token.".into());
+    }
+    let refresh_token = object
+        .get("refresh_token")
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|value| {
+                    !value.is_empty()
+                        && value.len() <= 32 * 1024
+                        && !value.chars().any(char::is_control)
+                })
+                .map(str::to_string)
+                .ok_or_else(|| "MCP OAuth refresh token was invalid.".to_string())
+        })
+        .transpose()?;
+    let expires_in = object
+        .get("expires_in")
+        .and_then(Value::as_u64)
+        .filter(|value| (1..=31_536_000).contains(value))
+        .ok_or_else(|| "MCP OAuth token response omitted a bounded expiry.".to_string())?;
+    let mut scopes = object
+        .get("scope")
+        .and_then(Value::as_str)
+        .map(|value| value.split_ascii_whitespace().map(str::to_string).collect())
+        .unwrap_or_else(|| requested_scopes.to_vec());
+    if scopes.len() > 64
+        || scopes.iter().any(|scope: &String| {
+            scope.is_empty() || scope.len() > 200 || scope.chars().any(char::is_control)
+        })
+    {
+        return Err("MCP OAuth token response scopes were invalid.".into());
+    }
+    scopes.sort();
+    scopes.dedup();
+    if scopes
+        .iter()
+        .any(|scope| !requested_scopes.iter().any(|requested| requested == scope))
+    {
+        return Err("MCP OAuth token response attempted to widen the requested scopes.".into());
+    }
+    Ok(RemoteMcpOAuthTokens {
+        access_token: access_token.to_string(),
+        refresh_token,
+        expires_at: chrono::Utc::now().timestamp() + expires_in as i64,
+        scopes,
+        token_endpoint: token_endpoint.to_string(),
+        client_id: client_id.to_string(),
+        resource: resource.to_string(),
+    })
+}
+
+async fn exchange_mcp_authorization_code(
+    discovery: &RemoteMcpAuthorizationDiscovery,
+    resource: &Url,
+    client_id: &str,
+    redirect_uri: &str,
+    code: &str,
+    verifier: &str,
+) -> Result<RemoteMcpOAuthTokens, String> {
+    let client = remote_http_client(&discovery.token_endpoint).await?;
+    let response = client
+        .post(discovery.token_endpoint.clone())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", client_id),
+            ("redirect_uri", redirect_uri),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("resource", resource.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|_| "MCP OAuth token exchange failed.".to_string())?;
+    if response.status().is_redirection() || !response.status().is_success() {
+        return Err("MCP OAuth token exchange was rejected.".into());
+    }
+    let bytes = read_remote_body(response, MCP_AUTH_METADATA_MAX_BYTES).await?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|_| "MCP OAuth token response was malformed.".to_string())?;
+    parse_mcp_token_response(
+        &value,
+        &discovery.summary.scopes,
+        &discovery.token_endpoint,
+        client_id,
+        resource,
+    )
+}
+
 async fn discover_remote_authorization(
     endpoint: &Url,
     challenge: Option<&RemoteAuthorizationChallenge>,
-) -> Result<RemoteMcpAuthorizationSummary, String> {
+) -> Result<RemoteMcpAuthorizationDiscovery, String> {
     let mut protected = None;
     let candidates = challenge
         .map(|challenge| vec![challenge.resource_metadata.clone()])
@@ -3626,9 +4291,18 @@ mod tests {
             "grant_types_supported": ["authorization_code"],
             "client_id_metadata_document_supported": true
         });
-        let summary = parse_authorization_server_metadata(&servers[0], scopes, &metadata).unwrap();
-        assert_eq!(summary.pkce_method, "S256");
-        assert!(summary.client_id_metadata_document_supported);
+        let discovery =
+            parse_authorization_server_metadata(&servers[0], scopes, &metadata).unwrap();
+        assert_eq!(discovery.summary.pkce_method, "S256");
+        assert!(discovery.summary.client_id_metadata_document_supported);
+        assert_eq!(
+            discovery.authorization_endpoint.as_str(),
+            "https://auth.example.com/authorize"
+        );
+        assert_eq!(
+            discovery.token_endpoint.as_str(),
+            "https://auth.example.com/token"
+        );
         let mut wrong_resource = protected.clone();
         wrong_resource["resource"] = Value::String("https://other.example.com/mcp".into());
         assert!(parse_protected_resource_metadata(&endpoint, &wrong_resource).is_err());
@@ -3652,6 +4326,126 @@ mod tests {
         let manual = select_client_registration_from_availability(false, false, false);
         assert_eq!(manual.strategy, "manual-client-information");
         assert_eq!(manual.status, "configuration-required");
+    }
+
+    #[test]
+    fn oauth_dynamic_registration_accepts_only_the_exact_public_client_contract() {
+        let redirect = "http://127.0.0.1:49152/callback";
+        let valid = serde_json::json!({
+            "client_id": "public-client-1",
+            "application_type": "native",
+            "redirect_uris": [redirect],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none"
+        });
+        assert_eq!(
+            validate_dynamic_client_response(&valid, redirect).unwrap(),
+            "public-client-1"
+        );
+
+        let mut confidential = valid.clone();
+        confidential["client_secret"] = Value::String("must-not-cross".into());
+        assert!(validate_dynamic_client_response(&confidential, redirect).is_err());
+
+        let mut wrong_redirect = valid.clone();
+        wrong_redirect["redirect_uris"] = serde_json::json!(["http://127.0.0.1:60000/callback"]);
+        assert!(validate_dynamic_client_response(&wrong_redirect, redirect).is_err());
+
+        let mut implicit_secret_auth = valid;
+        implicit_secret_auth
+            .as_object_mut()
+            .unwrap()
+            .remove("token_endpoint_auth_method");
+        assert!(validate_dynamic_client_response(&implicit_secret_auth, redirect).is_err());
+
+        let document_url =
+            validate_remote_endpoint("https://fable.example.com/oauth/client.json").unwrap();
+        let document = serde_json::json!({
+            "client_id": document_url.as_str(),
+            "redirect_uris": ["http://127.0.0.1/callback"],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "none"
+        });
+        validate_client_metadata_document(&document, &document_url, redirect).unwrap();
+        let mut wrong_document = document;
+        wrong_document["redirect_uris"] = serde_json::json!(["https://fable.example.com/callback"]);
+        assert!(
+            validate_client_metadata_document(&wrong_document, &document_url, redirect).is_err()
+        );
+    }
+
+    #[test]
+    fn oauth_callback_and_token_contract_fail_closed_without_exposing_secrets() {
+        let redirect = "http://127.0.0.1:49152/callback";
+        let callback = format!("{redirect}?code=opaque-code&state=expected-state");
+        assert_eq!(
+            authorization_code_from_callback(&callback, redirect, "expected-state").unwrap(),
+            "opaque-code"
+        );
+        assert!(authorization_code_from_callback(&callback, redirect, "other-state").is_err());
+        assert!(authorization_code_from_callback(
+            "http://127.0.0.1:50000/callback?code=x&state=expected-state",
+            redirect,
+            "expected-state"
+        )
+        .is_err());
+
+        let token_endpoint = validate_remote_endpoint("https://auth.example.com/token").unwrap();
+        let resource = validate_remote_endpoint("https://mcp.example.com/rpc").unwrap();
+        let valid = serde_json::json!({
+            "access_token": "access-value",
+            "refresh_token": "refresh-value",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "files:read"
+        });
+        let tokens = parse_mcp_token_response(
+            &valid,
+            &["files:read".into()],
+            &token_endpoint,
+            "public-client",
+            &resource,
+        )
+        .unwrap();
+        assert_eq!(tokens.scopes, ["files:read"]);
+        assert_eq!(tokens.token_endpoint, token_endpoint.as_str());
+
+        let mut confidential_method = valid.clone();
+        confidential_method["token_type"] = Value::String("MAC".into());
+        assert!(parse_mcp_token_response(
+            &confidential_method,
+            &[],
+            &token_endpoint,
+            "public-client",
+            &resource
+        )
+        .is_err());
+        let mut unbounded = valid;
+        unbounded["expires_in"] = Value::from(0);
+        assert!(parse_mcp_token_response(
+            &unbounded,
+            &[],
+            &token_endpoint,
+            "public-client",
+            &resource
+        )
+        .is_err());
+        let widened = serde_json::json!({
+            "access_token": "access-value",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "files:read files:write"
+        });
+        assert!(parse_mcp_token_response(
+            &widened,
+            &["files:read".into()],
+            &token_endpoint,
+            "public-client",
+            &resource
+        )
+        .is_err());
     }
 
     #[test]

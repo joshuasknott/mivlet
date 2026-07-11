@@ -3169,12 +3169,30 @@ export interface RuntimeRemoteMcpAuthorizationSummary {
   clientRegistrationReason: string;
 }
 
+export interface RuntimeRemoteMcpAuthorizationResult {
+  status: "connected";
+  issuer: string;
+  scopes: string[];
+  clientRegistrationStrategy: RuntimeRemoteMcpAuthorizationSummary["clientRegistrationStrategy"];
+  message: string;
+}
+
 export async function inspectRuntimeRemoteMcpAuthorization(
   workspaceId: string,
   configurationReference: string
 ) {
   if (!hasTauriRuntime()) return null;
   return invoke<RuntimeRemoteMcpAuthorizationSummary>("inspect_remote_mcp_authorization", {
+    request: { workspaceId, configurationReference }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function beginRuntimeRemoteMcpAuthorization(
+  workspaceId: string,
+  configurationReference: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeRemoteMcpAuthorizationResult>("begin_remote_mcp_authorization", {
     request: { workspaceId, configurationReference }
   }).catch((error) => { throw toRuntimeError(error); });
 }
