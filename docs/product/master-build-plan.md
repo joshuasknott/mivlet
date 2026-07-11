@@ -115,10 +115,13 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 2C - Artifact system
 
-- [ ] Add artifact types, versions, lineage, scope, and producing-run links.
+- [x] Add artifact types, versions, lineage, scope, and producing-run links.
+  - Evidence: SQLite schema v16 stores exact-owner artifact identities and immutable ordered versions separately. New edits use optimistic revision/current-version checks, retain earlier bytes and hashes, add an exact `supersedes` lineage link, survive restart, and remain bound to the producing run, thread, and terminal assistant response.
 - [ ] Preserve sources, citations, inputs, and decisions.
+  - Repo-local evidence: response artifacts derive v1 citations from the immutable producing-run receipt, and later versions inherit that evidence without accepting renderer replacements. Portable import rejects unsigned citation, input, decision, review, and publication claims until Fable has a trusted evidence-transfer mechanism.
 - [ ] Add review, requested changes, acceptance, and approval state.
 - [ ] Add artifact search and export.
+  - Repo-local evidence: owner-scoped workspace archives now include projectless artifacts and all immutable versions, and reject cross-member or tampered imports. A focused user-facing artifact search and exact-version export remain open.
 - [ ] Support explicit cross-context handoff without transferring hidden history or authority.
 
 ### Wave 2D - First multi-member slice
