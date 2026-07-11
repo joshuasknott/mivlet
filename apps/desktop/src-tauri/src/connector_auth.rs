@@ -533,14 +533,11 @@ fn broker_sibling_endpoint(endpoint: &str, segment: &str) -> Result<String, Conn
     }
 }
 
-/// Mark the matching connection expired, persist the full list, and surface the
-/// non-retryable `expired-auth` error so the user reconnects.
-fn refresh_rejected(
+fn mark_refresh_rejected(
     connector_id: &str,
     account_id: &str,
-    path: &Path,
     connections: &mut [ConnectorConnection],
-) -> Result<ConnectorConnection, ConnectorCommandError> {
+) {
     if let Some(connection) = connections
         .iter_mut()
         .find(|item| item.connector_id == connector_id && item.account.id == account_id)
@@ -548,14 +545,6 @@ fn refresh_rejected(
         connection.status = "expired".to_string();
         connection.updated_at = now_epoch().to_string();
     }
-    write_connections(path, connections)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    Err(command_error(
-        "expired-auth",
-        connector_id,
-        "Connector token refresh was rejected; reconnect the account.",
-        false,
-    ))
 }
 
 /// The redacted error shape every broker route emits on failure (mirrors
@@ -1855,13 +1844,260 @@ async fn disconnect_with_store_and_path<G>(
     Ok(())
 }
 
+fn refresh_authorization_context(
+    connector_id: &str,
+) -> Result<
+    (
+        crate::clerk_identity::NativeIdentityGenerationSnapshot,
+        crate::authorized_scope::AuthorizedCommandScope,
+        &'static crate::store::Store,
+    ),
+    ConnectorCommandError,
+> {
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    Ok((identity, scope, durable_store))
+}
+
+fn verify_refresh_snapshot(
+    connector_id: &str,
+    store: &dyn ConnectorSecretStore,
+    path: &Path,
+    previous_connections: &[ConnectorConnection],
+    credential_ref: &str,
+    previous_secret: &str,
+) -> Result<(), ConnectorCommandError> {
+    let current_connections = read_connections(path)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let current_secret = store
+        .get(credential_ref)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    if !same_connection_snapshot(&current_connections, previous_connections)
+        || current_secret.as_deref() != Some(previous_secret)
+    {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "Connector state changed before refresh could be saved.",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn transition_refreshed_canonical(
+    durable_store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    account_id: &str,
+    lifecycle: &str,
+    authorization_state: &str,
+    health_state: Option<&str>,
+    credential_state: &str,
+    updated_at: &str,
+) -> crate::store::Result<()> {
+    durable_store.transaction(|tx| {
+        let id = derive_native_connection_id(scope.data.workspace_id(), connector_id, account_id);
+        let existing = crate::store::repos::connection_record::get(tx, durable_store, scope, &id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Connection is unavailable.".into())
+            })?;
+        crate::store::repos::connection_record::transition_native_connector(
+            tx,
+            durable_store,
+            scope,
+            &id,
+            existing.revision,
+            lifecycle,
+            authorization_state,
+            health_state.unwrap_or(&existing.health_state),
+            credential_state,
+            updated_at,
+        )?;
+        Ok(())
+    })
+}
+
+fn commit_refresh_success<G>(
+    connector_id: &str,
+    store: &dyn ConnectorSecretStore,
+    path: &Path,
+    durable_store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    previous_connections: &[ConnectorConnection],
+    previous_secret: &str,
+    updated_connection: ConnectorConnection,
+    updated_secret: &str,
+    before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
+) -> Result<ConnectorConnection, ConnectorCommandError> {
+    let _guard = before_commit()?;
+    verify_refresh_snapshot(
+        connector_id,
+        store,
+        path,
+        previous_connections,
+        &updated_connection.credential_ref,
+        previous_secret,
+    )?;
+    store
+        .set(&updated_connection.credential_ref, updated_secret)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let rollback = CredentialRollback {
+        credential_ref: updated_connection.credential_ref.clone(),
+        previous_secret: Some(previous_secret.to_string()),
+    };
+    let mut updated_connections = previous_connections.to_vec();
+    let Some(target) = updated_connections.iter_mut().find(|connection| {
+        connection.connector_id == connector_id
+            && connection.account.id == updated_connection.account.id
+    }) else {
+        let _ = rollback_credential(store, rollback);
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "Connector state changed before refresh could be saved.",
+            true,
+        ));
+    };
+    *target = updated_connection.clone();
+    if let Err(error) = write_connections(path, &updated_connections) {
+        return finish_metadata_commit(Err(error), store, rollback)
+            .map(|_| unreachable!())
+            .map_err(|message| command_error("unknown", connector_id, &message, false));
+    }
+    let canonical = transition_refreshed_canonical(
+        durable_store,
+        scope,
+        connector_id,
+        &updated_connection.account.id,
+        "authorized",
+        "authorized",
+        None,
+        "available",
+        &updated_connection.updated_at,
+    );
+    if let Err(error) = canonical {
+        let metadata_restored = write_connections(path, previous_connections).is_ok();
+        let credential_restored = rollback_credential(store, rollback).is_ok();
+        return if metadata_restored && credential_restored {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                &error.to_string(),
+                false,
+            ))
+        } else {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                "Fable could not finish or fully restore connector refresh; reconnect this provider.",
+                false,
+            ))
+        };
+    }
+    Ok(updated_connection)
+}
+
+fn commit_refresh_rejection<G>(
+    connector_id: &str,
+    store: &dyn ConnectorSecretStore,
+    path: &Path,
+    durable_store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    previous_connections: &[ConnectorConnection],
+    previous_secret: &str,
+    account_id: &str,
+    before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
+) -> Result<ConnectorConnection, ConnectorCommandError> {
+    let _guard = before_commit()?;
+    verify_refresh_snapshot(
+        connector_id,
+        store,
+        path,
+        previous_connections,
+        &previous_connections
+            .iter()
+            .find(|connection| {
+                connection.connector_id == connector_id && connection.account.id == account_id
+            })
+            .ok_or_else(|| {
+                command_error(
+                    "conflict",
+                    connector_id,
+                    "Connector state changed before refresh could be saved.",
+                    true,
+                )
+            })?
+            .credential_ref,
+        previous_secret,
+    )?;
+    let mut rejected = previous_connections.to_vec();
+    mark_refresh_rejected(connector_id, account_id, &mut rejected);
+    write_connections(path, &rejected)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let updated_at = rejected
+        .iter()
+        .find(|connection| {
+            connection.connector_id == connector_id && connection.account.id == account_id
+        })
+        .map(|connection| connection.updated_at.as_str())
+        .unwrap_or("0");
+    if let Err(error) = transition_refreshed_canonical(
+        durable_store,
+        scope,
+        connector_id,
+        account_id,
+        "refresh-required",
+        "expired",
+        Some("unhealthy"),
+        "refresh-required",
+        updated_at,
+    ) {
+        return if write_connections(path, previous_connections).is_ok() {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                &error.to_string(),
+                false,
+            ))
+        } else {
+            Err(command_error(
+                "unknown",
+                connector_id,
+                "Fable could not finish or fully restore rejected connector refresh; reconnect this provider.",
+                false,
+            ))
+        };
+    }
+    Err(command_error(
+        "expired-auth",
+        connector_id,
+        "Connector token refresh was rejected; reconnect the account.",
+        false,
+    ))
+}
+
 pub(crate) async fn refresh_connection(
     app: &tauri::AppHandle,
     connector_id: &str,
 ) -> Result<ConnectorConnection, ConnectorCommandError> {
     let path = connector_connections_path(app)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    let mut connections = read_connections(&path)
+    let connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     // Multi-account: refresh the active account for this connector, falling
     // back to the first connected account if none is flagged active.
@@ -1882,7 +2118,8 @@ pub(crate) async fn refresh_connection(
         )
     })?;
     let mut connection = connections[active_index].clone();
-    let encoded = NativeConnectorSecretStore
+    let secret_store = NativeConnectorSecretStore;
+    let encoded = secret_store
         .get(&connection.credential_ref)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?
         .ok_or_else(|| {
@@ -1916,6 +2153,7 @@ pub(crate) async fn refresh_connection(
             false,
         )
     })?;
+    let (identity, scope, durable_store) = refresh_authorization_context(connector_id)?;
     crate::ensure_rustls_provider();
     let refreshed: TokenResponse = if tokens.brokered {
         // Confidential broker flow: rotate through the broker's refresh endpoint,
@@ -1957,11 +2195,20 @@ pub(crate) async fn refresh_connection(
             // temporary broker problem does not permanently disconnect an
             // otherwise-valid account.
             if error.code == "needs-auth" || error.code == "configuration-required" {
-                return refresh_rejected(
+                return commit_refresh_rejection(
                     connector_id,
-                    &connection.account.id,
+                    &secret_store,
                     &path,
-                    &mut connections,
+                    durable_store,
+                    &scope,
+                    &connections,
+                    &encoded,
+                    &connection.account.id,
+                    || {
+                        crate::clerk_identity::lock_native_identity_generation(&identity).map_err(
+                            |message| command_error("needs-auth", connector_id, &message, false),
+                        )
+                    },
                 );
             }
             return Err(error);
@@ -2005,11 +2252,20 @@ pub(crate) async fn refresh_connection(
                 )
             })?;
         if !response.status().is_success() {
-            return refresh_rejected(
+            return commit_refresh_rejection(
                 connector_id,
-                &connection.account.id,
+                &secret_store,
                 &path,
-                &mut connections,
+                durable_store,
+                &scope,
+                &connections,
+                &encoded,
+                &connection.account.id,
+                || {
+                    crate::clerk_identity::lock_native_identity_generation(&identity).map_err(
+                        |message| command_error("needs-auth", connector_id, &message, false),
+                    )
+                },
             );
         }
         response.json().await.map_err(|_| {
@@ -2037,28 +2293,33 @@ pub(crate) async fn refresh_connection(
         // scope-gated operations until Google returns scope truth again.
         tokens.scopes.clear();
     }
-    NativeConnectorSecretStore
-        .set(
-            &connection.credential_ref,
-            &serde_json::to_string(&tokens).map_err(|_| {
-                command_error(
-                    "unknown",
-                    connector_id,
-                    "Fable could not encode refreshed tokens.",
-                    false,
-                )
-            })?,
+    let updated_secret = serde_json::to_string(&tokens).map_err(|_| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Fable could not encode refreshed tokens.",
+            false,
         )
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    })?;
     connection.status = "connected".to_string();
     connection.scopes = tokens.scopes;
     connection.expires_at = tokens.expires_at;
     connection.updated_at = now_epoch().to_string();
-    connections[active_index] = connection.clone();
-    let updated = connection.clone();
-    write_connections(&path, &connections)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    Ok(updated)
+    commit_refresh_success(
+        connector_id,
+        &secret_store,
+        &path,
+        durable_store,
+        &scope,
+        &connections,
+        &encoded,
+        connection,
+        &updated_secret,
+        || {
+            crate::clerk_identity::lock_native_identity_generation(&identity)
+                .map_err(|message| command_error("needs-auth", connector_id, &message, false))
+        },
+    )
 }
 
 /// Return a usable token set to native provider code. Tokens remain inside
@@ -3475,6 +3736,153 @@ mod tests {
         assert_eq!(connections[0].account.id, "account-1");
         assert!(!error.message.contains("rollback-access-secret"));
         assert!(!error.message.contains("rollback-refresh-secret"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn canonical_refresh_success_and_rejection_are_coherent_and_reversible() {
+        let store = MemoryStore::default();
+        let durable =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let scope = durable
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
+                    [],
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                resolve(tx, Some("default"), None, ScopeAccess::Write)
+            })
+            .unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "fable-canonical-refresh-test-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let credential_ref = native_connector_credential_ref("gmail", "account-1");
+        let old_tokens = StoredTokenSet {
+            access_token: "old-refresh-access".into(),
+            refresh_token: Some("stable-refresh-token".into()),
+            token_type: "Bearer".into(),
+            expires_at: Some(1),
+            scopes: vec!["gmail.readonly".into()],
+            revocation_endpoint: None,
+            token_endpoint: None,
+            handoff_endpoint: None,
+            client_id: "desktop-client".into(),
+            brokered: false,
+        };
+        let old_encoded = serde_json::to_string(&old_tokens).unwrap();
+        commit_prepared_auth_state(
+            &path,
+            &durable,
+            "gmail",
+            &scope,
+            &store,
+            (
+                old_tokens,
+                ConnectorAccountSummary {
+                    id: "account-1".into(),
+                    display_name: "Account one".into(),
+                    handle: None,
+                    email: None,
+                    workspace: None,
+                    avatar_url: None,
+                },
+                credential_ref.clone(),
+                CredentialRollback {
+                    credential_ref: credential_ref.clone(),
+                    previous_secret: None,
+                },
+                old_encoded.clone(),
+            ),
+            || Ok(()),
+        )
+        .unwrap();
+        let previous_connections = read_connections(&path).unwrap();
+        let mut updated_connection = previous_connections[0].clone();
+        updated_connection.expires_at = Some(now_epoch() + 3600);
+        updated_connection.updated_at = now_epoch().to_string();
+        let new_tokens = StoredTokenSet {
+            access_token: "new-refresh-access".into(),
+            refresh_token: Some("stable-refresh-token".into()),
+            token_type: "Bearer".into(),
+            expires_at: updated_connection.expires_at,
+            scopes: vec!["gmail.readonly".into()],
+            revocation_endpoint: None,
+            token_endpoint: None,
+            handoff_endpoint: None,
+            client_id: "desktop-client".into(),
+            brokered: false,
+        };
+        let new_encoded = serde_json::to_string(&new_tokens).unwrap();
+        commit_refresh_success(
+            "gmail",
+            &store,
+            &path,
+            &durable,
+            &scope,
+            &previous_connections,
+            &old_encoded,
+            updated_connection,
+            &new_encoded,
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(
+            store.get(&credential_ref).unwrap().as_deref(),
+            Some(new_encoded.as_str())
+        );
+        let refreshed_connections = read_connections(&path).unwrap();
+
+        durable
+            .transaction(|tx| clear_current_internal_user(tx))
+            .unwrap();
+        let rollback_error = commit_refresh_rejection(
+            "gmail",
+            &store,
+            &path,
+            &durable,
+            &scope,
+            &refreshed_connections,
+            &new_encoded,
+            "account-1",
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(rollback_error.code, "unknown");
+        assert_eq!(read_connections(&path).unwrap()[0].status, "connected");
+        assert_eq!(
+            store.get(&credential_ref).unwrap().as_deref(),
+            Some(new_encoded.as_str())
+        );
+
+        durable
+            .transaction(|tx| set_current_internal_user(tx, "user-a", "t2"))
+            .unwrap();
+        let rejected = commit_refresh_rejection(
+            "gmail",
+            &store,
+            &path,
+            &durable,
+            &scope,
+            &refreshed_connections,
+            &new_encoded,
+            "account-1",
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(rejected.code, "expired-auth");
+        assert_eq!(read_connections(&path).unwrap()[0].status, "expired");
+        let canonical = durable
+            .with_conn(|tx| crate::store::repos::connection_record::list(tx, &durable, &scope))
+            .unwrap();
+        assert_eq!(canonical[0].lifecycle, "refresh-required");
+        assert_eq!(canonical[0].authorization_state, "expired");
+        assert_eq!(canonical[0].health_state, "unhealthy");
+        assert_eq!(canonical[0].credential_state, "refresh-required");
+        assert!(!rollback_error.message.contains("old-refresh-access"));
+        assert!(!rollback_error.message.contains("new-refresh-access"));
         let _ = fs::remove_file(path);
     }
 }
