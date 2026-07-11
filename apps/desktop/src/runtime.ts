@@ -823,7 +823,7 @@ export interface CreateResponseArtifactInput {
 }
 
 const previewArtifacts = new Map<string, RuntimeArtifactBundle[]>();
-const previewArtifactProjectAssociations = new Map<string, Map<string, Set<string>>>();
+const previewArtifactProjectAssociations = new Map<string, Map<string, Map<string, string>>>();
 const ARTIFACT_MAX_INLINE_CONTENT_BYTES = 65_536;
 
 function isArtifactMedia(value: unknown): value is Spine.ArtifactsAndRoutines.ArtifactMediaMetadata {
@@ -1236,24 +1236,31 @@ export async function searchRuntimeArtifacts(
     return records.flatMap((entry) => {
       const { artifact, currentVersion } = entry;
       if (boundedQuery.threadId && artifact.context.threadId !== boundedQuery.threadId) return [];
-      const associatedWithProject = boundedQuery.projectId
-        ? previewArtifactProjectAssociations.get(scope.workspaceId)?.get(boundedQuery.projectId)?.has(artifact.id) === true
-        : false;
-      if (boundedQuery.projectId && artifact.context.projectId !== boundedQuery.projectId && !associatedWithProject) return [];
+      const associatedVersionId = boundedQuery.projectId
+        ? previewArtifactProjectAssociations.get(scope.workspaceId)?.get(boundedQuery.projectId)?.get(artifact.id)
+        : undefined;
+      if (boundedQuery.projectId && artifact.context.projectId !== boundedQuery.projectId && !associatedVersionId) return [];
+      const projectedVersion = associatedVersionId
+        ? entry.versions.find((version) => version.id === associatedVersionId)
+        : currentVersion;
+      if (!projectedVersion) return [];
       if (boundedQuery.kinds && !boundedQuery.kinds.includes(artifact.kind)) return [];
       if (boundedQuery.statuses && !boundedQuery.statuses.includes(artifact.status)) return [];
-      const currentText = currentVersion.content.kind === "inline" ? currentVersion.content.text : "";
-      const sourceText = currentVersion.citations.map((citation) =>
+      const currentText = projectedVersion.content.kind === "inline" ? projectedVersion.content.text : "";
+      const sourceText = projectedVersion.citations.map((citation) =>
         `${citation.label} ${citation.quotedText ?? ""}`
       ).join(" ");
-      const decisionText = JSON.stringify(currentVersion.decisions ?? []);
+      const decisionText = JSON.stringify(projectedVersion.decisions ?? []);
       const matchedOn: RuntimeArtifactSearchResult["matchedOn"] = normalized ? [
         ...(artifact.title.toLowerCase().includes(normalized) ? ["title" as const] : []),
         ...(currentText.toLowerCase().includes(normalized) ? ["content" as const] : []),
         ...(sourceText.toLowerCase().includes(normalized) ? ["source" as const] : []),
         ...(decisionText.toLowerCase().includes(normalized) ? ["decision" as const] : [])
       ] : [];
-      return normalized && matchedOn.length === 0 ? [] : [{ artifact, currentVersion, matchedOn }];
+      const projectedArtifact = associatedVersionId
+        ? { ...artifact, currentVersionId: projectedVersion.id }
+        : artifact;
+      return normalized && matchedOn.length === 0 ? [] : [{ artifact: projectedArtifact, currentVersion: projectedVersion, matchedOn }];
     }).slice(0, boundedQuery.limit);
   }
   const result = await invoke<unknown>("artifact_search", { input: boundedQuery });
@@ -1292,6 +1299,30 @@ export async function exportRuntimeArtifact(artifactId: string, versionId: strin
   return parseArtifactExport(result, artifactId, versionId);
 }
 
+/** Resolves the artifact's canonical source project without guessing from UI placement. */
+export async function getRuntimeArtifactSourceProjectId(artifactId: string): Promise<string | null> {
+  const scope = conversationScopeOrThrow();
+  const bundle = await getRuntimeArtifact(artifactId);
+  if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+    throw new Error("The active workspace changed while resolving the artifact source.");
+  }
+  if (!bundle) throw new Error("This artifact is no longer available.");
+  if (bundle.artifact.context.projectId) return bundle.artifact.context.projectId;
+  const threadId = bundle.artifact.context.threadId;
+  if (!threadId) return null;
+  const thread = await getRuntimeConversationThread(threadId);
+  if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+    throw new Error("The active workspace changed while resolving the artifact source.");
+  }
+  if (!thread) return null;
+  if (thread.workspaceId !== scope.workspaceId || thread.authority !== "local" ||
+      thread.visibility !== "member-private" ||
+      (!hasTauriRuntime() && thread.ownerMemberId !== bundle.artifact.ownerMemberId)) {
+    throw new Error("The artifact source conversation is outside its private scope.");
+  }
+  return thread.projectId ?? null;
+}
+
 export async function proposeRuntimeArtifactHandoff(input: {
   artifactId: string;
   versionId: string;
@@ -1312,7 +1343,20 @@ export async function proposeRuntimeArtifactHandoff(input: {
   if (!bundle.versions.some((version) => version.id === input.versionId)) {
     throw new Error("This artifact version is no longer available.");
   }
-  if (bundle.artifact.context.projectId === input.targetProjectId) {
+  let sourceProjectId = bundle.artifact.context.projectId;
+  if (!hasTauriRuntime() && !sourceProjectId && bundle.artifact.context.threadId) {
+    const sourceThread = await getRuntimeConversationThread(bundle.artifact.context.threadId);
+    if (activeDataScope()?.workspaceId !== scope.workspaceId) {
+      throw new Error("The active workspace changed while preparing the artifact handoff.");
+    }
+    if (sourceThread && (sourceThread.workspaceId !== scope.workspaceId ||
+        sourceThread.authority !== "local" || sourceThread.visibility !== "member-private" ||
+        sourceThread.ownerMemberId !== bundle.artifact.ownerMemberId)) {
+      throw new Error("The artifact source conversation is outside its private scope.");
+    }
+    sourceProjectId = sourceThread?.projectId;
+  }
+  if (sourceProjectId === input.targetProjectId) {
     throw new Error("This artifact is already in that project.");
   }
   const target = await getRuntimeProject(scope.workspaceId, input.targetProjectId);
@@ -1326,7 +1370,7 @@ export async function proposeRuntimeArtifactHandoff(input: {
   }
   const source = { workspaceId: scope.workspaceId, ...bundle.artifact.context } as Spine.ArtifactsAndRoutines.HandoffContextReference;
   const duplicate = (knownArtifactHandoffs.get(scope.workspaceId)?.values() ?? []) as Iterable<RuntimeArtifactHandoff>;
-  if ([...duplicate].some((handoff) =>
+  if (!hasTauriRuntime() && [...duplicate].some((handoff) =>
     (handoff.status === "proposed" || handoff.status === "accepted") &&
     handoff.artifactVersionIds[0] === input.versionId && handoff.target.projectId === input.targetProjectId
   )) {
@@ -1426,12 +1470,12 @@ export async function acceptRuntimeArtifactHandoff(handoffId: string, expectedRe
     }
     let artifacts = workspace.get(targetProjectId);
     if (!artifacts) {
-      artifacts = new Set();
+      artifacts = new Map();
       workspace.set(targetProjectId, artifacts);
     }
     const bundle = (previewArtifacts.get(scope.workspaceId) ?? [])
       .find((entry) => entry.versions.some((version) => version.id === proposed.artifactVersionIds[0]));
-    if (bundle) artifacts.add(bundle.artifact.id);
+    if (bundle) artifacts.set(bundle.artifact.id, proposed.artifactVersionIds[0]);
   } else {
     const result = await invoke<unknown>("artifact_handoff_accept", { input: { handoffId, expectedRevision } });
     if (activeDataScope()?.workspaceId !== scope.workspaceId) {

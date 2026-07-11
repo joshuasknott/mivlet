@@ -3,8 +3,11 @@ import { clearActiveRuntimeDataScope, setActiveRuntimeDataScope } from "./runtim
 import {
   appendRuntimeArtifactVersion,
   acceptRuntimeArtifactHandoff,
+  createRuntimeConversationThread,
   createRuntimeResponseArtifact,
   exportRuntimeArtifact,
+  getRuntimeArtifact,
+  getRuntimeArtifactSourceProjectId,
   listRuntimeThreadArtifacts,
   proposeRuntimeArtifactHandoff,
   reviewRuntimeArtifact,
@@ -606,7 +609,8 @@ describe("artifact runtime revisions", () => {
   it("uses exact native handoff envelopes and rejects expanded authority or history", async () => {
     setNative(true);
     setActiveRuntimeDataScope("workspace-native");
-    mocks.invoke.mockResolvedValueOnce(nativeBundle()).mockResolvedValueOnce(nativeProject()).mockResolvedValueOnce(nativeHandoff("proposed", "Add this"));
+    mocks.invoke.mockResolvedValueOnce(nativeBundle()).mockResolvedValueOnce(nativeProject())
+      .mockResolvedValueOnce(nativeHandoff("proposed", "Add this"));
     const proposed = await proposeRuntimeArtifactHandoff({
       artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target", note: " Add this "
     });
@@ -617,8 +621,14 @@ describe("artifact runtime revisions", () => {
         artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target", note: "Add this"
       } }]
     ]);
+    mocks.invoke.mockResolvedValueOnce(nativeBundle()).mockResolvedValueOnce(nativeProject())
+      .mockResolvedValueOnce(nativeHandoff("proposed", "Add this"));
+    const recovered = await proposeRuntimeArtifactHandoff({
+      artifactId: "artifact-1", versionId: "version-1", targetProjectId: "project-target", note: "Add this"
+    });
+    expect(recovered.id).toBe(proposed.id);
     mocks.invoke.mockResolvedValueOnce(nativeHandoff("accepted", "Add this"));
-    await acceptRuntimeArtifactHandoff(proposed.id, proposed.revision);
+    await acceptRuntimeArtifactHandoff(recovered.id, recovered.revision);
     expect(mocks.invoke).toHaveBeenLastCalledWith("artifact_handoff_accept", {
       input: { handoffId: "handoff-1", expectedRevision: 1 }
     });
@@ -662,12 +672,23 @@ describe("artifact runtime revisions", () => {
     await expect(acceptRuntimeArtifactHandoff(proposed.id, proposed.revision + 1)).rejects.toThrow(/changed elsewhere/i);
     const accepted = await acceptRuntimeArtifactHandoff(proposed.id, proposed.revision);
     expect(accepted.status).toBe("accepted");
+    const revised = await appendRuntimeArtifactVersion({
+      artifactId: created.artifact.id,
+      expectedRevision: created.artifact.revision,
+      expectedCurrentVersionId: created.currentVersion.id,
+      content: "Version two"
+    });
     const targetResults = await searchRuntimeArtifacts({ projectId: target.id });
     expect(targetResults.map((entry) => entry.artifact.id)).toContain(created.artifact.id);
+    expect(targetResults[0].currentVersion.id).toBe(created.currentVersion.id);
+    expect(targetResults[0].artifact.currentVersionId).toBe(created.currentVersion.id);
+    expect(targetResults[0].currentVersion.content).toEqual(created.currentVersion.content);
     const unchanged = await searchRuntimeArtifacts({ query: "Handoff report" });
     expect(unchanged[0].artifact.context).toEqual(before.artifact.context);
-    expect(unchanged[0].currentVersion).toEqual(before.currentVersion);
+    expect(unchanged[0].currentVersion.id).toBe(revised.currentVersion.id);
     expect(unchanged[0].artifact.authority).toBe(before.artifact.authority);
+    const sourceBundle = await getRuntimeArtifact(created.artifact.id);
+    expect(sourceBundle?.versions).toHaveLength(2);
     await expect(proposeRuntimeArtifactHandoff({
       artifactId: created.artifact.id, versionId: created.currentVersion.id, targetProjectId: target.id
     })).rejects.toThrow(/already been added/i);
@@ -700,5 +721,26 @@ describe("artifact runtime revisions", () => {
     setActiveRuntimeDataScope("workspace-other");
     resolveHandoff(nativeHandoff());
     await expect(pending).rejects.toThrow(/active workspace changed/i);
+  });
+
+  it("resolves a response artifact's canonical source project from its conversation", async () => {
+    setActiveRuntimeDataScope("workspace-source-resolution");
+    const source = await createRuntimeProject("workspace-source-resolution", { title: "Source" });
+    const thread = await createRuntimeConversationThread({
+      projectId: source.id,
+      title: "Project conversation",
+      authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "preview-member" as never }
+    });
+    const artifact = await createRuntimeResponseArtifact({
+      threadId: thread.id, messageId: "message-source", runId: "run-source",
+      title: "Project response", content: "Project answer", citations: []
+    });
+    expect(artifact.artifact.context.projectId).toBeUndefined();
+    expect(await getRuntimeArtifactSourceProjectId(artifact.artifact.id)).toBe(source.id);
+    await expect(proposeRuntimeArtifactHandoff({
+      artifactId: artifact.artifact.id,
+      versionId: artifact.currentVersion.id,
+      targetProjectId: source.id
+    })).rejects.toThrow(/already in that project/i);
   });
 });

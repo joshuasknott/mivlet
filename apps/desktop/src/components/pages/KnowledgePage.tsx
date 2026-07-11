@@ -20,6 +20,7 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import {
   exportRuntimeArtifact,
   getRuntimeArtifact,
+  getRuntimeArtifactSourceProjectId,
   proposeRuntimeArtifactHandoff,
   acceptRuntimeArtifactHandoff,
   searchRuntimeArtifacts,
@@ -527,6 +528,7 @@ function ArtifactDetail({
   const [handoffStatus, setHandoffStatus] = useState("");
   const [handoffError, setHandoffError] = useState("");
   const confirmHandoffRef = useRef<HTMLButtonElement>(null);
+  const handoffSuccessRef = useRef<HTMLParagraphElement>(null);
   const version = bundle.versions.find((entry) => entry.id === selectedVersionId) ?? bundle.currentVersion;
   const scopeLabel = bundle.artifact.context.projectId
     ? "Project"
@@ -536,17 +538,20 @@ function ArtifactDetail({
   const review = [...bundle.artifact.reviews].reverse().find((entry) => entry.versionId === version.id);
   useEffect(() => {
     let active = true;
-    void listRuntimeProjects(activeWorkspaceId, true).then((projects) => {
+    void Promise.all([
+      listRuntimeProjects(activeWorkspaceId, true),
+      getRuntimeArtifactSourceProjectId(bundle.artifact.id)
+    ]).then(([projects, sourceProjectId]) => {
       if (!active || activeWorkspaceRef.current !== activeWorkspaceId) return;
       setEligibleProjects(projects.filter((project) =>
         project.lifecycle === "active" && project.authority === "local" &&
         project.visibility === "member-private" &&
         project.ownerMemberId === bundle.artifact.ownerMemberId &&
-        project.id !== bundle.artifact.context.projectId
+        project.id !== sourceProjectId
       ));
     }).catch(() => { if (active && activeWorkspaceRef.current === activeWorkspaceId) setEligibleProjects([]); });
     return () => { active = false; };
-  }, [activeWorkspaceId, activeWorkspaceRef, bundle.artifact.context.projectId, bundle.artifact.ownerMemberId]);
+  }, [activeWorkspaceId, activeWorkspaceRef, bundle.artifact.id, bundle.artifact.ownerMemberId]);
   useEffect(() => {
     setTargetProjectId("");
     setPreparedHandoff(null);
@@ -554,6 +559,7 @@ function ArtifactDetail({
     setHandoffError("");
   }, [version.id]);
   useEffect(() => { preparedHandoff && confirmHandoffRef.current?.focus(); }, [preparedHandoff]);
+  useEffect(() => { handoffStatus && handoffSuccessRef.current?.focus(); }, [handoffStatus]);
   const runExport = (format: "markdown" | "json") => {
     const requestedWorkspaceId = activeWorkspaceId;
     setExporting(true);
@@ -668,7 +674,7 @@ function ArtifactDetail({
               Confirm add version {version.version}
             </button>
           ) : null}
-          {handoffStatus ? <p role="status">{handoffStatus}</p> : null}
+          {handoffStatus ? <p ref={handoffSuccessRef} role="status" tabIndex={-1}>{handoffStatus}</p> : null}
           {handoffError ? <p role="alert">{handoffError}</p> : null}
         </section>
       ) : null}

@@ -7,6 +7,7 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import {
   exportRuntimeArtifact,
   getRuntimeArtifact,
+  getRuntimeArtifactSourceProjectId,
   proposeRuntimeArtifactHandoff,
   acceptRuntimeArtifactHandoff,
   searchRuntimeArtifacts,
@@ -20,6 +21,7 @@ import { listRuntimeProjects, type RuntimeProject } from "../../lib/project-runt
 vi.mock("../../runtime", () => ({
   searchRuntimeArtifacts: vi.fn(async () => []),
   getRuntimeArtifact: vi.fn(async () => null),
+  getRuntimeArtifactSourceProjectId: vi.fn(async () => null),
   exportRuntimeArtifact: vi.fn(),
   proposeRuntimeArtifactHandoff: vi.fn(),
   acceptRuntimeArtifactHandoff: vi.fn()
@@ -287,6 +289,7 @@ describe("KnowledgePage — artifacts", () => {
     vi.clearAllMocks();
     vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
     vi.mocked(listRuntimeProjects).mockResolvedValue([]);
+    vi.mocked(getRuntimeArtifactSourceProjectId).mockResolvedValue(null);
   });
 
   it("searches on entry and query changes, shows the count, and opens plain-language details", async () => {
@@ -399,7 +402,11 @@ describe("KnowledgePage — artifacts", () => {
     const bundle = makeArtifactBundle();
     vi.mocked(searchRuntimeArtifacts).mockResolvedValue([artifactSearchResult(bundle)]);
     vi.mocked(getRuntimeArtifact).mockResolvedValue(bundle);
-    vi.mocked(listRuntimeProjects).mockResolvedValue([makeProject()]);
+    vi.mocked(listRuntimeProjects).mockResolvedValue([
+      makeProject(),
+      makeProject({ id: "project-source" as never, title: "Source project" })
+    ]);
+    vi.mocked(getRuntimeArtifactSourceProjectId).mockResolvedValue("project-source");
     vi.mocked(proposeRuntimeArtifactHandoff).mockResolvedValue(makeHandoff());
     vi.mocked(acceptRuntimeArtifactHandoff).mockResolvedValue(makeHandoff("accepted"));
     const runtime = stubRuntime({
@@ -411,6 +418,7 @@ describe("KnowledgePage — artifacts", () => {
     await user.click(await screen.findByRole("button", { name: /Launch report.*Version 2/i }));
     await user.selectOptions(await screen.findByLabelText("Version of Launch report"), "version-1");
     const project = await screen.findByLabelText("Project for Launch report version 1");
+    expect(within(project).queryByRole("option", { name: "Source project" })).not.toBeInTheDocument();
     await user.selectOptions(project, "project-target");
     expect(screen.getByText("Adds this version only. Conversation history and permissions stay here.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Prepare" }));
@@ -421,7 +429,9 @@ describe("KnowledgePage — artifacts", () => {
     expect(confirm).toHaveFocus();
     await user.click(confirm);
     expect(acceptRuntimeArtifactHandoff).toHaveBeenCalledWith("handoff-1", 1);
-    expect(await screen.findByText("Version 1 added to project.")).toBeInTheDocument();
+    const success = await screen.findByText("Version 1 added to project.");
+    expect(success).toBeInTheDocument();
+    await waitFor(() => expect(success).toHaveFocus());
     expect(screen.queryByText(/collaborator|shared|copied conversation/i)).not.toBeInTheDocument();
   });
 
