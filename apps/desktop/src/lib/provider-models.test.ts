@@ -45,11 +45,11 @@ describe("provider model choices", () => {
     const options = providerModelOptions([
       {
         provider: provider("openai", "OpenAI"),
-        models: [{ id: "different", label: "Different", available: true }]
+        models: [{ id: "shared", label: "Shared", available: true }]
       },
       {
         provider: provider("openrouter", "OpenRouter"),
-        models: [{ id: "shared", label: "Shared", available: true }]
+        models: [{ id: "different", label: "Different", available: true }]
       }
     ]);
 
@@ -72,6 +72,20 @@ describe("provider model choices", () => {
     ]);
 
     expect(resolveProviderModelOption(options, "openai::shared")).toBeUndefined();
+  });
+
+  it("never guesses between ambiguous legacy provider routes", () => {
+    const options = providerModelOptions([
+      {
+        provider: provider("openai", "OpenAI"),
+        models: [{ id: "shared", label: "Shared", available: true }]
+      },
+      {
+        provider: provider("openrouter", "OpenRouter"),
+        models: [{ id: "shared", label: "Shared", available: true }]
+      }
+    ]);
+
     expect(resolveProviderModelOption(options, "shared")).toBeUndefined();
   });
 
