@@ -1,5 +1,6 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { parseComposerText } from "@fable/connectors";
+import type { KnowledgeCitation } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { connectors } from "../data/workspace";
@@ -22,7 +23,8 @@ import { composerModelsFor } from "./composer-models";
 import { ShellPageBoundary } from "./ShellRoutes";
 import { useShellAgentController } from "./useShellAgentController";
 import { useProjects } from "../hooks/useProjects";
-import { ProjectPage } from "../components/pages/ProjectPage";
+import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView } from "../components/pages/ProjectPage";
+import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
 
 type ConversationMessage = {
   id: string;
@@ -279,6 +281,34 @@ export function ChatWorkspace() {
     () => selectedProjectId ? projectWorkspaces.find((project) => project.id === selectedProjectId) ?? null : null,
     [projectWorkspaces, selectedProjectId]
   );
+  const projectKnowledge = useProjectKnowledge({
+    workspaceId: boundWorkspaceId ?? "",
+    projectId: selectedProjectId ?? "",
+    enabled: Boolean(boundWorkspaceId && selectedProjectId && selectedProject)
+  });
+  const projectKnowledgeView = useMemo<ProjectKnowledgeView>(() => ({
+    sources: projectKnowledge.sources.map((source: ProjectKnowledgeSourceView) => ({
+      id: source.id,
+      title: source.title,
+      provenance: source.provenance,
+      freshness: source.freshness,
+      status: source.status,
+      statusMessage: source.statusMessage
+    })),
+    loading: projectKnowledge.loading,
+    error: projectKnowledge.error,
+    refresh: projectKnowledge.refresh,
+    importFile: projectKnowledge.importFile,
+    search: async (query: string) => {
+      const result = await projectKnowledge.search(query);
+      return result.citations.map((citation: KnowledgeCitation) => ({
+        id: citation.sourceId,
+        title: citation.title,
+        provenance: citation.provenance,
+        freshness: citation.freshness
+      }));
+    }
+  }), [projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.search, projectKnowledge.sources]);
 
   useEffect(() => {
     if (selectedProjectId && !projectStore.loading && !selectedProject) {
@@ -905,6 +935,7 @@ export function ChatWorkspace() {
           <div className="workspace-center workspace-center--page">
             <ProjectPage
               project={selectedProject}
+              knowledge={projectKnowledgeView}
               onNewChat={() => startNewChat(selectedProject.id)}
               onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
               onReload={async () => { await projectStore.refresh(); }}
