@@ -32,7 +32,12 @@ export function workspaceDelta(
   if (revisions.length !== expected.length || revisions.some((revision, index) => revision !== expected[index])) {
     throw new Error("The shared workspace delta is not contiguous.");
   }
-  return { workspaceId, afterRevision, workspaceRevision, changes };
+  return {
+    workspaceId: workspaceId as CloudWorkspaceDelta["workspaceId"],
+    afterRevision,
+    workspaceRevision,
+    changes,
+  };
 }
 
 export const getWorkspaceDelta = queryGeneric({
