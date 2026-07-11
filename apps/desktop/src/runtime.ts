@@ -3128,6 +3128,13 @@ export interface RuntimeRemoteMcpAuthorizationSummary {
   pkceMethod: "S256";
   clientIdMetadataDocumentSupported: boolean;
   dynamicRegistrationSupported: boolean;
+  clientRegistrationStrategy:
+    | "pre-registered"
+    | "client-id-metadata-document"
+    | "dynamic-client-registration"
+    | "manual-client-information";
+  clientRegistrationStatus: "selected" | "configuration-required";
+  clientRegistrationReason: string;
 }
 
 export async function inspectRuntimeRemoteMcpAuthorization(

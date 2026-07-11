@@ -204,6 +204,9 @@ pub struct RemoteMcpAuthorizationSummary {
     pkce_method: String,
     client_id_metadata_document_supported: bool,
     dynamic_registration_supported: bool,
+    client_registration_strategy: String,
+    client_registration_status: String,
+    client_registration_reason: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -2738,16 +2741,119 @@ fn parse_authorization_server_metadata(
         .map(validate_remote_endpoint)
         .transpose()?
         .is_some();
+    let client_id_metadata_document_supported = object
+        .get("client_id_metadata_document_supported")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let registration = select_client_registration(
+        issuer,
+        client_id_metadata_document_supported,
+        dynamic_registration_supported,
+    )?;
     Ok(RemoteMcpAuthorizationSummary {
         issuer: issuer.to_string(),
         scopes,
         pkce_method: "S256".into(),
-        client_id_metadata_document_supported: object
-            .get("client_id_metadata_document_supported")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        client_id_metadata_document_supported,
         dynamic_registration_supported,
+        client_registration_strategy: registration.strategy.into(),
+        client_registration_status: registration.status.into(),
+        client_registration_reason: registration.reason.into(),
     })
+}
+
+struct ClientRegistrationDecision {
+    strategy: &'static str,
+    status: &'static str,
+    reason: &'static str,
+}
+
+fn select_client_registration_from_availability(
+    pre_registered: bool,
+    client_metadata_document: bool,
+    dynamic_registration: bool,
+) -> ClientRegistrationDecision {
+    if pre_registered {
+        ClientRegistrationDecision {
+            strategy: "pre-registered",
+            status: "selected",
+            reason: "Use the issuer-specific client registration already configured for Fable.",
+        }
+    } else if client_metadata_document {
+        ClientRegistrationDecision {
+            strategy: "client-id-metadata-document",
+            status: "selected",
+            reason: "Use Fable's configured public HTTPS Client ID Metadata Document.",
+        }
+    } else if dynamic_registration {
+        ClientRegistrationDecision {
+            strategy: "dynamic-client-registration",
+            status: "selected",
+            reason:
+                "Register Fable's public PKCE client dynamically with this authorization server.",
+        }
+    } else {
+        ClientRegistrationDecision {
+            strategy: "manual-client-information",
+            status: "configuration-required",
+            reason: "This server requires explicit client information before Fable can connect an account.",
+        }
+    }
+}
+
+fn configured_preregistered_client(issuer: &Url) -> Result<bool, String> {
+    let Some(raw) = std::env::var_os("FABLE_MCP_OAUTH_PREREGISTERED_CLIENTS") else {
+        return Ok(false);
+    };
+    let raw = raw
+        .into_string()
+        .map_err(|_| "MCP OAuth pre-registration configuration is invalid.".to_string())?;
+    if raw.len() > 64 * 1024 {
+        return Err("MCP OAuth pre-registration configuration is too large.".into());
+    }
+    let registrations: serde_json::Map<String, Value> = serde_json::from_str(&raw)
+        .map_err(|_| "MCP OAuth pre-registration configuration is invalid.".to_string())?;
+    let Some(client_id) = registrations.get(issuer.as_str()) else {
+        return Ok(false);
+    };
+    client_id
+        .as_str()
+        .filter(|value| {
+            !value.trim().is_empty() && value.len() <= 2_048 && !value.chars().any(char::is_control)
+        })
+        .ok_or_else(|| "MCP OAuth pre-registered client information is invalid.".to_string())?;
+    Ok(true)
+}
+
+fn configured_client_metadata_document() -> Result<bool, String> {
+    let Some(raw) = std::env::var_os("FABLE_MCP_OAUTH_CLIENT_METADATA_DOCUMENT_URL") else {
+        return Ok(false);
+    };
+    let raw = raw
+        .into_string()
+        .map_err(|_| "MCP OAuth client metadata configuration is invalid.".to_string())?;
+    let url = validate_remote_endpoint(raw.trim())?;
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(
+            "MCP OAuth Client ID Metadata Document URL cannot contain a query or fragment.".into(),
+        );
+    }
+    Ok(true)
+}
+
+fn select_client_registration(
+    issuer: &Url,
+    client_metadata_document_supported: bool,
+    dynamic_registration_supported: bool,
+) -> Result<ClientRegistrationDecision, String> {
+    let pre_registered = configured_preregistered_client(issuer)?;
+    let metadata_document =
+        client_metadata_document_supported && configured_client_metadata_document()?;
+    Ok(select_client_registration_from_availability(
+        pre_registered,
+        metadata_document,
+        dynamic_registration_supported,
+    ))
 }
 
 async fn discover_remote_authorization(
@@ -3229,6 +3335,23 @@ mod tests {
         let mut no_pkce = metadata;
         no_pkce["code_challenge_methods_supported"] = serde_json::json!(["plain"]);
         assert!(parse_authorization_server_metadata(&servers[0], vec![], &no_pkce).is_err());
+    }
+
+    #[test]
+    fn oauth_client_registration_order_prefers_operator_control_then_interoperability() {
+        let pre_registered = select_client_registration_from_availability(true, true, true);
+        assert_eq!(pre_registered.strategy, "pre-registered");
+        assert_eq!(pre_registered.status, "selected");
+
+        let metadata_document = select_client_registration_from_availability(false, true, true);
+        assert_eq!(metadata_document.strategy, "client-id-metadata-document");
+
+        let dynamic = select_client_registration_from_availability(false, false, true);
+        assert_eq!(dynamic.strategy, "dynamic-client-registration");
+
+        let manual = select_client_registration_from_availability(false, false, false);
+        assert_eq!(manual.strategy, "manual-client-information");
+        assert_eq!(manual.status, "configuration-required");
     }
 
     #[test]
