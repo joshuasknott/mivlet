@@ -23,8 +23,9 @@ import { composerModelsFor } from "./composer-models";
 import { ShellPageBoundary } from "./ShellRoutes";
 import { useShellAgentController } from "./useShellAgentController";
 import { useProjects } from "../hooks/useProjects";
-import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView } from "../components/pages/ProjectPage";
+import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView, type ProjectMemoryView } from "../components/pages/ProjectPage";
 import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
+import { useProjectMemory } from "../hooks/useProjectMemory";
 
 type ConversationMessage = {
   id: string;
@@ -278,13 +279,24 @@ export function ChatWorkspace() {
     [projectStore.archivedProjects]
   );
   const selectedProject = useMemo(
-    () => selectedProjectId ? projectWorkspaces.find((project) => project.id === selectedProjectId) ?? null : null,
-    [projectWorkspaces, selectedProjectId]
+    () => selectedProjectId
+      ? [...projectWorkspaces, ...archivedProjectWorkspaces].find((project) => project.id === selectedProjectId) ?? null
+      : null,
+    [archivedProjectWorkspaces, projectWorkspaces, selectedProjectId]
   );
+  const runProjectId = useMemo(() => {
+    if (newThreadProjectId) return newThreadProjectId;
+    if (!selectedConversationThreadId) return null;
+    return durableConversation.state.threads.find((thread) => thread.id === selectedConversationThreadId)?.projectId ?? null;
+  }, [durableConversation.state.threads, newThreadProjectId, selectedConversationThreadId]);
+  const scopedProjectId = selectedProjectId ?? runProjectId;
+  const scopedProject = scopedProjectId
+    ? [...projectWorkspaces, ...archivedProjectWorkspaces].find((project) => project.id === scopedProjectId) ?? null
+    : null;
   const projectKnowledge = useProjectKnowledge({
     workspaceId: boundWorkspaceId ?? "",
-    projectId: selectedProjectId ?? "",
-    enabled: Boolean(boundWorkspaceId && selectedProjectId && selectedProject)
+    projectId: scopedProjectId ?? "",
+    enabled: Boolean(boundWorkspaceId && scopedProjectId && scopedProject)
   });
   const projectKnowledgeView = useMemo<ProjectKnowledgeView>(() => ({
     sources: projectKnowledge.sources.map((source: ProjectKnowledgeSourceView) => ({
@@ -309,6 +321,36 @@ export function ChatWorkspace() {
       }));
     }
   }), [projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.search, projectKnowledge.sources]);
+  const projectMemory = useProjectMemory({
+    workspaceId: boundWorkspaceId ?? "",
+    projectId: scopedProjectId ?? "",
+    enabled: Boolean(boundWorkspaceId && scopedProjectId && scopedProject)
+  });
+  const projectMemoryView = useMemo<ProjectMemoryView>(() => ({
+    records: projectMemory.records.map((record) => ({
+      id: record.id,
+      title: record.title,
+      value: record.value,
+      source: record.provenance?.note || record.source,
+      freshness: record.freshness,
+      pinned: record.pinned,
+      disabled: Boolean(record.disabled)
+    })),
+    disabled: projectMemory.disabled,
+    loading: projectMemory.loading,
+    error: projectMemory.error,
+    refresh: projectMemory.refresh,
+    promote: async (sourceId: string) => {
+      const source = projectKnowledge.sources.find((candidate) => candidate.id === sourceId);
+      if (!source) throw new Error("That knowledge source is no longer available.");
+      return projectMemory.promote(source);
+    },
+    edit: projectMemory.edit,
+    togglePin: projectMemory.togglePin,
+    toggleDisabled: projectMemory.toggleDisabled,
+    forget: projectMemory.forget,
+    exportText: projectMemory.exportText
+  }), [projectKnowledge.sources, projectMemory.disabled, projectMemory.edit, projectMemory.error, projectMemory.exportText, projectMemory.forget, projectMemory.loading, projectMemory.promote, projectMemory.records, projectMemory.refresh, projectMemory.toggleDisabled, projectMemory.togglePin]);
 
   useEffect(() => {
     if (selectedProjectId && !projectStore.loading && !selectedProject) {
@@ -679,11 +721,28 @@ export function ChatWorkspace() {
       prompt,
       maxTokens: validation.maxTokens
     });
-    activeAssistantMessageId.current = appendConversationMessage("assistant", "Working...");
+    const assistantMessageId = appendConversationMessage("assistant", "Working...");
+    activeAssistantMessageId.current = assistantMessageId;
     resetCancellation();
-    void runtime.assembleKnowledgeContext(prompt).then((contextPrefix) =>
-      agent.run(request, contextPrefix || undefined, runtime.permissionMode)
-    );
+    const assembleProjectContext = runtime.assembleKnowledgeContext as unknown as (
+      input: string,
+      project: { projectId: string | null; projectMemoryRecords: typeof projectMemory.contextRecords }
+    ) => Promise<string>;
+    const projectContext = runProjectId ? projectMemory.loadContextRecords() : Promise.resolve([]);
+    void projectContext
+      .then((projectMemoryRecords) => assembleProjectContext(prompt, {
+        projectId: runProjectId,
+        projectMemoryRecords
+      }))
+      .then((contextPrefix) => agent.run(request, contextPrefix || undefined, runtime.permissionMode))
+      .catch((cause) => {
+        const message = cause instanceof Error ? cause.message : "Fable could not load this project's context.";
+        agent.reportError(message);
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId ? { ...entry, content: message } : entry
+        ));
+        activeAssistantMessageId.current = null;
+      });
   }
 
   // Subscribe the global shortcut listener once. The runtime object is not
@@ -936,6 +995,7 @@ export function ChatWorkspace() {
             <ProjectPage
               project={selectedProject}
               knowledge={projectKnowledgeView}
+              memory={projectMemoryView}
               onNewChat={() => startNewChat(selectedProject.id)}
               onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
               onReload={async () => { await projectStore.refresh(); }}

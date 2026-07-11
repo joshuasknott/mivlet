@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ProjectPage, type ProjectKnowledgeView, type ProjectPageRecord } from "./ProjectPage";
+import { ProjectPage, type ProjectKnowledgeView, type ProjectMemoryView, type ProjectPageRecord } from "./ProjectPage";
 
 const project: ProjectPageRecord = {
   id: "project-1",
@@ -27,6 +27,20 @@ const emptyKnowledge: ProjectKnowledgeView = {
   refresh: async () => undefined,
   importFile: async () => undefined,
   search: async () => []
+};
+
+const emptyMemory: ProjectMemoryView = {
+  records: [],
+  disabled: false,
+  loading: false,
+  error: null,
+  refresh: async () => undefined,
+  promote: async () => undefined,
+  edit: async () => undefined,
+  togglePin: async () => undefined,
+  toggleDisabled: async () => undefined,
+  forget: async () => undefined,
+  exportText: async () => "# Memory export"
 };
 
 describe("ProjectPage", () => {
@@ -197,5 +211,90 @@ describe("ProjectPage", () => {
       />
     );
     expect(screen.getByRole("status")).toHaveTextContent("Loading project knowledge");
+  });
+
+  it("remembers a project knowledge source through the deliberate callback", async () => {
+    const user = userEvent.setup();
+    const promote = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={{ ...emptyKnowledge, sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today" }] }}
+        memory={{ ...emptyMemory, promote }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Remember" }));
+    await waitFor(() => expect(promote).toHaveBeenCalledWith("source-1"));
+  });
+
+  it("edits, pins, disables and forgets a project memory with confirmation", async () => {
+    const user = userEvent.setup();
+    const edit = vi.fn().mockResolvedValue(undefined);
+    const togglePin = vi.fn().mockResolvedValue(undefined);
+    const toggleDisabled = vi.fn().mockResolvedValue(undefined);
+    const forget = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        memory={{
+          ...emptyMemory,
+          records: [{ id: "memory-1", title: "Launch date", value: "Friday", source: "Launch brief", freshness: "Approved now", pinned: false, disabled: false }],
+          edit,
+          togglePin,
+          toggleDisabled,
+          forget
+        }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.clear(screen.getByLabelText("What Fable should remember"));
+    await user.type(screen.getByLabelText("What Fable should remember"), "Monday");
+    await user.click(screen.getByRole("button", { name: "Save memory" }));
+    expect(edit).toHaveBeenCalledWith("memory-1", { title: "Launch date", value: "Monday" });
+    await user.click(screen.getByRole("button", { name: "Pin" }));
+    expect(togglePin).toHaveBeenCalledWith("memory-1");
+    await user.click(screen.getByRole("button", { name: "Stop using" }));
+    expect(toggleDisabled).toHaveBeenCalledWith("memory-1");
+    await user.click(screen.getByRole("button", { name: "Forget" }));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(forget).toHaveBeenCalledWith("memory-1");
+  });
+
+  it("keeps archived memory readable and exportable but hides every mutation", async () => {
+    const user = userEvent.setup();
+    const exportText = vi.fn().mockResolvedValue("# Memory export\n\nLaunch date");
+    render(
+      <ProjectPage
+        project={{ ...project, lifecycle: "archived" }}
+        knowledge={{ ...emptyKnowledge, sources: [{ id: "source-1", title: "Launch brief", provenance: "Local file", freshness: "Today" }] }}
+        memory={{
+          ...emptyMemory,
+          records: [{ id: "memory-1", title: "Launch date", value: "Friday", source: "Launch brief", freshness: "Approved now", pinned: true, disabled: false }],
+          exportText
+        }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Archived projects are read only.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit guidance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remember" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Export" }));
+    expect(await screen.findByLabelText("Project memory export")).toHaveTextContent("Launch date");
   });
 });

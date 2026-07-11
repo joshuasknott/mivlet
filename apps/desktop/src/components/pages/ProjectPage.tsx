@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { FilePlus } from "@phosphor-icons/react/dist/csr/FilePlus";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { DownloadSimple } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import type { SourceStatus, ThreadSummary } from "@fable/protocol";
 import { PageHeader } from "../PageHeader";
 
@@ -33,13 +34,49 @@ export interface ProjectKnowledgeView {
   search: (query: string) => Promise<ProjectKnowledgeSourceView[]>;
 }
 
+export interface ProjectMemoryRecordView {
+  id: string;
+  title: string;
+  value: string;
+  source: string;
+  freshness: string;
+  pinned: boolean;
+  disabled: boolean;
+}
+
+export interface ProjectMemoryView {
+  records: ProjectMemoryRecordView[];
+  disabled: boolean;
+  loading: boolean;
+  error: string | null;
+  refresh: () => void | Promise<unknown>;
+  promote: (sourceId: string) => Promise<unknown>;
+  edit: (id: string, patch: { title: string; value: string }) => Promise<unknown>;
+  togglePin: (id: string) => Promise<unknown>;
+  toggleDisabled: (id: string) => Promise<unknown>;
+  forget: (id: string) => Promise<unknown>;
+  exportText: () => Promise<string>;
+}
+
+const EMPTY_PROJECT_MEMORY: ProjectMemoryView = {
+  records: [], disabled: false, loading: false, error: null,
+  refresh: async () => undefined,
+  promote: async () => undefined,
+  edit: async () => undefined,
+  togglePin: async () => undefined,
+  toggleDisabled: async () => undefined,
+  forget: async () => undefined,
+  exportText: async () => "# Memory export\n\n(no live memories)"
+};
+
 export function ProjectPage({
   project,
   onSaveGuidance,
   onReload,
   onNewChat,
   onSelectThread,
-  knowledge
+  knowledge,
+  memory = EMPTY_PROJECT_MEMORY
 }: {
   project: ProjectPageRecord;
   onSaveGuidance: (input: { description: string | null; instructions: string | null }) => Promise<void>;
@@ -47,6 +84,7 @@ export function ProjectPage({
   onNewChat: () => void;
   onSelectThread: (thread: ThreadSummary) => void;
   knowledge: ProjectKnowledgeView;
+  memory?: ProjectMemoryView;
 }) {
   const [editing, setEditing] = useState(false);
   const [description, setDescription] = useState(project.description);
@@ -58,6 +96,11 @@ export function ProjectPage({
   const [knowledgeBusy, setKnowledgeBusy] = useState(false);
   const [knowledgeActionError, setKnowledgeActionError] = useState("");
   const knowledgeFileRef = useRef<HTMLInputElement>(null);
+  const [memoryBusyId, setMemoryBusyId] = useState<string | null>(null);
+  const [memoryActionError, setMemoryActionError] = useState("");
+  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
+  const [memoryDraft, setMemoryDraft] = useState({ title: "", value: "" });
+  const [memoryExport, setMemoryExport] = useState("");
 
   useEffect(() => {
     setDescription(project.description);
@@ -69,7 +112,23 @@ export function ProjectPage({
     setKnowledgeQuery("");
     setKnowledgeResults(null);
     setKnowledgeActionError("");
+    setMemoryBusyId(null);
+    setMemoryActionError("");
+    setEditingMemoryId(null);
+    setMemoryExport("");
   }, [project.id]);
+
+  const runMemoryAction = async (id: string, action: () => Promise<unknown>) => {
+    setMemoryBusyId(id);
+    setMemoryActionError("");
+    try {
+      await action();
+    } catch (cause) {
+      setMemoryActionError(cause instanceof Error ? cause.message : "Fable could not update this project memory.");
+    } finally {
+      setMemoryBusyId(null);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -127,12 +186,12 @@ export function ProjectPage({
     <div className="project-page">
       <PageHeader
         title={project.title}
-        actions={
+        actions={project.lifecycle === "active" ? (
           <button type="button" className="project-page__new-chat" onClick={onNewChat}>
             <Plus size={15} weight="bold" aria-hidden="true" />
             New chat
           </button>
-        }
+        ) : undefined}
       />
 
       <section className="project-page__section" aria-labelledby="project-guidance-heading">
@@ -141,7 +200,7 @@ export function ProjectPage({
             <h2 id="project-guidance-heading">Guidance</h2>
             <p>What Fable should keep in mind for this project.</p>
           </div>
-          {!editing ? <button type="button" onClick={() => setEditing(true)}>Edit guidance</button> : null}
+          {!editing && project.lifecycle === "active" ? <button type="button" onClick={() => setEditing(true)}>Edit guidance</button> : null}
         </div>
 
         {editing ? (
@@ -269,10 +328,108 @@ export function ProjectPage({
                   <span>{source.status === "indexing" ? "Indexing" : source.status === "stale" ? "Needs refresh" : source.status === "error" ? "Import failed" : source.freshness}</span>
                   {source.statusMessage ? <span title={source.statusMessage}>{source.statusMessage}</span> : null}
                 </div>
+                {project.lifecycle === "active" ? (
+                  <button
+                    type="button"
+                    disabled={memoryBusyId === source.id || memory.disabled}
+                    onClick={() => void runMemoryAction(source.id, () => memory.promote(source.id))}
+                  >
+                    {memoryBusyId === source.id ? "Rememberingâ€¦" : "Remember"}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
         ) : null}
+      </section>
+
+      <section className="project-page__section project-memory" aria-labelledby="project-memory-heading">
+        <div className="project-page__section-heading">
+          <div>
+            <h2 id="project-memory-heading">Memory</h2>
+            <p>Details Fable should remember only for this project.</p>
+          </div>
+          <button
+            type="button"
+            className="project-memory__export"
+            disabled={memory.loading}
+            onClick={() => void runMemoryAction("export", async () => setMemoryExport(await memory.exportText()))}
+          >
+            <DownloadSimple size={15} aria-hidden="true" /> Export
+          </button>
+        </div>
+
+        {project.lifecycle === "archived" ? <p className="project-memory__read-only">Archived projects are read only.</p> : null}
+        {memory.disabled ? <p className="project-memory__state">Memory is turned off for this project.</p> : null}
+        {memory.error ? (
+          <div className="project-memory__state project-memory__state--error" role="alert">
+            <p>{memory.error}</p>
+            <button type="button" onClick={() => void memory.refresh()}>Try again</button>
+          </div>
+        ) : null}
+        {memoryActionError ? <p className="project-memory__state project-memory__state--error" role="alert">{memoryActionError}</p> : null}
+        {memory.loading ? <p className="project-memory__state" role="status">Loading project memoryâ€¦</p> : null}
+        {!memory.loading && !memory.error && memory.records.length === 0 ? (
+          <p className="project-page__empty">Nothing remembered yet. Choose Remember beside a knowledge file to add it.</p>
+        ) : null}
+        {!memory.loading && !memory.error && memory.records.length > 0 ? (
+          <ul className="project-memory__list" aria-label="Project memory">
+            {memory.records.map((record) => (
+              <li key={record.id} className={record.disabled ? "project-memory__item project-memory__item--disabled" : "project-memory__item"}>
+                {editingMemoryId === record.id ? (
+                  <form onSubmit={(event) => {
+                    event.preventDefault();
+                    void runMemoryAction(record.id, async () => {
+                      await memory.edit(record.id, memoryDraft);
+                      setEditingMemoryId(null);
+                    });
+                  }}>
+                    <label>
+                      <span>Memory title</span>
+                      <input value={memoryDraft.title} onChange={(event) => setMemoryDraft((draft) => ({ ...draft, title: event.target.value }))} />
+                    </label>
+                    <label>
+                      <span>What Fable should remember</span>
+                      <textarea value={memoryDraft.value} onChange={(event) => setMemoryDraft((draft) => ({ ...draft, value: event.target.value }))} />
+                    </label>
+                    <div className="project-memory__actions">
+                      <button type="button" onClick={() => setEditingMemoryId(null)}>Cancel</button>
+                      <button type="submit" disabled={memoryBusyId === record.id || !memoryDraft.title.trim() || !memoryDraft.value.trim()}>Save memory</button>
+                    </div>
+                  </form>
+                ) : (
+                  <>
+                    <div className="project-memory__copy">
+                      <strong>{record.title}</strong>
+                      <p>{record.value}</p>
+                      <span>{record.source} Â· {record.freshness}</span>
+                      <div className="project-memory__badges">
+                        {record.pinned ? <span>Pinned</span> : null}
+                        {record.disabled ? <span>Not in use</span> : null}
+                      </div>
+                    </div>
+                    {project.lifecycle === "active" ? (
+                      <div className="project-memory__actions">
+                        <button type="button" disabled={memoryBusyId === record.id} onClick={() => {
+                          setMemoryDraft({ title: record.title, value: record.value });
+                          setEditingMemoryId(record.id);
+                        }}>Edit</button>
+                        <button type="button" disabled={memoryBusyId === record.id || record.disabled} onClick={() => void runMemoryAction(record.id, () => memory.togglePin(record.id))}>{record.pinned ? "Unpin" : "Pin"}</button>
+                        <button type="button" disabled={memoryBusyId === record.id} onClick={() => void runMemoryAction(record.id, () => memory.toggleDisabled(record.id))}>{record.disabled ? "Use again" : "Stop using"}</button>
+                        <button type="button" className="project-memory__forget" disabled={memoryBusyId === record.id} onClick={() => {
+                          if (window.confirm(`Forget â€œ${record.title}â€? This cannot be undone.`)) {
+                            void runMemoryAction(record.id, () => memory.forget(record.id));
+                          }
+                        }}>Forget</button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {memoryExport ? <pre className="project-memory__export-text" aria-label="Project memory export">{memoryExport}</pre> : null}
       </section>
     </div>
   );

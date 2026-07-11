@@ -557,6 +557,8 @@ describe("Fable home", () => {
     expect(onMoveThread).toHaveBeenCalledWith("thread-abc-123", null);
 
     fireEvent.click(screen.getByRole("button", { name: /archived \(1\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Old Project" }));
+    expect(onOpenProject).toHaveBeenCalledWith("proj-old");
     fireEvent.click(screen.getByRole("button", { name: /restore/i }));
     expect(onRestoreProject).toHaveBeenCalledWith(expect.objectContaining({ id: "proj-old" }));
 

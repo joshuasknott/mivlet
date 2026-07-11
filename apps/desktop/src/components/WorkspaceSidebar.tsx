@@ -722,7 +722,9 @@ export function WorkspaceSidebar({
                   </button>
                   {archivedProjectsOpen ? archivedProjects.map((project) => (
                     <div className="archived-project-row" key={project.id}>
-                      <span>{project.title}</span>
+                      <button type="button" className="archived-project-row__title" onClick={() => onOpenProject(project.id)}>
+                        {project.title}
+                      </button>
                       <button type="button" onClick={() => void runProjectAction(() => onRestoreProject(project))}>
                         <ArrowCounterClockwise size={13} /> Restore
                       </button>

@@ -752,6 +752,16 @@
   font-size: var(--text-12);
 }
 
+.archived-project-row .archived-project-row__title {
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-start;
+  overflow: hidden;
+  color: var(--ink-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project-caret {
   color: var(--ink-soft);
   transform: rotate(0deg);
