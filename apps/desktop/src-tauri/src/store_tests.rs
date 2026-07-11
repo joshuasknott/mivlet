@@ -449,19 +449,6 @@ fn test_import_targets_workspace_and_preserves_project_scope() {
             let alpha = DataScope::workspace("alpha")?;
             add_project(tx, &source, &alpha, "portable-project");
             let project_scope = DataScope::new("alpha", Some("portable-project".to_string()))?;
-            knowledge_source::upsert_from_value_scoped(
-                tx,
-                &source,
-                &project_scope,
-                json!({
-                    "id": "portable-source",
-                    "connectorId": "local",
-                    "kind": "doc",
-                    "trust": "trusted",
-                    "sizeBytes": 1
-                }),
-                "now",
-            )?;
             workflow::upsert_definition(
                 tx,
                 &source,
@@ -522,11 +509,13 @@ fn test_import_targets_workspace_and_preserves_project_scope() {
     import_workspace_for(&destination, "beta", &archive, ImportOptions::default()).unwrap();
 
     let imported_scope = DataScope::new("beta", Some("portable-project".to_string())).unwrap();
+    // Portable archives currently have workspace/project scope but no
+    // authenticated private owner. Knowledge must stay absent rather than be
+    // guessed into the destination account.
     let imported = destination
         .with_conn(|conn| knowledge_source::list_scoped(conn, &destination, &imported_scope))
         .unwrap();
-    assert_eq!(imported.len(), 1);
-    assert_eq!(imported[0].id, "portable-source");
+    assert!(imported.is_empty());
     let definitions = destination
         .with_conn(|conn| workflow::list_definitions(conn, &destination, &imported_scope))
         .unwrap();

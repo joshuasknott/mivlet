@@ -2439,20 +2439,9 @@ mod tests {
                      VALUES ('default',NULL,'github','u','connected',12345,'keyring-opaque-key','t','t',?1,?2);",
                     rusqlite::params![cap.ciphertext, cap.nonce],
                 )?;
-                // knowledge source
-                let kp = store.seal_json_owned(&serde_json::json!({"title":"doc"}), "knowledge_source:default:k1")?;
-                tx.execute(
-                    "INSERT INTO knowledge_source (id, workspace_id, project_id, connector_id, kind, trust, pinned, content_fingerprint, size_bytes, imported_at, origin, payload, payload_nonce)
-                     VALUES ('k1','default',NULL,'local-files','document','trusted',1,'cf',100,'t','local',?1,?2);",
-                    rusqlite::params![kp.ciphertext, kp.nonce],
-                )?;
-                // memory record
-                let mem = store.seal_json_owned(&serde_json::json!({"value":"remember"}), "memory_record:default:mem1")?;
-                tx.execute(
-                    "INSERT INTO memory_record (id, workspace_id, project_id, kind, pinned, approved, created_at, payload, payload_nonce)
-                     VALUES ('mem1','default',NULL,'fact',1,1,'t',?1,?2);",
-                    rusqlite::params![mem.ciphertext, mem.nonce],
-                )?;
+                // Private Knowledge and Memory require an authenticated owner.
+                // This portable fixture intentionally has none, so it must not
+                // invent one merely to exercise unrelated archive sections.
                 // schedule (enabled)
                 let sp = store.seal_json_owned(&serde_json::json!({"name":"Weekly"}), "schedule:default:s1")?;
                 tx.execute(
@@ -2497,7 +2486,8 @@ mod tests {
         assert_eq!(manifest_b.sections.projects.len(), 1);
         assert_eq!(manifest_b.sections.projects[0].id, "p1");
         assert_eq!(manifest_b.sections.messages[0].payload["text"], "hi");
-        assert_eq!(manifest_b.sections.knowledge_sources.len(), 1);
+        assert!(manifest_b.sections.knowledge_sources.is_empty());
+        assert!(manifest_b.sections.memory_records.is_empty());
         assert_eq!(manifest_b.sections.schedules.len(), 1);
         assert_eq!(manifest_b.sections.drafts.len(), 1);
     }

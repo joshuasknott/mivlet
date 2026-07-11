@@ -826,12 +826,25 @@ mod tests {
             2
         );
         assert_eq!(count(&store, "SELECT COUNT(*) FROM schedule;"), 1);
-        assert_eq!(count(&store, "SELECT COUNT(*) FROM memory_record;"), 1);
+        assert_eq!(count(&store, "SELECT COUNT(*) FROM memory_record;"), 0);
+        assert_eq!(
+            count(
+                &store,
+                "SELECT COUNT(*) FROM private_context_legacy_unowned WHERE record_type='memory';"
+            ),
+            1
+        );
 
         // Re-running with the same bytes is a no-op (idempotent).
-        let before = count(&store, "SELECT COUNT(*) FROM memory_record;");
+        let before = count(
+            &store,
+            "SELECT COUNT(*) FROM private_context_legacy_unowned WHERE record_type='memory';",
+        );
         migrate_all(&store, dir.path()).unwrap();
-        let after = count(&store, "SELECT COUNT(*) FROM memory_record;");
+        let after = count(
+            &store,
+            "SELECT COUNT(*) FROM private_context_legacy_unowned WHERE record_type='memory';",
+        );
         assert_eq!(before, after);
 
         // The legacy file is NOT deleted.

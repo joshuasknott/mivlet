@@ -470,8 +470,8 @@ mod tests {
         store.transaction(|tx| {
             create(tx, &store, &scope, "project-1", "member-1", "user-1", "Project", None, None, "t1")?;
             tx.execute("INSERT INTO thread (id,workspace_id,project_id,title,created_at,updated_at,payload,payload_nonce) VALUES ('thread-1','w1','project-1','Thread','t','t',x'01',x'02');", [])?;
-            tx.execute("INSERT INTO knowledge_source (workspace_id,id,project_id,connector_id,kind,trust,content_fingerprint,size_bytes,imported_at,origin,payload,payload_nonce) VALUES ('w1','source-1','project-1','local','text','trusted','fp',1,'t','local',x'01',x'02');", [])?;
-            tx.execute("INSERT INTO memory_record (workspace_id,id,project_id,kind,created_at,payload,payload_nonce) VALUES ('w1','memory-1','project-1','fact','t',x'01',x'02');", [])?;
+            tx.execute("INSERT INTO knowledge_source (workspace_id,owner_subject,authority,visibility,owner_member_id,id,project_id,connector_id,kind,trust,content_fingerprint,size_bytes,imported_at,origin,payload,payload_nonce) VALUES ('w1','member:member-1','local','member-private','member-1','source-1','project-1','local','text','trusted','fp',1,'t','local',x'01',x'02');", [])?;
+            tx.execute("INSERT INTO memory_record (workspace_id,owner_subject,authority,visibility,owner_member_id,id,project_id,kind,created_at,payload,payload_nonce) VALUES ('w1','member:member-1','local','member-private','member-1','memory-1','project-1','fact','t',x'01',x'02');", [])?;
             tx.execute("INSERT INTO schedule (id,workspace_id,project_id,weekday,time,created_at,payload,payload_nonce) VALUES ('schedule-1','w1','project-1','mon','09:00','t',x'01',x'02');", [])?;
             tx.execute("INSERT INTO workflow_definition (workspace_id,project_id,id,version,created_at,updated_at,payload,payload_nonce) VALUES ('w1','project-1','definition-1',1,'t','t',x'01',x'02');", [])?;
             tx.execute("INSERT INTO workflow_run (workspace_id,project_id,id,definition_id,definition_version,status,started_at,updated_at,payload,payload_nonce) VALUES ('w1','project-1','run-1','definition-1',1,'completed','t','t',x'01',x'02');", [])?;
