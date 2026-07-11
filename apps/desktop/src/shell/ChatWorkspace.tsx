@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { parseComposerText } from "@fable/connectors";
-import type { KnowledgeCitation, PreparedRunContext } from "@fable/protocol";
+import type { KnowledgeCitation } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { connectors } from "../data/workspace";
@@ -744,20 +744,13 @@ export function ChatWorkspace() {
         projectId: runProjectId,
         projectMemoryRecords
       }))
-      .then((runtimeContext) => {
-        // Compatibility during the parallel landing: the final assembly path
-        // returns PreparedRunContext; older callers are accepted by the hook
-        // and receive an explicit empty receipt.
-        if (typeof runtimeContext === "object" && runtimeContext && "receipt" in runtimeContext) {
-          const preparedContext = runtimeContext as PreparedRunContext;
-          setConversationMessages((current) => current.map((entry) =>
-            entry.id === assistantMessageId
-              ? { ...entry, runId: preparedContext.receipt.runId }
-              : entry
-          ));
-          return agent.run(request, preparedContext, runtime.permissionMode);
-        }
-        return agent.run(request, runtimeContext || undefined, runtime.permissionMode);
+      .then((preparedContext) => {
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId
+            ? { ...entry, runId: preparedContext.receipt.runId }
+            : entry
+        ));
+        return agent.run(request, preparedContext, runtime.permissionMode);
       })
       .catch((cause) => {
         const message = cause instanceof Error ? cause.message : "Fable could not load this project's context.";

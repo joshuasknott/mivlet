@@ -179,6 +179,20 @@ describe("assembleContext — citations + usage", () => {
     expect(assembled.receipt.citations[0].ranking.relevance).toBe(2);
   });
 
+  it("labels approved project memory as project context", () => {
+    const assembled = assembleContext({
+      runId: "run-project",
+      assembledAt: NOW,
+      scope: { level: "project", projectId: "p1" },
+      memory: [makeMemory({ scope: { level: "project", projectId: "p1" } })],
+      citations: []
+    });
+
+    expect(assembled.receipt.contributions).toContainEqual(
+      expect.objectContaining({ id: "m1", kind: "memory", reason: "project-context" })
+    );
+  });
+
   it("does not snapshot excluded inputs in the receipt", () => {
     const assembled = assembleContext({
       runId: "run-exclusions",

@@ -195,7 +195,11 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
       usage.push({
         id: record.id,
         kind: "memory",
-        reason: record.pinned ? "memory-pinned" : "memory-approved"
+        reason: record.pinned
+          ? "memory-pinned"
+          : record.scope?.level === "project"
+            ? "project-context"
+            : "memory-approved"
       });
     }
     if (memoryLines.length > 1) pushPart(memoryLines.join("\n"));

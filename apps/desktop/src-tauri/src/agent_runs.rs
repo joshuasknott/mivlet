@@ -58,14 +58,14 @@ fn bounded_id(value: &str, max: usize, label: &str) -> Result<String, String> {
 }
 
 fn bounded_text(value: &str, max: usize, label: &str) -> Result<String, String> {
-    let normalized = normalize_spaces(value);
-    if normalized.is_empty() {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
         return Err(format!("Run context {label} is invalid."));
     }
-    let safe = if contains_secret_shape(&normalized) {
+    let safe = if contains_secret_shape(trimmed) {
         "[redacted secret-bearing context]".to_string()
     } else {
-        normalized
+        trimmed.to_string()
     };
     Ok(truncate_characters(&safe, max))
 }
@@ -687,9 +687,15 @@ mod tests {
         let base = fixture("streaming");
         persist_agent_run(&path, base.clone()).unwrap();
         let mut with_receipt = base;
-        with_receipt.context_receipt = Some(receipt());
+        let mut context_receipt = receipt();
+        context_receipt.citations[0].snippet = "First line\n\nSecond line".into();
+        with_receipt.context_receipt = Some(context_receipt);
         with_receipt.updated_at = "2026-06-27T12:00:02Z".into();
         let with_receipt = persist_agent_run(&path, with_receipt).unwrap();
+        assert_eq!(
+            with_receipt.context_receipt.as_ref().unwrap().citations[0].snippet,
+            "First line\n\nSecond line"
+        );
 
         let mut removed = with_receipt.clone();
         removed.context_receipt = None;

@@ -154,8 +154,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
 
   useEffect(() => {
     void (async () => {
-      const recovered = await recoverRuntimeAgentRuns(new Date().toISOString());
-      const listed = await listRuntimeAgentRuns();
+      const recovered = await recoverRuntimeAgentRuns(new Date().toISOString()).catch(() => null);
+      const listed = await listRuntimeAgentRuns().catch(() => null);
       const runs = listed ?? recovered;
       if (!runs) return;
       setState((current) => ({
