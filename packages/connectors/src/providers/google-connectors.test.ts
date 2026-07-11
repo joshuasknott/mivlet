@@ -331,6 +331,21 @@ describe("Google Drive production adapter", () => {
 });
 
 describe("Gmail production adapter", () => {
+  it("passes cancellation to provider egress", async () => {
+    const controller = new AbortController();
+    const adapter = createGmailAdapter({
+      ...common,
+      fetch: vi.fn(async (_url, init) => {
+        expect(init?.signal).toBe(controller.signal);
+        throw new DOMException("cancelled", "AbortError");
+      })
+    });
+
+    await expect(
+      adapter.read({ capability: "gmail.search", input: {}, signal: controller.signal }, tokens)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("maps message list reads, nextPageToken pagination, and rate limits", async () => {
     const fetcher = vi.fn(async () =>
       response(
@@ -437,6 +452,21 @@ describe("Gmail production adapter", () => {
 });
 
 describe("Google Calendar production adapter", () => {
+  it("passes cancellation to provider egress", async () => {
+    const controller = new AbortController();
+    const adapter = createGoogleCalendarAdapter({
+      ...common,
+      fetch: vi.fn(async (_url, init) => {
+        expect(init?.signal).toBe(controller.signal);
+        throw new DOMException("cancelled", "AbortError");
+      })
+    });
+
+    await expect(
+      adapter.read({ capability: "calendar.list", input: {}, signal: controller.signal }, tokens)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("maps calendar list reads, nextPageToken pagination, and rate limits", async () => {
     const fetcher = vi.fn(async () =>
       response(

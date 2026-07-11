@@ -377,6 +377,19 @@ describe("Vercel production adapter", () => {
 });
 
 describe("Linear production adapter", () => {
+  it("passes cancellation to provider egress", async () => {
+    const controller = new AbortController();
+    const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      expect(init?.signal).toBe(controller.signal);
+      throw new DOMException("cancelled", "AbortError");
+    });
+    const adapter = createLinearAdapter({ ...common, fetch: fetcher });
+
+    await expect(
+      adapter.read({ capability: "issues.search", input: { query: "ship" }, signal: controller.signal }, tokens)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("redeems, refreshes, and revokes only through the versioned broker contract", async () => {
     const seen: string[] = [];
     const fetcher = vi.fn<ProviderFetch>(async (url, init) => {

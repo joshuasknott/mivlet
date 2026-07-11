@@ -187,6 +187,18 @@ describe("Notion production adapter", () => {
 
 
 describe("Slack production adapter", () => {
+  it("passes cancellation to provider egress", async () => {
+    const controller = new AbortController();
+    const adapter = slack(vi.fn(async (_url, init) => {
+      expect(init?.signal).toBe(controller.signal);
+      throw new DOMException("cancelled", "AbortError");
+    }));
+
+    await expect(
+      adapter.read({ capability: "slack.channels.list", input: {}, signal: controller.signal }, tokens)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("registers all external mutations as consequential", () => {
     expect(SLACK_CAPABILITIES.filter((capability) => capability.kind === "write").every((capability) => capability.consequential)).toBe(true);
   });

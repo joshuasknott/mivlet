@@ -162,7 +162,8 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 - [ ] Complete broker deployment configuration and callback policy.
 - [ ] Complete multi-account, refresh, revocation, disconnect, and recovery behavior.
 - [ ] Complete exact connector approvals and audit.
-- [ ] Add connector contract tests for pagination, cancellation, rate limits, scopes, and errors.
+- [x] Add connector contract tests for pagination, cancellation, rate limits, scopes, and errors.
+  - Evidence: the production adapter suites cover GitHub, Vercel, Linear, Google Drive, Gmail, Google Calendar, Notion, and Slack pagination/cursor shapes, bounded rate-limit normalization, explicit granted-scope behavior, malformed/provider/auth/network errors, and secret-safe failures. Cooperative cancellation is asserted at provider egress for every adapter family and now individually for Linear, Slack, Gmail, and Calendar rather than inferred from a sibling implementation. Opt-in live cases remain deliberately skipped without credentials and are not counted as production validation.
 
 ### Wave 3C - MCP runtime
 
