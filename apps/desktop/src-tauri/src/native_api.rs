@@ -1259,11 +1259,23 @@ mod transport_policy_tests {
     fn streaming_statuses_distinguish_auth_entitlement_rate_limit_and_provider_failure() {
         use reqwest::StatusCode;
 
-        assert_eq!(status_error_code(StatusCode::UNAUTHORIZED), "authentication");
+        assert_eq!(
+            status_error_code(StatusCode::UNAUTHORIZED),
+            "authentication"
+        );
         assert_eq!(status_error_code(StatusCode::FORBIDDEN), "entitlement");
-        assert_eq!(status_error_code(StatusCode::PAYMENT_REQUIRED), "entitlement");
-        assert_eq!(status_error_code(StatusCode::TOO_MANY_REQUESTS), "rate-limited");
-        assert_eq!(status_error_code(StatusCode::SERVICE_UNAVAILABLE), "provider-unavailable");
+        assert_eq!(
+            status_error_code(StatusCode::PAYMENT_REQUIRED),
+            "entitlement"
+        );
+        assert_eq!(
+            status_error_code(StatusCode::TOO_MANY_REQUESTS),
+            "rate-limited"
+        );
+        assert_eq!(
+            status_error_code(StatusCode::SERVICE_UNAVAILABLE),
+            "provider-unavailable"
+        );
     }
 
     #[test]
