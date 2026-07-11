@@ -573,7 +573,9 @@ function ProviderConnectionModal({
   onConnect: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
   onDisconnect?: (providerId: string) => void | Promise<void>;
   onRefreshModels?: (providerId: string) => void | Promise<void>;
-  onCheckConnection?: (providerId: string) => void | Promise<void>;
+  onCheckConnection?: (
+    providerId: string
+  ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
   onStatus?: (message: string) => void;
 }) {
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);

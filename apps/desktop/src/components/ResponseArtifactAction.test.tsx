@@ -18,6 +18,7 @@ it("saves and opens a sourced assistant response", async () => {
   await waitFor(() => expect(onSaved).toHaveBeenCalled());
   const saved = onSaved.mock.calls[0][0];
   rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={saved} onSaved={onSaved} />);
+  await userEvent.click(screen.getByRole("button", { name: "Hide artifact" }));
   await userEvent.click(screen.getByRole("button", { name: "View artifact" }));
   expect(screen.getByRole("region", { name: "Saved artifact" })).toHaveTextContent("Answer");
   expect(screen.getByRole("list", { name: "Artifact sources" })).toHaveTextContent("Roadmap");

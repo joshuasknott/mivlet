@@ -140,6 +140,9 @@ vi.mock("./runtime", () => ({
   loadRuntimeConversationDraft: vi.fn(async () => null),
   saveRuntimeConversationDraft: vi.fn(async (draft: unknown) => draft),
   deleteRuntimeConversationDraft: vi.fn(async () => undefined),
+  createRuntimeResponseArtifact: vi.fn(async () => null),
+  listRuntimeThreadArtifacts: vi.fn(async () => []),
+  getRuntimeArtifact: vi.fn(async () => null),
   beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
     runtimeMocks.connectorOAuthCalls.push(request.connectorId);
     return null;
@@ -1056,7 +1059,7 @@ describe("Fable home", () => {
     });
     // After connecting, the setup modal switches to Disconnect.
     expect(
-      within(providerDialog).getByRole("button", { name: /disconnect/i })
+      within(providerDialog).getByRole("button", { name: /remove from fable/i })
     ).toBeInTheDocument();
   });
 
