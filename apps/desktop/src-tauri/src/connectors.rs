@@ -1194,7 +1194,9 @@ pub fn start_connector_auth(
     require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    start_auth(entry.id, entry.auth_mode, scopes, request)
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    start_auth(entry.id, entry.auth_mode, scopes, request, &identity)
 }
 
 #[tauri::command]
@@ -1205,7 +1207,9 @@ pub async fn complete_connector_auth(
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
-    complete_auth(&app, entry.id, request).await
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    complete_auth(&app, entry.id, request, &identity).await
 }
 
 /// Begin a loopback OAuth flow end-to-end: bind an exact desktop redirect,
@@ -1222,7 +1226,10 @@ pub async fn begin_connector_oauth(
     require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
     let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    oauth_loopback::run_loopback_oauth(&app, entry.id, entry.auth_mode, scopes, request).await
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    oauth_loopback::run_loopback_oauth(&app, entry.id, entry.auth_mode, scopes, request, identity)
+        .await
 }
 
 #[tauri::command]

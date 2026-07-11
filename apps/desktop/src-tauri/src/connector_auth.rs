@@ -61,6 +61,10 @@ struct PendingOAuth {
     scopes: Vec<String>,
     brokered: bool,
     created_at: u64,
+    /// Stable Fable account binding captured before provider egress. Legacy
+    /// test/upgrade records may omit it, but production starts are always bound.
+    #[serde(default)]
+    fable_account_binding: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -361,11 +365,22 @@ fn provider_config(
     })
 }
 
+#[cfg(test)]
 fn start_with_store(
     connector_id: &str,
     redirect_uri: &str,
     config: OAuthProviderConfig,
     store: &dyn ConnectorSecretStore,
+) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    start_with_store_bound(connector_id, redirect_uri, config, store, None)
+}
+
+fn start_with_store_bound(
+    connector_id: &str,
+    redirect_uri: &str,
+    config: OAuthProviderConfig,
+    store: &dyn ConnectorSecretStore,
+    fable_account_binding: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let redirect = Url::parse(redirect_uri).map_err(|_| {
         command_error(
@@ -426,6 +441,7 @@ fn start_with_store(
         scopes: config.scopes,
         brokered: config.brokered,
         created_at: now_epoch(),
+        fable_account_binding,
     };
     let encoded = serde_json::to_string(&pending).map_err(|_| {
         command_error(
@@ -715,16 +731,18 @@ struct CredentialRollback {
     previous_secret: Option<String>,
 }
 
-async fn complete_with_store_reversible(
+async fn prepare_with_store(
     connector_id: &str,
     callback_url: &str,
     store: &dyn ConnectorSecretStore,
+    expected_account_binding: Option<&str>,
 ) -> Result<
     (
         StoredTokenSet,
         ConnectorAccountSummary,
         String,
         CredentialRollback,
+        String,
     ),
     ConnectorCommandError,
 > {
@@ -797,6 +815,17 @@ async fn complete_with_store_reversible(
             "invalid-request",
             connector_id,
             "OAuth state did not match.",
+            false,
+        ));
+    }
+    if pending.fable_account_binding.as_deref() != expected_account_binding {
+        store
+            .remove(&key)
+            .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+        return Err(command_error(
+            "needs-auth",
+            connector_id,
+            "Fable account changed during connector authorization; try again.",
             false,
         ));
     }
@@ -967,19 +996,14 @@ async fn complete_with_store_reversible(
         client_id: pending.client_id,
         brokered: pending.brokered,
     };
-    store
-        .set(
-            &credential_ref,
-            &serde_json::to_string(&tokens).map_err(|_| {
-                command_error(
-                    "unknown",
-                    connector_id,
-                    "Fable could not encode connector tokens.",
-                    false,
-                )
-            })?,
+    let encoded_tokens = serde_json::to_string(&tokens).map_err(|_| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Fable could not encode connector tokens.",
+            false,
         )
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    })?;
     Ok((
         tokens,
         account,
@@ -988,6 +1012,7 @@ async fn complete_with_store_reversible(
             credential_ref,
             previous_secret,
         },
+        encoded_tokens,
     ))
 }
 
@@ -997,9 +1022,12 @@ async fn complete_with_store(
     callback_url: &str,
     store: &dyn ConnectorSecretStore,
 ) -> Result<(StoredTokenSet, ConnectorAccountSummary, String), ConnectorCommandError> {
-    complete_with_store_reversible(connector_id, callback_url, store)
-        .await
-        .map(|(tokens, account, credential_ref, _)| (tokens, account, credential_ref))
+    let (tokens, account, credential_ref, _rollback, encoded_tokens) =
+        prepare_with_store(connector_id, callback_url, store, None).await?;
+    store
+        .set(&credential_ref, &encoded_tokens)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    Ok((tokens, account, credential_ref))
 }
 
 fn rollback_credential(
@@ -1010,6 +1038,20 @@ fn rollback_credential(
         Some(previous) => store.set(&rollback.credential_ref, &previous),
         None => store.remove(&rollback.credential_ref),
     }
+}
+
+fn persist_credential_after_guard<G>(
+    store: &dyn ConnectorSecretStore,
+    connector_id: &str,
+    credential_ref: &str,
+    encoded_tokens: &str,
+    before_commit: impl FnOnce() -> Result<G, ConnectorCommandError>,
+) -> Result<G, ConnectorCommandError> {
+    let guard = before_commit()?;
+    store
+        .set(credential_ref, encoded_tokens)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    Ok(guard)
 }
 
 fn finish_metadata_commit(
@@ -1203,6 +1245,7 @@ pub(crate) fn start_auth(
     auth_mode: &str,
     scopes: Vec<String>,
     request: ConnectorAuthRequest,
+    identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let redirect = request.redirect_uri.ok_or_else(|| {
         command_error(
@@ -1213,13 +1256,20 @@ pub(crate) fn start_auth(
         )
     })?;
     let config = provider_config(connector_id, auth_mode, scopes)?;
-    start_with_store(connector_id, &redirect, config, &NativeConnectorSecretStore)
+    start_with_store_bound(
+        connector_id,
+        &redirect,
+        config,
+        &NativeConnectorSecretStore,
+        Some(identity.account_binding.clone()),
+    )
 }
 
 pub(crate) async fn complete_auth(
     app: &tauri::AppHandle,
     connector_id: &str,
     request: ConnectorAuthRequest,
+    identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let callback = request.callback_url.ok_or_else(|| {
         command_error(
@@ -1230,8 +1280,40 @@ pub(crate) async fn complete_auth(
         )
     })?;
     let secret_store = NativeConnectorSecretStore;
-    let (tokens, account, credential_ref, rollback) =
-        complete_with_store_reversible(connector_id, &callback, &secret_store).await?;
+    let prepared = prepare_with_store(
+        connector_id,
+        &callback,
+        &secret_store,
+        Some(&identity.account_binding),
+    )
+    .await?;
+    commit_prepared_auth(app, connector_id, identity, &secret_store, prepared)
+}
+
+fn commit_prepared_auth(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+    identity: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    secret_store: &dyn ConnectorSecretStore,
+    prepared: (
+        StoredTokenSet,
+        ConnectorAccountSummary,
+        String,
+        CredentialRollback,
+        String,
+    ),
+) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    let (tokens, account, credential_ref, rollback, encoded_tokens) = prepared;
+    let _identity_guard = persist_credential_after_guard(
+        secret_store,
+        connector_id,
+        &credential_ref,
+        &encoded_tokens,
+        || {
+            crate::clerk_identity::lock_native_identity_generation(identity)
+                .map_err(|message| command_error("needs-auth", connector_id, &message, false))
+        },
+    )?;
     let metadata_result = (|| {
         let timestamp = now_epoch().to_string();
         let connection = ConnectorConnection {
@@ -1269,7 +1351,7 @@ pub(crate) async fn complete_auth(
         promote_single_active(&mut connections, connector_id);
         write_connections(&path, &connections)
     })();
-    finish_metadata_commit(metadata_result, &secret_store, rollback)
+    finish_metadata_commit(metadata_result, secret_store, rollback)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     Ok(ConnectorAuthResult {
         connector_id: connector_id.to_string(),
@@ -2034,6 +2116,70 @@ mod tests {
         .await
         .expect_err("redirect mismatch");
         assert_eq!(wrong_redirect.code, "invalid-request");
+    }
+
+    #[tokio::test]
+    async fn connector_oauth_is_bound_to_the_fable_account_that_started_it() {
+        let store = MemoryStore::default();
+        let started = start_with_store_bound(
+            "fixture",
+            "http://127.0.0.1:43123/callback",
+            fixture_config(),
+            &store,
+            Some("account-binding-a".into()),
+        )
+        .unwrap();
+        let authorization = Url::parse(started.authorization_url.as_deref().unwrap()).unwrap();
+        let state = authorization
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let callback = format!("http://127.0.0.1:43123/callback?code=code&state={state}");
+
+        let error = prepare_with_store("fixture", &callback, &store, Some("account-binding-b"))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.code, "needs-auth");
+        assert!(store
+            .get(&pending_key("fixture", &state))
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get(&native_connector_credential_ref("fixture", "account-1"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn failed_generation_guard_writes_no_connector_credential() {
+        let store = MemoryStore::default();
+        let credential_ref = "oauth-token:fixture:account-1";
+        store.set(credential_ref, "old-secret").unwrap();
+        let error = persist_credential_after_guard(
+            &store,
+            "fixture",
+            credential_ref,
+            "new-secret",
+            || -> Result<(), ConnectorCommandError> {
+                Err(command_error(
+                    "needs-auth",
+                    "fixture",
+                    "Fable account changed during the request. Please try again.",
+                    false,
+                ))
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "needs-auth");
+        assert_eq!(
+            store.get(credential_ref).unwrap().as_deref(),
+            Some("old-secret")
+        );
+        assert!(!error.message.contains("old-secret"));
+        assert!(!error.message.contains("new-secret"));
     }
 
     #[tokio::test]
