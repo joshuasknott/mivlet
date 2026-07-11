@@ -3676,10 +3676,7 @@ fn minimum_account_provider_chat_artifact_journey_survives_native_store_reopen()
         },
     )
     .expect("store native provider credential");
-    assert_eq!(
-        verify_outcome_for_status(reqwest::StatusCode::OK),
-        "ready"
-    );
+    assert_eq!(verify_outcome_for_status(reqwest::StatusCode::OK), "ready");
     let provider = list_providers_from(&credentials, &connected_backends)
         .expect("list native providers")
         .into_iter()

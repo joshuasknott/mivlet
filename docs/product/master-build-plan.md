@@ -81,11 +81,11 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 1C - Provider and first artifact
 
-- [ ] Complete provider add, health, reconnect, revoke, and remove behavior.
-- [ ] Complete live model discovery and exact eligible route selection.
-- [ ] Explain auth, entitlement, offline, timeout, rate-limit, and provider failures clearly.
-- [ ] Turn a useful response into a durable sourced artifact.
-- [ ] Test the complete minimum-configuration journey through the real Tauri path.
+- [x] Complete provider add, health, reconnect, revoke, and remove behavior.
+- [x] Complete live model discovery and exact eligible route selection.
+- [x] Explain auth, entitlement, offline, timeout, rate-limit, and provider failures clearly.
+- [x] Turn a useful response into a durable sourced artifact.
+- [x] Test the complete minimum-configuration journey through the real Tauri path.
 
 **Phase 1 complete when:** one account, workspace, and provider can sustain a useful conversation and artifact across restart without any optional layer configured.
 
