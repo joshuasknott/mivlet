@@ -30,6 +30,7 @@ import { acceptRuntimePendingInvitation, getRuntimeRemoteControlStatus, loadRunt
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
+import { useWorkspaceMembers } from "../../hooks/useWorkspaceMembers";
 
 // Re-export the eager-loadable tab metadata so the lazy-loaded page module
 // remains the single source of truth for existing direct importers. The
@@ -1148,10 +1149,14 @@ function AppearanceSettingsView({
 
 export function WorkspaceSettingsView({
   workspaceName,
+  fableWorkspaceId = null,
+  accountContextKey = "standalone",
   onStatus,
   onInvitationAccepted
 }: {
   workspaceName: string;
+  fableWorkspaceId?: string | null;
+  accountContextKey?: string;
   onStatus: (message: string) => void;
   onInvitationAccepted: () => void | Promise<void>;
 }) {
@@ -1162,6 +1167,7 @@ export function WorkspaceSettingsView({
   const feedbackRef = useRef<HTMLParagraphElement>(null);
   const acceptanceTokenRef = useRef<symbol | null>(null);
   const mountedRef = useRef(true);
+  const members = useWorkspaceMembers({ accountContextKey, fableWorkspaceId });
 
   const loadInvitations = async () => {
     setInvitationState("loading");
@@ -1307,6 +1313,48 @@ export function WorkspaceSettingsView({
               </div>
             ) : null}
             {invitationMessage ? <p ref={feedbackRef} tabIndex={-1} role="status" className="profile-security-note">{invitationMessage}</p> : null}
+          </section>
+
+          <section className="profile-section" aria-labelledby="workspace-members-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <UserCircle size={19} />
+              </span>
+              <span>
+                <strong id="workspace-members-title">People with access</strong>
+                <small>People connected to this workspace and their access.</small>
+              </span>
+            </div>
+            {members.state === "loading" ? <p role="status">Loading people…</p> : null}
+            {members.state === "unavailable" ? (
+              <p className="profile-security-note">People with access are available in the Fable desktop app when your account is online.</p>
+            ) : null}
+            {members.state === "error" ? (
+              <div>
+                <p role="alert">People with access couldn’t be loaded. Check your connection and try again.</p>
+                <button type="button" className="button button--secondary" onClick={members.reload}>Try again</button>
+              </div>
+            ) : null}
+            {members.state === "ready" && members.roster?.members.length === 0 ? <p>No people are listed yet.</p> : null}
+            {members.state === "ready" && members.roster && members.roster.members.length > 0 ? (
+              <div className="provider-access-list" aria-label="People with workspace access">
+                {members.roster.members.map((member) => {
+                  const role = member.role === "owner" ? "Owner" : member.role === "admin" ? "Admin" : member.role === "editor" ? "Can edit" : "Can view";
+                  const status = member.status === "active" ? "Active" : member.status === "suspended" ? "Paused" : "Removed";
+                  return (
+                    <div className="provider-access-row" key={member.memberId}>
+                      <span>
+                        <strong>
+                          {member.displayName?.trim() || "Workspace member"}
+                          {member.isCurrentUser ? " · You" : ""}
+                        </strong>
+                        <small>{member.emailHint ? `${member.emailHint} · ` : ""}{role} · {status}</small>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </section>
         </div>
 

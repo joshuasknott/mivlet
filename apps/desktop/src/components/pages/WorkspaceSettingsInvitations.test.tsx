@@ -6,12 +6,14 @@ import { WorkspaceSettingsView } from "./SettingsPage";
 
 const mocks = vi.hoisted(() => ({
   load: vi.fn(),
-  accept: vi.fn()
+  accept: vi.fn(),
+  loadMembers: vi.fn()
 }));
 
 vi.mock("../../runtime", () => ({
   loadRuntimePendingInvitations: mocks.load,
-  acceptRuntimePendingInvitation: mocks.accept
+  acceptRuntimePendingInvitation: mocks.accept,
+  loadRuntimeWorkspaceMembers: mocks.loadMembers
 }));
 
 afterEach(cleanup);
@@ -53,6 +55,8 @@ describe("workspace invitation inbox", () => {
   beforeEach(() => {
     mocks.load.mockReset();
     mocks.accept.mockReset();
+    mocks.loadMembers.mockReset();
+    mocks.loadMembers.mockResolvedValue(null);
   });
 
   it("loads addressed invitations and accepts the exact selected id once", async () => {

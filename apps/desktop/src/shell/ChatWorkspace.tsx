@@ -1190,6 +1190,8 @@ export function ChatWorkspace() {
                     <WorkspaceSettingsView
                       key={invitationContextKey}
                       workspaceName={workspaceName}
+                      fableWorkspaceId={runtime.accountWorkspaceStatus.activeWorkspace.fableWorkspaceId ?? null}
+                      accountContextKey={invitationContextKey}
                       onInvitationAccepted={async () => {
                         await runtime.reconcileAccountWorkspace();
                       }}
