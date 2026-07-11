@@ -140,7 +140,7 @@ export interface AccountInvitationAcceptanceOutcome {
   result: AcceptWorkspaceInvitationResult;
   accountWorkspace: AccountWorkspaceStatus;
   reconciliation: {
-    status: "refreshed" | "refresh-needed";
+    status: "refreshed" | "refresh-needed" | "not-needed";
     message: string;
   };
 }
