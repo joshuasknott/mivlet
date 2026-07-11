@@ -1094,6 +1094,7 @@ export async function appendRuntimeArtifactVersion(input: {
       artifact: {
         ...current.artifact,
         ...(input.title === undefined ? {} : { title: input.title }),
+        status: "draft",
         currentVersionId: nextVersion.id,
         revision: current.artifact.revision + 1,
         updatedAt: now
@@ -1112,6 +1113,114 @@ export async function appendRuntimeArtifactVersion(input: {
   } catch (cause) {
     const error = toRuntimeError(cause);
     if (/stale|changed|revision|current version/i.test(error.message)) throw staleArtifactVersionError();
+    throw error;
+  }
+}
+
+export async function reviewRuntimeArtifact(input: {
+  artifactId: string;
+  versionId: string;
+  expectedRevision: number;
+  action: Spine.ArtifactsAndRoutines.ArtifactReviewActionInput["action"];
+  note?: string;
+  requestedChanges?: readonly string[];
+}) {
+  const scope = conversationScopeOrThrow();
+  const commandInput = {
+    artifactId: input.artifactId,
+    versionId: input.versionId,
+    expectedRevision: input.expectedRevision,
+    action: input.action,
+    ...(input.note === undefined ? {} : { note: input.note }),
+    ...(input.requestedChanges === undefined ? {} : { requestedChanges: input.requestedChanges })
+  };
+  if (!hasTauriRuntime()) {
+    const records = previewArtifacts.get(scope.workspaceId) ?? [];
+    const index = records.findIndex((entry) => entry.artifact.id === input.artifactId);
+    if (index < 0) throw new Error("This artifact is no longer available.");
+    const current = records[index];
+    if (
+      current.artifact.revision !== input.expectedRevision ||
+      current.artifact.currentVersionId !== input.versionId
+    ) {
+      throw staleArtifactVersionError();
+    }
+    const now = new Date().toISOString();
+    let nextStatus = current.artifact.status;
+    let reviews = [...current.artifact.reviews];
+    if (input.action === "request-review") {
+      if (nextStatus !== "draft" && nextStatus !== "changes-requested") {
+        throw new Error("This artifact is not ready to request review.");
+      }
+      nextStatus = "in-review";
+      reviews.push({
+        id: `artifact-review-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+        status: "in-review",
+        requestedByInternalUserId: "preview-user" as never,
+        versionId: current.currentVersion.id,
+        requestedAt: now
+      });
+    } else if (input.action === "accept" || input.action === "request-changes") {
+      if (nextStatus !== "in-review") throw new Error("This artifact is not currently in review.");
+      let reviewIndex = -1;
+      for (let candidate = reviews.length - 1; candidate >= 0; candidate -= 1) {
+        const review = reviews[candidate];
+        if (review.versionId === current.currentVersion.id && review.status === "in-review") {
+          reviewIndex = candidate;
+          break;
+        }
+      }
+      if (reviewIndex < 0) throw new Error("This artifact review is no longer available.");
+      const review = reviews[reviewIndex];
+      if (input.action === "accept") {
+        nextStatus = "accepted";
+        reviews[reviewIndex] = {
+          ...review,
+          status: "approved",
+          resolvedAt: now,
+          acceptance: {
+            acceptedByInternalUserId: "preview-user" as never,
+            acceptedAt: now,
+            ...(input.note ? { note: input.note } : {})
+          }
+        };
+      } else {
+        const requestedChanges = (input.requestedChanges ?? []).map((entry) => entry.trim()).filter(Boolean);
+        if (requestedChanges.length === 0) throw new Error("Describe the changes needed before confirming.");
+        nextStatus = "changes-requested";
+        reviews[reviewIndex] = {
+          ...review,
+          status: "changes-requested",
+          resolvedAt: now,
+          ...(input.note ? { summary: input.note } : {}),
+          requestedChanges
+        };
+      }
+    } else {
+      throw new Error("This review action is not available here.");
+    }
+    const updated: RuntimeArtifactBundle = {
+      ...current,
+      artifact: {
+        ...current.artifact,
+        status: nextStatus,
+        reviews,
+        revision: current.artifact.revision + 1,
+        updatedAt: now
+      }
+    };
+    previewArtifacts.set(scope.workspaceId, records.map((entry, recordIndex) => recordIndex === index ? updated : entry));
+    return updated;
+  }
+  try {
+    const result = await invoke<unknown>("artifact_review_action", { input: commandInput });
+    assertArtifactBundle(result, scope.workspaceId);
+    return result;
+  } catch (cause) {
+    const error = toRuntimeError(cause);
+    if (/stale|changed|revision|current version|version mismatch/i.test(error.message)) {
+      throw staleArtifactVersionError();
+    }
     throw error;
   }
 }

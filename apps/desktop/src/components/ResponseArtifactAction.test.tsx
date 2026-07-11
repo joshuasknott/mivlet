@@ -14,7 +14,7 @@ const version1 = {
 };
 
 const saved = {
-  artifact: { id: "artifact-1", title: "Answer", revision: 0, currentVersionId: "version-1", context: { threadId: "thread-1" } },
+  artifact: { id: "artifact-1", title: "Answer", status: "draft", revision: 1, currentVersionId: "version-1", context: { threadId: "thread-1" }, reviews: [] },
   currentVersion: version1,
   versions: [version1],
   sourceMessageId: "message-1"
@@ -22,7 +22,8 @@ const saved = {
 
 vi.mock("../runtime", () => ({
   createRuntimeResponseArtifact: vi.fn(async () => saved),
-  appendRuntimeArtifactVersion: vi.fn()
+  appendRuntimeArtifactVersion: vi.fn(),
+  reviewRuntimeArtifact: vi.fn()
 }));
 
 describe("ResponseArtifactAction", () => {
@@ -71,7 +72,7 @@ describe("ResponseArtifactAction", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith(revised));
     expect(runtime.appendRuntimeArtifactVersion).toHaveBeenCalledWith({
       artifactId: "artifact-1",
-      expectedRevision: 0,
+      expectedRevision: 1,
       expectedCurrentVersionId: "version-1",
       content: "Revised answer"
     });
@@ -96,5 +97,67 @@ describe("ResponseArtifactAction", () => {
     await user.click(screen.getByRole("button", { name: "Save new version" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("changed elsewhere");
     expect(screen.getByRole("textbox", { name: "Edit artifact markdown" })).toBeInTheDocument();
+  });
+
+  it("shows calm review states and exact actions", async () => {
+    const user = userEvent.setup();
+    const onSaved = vi.fn();
+    const inReview = {
+      ...saved,
+      artifact: { ...saved.artifact, status: "in-review", revision: 2, reviews: [{ id: "review-1", status: "in-review", versionId: "version-1" }] }
+    } as unknown as runtime.RuntimeArtifactBundle;
+    const changesRequested = {
+      ...inReview,
+      artifact: { ...inReview.artifact, status: "changes-requested", revision: 3 }
+    } as unknown as runtime.RuntimeArtifactBundle;
+    vi.mocked(runtime.reviewRuntimeArtifact)
+      .mockResolvedValueOnce(inReview)
+      .mockResolvedValueOnce(changesRequested);
+    const view = render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={saved} onSaved={onSaved} />);
+
+    await user.click(screen.getByRole("button", { name: "View artifact" }));
+    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request review" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Request review" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(inReview));
+    expect(runtime.reviewRuntimeArtifact).toHaveBeenLastCalledWith({
+      artifactId: "artifact-1",
+      versionId: "version-1",
+      expectedRevision: 1,
+      action: "request-review"
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Review requested");
+
+    view.rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={inReview} onSaved={onSaved} />);
+    expect(screen.getByText("In review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accept" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Request changes" }));
+    const changes = screen.getByRole("textbox", { name: "Changes needed" });
+    expect(changes).toHaveAttribute("maxlength", "2000");
+    await user.type(changes, "Clarify the conclusion.");
+    await user.click(screen.getByRole("button", { name: "Confirm changes" }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(changesRequested));
+    expect(runtime.reviewRuntimeArtifact).toHaveBeenLastCalledWith({
+      artifactId: "artifact-1",
+      versionId: "version-1",
+      expectedRevision: 2,
+      action: "request-changes",
+      requestedChanges: ["Clarify the conclusion."]
+    });
+  });
+
+  it("shows accepted as final until editing creates a new draft", async () => {
+    const accepted = {
+      ...saved,
+      artifact: { ...saved.artifact, status: "accepted", revision: 3 }
+    } as unknown as runtime.RuntimeArtifactBundle;
+    const user = userEvent.setup();
+    render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={accepted} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "View artifact" }));
+    expect(screen.getByText("Accepted")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request review" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
   });
 });

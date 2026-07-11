@@ -299,6 +299,41 @@ kbd {
   font-size: var(--text-12);
 }
 
+.response-artifact__meta,
+.response-artifact__review-actions,
+.response-artifact__changes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.response-artifact__meta {
+  align-items: center;
+}
+
+.response-artifact__review-status {
+  padding: 2px 7px;
+  color: var(--ink-secondary);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-pill);
+}
+
+.response-artifact__changes {
+  display: grid;
+}
+
+.response-artifact__changes label {
+  color: var(--ink-secondary);
+  font-size: var(--text-12);
+  font-weight: 600;
+}
+
+.response-artifact__changes textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
 .response-artifact__content {
   max-height: 260px;
   overflow: auto;

@@ -4,6 +4,7 @@ import {
   appendRuntimeArtifactVersion,
   createRuntimeResponseArtifact,
   listRuntimeThreadArtifacts,
+  reviewRuntimeArtifact,
   type RuntimeArtifactBundle
 } from "./runtime";
 
@@ -113,6 +114,34 @@ describe("artifact runtime revisions", () => {
     expect(payload.input).not.toHaveProperty("authority");
     expect(payload.input).not.toHaveProperty("lineage");
     expect(payload.input).not.toHaveProperty("actor");
+  });
+
+  it("sends only the exact review action contract to native", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-native");
+    mocks.invoke.mockResolvedValue(nativeBundle());
+    await reviewRuntimeArtifact({
+      artifactId: "artifact-1",
+      versionId: "version-1",
+      expectedRevision: 1,
+      action: "request-changes",
+      requestedChanges: ["Clarify the conclusion."]
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("artifact_review_action", {
+      input: {
+        artifactId: "artifact-1",
+        versionId: "version-1",
+        expectedRevision: 1,
+        action: "request-changes",
+        requestedChanges: ["Clarify the conclusion."]
+      }
+    });
+    const input = mocks.invoke.mock.calls[0][1].input;
+    expect(input).not.toHaveProperty("actor");
+    expect(input).not.toHaveProperty("reviewer");
+    expect(input).not.toHaveProperty("status");
+    expect(input).not.toHaveProperty("time");
+    expect(input).not.toHaveProperty("authority");
   });
 
   it("creates a native-equivalent bounded preview artifact without renderer evidence", async () => {
@@ -247,5 +276,97 @@ describe("artifact runtime revisions", () => {
     })).rejects.toThrow(/no longer available/i);
     setActiveRuntimeDataScope("workspace-preview-a");
     expect(await listRuntimeThreadArtifacts("thread-shared")).toHaveLength(1);
+  });
+
+  it("mirrors request-review and accept transitions in preview", async () => {
+    setActiveRuntimeDataScope("workspace-preview-review-accept");
+    const draft = await createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    });
+    const inReview = await reviewRuntimeArtifact({
+      artifactId: draft.artifact.id,
+      versionId: draft.currentVersion.id,
+      expectedRevision: draft.artifact.revision,
+      action: "request-review"
+    });
+    expect(inReview.artifact.status).toBe("in-review");
+    expect(inReview.artifact.revision).toBe(2);
+    expect(inReview.artifact.reviews[0]).toEqual(expect.objectContaining({
+      status: "in-review",
+      versionId: draft.currentVersion.id
+    }));
+
+    const accepted = await reviewRuntimeArtifact({
+      artifactId: inReview.artifact.id,
+      versionId: inReview.currentVersion.id,
+      expectedRevision: inReview.artifact.revision,
+      action: "accept"
+    });
+    expect(accepted.artifact.status).toBe("accepted");
+    expect(accepted.artifact.reviews[0]).toEqual(expect.objectContaining({
+      status: "approved",
+      acceptance: expect.objectContaining({ acceptedByInternalUserId: "preview-user" })
+    }));
+  });
+
+  it("mirrors requested changes and preserves review history when a new draft version is appended", async () => {
+    setActiveRuntimeDataScope("workspace-preview-review-changes");
+    const draft = await createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    });
+    const inReview = await reviewRuntimeArtifact({
+      artifactId: draft.artifact.id, versionId: draft.currentVersion.id,
+      expectedRevision: draft.artifact.revision, action: "request-review"
+    });
+    const changes = await reviewRuntimeArtifact({
+      artifactId: inReview.artifact.id, versionId: inReview.currentVersion.id,
+      expectedRevision: inReview.artifact.revision, action: "request-changes",
+      requestedChanges: ["Clarify the conclusion."]
+    });
+    expect(changes.artifact.status).toBe("changes-requested");
+    expect(changes.artifact.reviews[0]).toEqual(expect.objectContaining({
+      status: "changes-requested",
+      requestedChanges: ["Clarify the conclusion."]
+    }));
+
+    const revised = await appendRuntimeArtifactVersion({
+      artifactId: changes.artifact.id,
+      expectedRevision: changes.artifact.revision,
+      expectedCurrentVersionId: changes.currentVersion.id,
+      content: "Revised answer"
+    });
+    expect(revised.artifact.status).toBe("draft");
+    expect(revised.artifact.reviews).toEqual(changes.artifact.reviews);
+    expect(revised.versions).toHaveLength(2);
+  });
+
+  it("rejects stale revisions and review actions against an old version", async () => {
+    setActiveRuntimeDataScope("workspace-preview-review-stale");
+    const draft = await createRuntimeResponseArtifact({
+      threadId: "thread-1", messageId: "message-1", runId: "run-1",
+      title: "Answer", content: "Answer", citations: []
+    });
+    const inReview = await reviewRuntimeArtifact({
+      artifactId: draft.artifact.id, versionId: draft.currentVersion.id,
+      expectedRevision: draft.artifact.revision, action: "request-review"
+    });
+    await expect(reviewRuntimeArtifact({
+      artifactId: inReview.artifact.id, versionId: inReview.currentVersion.id,
+      expectedRevision: draft.artifact.revision, action: "accept"
+    })).rejects.toThrow(/changed elsewhere/i);
+    const revised = await appendRuntimeArtifactVersion({
+      artifactId: inReview.artifact.id,
+      expectedRevision: inReview.artifact.revision,
+      expectedCurrentVersionId: inReview.currentVersion.id,
+      content: "New draft"
+    });
+    await expect(reviewRuntimeArtifact({
+      artifactId: revised.artifact.id,
+      versionId: inReview.currentVersion.id,
+      expectedRevision: revised.artifact.revision,
+      action: "request-review"
+    })).rejects.toThrow(/changed elsewhere/i);
   });
 });
