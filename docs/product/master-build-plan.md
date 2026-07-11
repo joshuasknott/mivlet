@@ -12,7 +12,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 |---|---|---|
 | 0. Product spine | One ontology, authority model, and shared contract foundation | Complete |
 | 1. Essential Fable | Account + provider + durable conversation | In progress |
-| 2. Work context | Workspaces, projects, context, memory, and artifacts | Not started |
+| 2. Work context | Workspaces, projects, context, memory, and artifacts | In progress |
 | 3. Connection fabric | Native connections and MCP satisfy portable capabilities | Not started |
 | 4. Dynamic missions | Fable sizes, plans, routes, and supervises work | Not started |
 | 5. Embedded routines | Successful work can run later or from events | Not started |
@@ -95,11 +95,11 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 
 ### Wave 2A - Optional projects
 
-- [ ] Complete project create, rename, archive, restore, and delete behavior.
-- [ ] Create threads inside projects or assign and remove them later.
+- [x] Complete project create, rename, archive, restore, and delete behavior.
+- [x] Create threads inside projects or assign and remove them later.
 - [ ] Add optional project instructions, goals, knowledge, connections, missions, routines, artifacts, and activity.
-- [ ] Keep standalone workspace threads first-class.
-- [ ] Prove workspace and project scope isolation.
+- [x] Keep standalone workspace threads first-class.
+- [x] Prove workspace and project scope isolation.
 
 ### Wave 2B - Knowledge, memory, and context
 
