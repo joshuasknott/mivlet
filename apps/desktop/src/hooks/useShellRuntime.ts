@@ -214,6 +214,7 @@ import {
   shellStateToRuntimeSnapshot
 } from "../lib/persistence";
 import type { ModelDiscoveryOutcome } from "../lib/backend-state";
+import { createRuntimeGoal } from "../lib/goal-runtime";
 import {
   ALLOW_PREVIEW_FALLBACKS,
   DEFAULT_IDENTITY_STATUS,
@@ -2863,21 +2864,27 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
    * only a title, the user's statement, and lifecycle bookkeeping. Surfaced
    * in shell state and persisted through the runtime snapshot.
    */
-  const createGoal = ({
+  const createGoal = async ({
     title,
     statement
   }: {
     title: string;
     statement: string;
-  }): WorkspaceGoal => {
-    const now = new Date().toISOString();
+  }): Promise<WorkspaceGoal> => {
+    if (!accountWorkspaceStatus.accountBound) {
+      throw new Error("A Fable workspace is required before creating a goal.");
+    }
+    const durable = await createRuntimeGoal(
+      accountWorkspaceStatus.activeWorkspace.localWorkspaceId,
+      { title, statement }
+    );
     const goal: WorkspaceGoal = {
-      id: `goal-${toSlug(title)}-${toSlug(now)}`,
-      title,
-      statement,
-      status: "active",
-      createdAt: now,
-      updatedAt: now
+      id: durable.id,
+      title: durable.title,
+      statement: durable.statement,
+      status: durable.lifecycle,
+      createdAt: durable.createdAt,
+      updatedAt: durable.updatedAt
     };
     setGoals((current) => (current.some((entry) => entry.id === goal.id) ? current : [goal, ...current]));
     return goal;
@@ -2954,7 +2961,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const commandRuntime: CommandRuntime = {
     createMemory: (input) => Promise.resolve(createMemoryFromCommand(input)),
     createSchedule: (input) => Promise.resolve(createScheduleFromTrigger(input)),
-    createGoal: (input) => Promise.resolve(createGoal(input)),
+    createGoal,
     createPlan: (input) => Promise.resolve(createPlan(input)),
     now: () => new Date().toISOString()
   };

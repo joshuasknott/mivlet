@@ -173,7 +173,7 @@ export interface ShellRuntime {
   // goals + plans (structured Fable state created by /goal and /plan)
   goals: WorkspaceGoal[];
   plans: WorkspacePlan[];
-  createGoal: (input: { title: string; statement: string }) => WorkspaceGoal;
+  createGoal: (input: { title: string; statement: string }) => Promise<WorkspaceGoal>;
   createPlan: (input: { title: string; steps: string[]; goalId?: string }) => WorkspacePlan;
   /** Execute a parsed Fable command; returns the result + any follow-up prompt. */
   runFableCommand: (
