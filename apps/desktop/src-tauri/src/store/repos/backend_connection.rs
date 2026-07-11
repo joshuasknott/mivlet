@@ -68,3 +68,38 @@ pub fn quarantine_legacy(tx: &Connection, provider_id: &str, now: &str) -> Resul
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::vault::{MasterKey, Vault};
+    use crate::store::Store;
+
+    #[test]
+    fn provider_connections_are_isolated_by_internal_user() {
+        let vault = Vault::new(&MasterKey::generate().unwrap()).unwrap();
+        let store = Store::open_in_memory(vault).unwrap();
+        store
+            .transaction(|tx| {
+                for user in ["user-a", "user-b"] {
+                    tx.execute(
+                        "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES (?1,'active',0,'t')",
+                        [user],
+                    )?;
+                }
+                upsert(tx, "user-a", "openai", "t")?;
+                upsert(tx, "user-b", "anthropic", "t")?;
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(
+            store.with_conn(|tx| list(tx, "user-a")).unwrap(),
+            vec!["openai"]
+        );
+        assert_eq!(
+            store.with_conn(|tx| list(tx, "user-b")).unwrap(),
+            vec!["anthropic"]
+        );
+    }
+}

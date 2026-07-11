@@ -699,10 +699,7 @@ export async function createRuntimeResponseArtifact(input: CreateResponseArtifac
     artifactId,
     versionId,
     citations: input.citations.map((citation) => ({
-      sourceId: citation.sourceId,
-      title: citation.title,
-      snippet: citation.snippet,
-      locator: citation.chunkId ?? citation.sourcePath
+      sourceId: citation.sourceId
     }))
   };
   if (!hasTauriRuntime()) {
@@ -711,8 +708,8 @@ export async function createRuntimeResponseArtifact(input: CreateResponseArtifac
     const contentHash = { algorithm: "sha-256" as const, value: `preview-${input.content.length}` };
     const provenance = { kind: "run" as const, runId: input.runId as never, externalReference: `message:${input.messageId}`, observedAt: now };
     const bundle = {
-      artifact: { id: artifactId, workspaceId: scope.workspaceId, authority: "local", visibility: "member-private", ownerMemberId: scope.workspaceId, schemaVersion: 1, revision: 0, createdByInternalUserId: scope.workspaceId, createdAt: now, updatedAt: now, kind: "document", status: "draft", title: input.title, currentVersionId: versionId, producingRunId: input.runId, sourceProvenance: [provenance], context: { threadId: input.threadId }, reviews: [], retention: { status: "active" } },
-      version: { id: versionId, artifactId, version: 1, status: "available", createdAt: now, createdByInternalUserId: scope.workspaceId, content: { kind: "inline", text: input.content, media, contentHash }, media, contentHash, provenance, citations: input.citations.map((citation, index) => ({ id: `citation-${index + 1}`, label: citation.title, source: { kind: "import", externalReference: citation.sourceId, observedAt: now }, locator: citation.chunkId ?? citation.sourcePath, quotedText: citation.snippet })), lineage: [] },
+      artifact: { id: artifactId, workspaceId: scope.workspaceId, authority: "local", visibility: "member-private", ownerMemberId: "preview-member", schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user", createdAt: now, updatedAt: now, kind: "document", status: "draft", title: input.title, currentVersionId: versionId, producingRunId: input.runId, sourceProvenance: [provenance], context: { threadId: input.threadId }, reviews: [], retention: { status: "active" } },
+      version: { id: versionId, artifactId, version: 1, status: "available", createdAt: now, createdByInternalUserId: "preview-user", content: { kind: "inline", text: input.content, media, contentHash }, media, contentHash, provenance, citations: input.citations.map((citation, index) => ({ id: `citation-${index + 1}`, label: citation.title, source: { kind: "import", externalReference: citation.sourceId, observedAt: now }, locator: citation.chunkId ?? citation.sourcePath, quotedText: citation.snippet })), lineage: [] },
       sourceMessageId: input.messageId
     } as unknown as RuntimeArtifactBundle;
     const records = previewArtifacts.get(scope.workspaceId) ?? [];

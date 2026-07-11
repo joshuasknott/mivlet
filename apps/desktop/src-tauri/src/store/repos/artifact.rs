@@ -38,8 +38,8 @@ pub fn create(
         ));
     }
     let revision = tx.query_row(
-        "SELECT m.current_revision_id,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.id=?1 AND m.thread_id=?2 AND m.workspace_id=?3 AND m.kind='assistant' AND m.current_revision_state='terminal' AND m.deleted_at IS NULL",
-        rusqlite::params![message_id, thread_id, scope.workspace_id()],
+        "SELECT m.current_revision_id,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.id=?1 AND m.thread_id=?2 AND m.workspace_id=?3 AND m.run_id=?4 AND m.kind='assistant' AND m.current_revision_state='terminal' AND m.deleted_at IS NULL",
+        rusqlite::params![message_id, thread_id, scope.workspace_id(), run_id],
         |row| Ok((row.get::<_, String>(0)?, payload_of(row)?)),
     ).optional()?;
     let Some((revision_id, sealed_revision)) = revision else {
@@ -143,7 +143,7 @@ mod tests {
             let message_payload = seal_json(store, &serde_json::json!({}), &format!("message:{message}"))?;
             let revision = format!("revision-{message}");
             let revision_payload = seal_json(store, &serde_json::json!("Answer"), &format!("message-revision:{workspace}:{revision}"))?;
-            tx.execute("INSERT INTO message(id,workspace_id,thread_id,kind,seq,idempotency_key,current_revision_id,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,'assistant',1,?1,?4,'terminal','t',?5,?6)", rusqlite::params![message,workspace,thread,revision,message_payload.ciphertext,message_payload.nonce])?;
+            tx.execute("INSERT INTO message(id,workspace_id,thread_id,kind,run_id,seq,idempotency_key,current_revision_id,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,'assistant',?4,1,?1,?5,'terminal','t',?6,?7)", rusqlite::params![message,workspace,thread,run,revision,message_payload.ciphertext,message_payload.nonce])?;
             tx.execute("INSERT INTO message_revision(id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,1,0,'terminal','initial',?1,'t','t',?5,?6)", rusqlite::params![revision,workspace,thread,message,revision_payload.ciphertext,revision_payload.nonce])?;
             Ok(())
         }).unwrap();
@@ -203,6 +203,35 @@ mod tests {
                 "run-2",
                 "thread-2",
                 "message-2",
+                "document",
+                "hash",
+                4,
+                "t",
+                &payload(),
+            )
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rejects_message_from_a_different_run() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        seed(&store, "default", "thread-1", "run-1", "message-1");
+        let result = store.transaction(|tx| {
+            let other_payload =
+                seal_json(&store, &serde_json::json!({}), "run:run-2")?;
+            tx.execute(
+                "INSERT INTO run(id,workspace_id,thread_id,provider_id,model,status,created_at,updated_at,payload,payload_nonce) VALUES ('run-2','default','thread-1','provider','model','completed','t','t',?1,?2)",
+                rusqlite::params![other_payload.ciphertext, other_payload.nonce],
+            )?;
+            create(
+                tx,
+                &store,
+                &DataScope::legacy_default(),
+                "artifact-1",
+                "run-2",
+                "thread-1",
+                "message-1",
                 "document",
                 "hash",
                 4,
