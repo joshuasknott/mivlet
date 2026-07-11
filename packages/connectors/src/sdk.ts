@@ -138,20 +138,29 @@ export class ConnectorRuntime {
     const adapter = this.requireAdapter(session.connectorId);
     const capability = this.requireCapability(adapter, request.capability, "write");
     const requestedAt = this.now().toISOString();
+    const preparedRequest: ConnectorWriteRequest = {
+      ...request,
+      input: snapshotJsonObject(request.input)
+    };
+    const actionFingerprint = await connectorActionFingerprint(
+      session.connectorId,
+      session.account.id,
+      preparedRequest
+    );
     const record: ConnectorApprovalRecord = {
       id: `${session.connectorId}:${session.account.id}:${requestedAt}`,
       connectorId: session.connectorId,
       accountId: session.account.id,
-      proposedAction: request.capability,
-      target: request.target,
-      preview: request.preview,
-      riskLevel: request.riskLevel,
+      proposedAction: preparedRequest.capability,
+      target: preparedRequest.target,
+      preview: preparedRequest.preview,
+      riskLevel: preparedRequest.riskLevel,
       result: "pending",
       requestId: `${session.connectorId}:${request.capability}:${requestedAt}`,
       requestedAt,
       actor: "user",
-      runId: request.runId,
-      actionFingerprint: `${session.connectorId}:${session.account.id}:${request.capability}:${request.target}:${request.preview}`
+      runId: preparedRequest.runId,
+      actionFingerprint
     };
 
     // All writes marked consequential by the adapter require a fresh record.
@@ -182,8 +191,8 @@ export class ConnectorRuntime {
 
     try {
       const result = await this.withTokenRefresh(session, (tokens) => {
-        const write = () => adapter.write(request, tokens) as Promise<T>;
-        return request.idempotencyKey ? this.withRetries(write) : write();
+        const write = () => adapter.write(preparedRequest, tokens) as Promise<T>;
+        return preparedRequest.idempotencyKey ? this.withRetries(write) : write();
       });
       await this.approvals.complete({
         ...approved,
@@ -252,6 +261,75 @@ export class ConnectorRuntime {
     }
     throw lastError;
   }
+}
+
+function snapshotJsonObject(input: Record<string, unknown>): Record<string, unknown> {
+  const encoded = canonicalJson(input, new Set());
+  const value: unknown = JSON.parse(encoded);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Connector action input must be a JSON object.");
+  }
+  return value as Record<string, unknown>;
+}
+
+async function connectorActionFingerprint(
+  connectorId: ConnectorId,
+  accountId: string,
+  request: ConnectorWriteRequest
+): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new Error("Secure connector action fingerprinting is unavailable.");
+  }
+  const encoded = canonicalJson(
+    {
+      connectorId,
+      accountId,
+      capability: request.capability,
+      input: request.input,
+      cursor: request.cursor ?? null,
+      target: request.target,
+      preview: request.preview,
+      riskLevel: request.riskLevel,
+      runId: request.runId ?? null,
+      idempotencyKey: request.idempotencyKey ?? null
+    },
+    new Set()
+  );
+  const digest = await subtle.digest("SHA-256", new TextEncoder().encode(encoded));
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function canonicalJson(value: unknown, ancestors: Set<object>): string {
+  if (value === null) return "null";
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("Connector action input must contain finite JSON numbers.");
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) throw new Error("Connector action input must not contain cycles.");
+    ancestors.add(value);
+    const encoded = `[${value.map((entry) => canonicalJson(entry, ancestors)).join(",")}]`;
+    ancestors.delete(value);
+    return encoded;
+  }
+  if (typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error("Connector action input must contain only JSON values.");
+    }
+    if (ancestors.has(value)) throw new Error("Connector action input must not contain cycles.");
+    ancestors.add(value);
+    const record = value as Record<string, unknown>;
+    const encoded = `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key], ancestors)}`)
+      .join(",")}}`;
+    ancestors.delete(value);
+    return encoded;
+  }
+  throw new Error("Connector action input must contain only JSON values.");
 }
 
 export function tokenExpiresSoon(tokens: ConnectorTokenSet, now = new Date()): boolean {

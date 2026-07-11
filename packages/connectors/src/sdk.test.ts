@@ -121,6 +121,70 @@ describe("ConnectorRuntime", () => {
     );
   });
 
+  it("binds the full exact action into a secret-free canonical fingerprint", async () => {
+    const boundary = approvals();
+    const adapter = fixtureAdapter();
+    const runtime = new ConnectorRuntime({
+      approvals: boundary,
+      now: () => new Date("2026-06-27T12:00:00.000Z")
+    });
+    runtime.register(adapter);
+
+    await runtime.write(session(), {
+      capability: "items.publish",
+      input: { z: 2, nested: { secretDraft: "private-value", a: 1 } },
+      cursor: "cursor-1",
+      target: "production",
+      preview: "Publish release",
+      riskLevel: "high",
+      runId: "run-1",
+      idempotencyKey: "publish-1"
+    });
+    const first = vi.mocked(boundary.approve).mock.calls[0][0].actionFingerprint;
+    expect(first).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(first).not.toContain("private-value");
+
+    await runtime.write(session(), {
+      capability: "items.publish",
+      input: { nested: { a: 1, secretDraft: "private-value" }, z: 2 },
+      cursor: "cursor-1",
+      target: "production",
+      preview: "Publish release",
+      riskLevel: "high",
+      runId: "run-1",
+      idempotencyKey: "publish-1"
+    });
+    const second = vi.mocked(boundary.approve).mock.calls[1][0].actionFingerprint;
+    expect(second).toBe(first);
+  });
+
+  it("executes the exact snapshotted input even if the caller mutates its object during approval", async () => {
+    const input = { title: "Approved title", nested: { publish: true } };
+    const boundary = approvals((record) => {
+      input.title = "Substituted title";
+      input.nested.publish = false;
+      return { ...record, result: "approved", decidedAt: "2026-06-27T12:00:01.000Z" };
+    });
+    const adapter = fixtureAdapter();
+    const runtime = new ConnectorRuntime({ approvals: boundary });
+    runtime.register(adapter);
+
+    await runtime.write(session(), {
+      capability: "items.publish",
+      input,
+      target: "production",
+      preview: "Publish approved title",
+      riskLevel: "high"
+    });
+
+    expect(adapter.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { title: "Approved title", nested: { publish: true } }
+      }),
+      expect.anything()
+    );
+  });
+
   it("retries normalized retryable errors", async () => {
     const read = vi
       .fn()
