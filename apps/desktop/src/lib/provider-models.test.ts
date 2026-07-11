@@ -41,11 +41,11 @@ describe("provider model choices", () => {
     ]);
   });
 
-  it("recovers legacy model-only selections and returns provider wire ids", () => {
+  it("returns provider wire ids for an unambiguous legacy selection", () => {
     const options = providerModelOptions([
       {
         provider: provider("openai", "OpenAI"),
-        models: [{ id: "shared", label: "Shared", available: true }]
+        models: [{ id: "different", label: "Different", available: true }]
       },
       {
         provider: provider("openrouter", "OpenRouter"),
@@ -55,7 +55,37 @@ describe("provider model choices", () => {
 
     expect(resolveProviderModelOption(options, "shared")?.providerId).toBe("openai");
     expect(modelsForProvider(options, "openrouter")).toEqual([
-      { id: "shared", label: "Shared", available: true }
+      { id: "different", label: "Different", available: true }
     ]);
+  });
+
+  it("never reroutes an unavailable qualified selection to another provider", () => {
+    const options = providerModelOptions([
+      {
+        provider: provider("openai", "OpenAI"),
+        models: [{ id: "shared", label: "Shared", available: false }]
+      },
+      {
+        provider: provider("openrouter", "OpenRouter"),
+        models: [{ id: "shared", label: "Shared", available: true }]
+      }
+    ]);
+
+    expect(resolveProviderModelOption(options, "openai::shared")).toBeUndefined();
+    expect(resolveProviderModelOption(options, "shared")).toBeUndefined();
+  });
+
+  it("selects the first eligible route only when no selection has been saved", () => {
+    const options = providerModelOptions([
+      {
+        provider: provider("openai", "OpenAI"),
+        models: [
+          { id: "old", label: "Old", available: false },
+          { id: "current", label: "Current", available: true }
+        ]
+      }
+    ]);
+
+    expect(resolveProviderModelOption(options, "")?.id).toBe("openai::current");
   });
 });

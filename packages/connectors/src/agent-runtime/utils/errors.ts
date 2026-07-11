@@ -23,6 +23,13 @@ export function classifyBackendError(
   message: string
 ): Pick<BackendErrorMetadata, "code" | "retryable"> {
   if (
+    /entitle|subscription|billing|payment required|plan does not|not included|access denied/i.test(
+      message
+    )
+  ) {
+    return { code: "entitlement", retryable: false };
+  }
+  if (
     /auth|unauthor|forbidden|401|403|credential|sign[- ]?in|login|token|api[-_ ]?key|invalid key|bad key/i.test(
       message
     )
@@ -35,11 +42,17 @@ export function classifyBackendError(
   if (/cancel/i.test(message)) {
     return { code: "cancelled", retryable: false };
   }
+  if (/timeout|timed out/i.test(message)) {
+    return { code: "timeout", retryable: true };
+  }
   if (
-    /timeout|timed out|temporar|offline|unavailable|overload|connection|disconnect|network|5\d\d/i.test(
+    /offline|dns|no network|network unreachable|connection refused|couldn't reach|could not reach/i.test(
       message
     )
   ) {
+    return { code: "offline", retryable: true };
+  }
+  if (/temporar|unavailable|overload|connection|disconnect|network|5\d\d/i.test(message)) {
     return { code: "provider-unavailable", retryable: true };
   }
   if (/invalid|malformed|unsupported|too large|exceed/i.test(message)) {

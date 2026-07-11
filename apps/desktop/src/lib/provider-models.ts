@@ -40,13 +40,16 @@ export function resolveProviderModelOption(
   options: ProviderModelOption[],
   persistedId: string
 ): ProviderModelOption | undefined {
-  const exact = options.find((option) => option.id === persistedId && option.available);
-  if (exact) return exact;
+  if (persistedId.includes(MODEL_KEY_SEPARATOR)) {
+    return options.find((option) => option.id === persistedId && option.available);
+  }
 
-  const legacy = options.find(
+  const legacyMatches = options.filter(
     (option) => option.modelId === persistedId && option.available
   );
-  return legacy ?? options.find((option) => option.available);
+  if (legacyMatches.length === 1) return legacyMatches[0];
+  if (persistedId) return undefined;
+  return options.find((option) => option.available);
 }
 
 /** Return the active provider's original model catalogue from flattened choices. */

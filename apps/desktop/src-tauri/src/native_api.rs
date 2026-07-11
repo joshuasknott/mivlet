@@ -512,10 +512,21 @@ fn retry_after(response: &reqwest::Response, attempt: usize) -> Duration {
 
 fn status_error_code(status: reqwest::StatusCode) -> &'static str {
     match status {
-        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN => "authentication",
+        reqwest::StatusCode::UNAUTHORIZED => "authentication",
+        reqwest::StatusCode::PAYMENT_REQUIRED | reqwest::StatusCode::FORBIDDEN => "entitlement",
         reqwest::StatusCode::TOO_MANY_REQUESTS => "rate-limited",
         status if status.is_server_error() => "provider-unavailable",
         _ => "invalid-request",
+    }
+}
+
+fn request_error_code(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() || error.is_request() {
+        "offline"
+    } else {
+        "transport"
     }
 }
 
@@ -595,7 +606,8 @@ pub async fn stream_backend_completion(
 
         let response = match response {
             Ok(response) => response,
-            Err(_) if attempt + 1 < MAX_ATTEMPTS => {
+            Err(error) if attempt + 1 < MAX_ATTEMPTS => {
+                let code = request_error_code(&error);
                 let delay =
                     Duration::from_millis(250_u64.saturating_mul(2_u64.pow(attempt as u32)));
                 emit_control(
@@ -603,8 +615,12 @@ pub async fn stream_backend_completion(
                     &channel,
                     TransportControlEvent {
                         kind: "retrying",
-                        code: "transport",
-                        message: "Provider connection failed; retrying.".to_string(),
+                        code,
+                        message: if code == "timeout" {
+                            "Provider request timed out; retrying.".to_string()
+                        } else {
+                            "Provider connection failed; retrying.".to_string()
+                        },
                         retryable: true,
                         attempt: attempt + 1,
                         retry_after_ms: Some(delay.as_millis() as u64),
@@ -624,14 +640,19 @@ pub async fn stream_backend_completion(
                 }
                 continue;
             }
-            Err(_) => {
+            Err(error) => {
+                let code = request_error_code(&error);
                 emit_control(
                     &app,
                     &channel,
                     TransportControlEvent {
                         kind: "error",
-                        code: "transport",
-                        message: "Provider connection failed after retrying.".to_string(),
+                        code,
+                        message: if code == "timeout" {
+                            "Provider request timed out after retrying.".to_string()
+                        } else {
+                            "Provider connection failed after retrying.".to_string()
+                        },
                         retryable: true,
                         attempt: attempt + 1,
                         retry_after_ms: None,
@@ -722,10 +743,11 @@ pub async fn stream_backend_completion(
                                 }
                             }
                         }
-                        Some(Err(_)) => {
+                        Some(Err(error)) => {
+                            let code = request_error_code(&error);
                             emit_control(&app, &channel, TransportControlEvent {
                                 kind: "error",
-                                code: "transport",
+                                code,
                                 message: "Provider stream ended unexpectedly.".to_string(),
                                 retryable: true,
                                 attempt: attempt + 1,
@@ -1231,6 +1253,17 @@ mod transport_policy_tests {
         assert!(retryable_status(reqwest::StatusCode::BAD_GATEWAY));
         assert!(!retryable_status(reqwest::StatusCode::BAD_REQUEST));
         assert!(!retryable_status(reqwest::StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn streaming_statuses_distinguish_auth_entitlement_rate_limit_and_provider_failure() {
+        use reqwest::StatusCode;
+
+        assert_eq!(status_error_code(StatusCode::UNAUTHORIZED), "authentication");
+        assert_eq!(status_error_code(StatusCode::FORBIDDEN), "entitlement");
+        assert_eq!(status_error_code(StatusCode::PAYMENT_REQUIRED), "entitlement");
+        assert_eq!(status_error_code(StatusCode::TOO_MANY_REQUESTS), "rate-limited");
+        assert_eq!(status_error_code(StatusCode::SERVICE_UNAVAILABLE), "provider-unavailable");
     }
 
     #[test]

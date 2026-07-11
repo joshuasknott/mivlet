@@ -132,7 +132,7 @@ describe("Provider Hardening Tests", () => {
       const transport = {
         async *stream(): AsyncIterable<string> {
           yield 'data: {"choices":[{"delta":{"content":"ok"}}]}';
-          throw new Error("DNS resolution failed or network disconnect.");
+          throw new Error("Connection dropped mid-stream.");
         }
       };
       const backend = createNativeApiBackend(mockNativeProvider(), {
@@ -144,6 +144,27 @@ describe("Provider Hardening Tests", () => {
         type: "error",
         code: "provider-unavailable",
         retryable: true
+      });
+    });
+
+    it.each([
+      ["This model is not included in your subscription plan.", "entitlement", false],
+      ["DNS resolution failed: network unreachable.", "offline", true],
+      ["Connection timed out waiting for gateway response.", "timeout", true]
+    ])("normalizes %s", async (message, code, retryable) => {
+      const transport = {
+        async *stream(): AsyncIterable<string> {
+          throw new Error(message);
+        }
+      };
+      const backend = createNativeApiBackend(mockNativeProvider(), {
+        createTransport: () => ({ transport, cancel: async () => {} })
+      });
+      const events = await collectEvents(backend?.run(baseRequest, { execute: async () => "" }));
+      expect(events.find(event => event.type === "error")).toMatchObject({
+        type: "error",
+        code,
+        retryable
       });
     });
   });
@@ -291,7 +312,7 @@ describe("Provider Hardening Tests", () => {
 
   // 5. Retry & Timeout Behavior
   describe("Retry and Timeout Behavior", () => {
-    it("normalizes timeout error messages to provider-unavailable code and retryable true", async () => {
+    it("normalizes timeout error messages to timeout code and retryable true", async () => {
       const transport = {
         async *stream(): AsyncIterable<string> {
           throw new Error("Connection timed out waiting for gateway response.");
@@ -304,7 +325,7 @@ describe("Provider Hardening Tests", () => {
       const errorEvent = events.find(e => e.type === "error");
       expect(errorEvent).toMatchObject({
         type: "error",
-        code: "provider-unavailable",
+        code: "timeout",
         retryable: true
       });
     });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composerModelsFor } from "./composer-models";
 
 const model = (id: string, providerId = "openai", available = true) => ({
-  id,
+  id: `${providerId}::${id}`,
   modelId: id,
   label: id,
   providerId,
@@ -12,7 +12,7 @@ const model = (id: string, providerId = "openai", available = true) => ({
 
 describe("composerModelsFor", () => {
   it("prefers current OpenAI and reasoning models when GPT-5 is available", () => {
-    expect(composerModelsFor("openai", [model("gpt-4.1"), model("o3"), model("gpt-5")]).map((item) => item.id)).toEqual([
+    expect(composerModelsFor("openai", [model("gpt-4.1"), model("o3"), model("gpt-5")]).map((item) => item.modelId)).toEqual([
       "o3",
       "gpt-5"
     ]);
@@ -21,7 +21,7 @@ describe("composerModelsFor", () => {
   it("keeps only the newest Gemini version and ignores unavailable models", () => {
     expect(
       composerModelsFor("gemini", [model("gemini-2.5", "gemini"), model("gemini-3.0", "gemini"), model("gemini-4.0", "gemini", false)]).map(
-        (item) => item.id
+        (item) => item.modelId
       )
     ).toEqual(["gemini-3.0"]);
   });

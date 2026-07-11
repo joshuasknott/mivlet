@@ -19,20 +19,20 @@ export function composerModelsFor(
   );
   if (available.length === 0) return [];
   if (providerId === "openai") {
-    const hasGpt5 = available.some((model) => model.id.toLowerCase().startsWith("gpt-5"));
+    const hasGpt5 = available.some((model) => model.modelId.toLowerCase().startsWith("gpt-5"));
     if (hasGpt5) {
       const preferred = available.filter((model) => {
-        const id = model.id.toLowerCase();
+        const id = model.modelId.toLowerCase();
         return id.startsWith("gpt-5") || /^o[3-9]/.test(id);
       });
       if (preferred.length > 0) return preferred;
     }
-    const hasGpt4 = available.some((model) => model.id.toLowerCase().startsWith("gpt-4"));
-    if (hasGpt4) return available.filter((model) => !model.id.toLowerCase().startsWith("gpt-3.5"));
+    const hasGpt4 = available.some((model) => model.modelId.toLowerCase().startsWith("gpt-4"));
+    if (hasGpt4) return available.filter((model) => !model.modelId.toLowerCase().startsWith("gpt-3.5"));
   }
   if (providerId === "gemini") {
     const versioned = available
-      .map((model) => ({ model, version: parsedModelVersion(model.id, "gemini") }))
+      .map((model) => ({ model, version: parsedModelVersion(model.modelId, "gemini") }))
       .filter((entry): entry is { model: ProviderModelOption; version: number } => entry.version !== null);
     const maxVersion = Math.max(...versioned.map((entry) => entry.version), 0);
     if (maxVersion > 0) {

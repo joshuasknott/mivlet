@@ -26,6 +26,22 @@ describe("describeBackendError", () => {
     }
   });
 
+  it("explains entitlement failures as account access problems", () => {
+    const result = describeBackendError("HTTP 403", "entitlement", false);
+    expect(result).toMatchObject({ tone: "danger", retryable: false });
+    expect(result.message.toLowerCase()).toContain("doesn't have access");
+    expect(result.message.toLowerCase()).toContain("plan");
+  });
+
+  it("distinguishes offline and timeout failures", () => {
+    const offline = describeBackendError("DNS failed", "offline", true);
+    const timeout = describeBackendError("deadline elapsed", "timeout", true);
+    expect(offline.message.toLowerCase()).toContain("offline");
+    expect(timeout.message.toLowerCase()).toContain("too long");
+    expect(offline.retryable).toBe(true);
+    expect(timeout.retryable).toBe(true);
+  });
+
   it("classifies response-too-large as a non-retryable runtime limit", () => {
     const result = describeBackendError("too big", "response-too-large", false);
     expect(result.tone).toBe("caution");
@@ -65,6 +81,9 @@ describe("isBackendErrorCode", () => {
     expect(isBackendErrorCode("authentication")).toBe(true);
     expect(isBackendErrorCode("transport")).toBe(true);
     expect(isBackendErrorCode("provider-unavailable")).toBe(true);
+    expect(isBackendErrorCode("entitlement")).toBe(true);
+    expect(isBackendErrorCode("offline")).toBe(true);
+    expect(isBackendErrorCode("timeout")).toBe(true);
   });
 
   it("rejects unknown values", () => {
@@ -77,6 +96,7 @@ describe("isBackendErrorCode", () => {
 describe("isConfigurationErrorCode", () => {
   it("treats authentication as a configuration problem", () => {
     expect(isConfigurationErrorCode("authentication")).toBe(true);
+    expect(isConfigurationErrorCode("entitlement")).toBe(true);
   });
 
   it("treats runtime codes as non-configuration", () => {

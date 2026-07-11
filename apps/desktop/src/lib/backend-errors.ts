@@ -24,6 +24,9 @@
  */
 export type BackendErrorCode =
   | "authentication"
+  | "entitlement"
+  | "offline"
+  | "timeout"
   | "rate-limited"
   | "provider-unavailable"
   | "invalid-request"
@@ -34,6 +37,9 @@ export type BackendErrorCode =
 export function isBackendErrorCode(code: unknown): code is BackendErrorCode {
   return (
     code === "authentication" ||
+    code === "entitlement" ||
+    code === "offline" ||
+    code === "timeout" ||
     code === "rate-limited" ||
     code === "provider-unavailable" ||
     code === "invalid-request" ||
@@ -49,7 +55,7 @@ export function isBackendErrorCode(code: unknown): code is BackendErrorCode {
  * something (re-add a key, adjust the request).
  */
 export function isConfigurationErrorCode(code: BackendErrorCode): boolean {
-  return code === "authentication";
+  return code === "authentication" || code === "entitlement";
 }
 
 export interface DescribedBackendError {
@@ -90,6 +96,27 @@ export function describeBackendError(
       message: `Your API key was rejected or has expired. Check the key for this provider in Settings and reconnect. (${message})`,
       tone: "danger",
       retryable: false
+    };
+  }
+  if (code === "entitlement") {
+    return {
+      message: `This account doesn't have access to the selected model or feature. Check the provider plan and model access. (${message})`,
+      tone: "danger",
+      retryable: false
+    };
+  }
+  if (code === "offline") {
+    return {
+      message: `Fable is offline or can't reach the provider. Check your connection and retry. (${message})`,
+      tone: "caution",
+      retryable: true
+    };
+  }
+  if (code === "timeout") {
+    return {
+      message: `The provider took too long to respond. Try again. (${message})`,
+      tone: "caution",
+      retryable: true
     };
   }
   if (code === "rate-limited") {
