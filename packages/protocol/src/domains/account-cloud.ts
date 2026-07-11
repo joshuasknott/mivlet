@@ -92,6 +92,11 @@ export interface AccountWorkspaceStatus {
   accountBound: boolean;
   workspaces: AccountWorkspaceSummary[];
   activeWorkspace: ActiveWorkspaceSelection;
+  /** Secret-free native owner used for private local data; member is hosted-only. */
+  activeContextOwner?: {
+    internalUserId: string;
+    memberId?: string;
+  };
   devices: AccountDeviceSummary[];
 }
 

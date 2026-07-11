@@ -4,7 +4,7 @@ import type {
   ApprovalRiskLevel,
   PermissionMode
 } from "./approvals.js";
-import type { MemberId } from "../spine/primitives.js";
+import type { InternalUserId, MemberId } from "../spine/primitives.js";
 
 export type AgentRunStatus =
   | "queued"
@@ -50,29 +50,36 @@ export interface RunContextScope {
 }
 
 /** Portable access boundary for Knowledge and Memory records. */
+export type ContextPrivateOwner =
+  | { ownerMemberId: MemberId; ownerInternalUserId?: never }
+  | { ownerInternalUserId: InternalUserId; ownerMemberId?: never };
+
 export type ContextRecordAuthorityScope =
-  | {
+  | ({
       authority: "local";
       visibility: "member-private";
-      ownerMemberId: MemberId;
-    }
+    } & ContextPrivateOwner)
   | {
       authority: "convex";
       visibility: "workspace-shared";
       ownerMemberId?: never;
+      ownerInternalUserId?: never;
     };
 
 /** Audience the context was assembled for; it never expands record authority. */
 export type RunContextAudience =
-  | {
+  | ({
       authority: "local";
       visibility: "member-private";
-      actingMemberId: MemberId;
-    }
+    } & (
+      | { actingMemberId: MemberId; actingInternalUserId?: never }
+      | { actingInternalUserId: InternalUserId; actingMemberId?: never }
+    ))
   | {
       authority: "convex";
       visibility: "workspace-shared";
       actingMemberId: MemberId;
+      actingInternalUserId?: never;
     };
 
 /** Immutable citation snapshot: later source changes cannot rewrite run history. */
