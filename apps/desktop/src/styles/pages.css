@@ -334,6 +334,7 @@
 
 .project-knowledge__list li {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
@@ -351,6 +352,10 @@
   min-width: 0;
 }
 
+.project-knowledge__list li > div:first-child {
+  flex: 1 1 220px;
+}
+
 .project-knowledge__list strong {
   overflow: hidden;
   color: var(--ink);
@@ -366,6 +371,7 @@
 }
 
 .project-knowledge__meta {
+  flex: 0 0 auto;
   justify-items: end;
   text-align: right;
 }
@@ -409,11 +415,18 @@
   opacity: 0.72;
 }
 
-.project-knowledge__actions {
+.project-knowledge__list .project-knowledge__actions {
   display: flex;
+  flex: 0 0 320px;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.project-knowledge__update-help {
+  flex: 1 0 100%;
+  margin: 0;
+  text-align: right;
 }
 
 .project-knowledge__actions .project-knowledge__delete {
@@ -564,7 +577,13 @@
   }
 
   .project-knowledge__actions {
+    width: auto;
+    flex-basis: auto;
     justify-content: flex-start;
+  }
+
+  .project-knowledge__update-help {
+    text-align: left;
   }
 
   .project-memory__actions {

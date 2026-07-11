@@ -360,7 +360,7 @@ export function ProjectPage({
                   <>
                   <div className="project-knowledge__actions">
                     <label className="project-knowledge__update-file">
-                      <span>{knowledgeActionId === source.id ? "Updatingâ€¦" : "Update file"}</span>
+                      <span>{knowledgeActionId === source.id ? "Updating..." : "Update file"}</span>
                       <input
                         className="sr-only"
                         type="file"
@@ -380,7 +380,7 @@ export function ProjectPage({
                         disabled={memoryBusyId === source.id || memory.disabled || knowledgeActionId === source.id}
                         onClick={() => void runMemoryAction(source.id, () => memory.promote(source.id))}
                       >
-                        {memoryBusyId === source.id ? "Rememberingâ€¦" : "Remember"}
+                        {memoryBusyId === source.id ? "Remembering..." : "Remember"}
                       </button>
                     ) : null}
                     <button
@@ -393,13 +393,13 @@ export function ProjectPage({
                       className="project-knowledge__delete"
                       disabled={knowledgeActionId === source.id}
                       onClick={() => {
-                        if (window.confirm(`Delete â€œ${source.title}â€ from this project?`)) {
+                        if (window.confirm(`Delete "${source.title}" from this project?`)) {
                           void runKnowledgeAction(source.id, () => knowledge.remove(source.id));
                         }
                       }}
                     >Delete</button>
                   </div>
-                  <p className="project-knowledge__update-help">Choose the current version of this file. Fable wonâ€™t keep access to its location.</p>
+                  <p className="project-knowledge__update-help">Choose the current version of this file. Fable won't keep access to its location.</p>
                   </>
                 ) : null}
               </li>
@@ -433,7 +433,7 @@ export function ProjectPage({
           </div>
         ) : null}
         {memoryActionError ? <p className="project-memory__state project-memory__state--error" role="alert">{memoryActionError}</p> : null}
-        {memory.loading ? <p className="project-memory__state" role="status">Loading project memoryâ€¦</p> : null}
+        {memory.loading ? <p className="project-memory__state" role="status">Loading project memory...</p> : null}
         {!memory.loading && !memory.error && memory.records.length === 0 ? (
           <p className="project-page__empty">Nothing remembered yet. Choose Remember beside a knowledge file to add it.</p>
         ) : null}
@@ -482,7 +482,7 @@ export function ProjectPage({
                         <button type="button" disabled={memoryBusyId === record.id || record.disabled} onClick={() => void runMemoryAction(record.id, () => memory.togglePin(record.id))}>{record.pinned ? "Unpin" : "Pin"}</button>
                         <button type="button" disabled={memoryBusyId === record.id} onClick={() => void runMemoryAction(record.id, () => memory.toggleDisabled(record.id))}>{record.disabled ? "Use again" : "Stop using"}</button>
                         <button type="button" className="project-memory__forget" disabled={memoryBusyId === record.id} onClick={() => {
-                          if (window.confirm(`Forget â€œ${record.title}â€? This cannot be undone.`)) {
+                          if (window.confirm(`Forget "${record.title}"? This cannot be undone.`)) {
                             void runMemoryAction(record.id, () => memory.forget(record.id));
                           }
                         }}>Forget</button>

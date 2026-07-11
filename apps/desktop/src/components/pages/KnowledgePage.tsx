@@ -508,7 +508,7 @@ function SourceList({
                   </button>
                   {source.connectorId === "local-files" ? (
                     <label className="knowledge-item__update-file">
-                      <span><ArrowClockwise size={16} /> {updatingId === source.id ? "Updatingâ€¦" : "Update file"}</span>
+                      <span><ArrowClockwise size={16} /> {updatingId === source.id ? "Updating..." : "Update file"}</span>
                       <input
                         className="sr-only"
                         type="file"
@@ -545,7 +545,7 @@ function SourceList({
                   />
                 </div>
                 {source.connectorId === "local-files" ? (
-                  <p className="knowledge-item__update-help">Choose the current version of this file. Fable wonâ€™t keep access to its location.</p>
+                  <p className="knowledge-item__update-help">Choose the current version of this file. Fable won't keep access to its location.</p>
                 ) : null}
               </div>
             ) : null}
