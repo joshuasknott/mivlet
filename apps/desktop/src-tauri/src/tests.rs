@@ -18,7 +18,7 @@ use crate::connectors::{
     list_connector_statuses_with, list_unconfigured_connector_statuses, redact_connector_text,
     validate_connector_action, validate_connector_execution_request, ConnectorCredentialBoundary,
 };
-use crate::knowledge::{import_local_text_file, search_knowledge_sources};
+use crate::knowledge::{import_local_text_file, search_knowledge_sources_inner};
 use crate::memory::{
     encode_memory_export, promote_knowledge_source, read_memory_state, write_memory_state,
 };
@@ -365,7 +365,7 @@ fn knowledge_search_requires_actual_matches_before_boosts() {
         },
     ];
 
-    let result = search_knowledge_sources("connector recovery".to_string(), sources, None);
+    let result = search_knowledge_sources_inner("connector recovery".to_string(), sources, None);
 
     assert_eq!(result.mode, "lexical-fallback");
     assert_eq!(result.citations.len(), 1);

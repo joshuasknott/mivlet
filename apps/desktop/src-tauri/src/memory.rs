@@ -8,6 +8,7 @@
 use std::{fs, path::Path};
 
 use crate::approvals::{normalize_approval_audit_entry, persist_approval_audit_entry};
+use crate::authorized_scope::{command_scope, ScopeAccess};
 use crate::models::ApprovalAuditEntry;
 use crate::models::{
     MemoryControlState, MemoryExportEnvelope, MemoryPromotionRequest, MemoryPromotionResponse,
@@ -16,15 +17,6 @@ use crate::models::{
 };
 use crate::paths::approval_audit_path;
 use crate::paths::{file_slug, memory_state_path, normalize_spaces, truncate_characters};
-use crate::store::repos::scope::DataScope;
-
-fn data_scope(
-    workspace_id: Option<String>,
-    project_id: Option<String>,
-) -> Result<DataScope, String> {
-    let workspace_id = workspace_id.ok_or_else(|| "Workspace id is required.".to_string())?;
-    DataScope::new(workspace_id, project_id).map_err(|error| error.to_string())
-}
 
 fn default_memory_state() -> MemoryControlState {
     MemoryControlState {
@@ -345,9 +337,12 @@ pub fn list_memory_state(
     project_id: Option<String>,
 ) -> Result<MemoryControlState, String> {
     let path = memory_state_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
     if let Some(state) = crate::store::read_workspace_document(&path, &scope)? {
         return normalize_memory_state(state).map(live_memory_state);
+    }
+    if scope.project_id().is_some() {
+        return Ok(default_memory_state());
     }
     read_memory_state(&path)
 }
@@ -360,7 +355,7 @@ pub fn save_memory_state(
     project_id: Option<String>,
 ) -> Result<MemoryControlState, String> {
     let path = memory_state_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
     let mut normalized = normalize_memory_state(state)?;
     if let Some(existing) =
         crate::store::read_workspace_document::<MemoryControlState>(&path, &scope)?
@@ -392,7 +387,7 @@ pub fn export_memory_state(
     project_id: Option<String>,
 ) -> Result<String, String> {
     let path = memory_state_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
     let state =
         crate::store::read_workspace_document(&path, &scope)?.unwrap_or_else(default_memory_state);
     encode_memory_export_scoped(state, scope.workspace_id())
@@ -407,7 +402,7 @@ pub fn promote_knowledge_source_to_memory(
 ) -> Result<MemoryPromotionResponse, String> {
     let response = promote_knowledge_source(request)?;
     let memory_path = memory_state_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
     let state = if crate::store::write_workspace_document(&memory_path, &scope, &response.state)? {
         response.state
     } else {

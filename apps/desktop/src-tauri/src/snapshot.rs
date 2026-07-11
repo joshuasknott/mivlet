@@ -12,6 +12,7 @@ use std::{
 };
 
 use crate::approvals::{normalize_approval_audit_entry, normalize_approval_grant};
+use crate::authorized_scope::{command_scope, ScopeAccess};
 use crate::knowledge::import_local_text_file;
 use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
@@ -230,7 +231,7 @@ pub fn save_imported_knowledge_sources(
         }
     }
     let path = imported_knowledge_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
     let existing: Vec<LocalFileImport> =
         crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();
     let normalized = merge_deleted_imported_tombstones(normalized, existing)?;
@@ -677,9 +678,12 @@ pub fn list_imported_knowledge_sources(
     project_id: Option<String>,
 ) -> Result<Vec<LocalFileImport>, String> {
     let path = imported_knowledge_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
     if let Some(sources) = crate::store::read_workspace_document(&path, &scope)? {
         return Ok(sources);
+    }
+    if scope.project_id().is_some() {
+        return Ok(Vec::new());
     }
     read_imported_knowledge_sources(&path)
 }
@@ -691,9 +695,9 @@ pub fn import_local_knowledge_source(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<LocalFileImport, String> {
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?.data;
     let imported = import_local_text_file(candidate)?;
     let path = imported_knowledge_path(&app)?;
-    let scope = data_scope(workspace_id, project_id)?;
     if crate::store::try_global().is_some() {
         let mut sources: Vec<LocalFileImport> =
             crate::store::read_workspace_document(&path, &scope)?.unwrap_or_default();

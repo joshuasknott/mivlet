@@ -11,6 +11,7 @@ mod action_history;
 mod agent_runs;
 mod approvals;
 mod artifacts;
+mod authorized_scope;
 mod backends;
 mod clerk_identity;
 mod cloud_sync;

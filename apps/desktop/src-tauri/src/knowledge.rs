@@ -3,6 +3,7 @@
 //! Public Tauri commands (names must stay stable): `import_local_text_file`,
 //! `search_knowledge_sources`.
 
+use crate::authorized_scope::{command_scope, ScopeAccess};
 use crate::models::{
     KnowledgeCitation, KnowledgeSearchResponse, KnowledgeSource, LocalFileImport,
     LocalTextFileCandidate, DEFAULT_RESULT_LIMIT, MAX_LOCAL_FILE_BYTES,
@@ -234,6 +235,17 @@ fn to_citation(source: KnowledgeSource, score: f64) -> KnowledgeCitation {
 
 #[tauri::command]
 pub fn search_knowledge_sources(
+    query: String,
+    sources: Vec<KnowledgeSource>,
+    limit: Option<usize>,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<KnowledgeSearchResponse, String> {
+    let _scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
+    Ok(search_knowledge_sources_inner(query, sources, limit))
+}
+
+pub(crate) fn search_knowledge_sources_inner(
     query: String,
     sources: Vec<KnowledgeSource>,
     limit: Option<usize>,
