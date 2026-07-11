@@ -2702,6 +2702,40 @@
   line-height: 1.45;
 }
 
+.mcp-settings {
+  margin-top: var(--space-5);
+}
+
+.mcp-settings__advanced {
+  margin-top: var(--space-4);
+  border-top: 1px solid var(--line-soft);
+  padding-top: var(--space-4);
+}
+
+.mcp-settings__advanced summary {
+  color: var(--ink);
+  cursor: pointer;
+  font-size: var(--text-13);
+  font-weight: 600;
+}
+
+.mcp-settings__advanced > p {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  margin: var(--space-2) 0 var(--space-4);
+}
+
+.mcp-settings__form {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 42rem;
+}
+
+.mcp-settings__form textarea {
+  min-height: 5rem;
+  resize: vertical;
+}
+
 .settings-open-section {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -2942,6 +2942,56 @@ export interface RuntimeSpawnedMcpProcess {
   launchReference: string;
 }
 
+export interface RuntimeMcpServerConfiguration {
+  workspaceId: string;
+  id: string;
+  displayName: string;
+  command: string;
+  args: string[];
+  expectedRevision?: number;
+}
+
+export interface RuntimeMcpServerSummary {
+  id: string;
+  workspaceId: string;
+  displayName: string;
+  revision: number;
+  disabled: boolean;
+  createdByInternalUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RuntimePreparedMcpServerConfiguration {
+  configurationFingerprint: string;
+  approval: import("@fable/protocol").ApprovalRequest;
+}
+
+export async function prepareRuntimeMcpServerConfiguration(
+  configuration: RuntimeMcpServerConfiguration
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimePreparedMcpServerConfiguration>("prepare_mcp_server_configuration", {
+    configuration
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function commitRuntimeMcpServerConfiguration(
+  configuration: RuntimeMcpServerConfiguration,
+  resolution: ApprovalResolutionRequest
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeMcpServerSummary>("commit_mcp_server_configuration", {
+    request: { configuration, resolution }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
+export async function listRuntimeMcpServerConfigurations(workspaceId: string) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeMcpServerSummary[]>("list_mcp_server_configurations", { workspaceId })
+    .catch((error) => { throw toRuntimeError(error); });
+}
+
 export async function spawnRuntimeMcpProcess(workspaceId: string, launchReference: string) {
   if (!hasTauriRuntime()) return null;
   try {

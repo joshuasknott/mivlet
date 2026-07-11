@@ -33,6 +33,7 @@ import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { useWorkspaceMembers } from "../../hooks/useWorkspaceMembers";
+import { LocalMcpSettings } from "../settings/LocalMcpSettings";
 
 // Re-export the eager-loadable tab metadata so the lazy-loaded page module
 // remains the single source of truth for existing direct importers. The
@@ -338,6 +339,11 @@ function ProviderAccessView({
           onStatus(`${providerId} connection checked.`);
           return result;
         }}
+        onStatus={onStatus}
+      />
+
+      <LocalMcpSettings
+        workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}
         onStatus={onStatus}
       />
 
