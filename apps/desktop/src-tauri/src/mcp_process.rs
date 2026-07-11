@@ -41,9 +41,34 @@ struct McpChild {
 
 type ProcessMap = HashMap<String, McpChild>;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DiscoveryKind {
+    Tools,
+    Resources,
+}
+
+#[derive(Default)]
+struct DiscoveryCollection {
+    values: Vec<String>,
+    expected_cursor: Option<String>,
+    complete: bool,
+}
+
+#[derive(Default)]
+struct DiscoveryProof {
+    pending: HashMap<String, DiscoveryKind>,
+    tools: DiscoveryCollection,
+    resources: DiscoveryCollection,
+}
+
 fn process_map() -> &'static Mutex<ProcessMap> {
     static MAP: OnceLock<Mutex<ProcessMap>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn discovery_proofs() -> &'static Mutex<HashMap<String, DiscoveryProof>> {
+    static PROOFS: OnceLock<Mutex<HashMap<String, DiscoveryProof>>> = OnceLock::new();
+    PROOFS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Clone)]
@@ -531,10 +556,21 @@ pub async fn send_remote_mcp_frame(
         if session.busy {
             return Err("This remote MCP session is already handling a request.".to_string());
         }
+        register_discovery_request(&request.session_id, &request.frame)?;
         session.busy = true;
         session.clone()
     };
     let result = post_remote_mcp_frame(&snapshot, &request.frame).await;
+    if let Ok(response) = &result {
+        for frame in &response.frames {
+            observe_discovery_frame(&request.session_id, frame);
+        }
+        if response.error.is_some() {
+            mark_discovery_changed(&request.session_id);
+        }
+    } else {
+        mark_discovery_changed(&request.session_id);
+    }
     if let Ok(mut sessions) = remote_sessions().lock() {
         if let Some(session) = sessions.get_mut(&request.session_id) {
             session.busy = false;
@@ -617,6 +653,11 @@ pub async fn poll_remote_mcp_messages(
     };
     tokio::time::sleep(Duration::from_millis(snapshot.retry_after_ms)).await;
     let result = get_remote_mcp_messages(&snapshot).await;
+    if let Ok(polled) = &result {
+        for frame in &polled.frames {
+            observe_discovery_frame(&request.session_id, frame);
+        }
+    }
     if let Ok(mut sessions) = remote_sessions().lock() {
         if let Some(session) = sessions.get_mut(&request.session_id) {
             session.poll_busy = false;
@@ -657,6 +698,9 @@ pub async fn close_remote_mcp_session(request: CloseMcpProcessRequest) -> Result
             .remove(&request.session_id)
             .expect("session existed")
     };
+    if let Ok(mut proofs) = discovery_proofs().lock() {
+        proofs.remove(&request.session_id);
+    }
     if session.server_session_id.is_some() {
         delete_remote_mcp_session(&session).await?;
     }
@@ -699,6 +743,9 @@ pub fn record_mcp_server_discovery(
         require_remote_session_owner(session, &scope)?;
         (session.connection_id.clone(), session.connection_revision)
     };
+    verify_discovery_proof(&request.session_id, &request.tools, &request.resources)?;
+    let proof_tools = request.tools.clone();
+    let proof_resources = request.resources.clone();
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let recorded = store
@@ -715,26 +762,14 @@ pub fn record_mcp_server_discovery(
             )
         })
         .map_err(|error| error.to_string())?;
-    if let Ok(mut map) = process_map().lock() {
-        if let Some(process) = map.get_mut(&request.session_id) {
-            if process.connection_id == recorded.connection_id
-                && process.connection_revision == connection_revision
-            {
-                process.connection_revision = recorded.connection_revision;
-                process.discovery_current = true;
-            }
-        }
-    }
-    if let Ok(mut sessions) = remote_sessions().lock() {
-        if let Some(session) = sessions.get_mut(&request.session_id) {
-            if session.connection_id == recorded.connection_id
-                && session.connection_revision == connection_revision
-            {
-                session.connection_revision = recorded.connection_revision;
-                session.discovery_current = true;
-            }
-        }
-    }
+    commit_session_discovery_authority(
+        &request.session_id,
+        &recorded.connection_id,
+        connection_revision,
+        recorded.connection_revision,
+        &proof_tools,
+        &proof_resources,
+    )?;
     Ok(recorded)
 }
 
@@ -1065,6 +1100,7 @@ pub async fn spawn_mcp_process(
                     for line in decoder.push(&chunk[..count]) {
                         if let Ok(text) = String::from_utf8(line) {
                             if valid_mcp_frame(&text) {
+                                observe_discovery_frame(&stdout_session_id, &text);
                                 audit_mcp_response(&stdout_session_id, &text);
                                 let _ = stdout_app.emit(&stdout_channel, text);
                             }
@@ -1135,10 +1171,12 @@ pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String
             .clone()
             .ok_or_else(|| "This local MCP session is closed.".to_string())?
     };
-    sender
-        .send(request.frame)
-        .await
-        .map_err(|_| "This local MCP session is closed.".to_string())
+    register_discovery_request(&request.session_id, &request.frame)?;
+    if sender.send(request.frame).await.is_err() {
+        mark_discovery_changed(&request.session_id);
+        return Err("This local MCP session is closed.".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1162,6 +1200,9 @@ pub async fn close_mcp_process(request: CloseMcpProcessRequest) -> Result<(), St
         map.remove(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?
     };
+    if let Ok(mut proofs) = discovery_proofs().lock() {
+        proofs.remove(&request.session_id);
+    }
     drain_session_audits(&request.session_id);
     if let Ok(mut permits) = tool_permits().lock() {
         permits.retain(|_, permit| permit.session_id != request.session_id);
@@ -1299,6 +1340,274 @@ fn require_current_session_discovery(discovery_current: bool) -> Result<(), Stri
     if !discovery_current {
         return Err("MCP tools must be rediscovered in this session before execution.".into());
     }
+    Ok(())
+}
+
+fn discovery_request_id(value: &Value) -> Option<String> {
+    if value.is_string() || value.as_i64().is_some() || value.as_u64().is_some() {
+        serde_json::to_string(value).ok()
+    } else {
+        None
+    }
+}
+
+fn discovery_collection_mut(
+    proof: &mut DiscoveryProof,
+    kind: DiscoveryKind,
+) -> &mut DiscoveryCollection {
+    match kind {
+        DiscoveryKind::Tools => &mut proof.tools,
+        DiscoveryKind::Resources => &mut proof.resources,
+    }
+}
+
+fn register_discovery_request(session_id: &str, frame: &str) -> Result<(), String> {
+    let Value::Object(object) = serde_json::from_str::<Value>(frame)
+        .map_err(|_| "The MCP discovery request is invalid.".to_string())?
+    else {
+        return Err("The MCP discovery request is invalid.".into());
+    };
+    let kind = match object.get("method").and_then(Value::as_str) {
+        Some("tools/list") => DiscoveryKind::Tools,
+        Some("resources/list") => DiscoveryKind::Resources,
+        _ => return Ok(()),
+    };
+    let id = object
+        .get("id")
+        .and_then(discovery_request_id)
+        .ok_or_else(|| "MCP discovery requires a request id.".to_string())?;
+    let cursor = match object.get("params") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(params)) => match params.get("cursor") {
+            None => None,
+            Some(Value::String(cursor))
+                if !cursor.is_empty()
+                    && cursor.len() <= 2_048
+                    && !cursor.chars().any(char::is_control) =>
+            {
+                Some(cursor.clone())
+            }
+            _ => return Err("The MCP discovery cursor is invalid.".into()),
+        },
+        _ => return Err("The MCP discovery parameters are invalid.".into()),
+    };
+    let mut proofs = discovery_proofs()
+        .lock()
+        .map_err(|_| "Fable could not verify MCP discovery.".to_string())?;
+    let proof = proofs.entry(session_id.to_string()).or_default();
+    if proof.pending.values().any(|pending| *pending == kind) {
+        return Err("MCP discovery already has a pending page.".into());
+    }
+    let collection = discovery_collection_mut(proof, kind);
+    if let Some(cursor) = cursor {
+        if collection.expected_cursor.as_deref() != Some(cursor.as_str()) {
+            return Err("The MCP discovery cursor does not match the server response.".into());
+        }
+        collection.expected_cursor = None;
+    } else {
+        *collection = DiscoveryCollection::default();
+    }
+    proof.pending.insert(id, kind);
+    Ok(())
+}
+
+fn normalize_discovery_proof_values(
+    values: impl IntoIterator<Item = String>,
+    max_chars: usize,
+) -> Result<Vec<String>, String> {
+    let mut normalized = Vec::new();
+    for value in values {
+        let value = value.trim();
+        if value.is_empty()
+            || value.chars().count() > max_chars
+            || value.chars().any(char::is_control)
+        {
+            return Err("MCP discovery returned an invalid value.".into());
+        }
+        normalized.push(value.to_string());
+        if normalized.len() > 256 {
+            return Err("MCP discovery exceeded the supported limit.".into());
+        }
+    }
+    normalized.sort();
+    normalized.dedup();
+    Ok(normalized)
+}
+
+fn mark_discovery_changed(session_id: &str) {
+    if let Ok(mut sessions) = remote_sessions().lock() {
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.discovery_current = false;
+        }
+    }
+    if let Ok(mut processes) = process_map().lock() {
+        if let Some(process) = processes.get_mut(session_id) {
+            process.discovery_current = false;
+        }
+    }
+    if let Ok(mut proofs) = discovery_proofs().lock() {
+        proofs.remove(session_id);
+    }
+}
+
+fn observe_discovery_frame(session_id: &str, frame: &str) {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
+        return;
+    };
+    if matches!(
+        object.get("method").and_then(Value::as_str),
+        Some("notifications/tools/list_changed" | "notifications/resources/list_changed")
+    ) {
+        mark_discovery_changed(session_id);
+        return;
+    }
+    let Some(id) = object.get("id").and_then(discovery_request_id) else {
+        return;
+    };
+    let Ok(mut proofs) = discovery_proofs().lock() else {
+        return;
+    };
+    let Some(proof) = proofs.get_mut(session_id) else {
+        return;
+    };
+    let Some(kind) = proof.pending.remove(&id) else {
+        return;
+    };
+    let collection = discovery_collection_mut(proof, kind);
+    if object.contains_key("error") {
+        *collection = DiscoveryCollection::default();
+        return;
+    }
+    let key = match kind {
+        DiscoveryKind::Tools => "tools",
+        DiscoveryKind::Resources => "resources",
+    };
+    let value_key = match kind {
+        DiscoveryKind::Tools => "name",
+        DiscoveryKind::Resources => "uri",
+    };
+    let max_chars = match kind {
+        DiscoveryKind::Tools => 256,
+        DiscoveryKind::Resources => 2_048,
+    };
+    let parsed = (|| {
+        let result = object.get("result")?.as_object()?;
+        let page = result.get(key)?.as_array()?;
+        let values = page
+            .iter()
+            .map(|item| {
+                item.as_object()?
+                    .get(value_key)?
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .collect::<Option<Vec<_>>>()?;
+        let next_cursor = match result.get("nextCursor") {
+            None => None,
+            Some(Value::String(cursor))
+                if !cursor.is_empty()
+                    && cursor.len() <= 2_048
+                    && !cursor.chars().any(char::is_control) =>
+            {
+                Some(cursor.clone())
+            }
+            _ => return None,
+        };
+        Some((values, next_cursor))
+    })();
+    let Some((values, next_cursor)) = parsed else {
+        *collection = DiscoveryCollection::default();
+        return;
+    };
+    collection.values.extend(values);
+    let Ok(values) = normalize_discovery_proof_values(collection.values.drain(..), max_chars)
+    else {
+        *collection = DiscoveryCollection::default();
+        return;
+    };
+    collection.values = values;
+    collection.expected_cursor = next_cursor;
+    collection.complete = collection.expected_cursor.is_none();
+}
+
+fn verify_discovery_proof(
+    session_id: &str,
+    tools: &[String],
+    resources: &[String],
+) -> Result<(), String> {
+    let tools = normalize_discovery_proof_values(tools.iter().cloned(), 256)?;
+    let resources = normalize_discovery_proof_values(resources.iter().cloned(), 2_048)?;
+    let proofs = discovery_proofs()
+        .lock()
+        .map_err(|_| "Fable could not verify MCP discovery.".to_string())?;
+    if !discovery_proof_matches(proofs.get(session_id), &tools, &resources) {
+        return Err("MCP discovery does not match the live server response.".into());
+    }
+    Ok(())
+}
+
+fn discovery_proof_matches(
+    proof: Option<&DiscoveryProof>,
+    tools: &[String],
+    resources: &[String],
+) -> bool {
+    if !tools.is_empty()
+        && !proof.is_some_and(|proof| proof.tools.complete && proof.tools.values == tools)
+    {
+        return false;
+    }
+    if !resources.is_empty()
+        && !proof
+            .is_some_and(|proof| proof.resources.complete && proof.resources.values == resources)
+    {
+        return false;
+    }
+    true
+}
+
+fn commit_session_discovery_authority(
+    session_id: &str,
+    connection_id: &str,
+    expected_revision: i64,
+    recorded_revision: i64,
+    tools: &[String],
+    resources: &[String],
+) -> Result<(), String> {
+    let tools = normalize_discovery_proof_values(tools.iter().cloned(), 256)?;
+    let resources = normalize_discovery_proof_values(resources.iter().cloned(), 2_048)?;
+    // This lock order matches discovery invalidation. Holding the proof lock
+    // through the session update prevents a concurrent list-changed event from
+    // being overwritten by a late discovery transaction.
+    let mut remote = remote_sessions()
+        .lock()
+        .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+    let mut local = process_map()
+        .lock()
+        .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+    let proofs = discovery_proofs()
+        .lock()
+        .map_err(|_| "Fable could not verify MCP discovery.".to_string())?;
+    if !discovery_proof_matches(proofs.get(session_id), &tools, &resources) {
+        return Err("MCP discovery changed before it could be committed.".into());
+    }
+    if let Some(process) = local.get_mut(session_id) {
+        if process.connection_id != connection_id
+            || process.connection_revision != expected_revision
+        {
+            return Err("The local MCP session changed during discovery.".into());
+        }
+        process.connection_revision = recorded_revision;
+        process.discovery_current = true;
+        return Ok(());
+    }
+    let session = remote
+        .get_mut(session_id)
+        .ok_or_else(|| "This MCP session closed during discovery.".to_string())?;
+    if session.connection_id != connection_id || session.connection_revision != expected_revision {
+        return Err("The remote MCP session changed during discovery.".into());
+    }
+    session.connection_revision = recorded_revision;
+    session.discovery_current = true;
     Ok(())
 }
 
@@ -2897,6 +3206,44 @@ mod tests {
     fn every_session_requires_fresh_discovery_before_tool_execution() {
         assert!(require_current_session_discovery(false).is_err());
         assert!(require_current_session_discovery(true).is_ok());
+    }
+
+    #[test]
+    fn discovery_proof_tracks_exact_pages_and_list_change_invalidation() {
+        let session = "mcp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        mark_discovery_changed(session);
+        register_discovery_request(
+            session,
+            r#"{"jsonrpc":"2.0","id":"tools-1","method":"tools/list","params":{}}"#,
+        )
+        .unwrap();
+        observe_discovery_frame(
+            session,
+            r#"{"jsonrpc":"2.0","id":"tools-1","result":{"tools":[{"name":"read"}],"nextCursor":"page-2"}}"#,
+        );
+        assert!(verify_discovery_proof(session, &["read".into()], &[]).is_err());
+        assert!(register_discovery_request(
+            session,
+            r#"{"jsonrpc":"2.0","id":"tools-bad","method":"tools/list","params":{"cursor":"wrong"}}"#,
+        )
+        .is_err());
+        register_discovery_request(
+            session,
+            r#"{"jsonrpc":"2.0","id":"tools-2","method":"tools/list","params":{"cursor":"page-2"}}"#,
+        )
+        .unwrap();
+        observe_discovery_frame(
+            session,
+            r#"{"jsonrpc":"2.0","id":"tools-2","result":{"tools":[{"name":"write"}]}}"#,
+        );
+        assert!(verify_discovery_proof(session, &["write".into(), "read".into()], &[]).is_ok());
+        assert!(verify_discovery_proof(session, &["forged".into()], &[]).is_err());
+        observe_discovery_frame(
+            session,
+            r#"{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"#,
+        );
+        assert!(verify_discovery_proof(session, &["read".into()], &[]).is_err());
+        mark_discovery_changed(session);
     }
 
     #[test]
