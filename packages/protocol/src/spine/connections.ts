@@ -522,6 +522,45 @@ export interface CapabilityResolutionFailure {
   retryAfter?: IsoDateTime;
 }
 
+export const CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION =
+  "fable.connected-source-search.v1" as const;
+
+/** Fable-owned citation shape shared by native and MCP source-search routes. */
+export interface ConnectedSourceCitation {
+  citationId: string;
+  sourceId: string;
+  title: string;
+  snippet: string;
+  uri?: string;
+  provenance: string;
+  freshness: string;
+  trust: "external-untrusted";
+}
+
+/**
+ * Provider-neutral result consumed by the model when producing a cited brief.
+ * External implementations supply source facts only; Fable stamps scope,
+ * trust, authority, Connection, grants, and implementation evidence.
+ */
+export interface ConnectedSourceSearchResult {
+  contractVersion: typeof CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION;
+  capabilityId: "knowledge.content.search";
+  query: string;
+  scope: { workspaceId: string; projectId?: string };
+  citations: readonly ConnectedSourceCitation[];
+  nextCursor?: string;
+  trust: "external-untrusted";
+  instructionAuthority: "none";
+  degraded: boolean;
+  degradationReasons: readonly string[];
+  connectionId: ConnectionId;
+  matchedGrantIds: readonly CapabilityGrantId[];
+  implementation: {
+    kind: "native" | "mcp";
+    evidence: CapabilityImplementationEvidenceKind;
+  };
+}
+
 export type CapabilityResolutionResult =
   | {
       status: "resolved";

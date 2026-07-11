@@ -4,7 +4,109 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::models::{ConnectorCapabilityRequest, ConnectorCommandError, ConnectorSearchRequest};
+use crate::models::{
+    ConnectorCapabilityRequest, ConnectorCommandError, ConnectorSearchItem, ConnectorSearchRequest,
+    ConnectorSearchResult,
+};
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectedSourceScope {
+    workspace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectedSourceCitation {
+    citation_id: String,
+    source_id: String,
+    title: String,
+    snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uri: Option<String>,
+    provenance: String,
+    freshness: String,
+    trust: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectedSourceImplementation {
+    kind: &'static str,
+    evidence: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectedSourceSearchResult {
+    contract_version: &'static str,
+    capability_id: &'static str,
+    query: String,
+    scope: ConnectedSourceScope,
+    citations: Vec<ConnectedSourceCitation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<String>,
+    trust: &'static str,
+    instruction_authority: &'static str,
+    degraded: bool,
+    degradation_reasons: Vec<String>,
+    connection_id: String,
+    matched_grant_ids: Vec<String>,
+    implementation: ConnectedSourceImplementation,
+}
+
+fn native_connected_source_result(
+    result: ConnectorSearchResult,
+    workspace_id: &str,
+    project_id: Option<&str>,
+    connection_id: &str,
+    matched_grant_ids: &[String],
+    availability: &str,
+) -> ConnectedSourceSearchResult {
+    let citations = result
+        .items
+        .into_iter()
+        .enumerate()
+        .map(
+            |(index, item): (usize, ConnectorSearchItem)| ConnectedSourceCitation {
+                citation_id: format!("source-{}", index + 1),
+                source_id: item.id,
+                title: item.title,
+                snippet: item.content_preview.unwrap_or(item.summary),
+                uri: item.url,
+                provenance: item.provenance,
+                freshness: item.freshness,
+                trust: "external-untrusted",
+            },
+        )
+        .collect();
+    ConnectedSourceSearchResult {
+        contract_version: "fable.connected-source-search.v1",
+        capability_id: "knowledge.content.search",
+        query: result.query,
+        scope: ConnectedSourceScope {
+            workspace_id: workspace_id.into(),
+            project_id: project_id.map(str::to_string),
+        },
+        citations,
+        next_cursor: result.next_cursor,
+        trust: "external-untrusted",
+        instruction_authority: "none",
+        degraded: availability == "degraded",
+        degradation_reasons: (availability == "degraded")
+            .then_some("provider-degraded".into())
+            .into_iter()
+            .collect(),
+        connection_id: connection_id.into(),
+        matched_grant_ids: matched_grant_ids.to_vec(),
+        implementation: ConnectedSourceImplementation {
+            kind: "native",
+            evidence: "adapter-validated",
+        },
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum NativeReadAdapter {
@@ -404,6 +506,8 @@ pub(crate) async fn read(
     input: BTreeMap<String, serde_json::Value>,
     cursor: Option<String>,
 ) -> Result<SemanticCapabilityReadResult, ConnectorCommandError> {
+    let result_workspace_id = workspace_id.clone();
+    let result_project_id = project_id.clone();
     let resolved = resolve_native_read(app, &capability_id, &workspace_id, project_id.as_deref())?;
     let scope = crate::authorized_scope::command_scope(
         Some(workspace_id),
@@ -441,7 +545,7 @@ pub(crate) async fn read(
         })?;
     let grants = grant_result
         .map_err(|failure| error(failure.code, &capability_id, failure.message, false))?;
-    let matched_grant_ids = grants.into_iter().map(|grant| grant.id).collect();
+    let matched_grant_ids: Vec<String> = grants.into_iter().map(|grant| grant.id).collect();
     let connector_id = resolved.implementation.connector_id.to_string();
     let result = match resolved.implementation.adapter {
         NativeReadAdapter::Capability(adapter_capability) => {
@@ -549,7 +653,19 @@ pub(crate) async fn read(
                     .await?
                 }
             };
-            serde_json::to_value(result).map_err(|_| {
+            let semantic_result = if capability_id == "knowledge.content.search" {
+                serde_json::to_value(native_connected_source_result(
+                    result,
+                    &result_workspace_id,
+                    result_project_id.as_deref(),
+                    &resolved.connection_id,
+                    &matched_grant_ids,
+                    &resolved.availability,
+                ))
+            } else {
+                serde_json::to_value(result)
+            };
+            semantic_result.map_err(|_| {
                 error(
                     "implementation-unverified",
                     &capability_id,
@@ -816,5 +932,49 @@ mod tests {
             "connection-unhealthy"
         );
         assert!(implementation("unknown.capability").is_none());
+    }
+
+    #[test]
+    fn native_connected_search_stamps_the_portable_citation_contract() {
+        let result = native_connected_source_result(
+            ConnectorSearchResult {
+                connector_id: "notion".into(),
+                query: "launch risks".into(),
+                items: vec![ConnectorSearchItem {
+                    id: "doc-1".into(),
+                    connector_id: "notion".into(),
+                    title: "Launch review".into(),
+                    kind: "page".into(),
+                    summary: "The support plan needs an owner.".into(),
+                    provenance: "Notion shared content".into(),
+                    freshness: "2026-07-11T20:00:00Z".into(),
+                    trust: "untrusted".into(),
+                    url: Some("https://notion.example/doc-1".into()),
+                    content_preview: None,
+                    provider_metadata: BTreeMap::new(),
+                }],
+                next_cursor: None,
+                source: "live".into(),
+                searched_at: "2026-07-11T20:01:00Z".into(),
+            },
+            "workspace-a",
+            Some("project-a"),
+            "connection-a",
+            &["grant-a".into()],
+            "available",
+        );
+        let encoded = serde_json::to_value(result).unwrap();
+        assert_eq!(
+            encoded["contractVersion"],
+            "fable.connected-source-search.v1"
+        );
+        assert_eq!(encoded["scope"]["workspaceId"], "workspace-a");
+        assert_eq!(encoded["scope"]["projectId"], "project-a");
+        assert_eq!(encoded["trust"], "external-untrusted");
+        assert_eq!(encoded["instructionAuthority"], "none");
+        assert_eq!(encoded["matchedGrantIds"][0], "grant-a");
+        assert_eq!(encoded["implementation"]["kind"], "native");
+        assert_eq!(encoded["citations"][0]["citationId"], "source-1");
+        assert_eq!(encoded["citations"][0]["trust"], "external-untrusted");
     }
 }
