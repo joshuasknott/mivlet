@@ -626,6 +626,30 @@ pub(crate) fn set_mcp_enablement(
     mcp_details_for_id(tx, store, scope, connection_id)
 }
 
+pub(crate) fn require_enabled_mcp_tool(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+    expected_revision: i64,
+    tool_name: &str,
+) -> Result<()> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let details = mcp_details_for_id(tx, store, scope, connection_id)?;
+    if details.connection_revision != expected_revision
+        || details.discovery_state != "discovered"
+        || details
+            .enabled_tools
+            .binary_search_by(|candidate| candidate.as_str().cmp(tool_name))
+            .is_err()
+    {
+        return Err(StoreError::Invalid(
+            "This MCP tool is not enabled on the current Connection revision.".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn get(
     tx: &Connection,
     store: &Store,

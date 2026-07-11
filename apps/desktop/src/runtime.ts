@@ -2956,6 +2956,23 @@ export interface RuntimeMcpConnectionDetails {
   enabledResources: string[];
 }
 
+export interface RuntimeMcpToolProposal {
+  workspaceId: string;
+  sessionId: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface RuntimePreparedMcpToolCall {
+  proposalFingerprint: string;
+  approval: import("@fable/protocol").ApprovalRequest;
+}
+
+export interface RuntimeAuthorizedMcpToolCall {
+  permitId: string;
+  expiresInSeconds: number;
+}
+
 export interface RuntimeMcpServerConfiguration {
   workspaceId: string;
   id: string;
@@ -3070,6 +3087,44 @@ export async function setRuntimeMcpEnablement(
   try {
     return await invoke<RuntimeMcpConnectionDetails>("set_mcp_server_enablement", {
       request: { workspaceId, connectionId, expectedRevision, enabledTools, enabledResources }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function prepareRuntimeMcpToolCall(proposal: RuntimeMcpToolProposal) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimePreparedMcpToolCall>("prepare_mcp_tool_call", { proposal });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function authorizeRuntimeMcpToolCall(
+  proposal: RuntimeMcpToolProposal,
+  resolution: ApprovalResolutionRequest
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeAuthorizedMcpToolCall>("authorize_mcp_tool_call", {
+      request: { proposal, resolution }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function executeRuntimeApprovedMcpToolCall(
+  proposal: RuntimeMcpToolProposal,
+  permitId: string,
+  requestId: string
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("execute_approved_mcp_tool_call", {
+      request: { proposal, permitId, requestId }
     });
   } catch (error) {
     throw toRuntimeError(error);

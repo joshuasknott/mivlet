@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     process::Stdio,
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde_json::Value;
@@ -39,6 +39,31 @@ type ProcessMap = HashMap<String, McpChild>;
 
 fn process_map() -> &'static Mutex<ProcessMap> {
     static MAP: OnceLock<Mutex<ProcessMap>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct McpToolPermit {
+    session_id: String,
+    connection_id: String,
+    connection_revision: i64,
+    tool_name: String,
+    arguments_fingerprint: String,
+    issued_at: Instant,
+}
+
+fn tool_permits() -> &'static Mutex<HashMap<String, McpToolPermit>> {
+    static MAP: OnceLock<Mutex<HashMap<String, McpToolPermit>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct PendingMcpAudit {
+    tool_name: String,
+    connection_id: String,
+    actor: String,
+}
+
+fn pending_audits() -> &'static Mutex<HashMap<String, PendingMcpAudit>> {
+    static MAP: OnceLock<Mutex<HashMap<String, PendingMcpAudit>>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -116,6 +141,44 @@ pub struct SetMcpEnablementRequest {
     expected_revision: i64,
     enabled_tools: Vec<String>,
     enabled_resources: Vec<String>,
+}
+
+#[derive(Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolProposal {
+    workspace_id: String,
+    session_id: String,
+    tool_name: String,
+    arguments: Value,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedMcpToolCall {
+    proposal_fingerprint: String,
+    approval: crate::models::ApprovalRequest,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizeMcpToolCallRequest {
+    proposal: McpToolProposal,
+    resolution: crate::models::ApprovalResolutionRequest,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizedMcpToolCall {
+    permit_id: String,
+    expires_in_seconds: u64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecuteMcpToolCallRequest {
+    proposal: McpToolProposal,
+    permit_id: String,
+    request_id: String,
 }
 
 #[tauri::command]
@@ -246,7 +309,7 @@ pub fn record_mcp_server_discovery(
     };
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
+    let recorded = store
         .transaction(|tx| {
             crate::store::repos::connection_record::record_mcp_discovery(
                 tx,
@@ -259,7 +322,17 @@ pub fn record_mcp_server_discovery(
                 &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             )
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if let Ok(mut map) = process_map().lock() {
+        if let Some(process) = map.get_mut(&request.session_id) {
+            if process.connection_id == recorded.connection_id
+                && process.connection_revision == connection_revision
+            {
+                process.connection_revision = recorded.connection_revision;
+            }
+        }
+    }
+    Ok(recorded)
 }
 
 #[tauri::command]
@@ -287,6 +360,151 @@ pub fn set_mcp_server_enablement(
             )
         })
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn prepare_mcp_tool_call(proposal: McpToolProposal) -> Result<PreparedMcpToolCall, String> {
+    let context = validate_tool_proposal(&proposal)?;
+    let approval = approval_for_tool_proposal(
+        &proposal,
+        &context.proposal_fingerprint,
+        random_session_id()?.replacen("mcp-", "approval-mcp-tool-", 1),
+        chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    );
+    Ok(PreparedMcpToolCall {
+        proposal_fingerprint: context.proposal_fingerprint,
+        approval,
+    })
+}
+
+#[tauri::command]
+pub fn authorize_mcp_tool_call(
+    app: AppHandle,
+    request: AuthorizeMcpToolCallRequest,
+) -> Result<AuthorizedMcpToolCall, String> {
+    let context = validate_tool_proposal(&request.proposal)?;
+    let expected = approval_for_tool_proposal(
+        &request.proposal,
+        &context.proposal_fingerprint,
+        request.resolution.request.id.clone(),
+        request.resolution.request.requested_at.clone(),
+    );
+    if request.resolution.request != expected
+        || request.resolution.decision != "once"
+        || request.resolution.modification.is_some()
+    {
+        return Err("The MCP tool proposal changed after approval preview.".into());
+    }
+    let resolution = crate::approvals::resolve_approval(request.resolution)?;
+    crate::execution_approvals::verify_and_consume_execution_approval(
+        &crate::paths::execution_approvals_path(&app)?,
+        &resolution.effective_request,
+        &resolution.audit_entry.decided_at,
+    )?;
+    // Re-resolve every authority after permit I/O so an account, session,
+    // Connection revision, or enablement change cannot race approval.
+    let current = validate_tool_proposal(&request.proposal)?;
+    if current.proposal_fingerprint != context.proposal_fingerprint {
+        return Err("The MCP tool proposal changed during approval.".into());
+    }
+    let permit_id = random_session_id()?.replacen("mcp-", "mcp-permit-", 1);
+    let permit = McpToolPermit {
+        session_id: request.proposal.session_id,
+        connection_id: current.connection_id,
+        connection_revision: current.connection_revision,
+        tool_name: request.proposal.tool_name,
+        arguments_fingerprint: current.arguments_fingerprint,
+        issued_at: Instant::now(),
+    };
+    let mut permits = tool_permits()
+        .lock()
+        .map_err(|_| "Fable could not access MCP execution permits.".to_string())?;
+    permits.retain(|_, value| value.issued_at.elapsed() <= Duration::from_secs(60));
+    permits.insert(permit_id.clone(), permit);
+    Ok(AuthorizedMcpToolCall {
+        permit_id,
+        expires_in_seconds: 60,
+    })
+}
+
+#[tauri::command]
+pub async fn execute_approved_mcp_tool_call(
+    request: ExecuteMcpToolCallRequest,
+) -> Result<(), String> {
+    if !valid_request_id(&request.request_id) {
+        return Err("The MCP request id is invalid.".into());
+    }
+    let permit = tool_permits()
+        .lock()
+        .map_err(|_| "Fable could not access MCP execution permits.".to_string())?
+        .remove(&request.permit_id)
+        .ok_or_else(|| "The MCP execution permit is unavailable or already used.".to_string())?;
+    if permit.issued_at.elapsed() > Duration::from_secs(60) {
+        return Err("The MCP execution permit expired.".into());
+    }
+    let context = validate_tool_proposal(&request.proposal)?;
+    if permit.session_id != request.proposal.session_id
+        || permit.connection_id != context.connection_id
+        || permit.connection_revision != context.connection_revision
+        || permit.tool_name != request.proposal.tool_name
+        || permit.arguments_fingerprint != context.arguments_fingerprint
+    {
+        return Err("The MCP execution permit does not match this exact tool call.".into());
+    }
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.proposal.workspace_id.clone()),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let sender = {
+        let map = process_map()
+            .lock()
+            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+        let process = map
+            .get(&request.proposal.session_id)
+            .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
+        require_session_owner(process, &scope)?;
+        process
+            .stdin
+            .clone()
+            .ok_or_else(|| "This local MCP session is closed.".to_string())?
+    };
+    let frame = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": request.request_id,
+        "method": "tools/call",
+        "params": {
+            "name": request.proposal.tool_name,
+            "arguments": request.proposal.arguments
+        }
+    })
+    .to_string();
+    if frame.len() > MAX_MCP_FRAME_BYTES || !valid_mcp_frame(&frame) {
+        return Err("The approved MCP tool frame is invalid.".into());
+    }
+    let audit_key = pending_audit_key(&request.proposal.session_id, &request.request_id);
+    pending_audits()
+        .lock()
+        .map_err(|_| "Fable could not access MCP audit state.".to_string())?
+        .insert(
+            audit_key.clone(),
+            PendingMcpAudit {
+                tool_name: request.proposal.tool_name,
+                connection_id: context.connection_id,
+                actor: scope.internal_user_id,
+            },
+        );
+    if sender.send(frame).await.is_err() {
+        if let Some(pending) = pending_audits()
+            .lock()
+            .ok()
+            .and_then(|mut audits| audits.remove(&audit_key))
+        {
+            record_mcp_audit(pending, &request.request_id, true, "transport-closed");
+        }
+        return Err("This local MCP session is closed.".into());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -360,6 +578,7 @@ pub async fn spawn_mcp_process(
 
     let stdout_app = app.clone();
     let stdout_channel = channel.clone();
+    let stdout_session_id = session_id.clone();
     tokio::spawn(async move {
         let mut reader = stdout;
         let mut decoder = BoundedLineDecoder::default();
@@ -371,6 +590,7 @@ pub async fn spawn_mcp_process(
                     for line in decoder.push(&chunk[..count]) {
                         if let Ok(text) = String::from_utf8(line) {
                             if valid_mcp_frame(&text) {
+                                audit_mcp_response(&stdout_session_id, &text);
                                 let _ = stdout_app.emit(&stdout_channel, text);
                             }
                         }
@@ -466,6 +686,10 @@ pub async fn close_mcp_process(request: CloseMcpProcessRequest) -> Result<(), St
         map.remove(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?
     };
+    drain_session_audits(&request.session_id);
+    if let Ok(mut permits) = tool_permits().lock() {
+        permits.retain(|_, permit| permit.session_id != request.session_id);
+    }
     process.stdin.take();
     match timeout(Duration::from_secs(2), process.child.wait()).await {
         Ok(Ok(_)) => Ok(()),
@@ -487,6 +711,235 @@ fn require_session_owner(
         return Err("This local MCP session belongs to a different account or workspace.".into());
     }
     Ok(())
+}
+
+struct ToolProposalContext {
+    connection_id: String,
+    connection_revision: i64,
+    arguments_fingerprint: String,
+    proposal_fingerprint: String,
+}
+
+fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalContext, String> {
+    if !valid_session_id(&proposal.session_id) {
+        return Err("The MCP session id is invalid.".into());
+    }
+    validate_mcp_tool_name(&proposal.tool_name)?;
+    validate_mcp_arguments(&proposal.arguments)?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(proposal.workspace_id.clone()),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let (connection_id, connection_revision) = {
+        let map = process_map()
+            .lock()
+            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+        let process = map
+            .get(&proposal.session_id)
+            .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
+        require_session_owner(process, &scope)?;
+        (process.connection_id.clone(), process.connection_revision)
+    };
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            crate::store::repos::connection_record::require_enabled_mcp_tool(
+                tx,
+                store,
+                &scope,
+                &connection_id,
+                connection_revision,
+                &proposal.tool_name,
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    let arguments = serde_json::to_vec(&proposal.arguments)
+        .map_err(|_| "The MCP tool arguments are invalid.".to_string())?;
+    let arguments_fingerprint = format!("{:x}", Sha256::digest(&arguments));
+    let proposal_value = serde_json::json!({
+        "sessionId": proposal.session_id,
+        "connectionId": connection_id,
+        "connectionRevision": connection_revision,
+        "toolName": proposal.tool_name,
+        "argumentsFingerprint": arguments_fingerprint
+    });
+    let proposal_fingerprint = format!(
+        "{:x}",
+        Sha256::digest(
+            serde_json::to_vec(&proposal_value)
+                .map_err(|_| "The MCP tool proposal is invalid.".to_string())?
+        )
+    );
+    Ok(ToolProposalContext {
+        connection_id,
+        connection_revision,
+        arguments_fingerprint,
+        proposal_fingerprint,
+    })
+}
+
+fn approval_for_tool_proposal(
+    proposal: &McpToolProposal,
+    fingerprint: &str,
+    id: String,
+    requested_at: String,
+) -> crate::models::ApprovalRequest {
+    crate::models::ApprovalRequest {
+        id,
+        service: "MCP tools".into(),
+        action: format!("run MCP tool {}", proposal.tool_name),
+        mode: "full-access".into(),
+        risk_level: "critical".into(),
+        data_used: vec![format!("proposal fingerprint: {fingerprint}")],
+        consequence: "Runs an enabled tool in user-managed local software.".into(),
+        requested_at,
+        decisions: vec!["once".into(), "deny".into()],
+        confirmation_phrase: Some(format!("run {}", proposal.tool_name)),
+    }
+}
+
+fn validate_mcp_tool_name(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "-_.".contains(character))
+    {
+        return Err("The MCP tool name is invalid.".into());
+    }
+    Ok(())
+}
+
+fn validate_mcp_arguments(value: &Value) -> Result<(), String> {
+    if !value.is_object() {
+        return Err("MCP tool arguments must be a JSON object.".into());
+    }
+    let encoded =
+        serde_json::to_vec(value).map_err(|_| "The MCP tool arguments are invalid.".to_string())?;
+    if encoded.len() > 1024 * 1024 {
+        return Err("MCP tool arguments exceed the supported size.".into());
+    }
+    fn walk(value: &Value, depth: usize, nodes: &mut usize) -> Result<(), String> {
+        *nodes += 1;
+        if depth > 20 || *nodes > 10_000 {
+            return Err("MCP tool arguments are too deeply nested or complex.".into());
+        }
+        match value {
+            Value::Object(object) => {
+                for (key, child) in object {
+                    let lower = key.to_ascii_lowercase();
+                    if [
+                        "authorization",
+                        "apikey",
+                        "api_key",
+                        "password",
+                        "secret",
+                        "token",
+                    ]
+                    .iter()
+                    .any(|marker| lower.contains(marker))
+                    {
+                        return Err("Credentials cannot be passed in MCP tool arguments.".into());
+                    }
+                    walk(child, depth + 1, nodes)?;
+                }
+            }
+            Value::Array(values) => {
+                for child in values {
+                    walk(child, depth + 1, nodes)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    let mut nodes = 0;
+    walk(value, 0, &mut nodes)
+}
+
+fn valid_request_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 160
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "-_:".contains(character))
+}
+
+fn pending_audit_key(session_id: &str, request_id: &str) -> String {
+    format!("{session_id}:{request_id}")
+}
+
+fn audit_mcp_response(session_id: &str, frame: &str) {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
+        return;
+    };
+    if object.contains_key("method") {
+        return;
+    }
+    let Some(request_id) = object.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let key = pending_audit_key(session_id, request_id);
+    let pending = pending_audits()
+        .lock()
+        .ok()
+        .and_then(|mut audits| audits.remove(&key));
+    let Some(pending) = pending else {
+        return;
+    };
+    let failed = object.contains_key("error");
+    record_mcp_audit(
+        pending,
+        request_id,
+        failed,
+        if failed { "mcp-tool-error" } else { "" },
+    );
+}
+
+fn record_mcp_audit(pending: PendingMcpAudit, request_id: &str, failed: bool, error_code: &str) {
+    let mut recorder = crate::action_history::Recorder::new(
+        crate::store::repos::action_history::category::TOOL_ACTION,
+        "MCP",
+        &pending.tool_name,
+        if failed { "failed" } else { "completed" },
+    )
+    .actor(&pending.actor)
+    .risk("critical")
+    .mode("full-access")
+    .correlation(request_id)
+    .summary(if failed {
+        "Approved MCP tool call failed."
+    } else {
+        "Approved MCP tool call completed."
+    })
+    .detail(serde_json::json!({ "connectionId": pending.connection_id }));
+    if failed {
+        recorder = recorder.error(error_code);
+    }
+    recorder.record();
+}
+
+fn drain_session_audits(session_id: &str) {
+    let prefix = format!("{session_id}:");
+    let drained = pending_audits()
+        .lock()
+        .map(|mut audits| {
+            let keys = audits
+                .keys()
+                .filter(|key| key.starts_with(&prefix))
+                .cloned()
+                .collect::<Vec<_>>();
+            keys.into_iter()
+                .filter_map(|key| audits.remove(&key).map(|pending| (key, pending)))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for (key, pending) in drained {
+        let request_id = key.strip_prefix(&prefix).unwrap_or("unknown");
+        record_mcp_audit(pending, request_id, true, "session-closed");
+    }
 }
 
 fn validate_configuration_for_approval(
@@ -873,5 +1326,51 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(status.success());
+    }
+
+    #[test]
+    fn tool_approval_is_fingerprint_only_and_arguments_reject_credentials() {
+        let proposal = McpToolProposal {
+            workspace_id: "workspace-a".into(),
+            session_id: "mcp-1234567890abcdef1234567890abcdef".into(),
+            tool_name: "read".into(),
+            arguments: serde_json::json!({ "path": "safe.txt" }),
+        };
+        validate_mcp_tool_name(&proposal.tool_name).unwrap();
+        validate_mcp_arguments(&proposal.arguments).unwrap();
+        let approval = approval_for_tool_proposal(
+            &proposal,
+            "fingerprint-only",
+            "approval-1".into(),
+            "2026-07-11T20:00:00Z".into(),
+        );
+        let encoded = serde_json::to_string(&approval).unwrap();
+        assert!(encoded.contains("fingerprint-only"));
+        assert!(!encoded.contains("safe.txt"));
+        assert!(validate_mcp_arguments(&serde_json::json!({ "apiKey": "secret" })).is_err());
+        assert!(validate_mcp_arguments(&serde_json::json!(["not-an-object"])).is_err());
+    }
+
+    #[test]
+    fn correlated_response_consumes_pending_audit_without_result_content() {
+        let session = "mcp-1234567890abcdef1234567890abcdef";
+        let request = "native-mcp-tool-1";
+        pending_audits().lock().unwrap().insert(
+            pending_audit_key(session, request),
+            PendingMcpAudit {
+                tool_name: "read".into(),
+                connection_id: "connection-mcp".into(),
+                actor: "user-a".into(),
+            },
+        );
+        audit_mcp_response(
+            session,
+            r#"{"jsonrpc":"2.0","id":"native-mcp-tool-1","result":{"content":[{"type":"text","text":"private"}]}}"#,
+        );
+        assert!(pending_audits()
+            .lock()
+            .unwrap()
+            .get(&pending_audit_key(session, request))
+            .is_none());
     }
 }

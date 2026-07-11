@@ -2,22 +2,50 @@
 
 import {
   parseMcpLine,
+  isMcpResponse,
   type McpFrame,
   type McpNotification,
   type McpRequest,
   type McpTransport
 } from "@fable/connectors";
+import type { ApprovalResolutionRequest } from "@fable/protocol";
 import {
+  authorizeRuntimeMcpToolCall,
   closeRuntimeMcpProcess,
+  executeRuntimeApprovedMcpToolCall,
   listenRuntimeMcpFrames,
   recordRuntimeMcpDiscovery,
+  prepareRuntimeMcpToolCall,
   spawnRuntimeMcpProcess,
   writeRuntimeMcpFrame
 } from "../runtime";
-import type { RuntimeMcpConnectionDetails } from "../runtime";
+import type {
+  RuntimeAuthorizedMcpToolCall,
+  RuntimeMcpConnectionDetails,
+  RuntimeMcpToolProposal,
+  RuntimePreparedMcpToolCall
+} from "../runtime";
 
 export interface DesktopMcpTransportHandle extends McpTransport {
   recordDiscovery(tools: string[], resources: string[]): Promise<RuntimeMcpConnectionDetails>;
+  prepareToolCall(toolName: string, args: Record<string, unknown>): Promise<{
+    proposal: RuntimeMcpToolProposal;
+    prepared: RuntimePreparedMcpToolCall;
+  }>;
+  authorizeToolCall(
+    proposal: RuntimeMcpToolProposal,
+    resolution: ApprovalResolutionRequest
+  ): Promise<RuntimeAuthorizedMcpToolCall>;
+  executeAuthorizedToolCall(
+    proposal: RuntimeMcpToolProposal,
+    permitId: string
+  ): Promise<unknown>;
+}
+
+interface PendingToolResponse {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
 }
 
 function hasDesktopRuntime(): boolean {
@@ -28,6 +56,8 @@ function hasDesktopRuntime(): boolean {
 class DesktopMcpTransport implements DesktopMcpTransportHandle {
   private readonly frameHandlers = new Set<(frame: McpFrame) => void>();
   private readonly closeHandlers = new Set<() => void>();
+  private readonly pendingToolResponses = new Map<string, PendingToolResponse>();
+  private nextToolRequest = 1;
   private closed = false;
   private closePromise?: Promise<void>;
 
@@ -46,6 +76,15 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
     if (this.closed) return;
     const frame = parseMcpLine(line);
     if (!frame) return;
+    if (isMcpResponse(frame) && typeof frame.id === "string") {
+      const pending = this.pendingToolResponses.get(frame.id);
+      if (pending) {
+        this.pendingToolResponses.delete(frame.id);
+        clearTimeout(pending.timeout);
+        if (frame.error) pending.reject(new Error(`MCP ${frame.error.code}: ${frame.error.message}`));
+        else pending.resolve(frame.result);
+      }
+    }
     for (const handler of this.frameHandlers) handler(frame);
   }
 
@@ -78,6 +117,62 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
     return recorded;
   }
 
+  async prepareToolCall(toolName: string, args: Record<string, unknown>) {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const proposal: RuntimeMcpToolProposal = {
+      workspaceId: this.workspaceId,
+      sessionId: this.sessionId,
+      toolName,
+      arguments: JSON.parse(JSON.stringify(args)) as Record<string, unknown>
+    };
+    const prepared = await prepareRuntimeMcpToolCall(proposal);
+    if (!prepared) throw new Error("MCP tool approval requires the desktop app.");
+    return { proposal, prepared };
+  }
+
+  async authorizeToolCall(
+    proposal: RuntimeMcpToolProposal,
+    resolution: ApprovalResolutionRequest
+  ): Promise<RuntimeAuthorizedMcpToolCall> {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const authorized = await authorizeRuntimeMcpToolCall(proposal, resolution);
+    if (!authorized) throw new Error("MCP tool approval requires the desktop app.");
+    return authorized;
+  }
+
+  async executeAuthorizedToolCall(
+    proposal: RuntimeMcpToolProposal,
+    permitId: string
+  ): Promise<unknown> {
+    if (this.closed) throw new Error("MCP transport is closed.");
+    const requestId = `native-mcp-tool-${this.nextToolRequest++}`;
+    const response = new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingToolResponses.delete(requestId);
+        reject(new Error("The approved MCP tool call timed out."));
+        void writeRuntimeMcpFrame(
+          this.workspaceId,
+          this.sessionId,
+          JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/cancelled",
+            params: { requestId, reason: "Fable request timeout" }
+          })
+        ).catch(() => undefined);
+      }, 30_000);
+      this.pendingToolResponses.set(requestId, { resolve, reject, timeout });
+    });
+    try {
+      await executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId);
+    } catch (error) {
+      const pending = this.pendingToolResponses.get(requestId);
+      if (pending) clearTimeout(pending.timeout);
+      this.pendingToolResponses.delete(requestId);
+      throw error;
+    }
+    return response;
+  }
+
   close(): Promise<void> {
     this.markClosed();
     return this.beginNativeClose();
@@ -96,6 +191,11 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
     if (this.closed) return;
     this.closed = true;
     this.unlisten();
+    for (const pending of this.pendingToolResponses.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("MCP transport is closed."));
+    }
+    this.pendingToolResponses.clear();
     for (const handler of this.closeHandlers) handler();
     this.closeHandlers.clear();
     this.frameHandlers.clear();
