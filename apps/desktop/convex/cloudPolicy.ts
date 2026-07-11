@@ -6,11 +6,11 @@ export type MutationResult =
   | { status: "rejected"; code: string; message: string };
 
 /** Trusted authentication facts. They identify a principal but grant no workspace access. */
-export interface CloudIdentity { provider: "clerk"; normalizedIssuer: string; subject: string }
+export interface CloudIdentity { provider: "clerk"; normalizedIssuer: string; subject: string; sessionRef?: string }
 export interface CloudUser { internalUserId: string; status: "active" | "disabled"; initialWorkspaceId?: string }
 export interface CloudIdentityLink { provider: "clerk"; normalizedIssuer: string; subject: string; internalUserId: string; status: "active" | "disabled" | "revoked" }
 export interface CloudWorkspace { workspaceId: string; name: string; status: "active" | "locked" | "deleted"; revision: number; policyRevision: number }
-export interface CloudMembership { memberId: string; workspaceId: string; internalUserId: string; role: CloudRole; status: "active" | "suspended" | "removed"; revision: number }
+export interface CloudMembership { memberId: string; workspaceId: string; internalUserId: string; role: CloudRole; status: "active" | "suspended" | "removed"; revision: number; joinedFromInvitationId?: string; createdAt?: number; updatedAt?: number; activatedAt?: number; suspendedAt?: number; removedAt?: number; createdByInternalUserId?: string }
 export interface CloudDevice { deviceId: string; internalUserId: string; kind?: "desktop" | "mobile" | "web"; label?: string; status: "pending" | "active" | "revoked"; registeredAt?: number; lastSeenAt?: number; revokedAt?: number }
 export interface CloudDeviceLink { workspaceId: string; deviceId: string; internalUserId: string; memberId: string; status: "pending" | "active" | "revoked"; revokedAt?: number }
 export interface CloudProject { workspaceId: string; projectId: string; name: string; revision: number; deletedAt?: number }
@@ -27,7 +27,17 @@ const ASSIGNABLE: Record<CloudRole, readonly CloudRole[]> = { owner: ["owner", "
 
 export class CloudPolicyError extends Error { constructor(public readonly code: string, message: string, public readonly opaque = false) { super(message); } }
 export function ensureInvitationTarget(recipientStatus: string | undefined, invitationExists: boolean, membershipStatus: string | undefined) {
-  if (recipientStatus !== "active" || invitationExists || membershipStatus === "active") throw new CloudPolicyError("invitation-unavailable", "The invitation target is unavailable.", true);
+  if (recipientStatus !== "active" || invitationExists || membershipStatus === "active" || membershipStatus === "removed") throw new CloudPolicyError("invitation-unavailable", "The invitation target is unavailable.", true);
+}
+
+export type MemberLifecycleAction = "change-role" | "suspend" | "reactivate" | "remove";
+export function resolveMemberTransition(status: CloudMembership["status"], action: MemberLifecycleAction) {
+  if (status === "removed") throw new CloudPolicyError("conflict", "The membership transition is unavailable.", true);
+  if (action === "change-role") return status;
+  if (action === "suspend" && status === "active") return "suspended" as const;
+  if (action === "reactivate" && status === "suspended") return "active" as const;
+  if (action === "remove" && (status === "active" || status === "suspended")) return "removed" as const;
+  throw new CloudPolicyError("conflict", "The membership transition is unavailable.", true);
 }
 export function ensureDeviceLink(device: { internalUserId: string; status: string } | undefined, link: { internalUserId: string; memberId: string; status: string } | undefined, internalUserId: string, memberId: string) {
   if (device && (device.internalUserId !== internalUserId || device.status !== "active")) throw new CloudPolicyError("device-unavailable", "This device is unavailable.", true);
@@ -131,4 +141,164 @@ export function applyOutboxMutationToState(state: CloudState, identity: CloudIde
     else { if (!existing || existing.deletedAt || existing.revision !== args.baseRevision) return reject("conflict", "The shared record is unavailable."); existing.deletedAt = now; existing.revision = revision; state.tombstones.push({ workspaceId: args.workspaceId, recordType: args.recordType, recordId: args.recordId, revision, deletedAt: now, actorDeviceId: args.deviceId }); }
     workspace.revision = revision; const result: MutationResult = { status: "accepted", revision, recordType: args.recordType, recordId: args.recordId }; state.idempotencyKeys.push({ workspaceId: args.workspaceId, deviceId: args.deviceId, clientMutationId: args.clientMutationId, idempotencyKey: args.idempotencyKey, result }); return result;
   } catch (error) { if (error instanceof CloudPolicyError) return reject(error.code, "The shared record is unavailable."); throw error; }
+}
+
+export type LifecycleOutcome = "accepted" | "rejected" | "conflict";
+export interface CloudInvitation {
+  invitationId: string;
+  workspaceId: string;
+  role: CloudRole;
+  inviterMemberId: string;
+  recipientInternalUserId: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expiresAt: number;
+  presentationRef: string;
+  acceptedByInternalUserId?: string;
+  acceptedMembershipId?: string;
+  acceptedAt?: number;
+  revokedByMemberId?: string;
+  revokedAt?: number;
+  createdAt: number;
+  updatedAt: number;
+  createdByInternalUserId: string;
+}
+export interface LifecycleReceipt { actorInternalUserId: string; key: string; operation: string; fingerprint: string; result: LifecycleResult; createdAt: number }
+export interface LifecycleAudit {
+  workspaceId: string;
+  actorInternalUserId: string;
+  actorMemberId?: string;
+  targetMemberId?: string;
+  invitationId?: string;
+  operation: string;
+  outcome: LifecycleOutcome;
+  code?: string;
+  deviceId?: string;
+  sessionRef?: string;
+  createdAt: number;
+}
+export interface MembershipLifecycleState extends CloudState { invitations: CloudInvitation[]; lifecycleReceipts: LifecycleReceipt[]; lifecycleAudit: LifecycleAudit[] }
+export type CanonicalMembership = {
+  authority: "convex"; schemaVersion: 1; revision: number; workspaceId: string; memberId: string; internalUserId: string; role: CloudRole;
+  status: CloudMembership["status"]; joinedFromInvitationId?: string; activatedAt: string; suspendedAt?: string; removedAt?: string;
+  createdByInternalUserId: string; createdAt: string; updatedAt: string;
+};
+export type CanonicalInvitation = {
+  authority: "convex"; schemaVersion: 1; revision: number; workspaceId: string; invitationId: string; status: CloudInvitation["status"];
+  role: CloudRole; inviterMemberId: string; recipientConstraint: { kind: "internal-user"; internalUserId: string }; expiresAt: string;
+  acceptedByInternalUserId?: string; acceptedMembershipId?: string; acceptedAt?: string; revokedByMemberId?: string; revokedAt?: string;
+  createdByInternalUserId: string; createdAt: string; updatedAt: string;
+};
+export type LifecycleResult =
+  | { status: "accepted"; invitation?: CanonicalInvitation; membership?: CanonicalMembership; lastOwnerSafety?: { status: "safe"; remainingActiveOwnerCount: number }; idempotency: { key: string; replayed: boolean; recordedAt: string } }
+  | { status: "conflict" | "rejected"; code: string; message: string; idempotency?: { key: string; replayed: boolean; recordedAt: string } };
+
+type LifecycleActor = ReturnType<typeof requireCanManageMembers>;
+
+function iso(value: number | undefined) { return value === undefined ? undefined : new Date(value).toISOString(); }
+export function canonicalMembership(record: CloudMembership): CanonicalMembership {
+  const createdAt = record.createdAt ?? record.activatedAt ?? 0;
+  const updatedAt = record.updatedAt ?? createdAt;
+  return {
+    authority: "convex", schemaVersion: 1, revision: record.revision, workspaceId: record.workspaceId, memberId: record.memberId,
+    internalUserId: record.internalUserId, role: record.role, status: record.status,
+    ...(record.joinedFromInvitationId ? { joinedFromInvitationId: record.joinedFromInvitationId } : {}),
+    activatedAt: iso(record.activatedAt ?? createdAt)!, ...(record.suspendedAt === undefined ? {} : { suspendedAt: iso(record.suspendedAt)! }),
+    ...(record.removedAt === undefined ? {} : { removedAt: iso(record.removedAt)! }),
+    createdByInternalUserId: record.createdByInternalUserId ?? record.internalUserId, createdAt: iso(createdAt)!, updatedAt: iso(updatedAt)!,
+  };
+}
+export function canonicalInvitation(record: CloudInvitation): CanonicalInvitation {
+  return {
+    authority: "convex", schemaVersion: 1, revision: invitationRevision(record), workspaceId: record.workspaceId, invitationId: record.invitationId,
+    status: record.status, role: record.role, inviterMemberId: record.inviterMemberId,
+    recipientConstraint: { kind: "internal-user", internalUserId: record.recipientInternalUserId }, expiresAt: iso(record.expiresAt)!,
+    ...(record.acceptedByInternalUserId ? { acceptedByInternalUserId: record.acceptedByInternalUserId } : {}),
+    ...(record.acceptedMembershipId ? { acceptedMembershipId: record.acceptedMembershipId } : {}), ...(record.acceptedAt === undefined ? {} : { acceptedAt: iso(record.acceptedAt)! }),
+    ...(record.revokedByMemberId ? { revokedByMemberId: record.revokedByMemberId } : {}), ...(record.revokedAt === undefined ? {} : { revokedAt: iso(record.revokedAt)! }),
+    createdByInternalUserId: record.createdByInternalUserId, createdAt: iso(record.createdAt)!, updatedAt: iso(record.updatedAt)!,
+  };
+}
+function invitationRevision(record: CloudInvitation) { return record.status === "pending" ? 1 : 2; }
+function fingerprint(value: unknown) { return JSON.stringify(value); }
+function lifecycleError(code: string, message = "The requested membership operation is unavailable."): LifecycleResult { return { status: ["idempotency-conflict", "stale-revision", "conflict", "invitation-expired", "invitation-already-consumed"].includes(code) ? "conflict" : "rejected", code, message }; }
+function findReceipt(state: MembershipLifecycleState, actor: string, key: string, operation: string, intent: string): LifecycleResult | undefined {
+  const matches = state.lifecycleReceipts.filter((entry) => entry.actorInternalUserId === actor && entry.key === key);
+  if (matches.length > 1) return lifecycleError("idempotency-conflict");
+  const receipt = matches[0];
+  if (!receipt) return undefined;
+  if (receipt.operation !== operation || receipt.fingerprint !== intent) return lifecycleError("idempotency-conflict");
+  return receipt.result.status === "accepted" ? { ...receipt.result, idempotency: { ...receipt.result.idempotency, replayed: true } } : receipt.result;
+}
+function recordLifecycle(state: MembershipLifecycleState, identity: CloudIdentity, actor: { user: CloudUser; membership?: CloudMembership }, key: string, operation: string, intent: string, result: LifecycleResult, context: Omit<LifecycleAudit, "actorInternalUserId" | "actorMemberId" | "deviceId" | "sessionRef" | "operation" | "outcome" | "code" | "createdAt">, now: number) {
+  const receiptResult: LifecycleResult = result.status === "accepted" ? { ...result, idempotency: { key, replayed: false, recordedAt: iso(now)! } } : result;
+  state.lifecycleReceipts.push({ actorInternalUserId: actor.user.internalUserId, key, operation, fingerprint: intent, result: receiptResult, createdAt: now });
+  const deviceLinks = actor.membership ? state.deviceLinks.filter((link) => link.workspaceId === context.workspaceId && link.memberId === actor.membership!.memberId && link.status === "active") : [];
+  state.lifecycleAudit.push({ ...context, actorInternalUserId: actor.user.internalUserId, ...(actor.membership ? { actorMemberId: actor.membership.memberId } : {}), operation, outcome: result.status, ...(result.status === "accepted" ? {} : { code: result.code }), ...(deviceLinks.length === 1 ? { deviceId: deviceLinks[0].deviceId } : {}), ...(identity.sessionRef ? { sessionRef: identity.sessionRef } : {}), createdAt: now });
+  return receiptResult;
+}
+function expireInvitations(state: MembershipLifecycleState, now: number) { for (const invitation of state.invitations) if (invitation.status === "pending" && invitation.expiresAt <= now) { invitation.status = "expired"; invitation.updatedAt = now; } }
+function uniqueInvitation(state: MembershipLifecycleState, invitationId: string) { const found = state.invitations.filter((entry) => entry.invitationId === invitationId); if (found.length !== 1) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true); return found[0]; }
+function activeOwnerCount(state: MembershipLifecycleState, workspaceId: string, exceptMemberId?: string) { return state.memberships.filter((member) => member.workspaceId === workspaceId && member.memberId !== exceptMemberId && member.status === "active" && member.role === "owner").length; }
+
+export function listWorkspaceInvitationsToState(state: MembershipLifecycleState, identity: CloudIdentity, workspaceId: string, now = Date.now()) {
+  requireCanManageMembers(state, identity, workspaceId); expireInvitations(state, now);
+  return state.invitations.filter((entry) => entry.workspaceId === workspaceId).map(canonicalInvitation).sort((a, b) => a.invitationId.localeCompare(b.invitationId));
+}
+export function listRecipientPendingInvitationsToState(state: MembershipLifecycleState, identity: CloudIdentity, now = Date.now()) {
+  const { user } = resolveInternalUser(state, identity); expireInvitations(state, now);
+  return state.invitations.filter((entry) => entry.recipientInternalUserId === user.internalUserId && entry.status === "pending").map((entry) => ({ invitation: canonicalInvitation(entry), presentationProof: { invitationId: entry.invitationId, proofRef: entry.presentationRef, verifiedAt: iso(now)! } })).sort((a, b) => a.invitation.invitationId.localeCompare(b.invitation.invitationId));
+}
+export function createInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { workspaceId: string; role: CloudRole; recipientInternalUserId: string; expiresAt: number; idempotencyKey: string; invitationId: string; presentationRef: string }, now = Date.now()): LifecycleResult {
+  const actor = requireCanManageMembers(state, identity, args.workspaceId); const intent = fingerprint(["invitation.create", args.workspaceId, args.role, args.recipientInternalUserId, args.expiresAt]);
+  const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "invitation.create", intent); if (replay) return replay;
+  let result: LifecycleResult;
+  try {
+    ensureRoleAssignment(actor.membership.role, args.role); expireInvitations(state, now); if (args.expiresAt <= now) throw new CloudPolicyError("invitation-expired", "Invitation expiry must be in the future.");
+    if (state.invitations.some((entry) => entry.invitationId === args.invitationId)) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
+    const recipient = state.users.find((entry) => entry.internalUserId === args.recipientInternalUserId); const membership = state.memberships.find((entry) => entry.workspaceId === args.workspaceId && entry.internalUserId === args.recipientInternalUserId);
+    const duplicate = state.invitations.some((entry) => entry.workspaceId === args.workspaceId && entry.recipientInternalUserId === args.recipientInternalUserId && entry.status === "pending"); ensureInvitationTarget(recipient?.status, duplicate, membership?.status);
+    if (membership) ensureMemberManagement(actor.membership.role, membership.role, args.role);
+    const invitation: CloudInvitation = { invitationId: args.invitationId, workspaceId: args.workspaceId, role: args.role, inviterMemberId: actor.membership.memberId, recipientInternalUserId: args.recipientInternalUserId, status: "pending", expiresAt: args.expiresAt, presentationRef: args.presentationRef, createdAt: now, updatedAt: now, createdByInternalUserId: actor.user.internalUserId }; state.invitations.push(invitation);
+    result = { status: "accepted", invitation: canonicalInvitation(invitation), idempotency: { key: args.idempotencyKey, replayed: false, recordedAt: iso(now)! } };
+  } catch (error) { result = error instanceof CloudPolicyError ? lifecycleError(error.code, error.message) : lifecycleError("conflict"); }
+  return recordLifecycle(state, identity, actor, args.idempotencyKey, "invitation.create", intent, result, { workspaceId: args.workspaceId, invitationId: args.invitationId }, now);
+}
+export function acceptInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { invitationId: string; presentationRef: string; idempotencyKey: string }, now = Date.now()): LifecycleResult {
+  const actor = resolveInternalUser(state, identity); const intent = fingerprint(["invitation.accept", args.invitationId, args.presentationRef]); const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "invitation.accept", intent); if (replay) return replay;
+  let workspaceId = "unavailable"; let targetMemberId: string | undefined; let result: LifecycleResult;
+  try {
+    expireInvitations(state, now); const invitation = uniqueInvitation(state, args.invitationId); workspaceId = invitation.workspaceId;
+    if (invitation.status === "expired") throw new CloudPolicyError("invitation-expired", "The invitation is unavailable.", true);
+    if (invitation.status !== "pending") throw new CloudPolicyError("invitation-already-consumed", "The invitation is unavailable.", true);
+    if (invitation.recipientInternalUserId !== actor.user.internalUserId) throw new CloudPolicyError("invitation-recipient-mismatch", "The invitation is unavailable.", true);
+    if (invitation.presentationRef !== args.presentationRef) throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
+    const workspace = state.workspaces.filter((entry) => entry.workspaceId === invitation.workspaceId && entry.status === "active"); if (workspace.length !== 1) throw new CloudPolicyError("workspace-unavailable", "The invitation is unavailable.", true);
+    const memberships = state.memberships.filter((entry) => entry.workspaceId === invitation.workspaceId && entry.internalUserId === actor.user.internalUserId); if (memberships.length > 1) throw new CloudPolicyError("conflict", "The invitation is unavailable.", true);
+    let membership = memberships[0];
+    if (membership?.status === "removed" || membership?.status === "active") throw new CloudPolicyError("invitation-unavailable", "The invitation is unavailable.", true);
+    if (membership) { membership.status = "active"; membership.role = invitation.role; membership.revision += 1; membership.updatedAt = now; membership.activatedAt = now; membership.suspendedAt = undefined; }
+    else { membership = { memberId: `member:${invitation.invitationId}`, workspaceId: invitation.workspaceId, internalUserId: actor.user.internalUserId, role: invitation.role, status: "active", revision: 1, joinedFromInvitationId: invitation.invitationId, createdAt: now, updatedAt: now, activatedAt: now, createdByInternalUserId: invitation.createdByInternalUserId }; state.memberships.push(membership); }
+    targetMemberId = membership.memberId; invitation.status = "accepted"; invitation.acceptedByInternalUserId = actor.user.internalUserId; invitation.acceptedMembershipId = membership.memberId; invitation.acceptedAt = now; invitation.updatedAt = now;
+    result = { status: "accepted", invitation: canonicalInvitation(invitation), membership: canonicalMembership(membership), idempotency: { key: args.idempotencyKey, replayed: false, recordedAt: iso(now)! } };
+  } catch (error) { result = error instanceof CloudPolicyError ? lifecycleError(error.code, error.message) : lifecycleError("conflict"); }
+  return recordLifecycle(state, identity, { user: actor.user, ...(targetMemberId ? { membership: state.memberships.find((entry) => entry.memberId === targetMemberId) } : {}) }, args.idempotencyKey, "invitation.accept", intent, result, { workspaceId, invitationId: args.invitationId, ...(targetMemberId ? { targetMemberId } : {}) }, now);
+}
+export function revokeInvitationToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { workspaceId: string; invitationId: string; idempotencyKey: string }, now = Date.now()): LifecycleResult {
+  const actor = requireCanManageMembers(state, identity, args.workspaceId); const intent = fingerprint(["invitation.revoke", args.workspaceId, args.invitationId]); const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "invitation.revoke", intent); if (replay) return replay; let result: LifecycleResult;
+  try { expireInvitations(state, now); const invitation = uniqueInvitation(state, args.invitationId); if (invitation.workspaceId !== args.workspaceId || invitation.status !== "pending") throw new CloudPolicyError("invitation-already-consumed", "The invitation is unavailable.", true); invitation.status = "revoked"; invitation.revokedByMemberId = actor.membership.memberId; invitation.revokedAt = now; invitation.updatedAt = now; result = { status: "accepted", invitation: canonicalInvitation(invitation), idempotency: { key: args.idempotencyKey, replayed: false, recordedAt: iso(now)! } }; }
+  catch (error) { result = error instanceof CloudPolicyError ? lifecycleError(error.code, error.message) : lifecycleError("conflict"); }
+  return recordLifecycle(state, identity, actor, args.idempotencyKey, "invitation.revoke", intent, result, { workspaceId: args.workspaceId, invitationId: args.invitationId }, now);
+}
+export function changeMembershipToState(state: MembershipLifecycleState, identity: CloudIdentity, args: { workspaceId: string; memberId: string; action: MemberLifecycleAction; role?: CloudRole; baseRevision: number; idempotencyKey: string }, now = Date.now()): LifecycleResult {
+  const actor = requireCanManageMembers(state, identity, args.workspaceId); const intent = fingerprint(["membership.change", args.workspaceId, args.memberId, args.action, args.role ?? null, args.baseRevision]); const replay = findReceipt(state, actor.user.internalUserId, args.idempotencyKey, "membership.change", intent); if (replay) return replay; let result: LifecycleResult;
+  try {
+    const targets = state.memberships.filter((entry) => entry.memberId === args.memberId); if (targets.length !== 1 || targets[0].workspaceId !== args.workspaceId) throw new CloudPolicyError("membership-required", "The membership is unavailable.", true); const target = targets[0];
+    if (target.revision !== args.baseRevision) throw new CloudPolicyError("stale-revision", "The membership revision is stale.", true); const nextRole = args.action === "change-role" ? args.role : target.role; if (!nextRole) throw new CloudPolicyError("role-assignment-denied", "The requested role cannot be assigned.", true);
+    ensureMemberManagement(actor.membership.role, target.role, nextRole); const nextStatus = resolveMemberTransition(target.status, args.action); ensureNotLastOwner(state, target, nextRole, nextStatus);
+    target.role = nextRole; target.status = nextStatus; target.revision += 1; target.updatedAt = now;
+    if (args.action === "suspend") target.suspendedAt = now; if (args.action === "reactivate") { target.activatedAt = now; target.suspendedAt = undefined; } if (args.action === "remove") { target.removedAt = now; target.suspendedAt = undefined; }
+    if (args.action === "suspend" || args.action === "remove") for (const link of state.deviceLinks.filter((entry) => entry.workspaceId === args.workspaceId && entry.memberId === target.memberId && entry.status !== "revoked")) { link.status = "revoked"; link.revokedAt = now; }
+    result = { status: "accepted", membership: canonicalMembership(target), lastOwnerSafety: { status: "safe", remainingActiveOwnerCount: activeOwnerCount(state, args.workspaceId) }, idempotency: { key: args.idempotencyKey, replayed: false, recordedAt: iso(now)! } };
+  } catch (error) { result = error instanceof CloudPolicyError ? lifecycleError(error.code, error.message) : lifecycleError("conflict"); }
+  return recordLifecycle(state, identity, actor, args.idempotencyKey, "membership.change", intent, result, { workspaceId: args.workspaceId, targetMemberId: args.memberId }, now);
 }
