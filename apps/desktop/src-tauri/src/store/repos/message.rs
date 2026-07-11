@@ -1,7 +1,7 @@
 //! Immutable encrypted message checkpoints with strictly scoped ordering.
 
 use crate::store::repos::{
-    open_json, payload_of,
+    open_json,
     scope::{normalize_id, DataScope},
     seal_json,
 };
@@ -16,6 +16,7 @@ pub struct MessageRow {
     pub thread_id: String,
     pub sequence: i64,
     pub kind: String,
+    pub run_id: Option<String>,
     pub detail: Value,
     pub current_revision_id: String,
     pub current_revision_number: i64,
@@ -42,29 +43,34 @@ pub fn list(
             "Thread does not belong to this workspace.".into(),
         ));
     };
-    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.detail_kind,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq")?;
+    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq")?;
     let rows = s.query_map(rusqlite::params![scope.workspace_id(), thread_id], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
             r.get::<_, i64>(2)?,
             r.get::<_, String>(3)?,
-            r.get::<_, String>(4)?,
+            r.get::<_, Option<String>>(4)?,
             r.get::<_, String>(5)?,
-            r.get::<_, i64>(6)?,
-            r.get::<_, String>(7)?,
+            r.get::<_, String>(6)?,
+            r.get::<_, i64>(7)?,
             r.get::<_, String>(8)?,
-            payload_of(r)?,
+            r.get::<_, String>(9)?,
+            crate::store::vault::Sealed {
+                ciphertext: r.get(10)?,
+                nonce: r.get(11)?,
+            },
         ))
     })?;
     rows.map(|x| {
-        let (a, b, c, d, e, f, g, h, i, sealed) = x?;
+        let (a, b, c, d, run_id, e, f, g, h, i, sealed) = x?;
         let content = open_json(store, &sealed, &raad(scope.workspace_id(), &f))?;
         Ok(MessageRow {
             id: a,
             thread_id: b,
             sequence: c,
             kind: d,
+            run_id,
             detail: serde_json::from_str(&e).unwrap_or(Value::Null),
             current_revision_id: f,
             current_revision_number: g,
@@ -84,6 +90,7 @@ pub fn append(
     id: &str,
     kind: &str,
     detail: &Value,
+    run_id: Option<&str>,
     sequence: i64,
     expected: i64,
     previous: Option<&str>,
@@ -142,8 +149,8 @@ pub fn append(
     let r = seal_json(store, content, &raad(scope.workspace_id(), &revision_id))?;
     let detail_text = serde_json::to_string(detail)
         .map_err(|_| StoreError::Invalid("Message detail cannot be encoded.".into()))?;
-    tx.execute("INSERT INTO message (id,workspace_id,thread_id,kind,detail_kind,seq,previous_message_id,idempotency_key,current_revision_id,current_revision_number,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,1,?10,?11,?12,?13)",rusqlite::params![id,scope.workspace_id(),thread_id,kind,detail_text,sequence,previous,idempotency,revision_id,state,checkpointed_at,m.ciphertext,m.nonce])?;
-    tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,1,0,?5,?6,?7,?8,?8,?9,?10)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,id,state,reason,idempotency,checkpointed_at,r.ciphertext,r.nonce])?;
+    tx.execute("INSERT INTO message (id,workspace_id,thread_id,kind,run_id,detail_kind,seq,previous_message_id,idempotency_key,current_revision_id,current_revision_number,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12,?13,?14)",rusqlite::params![id,scope.workspace_id(),thread_id,kind,run_id,detail_text,sequence,previous,idempotency,revision_id,state,checkpointed_at,m.ciphertext,m.nonce])?;
+    tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,run_id,payload,payload_nonce) VALUES (?1,?2,?3,?4,1,0,?5,?6,?7,?8,?8,?9,?10,?11)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,id,state,reason,idempotency,checkpointed_at,run_id,r.ciphertext,r.nonce])?;
     tx.execute("UPDATE thread SET last_sequence=?1,last_message_id=?2,updated_at=?3 WHERE workspace_id=?4 AND id=?5",rusqlite::params![sequence,id,checkpointed_at,scope.workspace_id(),thread_id])?;
     list(tx, store, scope, thread_id).map(|v| v.into_iter().find(|m| m.id == id).unwrap())
 }
@@ -160,6 +167,7 @@ pub fn revise(
     state: &str,
     reason: &str,
     content: &Value,
+    run_id: Option<&str>,
     at: &str,
 ) -> Result<MessageRow> {
     let current:Option<(String,i64)>=tx.query_row("SELECT current_revision_id,current_revision_number FROM message WHERE workspace_id=?1 AND thread_id=?2 AND id=?3 AND deleted_at IS NULL",rusqlite::params![scope.workspace_id(),thread_id,message_id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
@@ -194,7 +202,7 @@ pub fn revise(
     };
     let sealed = seal_json(store, content, &raad(scope.workspace_id(), revision_id))?;
     let next = num + 1;
-    tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,previous_revision_id,state,reason,idempotency_key,checkpointed_at,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11,?12,?13)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,message_id,next,base,previous,state,reason,idempotency,at,sealed.ciphertext,sealed.nonce])?;
+    tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,previous_revision_id,state,reason,idempotency_key,checkpointed_at,created_at,run_id,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11,?12,?13,?14)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,message_id,next,base,previous,state,reason,idempotency,at,run_id,sealed.ciphertext,sealed.nonce])?;
     tx.execute("UPDATE message SET current_revision_id=?1,current_revision_number=?2,current_revision_state=?3,revision=revision+1 WHERE workspace_id=?4 AND thread_id=?5 AND id=?6",rusqlite::params![revision_id,next,state,scope.workspace_id(),thread_id,message_id])?;
     list(tx, store, scope, thread_id).map(|v| v.into_iter().find(|m| m.id == message_id).unwrap())
 }

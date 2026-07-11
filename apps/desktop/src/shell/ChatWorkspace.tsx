@@ -12,6 +12,8 @@ import {
 import { insertDictation } from "../lib/insert-dictation";
 import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
+import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
+import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, DirectiveCards } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -24,6 +26,7 @@ type ConversationMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  runId?: string;
 };
 
 function messageId(prefix: string) {
@@ -68,6 +71,7 @@ export function ChatWorkspace() {
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+  const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const draftHydrationKey = useRef<string | null>(null);
@@ -251,9 +255,20 @@ export function ChatWorkspace() {
     setConversationMessages(hydrated.messages.map(({ message, currentRevision }) => ({
       id: message.id,
       role: message.kind === "user" ? "user" : "assistant",
-      content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content
+      content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content,
+      runId: message.kind === "assistant" ? message.runId : undefined
     })));
   }, [conversationMessages.length, durableConversation.state.conversation, selectedConversationThreadId]);
+
+  useEffect(() => {
+    let active = true;
+    setThreadArtifacts([]);
+    if (!selectedConversationThreadId) return () => { active = false; };
+    void listRuntimeThreadArtifacts(selectedConversationThreadId)
+      .then((artifacts) => { if (active) setThreadArtifacts(artifacts); })
+      .catch(() => { if (active) setThreadArtifacts([]); });
+    return () => { active = false; };
+  }, [boundWorkspaceId, selectedConversationThreadId]);
 
   useEffect(() => {
     if (durableConversation.state.loading || submissionInFlight) return;
@@ -338,6 +353,17 @@ export function ChatWorkspace() {
             className={`conversation-message conversation-message--${message.role}`}
           >
             <p>{message.content}</p>
+            {message.role === "assistant" && message.runId && message.content ? (
+              <ResponseArtifactAction
+                threadId={selectedConversationThreadId ?? ""}
+                messageId={message.id}
+                runId={message.runId}
+                content={message.content}
+                citations={runtime.knowledgeCitations}
+                existing={threadArtifacts.find((entry) => entry.sourceMessageId === message.id)}
+                onSaved={(saved) => setThreadArtifacts((current) => [...current.filter((entry) => entry.artifact.id !== saved.artifact.id), saved])}
+              />
+            ) : null}
           </article>
         ))}
       </section>

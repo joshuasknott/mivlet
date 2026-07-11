@@ -10,6 +10,7 @@ mod acp_process;
 mod action_history;
 mod agent_runs;
 mod approvals;
+mod artifacts;
 mod backends;
 mod clerk_identity;
 mod cloud_sync;
@@ -128,6 +129,9 @@ pub fn run() {
             conversations::conversation_load_draft,
             conversations::conversation_save_draft,
             conversations::conversation_delete_draft,
+            artifacts::artifact_create_from_response,
+            artifacts::artifact_get,
+            artifacts::artifact_list_for_thread,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,

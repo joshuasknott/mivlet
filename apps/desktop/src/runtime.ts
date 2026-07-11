@@ -28,6 +28,7 @@ import type {
   ConnectorSyncState,
   JobAttempt,
   KnowledgeSearchResponse,
+  KnowledgeCitation,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
@@ -341,6 +342,7 @@ interface NativeConversationMessageRow {
   threadId: string;
   sequence: number;
   kind: ConversationMessage["kind"];
+  runId: string | null;
   detail: unknown;
   currentRevisionId: string;
   currentRevisionNumber: number;
@@ -477,6 +479,7 @@ function fromNativeMessage(row: NativeConversationMessageRow, workspaceId: strin
     threadId: row.threadId,
     sequence: row.sequence,
     kind: row.kind,
+    ...(row.runId ? { runId: row.runId } : {}),
     ...detail,
     idempotencyKey: `native:message:${row.id}`,
     currentRevisionId: row.currentRevisionId,
@@ -660,6 +663,83 @@ export async function deleteRuntimeConversationDraft(draftKey: string) {
     return;
   }
   await invoke<void>("conversation_delete_draft", { id: draftKey, threadId: draftThreadId(draftKey) });
+}
+
+export interface RuntimeArtifactBundle {
+  artifact: Spine.ArtifactsAndRoutines.Artifact;
+  version: Spine.ArtifactsAndRoutines.ArtifactVersion;
+  sourceMessageId: string;
+}
+
+export interface CreateResponseArtifactInput {
+  threadId: string;
+  messageId: string;
+  runId: string;
+  title: string;
+  content: string;
+  citations: readonly KnowledgeCitation[];
+}
+
+const previewArtifacts = new Map<string, RuntimeArtifactBundle[]>();
+
+function assertArtifactBundle(value: unknown, workspaceId: string): asserts value is RuntimeArtifactBundle {
+  if (!isRecord(value) || !isRecord(value.artifact) || !isRecord(value.version) ||
+      value.artifact.workspaceId !== workspaceId || typeof value.artifact.id !== "string" ||
+      typeof value.version.id !== "string" || typeof value.sourceMessageId !== "string") {
+    throw new Error("Malformed or cross-workspace artifact response.");
+  }
+}
+
+export async function createRuntimeResponseArtifact(input: CreateResponseArtifactInput) {
+  const scope = conversationScopeOrThrow();
+  const artifactId = `artifact-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  const versionId = `artifact-version-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  const nativeInput = {
+    ...input,
+    artifactId,
+    versionId,
+    citations: input.citations.map((citation) => ({
+      sourceId: citation.sourceId,
+      title: citation.title,
+      snippet: citation.snippet,
+      locator: citation.chunkId ?? citation.sourcePath
+    }))
+  };
+  if (!hasTauriRuntime()) {
+    const now = new Date().toISOString();
+    const media = { mediaType: "text/markdown", byteLength: new TextEncoder().encode(input.content).byteLength, encoding: "utf-8" };
+    const contentHash = { algorithm: "sha-256" as const, value: `preview-${input.content.length}` };
+    const provenance = { kind: "run" as const, runId: input.runId as never, externalReference: `message:${input.messageId}`, observedAt: now };
+    const bundle = {
+      artifact: { id: artifactId, workspaceId: scope.workspaceId, authority: "local", visibility: "member-private", ownerMemberId: scope.workspaceId, schemaVersion: 1, revision: 0, createdByInternalUserId: scope.workspaceId, createdAt: now, updatedAt: now, kind: "document", status: "draft", title: input.title, currentVersionId: versionId, producingRunId: input.runId, sourceProvenance: [provenance], context: { threadId: input.threadId }, reviews: [], retention: { status: "active" } },
+      version: { id: versionId, artifactId, version: 1, status: "available", createdAt: now, createdByInternalUserId: scope.workspaceId, content: { kind: "inline", text: input.content, media, contentHash }, media, contentHash, provenance, citations: input.citations.map((citation, index) => ({ id: `citation-${index + 1}`, label: citation.title, source: { kind: "import", externalReference: citation.sourceId, observedAt: now }, locator: citation.chunkId ?? citation.sourcePath, quotedText: citation.snippet })), lineage: [] },
+      sourceMessageId: input.messageId
+    } as unknown as RuntimeArtifactBundle;
+    const records = previewArtifacts.get(scope.workspaceId) ?? [];
+    previewArtifacts.set(scope.workspaceId, [...records, bundle]);
+    return bundle;
+  }
+  const result = await invoke<unknown>("artifact_create_from_response", { input: nativeInput });
+  assertArtifactBundle(result, scope.workspaceId);
+  return result;
+}
+
+export async function listRuntimeThreadArtifacts(threadId: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) return (previewArtifacts.get(scope.workspaceId) ?? []).filter((entry) => entry.artifact.context.threadId === threadId);
+  const result = await invoke<unknown>("artifact_list_for_thread", { threadId });
+  if (!Array.isArray(result)) throw new Error("Malformed artifact list response.");
+  result.forEach((entry) => assertArtifactBundle(entry, scope.workspaceId));
+  return result;
+}
+
+export async function getRuntimeArtifact(artifactId: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) return (previewArtifacts.get(scope.workspaceId) ?? []).find((entry) => entry.artifact.id === artifactId) ?? null;
+  const result = await invoke<unknown>("artifact_get", { artifactId });
+  if (result === null) return null;
+  assertArtifactBundle(result, scope.workspaceId);
+  return result;
 }
 
 export async function saveRuntimeMemoryState(state: MemoryControlState) {

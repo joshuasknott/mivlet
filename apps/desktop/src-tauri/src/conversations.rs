@@ -44,6 +44,7 @@ pub struct AppendMessage {
     pub kind: String,
     #[serde(default)]
     pub detail: Value,
+    pub run_id: Option<String>,
     pub expected_last_sequence: i64,
     pub sequence: i64,
     pub previous_message_id: Option<String>,
@@ -66,6 +67,7 @@ pub struct ReviseMessage {
     pub state: String,
     pub reason: String,
     pub content: Value,
+    pub run_id: Option<String>,
     pub checkpointed_at: Option<String>,
 }
 #[derive(Deserialize)]
@@ -158,6 +160,7 @@ pub fn conversation_append_message(input: AppendMessage) -> Result<message::Mess
                 &input.message_id,
                 &input.kind,
                 &input.detail,
+                input.run_id.as_deref(),
                 input.sequence,
                 input.expected_last_sequence,
                 input.previous_message_id.as_deref(),
@@ -192,6 +195,7 @@ pub fn conversation_revise_message(input: ReviseMessage) -> Result<message::Mess
                 &input.state,
                 &input.reason,
                 &input.content,
+                input.run_id.as_deref(),
                 &at,
             )
         })

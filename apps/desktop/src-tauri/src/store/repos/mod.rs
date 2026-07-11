@@ -15,6 +15,7 @@ use crate::store::{Result, Store};
 
 pub mod action_history;
 pub mod approval;
+pub mod artifact;
 pub mod audit_event;
 pub mod backend_connection;
 pub mod cloud_sync;
