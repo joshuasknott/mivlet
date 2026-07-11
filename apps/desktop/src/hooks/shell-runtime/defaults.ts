@@ -85,6 +85,9 @@ export const PREVIEW_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
     name: "Preview workspace",
     source: "legacy-default"
   },
+  activeContextOwner: {
+    internalUserId: "preview-user"
+  },
   devices: []
 };
 

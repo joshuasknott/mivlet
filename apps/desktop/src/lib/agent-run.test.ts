@@ -65,13 +65,17 @@ const accountStatus = (over: Partial<AccountWorkspaceStatus> = {}): AccountWorks
     name: "Fable",
     source: "hosted"
   },
+  activeContextOwner: {
+    internalUserId: "user-active",
+    memberId: "member-active"
+  },
   devices: [],
   ...over
 });
 
 describe("run context audience", () => {
   it("derives the private audience from the exact active hosted member", () => {
-    expect(privateRunAudience(accountStatus(), "hosted")).toEqual({
+    expect(privateRunAudience(accountStatus())).toEqual({
       authority: "local",
       visibility: "member-private",
       actingMemberId: "member-active"
@@ -86,14 +90,31 @@ describe("run context audience", () => {
         name: "Other",
         source: "hosted"
       }
-    }), "hosted")).toThrow(/could not confirm who can use this context/i);
+    }))).toThrow(/could not confirm who can use this context/i);
     expect(() => privateRunAudience(accountStatus({
       activeWorkspace: {
         localWorkspaceId: "workspace-local",
         name: "Legacy",
         source: "legacy-default"
-      }
-    }), "hosted")).toThrow(/could not confirm who can use this context/i);
+      },
+      activeContextOwner: undefined
+    }))).toThrow(/could not confirm who can use this context/i);
+  });
+
+  it("uses the authenticated internal user for a legacy-default local workspace", () => {
+    expect(privateRunAudience(accountStatus({
+      workspaces: [],
+      activeWorkspace: {
+        localWorkspaceId: "workspace-local",
+        name: "Local workspace",
+        source: "legacy-default"
+      },
+      activeContextOwner: { internalUserId: "user-local" }
+    }))).toEqual({
+      authority: "local",
+      visibility: "member-private",
+      actingInternalUserId: "user-local"
+    });
   });
 
   it("assigns explicit preview ownership without mutating fixture records", () => {
@@ -104,15 +125,16 @@ describe("run context audience", () => {
         fableWorkspaceId: "workspace-hosted",
         name: "Preview",
         source: "legacy-default"
-      }
-    }), "preview");
+      },
+      activeContextOwner: { internalUserId: "preview-user" }
+    }));
     const original = memory({ authorityScope: undefined });
     const [owned] = withPreviewPrivateAuthority([original], preview);
     expect(original.authorityScope).toBeUndefined();
     expect(owned.authorityScope).toEqual({
       authority: "local",
       visibility: "member-private",
-      ownerMemberId: "member-active"
+      ownerInternalUserId: "preview-user"
     });
   });
 

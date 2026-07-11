@@ -1572,10 +1572,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const runId = createRunContextId();
     const assembledAt = new Date().toISOString();
     const scope = knowledgeScopeForRun(activeThread?.id, context);
-    const audience = privateRunAudience(
-      accountWorkspaceStatus,
-      hasTauriRuntime() ? "hosted" : "preview"
-    );
+    const audience = privateRunAudience(accountWorkspaceStatus);
     const selectedMemory = selectMemoryForRun(managedMemoryRecords, context);
     // Native records must already carry canonical ownership from migration.
     // Browser preview has no native store, so its deliberate fixtures receive

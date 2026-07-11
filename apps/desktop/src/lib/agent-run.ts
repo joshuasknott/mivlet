@@ -116,25 +116,18 @@ export interface ProjectMemoryRunContext {
   projectMemoryRecords?: MemoryRecord[];
 }
 
-export type PrivateAudienceSource = "hosted" | "preview";
-
 const PRIVATE_CONTEXT_MEMBER_ERROR =
   "Fable could not confirm who can use this context. Refresh your account workspace and try again.";
 
 /**
- * Resolve the exact active member that owns a local private run. Native runs
- * require a hosted selection; browser preview is an explicit, separate path
- * and can never become a fallback for native ownership.
+ * Resolve the native-confirmed owner of local private context. Hosted
+ * workspaces use the exact active member pair; legacy-default local workspaces
+ * use the authenticated internal user and never fabricate membership.
  */
-export function privateRunAudience(
-  status: AccountWorkspaceStatus,
-  source: PrivateAudienceSource
-): RunContextAudience {
+export function privateRunAudience(status: AccountWorkspaceStatus): RunContextAudience {
   const activeLocalId = status.activeWorkspace.localWorkspaceId.trim();
   const usableState = status.state === "ready" || status.state === "offline";
-  const sourceMatches = source === "hosted"
-    ? status.activeWorkspace.source === "hosted"
-    : status.activeWorkspace.source === "legacy-default";
+  const owner = status.activeContextOwner;
   const member = status.workspaces.find((workspace) =>
     workspace.localWorkspaceId === activeLocalId &&
     (!status.activeWorkspace.fableWorkspaceId ||
@@ -144,19 +137,32 @@ export function privateRunAudience(
     !status.accountBound ||
     !usableState ||
     !activeLocalId ||
-    !sourceMatches ||
-    !member ||
-    member.workspaceStatus !== "active" ||
-    member.membershipStatus !== "active" ||
-    !member.memberId.trim()
+    !owner?.internalUserId.trim()
   ) {
     throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
   }
-  return {
-    authority: "local",
-    visibility: "member-private",
-    actingMemberId: member.memberId as RunContextAudience["actingMemberId"]
-  };
+  if (
+    status.activeWorkspace.source === "hosted" &&
+    member &&
+    member.workspaceStatus === "active" &&
+    member.membershipStatus === "active" &&
+    Boolean(member.memberId.trim()) &&
+    owner.memberId === member.memberId
+  ) {
+    return {
+      authority: "local",
+      visibility: "member-private",
+      actingMemberId: member.memberId as never
+    };
+  }
+  if (status.activeWorkspace.source === "legacy-default" && !owner.memberId) {
+    return {
+      authority: "local",
+      visibility: "member-private",
+      actingInternalUserId: owner.internalUserId as never
+    };
+  }
+  throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
 }
 
 /** Synthetic shared audience for contract tests and future hosted assembly. */
@@ -179,7 +185,7 @@ export function recordsVisibleToRunAudience<T extends { authorityScope?: Context
 
 /**
  * Browser preview has no native migration boundary, so its explicit fixture
- * records are cloned with the preview member's private authority before use.
+ * records are cloned with the preview user's private authority before use.
  */
 export function withPreviewPrivateAuthority<T extends { authorityScope?: ContextRecordAuthorityScope }>(
   records: readonly T[],
@@ -188,11 +194,22 @@ export function withPreviewPrivateAuthority<T extends { authorityScope?: Context
   if (audience.authority !== "local" || audience.visibility !== "member-private") {
     throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
   }
-  const authorityScope: ContextRecordAuthorityScope = {
-    authority: "local",
-    visibility: "member-private",
-    ownerMemberId: audience.actingMemberId
-  };
+  let authorityScope: ContextRecordAuthorityScope;
+  if (audience.actingMemberId) {
+    authorityScope = {
+      authority: "local",
+      visibility: "member-private",
+      ownerMemberId: audience.actingMemberId
+    };
+  } else if (audience.actingInternalUserId) {
+    authorityScope = {
+      authority: "local",
+      visibility: "member-private",
+      ownerInternalUserId: audience.actingInternalUserId
+    };
+  } else {
+    throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
+  }
   return records.map((record) => ({ ...record, authorityScope }));
 }
 

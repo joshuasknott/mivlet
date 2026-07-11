@@ -1411,7 +1411,7 @@ describe("useShellRuntime — prepared run context", () => {
       audience: {
         authority: "local",
         visibility: "member-private",
-        actingMemberId: "preview-member"
+        actingInternalUserId: "preview-user"
       }
     }));
     expect(prepared!.receipt.citations[0]).toEqual(expect.objectContaining({
@@ -1419,7 +1419,7 @@ describe("useShellRuntime — prepared run context", () => {
       authorityScope: {
         authority: "local",
         visibility: "member-private",
-        ownerMemberId: "preview-member"
+        ownerInternalUserId: "preview-user"
       },
       ranking: expect.objectContaining({ relevance: expect.any(Number) })
     }));

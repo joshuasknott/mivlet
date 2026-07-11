@@ -67,6 +67,10 @@ const runtimeMocks = vi.hoisted(() => ({
       name: "Test workspace",
       source: "hosted"
     },
+    activeContextOwner: {
+      internalUserId: "test-user",
+      memberId: "test-member"
+    },
     devices: []
   } as AccountWorkspaceStatus
 }));

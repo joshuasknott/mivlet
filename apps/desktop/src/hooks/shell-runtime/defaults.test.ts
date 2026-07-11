@@ -63,7 +63,8 @@ describe("shell runtime defaults", () => {
     expect(PREVIEW_ACCOUNT_WORKSPACE_STATUS).toMatchObject({
       state: "ready",
       accountBound: true,
-      activeWorkspace: { localWorkspaceId: "preview-default" }
+      activeWorkspace: { localWorkspaceId: "preview-default" },
+      activeContextOwner: { internalUserId: "preview-user" }
     });
     expect(PREVIEW_IDENTITY_STATUS).toMatchObject({ enabled: true, state: "signed-in" });
   });
