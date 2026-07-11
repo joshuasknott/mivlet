@@ -31,7 +31,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -252,6 +252,20 @@ pub struct ArtifactVersionRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ArtifactReviewRecord {
+    pub id: String,
+    pub artifact_id: String,
+    pub version_id: String,
+    pub status: String,
+    pub requested_by_internal_user_id: String,
+    pub reviewer_member_id: Option<String>,
+    pub requested_at: String,
+    pub resolved_at: Option<String>,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactRecord {
     pub id: String,
@@ -275,6 +289,8 @@ pub struct ArtifactRecord {
     pub payload: Value,
     #[serde(default)]
     pub versions: Vec<ArtifactVersionRecord>,
+    #[serde(default)]
+    pub reviews: Vec<ArtifactReviewRecord>,
 }
 
 // Connector account metadata. NOTE: `credential_ref` is intentionally absent
@@ -479,6 +495,12 @@ fn read_artifact_records(
     owner: &crate::store::repos::scope::PrivateDataScope,
 ) -> Result<Vec<ArtifactRecord>> {
     let workspace_id = owner.workspace_id();
+    let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(conn)?;
+    if context.active_workspace.local_workspace_id != workspace_id {
+        return Err(StoreError::Invalid(
+            "Artifact export requires the active workspace owner.".into(),
+        ));
+    }
     let mut stmt=conn.prepare(
         "SELECT owner_subject,authority,visibility,owner_member_id,owner_internal_user_id,id,run_id,
                 thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,
@@ -593,7 +615,64 @@ fn read_artifact_records(
                 payload: version_payload,
             });
         }
-        output.push(ArtifactRecord {
+        let mut reviews_stmt = conn.prepare(
+            "SELECT id,artifact_id,version_id,status,requested_by_internal_user_id,
+                    reviewer_member_id,requested_at,resolved_at,payload,payload_nonce
+             FROM artifact_review
+             WHERE workspace_id=?1 AND owner_subject=?2 AND artifact_id=?3
+             ORDER BY requested_at,id",
+        )?;
+        let review_rows = reviews_stmt
+            .query_map(rusqlite::params![workspace_id, owner_subject, id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    Sealed {
+                        ciphertext: row.get(8)?,
+                        nonce: row.get(9)?,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut reviews = Vec::with_capacity(review_rows.len());
+        for (
+            review_id,
+            review_artifact_id,
+            version_id,
+            review_status,
+            requested_by_internal_user_id,
+            reviewer_member_id,
+            requested_at,
+            resolved_at,
+            sealed,
+        ) in review_rows
+        {
+            let review_payload = open_json_value(
+                store,
+                &sealed,
+                &format!(
+                    "artifact_review:{workspace_id}:{owner_subject}:{review_artifact_id}:{review_id}"
+                ),
+            )?;
+            reviews.push(ArtifactReviewRecord {
+                id: review_id,
+                artifact_id: review_artifact_id,
+                version_id,
+                status: review_status,
+                requested_by_internal_user_id,
+                reviewer_member_id,
+                requested_at,
+                resolved_at,
+                payload: review_payload,
+            });
+        }
+        let record = ArtifactRecord {
             id,
             owner_subject,
             authority,
@@ -614,7 +693,10 @@ fn read_artifact_records(
             updated_at,
             payload,
             versions,
-        });
+            reviews,
+        };
+        validate_portable_reviews(&record, &context.internal_user_id, owner.owner_member_id())?;
+        output.push(record);
     }
     Ok(output)
 }
@@ -1628,6 +1710,182 @@ fn invalid_artifact(message: &str) -> StoreError {
     StoreError::Invalid(format!("Portable artifact is not canonical: {message}."))
 }
 
+fn bounded_nonempty(value: &str, max_chars: usize) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= max_chars
+}
+
+fn review_timestamp(value: &str) -> Option<DateTime<chrono::FixedOffset>> {
+    bounded_nonempty(value, 64)
+        .then(|| DateTime::parse_from_rfc3339(value).ok())
+        .flatten()
+}
+
+fn validate_portable_reviews(
+    artifact: &ArtifactRecord,
+    acting_internal_user_id: &str,
+    owner_member_id: Option<&str>,
+) -> Result<()> {
+    let version_ids = artifact
+        .versions
+        .iter()
+        .map(|version| version.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut review_ids = std::collections::BTreeSet::new();
+    let mut prior_order: Option<(&str, &str)> = None;
+    let mut open_reviews = 0usize;
+
+    for review in &artifact.reviews {
+        if !review_ids.insert(review.id.as_str())
+            || !bounded_nonempty(&review.id, 256)
+            || review.artifact_id != artifact.id
+            || !version_ids.contains(review.version_id.as_str())
+            || review.requested_by_internal_user_id != acting_internal_user_id
+            || review.reviewer_member_id.as_deref() != owner_member_id
+        {
+            return Err(invalid_artifact(
+                "review identity, owner, or exact version differs",
+            ));
+        }
+        if let Some((requested_at, id)) = prior_order {
+            if (review.requested_at.as_str(), review.id.as_str()) < (requested_at, id) {
+                return Err(invalid_artifact("review history order differs"));
+            }
+        }
+        prior_order = Some((&review.requested_at, &review.id));
+
+        let requested_at = review_timestamp(&review.requested_at)
+            .ok_or_else(|| invalid_artifact("review request timestamp is invalid"))?;
+        let resolved_at = review
+            .resolved_at
+            .as_deref()
+            .map(|value| {
+                review_timestamp(value)
+                    .filter(|resolved| *resolved >= requested_at)
+                    .ok_or_else(|| invalid_artifact("review resolution timestamp is invalid"))
+            })
+            .transpose()?;
+        let payload = review
+            .payload
+            .as_object()
+            .ok_or_else(|| invalid_artifact("review payload is malformed"))?;
+        let allowed = [
+            "id",
+            "status",
+            "requestedByInternalUserId",
+            "reviewerMemberId",
+            "versionId",
+            "requestedAt",
+            "resolvedAt",
+            "summary",
+            "requestedChanges",
+            "acceptance",
+        ];
+        if payload.keys().any(|key| !allowed.contains(&key.as_str()))
+            || payload.get("id").and_then(Value::as_str) != Some(review.id.as_str())
+            || payload.get("status").and_then(Value::as_str) != Some(review.status.as_str())
+            || payload
+                .get("requestedByInternalUserId")
+                .and_then(Value::as_str)
+                != Some(acting_internal_user_id)
+            || payload.get("reviewerMemberId").and_then(Value::as_str) != owner_member_id
+            || payload.get("versionId").and_then(Value::as_str) != Some(review.version_id.as_str())
+            || payload.get("requestedAt").and_then(Value::as_str)
+                != Some(review.requested_at.as_str())
+            || payload.get("resolvedAt").and_then(Value::as_str) != review.resolved_at.as_deref()
+        {
+            return Err(invalid_artifact("review wrapper and payload differ"));
+        }
+        if payload.get("summary").is_some_and(|summary| {
+            summary
+                .as_str()
+                .is_none_or(|value| !bounded_nonempty(value, 2_000))
+        }) {
+            return Err(invalid_artifact("review summary is invalid"));
+        }
+
+        match review.status.as_str() {
+            "requested" => {
+                open_reviews += 1;
+                if resolved_at.is_some()
+                    || payload.contains_key("requestedChanges")
+                    || payload.contains_key("acceptance")
+                    || review.version_id != artifact.current_version_id
+                {
+                    return Err(invalid_artifact("open review state is inconsistent"));
+                }
+            }
+            "changes-requested" => {
+                let changes = payload
+                    .get("requestedChanges")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| invalid_artifact("requested changes are missing"))?;
+                let mut unique = std::collections::BTreeSet::new();
+                if resolved_at.is_none()
+                    || changes.is_empty()
+                    || changes.len() > 32
+                    || changes.iter().any(|change| {
+                        change.as_str().is_none_or(|value| {
+                            !bounded_nonempty(value, 500) || !unique.insert(value)
+                        })
+                    })
+                    || payload.contains_key("acceptance")
+                {
+                    return Err(invalid_artifact("requested changes are inconsistent"));
+                }
+            }
+            "approved" => {
+                let acceptance = payload
+                    .get("acceptance")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| invalid_artifact("review acceptance is missing"))?;
+                let acceptance_allowed = ["acceptedByInternalUserId", "acceptedAt", "note"];
+                let acceptance_note = acceptance.get("note").and_then(Value::as_str);
+                if resolved_at.is_none()
+                    || payload.contains_key("requestedChanges")
+                    || acceptance
+                        .keys()
+                        .any(|key| !acceptance_allowed.contains(&key.as_str()))
+                    || acceptance
+                        .get("acceptedByInternalUserId")
+                        .and_then(Value::as_str)
+                        != Some(acting_internal_user_id)
+                    || acceptance.get("acceptedAt").and_then(Value::as_str)
+                        != review.resolved_at.as_deref()
+                    || acceptance.get("note").is_some_and(|note| {
+                        note.as_str()
+                            .is_none_or(|value| !bounded_nonempty(value, 2_000))
+                    })
+                    || acceptance_note != payload.get("summary").and_then(Value::as_str)
+                {
+                    return Err(invalid_artifact("review acceptance is inconsistent"));
+                }
+            }
+            _ => return Err(invalid_artifact("review status is unsupported")),
+        }
+    }
+    if open_reviews > 1 {
+        return Err(invalid_artifact("more than one review is open"));
+    }
+    let current_review = artifact
+        .reviews
+        .iter()
+        .rev()
+        .find(|review| review.version_id == artifact.current_version_id);
+    let expected_status = match current_review.map(|review| review.status.as_str()) {
+        None => "draft",
+        Some("requested") => "in-review",
+        Some("changes-requested") => "changes-requested",
+        Some("approved") => "accepted",
+        Some(_) => unreachable!("review status was validated above"),
+    };
+    if artifact.status != expected_status {
+        return Err(invalid_artifact(
+            "artifact status differs from its current-version review",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_portable_artifact(
     tx: &Connection,
     store: &Store,
@@ -1694,11 +1952,11 @@ fn validate_portable_artifact(
     if artifact
         .get("reviews")
         .and_then(Value::as_array)
-        .is_some_and(|v| !v.is_empty())
+        .is_none_or(|reviews| !reviews.is_empty())
         || artifact.get("publication").is_some_and(|v| !v.is_null())
     {
         return Err(invalid_artifact(
-            "review or publication claims cannot be revalidated",
+            "raw review or publication claims are not canonical",
         ));
     }
     if r.payload
@@ -1759,9 +2017,14 @@ fn validate_portable_artifact(
         )
         .optional()?
         .ok_or_else(|| invalid_artifact("terminal assistant source message is not native"))?;
-    if r.versions.is_empty() || r.revision != r.versions.len() as i64 {
+    let review_transitions = r
+        .reviews
+        .iter()
+        .map(|review| if review.status == "requested" { 1 } else { 2 })
+        .sum::<i64>();
+    if r.versions.is_empty() || r.revision != r.versions.len() as i64 + review_transitions {
         return Err(invalid_artifact(
-            "revision does not equal immutable history length",
+            "revision does not equal immutable version and review history",
         ));
     }
     let mut previous_id: Option<&str> = None;
@@ -1902,7 +2165,7 @@ fn validate_portable_artifact(
             "first version does not match the native source response",
         ));
     }
-    Ok(())
+    validate_portable_reviews(r, acting_internal_user_id, owner.owner_member_id())
 }
 
 fn plan_and_apply(
@@ -2271,6 +2534,36 @@ fn plan_and_apply(
                     rusqlite::params![workspace_id,owner.owner_subject(),r.id,version.id,version.version,
                         version.status,version.content_fingerprint,version.size_bytes,version.created_at,
                         sealed.ciphertext,sealed.nonce])?;
+            }
+            for review in &r.reviews {
+                let sealed = store.seal_json_owned(
+                    &review.payload,
+                    &format!(
+                        "artifact_review:{workspace_id}:{}:{}:{}",
+                        owner.owner_subject(),
+                        r.id,
+                        review.id
+                    ),
+                )?;
+                tx.execute(
+                    "INSERT INTO artifact_review(workspace_id,owner_subject,artifact_id,id,version_id,status,
+                       requested_by_internal_user_id,reviewer_member_id,requested_at,resolved_at,payload,payload_nonce)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                    rusqlite::params![
+                        workspace_id,
+                        owner.owner_subject(),
+                        r.id,
+                        review.id,
+                        review.version_id,
+                        review.status,
+                        review.requested_by_internal_user_id,
+                        review.reviewer_member_id,
+                        review.requested_at,
+                        review.resolved_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
             }
             Ok(())
         },
@@ -3064,24 +3357,130 @@ mod tests {
             }
             Ok(())
         }).unwrap();
+        let scope = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            crate::store::repos::scope::DataScope::workspace("default").unwrap(),
+            "user-local",
+            None,
+        )
+        .unwrap();
+        source
+            .transaction(|tx| {
+                crate::store::repos::artifact::review_action(
+                    tx,
+                    &source,
+                    &scope,
+                    "artifact-1",
+                    "artifact-1:v2",
+                    2,
+                    "request-review",
+                    "user-local",
+                    Some("Please review"),
+                    &[],
+                    "2026-07-11T01:00:00Z",
+                )?;
+                crate::store::repos::artifact::review_action(
+                    tx,
+                    &source,
+                    &scope,
+                    "artifact-1",
+                    "artifact-1:v2",
+                    3,
+                    "request-changes",
+                    "user-local",
+                    Some("Needs one change"),
+                    &["Clarify the result".into()],
+                    "2026-07-11T01:01:00Z",
+                )?;
+                let hash = format!("{:x}", Sha256::digest(b"Three"));
+                let media = serde_json::json!({"mediaType":"text/markdown","byteLength":5,"encoding":"utf-8"});
+                let content_hash = serde_json::json!({"algorithm":"sha-256","value":hash});
+                let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerInternalUserId":"user-local","schemaVersion":1,"revision":5,"createdByInternalUserId":"user-local","createdAt":"t","updatedAt":"2026-07-11T01:02:00Z","kind":"document","status":"draft","title":"Artifact","currentVersionId":"artifact-1:v3","producingRunId":"artifact-run","sourceProvenance":[{"kind":"run","runId":"artifact-run","observedAt":"t"}],"context":{"threadId":"artifact-thread"},"reviews":[],"retention":{"status":"active"}});
+                let version_payload=serde_json::json!({"id":"artifact-1:v3","artifactId":"artifact-1","version":3,"status":"available","createdAt":"2026-07-11T01:02:00Z","createdByInternalUserId":"user-local","content":{"kind":"inline","text":"Three","media":media,"contentHash":content_hash},"media":media,"contentHash":content_hash,"provenance":{"kind":"artifact-version","sourceArtifactVersionId":"artifact-1:v2","observedAt":"2026-07-11T01:02:00Z"},"citations":[],"inputs":[],"decisions":[],"lineage":[{"relation":"supersedes","artifactId":"artifact-1","artifactVersionId":"artifact-1:v2","recordedAt":"2026-07-11T01:02:00Z"}]});
+                crate::store::repos::artifact::append_version(
+                    tx,
+                    &source,
+                    &scope,
+                    "artifact-1",
+                    4,
+                    "artifact-1:v2",
+                    &format!("{:x}", Sha256::digest(b"Artifact")),
+                    &hash,
+                    5,
+                    "2026-07-11T01:02:00Z",
+                    &artifact_payload,
+                    &version_payload,
+                )?;
+                crate::store::repos::artifact::review_action(
+                    tx,
+                    &source,
+                    &scope,
+                    "artifact-1",
+                    "artifact-1:v3",
+                    5,
+                    "request-review",
+                    "user-local",
+                    None,
+                    &[],
+                    "2026-07-11T01:03:00Z",
+                )?;
+                crate::store::repos::artifact::review_action(
+                    tx,
+                    &source,
+                    &scope,
+                    "artifact-1",
+                    "artifact-1:v3",
+                    6,
+                    "accept",
+                    "user-local",
+                    Some("Approved"),
+                    &[],
+                    "2026-07-11T01:04:00Z",
+                )?;
+                Ok(())
+            })
+            .unwrap();
         let manifest = export_workspace(&source).unwrap();
         assert_eq!(manifest.sections.artifacts.len(), 1);
-        assert_eq!(manifest.sections.artifacts[0].versions.len(), 2);
+        assert_eq!(manifest.sections.artifacts[0].versions.len(), 3);
+        assert_eq!(manifest.sections.artifacts[0].reviews.len(), 2);
+        assert_eq!(
+            manifest.sections.artifacts[0].reviews[0].status,
+            "changes-requested"
+        );
+        assert_eq!(manifest.sections.artifacts[0].reviews[1].status, "approved");
+        assert_eq!(
+            manifest.sections.artifacts[0].payload["reviews"],
+            serde_json::json!([])
+        );
         assert_eq!(
             manifest.sections.artifacts[0].thread_id.as_deref(),
             Some("artifact-thread")
         );
         let json = serde_json::to_string(&manifest).unwrap();
-        let destination = store();
+        let directory = tempfile::TempDir::new().unwrap();
+        let database = directory.path().join("portable-review.db");
+        let vault = Vault::new(&MasterKey::generate().unwrap()).unwrap();
+        let destination = Store::open(&database, vault.clone()).unwrap();
         bind_local_user(&destination);
         seed_native_artifact_source(&destination);
         import_workspace(&destination, &json, ImportOptions::default()).unwrap();
         let roundtrip = export_workspace(&destination).unwrap();
-        assert_eq!(roundtrip.sections.artifacts[0].versions.len(), 2);
+        assert_eq!(roundtrip.sections.artifacts[0].versions.len(), 3);
+        assert_eq!(roundtrip.sections.artifacts[0].reviews.len(), 2);
         assert_eq!(
             roundtrip.sections.artifacts[0].current_version_id,
-            "artifact-1:v2"
+            "artifact-1:v3"
         );
+        drop(destination);
+        let reopened = Store::open(&database, vault).unwrap();
+        let restored = reopened
+            .transaction(|tx| {
+                crate::store::repos::artifact::get_bundle(tx, &reopened, &scope, "artifact-1")
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored["artifact"]["status"], "accepted");
+        assert_eq!(restored["artifact"]["reviews"].as_array().unwrap().len(), 2);
 
         let rejects = |bad: Manifest| {
             let target = store();
@@ -3119,6 +3518,55 @@ mod tests {
         rejects(bad);
         let mut bad = manifest.clone();
         bad.sections.artifacts[0].source_message_id = Some("foreign-message".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].reviews[0].requested_by_internal_user_id = "attacker".into();
+        bad.sections.artifacts[0].reviews[0].payload["requestedByInternalUserId"] =
+            Value::String("attacker".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].reviews[1].payload["acceptance"]["acceptedByInternalUserId"] =
+            Value::String("attacker".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].reviews[0].version_id = "artifact-1:foreign".into();
+        bad.sections.artifacts[0].reviews[0].payload["versionId"] =
+            Value::String("artifact-1:foreign".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].reviews[0].status = "rejected".into();
+        bad.sections.artifacts[0].reviews[0].payload["status"] = Value::String("rejected".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].reviews[0].reviewer_member_id = Some("foreign-member".into());
+        bad.sections.artifacts[0].reviews[0].payload["reviewerMemberId"] =
+            Value::String("foreign-member".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].status = "draft".into();
+        bad.sections.artifacts[0].payload["status"] = Value::String("draft".into());
+        rejects(bad);
+        let mut bad = manifest.clone();
+        bad.sections.artifacts[0].status = "in-review".into();
+        bad.sections.artifacts[0].revision = 9;
+        bad.sections.artifacts[0].payload["status"] = Value::String("in-review".into());
+        bad.sections.artifacts[0].payload["revision"] = serde_json::json!(9);
+        for (id, requested_at) in [
+            ("review:artifact-1:forged-1", "2026-07-11T01:05:00Z"),
+            ("review:artifact-1:forged-2", "2026-07-11T01:06:00Z"),
+        ] {
+            bad.sections.artifacts[0].reviews.push(ArtifactReviewRecord {
+                id: id.into(),
+                artifact_id: "artifact-1".into(),
+                version_id: "artifact-1:v3".into(),
+                status: "requested".into(),
+                requested_by_internal_user_id: "user-local".into(),
+                reviewer_member_id: None,
+                requested_at: requested_at.into(),
+                resolved_at: None,
+                payload: serde_json::json!({"id":id,"status":"requested","requestedByInternalUserId":"user-local","versionId":"artifact-1:v3","requestedAt":requested_at}),
+            });
+        }
         rejects(bad);
     }
 
