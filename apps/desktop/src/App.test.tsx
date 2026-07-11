@@ -6,7 +6,7 @@ import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
 import { listRuntimeConnectorStatuses } from "./runtime";
-import type { ProjectWorkspace, ThreadSummary } from "@fable/protocol";
+import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
   snapshot: null as RuntimeSnapshot | null,
@@ -404,7 +404,7 @@ describe("Fable home", () => {
     expect(screen.queryByText("Threads")).not.toBeInTheDocument();
   });
 
-  it("exercises real WorkspaceSidebar render with project/chat props + confirms threadId and threads-cap compat (no API change)", () => {
+  it("exercises real WorkspaceSidebar project lifecycle, grouping, and thread placement controls", async () => {
     // Direct render of the shipped component (per audit requirement) with real ThreadSummary data.
     const sampleThread: ThreadSummary = {
       id: "thread-abc-123",
@@ -414,16 +414,22 @@ describe("Fable home", () => {
       updatedAt: "now",
       pinnedContextIds: []
     };
-    const sampleProject: ProjectWorkspace = {
+    const sampleProject = {
       id: "proj-1",
       title: "Demo Project",
       description: "d",
+      instructions: "",
+      lifecycle: "active" as const,
+      revision: 1,
       threads: [sampleThread]
     };
     const expandedCollections = { projects: true, chats: false };
     const expandedProjects: Record<string, boolean> = { "proj-1": true };
     const onSelectProjectThread = vi.fn();
     const onAddProject = vi.fn();
+    const onArchiveProject = vi.fn();
+    const onRestoreProject = vi.fn();
+    const onMoveThread = vi.fn();
     const onSelectThread = vi.fn();
     const noop = () => {};
     // Render real component; props include ThreadSummary objects exactly as used in production path.
@@ -435,12 +441,18 @@ describe("Fable home", () => {
         expandedCollections={expandedCollections}
         expandedProjects={expandedProjects}
         projects={[sampleProject]}
+        archivedProjects={[{ ...sampleProject, id: "proj-old", title: "Old Project", lifecycle: "archived", threads: [] }]}
         chatThreads={[]}
         mobileNavOpen={true}
         collapsed={false}
         onNewChat={noop}
         onAddProject={onAddProject}
-        onOpenProjectFolder={noop}
+        onNewProjectChat={noop}
+        onRenameProject={noop}
+        onArchiveProject={onArchiveProject}
+        onRestoreProject={onRestoreProject}
+        onDeleteProject={noop}
+        onMoveThread={onMoveThread}
         onSearch={noop}
         onSelectWorkspace={noop}
         onToggleProjects={noop}
@@ -479,6 +491,21 @@ describe("Fable home", () => {
     // threadId is preserved verbatim through the callback (real prop -> render -> click -> handler).
     expect(onSelectProjectThread.mock.calls[0][0].id).toBe("thread-abc-123");
 
+    fireEvent.click(screen.getByLabelText("Add project"));
+    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch notes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(onAddProject).toHaveBeenCalledWith({ title: "Launch notes" }));
+
+    fireEvent.click(screen.getByLabelText("Archive Demo Project"));
+    expect(onArchiveProject).toHaveBeenCalledWith(sampleProject);
+
+    fireEvent.change(screen.getByLabelText("Move Sample conversation"), { target: { value: "" } });
+    expect(onMoveThread).toHaveBeenCalledWith("thread-abc-123", null);
+
+    fireEvent.click(screen.getByRole("button", { name: /archived \(1\)/i }));
+    fireEvent.click(screen.getByRole("button", { name: /restore/i }));
+    expect(onRestoreProject).toHaveBeenCalledWith(expect.objectContaining({ id: "proj-old" }));
+
     // "threads" capability key in mocks (used by App) remains the protocol value, unchanged.
     // (See connectedCodex above and other provider mocks using literal "threads".)
   });
@@ -501,7 +528,12 @@ describe("Fable home", () => {
         collapsed={false}
         onNewChat={noop}
         onAddProject={noop}
-        onOpenProjectFolder={noop}
+        onNewProjectChat={noop}
+        onRenameProject={noop}
+        onArchiveProject={noop}
+        onRestoreProject={noop}
+        onDeleteProject={noop}
+        onMoveThread={noop}
         onSearch={noop}
         onSelectWorkspace={noop}
         onToggleProjects={noop}

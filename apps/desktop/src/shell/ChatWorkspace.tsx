@@ -2,7 +2,7 @@
 import { parseComposerText } from "@fable/connectors";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { connectors, projects } from "../data/workspace";
+import { connectors } from "../data/workspace";
 import { utilityItems } from "../lib/constants";
 import {
   buildAgentRequest,
@@ -10,7 +10,7 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
+import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
@@ -21,6 +21,7 @@ import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
 import { ShellPageBoundary } from "./ShellRoutes";
 import { useShellAgentController } from "./useShellAgentController";
+import { useProjects } from "../hooks/useProjects";
 
 type ConversationMessage = {
   id: string;
@@ -70,10 +71,12 @@ export function ChatWorkspace() {
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
+  const projectStore = useProjects();
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
+  const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
   const draftHydrationKey = useRef<string | null>(null);
   const activeAssistantMessageId = useRef<string | null>(null);
   const boundWorkspaceId =
@@ -83,7 +86,6 @@ export function ChatWorkspace() {
       ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
       : null;
   const conversationWorkspaceId = useRef<string | null>(boundWorkspaceId);
-  const projectFolderInputRef = useRef<HTMLInputElement | null>(null);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
   const verifiedProfile = useMemo(() => {
     const display = runtime.identityStatus.authentication?.verifiedDisplayAttributes;
@@ -139,6 +141,7 @@ export function ChatWorkspace() {
 
       void agent.cancel();
       setSelectedConversationThreadId(undefined);
+      setNewThreadProjectId(null);
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
       navigationHistory.current = [runtime.activeItem];
@@ -157,6 +160,7 @@ export function ChatWorkspace() {
     if (conversationWorkspaceId.current !== boundWorkspaceId) {
       void agent.cancel();
       setSelectedConversationThreadId(undefined);
+      setNewThreadProjectId(null);
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
       navigationHistory.current = [runtime.activeItem];
@@ -240,6 +244,30 @@ export function ChatWorkspace() {
       pinnedContextIds: []
     })),
     [durableConversation.state.threads]
+  );
+  const standaloneThreads = useMemo(
+    () => durableThreads.filter((thread) => thread.kind === "chat"),
+    [durableThreads]
+  );
+  const projectWorkspaces = useMemo(
+    () => projectStore.projects.map((project: Omit<SidebarProject, "threads">) => ({
+      ...project,
+      description: project.description ?? "",
+      instructions: project.instructions ?? "",
+      threads: durableThreads.filter((thread) =>
+        durableConversation.state.threads.some((record) => record.id === thread.id && record.projectId === project.id)
+      )
+    })),
+    [durableConversation.state.threads, durableThreads, projectStore.projects]
+  );
+  const archivedProjectWorkspaces = useMemo(
+    () => projectStore.archivedProjects.map((project: Omit<SidebarProject, "threads">) => ({
+      ...project,
+      description: project.description ?? "",
+      instructions: project.instructions ?? "",
+      threads: []
+    })),
+    [projectStore.archivedProjects]
   );
 
   useEffect(() => {
@@ -526,6 +554,7 @@ export function ChatWorkspace() {
       setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
         authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "current-member" as never },
+        ...(newThreadProjectId ? { projectId: newThreadProjectId as never } : {}),
         title: submitted.slice(0, 72)
       });
       await durableConversation.deleteDraft();
@@ -718,8 +747,11 @@ export function ChatWorkspace() {
         profile={verifiedProfile}
         expandedCollections={expandedCollections}
         expandedProjects={expandedProjects}
-        projects={projects}
-        chatThreads={durableThreads}
+        projects={projectWorkspaces}
+        archivedProjects={archivedProjectWorkspaces}
+        projectsLoading={projectStore.loading}
+        projectsError={projectStore.error}
+        chatThreads={standaloneThreads}
         mobileNavOpen={runtime.mobileNavOpen}
         collapsed={sidebarCollapsed}
         loadingItemIds={loadingItemIds}
@@ -732,21 +764,32 @@ export function ChatWorkspace() {
         onNavigateForward={() => navigateHistory(1)}
         onCloseSettings={closeSettingsModal}
         onNewChat={() => {
+          setNewThreadProjectId(null);
           setSelectedConversationThreadId(undefined);
           activeAssistantMessageId.current = null;
           setConversationMessages([]);
           runtime.setComposerValue("");
           runtime.startNewChat();
         }}
-        onAddProject={() => {
-          runtime.setActiveItem("new-thread");
-          runtime.setLastAction("New project from scratch ready");
-          runtime.focusComposer("Start a new project from scratch: ");
+        onAddProject={(input) => projectStore.create(input)}
+        onNewProjectChat={(projectId) => {
+          setNewThreadProjectId(projectId);
+          setSelectedConversationThreadId(undefined);
+          activeAssistantMessageId.current = null;
+          setConversationMessages([]);
+          runtime.setComposerValue("");
+          runtime.startNewChat();
+          runtime.setLastAction("New project chat ready");
         }}
-        onOpenProjectFolder={() => {
-          runtime.setActiveItem("new-thread");
-          runtime.setLastAction("Choose a project folder");
-          projectFolderInputRef.current?.click();
+        onRenameProject={(project, title) => projectStore.update({ projectId: project.id, baseRevision: project.revision, title })}
+        onArchiveProject={(project) => projectStore.archive(project)}
+        onRestoreProject={(project) => projectStore.restore(project)}
+        onDeleteProject={async (project) => {
+          await projectStore.remove(project);
+          await durableConversation.refresh();
+        }}
+        onMoveThread={async (threadId, projectId) => {
+          await durableConversation.updateThread({ threadId: threadId as never, projectId: projectId as never });
         }}
         onSearch={() => {
           runtime.setLastAction("Search ready");
@@ -816,29 +859,6 @@ export function ChatWorkspace() {
           runtime.setLastAction(`${page} selected`);
         }}
       />
-      <input
-        ref={(node) => {
-          projectFolderInputRef.current = node;
-          node?.setAttribute("webkitdirectory", "");
-          node?.setAttribute("directory", "");
-        }}
-        className="sr-only"
-        type="file"
-        multiple
-        aria-label="Open project folder"
-        onChange={(event) => {
-          const firstFile = event.currentTarget.files?.[0];
-          event.currentTarget.value = "";
-          const folderName =
-            firstFile?.webkitRelativePath.split("/")[0] ||
-            firstFile?.name ||
-            "selected folder";
-          const prompt = `Open the ${folderName} folder as a project: `;
-          runtime.focusComposer(prompt);
-          runtime.setLastAction(`Project folder selected: ${folderName}`);
-        }}
-      />
-
       <section className="workspace" aria-label="Fable workspace">
         {runtime.activePage && !isSettingsActive ? (
           <ShellPageBoundary runtime={runtime} />

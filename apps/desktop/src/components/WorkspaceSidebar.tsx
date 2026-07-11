@@ -4,6 +4,8 @@ import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
+import { Archive } from "@phosphor-icons/react/dist/csr/Archive";
+import { ArrowCounterClockwise } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
@@ -12,13 +14,14 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { SignOut } from "@phosphor-icons/react/dist/csr/SignOut";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { Icon } from "@phosphor-icons/react/dist/lib/types";
-import type { AccountWorkspaceSummary, ProjectWorkspace, ThreadSummary } from "@fable/protocol";
+import type { AccountWorkspaceSummary, ThreadSummary } from "@fable/protocol";
 import type { SettingsTab } from "./pages/settings-tabs";
 
 /**
@@ -28,6 +31,16 @@ import type { SettingsTab } from "./pages/settings-tabs";
 export interface UtilityNavItem {
   label: string;
   icon: Icon;
+}
+
+export interface SidebarProject {
+  id: string;
+  title: string;
+  description: string;
+  instructions: string;
+  lifecycle: "active" | "archived";
+  revision: number;
+  threads: ThreadSummary[];
 }
 
 const userSettingsTabs = [
@@ -44,12 +57,20 @@ export function WorkspaceSidebar({
   expandedCollections,
   expandedProjects,
   projects,
+  archivedProjects = [],
+  projectsLoading = false,
+  projectsError,
   chatThreads,
   mobileNavOpen,
   collapsed,
   onNewChat,
   onAddProject,
-  onOpenProjectFolder,
+  onNewProjectChat,
+  onRenameProject,
+  onArchiveProject,
+  onRestoreProject,
+  onDeleteProject,
+  onMoveThread,
   onSearch,
   onSelectWorkspace,
   onToggleProjects,
@@ -84,13 +105,21 @@ export function WorkspaceSidebar({
   activeItem: string;
   expandedCollections: { projects: boolean; chats: boolean };
   expandedProjects: Record<string, boolean>;
-  projects: ProjectWorkspace[];
+  projects: SidebarProject[];
+  archivedProjects?: SidebarProject[];
+  projectsLoading?: boolean;
+  projectsError?: string | null;
   chatThreads: ThreadSummary[];
   mobileNavOpen: boolean;
   collapsed: boolean;
   onNewChat: () => void;
-  onAddProject: () => void;
-  onOpenProjectFolder: () => void;
+  onAddProject: (input: { title: string; description?: string; instructions?: string }) => void | Promise<void>;
+  onNewProjectChat: (projectId: string) => void;
+  onRenameProject: (project: SidebarProject, title: string) => void | Promise<void>;
+  onArchiveProject: (project: SidebarProject) => void | Promise<void>;
+  onRestoreProject: (project: SidebarProject) => void | Promise<void>;
+  onDeleteProject: (project: SidebarProject) => void | Promise<void>;
+  onMoveThread: (threadId: string, projectId: string | null) => void | Promise<void>;
   onSearch: () => void;
   onSelectWorkspace: () => void;
   onToggleProjects: () => void;
@@ -126,6 +155,11 @@ export function WorkspaceSidebar({
   const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [workspaceError, setWorkspaceError] = useState("");
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
+  const [projectTitle, setProjectTitle] = useState("");
+  const [projectDescription, setProjectDescription] = useState("");
+  const [projectInstructions, setProjectInstructions] = useState("");
+  const [projectActionError, setProjectActionError] = useState("");
+  const [archivedProjectsOpen, setArchivedProjectsOpen] = useState(false);
   const [chatFlyoutOpen, setChatFlyoutOpen] = useState(false);
   const [chatHistoryModalOpen, setChatHistoryModalOpen] = useState(false);
   const [chatHistorySearch, setChatHistorySearch] = useState("");
@@ -155,6 +189,32 @@ export function WorkspaceSidebar({
     () => accountWorkspaces.filter((workspace) => workspace.workspaceStatus === "active" && workspace.membershipStatus === "active"),
     [accountWorkspaces]
   );
+
+  const runProjectAction = async (action: () => void | Promise<void>) => {
+    setProjectActionError("");
+    try {
+      await action();
+    } catch {
+      setProjectActionError("That project couldn’t be updated. Try again.");
+    }
+  };
+
+  const createProject = async (event: FormEvent) => {
+    event.preventDefault();
+    const title = projectTitle.trim();
+    if (!title) return;
+    await runProjectAction(async () => {
+      await onAddProject({
+        title,
+        ...(projectDescription.trim() ? { description: projectDescription.trim() } : {}),
+        ...(projectInstructions.trim() ? { instructions: projectInstructions.trim() } : {})
+      });
+      setProjectCreateOpen(false);
+      setProjectTitle("");
+      setProjectDescription("");
+      setProjectInstructions("");
+    });
+  };
 
   const closeWorkspaceMenu = () => {
     setWorkspaceDropdownOpen(false);
@@ -528,33 +588,39 @@ export function WorkspaceSidebar({
                     <Plus size={13} weight="bold" />
                   </button>
                   {projectCreateOpen ? (
-                    <div className="project-create-menu" role="menu" aria-label="Add project">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setProjectCreateOpen(false);
-                          onOpenProjectFolder();
-                        }}
-                      >
-                        <FolderOpen size={15} />
-                        <span>Open folder</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setProjectCreateOpen(false);
-                          onAddProject();
-                        }}
-                      >
-                        <NotePencil size={15} />
-                        <span>Start from scratch</span>
-                      </button>
-                    </div>
+                    <form className="project-create-menu project-create-form" aria-label="Create project" onSubmit={(event) => void createProject(event)}>
+                      <label>
+                        <span>Project name</span>
+                        <input
+                          autoFocus
+                          value={projectTitle}
+                          onChange={(event) => setProjectTitle(event.target.value)}
+                          placeholder="Project name"
+                        />
+                      </label>
+                      <details>
+                        <summary>Add details</summary>
+                        <label>
+                          <span>Description</span>
+                          <textarea value={projectDescription} onChange={(event) => setProjectDescription(event.target.value)} />
+                        </label>
+                        <label>
+                          <span>Project guidance</span>
+                          <textarea value={projectInstructions} onChange={(event) => setProjectInstructions(event.target.value)} />
+                        </label>
+                      </details>
+                      <div className="project-create-form__actions">
+                        <button type="button" onClick={() => setProjectCreateOpen(false)}>Cancel</button>
+                        <button type="submit" disabled={!projectTitle.trim()}>Create</button>
+                      </div>
+                    </form>
                   ) : null}
                 </div>
               </div>
+              {projectsLoading ? <p className="project-list-state" role="status">Loading projects…</p> : null}
+              {projectsError ? <p className="project-list-state project-list-state--error" role="alert">{projectsError}</p> : null}
+              {!projectsLoading && !projectsError && !hasProjects ? <p className="project-list-state">No projects yet</p> : null}
+              {projectActionError ? <p className="project-list-state project-list-state--error" role="alert">{projectActionError}</p> : null}
               {hasProjects && expandedCollections.projects ? (
                 <div className="project-list">
                   {projects.map((project) => {
@@ -562,7 +628,7 @@ export function WorkspaceSidebar({
                     const projectLoading = loadingItemIds.includes(project.id) || project.threads.some(t => loadingItemIds.includes(t.id));
                     return (
                       <div className="project-block" key={project.id}>
-                        {project.threads.length > 0 ? (
+                        <div className="project-row-shell">
                           <button
                             type="button"
                             className={`project-row${projectLoading ? " project-row--loading" : ""}`}
@@ -572,28 +638,63 @@ export function WorkspaceSidebar({
                             <FolderOpen size={15} />
                             <span>{project.title}</span>
                           </button>
-                        ) : (
-                          <div className="project-row">
-                            <FolderOpen size={15} />
-                            <span>{project.title}</span>
+                          <div className="project-row-actions" aria-label={`${project.title} project actions`}>
+                            <button type="button" aria-label={`New chat in ${project.title}`} title="New chat" onClick={() => onNewProjectChat(project.id)}>
+                              <Plus size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Rename ${project.title}`}
+                              title="Rename"
+                              onClick={() => {
+                                const title = window.prompt("Project name", project.title)?.trim();
+                                if (title && title !== project.title) void runProjectAction(() => onRenameProject(project, title));
+                              }}
+                            >
+                              <NotePencil size={13} />
+                            </button>
+                            <button type="button" aria-label={`Archive ${project.title}`} title="Archive" onClick={() => void runProjectAction(() => onArchiveProject(project))}>
+                              <Archive size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Delete ${project.title}`}
+                              title="Delete permanently"
+                              onClick={() => {
+                                if (window.confirm(`Delete “${project.title}” permanently? Its chats will stay in this workspace.`)) {
+                                  void runProjectAction(() => onDeleteProject(project));
+                                }
+                              }}
+                            >
+                              <Trash size={13} />
+                            </button>
                           </div>
-                        )}
+                        </div>
                         {project.threads.length > 0 && expanded ? (
                           <div className="nested-thread-list">
                             {project.threads.map((thread) => {
                               const isActive = activeItem === thread.id;
                               const isThreadLoading = loadingItemIds.includes(thread.id);
                               return (
-                                <button
-                                  key={thread.id}
-                                  type="button"
-                                  className={`thread-row thread-row--nested${
-                                    isActive ? " thread-row--active" : ""
-                                  }${isThreadLoading ? " thread-row--loading" : ""}`}
-                                  onClick={() => onSelectProjectThread(thread, project.title)}
-                                >
-                                  {thread.title}
-                                </button>
+                                <div className="thread-row-shell" key={thread.id}>
+                                  <button
+                                    type="button"
+                                    className={`thread-row thread-row--nested${
+                                      isActive ? " thread-row--active" : ""
+                                    }${isThreadLoading ? " thread-row--loading" : ""}`}
+                                    onClick={() => onSelectProjectThread(thread, project.title)}
+                                  >
+                                    {thread.title}
+                                  </button>
+                                  <select
+                                    aria-label={`Move ${thread.title}`}
+                                    value={project.id}
+                                    onChange={(event) => void runProjectAction(() => onMoveThread(thread.id, event.target.value || null))}
+                                  >
+                                    <option value="">Move to Chats</option>
+                                    {projects.map((destination) => <option key={destination.id} value={destination.id}>{destination.title}</option>)}
+                                  </select>
+                                </div>
                               );
                             })}
                           </div>
@@ -601,6 +702,21 @@ export function WorkspaceSidebar({
                       </div>
                     );
                   })}
+                </div>
+              ) : null}
+              {archivedProjects.length > 0 ? (
+                <div className="archived-projects">
+                  <button type="button" className="archived-projects__toggle" aria-expanded={archivedProjectsOpen} onClick={() => setArchivedProjectsOpen((open) => !open)}>
+                    <Archive size={13} /> Archived ({archivedProjects.length})
+                  </button>
+                  {archivedProjectsOpen ? archivedProjects.map((project) => (
+                    <div className="archived-project-row" key={project.id}>
+                      <span>{project.title}</span>
+                      <button type="button" onClick={() => void runProjectAction(() => onRestoreProject(project))}>
+                        <ArrowCounterClockwise size={13} /> Restore
+                      </button>
+                    </div>
+                  )) : null}
                 </div>
               ) : null}
             </section>
@@ -647,20 +763,27 @@ export function WorkspaceSidebar({
                       const isActive = activeItem === thread.id;
                       const isThreadLoading = loadingItemIds.includes(thread.id);
                       return (
-                        <button
-                          key={thread.id}
-                          type="button"
-                          role="menuitem"
-                          className={`thread-row${isActive ? " thread-row--active" : ""}${
-                            isThreadLoading ? " thread-row--loading" : ""
-                          }`}
-                          onClick={() => {
-                            setChatFlyoutOpen(false);
-                            onSelectThread(thread);
-                          }}
-                        >
-                          {thread.title}
-                        </button>
+                        <div className="thread-row-shell" key={thread.id}>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className={`thread-row${isActive ? " thread-row--active" : ""}${
+                              isThreadLoading ? " thread-row--loading" : ""
+                            }`}
+                            onClick={() => {
+                              setChatFlyoutOpen(false);
+                              onSelectThread(thread);
+                            }}
+                          >
+                            {thread.title}
+                          </button>
+                          {projects.length > 0 ? (
+                            <select aria-label={`Move ${thread.title}`} value="" onChange={(event) => void runProjectAction(() => onMoveThread(thread.id, event.target.value || null))}>
+                              <option value="">Move to…</option>
+                              {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+                            </select>
+                          ) : null}
+                        </div>
                       );
                     })}
                   </div>
@@ -802,20 +925,28 @@ export function WorkspaceSidebar({
                       <FolderOpen size={14} />
                       {project.title}
                     </span>
+                    <button type="button" aria-label={`New chat in ${project.title}`} onClick={() => onNewProjectChat(project.id)}>
+                      <Plus size={13} /> New chat
+                    </button>
                     {project.threads.map((thread) => {
                       const isActive = activeItem === thread.id;
                       const isThreadLoading = loadingItemIds.includes(thread.id);
                       return (
-                        <button
-                          key={thread.id}
-                          type="button"
-                          className={`thread-row thread-row--nested${
-                            isActive ? " thread-row--active" : ""
-                          }${isThreadLoading ? " thread-row--loading" : ""}`}
-                          onClick={() => onSelectProjectThread(thread, project.title)}
-                        >
-                          {thread.title}
-                        </button>
+                        <div className="thread-row-shell" key={thread.id}>
+                          <button
+                            type="button"
+                            className={`thread-row thread-row--nested${
+                              isActive ? " thread-row--active" : ""
+                            }${isThreadLoading ? " thread-row--loading" : ""}`}
+                            onClick={() => onSelectProjectThread(thread, project.title)}
+                          >
+                            {thread.title}
+                          </button>
+                          <select aria-label={`Move ${thread.title}`} value={project.id} onChange={(event) => void runProjectAction(() => onMoveThread(thread.id, event.target.value || null))}>
+                            <option value="">Move to Chats</option>
+                            {projects.map((destination) => <option key={destination.id} value={destination.id}>{destination.title}</option>)}
+                          </select>
+                        </div>
                       );
                     })}
                   </div>
@@ -828,16 +959,23 @@ export function WorkspaceSidebar({
                   const isActive = activeItem === thread.id;
                   const isThreadLoading = loadingItemIds.includes(thread.id);
                   return (
-                    <button
-                      key={thread.id}
-                      type="button"
-                      className={`thread-row${isActive ? " thread-row--active" : ""}${
-                        isThreadLoading ? " thread-row--loading" : ""
-                      }`}
-                      onClick={() => onSelectThread(thread)}
-                    >
-                      {thread.title}
-                    </button>
+                    <div className="thread-row-shell" key={thread.id}>
+                      <button
+                        type="button"
+                        className={`thread-row${isActive ? " thread-row--active" : ""}${
+                          isThreadLoading ? " thread-row--loading" : ""
+                        }`}
+                        onClick={() => onSelectThread(thread)}
+                      >
+                        {thread.title}
+                      </button>
+                      {projects.length > 0 ? (
+                        <select aria-label={`Move ${thread.title}`} value="" onChange={(event) => void runProjectAction(() => onMoveThread(thread.id, event.target.value || null))}>
+                          <option value="">Move to…</option>
+                          {projects.map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
+                        </select>
+                      ) : null}
+                    </div>
                   );
                 })}
               </section>
