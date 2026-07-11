@@ -710,11 +710,24 @@ async fn redeem_handoff(
     Ok(tokens)
 }
 
-async fn complete_with_store(
+struct CredentialRollback {
+    credential_ref: String,
+    previous_secret: Option<String>,
+}
+
+async fn complete_with_store_reversible(
     connector_id: &str,
     callback_url: &str,
     store: &dyn ConnectorSecretStore,
-) -> Result<(StoredTokenSet, ConnectorAccountSummary, String), ConnectorCommandError> {
+) -> Result<
+    (
+        StoredTokenSet,
+        ConnectorAccountSummary,
+        String,
+        CredentialRollback,
+    ),
+    ConnectorCommandError,
+> {
     let callback = Url::parse(callback_url).map_err(|_| {
         command_error(
             "invalid-request",
@@ -922,11 +935,12 @@ async fn complete_with_store(
         }
     };
     let credential_ref = native_connector_credential_ref(connector_id, &account.id);
-    let previous = store
+    let previous_secret = store
         .get(&credential_ref)
-        .ok()
-        .flatten()
-        .and_then(|encoded| serde_json::from_str::<StoredTokenSet>(&encoded).ok());
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let previous = previous_secret
+        .as_deref()
+        .and_then(|encoded| serde_json::from_str::<StoredTokenSet>(encoded).ok());
     let granted_scopes: Vec<String> = match response.scope.as_deref() {
         Some(scope) => scope.split_whitespace().map(str::to_string).collect(),
         // Public installed-app tokens must not inherit historical grants:
@@ -966,7 +980,53 @@ async fn complete_with_store(
             })?,
         )
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    Ok((tokens, account, credential_ref))
+    Ok((
+        tokens,
+        account,
+        credential_ref.clone(),
+        CredentialRollback {
+            credential_ref,
+            previous_secret,
+        },
+    ))
+}
+
+#[cfg(test)]
+async fn complete_with_store(
+    connector_id: &str,
+    callback_url: &str,
+    store: &dyn ConnectorSecretStore,
+) -> Result<(StoredTokenSet, ConnectorAccountSummary, String), ConnectorCommandError> {
+    complete_with_store_reversible(connector_id, callback_url, store)
+        .await
+        .map(|(tokens, account, credential_ref, _)| (tokens, account, credential_ref))
+}
+
+fn rollback_credential(
+    store: &dyn ConnectorSecretStore,
+    rollback: CredentialRollback,
+) -> Result<(), String> {
+    match rollback.previous_secret {
+        Some(previous) => store.set(&rollback.credential_ref, &previous),
+        None => store.remove(&rollback.credential_ref),
+    }
+}
+
+fn finish_metadata_commit(
+    result: Result<(), String>,
+    store: &dyn ConnectorSecretStore,
+    rollback: CredentialRollback,
+) -> Result<(), String> {
+    if let Err(error) = result {
+        return match rollback_credential(store, rollback) {
+            Ok(()) => Err(error),
+            Err(_) => Err(
+                "Fable could not save connector state or restore the prior credential; reconnect this provider."
+                    .into(),
+            ),
+        };
+    }
+    Ok(())
 }
 
 async fn fetch_identity(
@@ -1169,45 +1229,47 @@ pub(crate) async fn complete_auth(
             false,
         )
     })?;
-    let (tokens, account, credential_ref) =
-        complete_with_store(connector_id, &callback, &NativeConnectorSecretStore).await?;
-    let timestamp = now_epoch().to_string();
-    let connection = ConnectorConnection {
-        connector_id: connector_id.to_string(),
-        account: account.clone(),
-        status: "connected".to_string(),
-        scopes: tokens.scopes,
-        expires_at: tokens.expires_at,
-        credential_ref,
-        connected_at: timestamp.clone(),
-        updated_at: timestamp,
-        is_active: true,
-    };
-    let path = connector_connections_path(app)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    let mut connections = read_connections(&path)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    // Multi-account: keep every other account for this connector, deactivate
-    // them (the freshly authenticated one becomes active), and replace the
-    // matching account in place if the user re-authenticated it. Connecting a
-    // brand-new account therefore never discards an existing one.
-    let mut replaced = false;
-    for existing in connections.iter_mut() {
-        if existing.connector_id == connector_id {
-            existing.is_active = false;
-            if existing.account.id == account.id {
-                *existing = connection.clone();
-                replaced = true;
+    let secret_store = NativeConnectorSecretStore;
+    let (tokens, account, credential_ref, rollback) =
+        complete_with_store_reversible(connector_id, &callback, &secret_store).await?;
+    let metadata_result = (|| {
+        let timestamp = now_epoch().to_string();
+        let connection = ConnectorConnection {
+            connector_id: connector_id.to_string(),
+            account: account.clone(),
+            status: "connected".to_string(),
+            scopes: tokens.scopes,
+            expires_at: tokens.expires_at,
+            credential_ref,
+            connected_at: timestamp.clone(),
+            updated_at: timestamp,
+            is_active: true,
+        };
+        let path = connector_connections_path(app)?;
+        let mut connections = read_connections(&path)?;
+        // Multi-account: keep every other account for this connector, deactivate
+        // them (the freshly authenticated one becomes active), and replace the
+        // matching account in place if the user re-authenticated it. Connecting a
+        // brand-new account therefore never discards an existing one.
+        let mut replaced = false;
+        for existing in connections.iter_mut() {
+            if existing.connector_id == connector_id {
+                existing.is_active = false;
+                if existing.account.id == account.id {
+                    *existing = connection.clone();
+                    replaced = true;
+                }
             }
         }
-    }
-    if !replaced {
-        connections.insert(0, connection);
-    }
-    // Backfill `is_active` for any legacy entry missing the field: the most
-    // recently connected account per connector wins as active.
-    promote_single_active(&mut connections, connector_id);
-    write_connections(&path, &connections)
+        if !replaced {
+            connections.insert(0, connection);
+        }
+        // Backfill `is_active` for any legacy entry missing the field: the most
+        // recently connected account per connector wins as active.
+        promote_single_active(&mut connections, connector_id);
+        write_connections(&path, &connections)
+    })();
+    finish_metadata_commit(metadata_result, &secret_store, rollback)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     Ok(ConnectorAuthResult {
         connector_id: connector_id.to_string(),
@@ -1879,6 +1941,66 @@ mod tests {
         assert!(!disk.contains("access_token"));
         assert!(!disk.contains("refresh_token"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn metadata_failure_restores_previous_or_removes_new_credential() {
+        let path = std::env::temp_dir()
+            .join(format!("fable-missing-parent-{}", std::process::id()))
+            .join("connector-connections.json");
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+        let connection = ConnectorConnection {
+            connector_id: "fixture".into(),
+            account: ConnectorAccountSummary {
+                id: "account-1".into(),
+                display_name: "Fixture".into(),
+                handle: None,
+                email: None,
+                workspace: None,
+                avatar_url: None,
+            },
+            status: "connected".into(),
+            scopes: vec![],
+            expires_at: None,
+            credential_ref: "oauth-token:fixture:account-1".into(),
+            connected_at: "1".into(),
+            updated_at: "1".into(),
+            is_active: true,
+        };
+
+        let store = MemoryStore::default();
+        let existing_ref = "oauth-token:fixture:account-1";
+        store.set(existing_ref, "old-secret").unwrap();
+        store.set(existing_ref, "new-secret").unwrap();
+        let error = finish_metadata_commit(
+            write_connections(&path, std::slice::from_ref(&connection)),
+            &store,
+            CredentialRollback {
+                credential_ref: existing_ref.into(),
+                previous_secret: Some("old-secret".into()),
+            },
+        )
+        .unwrap_err();
+        assert_eq!(
+            store.get(existing_ref).unwrap().as_deref(),
+            Some("old-secret")
+        );
+        assert!(!error.contains("old-secret"));
+        assert!(!error.contains("new-secret"));
+
+        let new_ref = "oauth-token:fixture:account-2";
+        store.set(new_ref, "brand-new-secret").unwrap();
+        let error = finish_metadata_commit(
+            write_connections(&path, &[connection]),
+            &store,
+            CredentialRollback {
+                credential_ref: new_ref.into(),
+                previous_secret: None,
+            },
+        )
+        .unwrap_err();
+        assert!(store.get(new_ref).unwrap().is_none());
+        assert!(!error.contains("brand-new-secret"));
     }
 
     #[tokio::test]
