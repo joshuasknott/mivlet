@@ -282,6 +282,10 @@ kbd {
   border-radius: var(--radius-1);
 }
 
+.response-artifact > section > button {
+  justify-self: start;
+}
+
 .response-artifact__header {
   align-items: baseline;
   display: flex;
