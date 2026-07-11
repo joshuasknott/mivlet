@@ -1281,12 +1281,44 @@ pub fn list_connector_accounts(
             false,
         )
     })?;
-    reconcile_canonical_connector_accounts(store, &scope, entry.id, &connections)?;
-    Ok(account_options_from_connections(
-        &connections,
+    let canonical = reconcile_canonical_connector_accounts(store, &scope, entry.id, &connections)?;
+    project_canonical_account_options(
+        account_options_from_connections(&connections, entry.id, &workspace_id),
+        &canonical,
         entry.id,
-        &workspace_id,
-    ))
+    )
+}
+
+fn project_canonical_account_options(
+    options: Vec<crate::models::ConnectorAccountOption>,
+    canonical: &[crate::store::repos::connection_record::SafeConnectionRecord],
+    connector_id: &str,
+) -> Result<Vec<crate::models::ConnectorAccountOption>, ConnectorCommandError> {
+    let records: BTreeMap<&str, &crate::store::repos::connection_record::SafeConnectionRecord> =
+        canonical
+            .iter()
+            .filter(|record| record.connector_definition_key == connector_id)
+            .map(|record| (record.id.as_str(), record))
+            .collect();
+    options
+        .into_iter()
+        .map(|mut option| {
+            let record = records.get(option.connection_id.as_str()).ok_or_else(|| {
+                command_error(
+                    "unknown",
+                    connector_id,
+                    "Connection metadata is unavailable; refresh and try again.",
+                    false,
+                )
+            })?;
+            option.lifecycle = record.lifecycle.clone();
+            option.authorization_state = record.authorization_state.clone();
+            option.health_state = record.health_state.clone();
+            option.credential_custody = record.credential_custody.clone();
+            option.credential_state = record.credential_state.clone();
+            Ok(option)
+        })
+        .collect()
 }
 
 fn reconcile_canonical_connector_accounts(
@@ -1294,7 +1326,8 @@ fn reconcile_canonical_connector_accounts(
     scope: &crate::authorized_scope::AuthorizedCommandScope,
     connector_id: &str,
     connections: &[ConnectorConnection],
-) -> Result<(), ConnectorCommandError> {
+) -> Result<Vec<crate::store::repos::connection_record::SafeConnectionRecord>, ConnectorCommandError>
+{
     store
         .transaction(|tx| {
             for connection in connections
@@ -1306,9 +1339,8 @@ fn reconcile_canonical_connector_accounts(
                     connector_id,
                     &connection.account.id,
                 );
-                let expected_revision =
-                    crate::store::repos::connection_record::get(tx, store, scope, &id)?
-                        .map(|record| record.revision);
+                let existing = crate::store::repos::connection_record::get(tx, store, scope, &id)?;
+                let expected_revision = existing.as_ref().map(|record| record.revision);
                 let (lifecycle, authorization_state, credential_state) =
                     match connection.status.as_str() {
                         "connected" => ("authorized", "authorized", "available"),
@@ -1325,14 +1357,17 @@ fn reconcile_canonical_connector_accounts(
                         display_name: &connection.account.display_name,
                         lifecycle,
                         authorization_state,
-                        health_state: "unknown",
+                        health_state: existing
+                            .as_ref()
+                            .map(|record| record.health_state.as_str())
+                            .unwrap_or("unknown"),
                         credential_state,
                         expected_revision,
                         updated_at: &connection.updated_at,
                     },
                 )?;
             }
-            Ok(())
+            crate::store::repos::connection_record::list(tx, store, scope)
         })
         .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))
 }
@@ -1859,6 +1894,29 @@ mod workspace_scope_tests {
         assert!(!serde_json::to_string(&records)
             .unwrap()
             .contains("provider-account-secret"));
+        let mut canonical_health = records.clone();
+        canonical_health[0].health_state = "healthy".into();
+        let projected = project_canonical_account_options(
+            account_options_from_connections(
+                std::slice::from_ref(&connection),
+                "gmail",
+                scope_a.data.workspace_id(),
+            ),
+            &canonical_health,
+            "gmail",
+        )
+        .unwrap();
+        assert_eq!(projected[0].health_state, "healthy");
+        assert!(project_canonical_account_options(
+            account_options_from_connections(
+                std::slice::from_ref(&connection),
+                "gmail",
+                scope_a.data.workspace_id(),
+            ),
+            &[],
+            "gmail",
+        )
+        .is_err());
 
         store
             .transaction(|tx| {
