@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptRuntimePendingInvitation,
+  changeRuntimeWorkspaceMember,
   loadRuntimePendingInvitations,
   loadRuntimeWorkspaceMembers
 } from "./runtime";
@@ -25,6 +26,11 @@ describe("membership invitation runtime boundary", () => {
   it("does not simulate an invitation inbox outside Tauri", async () => {
     await expect(loadRuntimePendingInvitations()).resolves.toBeNull();
     await expect(loadRuntimeWorkspaceMembers("workspace-a")).resolves.toBeNull();
+    await expect(changeRuntimeWorkspaceMember({
+      memberActionRef: "member-action-a",
+      action: "suspend",
+      expectedRevision: 2
+    })).resolves.toBeNull();
     await expect(acceptRuntimePendingInvitation("invitation-a")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -34,15 +40,28 @@ describe("membership invitation runtime boundary", () => {
     mocks.invoke
       .mockResolvedValueOnce({ invitations: [] })
       .mockResolvedValueOnce({ workspaceId: "workspace-a", actorRole: "owner", members: [] })
+      .mockResolvedValueOnce({ status: "accepted", message: "Workspace access updated." })
       .mockResolvedValueOnce({ result: { status: "rejected" }, accountWorkspace: {} });
 
     await loadRuntimePendingInvitations();
     await loadRuntimeWorkspaceMembers("workspace-a");
+    await changeRuntimeWorkspaceMember({
+      memberActionRef: "member-action-a",
+      action: "change-role",
+      expectedRevision: 2,
+      role: "viewer"
+    });
     await acceptRuntimePendingInvitation("invitation-a");
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["account_membership_pending_invitations"],
       ["account_workspace_members", { fableWorkspaceId: "workspace-a" }],
+      ["account_workspace_member_change", { request: {
+        memberActionRef: "member-action-a",
+        action: "change-role",
+        expectedRevision: 2,
+        role: "viewer"
+      } }],
       ["account_membership_accept_invitation", { invitationId: "invitation-a" }]
     ]);
   });

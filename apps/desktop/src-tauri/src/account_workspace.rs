@@ -4,9 +4,10 @@
 //! credentials, Convex paths, internal-user IDs, idempotency keys, and the
 //! per-install device identity remain native concerns.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Mutex, OnceLock};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{SecondsFormat, TimeZone, Utc};
@@ -20,6 +21,9 @@ use crate::store::repos::workspace_directory as directory;
 const DEVICE_KEYRING_SERVICE: &str = "com.fable.workspace.account-device";
 const DEVICE_KEYRING_ENTRY: &str = "install-device-id";
 const ACCOUNT_CHANGED_ERROR: &str = "Fable account changed during the request. Please try again.";
+const MEMBER_ACTION_REF_LIMIT: usize = 2_000;
+const WORKSPACE_CONTEXT_CHANGED_ERROR: &str =
+    "The active workspace changed during the request. Please try again.";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -176,7 +180,16 @@ pub struct AccountPendingInvitationList {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AccountWorkspaceMemberSummary {
+struct HostedWorkspaceMemberManagement {
+    allowed_roles: Vec<String>,
+    allowed_actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    blocked_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedAccountWorkspaceMemberSummary {
     member_id: String,
     role: String,
     status: String,
@@ -186,10 +199,43 @@ struct AccountWorkspaceMemberSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     email_hint: Option<String>,
     is_current_user: bool,
+    management: HostedWorkspaceMemberManagement,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HostedAccountWorkspaceMemberList {
+    workspace_id: String,
+    actor_role: String,
+    members: Vec<HostedAccountWorkspaceMemberSummary>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountWorkspaceMemberManagement {
+    allowed_roles: Vec<String>,
+    allowed_actions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocked_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountWorkspaceMemberSummary {
+    member_action_ref: String,
+    role: String,
+    status: String,
+    revision: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    email_hint: Option<String>,
+    is_current_user: bool,
+    management: AccountWorkspaceMemberManagement,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AccountWorkspaceMemberList {
     workspace_id: String,
     actor_role: String,
@@ -227,6 +273,172 @@ struct LifecycleIdempotencyReceipt {
     key: String,
     replayed: bool,
     recorded_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountWorkspaceMemberChangeRequest {
+    member_action_ref: String,
+    action: String,
+    expected_revision: i64,
+    #[serde(default)]
+    role: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum AccountWorkspaceMemberChangeOutcome {
+    Accepted { message: String },
+    Conflict { code: String, message: String },
+    Rejected { code: String, message: String },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum LastOwnerSafety {
+    Safe {
+        remaining_active_owner_count: i64,
+    },
+    Blocked {
+        remaining_active_owner_count: i64,
+        error: FailClosedAuthorizationError,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+enum HostedMemberChangeResult {
+    Accepted {
+        membership: HostedMembership,
+        last_owner_safety: LastOwnerSafety,
+        idempotency: LifecycleIdempotencyReceipt,
+    },
+    Conflict {
+        #[serde(default)]
+        current_membership: Option<HostedMembership>,
+        #[serde(default)]
+        last_owner_safety: Option<LastOwnerSafety>,
+        error: FailClosedAuthorizationError,
+    },
+    Rejected {
+        #[serde(default)]
+        current_membership: Option<HostedMembership>,
+        #[serde(default)]
+        last_owner_safety: Option<LastOwnerSafety>,
+        error: FailClosedAuthorizationError,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct MemberActionGrant {
+    identity: AccountIdentitySnapshot,
+    internal_user_id: String,
+    workspace_id: String,
+    current_member_id: String,
+    target_member_id: String,
+    target_role: String,
+    target_status: String,
+    target_revision: i64,
+    allowed_roles: BTreeSet<String>,
+    allowed_actions: BTreeSet<String>,
+}
+
+#[derive(Default)]
+struct MemberActionRegistry {
+    grants: BTreeMap<String, MemberActionGrant>,
+    order: VecDeque<String>,
+}
+
+impl MemberActionRegistry {
+    fn replace_context(
+        &mut self,
+        identity: &AccountIdentitySnapshot,
+        context: &directory::AuthorizedWorkspaceContext,
+        roster: HostedAccountWorkspaceMemberList,
+    ) -> Result<AccountWorkspaceMemberList, String> {
+        let workspace_id = context
+            .active_workspace
+            .fable_workspace_id
+            .as_deref()
+            .ok_or_else(|| "The active hosted workspace is unavailable.".to_string())?;
+        let current_member_id = context
+            .member_id
+            .as_deref()
+            .ok_or_else(|| "The active workspace membership is unavailable.".to_string())?;
+        // The desktop exposes one active account/workspace context. A roster
+        // refresh or context switch invalidates every previously issued ref.
+        self.grants.clear();
+        self.order.clear();
+
+        let mut members = Vec::with_capacity(roster.members.len());
+        for member in roster.members {
+            let member_action_ref = opaque_id("member_action")?;
+            let grant = MemberActionGrant {
+                identity: identity.clone(),
+                internal_user_id: context.internal_user_id.clone(),
+                workspace_id: workspace_id.to_string(),
+                current_member_id: current_member_id.to_string(),
+                target_member_id: member.member_id,
+                target_role: member.role.clone(),
+                target_status: member.status.clone(),
+                target_revision: member.revision,
+                allowed_roles: member.management.allowed_roles.iter().cloned().collect(),
+                allowed_actions: member.management.allowed_actions.iter().cloned().collect(),
+            };
+            self.order.push_back(member_action_ref.clone());
+            self.grants.insert(member_action_ref.clone(), grant);
+            members.push(AccountWorkspaceMemberSummary {
+                member_action_ref,
+                role: member.role,
+                status: member.status,
+                revision: member.revision,
+                display_name: member.display_name,
+                email_hint: member.email_hint,
+                is_current_user: member.is_current_user,
+                management: AccountWorkspaceMemberManagement {
+                    allowed_roles: member.management.allowed_roles,
+                    allowed_actions: member.management.allowed_actions,
+                    blocked_reason: member.management.blocked_reason,
+                },
+            });
+        }
+        while self.grants.len() > MEMBER_ACTION_REF_LIMIT {
+            if let Some(reference) = self.order.pop_front() {
+                self.grants.remove(&reference);
+            }
+        }
+        Ok(AccountWorkspaceMemberList {
+            workspace_id: roster.workspace_id,
+            actor_role: roster.actor_role,
+            members,
+        })
+    }
+
+    fn resolve(&self, reference: &str) -> Result<MemberActionGrant, String> {
+        self.grants
+            .get(reference)
+            .cloned()
+            .ok_or_else(|| "Refresh the member list before changing access.".to_string())
+    }
+}
+
+fn member_action_registry() -> &'static Mutex<MemberActionRegistry> {
+    static REGISTRY: OnceLock<Mutex<MemberActionRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(MemberActionRegistry::default()))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -331,6 +543,21 @@ trait HostedAccountTransport: Send + Sync {
     ) -> HostedFuture<'a>;
 }
 
+trait ActiveContextSource: Send + Sync {
+    fn active_context(&self) -> Result<directory::AuthorizedWorkspaceContext, String>;
+}
+
+struct NativeActiveContextSource;
+
+impl ActiveContextSource for NativeActiveContextSource {
+    fn active_context(&self) -> Result<directory::AuthorizedWorkspaceContext, String> {
+        crate::store::try_global()
+            .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?
+            .with_conn(directory::require_active_workspace_context_for_current_user)
+            .map_err(|error| error.to_string())
+    }
+}
+
 type HostedStringFuture<'a> = Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>>;
 
 struct NativeHostedAccountTransport;
@@ -400,6 +627,44 @@ fn invitation_acceptance_idempotency_key(
         "invitation_accept_{}",
         URL_SAFE_NO_PAD.encode(digest.finalize())
     ))
+}
+
+fn member_change_idempotency_key(
+    account_binding: &str,
+    request: &AccountWorkspaceMemberChangeRequest,
+) -> Result<String, String> {
+    if !valid_id(account_binding)
+        || !valid_id(&request.member_action_ref)
+        || request.expected_revision < 0
+    {
+        return Err("Fable could not bind the member access request.".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(b"fable.account-membership.change.v1\0");
+    for value in [
+        account_binding,
+        request.member_action_ref.as_str(),
+        request.action.as_str(),
+        request.role.as_deref().unwrap_or("-"),
+    ] {
+        digest.update(value.as_bytes());
+        digest.update(b"\0");
+    }
+    digest.update(request.expected_revision.to_be_bytes());
+    Ok(format!(
+        "member_change_{}",
+        URL_SAFE_NO_PAD.encode(digest.finalize())
+    ))
+}
+
+fn context_matches_grant(
+    context: &directory::AuthorizedWorkspaceContext,
+    grant: &MemberActionGrant,
+) -> bool {
+    context.internal_user_id == grant.internal_user_id
+        && context.active_workspace.fable_workspace_id.as_deref()
+            == Some(grant.workspace_id.as_str())
+        && context.member_id.as_deref() == Some(grant.current_member_id.as_str())
 }
 
 async fn bound_hosted_call(
@@ -741,12 +1006,170 @@ fn validate_authorization_error(error: &FailClosedAuthorizationError) -> Result<
     if error.r#type != "authorization-error"
         || !CODES.contains(&error.code.as_str())
         || error.message.trim().is_empty()
+        || error.message != error.message.trim()
+        || error.message.chars().count() > 500
+        || error.message.chars().any(is_control_or_format)
         || !["opaque", "safe"].contains(&error.disclosure.as_str())
     {
         return Err("The hosted authorization outcome failed validation.".into());
     }
     let _ = error.retryable;
     Ok(())
+}
+
+fn validate_member_change_request(
+    grant: &MemberActionGrant,
+    request: &AccountWorkspaceMemberChangeRequest,
+) -> Result<(), String> {
+    if request.expected_revision < 0 || request.expected_revision != grant.target_revision {
+        return Err("The member list is out of date. Refresh it and try again.".into());
+    }
+    match request.action.as_str() {
+        "change-role" => {
+            let role = request
+                .role
+                .as_deref()
+                .filter(|role| valid_role(role))
+                .ok_or_else(|| "Choose a valid workspace role.".to_string())?;
+            if !grant.allowed_roles.contains(role) || role == grant.target_role {
+                return Err("This role change is unavailable. Refresh the member list.".into());
+            }
+        }
+        "suspend" | "reactivate" | "remove" => {
+            if request.role.is_some() || !grant.allowed_actions.contains(&request.action) {
+                return Err("This access change is unavailable. Refresh the member list.".into());
+            }
+        }
+        _ => return Err("The member access action is invalid.".into()),
+    }
+    Ok(())
+}
+
+fn validate_member_transition(
+    membership: &HostedMembership,
+    grant: &MemberActionGrant,
+    request: &AccountWorkspaceMemberChangeRequest,
+) -> bool {
+    if membership.workspace_id != grant.workspace_id
+        || membership.member_id != grant.target_member_id
+        || membership.revision != grant.target_revision + 1
+    {
+        return false;
+    }
+    match request.action.as_str() {
+        "change-role" => {
+            membership.role == request.role.as_deref().unwrap_or_default()
+                && membership.status == grant.target_status
+        }
+        "suspend" => membership.role == grant.target_role && membership.status == "suspended",
+        "reactivate" => membership.role == grant.target_role && membership.status == "active",
+        "remove" => membership.role == grant.target_role && membership.status == "removed",
+        _ => false,
+    }
+}
+
+fn validate_blocked_last_owner(
+    safety: Option<&LastOwnerSafety>,
+    error: &FailClosedAuthorizationError,
+) -> Result<(), String> {
+    if error.code != "last-active-owner" {
+        if safety.is_some() {
+            return Err("The hosted member access safety response is ambiguous.".into());
+        }
+        return Ok(());
+    }
+    match safety {
+        Some(LastOwnerSafety::Blocked {
+            remaining_active_owner_count,
+            error: safety_error,
+        }) if *remaining_active_owner_count == 0 => {
+            validate_authorization_error(safety_error)?;
+            if safety_error.code != error.code || safety_error.message != error.message {
+                return Err("The hosted member access safety response did not match.".into());
+            }
+            Ok(())
+        }
+        _ => Err("The hosted member access safety response failed validation.".into()),
+    }
+}
+
+fn parse_member_change_result(
+    value: Value,
+    grant: &MemberActionGrant,
+    request: &AccountWorkspaceMemberChangeRequest,
+    expected_idempotency_key: &str,
+) -> Result<AccountWorkspaceMemberChangeOutcome, String> {
+    let result: HostedMemberChangeResult = serde_json::from_value(value)
+        .map_err(|_| "The hosted member access response is malformed.".to_string())?;
+    match result {
+        HostedMemberChangeResult::Accepted {
+            membership,
+            last_owner_safety,
+            idempotency,
+        } => {
+            validate_membership(&membership)?;
+            if !validate_member_transition(&membership, grant, request)
+                || idempotency.key != expected_idempotency_key
+                || !valid_iso(&idempotency.recorded_at)
+                || !matches!(
+                    last_owner_safety,
+                    LastOwnerSafety::Safe {
+                        remaining_active_owner_count: 1..
+                    }
+                )
+            {
+                return Err("The hosted member access response failed validation.".into());
+            }
+            let _ = idempotency.replayed;
+            Ok(AccountWorkspaceMemberChangeOutcome::Accepted {
+                message: "Workspace access updated.".into(),
+            })
+        }
+        HostedMemberChangeResult::Conflict {
+            current_membership,
+            last_owner_safety,
+            error,
+        } => {
+            validate_authorization_error(&error)?;
+            validate_blocked_last_owner(last_owner_safety.as_ref(), &error)?;
+            if let Some(membership) = &current_membership {
+                validate_membership(membership)?;
+                if membership.workspace_id != grant.workspace_id
+                    || membership.member_id != grant.target_member_id
+                {
+                    return Err(
+                        "The hosted member access conflict did not match the target.".into(),
+                    );
+                }
+            }
+            Ok(AccountWorkspaceMemberChangeOutcome::Conflict {
+                code: error.code,
+                message: error.message,
+            })
+        }
+        HostedMemberChangeResult::Rejected {
+            current_membership,
+            last_owner_safety,
+            error,
+        } => {
+            validate_authorization_error(&error)?;
+            validate_blocked_last_owner(last_owner_safety.as_ref(), &error)?;
+            if let Some(membership) = &current_membership {
+                validate_membership(membership)?;
+                if membership.workspace_id != grant.workspace_id
+                    || membership.member_id != grant.target_member_id
+                {
+                    return Err(
+                        "The hosted member access rejection did not match the target.".into(),
+                    );
+                }
+            }
+            Ok(AccountWorkspaceMemberChangeOutcome::Rejected {
+                code: error.code,
+                message: error.message,
+            })
+        }
+    }
 }
 
 fn parse_pending_invitations(value: Value) -> Result<AccountPendingInvitationList, String> {
@@ -783,8 +1206,8 @@ fn parse_workspace_members(
     value: Value,
     expected_workspace_id: &str,
     expected_current_member_id: &str,
-) -> Result<AccountWorkspaceMemberList, String> {
-    let roster: AccountWorkspaceMemberList = serde_json::from_value(value)
+) -> Result<HostedAccountWorkspaceMemberList, String> {
+    let roster: HostedAccountWorkspaceMemberList = serde_json::from_value(value)
         .map_err(|_| "The hosted workspace member response is malformed.".to_string())?;
     if roster.workspace_id != expected_workspace_id
         || !valid_role(&roster.actor_role)
@@ -796,6 +1219,61 @@ fn parse_workspace_members(
     let mut member_ids = BTreeSet::new();
     let mut current_members = 0;
     for member in &roster.members {
+        let allowed_roles = member
+            .management
+            .allowed_roles
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let allowed_actions = member
+            .management
+            .allowed_actions
+            .iter()
+            .collect::<BTreeSet<_>>();
+        let valid_blocked_reason =
+            member
+                .management
+                .blocked_reason
+                .as_deref()
+                .is_none_or(|reason| {
+                    [
+                        "current-member",
+                        "last-active-owner",
+                        "owner-protected",
+                        "permission-denied",
+                        "unavailable",
+                    ]
+                    .contains(&reason)
+                });
+        let valid_role_projection = allowed_roles.len() == member.management.allowed_roles.len()
+            && allowed_roles.iter().all(|role| {
+                valid_role(role)
+                    && role.as_str() != member.role
+                    && (roster.actor_role == "owner" || role.as_str() != "owner")
+            });
+        let valid_action_projection = allowed_actions.len()
+            == member.management.allowed_actions.len()
+            && allowed_actions.iter().all(|action| {
+                matches!(
+                    (member.status.as_str(), action.as_str()),
+                    ("active", "suspend" | "remove") | ("suspended", "reactivate" | "remove")
+                )
+            });
+        let has_capabilities = !allowed_roles.is_empty() || !allowed_actions.is_empty();
+        let projection_shape_is_valid = if member.is_current_user {
+            !has_capabilities
+                && matches!(
+                    member.management.blocked_reason.as_deref(),
+                    Some("current-member" | "last-active-owner")
+                )
+        } else if matches!(roster.actor_role.as_str(), "editor" | "viewer") {
+            !has_capabilities
+                && member.management.blocked_reason.as_deref() == Some("permission-denied")
+        } else if roster.actor_role == "admin" && member.role == "owner" {
+            !has_capabilities
+                && member.management.blocked_reason.as_deref() == Some("owner-protected")
+        } else {
+            has_capabilities == member.management.blocked_reason.is_none()
+        };
         if !valid_id(&member.member_id)
             || !member_ids.insert(member.member_id.clone())
             || !valid_role(&member.role)
@@ -809,6 +1287,10 @@ fn parse_workspace_members(
                 .email_hint
                 .as_ref()
                 .is_some_and(|value| !valid_email_hint(value))
+            || !valid_blocked_reason
+            || !valid_role_projection
+            || !valid_action_projection
+            || !projection_shape_is_valid
         {
             return Err("The hosted workspace member list contains an invalid entry.".into());
         }
@@ -1069,10 +1551,17 @@ async fn pending_invitations_with_transport(
 
 async fn workspace_members_with_transport(
     transport: &dyn HostedAccountTransport,
+    contexts: &dyn ActiveContextSource,
+    registry: &Mutex<MemberActionRegistry>,
     expected_identity: &AccountIdentitySnapshot,
     workspace_id: &str,
-    current_member_id: &str,
 ) -> Result<AccountWorkspaceMemberList, String> {
+    let before = contexts.active_context()?;
+    if before.active_workspace.fable_workspace_id.as_deref() != Some(workspace_id)
+        || before.member_id.is_none()
+    {
+        return Err("Select this workspace before loading its members.".into());
+    }
     let response = bound_hosted_call(
         transport,
         &expected_identity.account_binding,
@@ -1082,7 +1571,70 @@ async fn workspace_members_with_transport(
     )
     .await?;
     let _identity_guard = transport.lock_identity_generation(expected_identity)?;
-    parse_workspace_members(response, workspace_id, current_member_id)
+    let after = contexts.active_context()?;
+    if after != before {
+        return Err(WORKSPACE_CONTEXT_CHANGED_ERROR.into());
+    }
+    let hosted = parse_workspace_members(
+        response,
+        workspace_id,
+        before.member_id.as_deref().unwrap_or_default(),
+    )?;
+    registry
+        .lock()
+        .map_err(|_| "Fable could not protect member action references.".to_string())?
+        .replace_context(expected_identity, &after, hosted)
+}
+
+async fn change_workspace_member_with_transport(
+    transport: &dyn HostedAccountTransport,
+    contexts: &dyn ActiveContextSource,
+    registry: &Mutex<MemberActionRegistry>,
+    request: &AccountWorkspaceMemberChangeRequest,
+) -> Result<AccountWorkspaceMemberChangeOutcome, String> {
+    if !valid_id(&request.member_action_ref) {
+        return Err("Refresh the member list before changing access.".into());
+    }
+    let grant = registry
+        .lock()
+        .map_err(|_| "Fable could not protect member action references.".to_string())?
+        .resolve(&request.member_action_ref)?;
+    let identity = transport.identity_snapshot()?;
+    if identity != grant.identity {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    let before = contexts.active_context()?;
+    if !context_matches_grant(&before, &grant) {
+        return Err(WORKSPACE_CONTEXT_CHANGED_ERROR.into());
+    }
+    validate_member_change_request(&grant, request)?;
+    let idempotency_key = member_change_idempotency_key(&identity.account_binding, request)?;
+    let mut args = json!({
+        "workspaceId": grant.workspace_id,
+        "memberId": grant.target_member_id,
+        "action": request.action,
+        "baseRevision": request.expected_revision,
+        "idempotencyKey": idempotency_key,
+    });
+    if let Some(role) = &request.role {
+        args.as_object_mut()
+            .expect("member change arguments are an object")
+            .insert("role".into(), json!(role));
+    }
+    let response = bound_hosted_call(
+        transport,
+        &identity.account_binding,
+        ConvexFunctionType::Mutation,
+        "membership:change",
+        args,
+    )
+    .await?;
+    let _identity_guard = transport.lock_identity_generation(&identity)?;
+    let after = contexts.active_context()?;
+    if !context_matches_grant(&after, &grant) || after != before {
+        return Err(WORKSPACE_CONTEXT_CHANGED_ERROR.into());
+    }
+    parse_member_change_result(response, &grant, request, &idempotency_key)
 }
 
 async fn accept_invitation_with_transport(
@@ -1288,22 +1840,25 @@ pub async fn account_workspace_members(
     }
     let transport = NativeHostedAccountTransport;
     let identity = transport.identity_snapshot()?;
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let context = store
-        .with_conn(directory::require_active_workspace_context_for_current_user)
-        .map_err(|error| error.to_string())?;
-    if context.active_workspace.fable_workspace_id.as_deref() != Some(&fable_workspace_id) {
-        return Err("Select this workspace before loading its members.".into());
-    }
-    let current_member_id = context
-        .member_id
-        .ok_or_else(|| "The active workspace membership is unavailable.".to_string())?;
     workspace_members_with_transport(
         &transport,
+        &NativeActiveContextSource,
+        member_action_registry(),
         &identity,
         &fable_workspace_id,
-        &current_member_id,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn account_workspace_member_change(
+    request: AccountWorkspaceMemberChangeRequest,
+) -> Result<AccountWorkspaceMemberChangeOutcome, String> {
+    change_workspace_member_with_transport(
+        &NativeHostedAccountTransport,
+        &NativeActiveContextSource,
+        member_action_registry(),
+        &request,
     )
     .await
 }
@@ -1436,7 +1991,6 @@ pub async fn account_workspace_clear_session() -> Result<AccountWorkspaceStatus,
 mod tests {
     use super::*;
     use std::collections::VecDeque;
-    use std::sync::Mutex;
 
     struct ScriptStep {
         mutation: bool,
@@ -1454,6 +2008,34 @@ mod tests {
 
     struct ScriptGenerationLock;
     impl AccountGenerationLock for ScriptGenerationLock {}
+
+    struct ScriptedContextSource {
+        contexts: Mutex<VecDeque<directory::AuthorizedWorkspaceContext>>,
+    }
+
+    impl ScriptedContextSource {
+        fn stable(context: directory::AuthorizedWorkspaceContext) -> Self {
+            Self {
+                contexts: Mutex::new(VecDeque::from([context.clone(), context])),
+            }
+        }
+
+        fn sequence(contexts: Vec<directory::AuthorizedWorkspaceContext>) -> Self {
+            Self {
+                contexts: Mutex::new(contexts.into()),
+            }
+        }
+    }
+
+    impl ActiveContextSource for ScriptedContextSource {
+        fn active_context(&self) -> Result<directory::AuthorizedWorkspaceContext, String> {
+            self.contexts
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_else(|| "No scripted workspace context remains.".into())
+        }
+    }
 
     impl ScriptedTransport {
         fn new(steps: Vec<ScriptStep>) -> Self {
@@ -1602,6 +2184,23 @@ mod tests {
         }
     }
 
+    fn active_context(
+        internal_user_id: &str,
+        workspace_id: &str,
+        member_id: &str,
+    ) -> directory::AuthorizedWorkspaceContext {
+        directory::AuthorizedWorkspaceContext {
+            active_workspace: directory::ActiveWorkspaceSelection {
+                local_workspace_id: format!("hosted_{workspace_id}"),
+                fable_workspace_id: Some(workspace_id.into()),
+                name: "Workspace".into(),
+                source: "hosted".into(),
+            },
+            internal_user_id: internal_user_id.into(),
+            member_id: Some(member_id.into()),
+        }
+    }
+
     fn roster_member(member_id: &str, is_current_user: bool) -> Value {
         json!({
             "memberId": member_id,
@@ -1610,7 +2209,12 @@ mod tests {
             "revision": 1,
             "displayName": "Workspace member",
             "emailHint": "m***@example.com",
-            "isCurrentUser": is_current_user
+            "isCurrentUser": is_current_user,
+            "management": if is_current_user {
+                json!({ "allowedRoles": [], "allowedActions": [], "blockedReason": "last-active-owner" })
+            } else {
+                json!({ "allowedRoles": ["viewer"], "allowedActions": ["suspend", "remove"] })
+            }
         })
     }
 
@@ -1619,6 +2223,63 @@ mod tests {
             "workspaceId": workspace_id,
             "actorRole": "owner",
             "members": [roster_member("member_current", true)]
+        })
+    }
+
+    fn manageable_roster(workspace_id: &str, current_member_id: &str) -> Value {
+        json!({
+            "workspaceId": workspace_id,
+            "actorRole": "owner",
+            "members": [
+                {
+                    "memberId": current_member_id, "role": "owner", "status": "active",
+                    "revision": 1, "displayName": "Current", "isCurrentUser": true,
+                    "management": { "allowedRoles": [], "allowedActions": [], "blockedReason": "last-active-owner" }
+                },
+                {
+                    "memberId": "member_target", "role": "editor", "status": "active",
+                    "revision": 2, "displayName": "Target", "isCurrentUser": false,
+                    "management": { "allowedRoles": ["owner", "admin", "viewer"], "allowedActions": ["suspend", "remove"] }
+                }
+            ]
+        })
+    }
+
+    fn member_change_grant(reference: &str) -> (Mutex<MemberActionRegistry>, MemberActionGrant) {
+        let grant = MemberActionGrant {
+            identity: identity("bootstrap_key"),
+            internal_user_id: "usr_current".into(),
+            workspace_id: "ws_home".into(),
+            current_member_id: "member_current".into(),
+            target_member_id: "member_target".into(),
+            target_role: "editor".into(),
+            target_status: "active".into(),
+            target_revision: 2,
+            allowed_roles: BTreeSet::from(["owner".into(), "admin".into(), "viewer".into()]),
+            allowed_actions: BTreeSet::from(["suspend".into(), "remove".into()]),
+        };
+        let mut registry = MemberActionRegistry::default();
+        registry.grants.insert(reference.into(), grant.clone());
+        registry.order.push_back(reference.into());
+        (Mutex::new(registry), grant)
+    }
+
+    fn changed_membership(role: &str, status: &str, revision: i64) -> Value {
+        json!({
+            "workspaceId": "ws_home", "authority": "convex", "schemaVersion": 1,
+            "revision": revision, "createdByInternalUserId": "usr_owner",
+            "createdAt": "2026-07-11T08:00:00.000Z", "updatedAt": "2026-07-11T09:00:00.000Z",
+            "memberId": "member_target", "internalUserId": "usr_target", "role": role,
+            "status": status, "activatedAt": "2026-07-11T08:00:00.000Z"
+        })
+    }
+
+    fn accepted_member_change(role: &str, status: &str, key: &str) -> Value {
+        json!({
+            "status": "accepted",
+            "membership": changed_membership(role, status, 3),
+            "lastOwnerSafety": { "status": "safe", "remainingActiveOwnerCount": 1 },
+            "idempotency": { "key": key, "replayed": false, "recordedAt": "2026-07-11T09:00:00.000Z" }
         })
     }
 
@@ -1828,11 +2489,18 @@ mod tests {
             args: json!({ "workspaceId": "ws_home" }),
             result: roster("ws_home"),
         }]);
-        let result = workspace_members_with_transport(
-            &transport,
-            &identity("bootstrap_key"),
+        let contexts = ScriptedContextSource::stable(active_context(
+            "usr_current",
             "ws_home",
             "member_current",
+        ));
+        let registry = Mutex::new(MemberActionRegistry::default());
+        let result = workspace_members_with_transport(
+            &transport,
+            &contexts,
+            &registry,
+            &identity("bootstrap_key"),
+            "ws_home",
         )
         .await
         .expect("valid roster");
@@ -1851,15 +2519,185 @@ mod tests {
             }],
             vec!["bootstrap_key", "changed_account"],
         );
-        let error = workspace_members_with_transport(
-            &transport,
-            &identity("bootstrap_key"),
+        let contexts = ScriptedContextSource::stable(active_context(
+            "usr_current",
             "ws_home",
             "member_current",
+        ));
+        let registry = Mutex::new(MemberActionRegistry::default());
+        let error = workspace_members_with_transport(
+            &transport,
+            &contexts,
+            &registry,
+            &identity("bootstrap_key"),
+            "ws_home",
         )
         .await
         .expect_err("account switch must fail");
         assert_eq!(error, ACCOUNT_CHANGED_ERROR);
+    }
+
+    #[test]
+    fn member_action_refs_hide_hosted_ids_and_refresh_invalidates_every_prior_ref() {
+        let identity = identity("bootstrap_key");
+        let first_context = active_context("usr_current", "ws_home", "member_current");
+        let first_hosted = parse_workspace_members(
+            manageable_roster("ws_home", "member_current"),
+            "ws_home",
+            "member_current",
+        )
+        .unwrap();
+        let mut registry = MemberActionRegistry::default();
+        let first = registry
+            .replace_context(&identity, &first_context, first_hosted)
+            .unwrap();
+        let old_refs = first
+            .members
+            .iter()
+            .map(|member| member.member_action_ref.clone())
+            .collect::<Vec<_>>();
+        let serialized = serde_json::to_string(&first).unwrap();
+        assert!(!serialized.contains("member_current"));
+        assert!(!serialized.contains("member_target"));
+        assert!(serialized.contains("memberActionRef"));
+
+        let second_context = active_context("usr_other", "ws_other", "member_other");
+        let second_hosted = parse_workspace_members(
+            manageable_roster("ws_other", "member_other"),
+            "ws_other",
+            "member_other",
+        )
+        .unwrap();
+        registry
+            .replace_context(&identity, &second_context, second_hosted)
+            .unwrap();
+        assert!(old_refs
+            .iter()
+            .all(|reference| registry.resolve(reference).is_err()));
+    }
+
+    #[tokio::test]
+    async fn member_change_uses_only_native_resolved_ids_and_preserves_retry_ref() {
+        let reference = "member_action_test";
+        let request = AccountWorkspaceMemberChangeRequest {
+            member_action_ref: reference.into(),
+            action: "change-role".into(),
+            expected_revision: 2,
+            role: Some("viewer".into()),
+        };
+        let key = member_change_idempotency_key("bootstrap_key", &request).unwrap();
+        let transport = ScriptedTransport::new(vec![ScriptStep {
+            mutation: true,
+            path: "membership:change",
+            args: json!({
+                "workspaceId": "ws_home", "memberId": "member_target",
+                "action": "change-role", "role": "viewer", "baseRevision": 2,
+                "idempotencyKey": key
+            }),
+            result: accepted_member_change("viewer", "active", &key),
+        }]);
+        let contexts = ScriptedContextSource::stable(active_context(
+            "usr_current",
+            "ws_home",
+            "member_current",
+        ));
+        let (registry, _) = member_change_grant(reference);
+        let outcome =
+            change_workspace_member_with_transport(&transport, &contexts, &registry, &request)
+                .await
+                .unwrap();
+        assert!(matches!(
+            outcome,
+            AccountWorkspaceMemberChangeOutcome::Accepted { .. }
+        ));
+        assert!(registry.lock().unwrap().resolve(reference).is_ok());
+        assert!(transport.finished());
+        let serialized = serde_json::to_string(&outcome).unwrap();
+        assert!(!serialized.contains("member_target"));
+        assert!(!serialized.contains("idempotency"));
+    }
+
+    #[tokio::test]
+    async fn member_change_rejects_unprojected_intent_and_post_await_context_switch() {
+        let reference = "member_action_test";
+        let stale = AccountWorkspaceMemberChangeRequest {
+            member_action_ref: reference.into(),
+            action: "reactivate".into(),
+            expected_revision: 2,
+            role: None,
+        };
+        let (empty_registry, _) = member_change_grant(reference);
+        let empty_transport = ScriptedTransport::new(Vec::new());
+        let contexts = ScriptedContextSource::sequence(vec![active_context(
+            "usr_current",
+            "ws_home",
+            "member_current",
+        )]);
+        assert!(change_workspace_member_with_transport(
+            &empty_transport,
+            &contexts,
+            &empty_registry,
+            &stale,
+        )
+        .await
+        .is_err());
+        assert!(empty_transport.finished());
+
+        let request = AccountWorkspaceMemberChangeRequest {
+            member_action_ref: reference.into(),
+            action: "suspend".into(),
+            expected_revision: 2,
+            role: None,
+        };
+        let key = member_change_idempotency_key("bootstrap_key", &request).unwrap();
+        let transport = ScriptedTransport::new(vec![ScriptStep {
+            mutation: true,
+            path: "membership:change",
+            args: json!({
+                "workspaceId": "ws_home", "memberId": "member_target",
+                "action": "suspend", "baseRevision": 2, "idempotencyKey": key
+            }),
+            result: accepted_member_change("editor", "suspended", &key),
+        }]);
+        let contexts = ScriptedContextSource::sequence(vec![
+            active_context("usr_current", "ws_home", "member_current"),
+            active_context("usr_current", "ws_other", "member_other"),
+        ]);
+        let (registry, _) = member_change_grant(reference);
+        assert_eq!(
+            change_workspace_member_with_transport(&transport, &contexts, &registry, &request)
+                .await
+                .unwrap_err(),
+            WORKSPACE_CONTEXT_CHANGED_ERROR
+        );
+
+        let generation_transport = ScriptedTransport::new(vec![ScriptStep {
+            mutation: true,
+            path: "membership:change",
+            args: json!({
+                "workspaceId": "ws_home", "memberId": "member_target",
+                "action": "suspend", "baseRevision": 2, "idempotencyKey": key
+            }),
+            result: accepted_member_change("editor", "suspended", &key),
+        }]);
+        generation_transport.switch_generation_at_commit();
+        let stable_contexts = ScriptedContextSource::stable(active_context(
+            "usr_current",
+            "ws_home",
+            "member_current",
+        ));
+        let (generation_registry, _) = member_change_grant(reference);
+        assert_eq!(
+            change_workspace_member_with_transport(
+                &generation_transport,
+                &stable_contexts,
+                &generation_registry,
+                &request,
+            )
+            .await
+            .unwrap_err(),
+            ACCOUNT_CHANGED_ERROR
+        );
     }
 
     #[test]
