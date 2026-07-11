@@ -304,6 +304,70 @@ pub fn get(
     partial.map(|row| open_safe(store, row)).transpose()
 }
 
+pub fn transition_native_connector(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    id: &str,
+    expected_revision: i64,
+    lifecycle: &str,
+    authorization_state: &str,
+    health_state: &str,
+    credential_state: &str,
+    updated_at: &str,
+) -> Result<SafeConnectionRecord> {
+    require_current_scope(tx, scope, ScopeAccess::Write)?;
+    validate_state(lifecycle, LIFECYCLES, "lifecycle")?;
+    validate_state(
+        authorization_state,
+        AUTHORIZATION_STATES,
+        "authorization state",
+    )?;
+    validate_state(health_state, HEALTH_STATES, "health state")?;
+    validate_state(credential_state, CREDENTIAL_STATES, "credential state")?;
+    let current = get(tx, store, scope, id)?
+        .ok_or_else(|| StoreError::Invalid("Connection is unavailable.".into()))?;
+    if current.kind != "native-connector"
+        || current.revision != expected_revision
+        || current.connector_definition_key.is_empty()
+    {
+        return Err(StoreError::Invalid(
+            "Connection changed or conflicts with existing authority.".into(),
+        ));
+    }
+    if current.lifecycle == lifecycle
+        && current.authorization_state == authorization_state
+        && current.health_state == health_state
+        && current.credential_state == credential_state
+    {
+        return Ok(current);
+    }
+    let changed = tx.execute(
+        "UPDATE connection_record SET revision=revision+1,lifecycle=?1,authorization_state=?2,
+           health_state=?3,credential_state=?4,updated_at=?5
+         WHERE workspace_id=?6 AND id=?7 AND revision=?8 AND kind='native-connector'
+           AND authority='local' AND deleted_at IS NULL;",
+        rusqlite::params![
+            lifecycle,
+            authorization_state,
+            health_state,
+            credential_state,
+            updated_at,
+            scope.data.workspace_id(),
+            id,
+            expected_revision,
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "Connection changed before its lifecycle was saved.".into(),
+        ));
+    }
+    get(tx, store, scope, id)?.ok_or_else(|| {
+        StoreError::Invalid("Connection could not be read after its lifecycle changed.".into())
+    })
+}
+
 pub fn list(
     tx: &Connection,
     store: &Store,
@@ -573,6 +637,41 @@ mod tests {
         assert_eq!(updated.revision, 2);
         assert!(store
             .transaction(|tx| upsert_native_connector(tx, &store, &scope_a, input(Some(1))))
+            .is_err());
+        let disconnected = store
+            .transaction(|tx| {
+                transition_native_connector(
+                    tx,
+                    &store,
+                    &scope_a,
+                    &updated.id,
+                    2,
+                    "disconnected",
+                    "revoked",
+                    "offline",
+                    "revoked",
+                    "2026-07-11T15:00:00Z",
+                )
+            })
+            .unwrap();
+        assert_eq!(disconnected.revision, 3);
+        assert_eq!(disconnected.lifecycle, "disconnected");
+        assert_eq!(disconnected.authorization_state, "revoked");
+        assert!(store
+            .transaction(|tx| {
+                transition_native_connector(
+                    tx,
+                    &store,
+                    &scope_a,
+                    &updated.id,
+                    2,
+                    "removed",
+                    "revoked",
+                    "offline",
+                    "revoked",
+                    "2026-07-11T15:01:00Z",
+                )
+            })
             .is_err());
 
         store
