@@ -10,7 +10,7 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { WorkspaceSidebar } from "../components/WorkspaceSidebar";
+import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
@@ -22,6 +22,7 @@ import { composerModelsFor } from "./composer-models";
 import { ShellPageBoundary } from "./ShellRoutes";
 import { useShellAgentController } from "./useShellAgentController";
 import { useProjects } from "../hooks/useProjects";
+import { ProjectPage } from "../components/pages/ProjectPage";
 
 type ConversationMessage = {
   id: string;
@@ -69,6 +70,7 @@ export function ChatWorkspace() {
   // it) share the same instance â€” a grant in the approval UI drives the tool call
   // the loop is currently blocked on.
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
@@ -141,6 +143,7 @@ export function ChatWorkspace() {
 
       void agent.cancel();
       setSelectedConversationThreadId(undefined);
+      setSelectedProjectId(null);
       setNewThreadProjectId(null);
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
@@ -160,6 +163,7 @@ export function ChatWorkspace() {
     if (conversationWorkspaceId.current !== boundWorkspaceId) {
       void agent.cancel();
       setSelectedConversationThreadId(undefined);
+      setSelectedProjectId(null);
       setNewThreadProjectId(null);
       activeAssistantMessageId.current = null;
       setConversationMessages([]);
@@ -271,6 +275,16 @@ export function ChatWorkspace() {
     })),
     [projectStore.archivedProjects]
   );
+  const selectedProject = useMemo(
+    () => selectedProjectId ? projectWorkspaces.find((project) => project.id === selectedProjectId) ?? null : null,
+    [projectWorkspaces, selectedProjectId]
+  );
+
+  useEffect(() => {
+    if (selectedProjectId && !projectStore.loading && !selectedProject) {
+      setSelectedProjectId(null);
+    }
+  }, [projectStore.loading, selectedProject, selectedProjectId]);
 
   useEffect(() => {
     const hydrated = durableConversation.state.conversation;
@@ -737,6 +751,38 @@ export function ChatWorkspace() {
     runtime.setActiveItem(target);
   };
 
+  const startNewChat = (projectId: string | null) => {
+    setSelectedProjectId(null);
+    setNewThreadProjectId(projectId);
+    setSelectedConversationThreadId(undefined);
+    activeAssistantMessageId.current = null;
+    setConversationMessages([]);
+    runtime.setComposerValue("");
+    runtime.startNewChat();
+    runtime.setLastAction(projectId ? "New project chat ready" : "New chat ready");
+  };
+
+  const openConversation = (thread: SidebarProject["threads"][number], context: string) => {
+    setSelectedProjectId(null);
+    setNewThreadProjectId(null);
+    setSelectedConversationThreadId(thread.id);
+    activeAssistantMessageId.current = null;
+    setConversationMessages([]);
+    runtime.setComposerValue("");
+    runtime.openThread(thread, context);
+  };
+
+  const openProject = (projectId: string) => {
+    setSelectedProjectId(projectId);
+    setNewThreadProjectId(null);
+    setSelectedConversationThreadId(undefined);
+    activeAssistantMessageId.current = null;
+    setConversationMessages([]);
+    runtime.setComposerValue("");
+    runtime.setActiveItem(projectId);
+    runtime.setLastAction("Project opened");
+  };
+
   return (
     <main
       className={`desktop-frame${sidebarCollapsed ? " desktop-frame--sidebar-collapsed" : ""}`}
@@ -765,35 +811,22 @@ export function ChatWorkspace() {
         onNavigateBack={() => navigateHistory(-1)}
         onNavigateForward={() => navigateHistory(1)}
         onCloseSettings={closeSettingsModal}
-        onNewChat={() => {
-          setNewThreadProjectId(null);
-          setSelectedConversationThreadId(undefined);
-          activeAssistantMessageId.current = null;
-          setConversationMessages([]);
-          runtime.setComposerValue("");
-          runtime.startNewChat();
-        }}
+        onNewChat={() => startNewChat(null)}
         onAddProject={async (input) => { await projectStore.create(input); }}
-        onNewProjectChat={(projectId) => {
-          setNewThreadProjectId(projectId);
-          setSelectedConversationThreadId(undefined);
-          activeAssistantMessageId.current = null;
-          setConversationMessages([]);
-          runtime.setComposerValue("");
-          runtime.startNewChat();
-          runtime.setLastAction("New project chat ready");
-        }}
+        onNewProjectChat={(projectId) => startNewChat(projectId)}
         onRenameProject={async (project, title) => {
           await projectStore.update({ projectId: project.id as never, baseRevision: project.revision, title });
         }}
         onArchiveProject={async (project) => {
           await projectStore.archive({ projectId: project.id as never, baseRevision: project.revision });
+          if (selectedProjectId === project.id) setSelectedProjectId(null);
         }}
         onRestoreProject={async (project) => {
           await projectStore.restore({ projectId: project.id as never, baseRevision: project.revision });
         }}
         onDeleteProject={async (project) => {
           await projectStore.remove({ projectId: project.id as never, baseRevision: project.revision });
+          if (selectedProjectId === project.id) setSelectedProjectId(null);
           await durableConversation.refresh();
         }}
         onMoveThread={async (threadId, projectId) => {
@@ -822,10 +855,12 @@ export function ChatWorkspace() {
           setExpandedCollections((current) => ({ ...current, chats: !current.chats }))
         }
         onSelectUtility={(label) => {
+          setSelectedProjectId(null);
           runtime.setActiveItem(label);
           runtime.setLastAction(`${label} selected`);
         }}
-        onSelectProjectThread={(thread, projectTitle) => runtime.openThread(thread, projectTitle)}
+        onOpenProject={openProject}
+        onSelectProjectThread={(thread, projectTitle) => openConversation(thread, projectTitle)}
         onToggleProject={(projectId, projectTitle, expanded) => {
           setExpandedProjects((current) => ({ ...current, [projectId]: !expanded }));
           runtime.setLastAction(`${expanded ? "Collapsed" : "Expanded"} project: ${projectTitle}`);
@@ -848,11 +883,7 @@ export function ChatWorkspace() {
           runtime.setLastAction("Workspace settings opened");
         }}
         onSelectThread={(thread) => {
-          setSelectedConversationThreadId(thread.id);
-          activeAssistantMessageId.current = null;
-          setConversationMessages([]);
-          runtime.setComposerValue("");
-          runtime.openThread(thread, "chat");
+          openConversation(thread, "chat");
         }}
         onAccountMenu={(item) => {
           if (item === "logout") {
@@ -870,6 +901,23 @@ export function ChatWorkspace() {
       <section className="workspace" aria-label="Fable workspace">
         {runtime.activePage && !isSettingsActive ? (
           <ShellPageBoundary runtime={runtime} />
+        ) : selectedProject && !isSettingsActive ? (
+          <div className="workspace-center workspace-center--page">
+            <ProjectPage
+              project={selectedProject}
+              onNewChat={() => startNewChat(selectedProject.id)}
+              onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
+              onReload={async () => { await projectStore.refresh(); }}
+              onSaveGuidance={async ({ description, instructions }) => {
+                await projectStore.update({
+                  projectId: selectedProject.id as never,
+                  baseRevision: selectedProject.revision,
+                  description,
+                  instructions
+                });
+              }}
+            />
+          </div>
         ) : (
           <div className="workspace-center workspace-center--composer">
             {renderConversation()}

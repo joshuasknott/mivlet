@@ -611,6 +611,33 @@
   position: relative;
 }
 
+.project-expand-button {
+  display: grid;
+  width: 24px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-1);
+}
+
+.project-expand-button svg {
+  transition: transform 140ms ease;
+}
+
+.project-expand-button[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.project-expand-button:hover,
+.project-expand-button:focus-visible {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
 .project-row-shell > .project-row,
 .thread-row-shell > .thread-row {
   min-width: 0;
@@ -659,7 +686,12 @@
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  padding: 0 10px;
+  padding: 0 10px 0 3px;
+}
+
+.project-row[aria-current="page"] {
+  background: var(--surface-raised);
+  font-weight: 500;
 }
 
 .thread-row-shell select {

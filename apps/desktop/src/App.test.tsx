@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { listRuntimeConnectorStatuses } from "./runtime";
+import { getRuntimeConversationThread, listRuntimeConnectorStatuses } from "./runtime";
 import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -22,6 +22,7 @@ const runtimeMocks = vi.hoisted(() => ({
   connectorOAuthCalls: [] as string[],
   agentRuns: [] as PersistedAgentRun[],
   conversationThreads: [] as Array<Record<string, unknown>>,
+  projectRecords: [] as Array<Record<string, unknown>>,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
   savedScheduledJobs: [] as unknown[],
@@ -68,6 +69,21 @@ const runtimeMocks = vi.hoisted(() => ({
     },
     devices: []
   } as AccountWorkspaceStatus
+}));
+
+vi.mock("./hooks/useProjects", () => ({
+  useProjects: () => ({
+    projects: runtimeMocks.projectRecords.filter((project) => project.lifecycle === "active"),
+    archivedProjects: runtimeMocks.projectRecords.filter((project) => project.lifecycle === "archived"),
+    loading: false,
+    error: null,
+    refresh: vi.fn(async () => runtimeMocks.projectRecords),
+    create: vi.fn(),
+    update: vi.fn(),
+    archive: vi.fn(),
+    restore: vi.fn(),
+    remove: vi.fn()
+  })
 }));
 
 // A connected Codex backend so the existing workspace tests clear the
@@ -359,6 +375,7 @@ describe("Fable home", () => {
     runtimeMocks.connectorOAuthCalls = [];
     runtimeMocks.agentRuns = [];
     runtimeMocks.conversationThreads = [];
+    runtimeMocks.projectRecords = [];
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
     connectRuntimeBackendSpy.mockClear();
@@ -404,6 +421,35 @@ describe("Fable home", () => {
     expect(screen.queryByText("Threads")).not.toBeInTheDocument();
   });
 
+  it("opens a real project detail and hydrates a selected project conversation", async () => {
+    runtimeMocks.projectRecords = [{
+      id: "project-roadmap",
+      title: "Roadmap",
+      description: "Plan the next release.",
+      instructions: "Keep priorities clear.",
+      lifecycle: "active",
+      revision: 2
+    }];
+    runtimeMocks.conversationThreads = [{
+      id: "thread-roadmap",
+      projectId: "project-roadmap",
+      title: "Release plan",
+      lifecycle: "active",
+      updatedAt: "2026-07-11T10:00:00Z",
+      messageHead: { lastSequence: 0 }
+    }];
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Roadmap" }));
+    expect(await screen.findByRole("heading", { name: "Roadmap" })).toBeInTheDocument();
+    expect(screen.getByText("Keep priorities clear.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Roadmap" }));
+    fireEvent.click(screen.getByRole("button", { name: "Release plan" }));
+    await waitFor(() => expect(getRuntimeConversationThread).toHaveBeenCalledWith("thread-roadmap"));
+    expect(screen.queryByRole("heading", { name: "Roadmap" })).not.toBeInTheDocument();
+  });
+
   it("exercises real WorkspaceSidebar project lifecycle, grouping, and thread placement controls", async () => {
     // Direct render of the shipped component (per audit requirement) with real ThreadSummary data.
     const sampleThread: ThreadSummary = {
@@ -426,6 +472,8 @@ describe("Fable home", () => {
     const expandedCollections = { projects: true, chats: false };
     const expandedProjects: Record<string, boolean> = { "proj-1": true };
     const onSelectProjectThread = vi.fn();
+    const onOpenProject = vi.fn();
+    const onToggleProject = vi.fn();
     const onAddProject = vi.fn();
     const onArchiveProject = vi.fn();
     const onRestoreProject = vi.fn();
@@ -458,8 +506,9 @@ describe("Fable home", () => {
         onToggleProjects={noop}
         onToggleChats={noop}
         onSelectUtility={noop}
+        onOpenProject={onOpenProject}
         onSelectProjectThread={onSelectProjectThread}
-        onToggleProject={noop as any}
+        onToggleProject={onToggleProject}
         onToggleMobileNav={noop}
         onToggleCollapsed={noop}
         onOpenMobileConnection={noop}
@@ -478,6 +527,11 @@ describe("Fable home", () => {
     // Compat: threadId value from real ThreadSummary is used for active/selection (no mutation of ids or caps).
     // (Title appears in both desktop nested list + mobile drawer when open; presence proves data from real ThreadSummary prop.)
     expect(screen.getAllByText("Sample conversation").length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Demo Project" })[0]);
+    expect(onOpenProject).toHaveBeenCalledWith("proj-1");
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Demo Project" }));
+    expect(onToggleProject).toHaveBeenCalledWith("proj-1", "Demo Project", true);
 
     // Drive the REAL selection callback entrypoint (plan AC3 / verification): click a thread row rendered from the ThreadSummary prop.
     // This exercises onSelectProjectThread with the exact object passed down, proving threadId roundtrips through the selection flow.
@@ -539,6 +593,7 @@ describe("Fable home", () => {
         onToggleProjects={noop}
         onToggleChats={noop}
         onSelectUtility={noop}
+        onOpenProject={noop}
         onSelectProjectThread={noop}
         onToggleProject={noop}
         onToggleMobileNav={noop}

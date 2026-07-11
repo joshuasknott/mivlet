@@ -76,6 +76,7 @@ export function WorkspaceSidebar({
   onToggleProjects,
   onToggleChats,
   onSelectUtility,
+  onOpenProject,
   onSelectProjectThread,
   onToggleProject,
   onToggleMobileNav,
@@ -125,6 +126,7 @@ export function WorkspaceSidebar({
   onToggleProjects: () => void;
   onToggleChats: () => void;
   onSelectUtility: (label: string) => void;
+  onOpenProject: (projectId: string) => void;
   onSelectProjectThread: (thread: ThreadSummary, projectTitle: string) => void;
   onToggleProject: (projectId: string, projectTitle: string, expanded: boolean) => void;
   onToggleMobileNav: () => void;
@@ -631,9 +633,18 @@ export function WorkspaceSidebar({
                         <div className="project-row-shell">
                           <button
                             type="button"
-                            className={`project-row${projectLoading ? " project-row--loading" : ""}`}
+                            className="project-expand-button"
+                            aria-label={`${expanded ? "Collapse" : "Expand"} ${project.title}`}
                             aria-expanded={expanded}
                             onClick={() => onToggleProject(project.id, project.title, expanded)}
+                          >
+                            <CaretRight size={12} weight="bold" />
+                          </button>
+                          <button
+                            type="button"
+                            className={`project-row${projectLoading ? " project-row--loading" : ""}`}
+                            aria-current={activeItem === project.id ? "page" : undefined}
+                            onClick={() => onOpenProject(project.id)}
                           >
                             <FolderOpen size={15} />
                             <span>{project.title}</span>
@@ -921,10 +932,10 @@ export function WorkspaceSidebar({
                 <strong>Projects</strong>
                 {projects.map((project) => (
                   <div className="mobile-project" key={project.id}>
-                    <span>
+                    <button type="button" className="mobile-project__open" onClick={() => onOpenProject(project.id)}>
                       <FolderOpen size={14} />
                       {project.title}
-                    </span>
+                    </button>
                     <button type="button" aria-label={`New chat in ${project.title}`} onClick={() => onNewProjectChat(project.id)}>
                       <Plus size={13} /> New chat
                     </button>

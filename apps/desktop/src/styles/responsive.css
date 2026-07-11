@@ -235,14 +235,18 @@
     gap: 1px;
   }
 
-  .mobile-project > span {
+  .mobile-project__open {
     display: flex;
     align-items: center;
     gap: 7px;
     min-height: 29px;
     padding: 5px 8px;
     color: var(--ink-muted);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-1);
     font-size: var(--text-13);
+    text-align: left;
   }
 
   .mobile-drawer .thread-row {
@@ -626,7 +630,7 @@
     color: var(--ink);
     background: var(--surface-hover);
   }
-  .desktop-frame[data-theme="dark"] .mobile-project > span {
+  .desktop-frame[data-theme="dark"] .mobile-project__open {
     color: var(--ink-muted);
   }
   .desktop-frame[data-theme="dark"] .mobile-drawer-section > strong {
