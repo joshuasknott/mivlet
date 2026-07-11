@@ -32,6 +32,7 @@ import type {
 } from "../runtime";
 
 export interface DesktopMcpTransportHandle extends McpTransport {
+  readonly sessionId: string;
   recordDiscovery(tools: string[], resources: string[]): Promise<RuntimeMcpConnectionDetails>;
   prepareToolCall(toolName: string, args: Record<string, unknown>): Promise<{
     proposal: RuntimeMcpToolProposal;
@@ -72,7 +73,7 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
 
   constructor(
     private readonly workspaceId: string,
-    private readonly sessionId: string,
+    public readonly sessionId: string,
     private readonly unlisten: () => void
   ) {}
 
@@ -249,7 +250,7 @@ class RemoteDesktopMcpTransport implements DesktopMcpTransportHandle {
 
   constructor(
     private readonly workspaceId: string,
-    private readonly sessionId: string
+    public readonly sessionId: string
   ) {}
 
   async send(frame: McpRequest | McpNotification): Promise<void> {

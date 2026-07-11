@@ -498,6 +498,95 @@ pub(crate) fn native_grant_target(
     })
 }
 
+pub(crate) fn mcp_grant_target(
+    workspace_id: &str,
+    project_id: Option<&str>,
+    capability_id: &str,
+    connection_id: &str,
+) -> Result<CapabilityGrantTarget, ConnectorCommandError> {
+    if capability_id != "knowledge.content.search" {
+        return Err(error(
+            "capability-unknown",
+            capability_id,
+            "This MCP semantic capability is not supported.",
+            false,
+        ));
+    }
+    crate::authorized_scope::command_scope(
+        Some(workspace_id.into()),
+        project_id.map(str::to_string),
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .map_err(|message| error("privacy-boundary", capability_id, &message, false))?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id.into()),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .map_err(|message| error("privacy-boundary", capability_id, &message, false))?;
+    let store = crate::store::try_global().ok_or_else(|| {
+        error(
+            "implementation-unverified",
+            capability_id,
+            "Fable's encrypted Connection store is unavailable.",
+            false,
+        )
+    })?;
+    let (connection, _binding) = store
+        .with_conn(|tx| {
+            let connection =
+                crate::store::repos::connection_record::get(tx, store, &scope, connection_id)?
+                    .ok_or_else(|| {
+                        crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
+                    })?;
+            if connection.kind != "mcp"
+                || connection.lifecycle != "authorized"
+                || connection.authorization_state != "not-required"
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "MCP Connection is not authorized.".into(),
+                ));
+            }
+            let binding = crate::store::repos::connection_record::require_mcp_capability_binding(
+                tx,
+                store,
+                &scope,
+                connection_id,
+                connection.revision,
+                capability_id,
+            )?;
+            Ok((connection, binding))
+        })
+        .map_err(|store_error| {
+            error(
+                "no-eligible-connection",
+                capability_id,
+                &store_error.to_string(),
+                false,
+            )
+        })?;
+    if matches!(connection.health_state.as_str(), "unhealthy" | "offline") {
+        return Err(error(
+            "connection-unhealthy",
+            capability_id,
+            "The MCP Connection is unavailable.",
+            false,
+        ));
+    }
+    Ok(CapabilityGrantTarget {
+        capability_id: capability_id.into(),
+        connection_id: connection.id,
+        connection_revision: connection.revision,
+        connection_display_name: connection.display_name,
+        consequence: "read".into(),
+        availability: if connection.health_state == "healthy" {
+            "available".into()
+        } else {
+            "degraded".into()
+        },
+    })
+}
+
 pub(crate) async fn read(
     app: &tauri::AppHandle,
     workspace_id: String,

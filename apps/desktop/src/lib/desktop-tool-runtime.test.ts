@@ -1,18 +1,86 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@fable/protocol";
+import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 
 const runtime = vi.hoisted(() => ({
   prepareGrant: vi.fn(),
   commitGrant: vi.fn(),
-  executeTool: vi.fn()
+  executeTool: vi.fn(),
+  resolveRoute: vi.fn()
 }));
+const mcpFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime", () => ({
   prepareRuntimeCapabilityGrant: runtime.prepareGrant,
   commitRuntimeCapabilityGrant: runtime.commitGrant,
-  executeRuntimeToolCall: runtime.executeTool
+  executeRuntimeToolCall: runtime.executeTool,
+  resolveRuntimeMcpCapabilityRoute: runtime.resolveRoute
 }));
+vi.mock("./mcp-transport", () => ({
+  createDesktopMcpTransport: mcpFactory,
+  createDesktopRemoteMcpTransport: mcpFactory
+}));
+
+class SemanticMcpTransport {
+  readonly sessionId = "mcp-session-1";
+  private handler?: (frame: McpFrame) => void;
+  async send(frame: McpRequest | McpNotification): Promise<void> {
+    if (!("id" in frame)) return;
+    const result = frame.method === "initialize"
+      ? {
+          protocolVersion: "2025-11-25",
+          capabilities: { tools: {}, resources: {} },
+          serverInfo: { name: "fixture", version: "1" }
+        }
+      : frame.method === "tools/list"
+        ? { tools: [{ name: "search_work", inputSchema: { type: "object" } }] }
+        : { resources: [] };
+    queueMicrotask(() => this.handler?.({ jsonrpc: "2.0", id: frame.id, result }));
+  }
+  subscribe(handler: (frame: McpFrame) => void) { this.handler = handler; return () => undefined; }
+  subscribeClose() { return () => undefined; }
+  async recordDiscovery() {
+    return {
+      connectionId: "connection-mcp",
+      connectionRevision: 3,
+      transport: "stdio" as const,
+      launchReference: "work-search",
+      discoveryState: "discovered",
+      discoveredTools: ["search_work"],
+      discoveredResources: [],
+      enabledTools: ["search_work"],
+      enabledResources: [],
+      capabilityBindings: [{
+        capabilityId: "knowledge.content.search" as const,
+        toolName: "search_work",
+        contractVersion: "fable.connected-source-search.v1" as const,
+        consequence: "read" as const,
+        trust: "untrusted" as const
+      }]
+    };
+  }
+  async executeAuthorizedToolCall() {
+    return {
+      trust: "untrusted" as const,
+      instructionAuthority: "none" as const,
+      isError: false,
+      content: [],
+      structuredJson: JSON.stringify({
+        contractVersion: "fable.connected-source-search.v1",
+        query: "Q3",
+        citations: [{
+          sourceId: "doc-1",
+          title: "Q3 plan",
+          snippet: "The launch needs a support owner.",
+          provenance: "Connected work source",
+          freshness: "2026-07-11T20:00:00Z"
+        }]
+      })
+    };
+  }
+  async close() {}
+}
 
 const approval: ApprovalRequest = {
   id: "acp-copilot-session-tool",
@@ -87,6 +155,8 @@ describe("desktop semantic capability grants", () => {
     vi.clearAllMocks();
     runtime.commitGrant.mockResolvedValue({ id: "grant-1" });
     runtime.executeTool.mockResolvedValue({ ok: true, output: "cited results" });
+    runtime.resolveRoute.mockResolvedValue(null);
+    mcpFactory.mockReset();
   });
 
   it("confirms first use, commits standing capability authority, then executes the separately approved search", async () => {
@@ -117,7 +187,8 @@ describe("desktop semantic capability grants", () => {
       {
         workspaceId: "workspace-1",
         projectId: undefined,
-        capabilityId: "knowledge.content.search"
+        capabilityId: "knowledge.content.search",
+        connectionId: undefined
       },
       expect.objectContaining({
         request: grantApproval,
@@ -131,6 +202,90 @@ describe("desktop semantic capability grants", () => {
         workspaceId: "workspace-1"
       })
     );
+  });
+
+  it("substitutes an explicitly bound MCP tool while preserving the cited-search contract", async () => {
+    runtime.resolveRoute.mockResolvedValue({
+      configurationReference: "work-search",
+      transport: "stdio",
+      connectionId: "connection-mcp",
+      connectionRevision: 2,
+      capabilityId: "knowledge.content.search",
+      toolName: "search_work"
+    });
+    runtime.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-mcp" } });
+    mcpFactory.mockResolvedValue(new SemanticMcpTransport());
+    runtime.executeTool.mockResolvedValue({
+      ok: true,
+      output: JSON.stringify({
+        kind: "mcp-connected-source-search",
+        proposal: {
+          workspaceId: "workspace-1",
+          sessionId: "mcp-session-1",
+          toolName: "search_work",
+          arguments: {
+            contractVersion: "fable.connected-source-search.v1",
+            query: "Q3"
+          }
+        },
+        permitId: "permit-1",
+        workspaceId: "workspace-1",
+        query: "Q3",
+        connectionId: "connection-mcp",
+        matchedGrantIds: ["grant-mcp"],
+        degraded: false,
+        degradationReasons: []
+      })
+    });
+    const executor = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      { workspaceId: "workspace-1" }
+    );
+
+    const encoded = await executor(
+      connectionApproval,
+      JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })
+    );
+    const result = JSON.parse(encoded);
+    expect(runtime.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId: "connection-mcp"
+    }));
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      mcpSessionId: "mcp-session-1"
+    }));
+    expect(result.result).toMatchObject({
+      contractVersion: "fable.connected-source-search.v1",
+      capabilityId: "knowledge.content.search",
+      scope: { workspaceId: "workspace-1" },
+      trust: "external-untrusted",
+      instructionAuthority: "none",
+      connectionId: "connection-mcp",
+      matchedGrantIds: ["grant-mcp"],
+      implementation: { kind: "mcp", evidence: "adapter-validated" },
+      citations: [{ citationId: "source-1", trust: "external-untrusted" }]
+    });
+  });
+
+  it("does not silently fall back to native when the selected MCP route is unavailable", async () => {
+    runtime.resolveRoute.mockResolvedValue({
+      configurationReference: "work-search",
+      transport: "stdio",
+      connectionId: "connection-mcp",
+      connectionRevision: 2,
+      capabilityId: "knowledge.content.search",
+      toolName: "search_work"
+    });
+    runtime.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-mcp" } });
+    mcpFactory.mockRejectedValue(new Error("The selected MCP server is unavailable."));
+    const executor = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      { workspaceId: "workspace-1" }
+    );
+    await expect(executor(
+      connectionApproval,
+      JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })
+    )).rejects.toThrow(/selected MCP server is unavailable/i);
+    expect(runtime.executeTool).not.toHaveBeenCalled();
   });
 
   it("uses an existing capability grant without another first-use prompt", async () => {

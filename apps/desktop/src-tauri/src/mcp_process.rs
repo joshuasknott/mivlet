@@ -279,13 +279,47 @@ pub struct SetMcpEnablementRequest {
     capability_bindings: Vec<crate::store::repos::connection_record::McpCapabilityBindingWrite>,
 }
 
-#[derive(Clone, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveMcpCapabilityRouteRequest {
+    workspace_id: String,
+    capability_id: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedMcpCapabilityRoute {
+    configuration_reference: String,
+    transport: String,
+    connection_id: String,
+    connection_revision: i64,
+    capability_id: String,
+    tool_name: String,
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpToolProposal {
     workspace_id: String,
     session_id: String,
     tool_name: String,
     arguments: Value,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct McpSemanticContinuation {
+    kind: &'static str,
+    proposal: McpToolProposal,
+    permit_id: String,
+    workspace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+    query: String,
+    connection_id: String,
+    matched_grant_ids: Vec<String>,
+    degraded: bool,
+    degradation_reasons: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -794,6 +828,30 @@ pub fn set_mcp_server_enablement(
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
+            if let Some(requested) = request.capability_bindings.first() {
+                for server in crate::store::repos::mcp_local_server::list(tx, store, &scope)? {
+                    let details = if server.transport == "stdio" {
+                        crate::store::repos::connection_record::mcp_details_for_launch(
+                            tx, store, &scope, &server.id,
+                        )
+                    } else {
+                        crate::store::repos::connection_record::mcp_details_for_remote(
+                            tx, store, &scope, &server.id,
+                        )
+                    }?;
+                    if details.connection_id != request.connection_id
+                        && details
+                            .capability_bindings
+                            .iter()
+                            .any(|binding| binding.capability_id == requested.capability_id)
+                    {
+                        return Err(crate::store::StoreError::Invalid(
+                            "Only one MCP Connection can be selected for a semantic capability."
+                                .into(),
+                        ));
+                    }
+                }
+            }
             crate::store::repos::connection_record::set_mcp_enablement(
                 tx,
                 store,
@@ -805,6 +863,62 @@ pub fn set_mcp_server_enablement(
                 request.capability_bindings,
                 &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn resolve_mcp_capability_route(
+    request: ResolveMcpCapabilityRouteRequest,
+) -> Result<Option<ResolvedMcpCapabilityRoute>, String> {
+    if request.capability_id != "knowledge.content.search" {
+        return Ok(None);
+    }
+    let scope = crate::authorized_scope::command_scope(
+        Some(request.workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let mut routes = Vec::new();
+            for server in crate::store::repos::mcp_local_server::list(tx, store, &scope)? {
+                if server.disabled {
+                    continue;
+                }
+                let details = if server.transport == "stdio" {
+                    crate::store::repos::connection_record::mcp_details_for_launch(
+                        tx, store, &scope, &server.id,
+                    )
+                } else {
+                    crate::store::repos::connection_record::mcp_details_for_remote(
+                        tx, store, &scope, &server.id,
+                    )
+                }?;
+                if let Some(binding) = details
+                    .capability_bindings
+                    .iter()
+                    .find(|binding| binding.capability_id == request.capability_id)
+                {
+                    routes.push(ResolvedMcpCapabilityRoute {
+                        configuration_reference: server.id,
+                        transport: details.transport,
+                        connection_id: details.connection_id,
+                        connection_revision: details.connection_revision,
+                        capability_id: binding.capability_id.clone(),
+                        tool_name: binding.tool_name.clone(),
+                    });
+                }
+            }
+            match routes.len() {
+                0 => Ok(None),
+                1 => Ok(routes.pop()),
+                _ => Err(crate::store::StoreError::Invalid(
+                    "Multiple MCP Connections are bound to this semantic capability.".into(),
+                )),
+            }
         })
         .map_err(|error| error.to_string())
 }
@@ -1261,6 +1375,189 @@ struct ToolProposalContext {
     transport: String,
     arguments_fingerprint: String,
     proposal_fingerprint: String,
+}
+
+pub(crate) fn prepare_semantic_capability_call(
+    workspace_id: String,
+    project_id: Option<String>,
+    session_id: String,
+    capability_id: String,
+    input: std::collections::BTreeMap<String, Value>,
+    cursor: Option<String>,
+) -> Result<McpSemanticContinuation, String> {
+    if capability_id != "knowledge.content.search" {
+        return Err("This MCP semantic capability is not supported.".into());
+    }
+    if input.keys().any(|key| key != "query" && key != "limit") {
+        return Err("Connected-source search input contains unsupported fields.".into());
+    }
+    let query = input
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|query| !query.is_empty() && query.len() <= 4_096)
+        .ok_or_else(|| "Connected-source search requires a bounded query.".to_string())?
+        .to_string();
+    let limit = input
+        .get("limit")
+        .map(|value| {
+            value
+                .as_u64()
+                .filter(|limit| (1..=50).contains(limit))
+                .ok_or_else(|| {
+                    "Connected-source search limit must be between 1 and 50.".to_string()
+                })
+        })
+        .transpose()?;
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id.clone()),
+        project_id.clone(),
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    let session = process_map()
+        .lock()
+        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .get(&session_id)
+        .map(|process| {
+            require_session_owner(process, &scope)?;
+            require_current_session_discovery(process.discovery_current)?;
+            Ok::<(String, i64), String>((
+                process.connection_id.clone(),
+                process.connection_revision,
+            ))
+        })
+        .transpose()?;
+    let (connection_id, connection_revision) = if let Some(session) = session {
+        session
+    } else {
+        let sessions = remote_sessions()
+            .lock()
+            .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| "This MCP session is unavailable.".to_string())?;
+        require_remote_session_owner(session, &scope)?;
+        if !session.initialized {
+            return Err("Remote MCP execution requires an initialized session.".into());
+        }
+        require_current_session_discovery(session.discovery_current)?;
+        (session.connection_id.clone(), session.connection_revision)
+    };
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let workspace_scope = crate::authorized_scope::command_scope(
+        Some(workspace_id.clone()),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let (binding, connection) = store
+        .with_conn(|tx| {
+            let binding = crate::store::repos::connection_record::require_mcp_capability_binding(
+                tx,
+                store,
+                &workspace_scope,
+                &connection_id,
+                connection_revision,
+                &capability_id,
+            )?;
+            let connection = crate::store::repos::connection_record::get(
+                tx,
+                store,
+                &workspace_scope,
+                &connection_id,
+            )?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
+            })?;
+            Ok((binding, connection))
+        })
+        .map_err(|error| error.to_string())?;
+    let mut arguments = serde_json::Map::from_iter([
+        (
+            "contractVersion".into(),
+            Value::String("fable.connected-source-search.v1".into()),
+        ),
+        ("query".into(), Value::String(query.clone())),
+    ]);
+    if let Some(limit) = limit {
+        arguments.insert("limit".into(), Value::Number(limit.into()));
+    }
+    if let Some(cursor) = cursor {
+        if cursor.is_empty() || cursor.len() > 2_048 || cursor.chars().any(char::is_control) {
+            return Err("Connected-source search cursor is invalid.".into());
+        }
+        arguments.insert("cursor".into(), Value::String(cursor));
+    }
+    let proposal = McpToolProposal {
+        workspace_id: workspace_id.clone(),
+        session_id,
+        tool_name: binding.tool_name,
+        arguments: Value::Object(arguments),
+    };
+    let context = validate_tool_proposal(&proposal)?;
+    if context.connection_id != connection_id || context.connection_revision != connection_revision
+    {
+        return Err("The MCP semantic route changed before execution.".into());
+    }
+    let grants = store
+        .transaction(|tx| {
+            let current_binding =
+                crate::store::repos::connection_record::require_mcp_capability_binding(
+                    tx,
+                    store,
+                    &workspace_scope,
+                    &connection_id,
+                    connection_revision,
+                    &capability_id,
+                )?;
+            if current_binding.tool_name != proposal.tool_name {
+                return Err(crate::store::StoreError::Invalid(
+                    "The MCP semantic binding changed before execution.".into(),
+                ));
+            }
+            crate::store::repos::capability_grant::authorize_and_consume(
+                tx,
+                store,
+                &scope,
+                &capability_id,
+                &connection_id,
+                "read",
+                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            )?
+            .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
+        })
+        .map_err(|error| error.to_string())?;
+    let permit_id = random_session_id()?.replacen("mcp-", "mcp-semantic-permit-", 1);
+    tool_permits()
+        .lock()
+        .map_err(|_| "Fable could not access MCP execution permits.".to_string())?
+        .insert(
+            permit_id.clone(),
+            McpToolPermit {
+                session_id: proposal.session_id.clone(),
+                connection_id: context.connection_id,
+                connection_revision: context.connection_revision,
+                tool_name: proposal.tool_name.clone(),
+                arguments_fingerprint: context.arguments_fingerprint,
+                issued_at: Instant::now(),
+            },
+        );
+    let degraded = connection.health_state != "healthy";
+    Ok(McpSemanticContinuation {
+        kind: "mcp-connected-source-search",
+        proposal,
+        permit_id,
+        workspace_id,
+        project_id,
+        query,
+        connection_id,
+        matched_grant_ids: grants.into_iter().map(|grant| grant.id).collect(),
+        degraded,
+        degradation_reasons: degraded
+            .then_some("connection-health-unknown-or-degraded".into())
+            .into_iter()
+            .collect(),
+    })
 }
 
 fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalContext, String> {

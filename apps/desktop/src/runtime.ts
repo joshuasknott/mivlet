@@ -2964,6 +2964,25 @@ export interface RuntimeMcpConnectionDetails {
   }>;
 }
 
+export interface RuntimeResolvedMcpCapabilityRoute {
+  configurationReference: string;
+  transport: "stdio" | "streamable-http";
+  connectionId: string;
+  connectionRevision: number;
+  capabilityId: "knowledge.content.search";
+  toolName: string;
+}
+
+export async function resolveRuntimeMcpCapabilityRoute(
+  workspaceId: string,
+  capabilityId: string
+) {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeResolvedMcpCapabilityRoute | null>("resolve_mcp_capability_route", {
+    request: { workspaceId, capabilityId }
+  }).catch((error) => { throw toRuntimeError(error); });
+}
+
 export interface RuntimeMcpToolProposal {
   workspaceId: string;
   sessionId: string;
@@ -3013,6 +3032,7 @@ export interface RuntimeCapabilityGrantProposal {
   workspaceId: string;
   projectId?: string;
   capabilityId: string;
+  connectionId?: string;
   maxUses?: number;
   expiresAt?: string;
 }
@@ -3337,6 +3357,8 @@ export interface RuntimeToolRequest {
   workspaceId?: string;
   /** Optional active private project scope. */
   projectId?: string;
+  /** Native-owned live MCP session selected from an explicit semantic binding. */
+  mcpSessionId?: string;
   /** Test-only compatibility field. Production Rust ignores caller-supplied roots. */
   workspaceRoot?: string;
 }

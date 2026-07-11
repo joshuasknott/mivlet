@@ -22,6 +22,8 @@ pub struct CapabilityGrantProposal {
     project_id: Option<String>,
     capability_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    connection_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     max_uses: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     expires_at: Option<String>,
@@ -189,17 +191,28 @@ fn validate_proposal_with_app(
         proposal.project_id.clone(),
         crate::authorized_scope::ScopeAccess::Write,
     )?;
-    let target = crate::capability_registry::native_grant_target(
-        app,
-        &proposal.workspace_id,
-        proposal.project_id.as_deref(),
-        &proposal.capability_id,
-    )
-    .map_err(|error| error.message)?;
+    let target = if let Some(connection_id) = proposal.connection_id.as_deref() {
+        crate::capability_registry::mcp_grant_target(
+            &proposal.workspace_id,
+            proposal.project_id.as_deref(),
+            &proposal.capability_id,
+            connection_id,
+        )
+        .map_err(|error| error.message)?
+    } else {
+        crate::capability_registry::native_grant_target(
+            app,
+            &proposal.workspace_id,
+            proposal.project_id.as_deref(),
+            &proposal.capability_id,
+        )
+        .map_err(|error| error.message)?
+    };
     let normalized = serde_json::json!({
         "workspaceId": proposal.workspace_id,
         "projectId": proposal.project_id,
         "capabilityId": target.capability_id,
+        "requestedConnectionId": proposal.connection_id,
         "connectionId": target.connection_id,
         "connectionRevision": target.connection_revision,
         "consequence": target.consequence,

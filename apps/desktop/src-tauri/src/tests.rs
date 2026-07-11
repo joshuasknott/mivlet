@@ -2251,6 +2251,7 @@ fn tool_request(
         },
         workspace_id: None,
         project_id: None,
+        mcp_session_id: None,
         workspace_root: None,
     }
 }
@@ -2552,6 +2553,7 @@ fn semantic_connection_read_enters_only_the_async_resolver_boundary() {
     ];
     let mut request = tool_request("connection-read", arguments, approval, "once");
     request.workspace_id = Some("workspace-1".into());
+    request.mcp_session_id = Some("mcp-session-1".into());
 
     match crate::tools::execute_tool_outcome(request, &root) {
         crate::tools::ToolOutcome::NeedsSemanticRead {
@@ -2560,12 +2562,14 @@ fn semantic_connection_read_enters_only_the_async_resolver_boundary() {
             capability_id,
             input,
             cursor,
+            mcp_session_id,
         } => {
             assert_eq!(workspace_id, "workspace-1");
             assert!(project_id.is_none());
             assert_eq!(capability_id, "source.repository.list");
             assert!(input.is_empty());
             assert!(cursor.is_none());
+            assert_eq!(mcp_session_id.as_deref(), Some("mcp-session-1"));
         }
         _ => panic!("semantic reads must defer only to the capability resolver"),
     }

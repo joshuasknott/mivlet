@@ -261,6 +261,7 @@ pub fn run() {
             mcp_process::close_remote_mcp_session,
             mcp_process::record_mcp_server_discovery,
             mcp_process::set_mcp_server_enablement,
+            mcp_process::resolve_mcp_capability_route,
             mcp_process::prepare_mcp_tool_call,
             mcp_process::authorize_mcp_tool_call,
             mcp_process::execute_approved_mcp_tool_call,

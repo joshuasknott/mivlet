@@ -23,15 +23,25 @@
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
   ACP_PERMISSION_TOOL,
+  McpClient,
+  normalizeMcpConnectedSourceSearch,
   type ApprovalGate,
+  type McpUntrustedToolResult,
   type ToolExecutor
 } from "@fable/connectors";
 import {
   commitRuntimeCapabilityGrant,
   executeRuntimeToolCall,
   prepareRuntimeCapabilityGrant,
+  resolveRuntimeMcpCapabilityRoute,
   type RuntimeCapabilityGrantProposal
 } from "../runtime";
+import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime";
+import {
+  createDesktopMcpTransport,
+  createDesktopRemoteMcpTransport,
+  type DesktopMcpTransportHandle
+} from "./mcp-transport";
 
 export interface DesktopToolExecutorOptions {
   workspaceId?: string;
@@ -56,8 +66,14 @@ export function createDesktopToolExecutor(
   return async (approval, args) => {
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
+    let mcpRoute: RuntimeResolvedMcpCapabilityRoute | null = null;
     if (toolName === "connection-read") {
-      await ensureCapabilityGrant(gate, options, parsed);
+      const workspaceId = options.workspaceId;
+      const capabilityId = typeof parsed.capability === "string" ? parsed.capability.trim() : "";
+      if (workspaceId && capabilityId) {
+        mcpRoute = await resolveRuntimeMcpCapabilityRoute(workspaceId, capabilityId);
+      }
+      await ensureCapabilityGrant(gate, options, parsed, mcpRoute?.connectionId);
     }
     const decision = await gate.waitForDecision(approval);
     if (decision !== "granted") {
@@ -70,6 +86,9 @@ export function createDesktopToolExecutor(
     if (approval.action.split(/\s+/)[0] === ACP_PERMISSION_TOOL) {
       return "ACP permission granted once.";
     }
+    if (mcpRoute) {
+      return runMcpSemanticRead(approval, parsed, options, mcpRoute);
+    }
     return runOnDesktop(approval, parsed, options);
   };
 }
@@ -77,7 +96,8 @@ export function createDesktopToolExecutor(
 async function ensureCapabilityGrant(
   gate: ApprovalGate,
   options: DesktopToolExecutorOptions,
-  parsed: Record<string, unknown>
+  parsed: Record<string, unknown>,
+  connectionId?: string
 ): Promise<void> {
   const workspaceId = options.workspaceId;
   const capabilityId = typeof parsed.capability === "string" ? parsed.capability.trim() : "";
@@ -87,7 +107,8 @@ async function ensureCapabilityGrant(
   const proposal: RuntimeCapabilityGrantProposal = {
     workspaceId,
     projectId: options.projectId,
-    capabilityId
+    capabilityId,
+    connectionId
   };
   const prepared = await prepareRuntimeCapabilityGrant(proposal);
   if (prepared === null) {
@@ -130,7 +151,8 @@ async function ensureCapabilityGrant(
 async function runOnDesktop(
   approval: ApprovalRequest,
   parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions
+  options: DesktopToolExecutorOptions,
+  mcpSessionId?: string
 ): Promise<string> {
   const toolName = approval.action.split(/\s+/)[0];
   // The gate already guaranteed a grant; synthesize the resolution request Rust
@@ -147,7 +169,8 @@ async function runOnDesktop(
     arguments: parsed,
     approval: resolution,
     workspaceId: options.workspaceId,
-    projectId: options.projectId
+    projectId: options.projectId,
+    mcpSessionId
   });
   if (result === null) {
     // No Tauri runtime: nothing executed (preview/test path).
@@ -159,6 +182,98 @@ async function runOnDesktop(
     throw new Error(result.output);
   }
   return result.output;
+}
+
+interface McpSemanticContinuation {
+  kind: "mcp-connected-source-search";
+  proposal: RuntimeMcpToolProposal;
+  permitId: string;
+  workspaceId: string;
+  projectId?: string;
+  query: string;
+  connectionId: string;
+  matchedGrantIds: string[];
+  degraded: boolean;
+  degradationReasons: string[];
+}
+
+function parseMcpContinuation(value: string): McpSemanticContinuation {
+  const parsed = JSON.parse(value) as Partial<McpSemanticContinuation>;
+  if (
+    parsed.kind !== "mcp-connected-source-search" ||
+    !parsed.proposal ||
+    typeof parsed.permitId !== "string" ||
+    typeof parsed.workspaceId !== "string" ||
+    typeof parsed.query !== "string" ||
+    typeof parsed.connectionId !== "string" ||
+    !Array.isArray(parsed.matchedGrantIds) ||
+    typeof parsed.degraded !== "boolean" ||
+    !Array.isArray(parsed.degradationReasons)
+  ) {
+    throw new Error("Fable returned an invalid MCP semantic continuation.");
+  }
+  return parsed as McpSemanticContinuation;
+}
+
+async function runMcpSemanticRead(
+  approval: ApprovalRequest,
+  parsed: Record<string, unknown>,
+  options: DesktopToolExecutorOptions,
+  route: RuntimeResolvedMcpCapabilityRoute
+): Promise<string> {
+  if (!options.workspaceId) throw new Error("MCP semantic search requires an active workspace.");
+  let transport: DesktopMcpTransportHandle | null = null;
+  try {
+    transport = route.transport === "stdio"
+      ? await createDesktopMcpTransport(options.workspaceId, route.configurationReference)
+      : await createDesktopRemoteMcpTransport(options.workspaceId, route.configurationReference);
+    if (!transport) throw new Error("MCP semantic search requires the desktop runtime.");
+    const client = new McpClient(transport, { authorizeToolCall: async () => false });
+    const initialized = await client.initialize();
+    const tools = initialized.capabilities.tools ? await client.listTools() : [];
+    const resources = initialized.capabilities.resources ? await client.listResources() : [];
+    const discovery = await transport.recordDiscovery(
+      tools.map((tool) => tool.name),
+      resources.map((resource) => resource.uri)
+    );
+    const binding = discovery.capabilityBindings.find(
+      (candidate) => candidate.capabilityId === "knowledge.content.search"
+    );
+    if (!binding || binding.toolName !== route.toolName) {
+      throw new Error("The MCP connected-source binding changed during discovery.");
+    }
+    const prepared = await runOnDesktop(
+      approval,
+      parsed,
+      options,
+      transport.sessionId
+    );
+    const continuation = parseMcpContinuation(prepared);
+    const untrusted = await transport.executeAuthorizedToolCall(
+      continuation.proposal,
+      continuation.permitId
+    ) as McpUntrustedToolResult;
+    const result = normalizeMcpConnectedSourceSearch(untrusted, {
+      workspaceId: continuation.workspaceId,
+      projectId: continuation.projectId,
+      query: continuation.query,
+      connectionId: continuation.connectionId,
+      matchedGrantIds: continuation.matchedGrantIds,
+      degraded: continuation.degraded,
+      degradationReasons: continuation.degradationReasons
+    });
+    return JSON.stringify({
+      capabilityId: "knowledge.content.search",
+      availability: continuation.degraded ? "degraded" : "available",
+      connectionId: continuation.connectionId,
+      connectorId: "mcp",
+      implementationEvidence: "adapter-validated",
+      matchedGrantIds: continuation.matchedGrantIds,
+      result
+    });
+  } finally {
+    await transport?.close().catch(() => undefined);
+  }
 }
 
 function safeParseArgs(args: string): Record<string, unknown> {

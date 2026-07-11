@@ -272,6 +272,7 @@ export * from "./mobile-remote";
 // authorization seams shared by STDIO and later Streamable HTTP.
 export * from "./mcp/client";
 export * from "./mcp/protocol";
+export * from "./mcp/connected-source-search";
 
 // Browser automation foundation: pure run/session binding, shared permission
 // policy classification, and redacted audit shaping. Live transport is supplied

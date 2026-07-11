@@ -54,6 +54,8 @@ pub struct ToolExecutionRequest {
     pub workspace_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub mcp_session_id: Option<String>,
     /// Retained for wire compatibility and pure helper tests. The Tauri command
     /// deliberately ignores it and resolves authority from the native app.
     #[allow(dead_code)]
@@ -109,6 +111,7 @@ pub(crate) enum ToolOutcome {
         capability_id: String,
         input: std::collections::BTreeMap<String, serde_json::Value>,
         cursor: Option<String>,
+        mcp_session_id: Option<String>,
     },
     /// An authenticated, read-only Google Workspace request owned by Rust.
     NeedsGoogleRead {
@@ -161,6 +164,7 @@ pub(crate) fn execute_tool_outcome(
     let arguments = request.arguments.clone();
     let workspace_id = request.workspace_id.clone();
     let project_id = request.project_id.clone();
+    let mcp_session_id = request.mcp_session_id.clone();
 
     // Defense in depth: re-resolve the approval exactly as the shell did. A deny
     // (or an invalid/reshaped approval) fails closed here too — never executes.
@@ -195,6 +199,7 @@ pub(crate) fn execute_tool_outcome(
                     capability_id,
                     input,
                     cursor,
+                    mcp_session_id,
                 },
                 None => ToolOutcome::Done(Err(
                     "Semantic Connection reads require the active workspace scope.".into(),
@@ -1110,18 +1115,32 @@ pub async fn execute_tool_call(
             capability_id,
             input,
             cursor,
+            mcp_session_id,
         } => {
-            let result = crate::capability_registry::read(
-                &app,
-                workspace_id,
-                project_id,
-                capability_id,
-                input,
-                cursor,
-            )
-            .await
-            .map_err(|error| error.message)?;
-            serde_json::to_string(&result)
+            let output = if let Some(session_id) = mcp_session_id {
+                let continuation = crate::mcp_process::prepare_semantic_capability_call(
+                    workspace_id,
+                    project_id,
+                    session_id,
+                    capability_id,
+                    input,
+                    cursor,
+                )?;
+                serde_json::to_string(&continuation)
+            } else {
+                let result = crate::capability_registry::read(
+                    &app,
+                    workspace_id,
+                    project_id,
+                    capability_id,
+                    input,
+                    cursor,
+                )
+                .await
+                .map_err(|error| error.message)?;
+                serde_json::to_string(&result)
+            };
+            output
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|_| "Fable could not encode the capability result.".to_string())
         }
