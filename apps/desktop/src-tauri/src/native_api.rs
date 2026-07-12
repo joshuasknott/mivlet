@@ -443,6 +443,7 @@ struct OpenAiTerminalObservation {
     capture_output: bool,
     output: String,
     output_overflow: bool,
+    usage: Option<(i64, i64)>,
 }
 
 impl OpenAiTerminalObservation {
@@ -459,9 +460,29 @@ impl OpenAiTerminalObservation {
             return;
         };
         let terminal_was_seen = self.finish_reason.is_some();
+        let usage_was_seen = self.usage.is_some();
         self.saw_payload = true;
         if value.get("error").is_some_and(|error| !error.is_null()) {
             self.provider_error = true;
+        }
+        if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
+            if !terminal_was_seen || usage_was_seen {
+                self.provider_error = true;
+            }
+            let parsed = usage.as_object().and_then(|usage| {
+                Some((
+                    usage.get("prompt_tokens")?.as_i64()?,
+                    usage.get("completion_tokens")?.as_i64()?,
+                ))
+            });
+            match parsed {
+                Some((input, output)) if input >= 0 && output >= 0 => {
+                    if terminal_was_seen && !usage_was_seen {
+                        self.usage = Some((input, output));
+                    }
+                }
+                _ => self.provider_error = true,
+            }
         }
         if value
             .get("choices")
@@ -474,6 +495,14 @@ impl OpenAiTerminalObservation {
             || value
                 .pointer("/choices/0/delta/content")
                 .is_some_and(|content| !content.is_null() && !content.is_string())
+        {
+            self.provider_error = true;
+        }
+        if usage_was_seen
+            && value
+                .get("choices")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|choices| !choices.is_empty())
         {
             self.provider_error = true;
         }
@@ -508,6 +537,7 @@ impl OpenAiTerminalObservation {
         self.saw_payload
             && !self.provider_error
             && self.finish_reason.as_deref() == Some("stop")
+            && self.usage.is_some()
             && (!self.capture_output || (!self.output.trim().is_empty() && !self.output_overflow))
     }
 }
@@ -1066,6 +1096,19 @@ pub async fn stream_backend_completion(
             None
         };
     }
+    if !cancelled {
+        if let (Some(authority), Some((input_tokens, output_tokens))) =
+            (mission_authority.as_ref(), terminal_observation.usage)
+        {
+            if authority.usage_exceeds_budget(input_tokens, output_tokens) {
+                mission_failure = Some(MissionProviderFailure {
+                    code: "native-worker-token-budget-exceeded",
+                    message: "The native provider usage exceeded the worker token budget.",
+                    retryable: false,
+                });
+            }
+        }
+    }
     let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
         let outcome = if !cancelled && completed && mission_failure.is_none() {
             Some(
@@ -1073,6 +1116,14 @@ pub async fn stream_backend_completion(
                     text: terminal_observation
                         .capture_output
                         .then(|| terminal_observation.output.clone()),
+                    input_tokens: terminal_observation
+                        .usage
+                        .map(|usage| usage.0)
+                        .unwrap_or_default(),
+                    output_tokens: terminal_observation
+                        .usage
+                        .map(|usage| usage.1)
+                        .unwrap_or_default(),
                 },
             )
         } else {
@@ -1081,6 +1132,7 @@ pub async fn stream_backend_completion(
                     code: failure.code,
                     message: failure.message,
                     retryable: failure.retryable,
+                    usage: terminal_observation.usage,
                 }
             })
         };
@@ -1578,13 +1630,19 @@ mod transport_policy_tests {
         observation.observe(r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#);
         assert!(!observation.clean_stop());
         observation.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        observation.observe(r#"{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1}}"#);
         assert!(observation.clean_stop());
         observation.observe(r#"{"error":{"message":"late failure"}}"#);
         assert!(!observation.clean_stop());
         let mut late_content = OpenAiTerminalObservation::new(false);
         late_content.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        late_content.observe(r#"{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1}}"#);
         late_content.observe(r#"{"choices":[{"delta":{"content":"late"}}]}"#);
         assert!(!late_content.clean_stop());
+        let mut early_usage = OpenAiTerminalObservation::new(false);
+        early_usage.observe(r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#);
+        early_usage.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(!early_usage.clean_stop());
     }
 
     #[test]
@@ -1593,10 +1651,12 @@ mod transport_policy_tests {
         observation.observe(r#"{"choices":[{"delta":{"content":"Hello "}}]}"#);
         observation
             .observe(r#"{"choices":[{"delta":{"content":"world"},"finish_reason":"stop"}]}"#);
+        observation.observe(r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}"#);
         assert!(observation.clean_stop());
         assert_eq!(observation.output, "Hello world");
         let mut empty = OpenAiTerminalObservation::new(true);
         empty.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        empty.observe(r#"{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":0}}"#);
         assert!(!empty.clean_stop());
     }
 
@@ -1606,6 +1666,7 @@ mod transport_policy_tests {
             run_id: "lease-run".into(),
             worker_id: "lease-worker".into(),
             worker_started_event_id: "lease-start".into(),
+            usage_event_id: "lease-usage".into(),
             completion_event_id: "lease-complete".into(),
             failure_event_id: "lease-fail".into(),
             idempotency_key: "lease-terminal".into(),

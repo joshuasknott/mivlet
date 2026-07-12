@@ -278,6 +278,20 @@ restart. This is durable provider-generated text, not an artifact, cited brief,
 accepted mission result, canonical provider-route observation, or evidence for
 tool/context-bearing workers, so the Wave 4A boxes remain unchecked.
 
+Native OpenAI mission termination now also requires exactly one nonnegative
+usage observation after the provider finish reason. Rust rejects early,
+duplicate, stale, or post-usage choice frames and atomically appends a
+route-optional `usage-recorded` event before either `worker-completed` or
+`worker-failed`. The event names the worker and requested model, records token
+counts and zero tool calls, leaves costs empty rather than estimating them, and
+does not invent a provider route. Token-budget excess is retained as usage then
+closed as a non-retryable budget failure instead of disappearing into a
+retryable started worker. Definitive failed terminals retain trustworthy final
+usage; cooperative cancellation records none because provider finality is not
+established. Older direct terminal events remain readable as legacy exact
+replays. Canonical route selection and price/cost provenance remain open until
+API providers are represented by canonical workspace Connections.
+
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
 checkpoint replay boundaries, advancing recovery attempts, cooperative

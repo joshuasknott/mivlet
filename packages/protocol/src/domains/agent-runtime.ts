@@ -501,6 +501,7 @@ export interface MissionWorkerExecutionBinding {
   runId: string;
   workerId: string;
   workerStartedEventId: string;
+  usageEventId: string;
   completionEventId: string;
   failureEventId: string;
   idempotencyKey: string;
