@@ -28,8 +28,12 @@ use tokio::{
 use url::Url;
 
 const MAX_MCP_FRAME_BYTES: usize = 10 * 1024 * 1024;
+const MAX_MCP_TOOL_RESULT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_MCP_STRUCTURED_CHARACTERS: usize = 256 * 1024;
+const MAX_CONNECTED_SOURCE_CITATIONS: usize = 50;
 const MCP_EVENT_CHANNEL_PREFIX: &str = "fable://mcp/";
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
+const CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION: &str = "fable.connected-source-search.v1";
 
 struct McpChild {
     child: Child,
@@ -429,6 +433,58 @@ pub(crate) struct McpSemanticContinuation {
     matched_grant_ids: Vec<String>,
     degraded: bool,
     degradation_reasons: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalizedMcpConnectedSourceCitation {
+    citation_id: String,
+    source_id: String,
+    title: String,
+    snippet: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    uri: Option<String>,
+    provenance: String,
+    freshness: String,
+    trust: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalizedMcpConnectedSourceScope {
+    workspace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NormalizedMcpConnectedSourceImplementation {
+    kind: &'static str,
+    evidence: &'static str,
+}
+
+/// A server result after the native runtime has removed every opportunity for
+/// MCP-controlled data to claim Fable authority. Fields stay private so future
+/// callers can serialize or inspect this value, but cannot rewrite its trust,
+/// scope, Connection, grant, or implementation facts.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct NormalizedMcpConnectedSourceSearch {
+    contract_version: &'static str,
+    capability_id: &'static str,
+    query: String,
+    scope: NormalizedMcpConnectedSourceScope,
+    citations: Vec<NormalizedMcpConnectedSourceCitation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<String>,
+    trust: &'static str,
+    instruction_authority: &'static str,
+    degraded: bool,
+    degradation_reasons: Vec<String>,
+    connection_id: String,
+    matched_grant_ids: Vec<String>,
+    implementation: NormalizedMcpConnectedSourceImplementation,
 }
 
 #[derive(serde::Serialize)]
@@ -1887,6 +1943,222 @@ pub(crate) fn prepare_semantic_capability_call(
             .then_some("connection-health-unknown-or-degraded".into())
             .into_iter()
             .collect(),
+    })
+}
+
+/// Normalizes the raw `tools/call` result while the authoritative semantic
+/// continuation is still held by Rust. Unlike the renderer adapter, this path
+/// never truncates structured data: anything beyond the accepted envelope is
+/// rejected before it can become mission evidence.
+pub(crate) fn normalize_mcp_connected_source_search(
+    result: &Value,
+    continuation: &McpSemanticContinuation,
+) -> Result<NormalizedMcpConnectedSourceSearch, String> {
+    let encoded = serde_json::to_vec(result)
+        .map_err(|_| "MCP cited search returned an invalid result.".to_string())?;
+    if encoded.len() > MAX_MCP_TOOL_RESULT_BYTES {
+        return Err("MCP cited search returned an oversized result.".into());
+    }
+    let result = result
+        .as_object()
+        .ok_or_else(|| "MCP cited search returned an invalid result.".to_string())?;
+    match result.get("isError") {
+        Some(Value::Bool(true)) => return Err("MCP cited search returned an error result.".into()),
+        Some(Value::Bool(false)) | None => {}
+        Some(_) => return Err("MCP cited search returned an invalid error state.".into()),
+    }
+    validate_mcp_tool_result_content(result.get("content"))?;
+    let structured = result
+        .get("structuredContent")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            "MCP cited search did not return a complete structured result.".to_string()
+        })?;
+    let structured_encoded = serde_json::to_string(structured)
+        .map_err(|_| "MCP cited search returned an invalid structured result.".to_string())?;
+    if structured_encoded.encode_utf16().count() > MAX_MCP_STRUCTURED_CHARACTERS {
+        return Err("MCP cited search returned an oversized structured result.".into());
+    }
+    if structured.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "contractVersion" | "query" | "citations" | "nextCursor"
+        )
+    }) {
+        return Err("MCP cited search attempted to supply Fable-owned authority metadata.".into());
+    }
+    if structured.get("contractVersion").and_then(Value::as_str)
+        != Some(CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION)
+    {
+        return Err("MCP cited search returned an unsupported contract version.".into());
+    }
+    if structured.get("query").and_then(Value::as_str) != Some(continuation.query.as_str()) {
+        return Err("MCP cited search returned results for a different query.".into());
+    }
+    let raw_citations = structured
+        .get("citations")
+        .and_then(Value::as_array)
+        .filter(|citations| citations.len() <= MAX_CONNECTED_SOURCE_CITATIONS)
+        .ok_or_else(|| "MCP cited search returned an invalid citation list.".to_string())?;
+    let citations = raw_citations
+        .iter()
+        .enumerate()
+        .map(|(index, raw)| normalize_mcp_connected_source_citation(raw, index))
+        .collect::<Result<Vec<_>, _>>()?;
+    let next_cursor = structured
+        .get("nextCursor")
+        .map(|value| connected_source_text(value, "next cursor", 2_048))
+        .transpose()?;
+
+    Ok(NormalizedMcpConnectedSourceSearch {
+        contract_version: CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION,
+        capability_id: "knowledge.content.search",
+        query: continuation.query.clone(),
+        scope: NormalizedMcpConnectedSourceScope {
+            workspace_id: continuation.workspace_id.clone(),
+            project_id: continuation.project_id.clone(),
+        },
+        citations,
+        next_cursor,
+        trust: "external-untrusted",
+        instruction_authority: "none",
+        degraded: continuation.degraded,
+        degradation_reasons: continuation.degradation_reasons.clone(),
+        connection_id: continuation.connection_id.clone(),
+        matched_grant_ids: continuation.matched_grant_ids.clone(),
+        implementation: NormalizedMcpConnectedSourceImplementation {
+            kind: "mcp",
+            evidence: "adapter-validated",
+        },
+    })
+}
+
+fn normalize_mcp_connected_source_citation(
+    raw: &Value,
+    index: usize,
+) -> Result<NormalizedMcpConnectedSourceCitation, String> {
+    let citation = raw
+        .as_object()
+        .ok_or_else(|| "MCP cited search returned an invalid citation.".to_string())?;
+    if citation.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "sourceId" | "title" | "snippet" | "uri" | "provenance" | "freshness"
+        )
+    }) {
+        return Err("MCP cited search citation attempted to supply authority metadata.".into());
+    }
+    Ok(NormalizedMcpConnectedSourceCitation {
+        citation_id: format!("source-{}", index + 1),
+        source_id: connected_source_text(
+            citation.get("sourceId").unwrap_or(&Value::Null),
+            "source id",
+            512,
+        )?,
+        title: connected_source_text(
+            citation.get("title").unwrap_or(&Value::Null),
+            "citation title",
+            512,
+        )?,
+        snippet: connected_source_text(
+            citation.get("snippet").unwrap_or(&Value::Null),
+            "citation snippet",
+            4_096,
+        )?,
+        uri: citation
+            .get("uri")
+            .map(normalize_connected_source_uri)
+            .transpose()?,
+        provenance: connected_source_text(
+            citation.get("provenance").unwrap_or(&Value::Null),
+            "citation provenance",
+            512,
+        )?,
+        freshness: connected_source_text(
+            citation.get("freshness").unwrap_or(&Value::Null),
+            "citation freshness",
+            200,
+        )?,
+        trust: "external-untrusted",
+    })
+}
+
+fn connected_source_text(value: &Value, label: &str, max: usize) -> Result<String, String> {
+    let raw = value
+        .as_str()
+        .ok_or_else(|| format!("MCP cited search returned an invalid {label}."))?;
+    if raw.encode_utf16().count() > max
+        || raw
+            .chars()
+            .any(|character| character <= '\u{001f}' || character == '\u{007f}')
+    {
+        return Err(format!("MCP cited search returned an invalid {label}."));
+    }
+    let trimmed =
+        raw.trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}');
+    if trimmed.is_empty() {
+        return Err(format!("MCP cited search returned an invalid {label}."));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn normalize_connected_source_uri(value: &Value) -> Result<String, String> {
+    let uri = connected_source_text(value, "citation URI", 2_048)?;
+    let parsed = Url::parse(&uri)
+        .map_err(|_| "MCP cited search returned an invalid citation URI.".to_string())?;
+    if !matches!(parsed.scheme(), "https" | "http" | "file")
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return Err("MCP cited search returned an unsafe citation URI.".into());
+    }
+    Ok(uri)
+}
+
+fn validate_mcp_tool_result_content(content: Option<&Value>) -> Result<(), String> {
+    let content = content
+        .and_then(Value::as_array)
+        .filter(|items| items.len() <= 64)
+        .ok_or_else(|| "MCP cited search returned invalid content.".to_string())?;
+    for item in content {
+        let item = item
+            .as_object()
+            .ok_or_else(|| "MCP cited search returned invalid content.".to_string())?;
+        match item.get("type").and_then(Value::as_str) {
+            Some("text") if item.get("text").is_some_and(Value::is_string) => {}
+            Some("resource_link")
+                if item
+                    .get("uri")
+                    .is_some_and(|value| valid_optional_mcp_text(value, 2_048)) => {}
+            Some("resource") => {
+                let resource =
+                    item.get("resource")
+                        .and_then(Value::as_object)
+                        .ok_or_else(|| {
+                            "MCP cited search returned unsupported embedded content.".to_string()
+                        })?;
+                if !resource
+                    .get("uri")
+                    .is_some_and(|value| valid_optional_mcp_text(value, 2_048))
+                    || !resource.get("text").is_some_and(Value::is_string)
+                {
+                    return Err("MCP cited search returned unsupported embedded content.".into());
+                }
+            }
+            Some("image" | "audio") if item.get("data").is_some_and(Value::is_string) => {}
+            _ => return Err("MCP cited search returned unsupported content.".into()),
+        }
+    }
+    Ok(())
+}
+
+fn valid_optional_mcp_text(value: &Value, max: usize) -> bool {
+    value.as_str().is_some_and(|text| {
+        !text.is_empty()
+            && text.encode_utf16().count() <= max
+            && !text
+                .chars()
+                .any(|character| character <= '\u{001f}' || character == '\u{007f}')
     })
 }
 
@@ -4220,6 +4492,185 @@ impl BoundedLineDecoder {
 mod tests {
     use super::*;
     use tokio::io::{AsyncBufReadExt, BufReader};
+
+    fn connected_source_continuation() -> McpSemanticContinuation {
+        McpSemanticContinuation {
+            kind: "mcp-connected-source-search",
+            proposal: McpToolProposal {
+                workspace_id: "workspace-authoritative".into(),
+                session_id: "mcp-1234567890abcdef1234567890abcdef".into(),
+                tool_name: "search".into(),
+                arguments: serde_json::json!({}),
+            },
+            permit_id: "permit-authoritative".into(),
+            workspace_id: "workspace-authoritative".into(),
+            project_id: Some("project-authoritative".into()),
+            query: "quarterly planning".into(),
+            connection_id: "connection-authoritative".into(),
+            matched_grant_ids: vec!["grant-authoritative".into()],
+            degraded: true,
+            degradation_reasons: vec!["connection-health-unknown-or-degraded".into()],
+        }
+    }
+
+    fn valid_connected_source_result() -> Value {
+        serde_json::json!({
+            "content": [],
+            "isError": false,
+            "structuredContent": {
+                "contractVersion": "fable.connected-source-search.v1",
+                "query": "quarterly planning",
+                "citations": [{
+                    "sourceId": "  document-7  ",
+                    "title": "  Planning notes  ",
+                    "snippet": "  Revenue assumptions and launch milestones.  ",
+                    "uri": "https://work.example.com/docs/7",
+                    "provenance": "  Connected Drive  ",
+                    "freshness": "  2026-07-11T20:00:00Z  "
+                }],
+                "nextCursor": "  page-2  "
+            }
+        })
+    }
+
+    #[test]
+    fn connected_source_result_is_normalized_with_only_native_authority() {
+        let normalized = normalize_mcp_connected_source_search(
+            &valid_connected_source_result(),
+            &connected_source_continuation(),
+        )
+        .unwrap();
+        let encoded = serde_json::to_value(normalized).unwrap();
+
+        assert_eq!(
+            encoded["contractVersion"],
+            "fable.connected-source-search.v1"
+        );
+        assert_eq!(encoded["capabilityId"], "knowledge.content.search");
+        assert_eq!(encoded["query"], "quarterly planning");
+        assert_eq!(encoded["scope"]["workspaceId"], "workspace-authoritative");
+        assert_eq!(encoded["scope"]["projectId"], "project-authoritative");
+        assert_eq!(encoded["connectionId"], "connection-authoritative");
+        assert_eq!(
+            encoded["matchedGrantIds"],
+            serde_json::json!(["grant-authoritative"])
+        );
+        assert_eq!(encoded["trust"], "external-untrusted");
+        assert_eq!(encoded["instructionAuthority"], "none");
+        assert_eq!(encoded["degraded"], true);
+        assert_eq!(
+            encoded["degradationReasons"],
+            serde_json::json!(["connection-health-unknown-or-degraded"])
+        );
+        assert_eq!(
+            encoded["implementation"],
+            serde_json::json!({ "kind": "mcp", "evidence": "adapter-validated" })
+        );
+        assert_eq!(encoded["citations"][0]["citationId"], "source-1");
+        assert_eq!(encoded["citations"][0]["sourceId"], "document-7");
+        assert_eq!(encoded["citations"][0]["title"], "Planning notes");
+        assert_eq!(encoded["citations"][0]["trust"], "external-untrusted");
+        assert_eq!(encoded["nextCursor"], "page-2");
+    }
+
+    #[test]
+    fn connected_source_result_rejects_authority_and_scope_substitution() {
+        for field in [
+            "trust",
+            "instructionAuthority",
+            "scope",
+            "capabilityId",
+            "connectionId",
+            "matchedGrantIds",
+            "implementation",
+            "degraded",
+            "degradationReasons",
+        ] {
+            let mut result = valid_connected_source_result();
+            result["structuredContent"][field] = serde_json::json!("server-controlled");
+            assert!(
+                normalize_mcp_connected_source_search(&result, &connected_source_continuation())
+                    .is_err(),
+                "accepted server-owned top-level field {field}"
+            );
+        }
+
+        for field in [
+            "citationId",
+            "trust",
+            "instructionAuthority",
+            "connectionId",
+        ] {
+            let mut result = valid_connected_source_result();
+            result["structuredContent"]["citations"][0][field] =
+                serde_json::json!("server-controlled");
+            assert!(
+                normalize_mcp_connected_source_search(&result, &connected_source_continuation())
+                    .is_err(),
+                "accepted server-owned citation field {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn connected_source_result_fails_closed_on_mismatch_malformed_and_oversize() {
+        let continuation = connected_source_continuation();
+        let mut attacks = Vec::new();
+
+        let mut wrong_version = valid_connected_source_result();
+        wrong_version["structuredContent"]["contractVersion"] = serde_json::json!("v2");
+        attacks.push(wrong_version);
+        let mut wrong_query = valid_connected_source_result();
+        wrong_query["structuredContent"]["query"] = serde_json::json!("different query");
+        attacks.push(wrong_query);
+        let mut unsafe_scheme = valid_connected_source_result();
+        unsafe_scheme["structuredContent"]["citations"][0]["uri"] =
+            serde_json::json!("javascript:alert(1)");
+        attacks.push(unsafe_scheme);
+        let mut credentials = valid_connected_source_result();
+        credentials["structuredContent"]["citations"][0]["uri"] =
+            serde_json::json!("https://user:password@work.example.com/private");
+        attacks.push(credentials);
+        let mut citation_authority = valid_connected_source_result();
+        citation_authority["structuredContent"]["citations"][0]["sourceId"] =
+            serde_json::json!("bad\nsource");
+        attacks.push(citation_authority);
+        let mut error = valid_connected_source_result();
+        error["isError"] = serde_json::json!(true);
+        attacks.push(error);
+        let mut malformed_content = valid_connected_source_result();
+        malformed_content["content"] = serde_json::json!([{ "type": "tool_result" }]);
+        attacks.push(malformed_content);
+        let mut too_many = valid_connected_source_result();
+        too_many["structuredContent"]["citations"] = Value::Array(
+            (0..=MAX_CONNECTED_SOURCE_CITATIONS)
+                .map(|_| {
+                    serde_json::json!({
+                        "sourceId": "source",
+                        "title": "title",
+                        "snippet": "snippet",
+                        "provenance": "source",
+                        "freshness": "now"
+                    })
+                })
+                .collect(),
+        );
+        attacks.push(too_many);
+        let mut oversized = valid_connected_source_result();
+        oversized["structuredContent"]["citations"][0]["snippet"] =
+            Value::String("x".repeat(MAX_MCP_STRUCTURED_CHARACTERS + 1));
+        attacks.push(oversized);
+
+        for attack in attacks {
+            assert!(normalize_mcp_connected_source_search(&attack, &continuation).is_err());
+        }
+        assert!(normalize_mcp_connected_source_search(&Value::Null, &continuation).is_err());
+        assert!(normalize_mcp_connected_source_search(
+            &serde_json::json!({ "content": [], "structuredContent": [] }),
+            &continuation
+        )
+        .is_err());
+    }
 
     #[test]
     fn frame_validation_accepts_protocol_messages_and_rejects_logs_or_multiline() {
