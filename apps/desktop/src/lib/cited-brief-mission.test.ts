@@ -4,7 +4,7 @@ import { executeCitedBriefMission, isCitedBriefMissionPrompt } from "./cited-bri
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({ executeLocalWorker: mocks.executeLocalWorker, buildToolApproval: mocks.buildToolApproval }));
 vi.mock("./desktop-tool-runtime", () => ({ createDesktopToolExecutor: mocks.desktopExecutor }));
@@ -17,6 +17,7 @@ vi.mock("../runtime", () => ({
   startRuntimeMissionWorker: mocks.startWorker,
   getRuntimeMissionRun: mocks.getRun,
   readRuntimeMissionWorkerOutput: mocks.readOutput,
+  requestRuntimeMissionRunCancellation: mocks.cancelRun,
   resolveRuntimeMcpCapabilityRoute: mocks.resolveMcpRoute
 }));
 
@@ -62,12 +63,14 @@ describe("cited brief mission composition", () => {
 
   it("uses separate mission-bound search and final writing turns", async () => {
     let counter = 0;
+    let cancelMission: (() => Promise<void>) | undefined;
     mocks.resolveMcpRoute.mockResolvedValue({ connectionId: "mcp-connection-1" });
     const gate = { register: vi.fn().mockReturnValue(true), waitForDecision: vi.fn() } as never;
     const result = await executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
       backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: gate,
-      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
+      onCancellationReady: (cancel) => { cancelMission = cancel; }
     });
 
     expect(result.text).toBe("Trustworthy brief [source-1].");
@@ -89,5 +92,8 @@ describe("cited brief mission composition", () => {
     }));
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
+    mocks.getRun.mockResolvedValue(journal(7, 6, []));
+    await cancelMission?.();
+    expect(mocks.cancelRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "mission-run-4", mode: "cooperative", expectedRunRevision: 7, expectedLastSequence: 6 }));
   });
 });

@@ -6,6 +6,7 @@ import {
   getRuntimeMissionPlan,
   getRuntimeMissionRun,
   readRuntimeMissionWorkerOutput,
+  requestRuntimeMissionRunCancellation,
   startRuntimeMissionWorker
 } from "./runtime";
 
@@ -55,6 +56,8 @@ describe("mission runtime boundary", () => {
     await startRuntimeMissionWorker(start);
     await getRuntimeMissionPlan("mission-1");
     await getRuntimeMissionRun("run-1");
+    const cancel = { runId: "run-1", eventId: "event-cancel", requestKey: "stop-1", expectedRunRevision: 3, expectedLastSequence: 2, mode: "cooperative" as const, reason: "User requested stop." };
+    await requestRuntimeMissionRunCancellation(cancel);
     await readRuntimeMissionWorkerOutput("mission-output:v1:ref");
 
     expect(mocks.invoke.mock.calls).toEqual([
@@ -64,6 +67,7 @@ describe("mission runtime boundary", () => {
       ["mission_worker_start", { input: start }],
       ["mission_plan_get", { missionId: "mission-1" }],
       ["mission_run_get", { runId: "run-1" }],
+      ["mission_run_request_cancellation", { input: cancel }],
       ["mission_worker_output_read", { valueReference: "mission-output:v1:ref" }]
     ]);
   });

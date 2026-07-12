@@ -1622,7 +1622,7 @@ describe("Fable home", () => {
     expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
   });
 
-  it("drives a cooperative cancel from the agent panel Stop button", async () => {
+  it("drives a cooperative cancel from the Fable stop command while work is running", async () => {
     // Drives the REAL App.tsx cancel path and proves the cooperative bail. The
     // distinguishing assertion: after Stop (which fires onCancel → sets the
     // cancelRequestedRef flag), a delta fed to the held-open transport is NOT
@@ -1656,11 +1656,12 @@ describe("Fable home", () => {
     // The run is in flight: the transcript shows the first delta and a Stop
     // button is rendered (the cooperative-cancel affordance on the agent panel).
     expect(await screen.findByText(/^partial$/)).toBeInTheDocument();
-    const stopButton = await screen.findByRole("button", { name: /stop/i });
+    await screen.findByRole("button", { name: /stop/i });
 
     // Clicking Stop drives App.tsx's cancel path (agent.cancel() → onCancel flips
     // the cancelRequestedRef flag the loop's shouldCancel reads).
-    await user.click(stopButton);
+    await user.type(composer, "Stop current work");
+    await user.keyboard("{Enter}");
 
     // The Rust boundary cancel fired (the real-Rust drop stays intact) and the
     // Stop button disappears as running drops.

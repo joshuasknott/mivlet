@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { executeCommand, parseScheduleTrigger, type CommandRuntime } from "./dispatch";
 import type {
   MemoryKind,
@@ -252,5 +252,19 @@ describe("parseScheduleTrigger", () => {
   it("returns null for unrecognized phrasing", () => {
     expect(parseScheduleTrigger("whenever", "UTC", FIXED_NOW)).toBeNull();
     expect(parseScheduleTrigger("every day", "UTC", FIXED_NOW)).toBeNull();
+  });
+});
+
+describe("executeCommand — /stop", () => {
+  it("cancels only through the injected current-work boundary", async () => {
+    const stopCurrentWork = vi.fn(async () => true);
+    const result = await executeCommand({ name: "stop", args: "" }, makeRuntime(), { stopCurrentWork });
+    expect(result).toMatchObject({ name: "stop", status: "ok" });
+    expect(stopCurrentWork).toHaveBeenCalledOnce();
+  });
+
+  it("reports idle and rejects extra text", async () => {
+    expect(await executeCommand({ name: "stop", args: "" }, makeRuntime())).toMatchObject({ status: "rejected" });
+    expect(await executeCommand({ name: "stop", args: "later" }, makeRuntime(), { stopCurrentWork: async () => true })).toMatchObject({ status: "validation" });
   });
 });

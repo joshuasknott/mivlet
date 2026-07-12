@@ -62,6 +62,8 @@ export interface ExecuteCommandOptions {
   timezone?: string;
   /** Optional active goal id so /plan can link to it. */
   activeGoalId?: string;
+  /** Cancels the shell's active run; cancellation is runtime state, not provider work. */
+  stopCurrentWork?: () => Promise<boolean>;
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -209,6 +211,17 @@ export async function executeCommand(
   const timezone = options.timezone ?? "UTC";
 
   switch (request.name) {
+    case "stop": {
+      if (request.args.trim()) return { name: "stop", status: "validation", message: "/stop does not take extra text." };
+      if (!options.stopCurrentWork) return { name: "stop", status: "rejected", message: "There is no running work to stop." };
+      try {
+        return await options.stopCurrentWork()
+          ? { name: "stop", status: "ok", message: "Stopping the current work." }
+          : { name: "stop", status: "rejected", message: "There is no running work to stop." };
+      } catch (error) {
+        return { name: "stop", status: "rejected", message: error instanceof Error ? error.message : "Fable could not stop the current work." };
+      }
+    }
     case "remember": {
       const value = request.args.trim();
       if (!value) {

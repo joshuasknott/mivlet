@@ -78,7 +78,7 @@ export function ChatWorkspace() {
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
-  const { runtime, agent, durableConversation, voice, scheduledActive, runCitedBrief, resetCancellation } = controller;
+  const { runtime, agent, durableConversation, voice, scheduledActive, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -659,14 +659,16 @@ export function ChatWorkspace() {
 
   /**
    * Submit raw composer text. Fable-owned slash commands (/goal, /plan,
-   * /remember, /schedule) are parsed and executed first - they create
+   * /remember, /schedule, /stop) are parsed and executed first - they create
    * structured Fable state and, when a backend is connected, submit follow-up
    * model work through the agent run. Unknown slashes and ordinary text fall
    * through to the normal prompt path unchanged.
    */
   async function submitComposerText(rawText: string) {
     const submitted = rawText.trim();
-    if (!submitted || agent.state.running || pendingPrompt) return;
+    const parsed = parseComposerText(submitted);
+    const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
+    if (!submitted || ((agent.state.running || pendingPrompt) && !stopRequested)) return;
     if (!selectedConversationThreadId) {
       setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
@@ -687,7 +689,7 @@ export function ChatWorkspace() {
   async function continueComposerSubmission(submitted: string) {
     const outcome = parseComposerText(submitted);
     if (outcome.status === "command") {
-      const result = await runtime.runFableCommand(outcome.request);
+      const result = await runtime.runFableCommand(outcome.request, { stopCurrentWork });
       // Clear the composer so the command token doesn't also reach the model
       // as ordinary prompt text. A follow-up prompt (if any) is submitted
       // through the same agent path as a normal prompt.
@@ -1069,7 +1071,9 @@ export function ChatWorkspace() {
               onSubmit={(event) => {
                 event.preventDefault();
                 const text = runtime.composerValue;
-                if (!text.trim() || agent.state.running || pendingPrompt) return;
+                const parsed = parseComposerText(text);
+                const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
+                if (!text.trim() || ((agent.state.running || pendingPrompt) && !stopRequested)) return;
                 void submitComposerText(text);
               }}
               voiceStatus={voice.state.status}

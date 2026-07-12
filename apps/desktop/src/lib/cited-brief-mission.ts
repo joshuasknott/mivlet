@@ -9,6 +9,7 @@ import {
   getRuntimeMissionRun,
   prepareRuntimeCapabilityGrant,
   readRuntimeMissionWorkerOutput,
+  requestRuntimeMissionRunCancellation,
   resolveRuntimeMcpCapabilityRoute,
   startRuntimeMissionWorker
 } from "../runtime";
@@ -26,6 +27,7 @@ export interface CitedBriefMissionInput {
   approvalGate: ApprovalGate;
   queueApproval: (approval: ApprovalRequest, tool: string, argumentsJson: string) => void;
   createId?: (prefix: string) => string;
+  onCancellationReady?: (cancel: () => Promise<void>) => void;
 }
 
 export interface CitedBriefMissionResult {
@@ -113,6 +115,13 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   if (!plan) throw new Error("Mission planning requires the desktop runtime.");
 
   let journal = requireJournal(await createRuntimeMissionRun({ missionId, runId, eventId: id("event"), idempotencyKey: id("create") }));
+  input.onCancellationReady?.(async () => {
+    const current = requireJournal(await getRuntimeMissionRun(runId));
+    await requestRuntimeMissionRunCancellation({
+      runId, eventId: id("event"), requestKey: id("stop"), ...head(current),
+      mode: "cooperative", reason: "User requested stop."
+    });
+  });
   journal = requireJournal(await createRuntimeMissionWorker({
     runId, eventId: id("event"), idempotencyKey: id("worker-create"),
     ...head(journal), workerId, stepKey: "research", context: [],

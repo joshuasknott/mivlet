@@ -416,7 +416,11 @@ receipts for other mission shapes remain open. The cited-brief result now shows 
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,
 cited-source count, and external-evidence trust classification. The Wave 4B
-checkboxes stay unchecked because the experience is not yet general.
+checkboxes stay unchecked because the experience is not yet general. `/stop`
+is now a Fable-owned command with exact natural-language parity, remains
+submittable while work is running, drives the existing cooperative native-agent
+cancel path, and appends a durable cancellation request for the active cited
+mission. Natural-language parity for the other four commands remains open.
 
 ### Wave 4C - Multi-worker coordination
 

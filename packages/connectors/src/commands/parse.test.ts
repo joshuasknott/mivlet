@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import { parseComposerText } from "./parse";
 
 describe("parseComposerText", () => {
+  it("recognizes stop with natural-language parity", () => {
+    expect(parseComposerText("/stop")).toEqual({ status: "command", request: { name: "stop", args: "" } });
+    expect(parseComposerText("Stop current work")).toEqual({ status: "command", request: { name: "stop", args: "" } });
+    expect(parseComposerText("cancel current work")).toEqual({ status: "command", request: { name: "stop", args: "" } });
+  });
   it("recognizes each Fable-owned command with trailing args", () => {
     expect(parseComposerText("/remember the prod endpoint is example.com")).toEqual({
       status: "command",

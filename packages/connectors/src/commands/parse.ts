@@ -24,6 +24,10 @@ const COMMAND_NAMES = FABLE_COMMAND_TOKENS.map((token) => token.slice(1));
  * must be delimited from a longer word by whitespace or end-of-text.
  */
 export function parseComposerText(text: string): ParseCommandOutcome {
+  const natural = text.trim().toLowerCase().replace(/\s+/g, " ");
+  if (["stop current work", "cancel current work", "stop what you're doing", "stop what you are doing"].includes(natural)) {
+    return { status: "command", request: { name: "stop", args: "" } };
+  }
   if (!text.trimStart().startsWith("/")) {
     return { status: "prompt", text };
   }

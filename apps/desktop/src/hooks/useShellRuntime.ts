@@ -3041,12 +3041,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
    */
   const runFableCommand = async (
     request: FableCommandRequest,
-    options: { backendConnected?: boolean; activeGoalId?: string } = {}
+    options: { backendConnected?: boolean; activeGoalId?: string; stopCurrentWork?: () => Promise<boolean> } = {}
   ): Promise<FableCommandResult> => {
     const result = await executeCommand(request, commandRuntime, {
       backendConnected: options.backendConnected ?? Boolean(connectedAgentBackend),
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-      activeGoalId: options.activeGoalId ?? goals[0]?.id
+      activeGoalId: options.activeGoalId ?? goals[0]?.id,
+      stopCurrentWork: options.stopCurrentWork
     });
     setLastAction(result.message);
     return result;

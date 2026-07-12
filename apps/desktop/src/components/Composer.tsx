@@ -22,7 +22,7 @@ import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { ProviderIcon } from "./ProviderIcon";
 
-const COMMANDS = ["/plan", "/goal", "/remember", "/schedule"] as const;
+const COMMANDS = ["/plan", "/goal", "/remember", "/schedule", "/stop"] as const;
 
 const PERMISSION_PRESENTATION = {
   "Read Only": {
@@ -196,6 +196,8 @@ export function Composer({
               ? "Create a schedule"
               : command === "/remember"
                 ? "Save memory"
+                : command === "/stop"
+                  ? "Stop current work"
                 : "Create a plan",
         value: command
       }));

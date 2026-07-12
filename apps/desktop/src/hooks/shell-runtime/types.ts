@@ -183,7 +183,7 @@ export interface ShellRuntime {
   /** Execute a parsed Fable command; returns the result + any follow-up prompt. */
   runFableCommand: (
     request: FableCommandRequest,
-    options?: { backendConnected?: boolean; activeGoalId?: string }
+    options?: { backendConnected?: boolean; activeGoalId?: string; stopCurrentWork?: () => Promise<boolean> }
   ) => Promise<FableCommandResult>;
   scheduledJobs: ScheduledJob[];
   workflowRuns: WorkflowRun[];

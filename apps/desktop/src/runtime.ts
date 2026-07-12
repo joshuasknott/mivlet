@@ -2963,6 +2963,16 @@ export interface RuntimeMissionRunCreateInput {
   idempotencyKey: string;
 }
 
+export interface RuntimeMissionRunCancelInput {
+  runId: string;
+  eventId: string;
+  requestKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  mode: "cooperative" | "immediate-if-safe";
+  reason?: string;
+}
+
 export interface RuntimeMissionWorkerCreateInput {
   runId: string;
   eventId: string;
@@ -3009,6 +3019,12 @@ export async function createRuntimeMissionRun(input: RuntimeMissionRunCreateInpu
 export async function getRuntimeMissionRun(runId: string) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown> | null>("mission_run_get", { runId }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function requestRuntimeMissionRunCancellation(input: RuntimeMissionRunCancelInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_run_request_cancellation", { input }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

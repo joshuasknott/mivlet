@@ -102,10 +102,10 @@ export interface MemoryControlState {
 // ---------------------------------------------------------------------------
 
 /** The Fable-owned commands. Provider-specific slashes never appear here. */
-export type FableCommandName = "goal" | "plan" | "remember" | "schedule";
+export type FableCommandName = "goal" | "plan" | "remember" | "schedule" | "stop";
 
 /** The canonical, slash-prefixed command tokens Fable owns. */
-export const FABLE_COMMAND_TOKENS: readonly string[] = ["/goal", "/plan", "/remember", "/schedule"];
+export const FABLE_COMMAND_TOKENS: readonly string[] = ["/goal", "/plan", "/remember", "/schedule", "/stop"];
 
 /** A parsed, validated command ready for execution. */
 export interface FableCommandRequest {

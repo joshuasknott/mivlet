@@ -13,6 +13,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const runtime = useShellRuntime({ approvalGate });
   const cancelRequestedRef = useRef(false);
   const citedMissionRunningRef = useRef(false);
+  const citedMissionCancelRef = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => { approvalGate.replaceStandingGrants([...runtime.sessionApprovalGrants, ...runtime.approvalRules]); }, [approvalGate, runtime.sessionApprovalGrants, runtime.approvalRules]);
   const queueToolApproval = (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => { if (approvalGate.register(event.approval)) runtime.recordBackendToolCall(event); };
   const executor = useMemo(
@@ -50,12 +51,24 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
         backend: agent.backend,
         model,
         approvalGate,
+        onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; },
         queueApproval: (approval, tool, argumentsJson) =>
           queueToolApproval({ callId: approval.id, tool, arguments: argumentsJson, approval })
       });
     } finally {
       citedMissionRunningRef.current = false;
+      citedMissionCancelRef.current = null;
     }
   };
-  return { runtime, agent, durableConversation, voice, scheduledActive: scheduledAgent.active, runCitedBrief, resetCancellation: () => { cancelRequestedRef.current = false; } };
+  const stopCurrentWork = async () => {
+    if (citedMissionRunningRef.current && citedMissionCancelRef.current) {
+      cancelApprovals();
+      await citedMissionCancelRef.current();
+      return true;
+    }
+    if (!agent.state.running) return false;
+    await agent.cancel();
+    return true;
+  };
+  return { runtime, agent, durableConversation, voice, scheduledActive: scheduledAgent.active, runCitedBrief, stopCurrentWork, resetCancellation: () => { cancelRequestedRef.current = false; } };
 }
