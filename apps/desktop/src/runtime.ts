@@ -2576,9 +2576,18 @@ export interface RuntimeStreamRequest {
   missionWorkerExecution?: import("@fable/protocol").MissionWorkerExecutionBinding;
 }
 
+export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
+  observationSummary?: {
+    sampleCount: number;
+    medianLatencyMs: number;
+    usageSampleCount: number;
+    latestObservedAt: string;
+  };
+};
+
 export async function listRuntimeNativeProviderRoutes() {
   if (!hasTauriRuntime()) return null;
-  try { return await invoke<Spine.Connections.ProviderRoute[]>("list_native_provider_routes"); }
+  try { return await invoke<RuntimeNativeProviderRoute[]>("list_native_provider_routes"); }
   catch (error) { throw toRuntimeError(error); }
 }
 

@@ -187,7 +187,10 @@ fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String
         crate::agent_runs::normalize_provider_route_binding(route)?;
         if run.trigger != "schedule"
             || route.selection.fallback_from_provider_route_id.is_some()
-            || !matches!(run.status.as_str(), "completed" | "failed" | "blocked-auth" | "cancelled")
+            || !matches!(
+                run.status.as_str(),
+                "completed" | "failed" | "blocked-auth" | "cancelled"
+            )
         {
             return Err("Workflow provider route evidence is invalid.".to_string());
         }

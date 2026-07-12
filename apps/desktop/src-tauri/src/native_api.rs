@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::backends::read_credential;
 use crate::models::BackendVerifyResult;
@@ -780,6 +780,7 @@ pub async fn stream_backend_completion(
         .filter(|_| mission_authority.is_some())
         .map(acquire_mission_execution)
         .transpose()?;
+    let observation_started = Instant::now();
     let credential = require_key(&request.provider_id)?;
     let connection =
         resolve_provider_connection(&request.provider_id, &credential, &request.model)?;
@@ -1190,6 +1191,39 @@ pub async fn stream_backend_completion(
         return Err("Provider request ended without a terminal state.".to_string());
     }
     mission_settlement?;
+    if request.provider_id == "openai"
+        && !cancelled
+        && completed
+        && !transport_failed
+        && mission_failure.is_none()
+        && terminal_observation.clean_stop()
+    {
+        let latency_ms =
+            u64::try_from(observation_started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let observed_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        if let Some(authority) = mission_authority.as_ref() {
+            let _ = crate::backends::record_native_provider_route_observation(
+                authority.observation_owner(),
+                &request.provider_id,
+                &request.model,
+                authority.provider_route_id(),
+                &request.request_id,
+                latency_ms,
+                terminal_observation.usage,
+                &observed_at,
+            );
+        } else if let Some(binding) = request.provider_route.as_ref() {
+            let _ = crate::backends::record_current_native_provider_route_observation(
+                &request.provider_id,
+                &request.model,
+                binding,
+                &request.request_id,
+                latency_ms,
+                terminal_observation.usage,
+                &observed_at,
+            );
+        }
+    }
     Ok(())
 }
 

@@ -39,6 +39,7 @@ pub mod mission_worker_output;
 pub mod mission_worker_tool;
 pub mod preferences;
 pub mod project;
+pub mod provider_route_observation;
 pub mod run;
 pub mod run_state;
 pub mod schedule;

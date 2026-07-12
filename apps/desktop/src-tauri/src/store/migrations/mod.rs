@@ -126,6 +126,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 27 -> 28: persist immutable encrypted mission-worker tool-result
             // receipts linked to exact run events. No tool result is inferred.
             27 => apply_v27_to_v28(conn)?,
+            // 28 -> 29: persist bounded encrypted provider-route observations.
+            // Migration creates no inferred performance evidence.
+            28 => apply_v28_to_v29(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -135,6 +138,28 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v28_to_v29(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS provider_route_observation (
+          internal_user_id TEXT NOT NULL,
+          provider_id TEXT NOT NULL,
+          provider_route_id TEXT NOT NULL,
+          observation_id TEXT NOT NULL,
+          observed_at TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(internal_user_id,observation_id),
+          FOREIGN KEY(internal_user_id,provider_id)
+            REFERENCES backend_connection(internal_user_id,provider_id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_provider_route_observation_route
+          ON provider_route_observation(internal_user_id,provider_route_id,observed_at,observation_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1412,8 +1437,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v28 is current; v28 -> v29 has no registered migration.
-        let err = apply(&conn, 28, 29).unwrap_err();
+        // v29 is current; v29 -> v30 has no registered migration.
+        let err = apply(&conn, 29, 30).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1544,6 +1569,36 @@ mod tests {
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM mission_worker_tool_receipt;",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn v28_to_v29_adds_empty_provider_route_observations_without_inference() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE backend_connection(
+               internal_user_id TEXT NOT NULL,
+               provider_id TEXT NOT NULL,
+               connected_at TEXT NOT NULL,
+               updated_at TEXT NOT NULL,
+               PRIMARY KEY(internal_user_id,provider_id)
+             );",
+        )
+        .unwrap();
+        apply(&conn, 28, 29).unwrap();
+        let exists: i64 = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='provider_route_observation');",
+            [], |row| row.get(0),
+        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM provider_route_observation;",
                 [],
                 |row| row.get(0),
             )

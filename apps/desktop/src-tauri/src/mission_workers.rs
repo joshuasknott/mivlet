@@ -110,6 +110,14 @@ impl NativeWorkerCompletionAuthority {
                 .max_input_tokens
                 .is_some_and(|maximum| input_tokens > maximum)
     }
+
+    pub(crate) fn observation_owner(&self) -> &str {
+        &self.internal_user_id
+    }
+
+    pub(crate) fn provider_route_id(&self) -> &str {
+        &self.provider_route_id
+    }
 }
 
 pub(crate) enum NativeWorkerCompletionPreflight {

@@ -833,6 +833,67 @@ pub(crate) fn validate_current_native_provider_route(
     Ok(expected)
 }
 
+pub(crate) fn record_current_native_provider_route_observation(
+    provider_id: &str,
+    model: &str,
+    binding: &crate::models::ProviderRouteExecutionBinding,
+    request_id: &str,
+    latency_ms: u64,
+    usage: Option<(i64, i64)>,
+    observed_at: &str,
+) -> Result<(), String> {
+    let route_id = validate_current_native_provider_route(provider_id, model, binding)?;
+    let internal_user_id = require_current_internal_user()?;
+    record_native_provider_route_observation(
+        &internal_user_id,
+        provider_id,
+        model,
+        &route_id,
+        request_id,
+        latency_ms,
+        usage,
+        observed_at,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_native_provider_route_observation(
+    internal_user_id: &str,
+    provider_id: &str,
+    model: &str,
+    provider_route_id: &str,
+    request_id: &str,
+    latency_ms: u64,
+    usage: Option<(i64, i64)>,
+    observed_at: &str,
+) -> Result<(), String> {
+    let expected = account_native_provider_route_id(internal_user_id, provider_id, model);
+    if expected != provider_route_id {
+        return Err("Provider route observation does not match its account route.".into());
+    }
+    let digest = Sha256::digest(format!("{internal_user_id}:{request_id}").as_bytes());
+    let observation_id = format!("route-observation:v1:{digest:x}");
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            crate::store::repos::provider_route_observation::record(
+                tx,
+                store,
+                internal_user_id,
+                provider_id,
+                provider_route_id,
+                &observation_id,
+                model,
+                latency_ms,
+                usage.map(|value| value.0),
+                usage.map(|value| value.1),
+                observed_at,
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
 fn validate_native_provider_route_binding(
     provider_id: &str,
     model: &str,
@@ -857,14 +918,19 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let internal_user_id = require_current_internal_user()?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let (workspace_id, member_id, rows) = store.with_conn(|tx| {
+    let (workspace_id, member_id, rows, observations) = store.with_conn(|tx| {
         let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
         let member = context.member_id.clone().ok_or_else(|| crate::store::StoreError::Invalid(
             "An active Fable workspace membership is required for provider routes.".into()))?;
         let workspace = context.active_workspace.fable_workspace_id.clone()
             .unwrap_or(context.active_workspace.local_workspace_id.clone());
         let rows = crate::store::repos::backend_connection::list_records(tx, &internal_user_id)?;
-        Ok((workspace, member, rows))
+        let observations = crate::store::repos::provider_route_observation::summaries(
+            tx,
+            store,
+            &internal_user_id,
+        )?;
+        Ok((workspace, member, rows, observations))
     }).map_err(|error| error.to_string())?;
     let stores = CredentialStores {
         internal_user_id: internal_user_id.clone(),
@@ -883,6 +949,7 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
         &member_id,
         &rows,
         &availability,
+        &observations,
     ))
 }
 
@@ -892,6 +959,10 @@ fn build_account_native_provider_routes(
     member_id: &str,
     rows: &[crate::store::repos::backend_connection::BackendConnectionRow],
     availability: &HashMap<String, bool>,
+    observations: &std::collections::BTreeMap<
+        String,
+        crate::store::repos::provider_route_observation::ProviderRouteObservationSummary,
+    >,
 ) -> Vec<serde_json::Value> {
     let mut routes = Vec::new();
     for row in rows {
@@ -906,8 +977,14 @@ fn build_account_native_provider_routes(
             format!("{}:{}:credential", internal_user_id, row.provider_id).as_bytes(),
         );
         for (model, label) in entry.models {
-            routes.push(serde_json::json!({
-                "id":account_native_provider_route_id(&internal_user_id, &row.provider_id, model),
+            let route_id =
+                account_native_provider_route_id(internal_user_id, &row.provider_id, model);
+            let route_updated_at = observations
+                .get(&route_id)
+                .map(|summary| summary.latest_observed_at.as_str())
+                .unwrap_or(row.updated_at.as_str());
+            let mut route = serde_json::json!({
+                "id":&route_id,
                 "recordType":"provider-route","connectionId":connection_id,"kind":"api-model",
                 "displayName":format!("{} {}",entry.label,label),"providerFamily":row.provider_id,
                 "modelOrRuntimeReference":model,"state":if credential_available{"available"}else{"unavailable"},
@@ -920,8 +997,15 @@ fn build_account_native_provider_routes(
                     "bindingReference":format!("credential-binding:v1:{binding_digest:x}"),"lastValidatedAt":row.updated_at,"refreshSupported":false},
                 "workspaceId":workspace_id,"visibility":"member-private","ownerMemberId":member_id,
                 "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
-                "createdAt":row.connected_at,"updatedAt":row.updated_at,"discoveredAt":row.updated_at
-            }));
+                "createdAt":row.connected_at,"updatedAt":route_updated_at,"discoveredAt":row.updated_at
+            });
+            if let Some(summary) = observations.get(&route_id) {
+                route
+                    .as_object_mut()
+                    .expect("provider route projection is an object")
+                    .insert("observationSummary".into(), serde_json::json!(summary));
+            }
+            routes.push(route);
         }
     }
     routes
@@ -1351,12 +1435,22 @@ mod provider_route_tests {
             },
         ];
         let availability = HashMap::from([("openai".to_string(), true)]);
+        let observations = std::collections::BTreeMap::from([(
+            gpt5,
+            crate::store::repos::provider_route_observation::ProviderRouteObservationSummary {
+                sample_count: 3,
+                median_latency_ms: 200,
+                usage_sample_count: 2,
+                latest_observed_at: "2026-07-12T02:00:00Z".into(),
+            },
+        )]);
         let routes = build_account_native_provider_routes(
             "user-1",
             "workspace-1",
             "member-1",
             &rows,
             &availability,
+            &observations,
         );
         let route = routes
             .iter()
@@ -1365,6 +1459,8 @@ mod provider_route_tests {
         assert_eq!(route["state"], "available");
         assert_eq!(route["workspaceId"], "workspace-1");
         assert_eq!(route["credentialBinding"]["custody"], "os-secure-store");
+        assert_eq!(route["observationSummary"]["medianLatencyMs"], 200);
+        assert_eq!(route["updatedAt"], "2026-07-12T02:00:00Z");
         assert_eq!(
             route["boundaries"]["placementBoundary"],
             "local-credential-egress"

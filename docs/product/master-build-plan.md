@@ -437,8 +437,19 @@ run only after execution finishes. Rust permits that one post-execution
 attribution transition, rejects running, changed, removed, fallback, non-schedule,
 or secret-bearing route claims, and the run-detail surface reuses the same
 secret-safe explanation.
-Durable observation history and visible product receipts for other mission shapes
-remain open. The cited-brief result now shows a
+Schema v29 adds bounded encrypted account-owned provider-route observations.
+After an exact OpenAI route finishes with one clean stop and final usage, Rust
+records the monotonic egress latency plus token counts under an idempotent
+request-derived observation id. Changed replay, unconnected providers,
+cross-account reads, malformed values, and more than fifty retained samples per
+route fail closed or are bounded; migration creates no inferred evidence. The
+authenticated route catalogue projects only sample count, median latency,
+usage-sample count, and latest observation time. These aggregates remain
+non-authoritative and do not enter route scoring yet: a changing aggregate must
+first gain a revision-bound selection reference so immutable mission replay
+cannot reinterpret an older decision. Quality observations, revision-bound
+scoring, and visible product receipts for other mission shapes remain open. The
+cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,
 cited-source count, external-evidence trust classification, and the persisted

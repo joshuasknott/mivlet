@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 28;
+pub const CURRENT_SCHEMA_VERSION: u32 = 29;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -1057,6 +1057,24 @@ CREATE TABLE IF NOT EXISTS backend_connection (
 );
 CREATE INDEX IF NOT EXISTS idx_backend_connection_user
   ON backend_connection(internal_user_id, updated_at);
+
+-- Bounded, encrypted execution observations for account-owned native provider
+-- routes. These rows are evidence only and never grant route or credential
+-- authority. Migration creates no observations.
+CREATE TABLE IF NOT EXISTS provider_route_observation (
+  internal_user_id TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  provider_route_id TEXT NOT NULL,
+  observation_id TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(internal_user_id,observation_id),
+  FOREIGN KEY(internal_user_id,provider_id)
+    REFERENCES backend_connection(internal_user_id,provider_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_provider_route_observation_route
+  ON provider_route_observation(internal_user_id,provider_route_id,observed_at,observation_id);
 
 -- Pre-v12 provider metadata had no account owner. It is retained for recovery
 -- diagnostics only and is never consulted for authorization or credential use.
