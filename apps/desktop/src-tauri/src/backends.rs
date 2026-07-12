@@ -758,8 +758,120 @@ pub(crate) fn validate_account_native_provider_model(
     if !entry.models.iter().any(|(id, _)| *id == model) {
         return Err("Mission routing requires an available catalog model.".into());
     }
+    Ok(account_native_provider_route_id(
+        internal_user_id,
+        provider_id,
+        model,
+    ))
+}
+
+fn account_native_provider_route_id(
+    internal_user_id: &str,
+    provider_id: &str,
+    model: &str,
+) -> String {
+    let digest = Sha256::digest(format!("{internal_user_id}:{provider_id}:{model}").as_bytes());
+    format!("provider-route:v2:{provider_id}:{digest:x}")
+}
+
+fn account_provider_connection_id(internal_user_id: &str, provider_id: &str) -> String {
     let digest = Sha256::digest(format!("{internal_user_id}:{provider_id}").as_bytes());
-    Ok(format!("provider-route:v1:{provider_id}:{digest:x}"))
+    format!("connection:provider-account:v1:{provider_id}:{digest:x}")
+}
+
+pub(crate) fn native_provider_route_reason(
+    provider_id: &str,
+    model: &str,
+) -> Result<String, String> {
+    let entry = catalog_entry(provider_id)
+        .filter(|entry| entry.backend_type == "native-api")
+        .ok_or_else(|| "Mission routing requires a registered native API provider.".to_string())?;
+    let label = entry
+        .models
+        .iter()
+        .find(|(id, _)| *id == model)
+        .map(|(_, label)| *label)
+        .ok_or_else(|| "Mission routing requires an available catalog model.".to_string())?;
+    Ok(format!("Selected {} {} for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", entry.label, label))
+}
+
+pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
+    format!("boundary:member-private:account-owned-provider:{provider_id}:local-credential-egress")
+}
+
+#[tauri::command]
+pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
+    let internal_user_id = require_current_internal_user()?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let (workspace_id, member_id, rows) = store.with_conn(|tx| {
+        let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+        let member = context.member_id.clone().ok_or_else(|| crate::store::StoreError::Invalid(
+            "An active Fable workspace membership is required for provider routes.".into()))?;
+        let workspace = context.active_workspace.fable_workspace_id.clone()
+            .unwrap_or(context.active_workspace.local_workspace_id.clone());
+        let rows = crate::store::repos::backend_connection::list_records(tx, &internal_user_id)?;
+        Ok((workspace, member, rows))
+    }).map_err(|error| error.to_string())?;
+    let stores = CredentialStores {
+        internal_user_id: internal_user_id.clone(),
+    };
+    let availability = rows
+        .iter()
+        .map(|row| {
+            stores
+                .get(&row.provider_id)
+                .map(|value| (row.provider_id.clone(), value.is_some()))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?;
+    Ok(build_account_native_provider_routes(
+        &internal_user_id,
+        &workspace_id,
+        &member_id,
+        &rows,
+        &availability,
+    ))
+}
+
+fn build_account_native_provider_routes(
+    internal_user_id: &str,
+    workspace_id: &str,
+    member_id: &str,
+    rows: &[crate::store::repos::backend_connection::BackendConnectionRow],
+    availability: &HashMap<String, bool>,
+) -> Vec<serde_json::Value> {
+    let mut routes = Vec::new();
+    for row in rows {
+        let Some(entry) =
+            catalog_entry(&row.provider_id).filter(|entry| entry.backend_type == "native-api")
+        else {
+            continue;
+        };
+        let credential_available = availability.get(&row.provider_id).copied().unwrap_or(false);
+        let connection_id = account_provider_connection_id(&internal_user_id, &row.provider_id);
+        let binding_digest = Sha256::digest(
+            format!("{}:{}:credential", internal_user_id, row.provider_id).as_bytes(),
+        );
+        for (model, label) in entry.models {
+            routes.push(serde_json::json!({
+                "id":account_native_provider_route_id(&internal_user_id, &row.provider_id, model),
+                "recordType":"provider-route","connectionId":connection_id,"kind":"api-model",
+                "displayName":format!("{} {}",entry.label,label),"providerFamily":row.provider_id,
+                "modelOrRuntimeReference":model,"state":if credential_available{"available"}else{"unavailable"},
+                "health":{"state":if credential_available{"healthy"}else{"unavailable"},"checkedAt":row.updated_at,
+                    "summary":if credential_available{"Account credential is present; live egress rechecks it."}else{"Account credential is unavailable."}},
+                "placement":{"allowedKinds":["local-desktop"],"requiresCredentialHoldingNode":true},
+                "boundaries":{"privacyBoundary":"member-private","billingBoundary":"account-owned-provider",
+                    "providerBoundary":row.provider_id,"placementBoundary":"local-credential-egress"},
+                "credentialBinding":{"custody":"os-secure-store","state":if credential_available{"available"}else{"unavailable"},
+                    "bindingReference":format!("credential-binding:v1:{binding_digest:x}"),"lastValidatedAt":row.updated_at,"refreshSupported":false},
+                "workspaceId":workspace_id,"visibility":"member-private","ownerMemberId":member_id,
+                "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
+                "createdAt":row.connected_at,"updatedAt":row.updated_at,"discoveredAt":row.updated_at
+            }));
+        }
+    }
+    routes
 }
 
 /// Apply the provider-owned Codex CLI install/auth status without exposing its
@@ -1158,4 +1270,51 @@ pub fn record_backend_event(
     decided_at: String,
 ) -> Result<ApprovalAuditEntry, String> {
     normalize_backend_event(event, &decided_at)
+}
+
+#[cfg(test)]
+mod provider_route_tests {
+    use super::*;
+
+    #[test]
+    fn account_routes_are_model_specific_and_connection_stable() {
+        let gpt5 = account_native_provider_route_id("user-1", "openai", "gpt-5");
+        let gpt52 = account_native_provider_route_id("user-1", "openai", "gpt-5.2");
+        assert_ne!(gpt5, gpt52);
+        assert!(gpt5.starts_with("provider-route:v2:openai:"));
+        assert_eq!(
+            account_provider_connection_id("user-1", "openai"),
+            account_provider_connection_id("user-1", "openai")
+        );
+        assert_ne!(
+            account_provider_connection_id("user-1", "openai"),
+            account_provider_connection_id("user-2", "openai")
+        );
+        let rows = [
+            crate::store::repos::backend_connection::BackendConnectionRow {
+                provider_id: "openai".into(),
+                connected_at: "2026-07-12T00:00:00Z".into(),
+                updated_at: "2026-07-12T01:00:00Z".into(),
+            },
+        ];
+        let availability = HashMap::from([("openai".to_string(), true)]);
+        let routes = build_account_native_provider_routes(
+            "user-1",
+            "workspace-1",
+            "member-1",
+            &rows,
+            &availability,
+        );
+        let route = routes
+            .iter()
+            .find(|route| route["modelOrRuntimeReference"] == "gpt-5")
+            .unwrap();
+        assert_eq!(route["state"], "available");
+        assert_eq!(route["workspaceId"], "workspace-1");
+        assert_eq!(route["credentialBinding"]["custody"], "os-secure-store");
+        assert_eq!(
+            route["boundaries"]["placementBoundary"],
+            "local-credential-egress"
+        );
+    }
 }

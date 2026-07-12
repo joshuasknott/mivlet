@@ -1715,10 +1715,8 @@ fn validate_selected_provider_route(
         .pointer("/payload/selection")
         .and_then(Value::as_object)
         .ok_or_else(|| "Mission provider route selection is invalid.".to_string())?;
-    let reason = format!("Selected the connected {provider_id} account route for {model}.");
-    let boundary = format!(
-        "boundary:member-private:user-provider-account:{provider_id}:local-credential-egress"
-    );
+    let reason = crate::backends::native_provider_route_reason(provider_id, model)?;
+    let boundary = crate::backends::native_provider_route_boundary(provider_id);
     if event.get("type").and_then(Value::as_str) != Some("route-selected")
         || event.get("previousEventId").and_then(Value::as_str)
             != Some(binding.worker_started_event_id.as_str())
@@ -2863,14 +2861,10 @@ fn append_route_selected(
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
         })?;
-    let reason = format!(
-        "Selected the connected {} account route for {}.",
-        input.provider_id, input.model_reference
-    );
-    let boundary = format!(
-        "boundary:member-private:user-provider-account:{}:local-credential-egress",
-        input.provider_id
-    );
+    let reason =
+        crate::backends::native_provider_route_reason(&input.provider_id, &input.model_reference)
+            .map_err(crate::store::StoreError::Invalid)?;
+    let boundary = crate::backends::native_provider_route_boundary(&input.provider_id);
     let selection = json!({"providerRouteId":provider_route_id,"selectedAt":at,"reason":reason,"boundaryPolicyRef":boundary});
     let sequence = last_sequence + 1;
     let event = json!({
@@ -2928,10 +2922,10 @@ fn exact_route_replay(event: &Value, input: &MissionWorkerStartInput) -> Result<
             .and_then(|value| value.get("reason"))
             .and_then(Value::as_str)
             == Some(
-                format!(
-                    "Selected the connected {} account route for {}.",
-                    input.provider_id, input.model_reference
-                )
+                crate::backends::native_provider_route_reason(
+                    &input.provider_id,
+                    &input.model_reference,
+                )?
                 .as_str(),
             )
     {
@@ -3643,7 +3637,7 @@ mod tests {
         assert!(validate_start_head(&journal, &input).is_ok());
         let event = json!({"id":"event-4","runId":"run-1","type":"worker-started","sequence":4,"previousEventId":"event-3","payload":{"workerId":"worker-1"}});
         assert!(exact_start_replay(&event, &input).is_ok());
-        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","selection":{"reason":"Selected the connected openai account route for gpt-5."}}});
+        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","selection":{"reason":"Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route."}}});
         assert!(exact_route_replay(&route, &input).is_ok());
         journal.events.push(event);
         assert!(validate_start_head(&journal, &input).is_err());

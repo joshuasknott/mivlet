@@ -2575,6 +2575,12 @@ export interface RuntimeStreamRequest {
   missionWorkerExecution?: import("@fable/protocol").MissionWorkerExecutionBinding;
 }
 
+export async function listRuntimeNativeProviderRoutes() {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Spine.Connections.ProviderRoute[]>("list_native_provider_routes"); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
 /** Begin a streaming completion. Rust adds the key + performs the HTTP call. */
 export async function streamRuntimeCompletion(request: RuntimeStreamRequest) {
   if (!hasTauriRuntime()) {

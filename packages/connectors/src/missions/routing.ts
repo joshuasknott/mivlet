@@ -9,9 +9,9 @@ export interface MissionRouteCandidate {
   capabilityIds: readonly string[];
   supportsTools: boolean;
   contextWindowTokens: number;
-  qualityScore: number;
-  estimatedLatencyMs: number;
-  estimatedCostMinorUnits: number;
+  qualityScore?: number;
+  estimatedLatencyMs?: number;
+  estimatedCostMinorUnits?: number;
   risk: "low" | "medium" | "high" | "critical";
 }
 
@@ -99,10 +99,10 @@ function rejectionReasons(request: MissionRouteRequest, candidate: MissionRouteC
   if (!sameBoundaries(route.boundaries, request.boundaries)) reasons.push("boundary-mismatch");
   if (!route.placement.allowedKinds.some((kind) => request.allowedPlacementKinds.includes(kind))) reasons.push("placement-denied");
   if (riskRank(candidate.risk) > riskRank(request.maximumRisk)) reasons.push("risk-exceeded");
-  if (request.maxCostMinorUnits !== undefined && candidate.estimatedCostMinorUnits > request.maxCostMinorUnits) reasons.push("cost-exceeded");
+  if (request.maxCostMinorUnits !== undefined && (candidate.estimatedCostMinorUnits === undefined || candidate.estimatedCostMinorUnits > request.maxCostMinorUnits)) reasons.push("cost-exceeded");
   if (route.budgetLimit?.maxInputTokens !== undefined && route.budgetLimit.maxInputTokens < request.requiredInputTokens) reasons.push("input-budget-exceeded");
   if (route.budgetLimit?.maxOutputTokens !== undefined && route.budgetLimit.maxOutputTokens < request.requiredOutputTokens) reasons.push("output-budget-exceeded");
-  if (route.budgetLimit?.maxCostMinorUnits !== undefined && candidate.estimatedCostMinorUnits > route.budgetLimit.maxCostMinorUnits) reasons.push("route-cost-limit-exceeded");
+  if (route.budgetLimit?.maxCostMinorUnits !== undefined && (candidate.estimatedCostMinorUnits === undefined || candidate.estimatedCostMinorUnits > route.budgetLimit.maxCostMinorUnits)) reasons.push("route-cost-limit-exceeded");
   if (request.currency && route.budgetLimit?.currency && route.budgetLimit.currency !== request.currency) reasons.push("currency-mismatch");
   const preference = request.preference;
   if (preference?.policy === "require" && !preference.providerRouteIds.includes(route.id)) reasons.push("provider-pin-mismatch");
@@ -112,11 +112,11 @@ function rejectionReasons(request: MissionRouteRequest, candidate: MissionRouteC
 
 function score(request: MissionRouteRequest, candidate: MissionRouteCandidate): number {
   const weights = request.weights ?? { quality: 0.5, cost: 0.25, speed: 0.25 };
-  const costScore = 1 / (1 + candidate.estimatedCostMinorUnits);
-  const speedScore = 1 / (1 + candidate.estimatedLatencyMs / 1_000);
+  const costScore = candidate.estimatedCostMinorUnits === undefined ? 0.5 : 1 / (1 + candidate.estimatedCostMinorUnits);
+  const speedScore = candidate.estimatedLatencyMs === undefined ? 0.5 : 1 / (1 + candidate.estimatedLatencyMs / 1_000);
   const preferenceBonus = request.preference?.policy === "prefer" && request.preference.providerRouteIds.includes(candidate.route.id) ? 1 : 0;
   const healthPenalty = candidate.route.state === "degraded" || candidate.route.health.state === "degraded" ? 0.15 : 0;
-  return round(weights.quality * candidate.qualityScore + weights.cost * costScore + weights.speed * speedScore + preferenceBonus - healthPenalty);
+  return round(weights.quality * (candidate.qualityScore ?? 0.5) + weights.cost * costScore + weights.speed * speedScore + preferenceBonus - healthPenalty);
 }
 
 function validateRequest(request: MissionRouteRequest): void {
@@ -139,9 +139,9 @@ function validateRequest(request: MissionRouteRequest): void {
 function routeReason(request: MissionRouteRequest, candidate: MissionRouteCandidate, fallback: boolean): string {
   const parts = [
     `Selected ${candidate.route.displayName} for ${request.capabilityId}`,
-    `quality ${candidate.qualityScore.toFixed(2)}`,
-    `estimated cost ${candidate.estimatedCostMinorUnits} minor units`,
-    `estimated latency ${candidate.estimatedLatencyMs} ms`,
+    candidate.qualityScore === undefined ? "quality unobserved" : `quality ${candidate.qualityScore.toFixed(2)}`,
+    candidate.estimatedCostMinorUnits === undefined ? "cost unobserved" : `estimated cost ${candidate.estimatedCostMinorUnits} minor units`,
+    candidate.estimatedLatencyMs === undefined ? "latency unobserved" : `estimated latency ${candidate.estimatedLatencyMs} ms`,
     candidate.route.health.state === "degraded" || candidate.route.state === "degraded" ? "degraded route allowed" : "healthy route",
     fallback ? "same-boundary fallback" : undefined
   ].filter(Boolean);

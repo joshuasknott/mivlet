@@ -8,6 +8,13 @@ use rusqlite::Connection;
 use crate::models::SUPPORTED_BACKEND_PROVIDER_IDS;
 use crate::store::{Result, StoreError};
 
+#[derive(Clone, Debug)]
+pub struct BackendConnectionRow {
+    pub provider_id: String,
+    pub connected_at: String,
+    pub updated_at: String,
+}
+
 /// Record an account-owned provider connection (idempotent upsert).
 pub fn upsert(tx: &Connection, internal_user_id: &str, provider_id: &str, now: &str) -> Result<()> {
     if !SUPPORTED_BACKEND_PROVIDER_IDS.contains(&provider_id) {
@@ -38,11 +45,24 @@ pub fn delete(tx: &Connection, internal_user_id: &str, provider_id: &str) -> Res
 
 /// List connected provider ids.
 pub fn list(tx: &Connection, internal_user_id: &str) -> Result<Vec<String>> {
+    Ok(list_records(tx, internal_user_id)?
+        .into_iter()
+        .map(|row| row.provider_id)
+        .collect())
+}
+
+pub fn list_records(tx: &Connection, internal_user_id: &str) -> Result<Vec<BackendConnectionRow>> {
     let mut stmt = tx.prepare(
-        "SELECT provider_id FROM backend_connection
+        "SELECT provider_id,connected_at,updated_at FROM backend_connection
          WHERE internal_user_id = ?1 ORDER BY provider_id;",
     )?;
-    let rows = stmt.query_map([internal_user_id], |row| row.get::<_, String>(0))?;
+    let rows = stmt.query_map([internal_user_id], |row| {
+        Ok(BackendConnectionRow {
+            provider_id: row.get(0)?,
+            connected_at: row.get(1)?,
+            updated_at: row.get(2)?,
+        })
+    })?;
     let mut out = Vec::new();
     for r in rows {
         out.push(r?);
@@ -97,6 +117,9 @@ mod tests {
             store.with_conn(|tx| list(tx, "user-a")).unwrap(),
             vec!["openai"]
         );
+        let rows = store.with_conn(|tx| list_records(tx, "user-a")).unwrap();
+        assert_eq!(rows[0].connected_at, "t");
+        assert_eq!(rows[0].updated_at, "t");
         assert_eq!(
             store.with_conn(|tx| list(tx, "user-b")).unwrap(),
             vec!["anthropic"]

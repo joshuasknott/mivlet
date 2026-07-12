@@ -191,6 +191,7 @@ pub fn run() {
             snapshot::load_runtime_snapshot,
             snapshot::save_runtime_snapshot,
             backends::list_backends,
+            backends::list_native_provider_routes,
             backends::store_backend_credential,
             backends::clear_backend_credential,
             backends::record_backend_event,

@@ -1,5 +1,5 @@
 import type { AgentBackend, ApprovalGate } from "@fable/connectors";
-import { buildToolApproval, executeLocalWorker } from "@fable/connectors";
+import { buildToolApproval, catalogueCapabilities, executeLocalWorker, selectMissionProviderRoute } from "@fable/connectors";
 import type { ApprovalRequest, ApprovalResolutionRequest, Spine } from "@fable/protocol";
 import {
   commitRuntimeCapabilityGrant,
@@ -7,6 +7,7 @@ import {
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
   getRuntimeMissionRun,
+  listRuntimeNativeProviderRoutes,
   prepareRuntimeCapabilityGrant,
   readRuntimeMissionWorkerOutput,
   requestRuntimeMissionRunCancellation,
@@ -80,6 +81,25 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   const runId = id("mission-run");
   const workerId = id("worker");
 
+  const routes = await listRuntimeNativeProviderRoutes();
+  if (!routes) throw new Error("Mission routing requires the desktop runtime.");
+  const pinnedRoute = routes.find((route) => route.providerFamily === input.backend.providerId
+    && route.modelOrRuntimeReference === input.model
+    && route.workspaceId === input.missionScopeWorkspaceId);
+  const capabilities = catalogueCapabilities(input.backend.providerId, input.model);
+  if (!pinnedRoute || !capabilities) throw new Error("The selected model has no authorized mission route.");
+  const routeDecision = selectMissionProviderRoute({
+    workspaceId: input.missionScopeWorkspaceId, capabilityId: "model.generate",
+    requiredInputTokens: 32_000, requiredOutputTokens: 2_048, requiresTools: false,
+    allowedPlacementKinds: ["local-desktop"], boundaries: pinnedRoute.boundaries,
+    allowDegraded: false, maximumRisk: "medium", selectedAt: new Date().toISOString(),
+    preference: { policy: "require", providerRouteIds: [pinnedRoute.id], allowFallback: false }
+  }, routes.map((route) => ({
+    route, capabilityIds: ["model.generate"], supportsTools: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.tools === true,
+    contextWindowTokens: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.contextWindow ?? 0,
+    risk: "medium" as const
+  })));
+
   const mcpRoute = await resolveRuntimeMcpCapabilityRoute(input.workspaceId, "knowledge.content.search");
   const grantProposal = {
     workspaceId: input.workspaceId,
@@ -144,6 +164,9 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
     providerId: input.backend.providerId, modelReference: input.model,
     idempotencyKey: id("worker-start"), ...head(journal)
   }));
+  if (journalSelectedRouteId(journal) !== routeDecision.selection.providerRouteId) {
+    throw new Error("The native mission route did not match the selected provider route.");
+  }
 
   const toolEventId = id("event");
   const toolHead = head(journal);
@@ -281,4 +304,11 @@ function terminalOutputReference(journal: Record<string, unknown>): string {
   const value = Array.isArray(outputs) ? (outputs[0] as Record<string, unknown> | undefined)?.valueReference : undefined;
   if (run.status !== "completed" || typeof value !== "string") throw new Error("The mission did not produce a durable accepted output.");
   return value;
+}
+
+function journalSelectedRouteId(journal: Record<string, unknown>): string | undefined {
+  const event = (journal.events as Array<Record<string, unknown>>).find((candidate) => candidate.type === "route-selected");
+  const payload = event?.payload as Record<string, unknown> | undefined;
+  const selection = payload?.selection as Record<string, unknown> | undefined;
+  return typeof selection?.providerRouteId === "string" ? selection.providerRouteId : undefined;
 }

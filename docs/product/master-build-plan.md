@@ -411,8 +411,17 @@ account route only from current account-owned provider metadata and an exact
 catalogue model, appends `route-selected` immediately after `worker-started`, and
 revalidates that route before egress. Tool execution, usage, output receipts, and
 terminal run results remain bound to the selected route across replay and restart.
-A multi-route durable catalogue, price/quality observations, and visible product
-receipts for other mission shapes remain open. The cited-brief result now shows a
+An authenticated native command now projects model-specific `ProviderRoute`
+records from durable account-owned backend metadata and current credential
+availability into the active member/workspace scope. Route and Connection ids
+are opaque and stable, credential references remain secret-free, and live egress
+still rechecks the credential. The cited journey requires the user-selected
+provider/model route as a no-fallback pin through the portable selector, then
+requires Rust's independently derived `route-selected` id to match. Missing,
+wrong-workspace, unhealthy, insufficient-context, or changed routes fail closed;
+unobserved quality, latency, and cost stay explicitly unobserved rather than zero.
+Durable observation history and visible product receipts for other mission shapes
+remain open. The cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,
 cited-source count, external-evidence trust classification, and the persisted

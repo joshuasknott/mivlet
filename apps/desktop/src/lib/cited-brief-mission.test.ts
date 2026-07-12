@@ -4,9 +4,14 @@ import { executeCitedBriefMission, isCitedBriefMissionPrompt } from "./cited-bri
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), listRoutes: vi.fn()
 }));
-vi.mock("@fable/connectors", () => ({ executeLocalWorker: mocks.executeLocalWorker, buildToolApproval: mocks.buildToolApproval }));
+vi.mock("@fable/connectors", () => ({
+  executeLocalWorker: mocks.executeLocalWorker,
+  buildToolApproval: mocks.buildToolApproval,
+  catalogueCapabilities: () => ({ contextWindow: 400_000, maxOutputTokens: 128_000, tools: true }),
+  selectMissionProviderRoute: (_request: unknown, candidates: Array<{ route: { id: string } }>) => ({ selection: { providerRouteId: candidates[0].route.id } })
+}));
 vi.mock("./desktop-tool-runtime", () => ({ createDesktopToolExecutor: mocks.desktopExecutor }));
 vi.mock("../runtime", () => ({
   prepareRuntimeCapabilityGrant: mocks.prepareGrant,
@@ -18,6 +23,7 @@ vi.mock("../runtime", () => ({
   getRuntimeMissionRun: mocks.getRun,
   readRuntimeMissionWorkerOutput: mocks.readOutput,
   requestRuntimeMissionRunCancellation: mocks.cancelRun,
+  listRuntimeNativeProviderRoutes: mocks.listRoutes,
   resolveRuntimeMcpCapabilityRoute: mocks.resolveMcpRoute
 }));
 
@@ -39,17 +45,18 @@ describe("cited brief mission composition", () => {
     vi.clearAllMocks();
     mocks.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-1" } });
     mocks.resolveMcpRoute.mockResolvedValue(null);
+    mocks.listRoutes.mockResolvedValue([{ id: "provider-route-ui", recordType: "provider-route", connectionId: "connection-openai", kind: "api-model", displayName: "OpenAI GPT-5", providerFamily: "openai", modelOrRuntimeReference: "gpt-5", state: "available", health: { state: "healthy" }, placement: { allowedKinds: ["local-desktop"], requiresCredentialHoldingNode: true }, boundaries: { privacyBoundary: "member-private", billingBoundary: "account-owned-provider", providerBoundary: "openai", placementBoundary: "local-credential-egress" }, credentialBinding: { custody: "os-secure-store", state: "available", refreshSupported: false }, workspaceId: "hosted-workspace", visibility: "member-private", ownerMemberId: "member-1", authority: "local", schemaVersion: 1, revision: 1, createdByInternalUserId: "user-1", createdAt: "t", updatedAt: "t" }]);
     mocks.createPlan.mockResolvedValue({ mission: { budget: { maxDurationMs: 120000, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxAttempts: 1 } } });
     mocks.createRun.mockResolvedValue(journal(2, 1, []));
     mocks.createWorker.mockResolvedValue(journal(3, 2, [{ type: "worker-created", payload: { worker } }]));
-    mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }]));
+    mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }, { type: "route-selected", payload: { selection: { providerRouteId: "provider-route-ui" } } }]));
     mocks.buildToolApproval.mockReturnValue({ id: "base", service: "openai", action: "connection-read", mode: "read-only", riskLevel: "medium", dataUsed: [], consequence: "Search", requestedAt: "t", decisions: ["once", "deny"] });
     mocks.desktopExecutor.mockReturnValue(vi.fn().mockResolvedValue(JSON.stringify({ result: { citations: [{ citationId: "source-1" }] } })));
     mocks.executeLocalWorker.mockResolvedValue({ status: "completed", events: [], text: "Brief", usage: {}, retryable: false });
     mocks.getRun
       .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(11, 10, [
-        { type: "route-selected", payload: { selection: { reason: "Selected the connected openai account route for gpt-5." } } },
+        { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
         { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } }
       ], { status: "completed", terminalResult: { outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
     mocks.readOutput.mockResolvedValue({ receipt: { text: "Trustworthy brief [source-1].", observedProvider: "openai", requestedModel: "gpt-5", trust: "provider-generated-with-external-evidence", citations: [{ citationId: "source-1" }] } });

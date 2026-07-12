@@ -72,4 +72,13 @@ describe("mission provider routing", () => {
       ]));
     }
   });
+
+  it("selects without inventing quality, latency, or cost observations", () => {
+    const decision = selectMissionProviderRoute(request({ maxCostMinorUnits: undefined }), [
+      candidate("route-unobserved", { qualityScore: undefined, estimatedLatencyMs: undefined, estimatedCostMinorUnits: undefined })
+    ]);
+    expect(decision.reason).toContain("quality unobserved");
+    expect(decision.reason).toContain("cost unobserved");
+    expect(decision.reason).toContain("latency unobserved");
+  });
 });
