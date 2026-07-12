@@ -110,4 +110,21 @@ describe("portable local worker driver", () => {
       model: "model", prompt: "Different", toolSpecs: [], execute: vi.fn(), missionWorkerExecution }))
       .rejects.toThrow("exact worker objective");
   });
+
+  it("binds the persisted Markdown output contract into the native prompt", async () => {
+    const runtime = backend([{ type: "text-delta", text: "# Brief" }, { type: "done", finishReason: "stop" }]);
+    const missionWorkerExecution = {
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3",
+      completionEventId: "event-4", failureEventId: "event-5", idempotencyKey: "terminal-1",
+      expectedRunRevision: 4, expectedLastSequence: 3
+    };
+    const outputWorker = { ...worker(), tools: [], outputContract: {
+      slots: [{ key: "brief", description: "A trustworthy brief", required: true, format: "text/markdown" }],
+      includeEvidence: false, includeUncertainty: true, delivery: "run-result" as const
+    } };
+    await executeLocalWorker({ worker: outputWorker, backend: runtime.value, model: "model",
+      prompt: "Research", toolSpecs: [], execute: vi.fn(), missionWorkerExecution });
+    expect(runtime.request?.messages).toEqual([{ role: "user", content:
+      "Objective:\nResearch\n\nRequired output (brief; text/markdown):\nA trustworthy brief\n\nReturn one Markdown result only.\nState material uncertainty explicitly in the Markdown result." }]);
+  });
 });

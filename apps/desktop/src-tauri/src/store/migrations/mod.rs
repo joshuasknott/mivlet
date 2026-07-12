@@ -120,6 +120,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 25 -> 26: persist redacted checkpoint state separately from the
             // immutable checkpoint event. No checkpoint is inferred.
             25 => apply_v25_to_v26(conn)?,
+            // 26 -> 27: persist immutable encrypted mission-worker output
+            // receipts linked to exact completion events. No output is inferred.
+            26 => apply_v26_to_v27(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -129,6 +132,29 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v26_to_v27(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mission_worker_output_receipt (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL, worker_id TEXT NOT NULL,
+          completion_event_id TEXT NOT NULL, output_key TEXT NOT NULL,
+          value_reference TEXT NOT NULL, content_hash TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL CHECK(size_bytes >= 1 AND size_bytes <= 65536),
+          created_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,completion_event_id,output_key),
+          UNIQUE(workspace_id,owner_member_id,run_id,worker_id,output_key),
+          UNIQUE(workspace_id,owner_member_id,value_reference),
+          FOREIGN KEY(workspace_id,owner_member_id,completion_event_id)
+            REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_worker_output_run
+          ON mission_worker_output_receipt(workspace_id,owner_member_id,run_id,worker_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1360,8 +1386,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v26 is current; v26 -> v27 has no registered migration.
-        let err = apply(&conn, 26, 27).unwrap_err();
+        // v27 is current; v27 -> v28 has no registered migration.
+        let err = apply(&conn, 27, 28).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1427,6 +1453,40 @@ mod tests {
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM mission_checkpoint_state;",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn v26_to_v27_adds_empty_worker_output_receipts_without_inference() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE workspace(id TEXT PRIMARY KEY);
+             CREATE TABLE mission_run_event(
+               workspace_id TEXT NOT NULL,owner_member_id TEXT NOT NULL,run_id TEXT NOT NULL,
+               sequence INTEGER NOT NULL,id TEXT NOT NULL,event_type TEXT NOT NULL,
+               idempotency_key TEXT NOT NULL,occurred_at TEXT NOT NULL,
+               payload BLOB NOT NULL,payload_nonce BLOB NOT NULL,
+               UNIQUE(workspace_id,owner_member_id,id)
+             );",
+        )
+        .unwrap();
+        apply(&conn, 26, 27).unwrap();
+        let exists: i64 = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='mission_worker_output_receipt');",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mission_worker_output_receipt;",
                 [],
                 |row| row.get(0),
             )

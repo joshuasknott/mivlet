@@ -34,6 +34,9 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
   if (input.missionWorkerExecution && (input.prompt.trim() !== worker.role.objective.trim() || input.contextPrefix)) {
     throw new Error("Native mission execution requires the exact worker objective without renderer context.");
   }
+  const executionPrompt = input.missionWorkerExecution
+    ? nativeMissionPrompt(worker)
+    : input.prompt.trim();
   const requiredTools = new Set(worker.tools.map((tool) => tool.toolName));
   const suppliedTools = new Set(input.toolSpecs.map((tool) => tool.name));
   if (requiredTools.size !== suppliedTools.size || [...requiredTools].some((name) => !suppliedTools.has(name))) {
@@ -63,7 +66,7 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
   const stream = input.backend.run(
     {
       model: input.model,
-      messages: [{ role: "user", content: input.prompt.trim() }],
+      messages: [{ role: "user", content: executionPrompt }],
       tools: [...input.toolSpecs],
       maxTokens: maxOutputTokens,
       ...(input.missionWorkerExecution ? { missionWorkerExecution: input.missionWorkerExecution } : {})
@@ -131,4 +134,24 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
   function outcome(status: LocalWorkerExecutionOutcome["status"], reason: string | undefined, retryable: boolean): LocalWorkerExecutionOutcome {
     return { status, text, events, usage: { inputTokens, outputTokens, toolCalls, costUsd, costUnknown }, reason, retryable };
   }
+}
+
+function nativeMissionPrompt(worker: LocalWorkerExecutionInput["worker"]): string {
+  const slots = worker.outputContract.slots;
+  if (slots.length === 0) return worker.role.objective;
+  const slot = slots[0];
+  if (
+    slots.length !== 1 ||
+    !slot ||
+    !slot.required ||
+    slot.format !== "text/markdown" ||
+    worker.outputContract.includeEvidence ||
+    worker.outputContract.delivery !== "run-result"
+  ) {
+    throw new Error("Native mission execution supports one evidence-free required Markdown output.");
+  }
+  const uncertainty = worker.outputContract.includeUncertainty
+    ? "\nState material uncertainty explicitly in the Markdown result."
+    : "";
+  return `Objective:\n${worker.role.objective}\n\nRequired output (${slot.key}; text/markdown):\n${slot.description}\n\nReturn one Markdown result only.${uncertainty}`;
 }

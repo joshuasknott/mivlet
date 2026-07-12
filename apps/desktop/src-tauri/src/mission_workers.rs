@@ -3,6 +3,7 @@
 use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::store::repos::{capability_grant, mission_plan, mission_run, workspace_directory};
@@ -30,6 +31,21 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     local_workspace_id: String,
     member_id: String,
     internal_user_id: String,
+    requested_model: String,
+    output: Option<NativeWorkerOutputSpec>,
+}
+
+#[derive(Clone, Debug)]
+struct NativeWorkerOutputSpec {
+    key: String,
+    description: String,
+    include_uncertainty: bool,
+}
+
+impl NativeWorkerCompletionAuthority {
+    pub(crate) fn expects_output(&self) -> bool {
+        self.output.is_some()
+    }
 }
 
 pub(crate) enum NativeWorkerCompletionPreflight {
@@ -38,7 +54,9 @@ pub(crate) enum NativeWorkerCompletionPreflight {
 }
 
 pub(crate) enum NativeWorkerTerminalOutcome {
-    Completed,
+    Completed {
+        text: Option<String>,
+    },
     Failed {
         code: &'static str,
         message: &'static str,
@@ -77,6 +95,38 @@ pub struct MissionWorkerStartInput {
 struct WorkerGrantInput {
     capability_id: String,
     capability_grant_id: String,
+}
+
+#[tauri::command]
+pub fn mission_worker_output_read(
+    value_reference: String,
+) -> Result<Option<crate::store::repos::mission_worker_output::MissionWorkerOutputRow>, String> {
+    if !value_reference.starts_with("mission-output:v1:") || value_reference.len() > 512 {
+        return Err("Mission worker output reference is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required.".into(),
+                )
+            })?;
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                context.active_workspace.local_workspace_id,
+            )?;
+            crate::store::repos::mission_worker_output::get_by_reference(
+                tx,
+                store,
+                &scope,
+                &member,
+                &value_reference,
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn preflight_native_worker_completion(
@@ -124,13 +174,14 @@ pub(crate) fn preflight_native_worker_completion(
                         "Mission worker assignment is unavailable.".into(),
                     )
                 })?;
-            for path in ["/tools", "/context", "/capabilityIds", "/capabilityGrantIds", "/outputContract/slots"] {
+            for path in ["/tools", "/context", "/capabilityIds", "/capabilityGrantIds"] {
                 if worker.pointer(path).and_then(Value::as_array).is_none_or(|items| !items.is_empty()) {
                     return Err(crate::store::StoreError::Invalid(
-                        "Native completion currently requires a worker with no tools, context, capabilities, grants, or expected outputs.".into(),
+                        "Native completion currently requires a worker with no tools, context, capabilities, or grants.".into(),
                     ));
                 }
             }
+            let output = native_output_spec(worker).map_err(crate::store::StoreError::Invalid)?;
             let objective = worker
                 .pointer("/role/objective")
                 .and_then(Value::as_str)
@@ -143,7 +194,8 @@ pub(crate) fn preflight_native_worker_completion(
                 .ok_or_else(|| {
                     crate::store::StoreError::Invalid("Mission worker output budget is invalid.".into())
                 })?;
-            validate_openai_worker_body(body, model, objective, max_tokens)
+            let prompt = native_worker_prompt(objective, output.as_ref());
+            validate_openai_worker_body(body, model, &prompt, max_tokens)
                 .map_err(crate::store::StoreError::Invalid)?;
             for event_key in native_terminal_event_keys(binding)
                 .map_err(crate::store::StoreError::Invalid)?
@@ -152,8 +204,11 @@ pub(crate) fn preflight_native_worker_completion(
                     event.get("idempotencyKey").and_then(Value::as_str)
                         == Some(event_key.as_str())
                 }) {
-                    exact_native_terminal_replay(existing, binding)
+                    exact_native_terminal_replay(existing, binding, output.as_ref())
                         .map_err(crate::store::StoreError::Invalid)?;
+                    validate_output_receipt_replay(
+                        tx, store, &scope, &member, existing, binding, output.as_ref(),
+                    )?;
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
             }
@@ -165,6 +220,8 @@ pub(crate) fn preflight_native_worker_completion(
                 local_workspace_id: scope.workspace_id().to_string(),
                 member_id: member,
                 internal_user_id: context.internal_user_id,
+                requested_model: model.to_string(),
+                output,
             }))
         })
         .map_err(|error| error.to_string())
@@ -203,35 +260,36 @@ pub(crate) fn settle_native_worker_completion(
             .ok_or_else(|| {
                 crate::store::StoreError::Invalid("Mission run disappeared.".into())
             })?;
-            let (event_key, event_id, event_type, payload) = match outcome {
-                NativeWorkerTerminalOutcome::Completed => (
+            let (event_key, event_id, event_type) = match &outcome {
+                NativeWorkerTerminalOutcome::Completed { .. } => (
                     native_terminal_event_keys(&authority.binding)
                         .map_err(crate::store::StoreError::Invalid)?[0]
                         .clone(),
                     authority.binding.completion_event_id.as_str(),
                     "worker-completed",
-                    json!({"workerId":authority.binding.worker_id,"outputs":[]}),
                 ),
-                NativeWorkerTerminalOutcome::Failed {
-                    code,
-                    message,
-                    retryable,
-                } => (
+                NativeWorkerTerminalOutcome::Failed { .. } => (
                     native_terminal_event_keys(&authority.binding)
                         .map_err(crate::store::StoreError::Invalid)?[1]
                         .clone(),
                     authority.binding.failure_event_id.as_str(),
                     "worker-failed",
-                    json!({"workerId":authority.binding.worker_id,"error":{
-                        "code":code,"category":"provider","message":message,"retryable":retryable
-                    }}),
                 ),
             };
             if let Some(existing) = journal.events.iter().find(|event| {
                 event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
             }) {
-                exact_native_terminal_replay(existing, &authority.binding)
+                exact_native_terminal_replay(existing, &authority.binding, authority.output.as_ref())
                     .map_err(crate::store::StoreError::Invalid)?;
+                validate_output_receipt_replay(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    existing,
+                    &authority.binding,
+                    authority.output.as_ref(),
+                )?;
                 return Ok(());
             }
             validate_native_completion_head(&journal, &authority.binding)
@@ -244,6 +302,63 @@ pub(crate) fn settle_native_worker_completion(
                 .ok_or_else(|| {
                     crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
                 })?;
+            let mut receipt = None;
+            let payload = match outcome {
+                NativeWorkerTerminalOutcome::Completed { text } => {
+                    let outputs = match (&authority.output, text) {
+                        (None, None) => Vec::new(),
+                        (Some(spec), Some(text))
+                            if !text.trim().is_empty() && text.len() <= 65_536 =>
+                        {
+                            let content_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+                            let value_reference = crate::store::repos::mission_worker_output::binding_reference(
+                                workspace,
+                                &authority.member_id,
+                                &authority.binding.run_id,
+                                &authority.binding.worker_id,
+                                &authority.binding.completion_event_id,
+                                &spec.key,
+                                &content_hash,
+                            );
+                            let size_bytes = text.len() as i64;
+                            let receipt_value = json!({
+                                "version":1,"workspaceId":workspace,"ownerMemberId":authority.member_id,
+                                "runId":authority.binding.run_id,"workerId":authority.binding.worker_id,
+                                "completionEventId":authority.binding.completion_event_id,
+                                "outputKey":spec.key,"valueReference":value_reference,
+                                "contentHash":content_hash,"sizeBytes":size_bytes,"text":text,
+                                "mediaType":"text/markdown","encoding":"utf-8",
+                                "observedProvider":"openai","requestedModel":authority.requested_model,
+                                "trust":"provider-generated","citations":[],"createdAt":at
+                            });
+                            receipt = Some((
+                                spec.key.clone(),
+                                value_reference.clone(),
+                                content_hash,
+                                size_bytes,
+                                receipt_value,
+                            ));
+                            vec![json!({
+                                "key":spec.key,"summary":"Native worker text output",
+                                "valueReference":value_reference
+                            })]
+                        }
+                        _ => {
+                            return Err(crate::store::StoreError::Invalid(
+                                "Native worker output does not match its persisted contract.".into(),
+                            ));
+                        }
+                    };
+                    json!({"workerId":authority.binding.worker_id,"outputs":outputs})
+                }
+                NativeWorkerTerminalOutcome::Failed {
+                    code,
+                    message,
+                    retryable,
+                } => json!({"workerId":authority.binding.worker_id,"error":{
+                    "code":code,"category":"provider","message":message,"retryable":retryable
+                }}),
+            };
             let sequence = authority.binding.expected_last_sequence + 1;
             let event = json!({
                 "workspaceId":workspace,"visibility":"member-private","ownerMemberId":authority.member_id,
@@ -283,6 +398,23 @@ pub(crate) fn settle_native_worker_completion(
                 &Value::Object(projected),
                 &at,
             )?;
+            if let Some((key, reference, hash, size, receipt)) = receipt {
+                crate::store::repos::mission_worker_output::put(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &authority.binding.run_id,
+                    &authority.binding.worker_id,
+                    &authority.binding.completion_event_id,
+                    &key,
+                    &reference,
+                    &hash,
+                    size,
+                    &receipt,
+                    &at,
+                )?;
+            }
             Ok(())
         })
         .map_err(|error| error.to_string())
@@ -347,6 +479,73 @@ fn validate_native_completion_head(
     Ok(())
 }
 
+fn native_output_spec(worker: &Value) -> Result<Option<NativeWorkerOutputSpec>, String> {
+    let contract = worker
+        .get("outputContract")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Mission worker output contract is invalid.".to_string())?;
+    let slots = contract
+        .get("slots")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Mission worker output slots are invalid.".to_string())?;
+    if slots.is_empty() {
+        return Ok(None);
+    }
+    if slots.len() != 1
+        || contract.get("includeEvidence").and_then(Value::as_bool) != Some(false)
+        || contract.get("delivery").and_then(Value::as_str) != Some("run-result")
+    {
+        return Err("Native completion supports one evidence-free run-result output only.".into());
+    }
+    let slot = object(&slots[0], "Mission worker output slot")?;
+    exact_keys(slot, &["key", "description", "required", "format"])?;
+    let key = bounded(
+        slot.get("key").and_then(Value::as_str).unwrap_or_default(),
+        "Mission worker output key",
+        120,
+    )?;
+    let key = crate::store::repos::scope::normalize_id(&key, "Mission worker output")
+        .map_err(|error| error.to_string())?;
+    let description = slot
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let include_uncertainty = contract
+        .get("includeUncertainty")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Mission worker uncertainty contract is invalid.".to_string())?;
+    if description.is_empty()
+        || description.len() > 1_000
+        || slot.get("required").and_then(Value::as_bool) != Some(true)
+        || slot.get("format").and_then(Value::as_str) != Some("text/markdown")
+    {
+        return Err("Native worker output slot is not one required Markdown result.".into());
+    }
+    Ok(Some(NativeWorkerOutputSpec {
+        key,
+        description: description.to_string(),
+        include_uncertainty,
+    }))
+}
+
+fn native_worker_prompt(objective: &str, output: Option<&NativeWorkerOutputSpec>) -> String {
+    output.map_or_else(
+        || objective.to_string(),
+        |output| {
+            let uncertainty = if output.include_uncertainty {
+                "\nState material uncertainty explicitly in the Markdown result."
+            } else {
+                ""
+            };
+            format!(
+                "Objective:\n{objective}\n\nRequired output ({}; text/markdown):\n{}\n\nReturn one Markdown result only.",
+                output.key, output.description
+            )
+            + uncertainty
+        },
+    )
+}
+
 fn validate_openai_worker_body(
     body: &Value,
     model: &str,
@@ -400,6 +599,7 @@ fn validate_openai_worker_body(
 fn exact_native_terminal_replay(
     event: &Value,
     binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
 ) -> Result<(), String> {
     let expected_correlation = format!(
         "native-worker-completion:v1:run-revision:{}",
@@ -413,7 +613,22 @@ fn exact_native_terminal_replay(
             event
                 .pointer("/payload/outputs")
                 .and_then(Value::as_array)
-                .is_some_and(Vec::is_empty),
+                .is_some_and(|outputs| match output {
+                    None => outputs.is_empty(),
+                    Some(spec) => {
+                        outputs.len() == 1
+                            && outputs[0].get("key").and_then(Value::as_str)
+                                == Some(spec.key.as_str())
+                            && outputs[0].get("summary").and_then(Value::as_str)
+                                == Some("Native worker text output")
+                            && outputs[0]
+                                .get("valueReference")
+                                .and_then(Value::as_str)
+                                .is_some_and(|reference| {
+                                    reference.starts_with("mission-output:v1:")
+                                })
+                    }
+                }),
         ),
         Some("worker-failed") => (
             binding.failure_event_id.as_str(),
@@ -438,6 +653,45 @@ fn exact_native_terminal_replay(
     } else {
         Err("Worker terminal idempotency key represents another result.".into())
     }
+}
+
+fn validate_output_receipt_replay(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner: &str,
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> crate::store::Result<()> {
+    if event.get("type").and_then(Value::as_str) != Some("worker-completed") {
+        return Ok(());
+    }
+    let Some(spec) = output else {
+        return Ok(());
+    };
+    let reference = event
+        .pointer("/payload/outputs/0/valueReference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Worker output reference is missing.".into())
+        })?;
+    let receipt = crate::store::repos::mission_worker_output::get_by_reference(
+        tx, store, scope, owner, reference,
+    )?
+    .ok_or_else(|| {
+        crate::store::StoreError::Invalid("Worker completion output receipt is missing.".into())
+    })?;
+    if receipt.run_id != binding.run_id
+        || receipt.worker_id != binding.worker_id
+        || receipt.completion_event_id != binding.completion_event_id
+        || receipt.output_key != spec.key
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Worker completion output receipt represents another result.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn native_failure_payload_valid(event: &Value) -> bool {
@@ -485,6 +739,14 @@ fn native_failure_payload_valid(event: &Value) -> bool {
         ) | (
             Some("native-provider-payload-error"),
             Some("The native provider returned an error payload."),
+            Some(false)
+        ) | (
+            Some("native-provider-invalid-utf8"),
+            Some("The native provider stream contained invalid UTF-8."),
+            Some(false)
+        ) | (
+            Some("native-provider-output-too-large"),
+            Some("The native provider output exceeded Fable's mission receipt limit."),
             Some(false)
         ) | (
             Some("native-provider-output-limit"),
@@ -1723,6 +1985,23 @@ mod tests {
     }
 
     #[test]
+    fn native_output_contract_allows_only_one_required_markdown_result() {
+        let worker = json!({"outputContract":{
+            "slots":[{"key":"brief","description":"A concise brief","required":true,"format":"text/markdown"}],
+            "includeEvidence":false,"includeUncertainty":true,"delivery":"run-result"
+        }});
+        let spec = native_output_spec(&worker).unwrap().unwrap();
+        assert_eq!(spec.key, "brief");
+        assert_eq!(
+            native_worker_prompt("Research", Some(&spec)),
+            "Objective:\nResearch\n\nRequired output (brief; text/markdown):\nA concise brief\n\nReturn one Markdown result only.\nState material uncertainty explicitly in the Markdown result."
+        );
+        let mut cited = worker;
+        cited["outputContract"]["includeEvidence"] = json!(true);
+        assert!(native_output_spec(&cited).is_err());
+    }
+
+    #[test]
     fn native_completion_replay_is_bound_to_the_original_run_revision() {
         let binding = NativeWorkerExecutionBinding {
             run_id: "run-1".into(),
@@ -1741,9 +2020,9 @@ mod tests {
             "correlationKey":"native-worker-completion:v1:run-revision:4",
             "payload":{"workerId":"worker-1","outputs":[]}
         });
-        assert!(exact_native_terminal_replay(&event, &binding).is_ok());
+        assert!(exact_native_terminal_replay(&event, &binding, None).is_ok());
         event["correlationKey"] = json!("native-worker-completion:v1:run-revision:3");
-        assert!(exact_native_terminal_replay(&event, &binding).is_err());
+        assert!(exact_native_terminal_replay(&event, &binding, None).is_err());
         let failed = json!({
             "id":"event-5","runId":"run-1","type":"worker-failed",
             "previousEventId":"event-3","sequence":4,
@@ -1755,6 +2034,6 @@ mod tests {
                 "retryable":false
             }}
         });
-        assert!(exact_native_terminal_replay(&failed, &binding).is_ok());
+        assert!(exact_native_terminal_replay(&failed, &binding, None).is_ok());
     }
 }

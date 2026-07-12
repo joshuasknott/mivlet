@@ -162,6 +162,7 @@ pub fn run() {
             mission_runs::mission_run_restore_checkpoint,
             mission_workers::mission_worker_create,
             mission_workers::mission_worker_start,
+            mission_workers::mission_worker_output_read,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
             artifacts::artifact_review_action,

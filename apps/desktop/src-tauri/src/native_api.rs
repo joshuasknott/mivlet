@@ -375,26 +375,50 @@ pub fn normalize_sse_line(line: &str) -> Option<String> {
     Some(payload)
 }
 
-/// Pure helper for CRLF normalization used in streaming buffer accumulation + final handling.
-/// Directly unit-testable (covers split chunks + lone \r / \r\n in SSE).
-fn normalize_sse_chunk(chunk: &str) -> String {
-    chunk.replace("\r\n", "\n").replace('\r', "\n")
-}
-
 /// Helper extracted from stream_backend_completion buffer path.
-/// Drives the shipped size bound check + accumulation + CRLF norm when called from unit tests.
+/// Drives the shipped size bound check and byte accumulation used before strict UTF-8 framing.
 fn accumulate_and_check_bound(
     response_bytes: &mut usize,
-    buffer: &mut String,
+    buffer: &mut Vec<u8>,
     bytes: &[u8],
 ) -> bool {
     *response_bytes = response_bytes.saturating_add(bytes.len());
     if *response_bytes > MAX_STREAM_RESPONSE_BYTES {
         return true;
     }
-    let chunk_text = normalize_sse_chunk(&String::from_utf8_lossy(bytes));
-    buffer.push_str(&chunk_text);
+    buffer.extend_from_slice(bytes);
     false
+}
+
+fn drain_strict_sse_lines(buffer: &mut Vec<u8>, final_flush: bool) -> Result<Vec<String>, ()> {
+    let mut lines = Vec::new();
+    loop {
+        let delimiter = buffer
+            .iter()
+            .position(|byte| matches!(*byte, b'\n' | b'\r'));
+        let Some(index) = delimiter else {
+            break;
+        };
+        if buffer[index] == b'\r' && index + 1 == buffer.len() && !final_flush {
+            break;
+        }
+        let delimiter_len = if buffer[index] == b'\r' && buffer.get(index + 1) == Some(&b'\n') {
+            2
+        } else {
+            1
+        };
+        let drained = buffer.drain(..index + delimiter_len).collect::<Vec<_>>();
+        lines.push(
+            std::str::from_utf8(&drained[..index])
+                .map_err(|_| ())?
+                .to_string(),
+        );
+    }
+    if final_flush && !buffer.is_empty() {
+        let remaining = std::mem::take(buffer);
+        lines.push(std::str::from_utf8(&remaining).map_err(|_| ())?.to_string());
+    }
+    Ok(lines)
 }
 
 /// The opaque request TS hands to Rust. `body` is the provider-shaped JSON; the
@@ -416,28 +440,75 @@ struct OpenAiTerminalObservation {
     saw_payload: bool,
     finish_reason: Option<String>,
     provider_error: bool,
+    capture_output: bool,
+    output: String,
+    output_overflow: bool,
 }
 
 impl OpenAiTerminalObservation {
+    fn new(capture_output: bool) -> Self {
+        Self {
+            capture_output,
+            ..Self::default()
+        }
+    }
+
     fn observe(&mut self, payload: &str) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
             self.provider_error = true;
             return;
         };
+        let terminal_was_seen = self.finish_reason.is_some();
         self.saw_payload = true;
         if value.get("error").is_some_and(|error| !error.is_null()) {
             self.provider_error = true;
+        }
+        if value
+            .get("choices")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|choices| choices.len() > 1)
+            || value
+                .pointer("/choices/0/delta/tool_calls")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|calls| !calls.is_empty())
+            || value
+                .pointer("/choices/0/delta/content")
+                .is_some_and(|content| !content.is_null() && !content.is_string())
+        {
+            self.provider_error = true;
+        }
+        let content = value
+            .pointer("/choices/0/delta/content")
+            .and_then(serde_json::Value::as_str);
+        if terminal_was_seen && content.is_some() {
+            self.provider_error = true;
+        }
+        if self.capture_output {
+            if let Some(content) = content {
+                if self.output.len().saturating_add(content.len()) > 65_536 {
+                    self.output_overflow = true;
+                } else if !self.output_overflow {
+                    self.output.push_str(content);
+                }
+            }
         }
         if let Some(reason) = value
             .pointer("/choices/0/finish_reason")
             .and_then(serde_json::Value::as_str)
         {
-            self.finish_reason = Some(reason.to_string());
+            if terminal_was_seen {
+                self.provider_error = true;
+            } else {
+                self.finish_reason = Some(reason.to_string());
+            }
         }
     }
 
     fn clean_stop(&self) -> bool {
-        self.saw_payload && !self.provider_error && self.finish_reason.as_deref() == Some("stop")
+        self.saw_payload
+            && !self.provider_error
+            && self.finish_reason.as_deref() == Some("stop")
+            && (!self.capture_output || (!self.output.trim().is_empty() && !self.output_overflow))
     }
 }
 
@@ -683,7 +754,11 @@ pub async fn stream_backend_completion(
     let mut cancelled = false;
     let mut completed = false;
     let mut transport_failed = false;
-    let mut terminal_observation = OpenAiTerminalObservation::default();
+    let mut terminal_observation = OpenAiTerminalObservation::new(
+        mission_authority
+            .as_ref()
+            .is_some_and(|authority| authority.expects_output()),
+    );
     let mut mission_failure: Option<MissionProviderFailure> = None;
 
     for attempt in 0..MAX_ATTEMPTS {
@@ -833,7 +908,7 @@ pub async fn stream_backend_completion(
         }
 
         let mut stream = response.bytes_stream();
-        let mut buffer = String::new();
+        let mut buffer = Vec::new();
         let mut response_bytes = 0usize;
         loop {
             tokio::select! {
@@ -864,8 +939,26 @@ pub async fn stream_backend_completion(
                                 });
                                 break;
                             }
-                            while let Some(newline_pos) = buffer.find('\n') {
-                                let line: String = buffer.drain(..=newline_pos).collect();
+                            let lines = match drain_strict_sse_lines(&mut buffer, false) {
+                                Ok(lines) => lines,
+                                Err(()) => {
+                                    emit_control(&app, &channel, TransportControlEvent {
+                                        kind: "error", code: "invalid-utf8",
+                                        message: "Provider stream contained invalid UTF-8.".to_string(),
+                                        retryable: false, attempt: attempt + 1, retry_after_ms: None,
+                                    });
+                                    completed = true;
+                                    transport_failed = true;
+                                    mission_failure = Some(MissionProviderFailure {
+                                        code: "native-provider-invalid-utf8",
+                                        message: "The native provider stream contained invalid UTF-8.",
+                                        retryable: false,
+                                    });
+                                    buffer.clear();
+                                    break;
+                                }
+                            };
+                            for line in lines {
                                 if let Some(payload) = normalize_sse_line(&line) {
                                     if mission_authority.is_some() {
                                         terminal_observation.observe(&payload);
@@ -901,13 +994,39 @@ pub async fn stream_backend_completion(
                 }
             }
         }
-        if !buffer.is_empty() && !cancelled {
-            let final_buf = normalize_sse_chunk(&buffer);
-            if let Some(payload) = normalize_sse_line(&final_buf) {
-                if mission_authority.is_some() {
-                    terminal_observation.observe(&payload);
+        if !buffer.is_empty() && !cancelled && !transport_failed {
+            match drain_strict_sse_lines(&mut buffer, true) {
+                Ok(lines) => {
+                    for line in lines {
+                        if let Some(payload) = normalize_sse_line(&line) {
+                            if mission_authority.is_some() {
+                                terminal_observation.observe(&payload);
+                            }
+                            let _ = app.emit(&channel, payload);
+                        }
+                    }
                 }
-                let _ = app.emit(&channel, payload);
+                Err(()) => {
+                    emit_control(
+                        &app,
+                        &channel,
+                        TransportControlEvent {
+                            kind: "error",
+                            code: "invalid-utf8",
+                            message: "Provider stream contained invalid UTF-8.".to_string(),
+                            retryable: false,
+                            attempt: attempt + 1,
+                            retry_after_ms: None,
+                        },
+                    );
+                    completed = true;
+                    transport_failed = true;
+                    mission_failure = Some(MissionProviderFailure {
+                        code: "native-provider-invalid-utf8",
+                        message: "The native provider stream contained invalid UTF-8.",
+                        retryable: false,
+                    });
+                }
             }
         }
         break;
@@ -923,6 +1042,12 @@ pub async fn stream_backend_completion(
             Some(MissionProviderFailure {
                 code: "native-provider-payload-error",
                 message: "The native provider returned an error payload.",
+                retryable: false,
+            })
+        } else if terminal_observation.output_overflow {
+            Some(MissionProviderFailure {
+                code: "native-provider-output-too-large",
+                message: "The native provider output exceeded Fable's mission receipt limit.",
                 retryable: false,
             })
         } else if terminal_observation.finish_reason.as_deref() == Some("length") {
@@ -943,7 +1068,13 @@ pub async fn stream_backend_completion(
     }
     let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
         let outcome = if !cancelled && completed && mission_failure.is_none() {
-            Some(crate::mission_workers::NativeWorkerTerminalOutcome::Completed)
+            Some(
+                crate::mission_workers::NativeWorkerTerminalOutcome::Completed {
+                    text: terminal_observation
+                        .capture_output
+                        .then(|| terminal_observation.output.clone()),
+                },
+            )
         } else {
             mission_failure.map(|failure| {
                 crate::mission_workers::NativeWorkerTerminalOutcome::Failed {
@@ -1450,6 +1581,23 @@ mod transport_policy_tests {
         assert!(observation.clean_stop());
         observation.observe(r#"{"error":{"message":"late failure"}}"#);
         assert!(!observation.clean_stop());
+        let mut late_content = OpenAiTerminalObservation::new(false);
+        late_content.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        late_content.observe(r#"{"choices":[{"delta":{"content":"late"}}]}"#);
+        assert!(!late_content.clean_stop());
+    }
+
+    #[test]
+    fn mission_terminal_observation_captures_one_bounded_native_text_output() {
+        let mut observation = OpenAiTerminalObservation::new(true);
+        observation.observe(r#"{"choices":[{"delta":{"content":"Hello "}}]}"#);
+        observation
+            .observe(r#"{"choices":[{"delta":{"content":"world"},"finish_reason":"stop"}]}"#);
+        assert!(observation.clean_stop());
+        assert_eq!(observation.output, "Hello world");
+        let mut empty = OpenAiTerminalObservation::new(true);
+        empty.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(!empty.clean_stop());
     }
 
     #[test]
@@ -1915,36 +2063,46 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn normalize_sse_chunk_covers_crlf_variants_and_lone_cr() {
-        // Directly exercises the shipped CRLF norm used by real buffer acc + final in stream_backend_completion
-        assert_eq!(normalize_sse_chunk("data: foo\r\nbar"), "data: foo\nbar");
-        assert_eq!(normalize_sse_chunk("data: x\ry\r\nz"), "data: x\ny\nz");
-        assert_eq!(normalize_sse_chunk("bare\r"), "bare\n");
+    fn strict_sse_framing_carries_split_utf8_and_crlf_boundaries() {
+        let encoded = "data: {\"text\":\"café\"}\r\n".as_bytes();
+        let split = encoded.iter().position(|byte| *byte == 0xc3).unwrap() + 1;
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&encoded[..split]);
+        assert!(drain_strict_sse_lines(&mut buffer, false)
+            .unwrap()
+            .is_empty());
+        buffer.extend_from_slice(&encoded[split..]);
+        assert_eq!(
+            drain_strict_sse_lines(&mut buffer, false).unwrap(),
+            vec!["data: {\"text\":\"café\"}"]
+        );
+        let mut invalid = vec![b'd', 0xff, b'\n'];
+        assert!(drain_strict_sse_lines(&mut invalid, false).is_err());
     }
 
     #[test]
     fn bounded_stream_and_max_constants() {
         // Drives the shipped > MAX check via the helper used in stream_backend buffer.
         let mut acc: usize = MAX_STREAM_RESPONSE_BYTES - 5;
-        let mut b = String::new();
+        let mut b = Vec::new();
         let big = vec![b'x'; 10];
         assert!(accumulate_and_check_bound(&mut acc, &mut b, &big));
     }
 
     #[test]
     fn accumulate_drives_real_size_check_and_buffer_path() {
-        // Directly exercises the shipped accumulate_and_check_bound (contains the response_bytes > MAX check + push + normalize_sse_chunk)
+        // Directly exercises the shipped accumulate_and_check_bound byte path.
         // used inside stream_backend_completion's bytes loop.
         let mut bytes_acc: usize = 0;
-        let mut buf = String::new();
+        let mut buf = Vec::new();
         let small = b"data: hello\r\n";
         assert!(!accumulate_and_check_bound(&mut bytes_acc, &mut buf, small));
         assert!(bytes_acc > 0);
-        assert!(buf.contains("data: hello"));
+        assert!(buf.starts_with(b"data: hello"));
 
         // Now cross the limit with a huge chunk (simulates large SSE payload chunk)
         let mut big_acc: usize = MAX_STREAM_RESPONSE_BYTES - 10;
-        let mut big_buf = String::new();
+        let mut big_buf = Vec::new();
         let huge = vec![b'x'; 100];
         let exceeded = accumulate_and_check_bound(&mut big_acc, &mut big_buf, &huge);
         assert!(exceeded);

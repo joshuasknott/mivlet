@@ -35,6 +35,7 @@ pub mod message;
 pub mod mission_checkpoint;
 pub mod mission_plan;
 pub mod mission_run;
+pub mod mission_worker_output;
 pub mod preferences;
 pub mod project;
 pub mod run;

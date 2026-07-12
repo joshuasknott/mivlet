@@ -263,6 +263,21 @@ egress. This does not claim semantic output evidence: tool-bearing workers,
 durable output receipts and provenance, other providers and runtimes, live grant
 consumption at tool use, handoffs, and the desktop experience remain open.
 
+The same OpenAI-only boundary now has one deliberately constrained semantic
+output path. A worker with exactly one required, evidence-free Markdown
+run-result slot receives a native-reconstructed prompt containing its persisted
+objective, output key, description, format, and uncertainty requirement. Rust strictly frames UTF-8 SSE
+bytes, rejects multiple choices, tool calls, late terminal content, invalid or
+oversized text, and whitespace-only results, then hashes the exact bounded text.
+Schema v27 atomically links the `worker-completed` event's domain-separated
+value reference to an immutable owner-qualified encrypted receipt containing
+the text, requested model reference, OpenAI observation, provider-generated
+trust class, and no citations. Replay requires both the exact event and receipt;
+an authenticated native read resolves only the active member's reference after
+restart. This is durable provider-generated text, not an artifact, cited brief,
+accepted mission result, canonical provider-route observation, or evidence for
+tool/context-bearing workers, so the Wave 4A boxes remain unchecked.
+
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
 checkpoint replay boundaries, advancing recovery attempts, cooperative
@@ -281,9 +296,9 @@ bind its hash to run, event, attempt, and reference; select the newest checkpoin
 by event sequence; restore into exactly the next attempt; and make an exact
 restore replay stable even after a newer checkpoint exists. The narrow OpenAI
 path described above persists truthful production `worker-completed` and
-`worker-failed` events, but general worker execution events, semantic output
-receipts, and desktop recovery wiring are still open, so the durable-run box
-remains unchecked.
+`worker-failed` events plus one atomic encrypted Markdown receipt, but general
+worker execution events, cited/artifact output provenance, and desktop recovery
+wiring are still open, so the durable-run box remains unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.
