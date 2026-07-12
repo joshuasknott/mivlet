@@ -2936,6 +2936,97 @@ export async function listenRuntimeAcpFrames(
   }
 }
 
+// Authenticated mission composition. These wrappers carry only plan content and
+// opaque event identities; Rust derives account, workspace, member, actor,
+// authority, revisions, timestamps, evaluation, and terminal results.
+export interface RuntimeMissionPlanCreateInput {
+  missionId: string;
+  planId: string;
+  planRevisionId: string;
+  executionDepth: "delegated" | "multi-worker";
+  outcome: unknown;
+  missionScope: unknown;
+  constraints: unknown;
+  timeConstraint?: unknown;
+  dataBoundary?: unknown;
+  acceptance: unknown;
+  budget?: unknown;
+  summary: string;
+  bounds: unknown;
+  steps: unknown;
+}
+
+export interface RuntimeMissionRunCreateInput {
+  missionId: string;
+  runId: string;
+  eventId: string;
+  idempotencyKey: string;
+}
+
+export interface RuntimeMissionWorkerCreateInput {
+  runId: string;
+  eventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  workerId: string;
+  stepKey: string;
+  context: unknown[];
+  grants: Array<{ capabilityId: string; capabilityGrantId: string }>;
+}
+
+export interface RuntimeMissionWorkerStartInput {
+  runId: string;
+  workerId: string;
+  runStartEventId?: string;
+  workerStartedEventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
+export async function createRuntimeMissionPlan(input: RuntimeMissionPlanCreateInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_plan_create", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function getRuntimeMissionPlan(missionId: string) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown> | null>("mission_plan_get", { missionId }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function createRuntimeMissionRun(input: RuntimeMissionRunCreateInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_run_create", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function getRuntimeMissionRun(runId: string) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown> | null>("mission_run_get", { runId }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function createRuntimeMissionWorker(input: RuntimeMissionWorkerCreateInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_worker_create", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function startRuntimeMissionWorker(input: RuntimeMissionWorkerStartInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_worker_start", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function readRuntimeMissionWorkerOutput(valueReference: string) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown> | null>("mission_worker_output_read", { valueReference }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
 // ---------------------------------------------------------------------------
 // MCP local STDIO process bridge. Rust resolves an opaque encrypted launch
 // reference, owns the child and validates every frame; TypeScript sees only

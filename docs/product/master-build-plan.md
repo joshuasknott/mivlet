@@ -378,6 +378,14 @@ derived `MissionResult` naming only that producing run. No renderer-selected
 status, result, actor, or time crosses this boundary; stale transitions roll
 back. General multi-run and partial/failed mission aggregation remains open.
 
+The desktop runtime now exposes the authenticated plan, run, worker, and output
+commands needed to compose that journey through Tauri. Browser preview returns
+no synthetic mission state, and focused boundary coverage proves the wrapper
+passes only plan content plus opaque lifecycle/event identities while Rust keeps
+scope, actor, authority, time, evaluation, and result ownership. The shell does
+not yet orchestrate provider/tool execution through this facade, so this is IPC
+composition evidence rather than a claimed user journey.
+
 ### Wave 4B - Routing and experience
 
 - [ ] Route by capability, quality, cost, speed, privacy, context, tools, health, preference, and risk.
