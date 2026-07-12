@@ -39,7 +39,7 @@ describe("cited brief mission composition", () => {
     vi.clearAllMocks();
     mocks.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-1" } });
     mocks.resolveMcpRoute.mockResolvedValue(null);
-    mocks.createPlan.mockResolvedValue({ mission: {} });
+    mocks.createPlan.mockResolvedValue({ mission: { budget: { maxDurationMs: 120000, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxAttempts: 1 } } });
     mocks.createRun.mockResolvedValue(journal(2, 1, []));
     mocks.createWorker.mockResolvedValue(journal(3, 2, [{ type: "worker-created", payload: { worker } }]));
     mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }]));
@@ -74,7 +74,7 @@ describe("cited brief mission composition", () => {
     });
 
     expect(result.text).toBe("Trustworthy brief [source-1].");
-    expect(result.receipt).toMatchObject({ provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1 });
+    expect(result.receipt).toMatchObject({ provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1 });
     expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(1);
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
       toolSpecs: [], missionToolEvidence: { result: { citations: [{ citationId: "source-1" }] } },

@@ -48,6 +48,11 @@ export interface CitedBriefMissionReceipt {
   toolCalls: number;
   sourceCount: number;
   trust: string;
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  maxToolCalls: number;
+  maxDurationMs: number;
+  maxAttempts: number;
 }
 
 export function isCitedBriefMissionPrompt(value: string): boolean {
@@ -186,22 +191,28 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
     : undefined;
   const text = outputReceipt?.text;
   if (!outputReceipt || typeof text !== "string" || !text.trim()) throw new Error("The durable cited brief is unavailable.");
-  return { missionId, runId, text, valueReference, journal, receipt: citedBriefReceipt(journal, outputReceipt) };
+  return { missionId, runId, text, valueReference, journal, receipt: citedBriefReceipt(journal, outputReceipt, plan) };
 }
 
-function citedBriefReceipt(journal: Record<string, unknown>, output: Record<string, unknown>): CitedBriefMissionReceipt {
+function citedBriefReceipt(journal: Record<string, unknown>, output: Record<string, unknown>, plan: Record<string, unknown>): CitedBriefMissionReceipt {
   const events = journal.events as Array<Record<string, unknown>>;
   const route = events.find((event) => event.type === "route-selected")?.payload as Record<string, unknown> | undefined;
   const selection = route?.selection as Record<string, unknown> | undefined;
   const usageEvent = events.find((event) => event.type === "usage-recorded")?.payload as Record<string, unknown> | undefined;
   const usage = usageEvent?.usage as Record<string, unknown> | undefined;
   const citations = Array.isArray(output.citations) ? output.citations : [];
+  const mission = plan.mission as Record<string, unknown> | undefined;
+  const budget = mission?.budget as Record<string, unknown> | undefined;
   const requiredText = (value: unknown, message: string) => {
     if (typeof value !== "string" || !value.trim()) throw new Error(message);
     return value;
   };
   const count = (value: unknown) => {
     if (!Number.isInteger(value) || (value as number) < 0) throw new Error("The durable mission usage receipt is invalid.");
+    return value as number;
+  };
+  const limit = (value: unknown) => {
+    if (!Number.isInteger(value) || (value as number) <= 0) throw new Error("The durable mission budget receipt is invalid.");
     return value as number;
   };
   return {
@@ -212,7 +223,12 @@ function citedBriefReceipt(journal: Record<string, unknown>, output: Record<stri
     outputTokens: count(usage?.outputTokens),
     toolCalls: count(usage?.toolCalls),
     sourceCount: citations.length,
-    trust: requiredText(output.trust, "The durable mission trust receipt is invalid.")
+    trust: requiredText(output.trust, "The durable mission trust receipt is invalid."),
+    maxInputTokens: limit(budget?.maxInputTokens),
+    maxOutputTokens: limit(budget?.maxOutputTokens),
+    maxToolCalls: limit(budget?.maxToolCalls),
+    maxDurationMs: limit(budget?.maxDurationMs),
+    maxAttempts: limit(budget?.maxAttempts)
   };
 }
 

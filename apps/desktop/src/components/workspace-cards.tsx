@@ -80,6 +80,7 @@ export function RunContextSummary({ receipt }: { receipt: RunContextReceipt }) {
 export function MissionRunReceipt({ receipt }: { receipt: {
   provider: string; model: string; routeReason: string; inputTokens: number;
   outputTokens: number; toolCalls: number; sourceCount: number; trust: string;
+  maxInputTokens: number; maxOutputTokens: number; maxToolCalls: number; maxDurationMs: number; maxAttempts: number;
 } }) {
   const provider = receipt.provider === "openai" ? "OpenAI" : receipt.provider;
   return (
@@ -88,8 +89,11 @@ export function MissionRunReceipt({ receipt }: { receipt: {
       <p className="run-context-summary__audience"><strong>Route</strong><span>{receipt.routeReason}</span></p>
       <ul className="run-context-summary__reasons" aria-label="Run facts">
         <li>{receipt.model}</li>
-        <li>{receipt.inputTokens} in · {receipt.outputTokens} out</li>
-        <li>{receipt.toolCalls} read {receipt.toolCalls === 1 ? "action" : "actions"}</li>
+        <li>{receipt.inputTokens} / {receipt.maxInputTokens} input tokens</li>
+        <li>{receipt.outputTokens} / {receipt.maxOutputTokens} output tokens</li>
+        <li>{receipt.toolCalls} / {receipt.maxToolCalls} read {receipt.maxToolCalls === 1 ? "action" : "actions"}</li>
+        <li>Up to {Math.round(receipt.maxDurationMs / 1000)} seconds</li>
+        <li>{receipt.maxAttempts} {receipt.maxAttempts === 1 ? "attempt" : "attempts"} · cost unavailable</li>
         <li>{receipt.sourceCount} cited {receipt.sourceCount === 1 ? "source" : "sources"}</li>
         <li>{receipt.trust === "provider-generated-with-external-evidence" ? "External evidence kept untrusted" : receipt.trust}</li>
       </ul>
