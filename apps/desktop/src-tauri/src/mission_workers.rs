@@ -10,6 +10,32 @@ use crate::store::repos::{capability_grant, mission_plan, mission_run, workspace
 const MAX_CONTEXT: usize = 32;
 const MAX_TOOLS: usize = 32;
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeWorkerExecutionBinding {
+    pub run_id: String,
+    pub worker_id: String,
+    pub worker_started_event_id: String,
+    pub completion_event_id: String,
+    pub idempotency_key: String,
+    pub expected_run_revision: i64,
+    pub expected_last_sequence: i64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NativeWorkerCompletionAuthority {
+    binding: NativeWorkerExecutionBinding,
+    identity: crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    local_workspace_id: String,
+    member_id: String,
+    internal_user_id: String,
+}
+
+pub(crate) enum NativeWorkerCompletionPreflight {
+    Execute(NativeWorkerCompletionAuthority),
+    AlreadyCompleted,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MissionWorkerCreateInput {
@@ -41,6 +67,321 @@ pub struct MissionWorkerStartInput {
 struct WorkerGrantInput {
     capability_id: String,
     capability_grant_id: String,
+}
+
+pub(crate) fn preflight_native_worker_completion(
+    binding: &NativeWorkerExecutionBinding,
+    provider_id: &str,
+    model: &str,
+    body: &Value,
+) -> Result<NativeWorkerCompletionPreflight, String> {
+    if provider_id != "openai" {
+        return Err("Native mission completion currently supports only the OpenAI adapter.".into());
+    }
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()?;
+    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.clone().ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required.".into(),
+                )
+            })?;
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                context.active_workspace.local_workspace_id.clone(),
+            )?;
+            let journal = mission_run::get(tx, store, &scope, &member, &binding.run_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            let worker = journal
+                .events
+                .iter()
+                .find(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("worker-created")
+                        && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                            == Some(binding.worker_id.as_str())
+                })
+                .and_then(|event| event.pointer("/payload/worker"))
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission worker assignment is unavailable.".into(),
+                    )
+                })?;
+            for path in ["/tools", "/context", "/capabilityIds", "/capabilityGrantIds", "/outputContract/slots"] {
+                if worker.pointer(path).and_then(Value::as_array).is_none_or(|items| !items.is_empty()) {
+                    return Err(crate::store::StoreError::Invalid(
+                        "Native completion currently requires a worker with no tools, context, capabilities, grants, or expected outputs.".into(),
+                    ));
+                }
+            }
+            let objective = worker
+                .pointer("/role/objective")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission worker objective is invalid.".into())
+                })?;
+            let max_tokens = worker
+                .pointer("/budget/maxOutputTokens")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission worker output budget is invalid.".into())
+                })?;
+            validate_openai_worker_body(body, model, objective, max_tokens)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let event_key = native_completion_event_key(binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            }) {
+                exact_native_completion_replay(existing, binding)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
+            }
+            validate_native_completion_head(&journal, binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            Ok(NativeWorkerCompletionPreflight::Execute(NativeWorkerCompletionAuthority {
+                binding: binding.clone(),
+                identity: identity.clone(),
+                local_workspace_id: scope.workspace_id().to_string(),
+                member_id: member,
+                internal_user_id: context.internal_user_id,
+            }))
+        })
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn settle_native_worker_completion(
+    authority: &NativeWorkerCompletionAuthority,
+) -> Result<(), String> {
+    let _identity_guard =
+        crate::clerk_identity::lock_native_identity_generation(&authority.identity)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            if context.active_workspace.local_workspace_id != authority.local_workspace_id
+                || context.member_id.as_deref() != Some(authority.member_id.as_str())
+                || context.internal_user_id != authority.internal_user_id
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "Mission worker authority changed during provider execution.".into(),
+                ));
+            }
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                authority.local_workspace_id.clone(),
+            )?;
+            let journal = mission_run::get(
+                tx,
+                store,
+                &scope,
+                &authority.member_id,
+                &authority.binding.run_id,
+            )?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run disappeared.".into())
+            })?;
+            let event_key = native_completion_event_key(&authority.binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            }) {
+                exact_native_completion_replay(existing, &authority.binding)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                return Ok(());
+            }
+            validate_native_completion_head(&journal, &authority.binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let at = now();
+            let workspace = journal
+                .run
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+                })?;
+            let sequence = authority.binding.expected_last_sequence + 1;
+            let event = json!({
+                "workspaceId":workspace,"visibility":"member-private","ownerMemberId":authority.member_id,
+                "authority":"local","schemaVersion":1,"revision":1,
+                "createdByInternalUserId":authority.internal_user_id,"createdAt":at,"updatedAt":at,
+                "id":authority.binding.completion_event_id,"runId":authority.binding.run_id,
+                "type":"worker-completed","sequence":sequence,"previousEventId":authority.binding.worker_started_event_id,
+                "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+                "occurredAt":at,"actor":{"kind":"system"},
+                "correlationKey":format!("native-worker-completion:v1:run-revision:{}", authority.binding.expected_run_revision),
+                "idempotencyKey":event_key,"payload":{"workerId":authority.binding.worker_id,"outputs":[]}
+            });
+            let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+            })?;
+            projected.insert(
+                "revision".into(),
+                json!(authority.binding.expected_run_revision + 1),
+            );
+            projected.insert("updatedAt".into(), json!(at));
+            projected.insert(
+                "eventHead".into(),
+                json!({"lastSequence":sequence,"lastEventId":authority.binding.completion_event_id}),
+            );
+            mission_run::append(
+                tx,
+                store,
+                &scope,
+                &authority.member_id,
+                &authority.binding.run_id,
+                authority.binding.expected_run_revision,
+                authority.binding.expected_last_sequence,
+                &authority.binding.completion_event_id,
+                "worker-completed",
+                &event_key,
+                &event,
+                &Value::Object(projected),
+                &at,
+            )?;
+            Ok(())
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn native_completion_event_key(binding: &NativeWorkerExecutionBinding) -> Result<String, String> {
+    Ok(format!(
+        "worker-complete:{}",
+        bounded(
+            &binding.idempotency_key,
+            "Worker completion idempotency key",
+            200,
+        )?
+    ))
+}
+
+fn validate_native_completion_head(
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<(), String> {
+    for value in [
+        &binding.run_id,
+        &binding.worker_id,
+        &binding.worker_started_event_id,
+        &binding.completion_event_id,
+        &binding.idempotency_key,
+    ] {
+        bounded(value, "Native worker execution identity", 200)?;
+    }
+    if binding.worker_started_event_id == binding.completion_event_id
+        || journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || journal.run.get("revision").and_then(Value::as_i64)
+            != Some(binding.expected_run_revision)
+        || journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(binding.expected_last_sequence)
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(binding.worker_started_event_id.as_str())
+        || !journal.events.iter().any(|event| {
+            event.get("id").and_then(Value::as_str)
+                == Some(binding.worker_started_event_id.as_str())
+                && event.get("type").and_then(Value::as_str) == Some("worker-started")
+                && event.pointer("/payload/workerId").and_then(Value::as_str)
+                    == Some(binding.worker_id.as_str())
+        })
+    {
+        return Err(
+            "Native worker execution is not bound to the current started-worker head.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_openai_worker_body(
+    body: &Value,
+    model: &str,
+    objective: &str,
+    max_tokens: i64,
+) -> Result<(), String> {
+    let request_object = object(body, "OpenAI worker request")?;
+    exact_keys(
+        request_object,
+        &[
+            "model",
+            "messages",
+            "max_tokens",
+            "max_completion_tokens",
+            "stream",
+            "stream_options",
+        ],
+    )?;
+    let messages = request_object
+        .get("messages")
+        .and_then(Value::as_array)
+        .filter(|messages| messages.len() == 1)
+        .ok_or_else(|| "Native worker request requires one objective message.".to_string())?;
+    let message = object(&messages[0], "Native worker objective message")?;
+    exact_keys(message, &["role", "content"])?;
+    let token_limit = request_object
+        .get("max_tokens")
+        .or_else(|| request_object.get("max_completion_tokens"))
+        .and_then(Value::as_i64);
+    let stream_options_valid = request_object
+        .get("stream_options")
+        .and_then(Value::as_object)
+        .is_some_and(|options| {
+            options.len() == 1
+                && options.get("include_usage").and_then(Value::as_bool) == Some(true)
+        });
+    if request_object.get("model").and_then(Value::as_str) != Some(model)
+        || request_object.get("stream").and_then(Value::as_bool) != Some(true)
+        || message.get("role").and_then(Value::as_str) != Some("user")
+        || message.get("content").and_then(Value::as_str) != Some(objective)
+        || token_limit != Some(max_tokens)
+        || !stream_options_valid
+        || request_object.contains_key("max_tokens")
+            == request_object.contains_key("max_completion_tokens")
+    {
+        return Err("OpenAI worker request does not match its native assignment.".into());
+    }
+    Ok(())
+}
+
+fn exact_native_completion_replay(
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<(), String> {
+    let expected_correlation = format!(
+        "native-worker-completion:v1:run-revision:{}",
+        binding.expected_run_revision
+    );
+    if event.get("id").and_then(Value::as_str) == Some(binding.completion_event_id.as_str())
+        && event.get("runId").and_then(Value::as_str) == Some(binding.run_id.as_str())
+        && event.get("type").and_then(Value::as_str) == Some("worker-completed")
+        && event.get("previousEventId").and_then(Value::as_str)
+            == Some(binding.worker_started_event_id.as_str())
+        && event.pointer("/payload/workerId").and_then(Value::as_str)
+            == Some(binding.worker_id.as_str())
+        && event
+            .pointer("/payload/outputs")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && event.get("sequence").and_then(Value::as_i64) == Some(binding.expected_last_sequence + 1)
+        && event.get("correlationKey").and_then(Value::as_str)
+            == Some(expected_correlation.as_str())
+    {
+        Ok(())
+    } else {
+        Err("Worker completion idempotency key represents another result.".into())
+    }
 }
 
 #[tauri::command]
@@ -1253,5 +1594,39 @@ mod tests {
         assert!(exact_start_replay(&event, &input).is_ok());
         journal.events.push(event);
         assert!(validate_start_head(&journal, &input).is_err());
+    }
+
+    #[test]
+    fn native_completion_request_is_exact_objective_only_and_outputless() {
+        let body = json!({
+            "model":"gpt-5","messages":[{"role":"user","content":"Inspect health"}],
+            "max_completion_tokens":50,"stream":true,"stream_options":{"include_usage":true}
+        });
+        assert!(validate_openai_worker_body(&body, "gpt-5", "Inspect health", 50).is_ok());
+        let mut widened = body;
+        widened["tools"] = json!([]);
+        assert!(validate_openai_worker_body(&widened, "gpt-5", "Inspect health", 50).is_err());
+    }
+
+    #[test]
+    fn native_completion_replay_is_bound_to_the_original_run_revision() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-3".into(),
+            completion_event_id: "event-4".into(),
+            idempotency_key: "complete-1".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+        };
+        let mut event = json!({
+            "id":"event-4","runId":"run-1","type":"worker-completed",
+            "previousEventId":"event-3","sequence":4,
+            "correlationKey":"native-worker-completion:v1:run-revision:4",
+            "payload":{"workerId":"worker-1","outputs":[]}
+        });
+        assert!(exact_native_completion_replay(&event, &binding).is_ok());
+        event["correlationKey"] = json!("native-worker-completion:v1:run-revision:3");
+        assert!(exact_native_completion_replay(&event, &binding).is_err());
     }
 }

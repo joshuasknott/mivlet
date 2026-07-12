@@ -95,4 +95,19 @@ describe("portable local worker driver", () => {
     })).resolves.toMatchObject({ status: "failed", reason: expect.stringContaining("duration budget") });
     expect(cancel).toHaveBeenCalledWith("run-1");
   });
+
+  it("carries only an exact objective-only native mission binding", async () => {
+    const runtime = backend([{ type: "done", finishReason: "stop" }]);
+    const missionWorkerExecution = {
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3",
+      completionEventId: "event-4", idempotencyKey: "complete-1",
+      expectedRunRevision: 4, expectedLastSequence: 3
+    };
+    await executeLocalWorker({ worker: { ...worker(), tools: [] }, backend: runtime.value,
+      model: "model", prompt: "Research", toolSpecs: [], execute: vi.fn(), missionWorkerExecution });
+    expect(runtime.request).toMatchObject({ missionWorkerExecution });
+    await expect(executeLocalWorker({ worker: { ...worker(), tools: [] }, backend: runtime.value,
+      model: "model", prompt: "Different", toolSpecs: [], execute: vi.fn(), missionWorkerExecution }))
+      .rejects.toThrow("exact worker objective");
+  });
 });

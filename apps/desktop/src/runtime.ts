@@ -2572,6 +2572,7 @@ export interface RuntimeStreamRequest {
   requestId: string;
   model: string;
   body: unknown;
+  missionWorkerExecution?: import("@fable/protocol").MissionWorkerExecutionBinding;
 }
 
 /** Begin a streaming completion. Rust adds the key + performs the HTTP call. */

@@ -1,4 +1,4 @@
-import type { AgentRunOptions, ApprovalRequest, BackendAgentEvent, NativeToolSpec } from "@fable/protocol";
+import type { AgentRunOptions, ApprovalRequest, BackendAgentEvent, MissionWorkerExecutionBinding, NativeToolSpec } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
 import type { AgentBackend } from "../agent-runtime";
 
@@ -12,6 +12,7 @@ export interface LocalWorkerExecutionInput {
   contextPrefix?: string;
   signal?: AbortSignal;
   onEvent?: (event: BackendAgentEvent) => void | Promise<void>;
+  missionWorkerExecution?: MissionWorkerExecutionBinding;
 }
 
 export interface LocalWorkerExecutionOutcome {
@@ -30,6 +31,9 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
     throw new Error("Only a proposed or queued worker can start local execution.");
   }
   if (!input.prompt.trim()) throw new Error("Worker execution requires an explicit prompt.");
+  if (input.missionWorkerExecution && (input.prompt.trim() !== worker.role.objective.trim() || input.contextPrefix)) {
+    throw new Error("Native mission execution requires the exact worker objective without renderer context.");
+  }
   const requiredTools = new Set(worker.tools.map((tool) => tool.toolName));
   const suppliedTools = new Set(input.toolSpecs.map((tool) => tool.name));
   if (requiredTools.size !== suppliedTools.size || [...requiredTools].some((name) => !suppliedTools.has(name))) {
@@ -61,7 +65,8 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
       model: input.model,
       messages: [{ role: "user", content: input.prompt.trim() }],
       tools: [...input.toolSpecs],
-      maxTokens: maxOutputTokens
+      maxTokens: maxOutputTokens,
+      ...(input.missionWorkerExecution ? { missionWorkerExecution: input.missionWorkerExecution } : {})
     },
     {
       execute,

@@ -246,9 +246,16 @@ start now atomically advances an eligible run to `running` when needed and
 appends `worker-started` only for an exact unstarted assignment after reloading
 the selected step and rechecking every active read grant; scope, actor, time,
 status, sequence, and both events are native-built, and the transaction exposes
-no intermediate running-without-worker state. Completion/failure events, live
-grant consumption at tool use, backend execution wiring, handoffs, and desktop
-experience remain open.
+no intermediate running-without-worker state. One deliberately narrow native
+completion path now binds an already-started, objective-only OpenAI worker to
+the current run revision and journal head before provider egress. It permits no
+tools, context, capabilities, grants, or expected outputs; Rust validates the
+exact request shape, observes a clean provider `stop`, rechecks account and
+workspace authority after the await, and appends an idempotent native-built
+`worker-completed` event with an empty output list. This does not claim semantic
+output evidence: tool-bearing workers, durable output receipts and provenance,
+other providers and runtimes, failure events, live grant consumption at tool
+use, handoffs, and the desktop experience remain open.
 
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
@@ -266,9 +273,10 @@ derive completed workers, plan steps, committed effects, active work, and waits
 only from the durable journal; persist only the closed portable replay shape;
 bind its hash to run, event, attempt, and reference; select the newest checkpoint
 by event sequence; restore into exactly the next attempt; and make an exact
-restore replay stable even after a newer checkpoint exists. Production worker
-execution-event persistence and desktop recovery wiring are still open, so the
-durable-run box remains unchecked.
+restore replay stable even after a newer checkpoint exists. The narrow OpenAI
+path described above persists one truthful production `worker-completed` event,
+but general worker execution events, semantic output receipts, and desktop
+recovery wiring are still open, so the durable-run box remains unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.

@@ -126,7 +126,8 @@ function tauriTransport(
         providerId: provider.id,
         requestId,
         model: request.model,
-        body: shapeBodyFor(request)
+        body: shapeBodyFor(request),
+        ...(request.missionWorkerExecution ? { missionWorkerExecution: request.missionWorkerExecution } : {})
       }).catch((error) => {
         if (!transportError) {
           const message =

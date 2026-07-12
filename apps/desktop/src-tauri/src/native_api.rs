@@ -400,7 +400,7 @@ fn accumulate_and_check_bound(
 /// The opaque request TS hands to Rust. `body` is the provider-shaped JSON; the
 /// API key is never present — Rust adds it as a header from the credential store.
 #[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackendStreamRequest {
     pub provider_id: String,
     pub request_id: String,
@@ -408,6 +408,37 @@ pub struct BackendStreamRequest {
     /// transport contract is explicit even though Rust routes the body verbatim.
     pub model: String,
     pub body: serde_json::Value,
+    pub mission_worker_execution: Option<crate::mission_workers::NativeWorkerExecutionBinding>,
+}
+
+#[derive(Default)]
+struct OpenAiTerminalObservation {
+    saw_payload: bool,
+    finish_reason: Option<String>,
+    provider_error: bool,
+}
+
+impl OpenAiTerminalObservation {
+    fn observe(&mut self, payload: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+            self.provider_error = true;
+            return;
+        };
+        self.saw_payload = true;
+        if value.get("error").is_some_and(|error| !error.is_null()) {
+            self.provider_error = true;
+        }
+        if let Some(reason) = value
+            .pointer("/choices/0/finish_reason")
+            .and_then(serde_json::Value::as_str)
+        {
+            self.finish_reason = Some(reason.to_string());
+        }
+    }
+
+    fn clean_stop(&self) -> bool {
+        self.saw_payload && !self.provider_error && self.finish_reason.as_deref() == Some("stop")
+    }
 }
 
 /// Cancel map: requestId -> oneshot sender. Dropping/sending cancels the future.
@@ -561,12 +592,33 @@ pub async fn stream_backend_completion(
     if request.body.to_string().len() > 2 * 1024 * 1024 {
         return Err("Native provider request body exceeds the supported limit.".to_string());
     }
+    let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
+    let mission_preflight = request
+        .mission_worker_execution
+        .as_ref()
+        .map(|binding| {
+            crate::mission_workers::preflight_native_worker_completion(
+                binding,
+                &request.provider_id,
+                &request.model,
+                &request.body,
+            )
+        })
+        .transpose()?;
+    let mission_authority = match mission_preflight {
+        Some(crate::mission_workers::NativeWorkerCompletionPreflight::Execute(authority)) => {
+            Some(authority)
+        }
+        Some(crate::mission_workers::NativeWorkerCompletionPreflight::AlreadyCompleted) => {
+            let _ = app.emit(&channel, "[DONE]");
+            return Ok(());
+        }
+        None => None,
+    };
     let credential = require_key(&request.provider_id)?;
     let connection =
         resolve_provider_connection(&request.provider_id, &credential, &request.model)?;
     let url = connection.chat_endpoint;
-    let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
-
     crate::ensure_rustls_provider();
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
@@ -583,6 +635,8 @@ pub async fn stream_backend_completion(
     use futures_util::StreamExt;
     let mut cancelled = false;
     let mut completed = false;
+    let mut transport_failed = false;
+    let mut terminal_observation = OpenAiTerminalObservation::default();
 
     for attempt in 0..MAX_ATTEMPTS {
         let mut req = client.post(&url).json(&request.body);
@@ -659,6 +713,7 @@ pub async fn stream_backend_completion(
                     },
                 );
                 completed = true;
+                transport_failed = true;
                 break;
             }
         };
@@ -707,6 +762,7 @@ pub async fn stream_backend_completion(
                 },
             );
             completed = true;
+            transport_failed = true;
             break;
         }
 
@@ -734,11 +790,15 @@ pub async fn stream_backend_completion(
                                     retry_after_ms: None,
                                 });
                                 completed = true;
+                                transport_failed = true;
                                 break;
                             }
                             while let Some(newline_pos) = buffer.find('\n') {
                                 let line: String = buffer.drain(..=newline_pos).collect();
                                 if let Some(payload) = normalize_sse_line(&line) {
+                                    if mission_authority.is_some() {
+                                        terminal_observation.observe(&payload);
+                                    }
                                     let _ = app.emit(&channel, payload);
                                 }
                             }
@@ -754,6 +814,7 @@ pub async fn stream_backend_completion(
                                 retry_after_ms: None,
                             });
                             completed = true;
+                            transport_failed = true;
                             break;
                         }
                         None => {
@@ -767,6 +828,9 @@ pub async fn stream_backend_completion(
         if !buffer.is_empty() && !cancelled {
             let final_buf = normalize_sse_chunk(&buffer);
             if let Some(payload) = normalize_sse_line(&final_buf) {
+                if mission_authority.is_some() {
+                    terminal_observation.observe(&payload);
+                }
                 let _ = app.emit(&channel, payload);
             }
         }
@@ -778,10 +842,21 @@ pub async fn stream_backend_completion(
         .map(|mut map| map.remove(&request.request_id));
     let terminal = if cancelled { "[CANCELLED]" } else { "[DONE]" };
     let _ = app.emit(&channel, terminal);
+    let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
+        if !cancelled && completed && !transport_failed && terminal_observation.clean_stop() {
+            crate::mission_workers::settle_native_worker_completion(authority)
+        } else {
+            Ok(())
+        }
+    } else {
+        Ok(())
+    };
     // Record the model-call lifecycle into the unified action-history store
     // (observation only; no payload content is retained).
     let (status, code) = if cancelled {
         ("cancelled", "cancelled")
+    } else if transport_failed {
+        ("failed", "provider-failed")
     } else if completed {
         ("ok", "")
     } else {
@@ -804,6 +879,7 @@ pub async fn stream_backend_completion(
     if !cancelled && !completed {
         return Err("Provider request ended without a terminal state.".to_string());
     }
+    mission_settlement?;
     Ok(())
 }
 
@@ -1253,6 +1329,17 @@ mod transport_policy_tests {
         assert!(retryable_status(reqwest::StatusCode::BAD_GATEWAY));
         assert!(!retryable_status(reqwest::StatusCode::BAD_REQUEST));
         assert!(!retryable_status(reqwest::StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn mission_terminal_observation_requires_one_clean_openai_stop() {
+        let mut observation = OpenAiTerminalObservation::default();
+        observation.observe(r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#);
+        assert!(!observation.clean_stop());
+        observation.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(observation.clean_stop());
+        observation.observe(r#"{"error":{"message":"late failure"}}"#);
+        assert!(!observation.clean_stop());
     }
 
     #[test]

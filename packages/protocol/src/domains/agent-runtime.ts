@@ -492,6 +492,19 @@ export interface NativeCompletionRequest {
   tools: NativeToolSpec[];
   /** Max output tokens; provider shapers clamp to the provider's limit. */
   maxTokens: number;
+  /** Optional native-only completion binding for one already-started mission worker. */
+  missionWorkerExecution?: MissionWorkerExecutionBinding;
+}
+
+/** Secret-free journal identity; Rust revalidates every field before provider egress. */
+export interface MissionWorkerExecutionBinding {
+  runId: string;
+  workerId: string;
+  workerStartedEventId: string;
+  completionEventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
 }
 
 /**
@@ -561,6 +574,7 @@ export interface AgentRunRequest {
   tools: NativeToolSpec[];
   /** Max output tokens; adapters clamp to the model's known ceiling. */
   maxTokens: number;
+  missionWorkerExecution?: MissionWorkerExecutionBinding;
 }
 
 /**
