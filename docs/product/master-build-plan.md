@@ -242,8 +242,13 @@ tool: native code maps only the registered connected-source read capabilities
 to `connection-read`, requires the exact active read grant in the authenticated
 workspace/project scope, and rejects capabilities without a native mission
 binding. The event is revision/sequence fenced and exact-replay safe. Worker
-start/completion/failure events, live grant consumption at tool use, backend
-execution wiring, handoffs, and desktop experience remain open.
+start now atomically advances an eligible run to `running` when needed and
+appends `worker-started` only for an exact unstarted assignment after reloading
+the selected step and rechecking every active read grant; scope, actor, time,
+status, sequence, and both events are native-built, and the transaction exposes
+no intermediate running-without-worker state. Completion/failure events, live
+grant consumption at tool use, backend execution wiring, handoffs, and desktop
+experience remain open.
 
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,

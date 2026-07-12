@@ -26,6 +26,18 @@ pub struct MissionWorkerCreateInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionWorkerStartInput {
+    run_id: String,
+    worker_id: String,
+    run_start_event_id: Option<String>,
+    worker_started_event_id: String,
+    idempotency_key: String,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WorkerGrantInput {
     capability_id: String,
     capability_grant_id: String,
@@ -165,6 +177,381 @@ pub fn mission_worker_create(
             )
         })
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_worker_start(
+    input: MissionWorkerStartInput,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.clone().ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required.".into(),
+                )
+            })?;
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                context.active_workspace.local_workspace_id.clone(),
+            )?;
+            let journal =
+                mission_run::get(tx, store, &scope, &member, &input.run_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            let key = bounded(&input.idempotency_key, "Worker start idempotency key", 200)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let event_key = format!("worker-start:{key}");
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            }) {
+                exact_start_replay(existing, &input).map_err(crate::store::StoreError::Invalid)?;
+                return Ok(journal);
+            }
+            validate_start_head(&journal, &input).map_err(crate::store::StoreError::Invalid)?;
+            let worker = journal
+                .events
+                .iter()
+                .find(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("worker-created")
+                        && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                            == Some(input.worker_id.as_str())
+                })
+                .and_then(|event| event.pointer("/payload/worker"))
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Worker assignment is unavailable in this run.".into(),
+                    )
+                })?;
+            let mission_id = journal
+                .run
+                .pointer("/initiator/missionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run has no selected mission lifecycle.".into(),
+                    )
+                })?;
+            let lifecycle =
+                mission_plan::get(tx, store, &scope, &member, mission_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission plan is unavailable in this workspace.".into(),
+                    )
+                })?;
+            validate_lifecycle(&journal.run, &lifecycle)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let mission =
+                object(&lifecycle.mission, "Mission").map_err(crate::store::StoreError::Invalid)?;
+            let revision = object(&lifecycle.current_revision, "Plan revision")
+                .map_err(crate::store::StoreError::Invalid)?;
+            let step_key = worker
+                .get("planStepKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Worker plan step is invalid.".into())
+                })?;
+            let step = revision
+                .get("steps")
+                .and_then(Value::as_array)
+                .and_then(|steps| {
+                    steps
+                        .iter()
+                        .find(|step| step.get("key").and_then(Value::as_str) == Some(step_key))
+                })
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Worker plan step is no longer selected.".into(),
+                    )
+                })?;
+            let mappings =
+                worker_grant_mappings(worker).map_err(crate::store::StoreError::Invalid)?;
+            let at = now();
+            validate_grants(tx, store, &scope, mission, step, &mappings, &at)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let mut current = journal;
+            if current.run.get("status").and_then(Value::as_str) != Some("running") {
+                let start_event_id = input.run_start_event_id.as_deref().ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Starting this worker requires a run-start event id.".into(),
+                    )
+                })?;
+                bounded(start_event_id, "Run start event", 160)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                current = append_run_started(
+                    tx,
+                    store,
+                    &scope,
+                    &member,
+                    &context.internal_user_id,
+                    &current,
+                    &input,
+                    start_event_id,
+                    &format!("worker-start-status:{key}"),
+                    &at,
+                )?;
+            } else if input.run_start_event_id.is_some() {
+                return Err(crate::store::StoreError::Invalid(
+                    "A running mission does not accept another run-start event.".into(),
+                ));
+            }
+            append_worker_started(
+                tx,
+                store,
+                &scope,
+                &member,
+                &context.internal_user_id,
+                &current,
+                &input,
+                &event_key,
+                &at,
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn validate_start_head(
+    journal: &mission_run::MissionRunJournalRow,
+    input: &MissionWorkerStartInput,
+) -> Result<(), String> {
+    bounded(&input.run_id, "Mission run", 160)?;
+    bounded(&input.worker_id, "Worker", 160)?;
+    bounded(&input.worker_started_event_id, "Worker start event", 160)?;
+    if input.run_start_event_id.as_deref() == Some(input.worker_started_event_id.as_str()) {
+        return Err("Run-start and worker-start events require distinct ids.".into());
+    }
+    if journal.run.get("revision").and_then(Value::as_i64) != Some(input.expected_run_revision)
+        || journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(input.expected_last_sequence)
+        || !matches!(
+            journal.run.get("status").and_then(Value::as_str),
+            Some("created" | "planning" | "queued" | "running")
+        )
+    {
+        return Err("The mission run changed before the worker could start.".into());
+    }
+    let created = journal.events.iter().any(|event| {
+        event.get("type").and_then(Value::as_str) == Some("worker-created")
+            && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                == Some(input.worker_id.as_str())
+    });
+    let already_advanced = journal.events.iter().any(|event| {
+        matches!(
+            event.get("type").and_then(Value::as_str),
+            Some("worker-started" | "worker-completed" | "worker-failed")
+        ) && event.pointer("/payload/workerId").and_then(Value::as_str)
+            == Some(input.worker_id.as_str())
+    });
+    if !created || already_advanced {
+        return Err("Worker is unavailable for a first start.".into());
+    }
+    Ok(())
+}
+
+fn worker_grant_mappings(worker: &Value) -> Result<Vec<WorkerGrantInput>, String> {
+    let capabilities = worker
+        .get("capabilityIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Worker capabilities are invalid.".to_string())?;
+    let grants = worker
+        .get("capabilityGrantIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Worker capability grants are invalid.".to_string())?;
+    if capabilities.len() != grants.len() {
+        return Err("Worker capability grants are incomplete.".into());
+    }
+    capabilities
+        .iter()
+        .zip(grants)
+        .map(|(capability, grant)| {
+            Ok(WorkerGrantInput {
+                capability_id: capability
+                    .as_str()
+                    .ok_or_else(|| "Worker capability is invalid.".to_string())?
+                    .to_string(),
+                capability_grant_id: grant
+                    .as_str()
+                    .ok_or_else(|| "Worker capability grant is invalid.".to_string())?
+                    .to_string(),
+            })
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_run_started(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    member: &str,
+    actor: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    input: &MissionWorkerStartInput,
+    event_id: &str,
+    event_key: &str,
+    at: &str,
+) -> crate::store::Result<mission_run::MissionRunJournalRow> {
+    let current_status = journal
+        .run
+        .get("status")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run status is invalid.".into())
+        })?;
+    let previous = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let workspace = journal
+        .run
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+        })?;
+    let sequence = input.expected_last_sequence + 1;
+    let event = json!({
+        "workspaceId":workspace,"visibility":"member-private","ownerMemberId":member,"authority":"local",
+        "schemaVersion":1,"revision":1,"createdByInternalUserId":actor,"createdAt":at,"updatedAt":at,
+        "id":event_id,"runId":input.run_id,"type":"status-transitioned","sequence":sequence,
+        "previousEventId":previous,"occurredAt":at,"actor":{"kind":"internal-user","internalUserId":actor,"memberId":member},
+        "idempotencyKey":event_key,"payload":{"from":current_status,"to":"running","reason":"The first bounded worker is starting."}
+    });
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("status".into(), Value::String("running".into()));
+    projected.insert("revision".into(), json!(input.expected_run_revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        member,
+        &input.run_id,
+        input.expected_run_revision,
+        input.expected_last_sequence,
+        event_id,
+        "status-transitioned",
+        event_key,
+        &event,
+        &Value::Object(projected),
+        at,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_worker_started(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    member: &str,
+    actor: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    input: &MissionWorkerStartInput,
+    event_key: &str,
+    at: &str,
+) -> crate::store::Result<mission_run::MissionRunJournalRow> {
+    let revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+        })?;
+    let last_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let previous = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let workspace = journal
+        .run
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+        })?;
+    let sequence = last_sequence + 1;
+    let event = json!({
+        "workspaceId":workspace,"visibility":"member-private","ownerMemberId":member,"authority":"local",
+        "schemaVersion":1,"revision":1,"createdByInternalUserId":actor,"createdAt":at,"updatedAt":at,
+        "id":input.worker_started_event_id,"runId":input.run_id,"type":"worker-started","sequence":sequence,
+        "previousEventId":previous,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "occurredAt":at,"actor":{"kind":"internal-user","internalUserId":actor,"memberId":member},
+        "idempotencyKey":event_key,"payload":{"workerId":input.worker_id}
+    });
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("revision".into(), json!(revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":input.worker_started_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        member,
+        &input.run_id,
+        revision,
+        last_sequence,
+        &input.worker_started_event_id,
+        "worker-started",
+        event_key,
+        &event,
+        &Value::Object(projected),
+        at,
+    )
+}
+
+fn exact_start_replay(event: &Value, input: &MissionWorkerStartInput) -> Result<(), String> {
+    let added = if input.run_start_event_id.is_some() {
+        2
+    } else {
+        1
+    };
+    if event.get("id").and_then(Value::as_str) == Some(input.worker_started_event_id.as_str())
+        && event.get("runId").and_then(Value::as_str) == Some(input.run_id.as_str())
+        && event.get("type").and_then(Value::as_str) == Some("worker-started")
+        && event.pointer("/payload/workerId").and_then(Value::as_str)
+            == Some(input.worker_id.as_str())
+        && event.get("sequence").and_then(Value::as_i64)
+            == Some(input.expected_last_sequence + added)
+        && event.get("sequence").and_then(Value::as_i64)
+            == Some(input.expected_run_revision + added - 1)
+        && input
+            .run_start_event_id
+            .as_deref()
+            .is_none_or(|start| event.get("previousEventId").and_then(Value::as_str) == Some(start))
+    {
+        Ok(())
+    } else {
+        Err("Worker start idempotency key already represents another start.".into())
+    }
 }
 
 fn validate_lifecycle(
@@ -844,5 +1231,27 @@ mod tests {
             &input
         )
         .is_err());
+    }
+
+    #[test]
+    fn worker_start_is_first_only_and_replays_exact_event_identity() {
+        let mut journal = mission_run::MissionRunJournalRow {
+            run: json!({"status":"created","revision":3,"eventHead":{"lastSequence":2,"lastEventId":"event-2"}}),
+            events: vec![json!({"type":"worker-created","payload":{"worker":{"id":"worker-1"}}})],
+        };
+        let input = MissionWorkerStartInput {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            run_start_event_id: Some("event-3".into()),
+            worker_started_event_id: "event-4".into(),
+            idempotency_key: "start-1".into(),
+            expected_run_revision: 3,
+            expected_last_sequence: 2,
+        };
+        assert!(validate_start_head(&journal, &input).is_ok());
+        let event = json!({"id":"event-4","runId":"run-1","type":"worker-started","sequence":4,"previousEventId":"event-3","payload":{"workerId":"worker-1"}});
+        assert!(exact_start_replay(&event, &input).is_ok());
+        journal.events.push(event);
+        assert!(validate_start_head(&journal, &input).is_err());
     }
 }
