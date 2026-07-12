@@ -388,6 +388,54 @@ pub(crate) fn authorize_and_consume(
     Ok(Ok(consumed))
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn authorize_and_consume_exact(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    grant_id: &str,
+    capability_key: &str,
+    connection_id: &str,
+    consequence: &str,
+    now: &str,
+) -> Result<std::result::Result<SafeCapabilityGrant, GrantFailure>> {
+    let now = parsed_time(now, "Capability use time")?;
+    let active = match check(
+        tx,
+        store,
+        scope,
+        capability_key,
+        connection_id,
+        consequence,
+        &now.to_rfc3339(),
+    )? {
+        Ok(active) => active,
+        Err(failure) => return Ok(Err(failure)),
+    };
+    let Some(grant) = active.into_iter().find(|grant| grant.id == grant_id) else {
+        return Ok(Err(GrantFailure {
+            code: "grant-missing",
+            message:
+                "The worker's exact capability grant is not active for this Connection and scope.",
+        }));
+    };
+    let changed = tx.execute(
+        "UPDATE capability_grant SET uses_consumed=uses_consumed+1,revision=revision+1,updated_at=?1
+         WHERE workspace_id=?2 AND owner_subject=?3 AND id=?4 AND revision=?5 AND state='active'
+           AND (max_uses IS NULL OR uses_consumed < max_uses)",
+        rusqlite::params![now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true), scope.data.workspace_id(), scope.private.owner_subject(), grant.id, grant.revision],
+    )?;
+    if changed != 1 {
+        return Ok(Err(GrantFailure {
+            code: "budget-exhausted",
+            message: "The worker's capability grant changed before execution.",
+        }));
+    }
+    Ok(Ok(get(tx, store, scope, grant_id)?.ok_or_else(|| {
+        StoreError::Invalid("Capability grant disappeared during use.".into())
+    })?))
+}
+
 pub(crate) fn check(
     tx: &Connection,
     store: &Store,
@@ -646,6 +694,67 @@ mod tests {
             })
             .unwrap();
         assert_eq!(revoked.state, "revoked");
+    }
+
+    #[test]
+    fn exact_worker_grant_never_substitutes_or_consumes_a_sibling() {
+        let (store, scope, connection_id) = setup();
+        store
+            .transaction(|tx| {
+                create(
+                    tx,
+                    &store,
+                    &scope,
+                    CreateCapabilityGrant {
+                        id: "grant-sibling",
+                        capability_key: "knowledge.content.search",
+                        connection_id: &connection_id,
+                        connection_revision_at_grant: 1,
+                        consequence_class: "read",
+                        max_uses: Some(2),
+                        expires_at: None,
+                        granted_at: "2026-07-11T20:00:00Z",
+                    },
+                )
+            })
+            .unwrap();
+        let missing = store
+            .transaction(|tx| {
+                authorize_and_consume_exact(
+                    tx,
+                    &store,
+                    &scope,
+                    "grant-worker",
+                    "knowledge.content.search",
+                    &connection_id,
+                    "read",
+                    "2026-07-11T20:01:00Z",
+                )
+            })
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(missing.code, "grant-missing");
+        let sibling = store
+            .with_conn(|tx| get(tx, &store, &scope, "grant-sibling"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(sibling.uses_consumed, 0);
+        let consumed = store
+            .transaction(|tx| {
+                authorize_and_consume_exact(
+                    tx,
+                    &store,
+                    &scope,
+                    "grant-sibling",
+                    "knowledge.content.search",
+                    &connection_id,
+                    "read",
+                    "2026-07-11T20:02:00Z",
+                )
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(consumed.uses_consumed, 1);
     }
 
     #[test]

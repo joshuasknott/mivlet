@@ -3355,6 +3355,20 @@ export async function executeRuntimeApprovedMcpToolCall(
   }
 }
 
+/** Normalize and persist one mission-owned MCP cited-search result in Rust. */
+export async function attestRuntimeMissionMcpConnectedSearch(
+  permitId: string
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<Record<string, unknown>>("attest_mission_mcp_connected_search", {
+      request: { permitId }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export async function listenRuntimeMcpFrames(
   channel: string,
   onFrame: (line: string) => void
@@ -3394,6 +3408,8 @@ export interface RuntimeToolRequest {
   projectId?: string;
   /** Native-owned live MCP session selected from an explicit semantic binding. */
   mcpSessionId?: string;
+  /** Exact mission journal binding for one connected-source tool result. */
+  missionWorkerToolExecution?: import("@fable/protocol").MissionWorkerToolExecutionBinding;
   /** Test-only compatibility field. Production Rust ignores caller-supplied roots. */
   workspaceRoot?: string;
 }

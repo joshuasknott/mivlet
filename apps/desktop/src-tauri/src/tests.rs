@@ -2252,6 +2252,7 @@ fn tool_request(
         workspace_id: None,
         project_id: None,
         mcp_session_id: None,
+        mission_worker_tool_execution: None,
         workspace_root: None,
     }
 }

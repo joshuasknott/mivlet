@@ -20,7 +20,7 @@
  * keeping the desktop testable without a live runtime.
  */
 
-import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
+import type { ApprovalRequest, ApprovalResolutionRequest, MissionWorkerToolExecutionBinding } from "@fable/protocol";
 import {
   ACP_PERMISSION_TOOL,
   McpClient,
@@ -30,6 +30,7 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import {
+  attestRuntimeMissionMcpConnectedSearch,
   commitRuntimeCapabilityGrant,
   executeRuntimeToolCall,
   prepareRuntimeCapabilityGrant,
@@ -46,6 +47,7 @@ import {
 export interface DesktopToolExecutorOptions {
   workspaceId?: string;
   projectId?: string;
+  missionWorkerToolExecution?: MissionWorkerToolExecutionBinding;
   queueApproval?: (
     approval: ApprovalRequest,
     tool: string,
@@ -198,7 +200,8 @@ async function runOnDesktop(
     approval: resolution,
     workspaceId: options.workspaceId,
     projectId: options.projectId,
-    mcpSessionId
+    mcpSessionId,
+    ...(options.missionWorkerToolExecution ? { missionWorkerToolExecution: options.missionWorkerToolExecution } : {})
   });
   if (result === null) {
     // No Tauri runtime: nothing executed (preview/test path).
@@ -281,6 +284,14 @@ async function runMcpSemanticRead(
       continuation.proposal,
       continuation.permitId
     ) as McpUntrustedToolResult;
+    if (options.missionWorkerToolExecution) {
+      if (!untrusted.structuredJson || untrusted.structuredTruncated) {
+        throw new Error("MCP mission evidence requires one complete structured cited-search result.");
+      }
+      const attested = await attestRuntimeMissionMcpConnectedSearch(continuation.permitId);
+      if (!attested) throw new Error("Mission MCP evidence requires the desktop runtime.");
+      return JSON.stringify(attested);
+    }
     const result = normalizeMcpConnectedSourceSearch(untrusted, {
       workspaceId: continuation.workspaceId,
       projectId: continuation.projectId,

@@ -281,6 +281,7 @@ pub fn run() {
             mcp_process::prepare_mcp_tool_call,
             mcp_process::authorize_mcp_tool_call,
             mcp_process::execute_approved_mcp_tool_call,
+            mcp_process::attest_mission_mcp_connected_search,
             capability_grants::prepare_capability_grant,
             capability_grants::commit_capability_grant,
             capability_grants::list_capability_grants,

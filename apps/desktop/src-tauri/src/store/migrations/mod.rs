@@ -123,6 +123,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 26 -> 27: persist immutable encrypted mission-worker output
             // receipts linked to exact completion events. No output is inferred.
             26 => apply_v26_to_v27(conn)?,
+            // 27 -> 28: persist immutable encrypted mission-worker tool-result
+            // receipts linked to exact run events. No tool result is inferred.
+            27 => apply_v27_to_v28(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -132,6 +135,29 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v27_to_v28(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mission_worker_tool_receipt (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL, worker_id TEXT NOT NULL,
+          tool_event_id TEXT NOT NULL, call_key TEXT NOT NULL,
+          output_reference TEXT NOT NULL, output_hash TEXT NOT NULL,
+          size_bytes INTEGER NOT NULL CHECK(size_bytes >= 1 AND size_bytes <= 131072),
+          created_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,tool_event_id),
+          UNIQUE(workspace_id,owner_member_id,run_id,worker_id,call_key),
+          UNIQUE(workspace_id,owner_member_id,output_reference),
+          FOREIGN KEY(workspace_id,owner_member_id,tool_event_id)
+            REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_worker_tool_run
+          ON mission_worker_tool_receipt(workspace_id,owner_member_id,run_id,worker_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1386,8 +1412,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v27 is current; v27 -> v28 has no registered migration.
-        let err = apply(&conn, 27, 28).unwrap_err();
+        // v28 is current; v28 -> v29 has no registered migration.
+        let err = apply(&conn, 28, 29).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1487,6 +1513,37 @@ mod tests {
         let count: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM mission_worker_output_receipt;",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn v27_to_v28_adds_empty_worker_tool_receipts_without_inference() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE workspace(id TEXT PRIMARY KEY);
+             CREATE TABLE mission_run_event(
+               workspace_id TEXT NOT NULL,owner_member_id TEXT NOT NULL,run_id TEXT NOT NULL,
+               sequence INTEGER NOT NULL,id TEXT NOT NULL,event_type TEXT NOT NULL,
+               idempotency_key TEXT NOT NULL,occurred_at TEXT NOT NULL,
+               payload BLOB NOT NULL,payload_nonce BLOB NOT NULL,
+               UNIQUE(workspace_id,owner_member_id,id)
+             );",
+        )
+        .unwrap();
+        apply(&conn, 27, 28).unwrap();
+        let exists: i64 = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='mission_worker_tool_receipt');",
+            [], |row| row.get(0),
+        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mission_worker_tool_receipt;",
                 [],
                 |row| row.get(0),
             )

@@ -597,6 +597,28 @@ pub(crate) async fn read(
     input: BTreeMap<String, serde_json::Value>,
     cursor: Option<String>,
 ) -> Result<SemanticCapabilityReadResult, ConnectorCommandError> {
+    read_with_exact_grant(
+        app,
+        workspace_id,
+        project_id,
+        capability_id,
+        input,
+        cursor,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn read_with_exact_grant(
+    app: &tauri::AppHandle,
+    workspace_id: String,
+    project_id: Option<String>,
+    capability_id: String,
+    input: BTreeMap<String, serde_json::Value>,
+    cursor: Option<String>,
+    exact_grant_id: Option<&str>,
+) -> Result<SemanticCapabilityReadResult, ConnectorCommandError> {
     let result_workspace_id = workspace_id.clone();
     let result_project_id = project_id.clone();
     let resolved = resolve_native_read(app, &capability_id, &workspace_id, project_id.as_deref())?;
@@ -616,15 +638,30 @@ pub(crate) async fn read(
     })?;
     let grant_result = store
         .transaction(|tx| {
-            crate::store::repos::capability_grant::authorize_and_consume(
-                tx,
-                store,
-                &scope,
-                &capability_id,
-                &resolved.connection_id,
-                "read",
-                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            )
+            let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            if let Some(grant_id) = exact_grant_id {
+                crate::store::repos::capability_grant::authorize_and_consume_exact(
+                    tx,
+                    store,
+                    &scope,
+                    grant_id,
+                    &capability_id,
+                    &resolved.connection_id,
+                    "read",
+                    &at,
+                )
+                .map(|result| result.map(|grant| vec![grant]))
+            } else {
+                crate::store::repos::capability_grant::authorize_and_consume(
+                    tx,
+                    store,
+                    &scope,
+                    &capability_id,
+                    &resolved.connection_id,
+                    "read",
+                    &at,
+                )
+            }
         })
         .map_err(|store_error| {
             error(

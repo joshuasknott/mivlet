@@ -509,6 +509,18 @@ export interface MissionWorkerExecutionBinding {
   expectedLastSequence: number;
 }
 
+/** Secret-free identity for one exact mission-owned connected-source tool result. */
+export interface MissionWorkerToolExecutionBinding {
+  runId: string;
+  workerId: string;
+  workerStartedEventId: string;
+  toolEventId: string;
+  callKey: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
 /**
  * A normalized agent-loop event streamed back to the shell — the shared event
  * surface for the native-API loop. Model tool calls arrive as `tool-call`

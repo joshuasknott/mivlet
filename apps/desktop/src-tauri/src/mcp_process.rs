@@ -189,6 +189,33 @@ fn tool_permits() -> &'static Mutex<HashMap<String, McpToolPermit>> {
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+#[derive(Clone)]
+struct PendingMissionMcpSearch {
+    continuation: McpSemanticContinuation,
+    authority: crate::mission_workers::NativeWorkerToolAuthority,
+    issued_at: Instant,
+}
+
+fn pending_mission_mcp_searches() -> &'static Mutex<HashMap<String, PendingMissionMcpSearch>> {
+    static MAP: OnceLock<Mutex<HashMap<String, PendingMissionMcpSearch>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn mission_mcp_response_requests() -> &'static Mutex<HashMap<String, String>> {
+    static MAP: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct MissionMcpOutcome {
+    result: Result<Value, String>,
+    observed_at: Instant,
+}
+
+fn mission_mcp_outcomes() -> &'static Mutex<HashMap<String, MissionMcpOutcome>> {
+    static MAP: OnceLock<Mutex<HashMap<String, MissionMcpOutcome>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 struct PendingMcpAudit {
     tool_name: String,
     connection_id: String,
@@ -419,7 +446,7 @@ pub struct McpToolProposal {
     arguments: Value,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct McpSemanticContinuation {
     kind: &'static str,
@@ -514,6 +541,12 @@ pub struct ExecuteMcpToolCallRequest {
     proposal: McpToolProposal,
     permit_id: String,
     request_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AttestMissionMcpSearchRequest {
+    permit_id: String,
 }
 
 #[tauri::command]
@@ -1129,6 +1162,9 @@ pub async fn close_remote_mcp_session(request: CloseMcpProcessRequest) -> Result
     if let Ok(mut proofs) = discovery_proofs().lock() {
         proofs.remove(&request.session_id);
     }
+    if let Ok(mut pending) = pending_mission_mcp_searches().lock() {
+        pending.retain(|_, value| value.continuation.proposal.session_id != request.session_id);
+    }
     if session.server_session_id.is_some() {
         delete_remote_mcp_session(&session).await?;
     }
@@ -1428,6 +1464,16 @@ pub async fn execute_approved_mcp_tool_call(
                 actor: scope.internal_user_id.clone(),
             },
         );
+    if pending_mission_mcp_searches()
+        .lock()
+        .map_err(|_| "Fable could not access pending mission MCP evidence.".to_string())?
+        .contains_key(&request.permit_id)
+    {
+        mission_mcp_response_requests()
+            .lock()
+            .map_err(|_| "Fable could not bind the mission MCP response.".to_string())?
+            .insert(audit_key.clone(), request.permit_id.clone());
+    }
     if context.transport == "stdio" {
         let sender = (|| -> Result<mpsc::Sender<String>, String> {
             let map = process_map()
@@ -1514,6 +1560,7 @@ pub async fn execute_approved_mcp_tool_call(
         if is_mcp_response_for(response_frame, &request.request_id) {
             matched = true;
         }
+        observe_mission_mcp_response(&request.proposal.session_id, response_frame);
         audit_mcp_response(&request.proposal.session_id, response_frame);
     }
     if !matched {
@@ -1610,6 +1657,7 @@ pub async fn spawn_mcp_process(
                         if let Ok(text) = String::from_utf8(line) {
                             if valid_mcp_frame(&text) {
                                 observe_discovery_frame(&stdout_session_id, &text);
+                                observe_mission_mcp_response(&stdout_session_id, &text);
                                 audit_mcp_response(&stdout_session_id, &text);
                                 let _ = stdout_app.emit(&stdout_channel, text);
                             }
@@ -1720,6 +1768,9 @@ pub async fn close_mcp_process(request: CloseMcpProcessRequest) -> Result<(), St
     if let Ok(mut permits) = tool_permits().lock() {
         permits.retain(|_, permit| permit.session_id != request.session_id);
     }
+    if let Ok(mut pending) = pending_mission_mcp_searches().lock() {
+        pending.retain(|_, value| value.continuation.proposal.session_id != request.session_id);
+    }
     process.stdin.take();
     match timeout(Duration::from_secs(2), process.child.wait()).await {
         Ok(Ok(_)) => Ok(()),
@@ -1770,6 +1821,27 @@ pub(crate) fn prepare_semantic_capability_call(
     capability_id: String,
     input: std::collections::BTreeMap<String, Value>,
     cursor: Option<String>,
+) -> Result<McpSemanticContinuation, String> {
+    prepare_semantic_capability_call_with_grant(
+        workspace_id,
+        project_id,
+        session_id,
+        capability_id,
+        input,
+        cursor,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prepare_semantic_capability_call_with_grant(
+    workspace_id: String,
+    project_id: Option<String>,
+    session_id: String,
+    capability_id: String,
+    input: std::collections::BTreeMap<String, Value>,
+    cursor: Option<String>,
+    exact_grant_id: Option<&str>,
 ) -> Result<McpSemanticContinuation, String> {
     if capability_id != "knowledge.content.search" {
         return Err("This MCP semantic capability is not supported.".into());
@@ -1901,16 +1973,32 @@ pub(crate) fn prepare_semantic_capability_call(
                     "The MCP semantic binding changed before execution.".into(),
                 ));
             }
-            crate::store::repos::capability_grant::authorize_and_consume(
-                tx,
-                store,
-                &scope,
-                &capability_id,
-                &connection_id,
-                "read",
-                &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            )?
-            .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
+            let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            if let Some(grant_id) = exact_grant_id {
+                crate::store::repos::capability_grant::authorize_and_consume_exact(
+                    tx,
+                    store,
+                    &scope,
+                    grant_id,
+                    &capability_id,
+                    &connection_id,
+                    "read",
+                    &at,
+                )?
+                .map(|grant| vec![grant])
+                .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
+            } else {
+                crate::store::repos::capability_grant::authorize_and_consume(
+                    tx,
+                    store,
+                    &scope,
+                    &capability_id,
+                    &connection_id,
+                    "read",
+                    &at,
+                )?
+                .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
+            }
         })
         .map_err(|error| error.to_string())?;
     let permit_id = random_session_id()?.replacen("mcp-", "mcp-semantic-permit-", 1);
@@ -1944,6 +2032,62 @@ pub(crate) fn prepare_semantic_capability_call(
             .into_iter()
             .collect(),
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_mission_semantic_capability_call(
+    workspace_id: String,
+    project_id: Option<String>,
+    session_id: String,
+    capability_id: String,
+    input: std::collections::BTreeMap<String, Value>,
+    cursor: Option<String>,
+    authority: crate::mission_workers::NativeWorkerToolAuthority,
+) -> Result<McpSemanticContinuation, String> {
+    let continuation = prepare_semantic_capability_call_with_grant(
+        workspace_id,
+        project_id,
+        session_id,
+        capability_id,
+        input,
+        cursor,
+        Some(authority.capability_grant_id()),
+    )?;
+    let mut pending = pending_mission_mcp_searches()
+        .lock()
+        .map_err(|_| "Fable could not access pending mission MCP evidence.".to_string())?;
+    pending.retain(|_, value| value.issued_at.elapsed() <= Duration::from_secs(60));
+    if pending
+        .insert(
+            continuation.permit_id.clone(),
+            PendingMissionMcpSearch {
+                continuation: continuation.clone(),
+                authority,
+                issued_at: Instant::now(),
+            },
+        )
+        .is_some()
+    {
+        return Err("The mission MCP evidence permit already exists.".into());
+    }
+    Ok(continuation)
+}
+
+#[tauri::command]
+pub fn attest_mission_mcp_connected_search(
+    request: AttestMissionMcpSearchRequest,
+) -> Result<Value, String> {
+    let outcome = mission_mcp_outcomes()
+        .lock()
+        .map_err(|_| "Fable could not access native-observed mission MCP evidence.".to_string())?
+        .remove(&request.permit_id)
+        .ok_or_else(|| {
+            "The native-observed mission MCP result is unavailable or already used.".to_string()
+        })?;
+    if outcome.observed_at.elapsed() > Duration::from_secs(60) {
+        return Err("The native-observed mission MCP result expired.".into());
+    }
+    outcome.result
 }
 
 /// Normalizes the raw `tools/call` result while the authoritative semantic
@@ -2819,6 +2963,61 @@ fn audit_mcp_response(session_id: &str, frame: &str) {
         failed,
         if failed { "mcp-tool-error" } else { "" },
     );
+}
+
+fn observe_mission_mcp_response(session_id: &str, frame: &str) {
+    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
+        return;
+    };
+    let Some(request_id) = object.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let audit_key = pending_audit_key(session_id, request_id);
+    let permit_id = mission_mcp_response_requests()
+        .lock()
+        .ok()
+        .and_then(|mut requests| requests.remove(&audit_key));
+    let Some(permit_id) = permit_id else {
+        return;
+    };
+    let pending = pending_mission_mcp_searches()
+        .lock()
+        .ok()
+        .and_then(|mut pending| pending.remove(&permit_id));
+    let Some(pending) = pending else {
+        return;
+    };
+    let result = if pending.issued_at.elapsed() > Duration::from_secs(60) {
+        Err("The mission MCP evidence permit expired.".into())
+    } else if object.contains_key("error") {
+        Err("MCP cited search returned an error response.".into())
+    } else if let Some(raw) = object.get("result") {
+        normalize_mcp_connected_source_search(raw, &pending.continuation)
+            .and_then(|normalized| serde_json::to_value(normalized).map_err(|_| "Fable could not encode normalized MCP mission evidence.".to_string()))
+            .and_then(|normalized| {
+                let outer = serde_json::json!({
+                    "capabilityId":"knowledge.content.search",
+                    "availability":if normalized.get("degraded").and_then(Value::as_bool) == Some(true) { "degraded" } else { "available" },
+                    "connectionId":normalized.get("connectionId").cloned().unwrap_or(Value::Null),
+                    "connectorId":"mcp","implementationEvidence":"adapter-validated",
+                    "matchedGrantIds":normalized.get("matchedGrantIds").cloned().unwrap_or(Value::Null),"result":normalized,
+                });
+                crate::mission_workers::settle_native_connected_search(&pending.authority, outer.clone(), "mcp")?;
+                Ok(outer)
+            })
+    } else {
+        Err("MCP cited search returned no correlated result.".into())
+    };
+    if let Ok(mut outcomes) = mission_mcp_outcomes().lock() {
+        outcomes.retain(|_, value| value.observed_at.elapsed() <= Duration::from_secs(60));
+        outcomes.insert(
+            permit_id,
+            MissionMcpOutcome {
+                result,
+                observed_at: Instant::now(),
+            },
+        );
+    }
 }
 
 fn record_mcp_audit(pending: PendingMcpAudit, request_id: &str, failed: bool, error_code: &str) {
@@ -4571,6 +4770,17 @@ mod tests {
         assert_eq!(encoded["citations"][0]["title"], "Planning notes");
         assert_eq!(encoded["citations"][0]["trust"], "external-untrusted");
         assert_eq!(encoded["nextCursor"], "page-2");
+    }
+
+    #[test]
+    fn mission_attestation_requires_a_native_observed_correlated_response() {
+        let permit_id = "mcp-semantic-permit-no-response";
+        mission_mcp_outcomes().lock().unwrap().remove(permit_id);
+        let error = attest_mission_mcp_connected_search(AttestMissionMcpSearchRequest {
+            permit_id: permit_id.into(),
+        })
+        .unwrap_err();
+        assert!(error.contains("native-observed"));
     }
 
     #[test]

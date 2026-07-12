@@ -25,6 +25,42 @@ pub struct NativeWorkerExecutionBinding {
     pub expected_last_sequence: i64,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeWorkerToolExecutionBinding {
+    pub run_id: String,
+    pub worker_id: String,
+    pub worker_started_event_id: String,
+    pub tool_event_id: String,
+    pub call_key: String,
+    pub idempotency_key: String,
+    pub expected_run_revision: i64,
+    pub expected_last_sequence: i64,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct NativeWorkerToolAuthority {
+    binding: NativeWorkerToolExecutionBinding,
+    identity: crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    local_workspace_id: String,
+    project_id: Option<String>,
+    member_id: String,
+    internal_user_id: String,
+    capability_grant_id: String,
+    query: String,
+}
+
+impl NativeWorkerToolAuthority {
+    pub(crate) fn capability_grant_id(&self) -> &str {
+        &self.capability_grant_id
+    }
+}
+
+pub(crate) enum NativeWorkerToolPreflight {
+    Execute(NativeWorkerToolAuthority),
+    AlreadyRecorded(Value),
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct NativeWorkerCompletionAuthority {
     binding: NativeWorkerExecutionBinding,
@@ -142,6 +178,235 @@ pub fn mission_worker_output_read(
             )
         })
         .map_err(|error| error.to_string())
+}
+
+pub(crate) fn preflight_native_connected_search(
+    binding: &NativeWorkerToolExecutionBinding,
+    approval_request_id: &str,
+    workspace_id: &str,
+    project_id: Option<&str>,
+    capability_id: &str,
+    input: &BTreeMap<String, Value>,
+) -> Result<NativeWorkerToolPreflight, String> {
+    if capability_id != "knowledge.content.search"
+        || input.keys().any(|key| key != "query" && key != "limit")
+    {
+        return Err("This mission tool boundary supports only connected-source search.".into());
+    }
+    let query = input
+        .get("query")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if query.is_empty() || query.len() > 2_000 || binding.call_key != approval_request_id {
+        return Err("Mission connected-source search identity is invalid.".into());
+    }
+    let identity = crate::clerk_identity::native_identity_generation_snapshot()?;
+    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.clone().ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required.".into(),
+                )
+            })?;
+            if context.active_workspace.local_workspace_id != workspace_id {
+                return Err(crate::store::StoreError::Invalid(
+                    "Mission connected-source workspace changed.".into(),
+                ));
+            }
+            let scope = crate::store::repos::scope::DataScope::workspace(workspace_id)?;
+            let journal = mission_run::get(tx, store, &scope, &member, &binding.run_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            validate_native_tool_binding(binding).map_err(crate::store::StoreError::Invalid)?;
+            let key = native_tool_event_key(binding).map_err(crate::store::StoreError::Invalid)?;
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(key.as_str())
+            }) {
+                if existing.get("id").and_then(Value::as_str)
+                    != Some(binding.tool_event_id.as_str())
+                    || existing.get("type").and_then(Value::as_str) != Some("tool-call-completed")
+                {
+                    return Err(crate::store::StoreError::Invalid(
+                        "Mission tool idempotency key represents another event.".into(),
+                    ));
+                }
+                let reference = existing
+                    .pointer("/payload/result/outputReference")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        crate::store::StoreError::Invalid("Mission tool replay is invalid.".into())
+                    })?;
+                let receipt = crate::store::repos::mission_worker_tool::get_by_reference(
+                    tx, store, &scope, &member, reference,
+                )?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission tool replay receipt is unavailable.".into(),
+                    )
+                })?;
+                return Ok(NativeWorkerToolPreflight::AlreadyRecorded(
+                    receipt.receipt["result"].clone(),
+                ));
+            }
+            validate_native_tool_head(&journal, binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let worker = journal
+                .events
+                .iter()
+                .find(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("worker-created")
+                        && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                            == Some(binding.worker_id.as_str())
+                })
+                .and_then(|event| event.pointer("/payload/worker"))
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission worker assignment is unavailable.".into(),
+                    )
+                })?;
+            let tools = worker
+                .get("tools")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission worker tools are invalid.".into())
+                })?;
+            let mappings =
+                worker_grant_mappings(worker).map_err(crate::store::StoreError::Invalid)?;
+            if tools.len() != 1
+                || tools[0].get("toolName").and_then(Value::as_str) != Some("connection-read")
+                || mappings.len() != 1
+                || mappings[0].capability_id != capability_id
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "Mission worker does not own this exact connected-source tool.".into(),
+                ));
+            }
+            let mission_id = journal
+                .run
+                .get("missionId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+                })?;
+            let lifecycle =
+                mission_plan::get(tx, store, &scope, &member, mission_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
+                })?;
+            validate_lifecycle(&journal.run, &lifecycle)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let mission_project = lifecycle
+                .mission
+                .pointer("/scope/projectId")
+                .and_then(Value::as_str);
+            if mission_project != project_id {
+                return Err(crate::store::StoreError::Invalid(
+                    "Mission connected-source project scope changed.".into(),
+                ));
+            }
+            Ok(NativeWorkerToolPreflight::Execute(
+                NativeWorkerToolAuthority {
+                    binding: binding.clone(),
+                    identity: identity.clone(),
+                    local_workspace_id: workspace_id.to_string(),
+                    project_id: project_id.map(str::to_string),
+                    member_id: member,
+                    internal_user_id: context.internal_user_id,
+                    capability_grant_id: mappings[0].capability_grant_id.clone(),
+                    query: query.to_string(),
+                },
+            ))
+        })
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn settle_native_connected_search(
+    authority: &NativeWorkerToolAuthority,
+    result: Value,
+    implementation_kind: &str,
+) -> Result<String, String> {
+    let connected = result
+        .get("result")
+        .ok_or_else(|| "Mission connected-source result is invalid.".to_string())?;
+    validate_connected_search_result(connected, authority, implementation_kind)?;
+    if result.get("capabilityId").and_then(Value::as_str) != Some("knowledge.content.search")
+        || result.get("connectionId") != connected.get("connectionId")
+        || result.get("matchedGrantIds") != connected.get("matchedGrantIds")
+        || result.get("implementationEvidence").and_then(Value::as_str) != Some("adapter-validated")
+    {
+        return Err("Mission connected-source outer authority is invalid.".into());
+    }
+    let encoded = serde_json::to_vec(&result)
+        .map_err(|_| "Mission connected-source result is invalid.".to_string())?;
+    if encoded.is_empty() || encoded.len() > 131_072 {
+        return Err("Mission connected-source result is too large.".into());
+    }
+    let hash = format!("{:x}", Sha256::digest(&encoded));
+    let reference = crate::store::repos::mission_worker_tool::binding_reference(
+        &authority.local_workspace_id,
+        &authority.member_id,
+        &authority.binding.run_id,
+        &authority.binding.worker_id,
+        &authority.binding.tool_event_id,
+        &authority.binding.call_key,
+        &hash,
+    );
+    let _identity_guard =
+        crate::clerk_identity::lock_native_identity_generation(&authority.identity)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store.transaction(|tx| {
+        let context = workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+        if context.active_workspace.local_workspace_id != authority.local_workspace_id
+            || context.member_id.as_deref() != Some(authority.member_id.as_str())
+            || context.internal_user_id != authority.internal_user_id {
+            return Err(crate::store::StoreError::Invalid("Mission tool authority changed during connected-source search.".into()));
+        }
+        let scope = crate::store::repos::scope::DataScope::workspace(authority.local_workspace_id.clone())?;
+        let journal = mission_run::get(tx, store, &scope, &authority.member_id, &authority.binding.run_id)?
+            .ok_or_else(|| crate::store::StoreError::Invalid("Mission run disappeared.".into()))?;
+        let key = native_tool_event_key(&authority.binding).map_err(crate::store::StoreError::Invalid)?;
+        if let Some(existing) = journal.events.iter().find(|event| event.get("idempotencyKey").and_then(Value::as_str) == Some(key.as_str())) {
+            if existing.pointer("/payload/result/outputReference").and_then(Value::as_str) == Some(reference.as_str()) { return Ok(reference); }
+            return Err(crate::store::StoreError::Invalid("Mission tool idempotency key represents another result.".into()));
+        }
+        validate_native_tool_head(&journal, &authority.binding).map_err(crate::store::StoreError::Invalid)?;
+        let at = now();
+        let sequence = authority.binding.expected_last_sequence + 1;
+        let event = json!({
+            "workspaceId":authority.local_workspace_id,"visibility":"member-private","ownerMemberId":authority.member_id,
+            "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":authority.internal_user_id,
+            "createdAt":at,"updatedAt":at,"id":authority.binding.tool_event_id,"runId":authority.binding.run_id,
+            "type":"tool-call-completed","sequence":sequence,"previousEventId":authority.binding.worker_started_event_id,
+            "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),"occurredAt":at,
+            "actor":{"kind":"system"},"idempotencyKey":key,
+            "payload":{"result":{"callKey":authority.binding.call_key,"workerId":authority.binding.worker_id,
+                "toolName":"connection-read","outputReference":reference,"outputHash":hash}}
+        });
+        let mut projected = journal.run.as_object().cloned().ok_or_else(|| crate::store::StoreError::Invalid("Mission run record is invalid.".into()))?;
+        projected.insert("revision".into(), json!(authority.binding.expected_run_revision + 1));
+        projected.insert("updatedAt".into(), json!(at));
+        projected.insert("eventHead".into(), json!({"lastSequence":sequence,"lastEventId":authority.binding.tool_event_id}));
+        mission_run::append(tx, store, &scope, &authority.member_id, &authority.binding.run_id,
+            authority.binding.expected_run_revision, authority.binding.expected_last_sequence, &authority.binding.tool_event_id,
+            "tool-call-completed", &key, &event, &Value::Object(projected), &at)?;
+        let receipt = json!({"version":1,"workspaceId":authority.local_workspace_id,"ownerMemberId":authority.member_id,
+            "runId":authority.binding.run_id,"workerId":authority.binding.worker_id,"toolEventId":authority.binding.tool_event_id,
+            "callKey":authority.binding.call_key,"outputReference":reference,"outputHash":hash,"sizeBytes":encoded.len(),
+            "trust":"external-untrusted","instructionAuthority":"none","result":result,"createdAt":at});
+        crate::store::repos::mission_worker_tool::put(tx, store, &scope, &authority.member_id, &authority.binding.run_id,
+            &authority.binding.worker_id, &authority.binding.tool_event_id, &authority.binding.call_key, &reference, &hash,
+            encoded.len() as i64, &receipt, &at)?;
+        Ok(reference)
+    }).map_err(|error| error.to_string())
 }
 
 pub(crate) fn preflight_native_worker_completion(
@@ -550,6 +815,214 @@ fn native_usage_event_key(binding: &NativeWorkerExecutionBinding) -> Result<Stri
             200,
         )?
     ))
+}
+
+fn native_tool_event_key(binding: &NativeWorkerToolExecutionBinding) -> Result<String, String> {
+    Ok(format!(
+        "worker-tool:{}",
+        bounded(&binding.idempotency_key, "Worker tool idempotency key", 200)?
+    ))
+}
+
+fn validate_native_tool_head(
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerToolExecutionBinding,
+) -> Result<(), String> {
+    validate_native_tool_binding(binding)?;
+    if journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || journal.run.get("revision").and_then(Value::as_i64)
+            != Some(binding.expected_run_revision)
+        || journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(binding.expected_last_sequence)
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(binding.worker_started_event_id.as_str())
+    {
+        return Err(
+            "The mission run changed before the connected-source tool could execute.".into(),
+        );
+    }
+    let started = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(binding.worker_started_event_id.as_str())
+    });
+    if started.is_none_or(|event| {
+        event.get("type").and_then(Value::as_str) != Some("worker-started")
+            || event.pointer("/payload/workerId").and_then(Value::as_str)
+                != Some(binding.worker_id.as_str())
+    }) {
+        return Err("The mission worker start fact is invalid.".into());
+    }
+    Ok(())
+}
+
+fn validate_native_tool_binding(binding: &NativeWorkerToolExecutionBinding) -> Result<(), String> {
+    for value in [
+        &binding.run_id,
+        &binding.worker_id,
+        &binding.worker_started_event_id,
+        &binding.tool_event_id,
+        &binding.call_key,
+        &binding.idempotency_key,
+    ] {
+        bounded(value, "Native worker tool identity", 200)?;
+    }
+    if binding.worker_started_event_id == binding.tool_event_id {
+        return Err("Mission tool event identities must be distinct.".into());
+    }
+    Ok(())
+}
+
+fn validate_connected_search_result(
+    result: &Value,
+    authority: &NativeWorkerToolAuthority,
+    implementation_kind: &str,
+) -> Result<(), String> {
+    if !matches!(implementation_kind, "native" | "mcp") {
+        return Err("Mission connected-source implementation is invalid.".into());
+    }
+    let object = result
+        .as_object()
+        .ok_or_else(|| "Mission connected-source result is invalid.".to_string())?;
+    const KEYS: [&str; 13] = [
+        "contractVersion",
+        "capabilityId",
+        "query",
+        "scope",
+        "citations",
+        "nextCursor",
+        "trust",
+        "instructionAuthority",
+        "degraded",
+        "degradationReasons",
+        "connectionId",
+        "matchedGrantIds",
+        "implementation",
+    ];
+    if object.keys().any(|key| !KEYS.contains(&key.as_str()))
+        || result.get("contractVersion").and_then(Value::as_str)
+            != Some("fable.connected-source-search.v1")
+        || result.get("capabilityId").and_then(Value::as_str) != Some("knowledge.content.search")
+        || result.get("query").and_then(Value::as_str) != Some(authority.query.as_str())
+        || result.pointer("/scope/workspaceId").and_then(Value::as_str)
+            != Some(authority.local_workspace_id.as_str())
+        || result.pointer("/scope/projectId").and_then(Value::as_str)
+            != authority.project_id.as_deref()
+        || result.get("trust").and_then(Value::as_str) != Some("external-untrusted")
+        || result.get("instructionAuthority").and_then(Value::as_str) != Some("none")
+        || result
+            .pointer("/implementation/kind")
+            .and_then(Value::as_str)
+            != Some(implementation_kind)
+        || result
+            .pointer("/implementation/evidence")
+            .and_then(Value::as_str)
+            != Some("adapter-validated")
+    {
+        return Err("Mission connected-source authority metadata is invalid.".into());
+    }
+    let grants = result
+        .get("matchedGrantIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Mission connected-source grants are invalid.".to_string())?;
+    if grants.len() != 1 || grants[0].as_str() != Some(authority.capability_grant_id.as_str()) {
+        return Err("Mission connected-source grant does not match the worker assignment.".into());
+    }
+    let connection = result
+        .get("connectionId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if connection.is_empty() || connection.len() > 200 {
+        return Err("Mission connected-source Connection is invalid.".into());
+    }
+    let degraded = result
+        .get("degraded")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "Mission connected-source degradation state is invalid.".to_string())?;
+    let reasons = result
+        .get("degradationReasons")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Mission connected-source degradation reasons are invalid.".to_string())?;
+    if reasons.len() > 16
+        || reasons.iter().any(|value| {
+            value
+                .as_str()
+                .is_none_or(|text| text.is_empty() || text.len() > 200)
+        })
+        || (!degraded && !reasons.is_empty())
+    {
+        return Err("Mission connected-source degradation reasons are invalid.".into());
+    }
+    let citations = result
+        .get("citations")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Mission connected-source citations are invalid.".to_string())?;
+    if citations.len() > 50 {
+        return Err("Mission connected-source citations exceed their bound.".into());
+    }
+    for (index, citation) in citations.iter().enumerate() {
+        let item = citation
+            .as_object()
+            .ok_or_else(|| "Mission connected-source citation is invalid.".to_string())?;
+        const CITATION_KEYS: [&str; 8] = [
+            "citationId",
+            "sourceId",
+            "title",
+            "snippet",
+            "uri",
+            "provenance",
+            "freshness",
+            "trust",
+        ];
+        let expected_id = format!("source-{}", index + 1);
+        if item
+            .keys()
+            .any(|key| !CITATION_KEYS.contains(&key.as_str()))
+            || citation.get("citationId").and_then(Value::as_str) != Some(expected_id.as_str())
+            || citation.get("trust").and_then(Value::as_str) != Some("external-untrusted")
+            || citation
+                .get("sourceId")
+                .and_then(Value::as_str)
+                .is_none_or(|v| v.is_empty() || v.len() > 512)
+            || citation
+                .get("title")
+                .and_then(Value::as_str)
+                .is_none_or(|v| v.is_empty() || v.len() > 512)
+            || citation
+                .get("snippet")
+                .and_then(Value::as_str)
+                .is_none_or(|v| v.is_empty() || v.len() > 4_096)
+            || citation
+                .get("provenance")
+                .and_then(Value::as_str)
+                .is_none_or(|v| v.is_empty() || v.len() > 512)
+            || citation
+                .get("freshness")
+                .and_then(Value::as_str)
+                .is_none_or(|v| v.is_empty() || v.len() > 200)
+        {
+            return Err("Mission connected-source citation is invalid.".into());
+        }
+        if let Some(uri) = citation.get("uri") {
+            let uri = uri
+                .as_str()
+                .ok_or_else(|| "Mission connected-source citation URI is invalid.".to_string())?;
+            let parsed = url::Url::parse(uri)
+                .map_err(|_| "Mission connected-source citation URI is invalid.".to_string())?;
+            if !matches!(parsed.scheme(), "https" | "http")
+                || !parsed.username().is_empty()
+                || parsed.password().is_some()
+                || parsed.host_str().is_none()
+            {
+                return Err("Mission connected-source citation URI is unsafe.".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_native_completion_head(

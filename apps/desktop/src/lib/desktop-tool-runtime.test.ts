@@ -4,6 +4,7 @@ import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 
 const runtime = vi.hoisted(() => ({
+  attestMissionMcp: vi.fn(),
   prepareGrant: vi.fn(),
   commitGrant: vi.fn(),
   executeTool: vi.fn(),
@@ -12,6 +13,7 @@ const runtime = vi.hoisted(() => ({
 const mcpFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime", () => ({
+  attestRuntimeMissionMcpConnectedSearch: runtime.attestMissionMcp,
   prepareRuntimeCapabilityGrant: runtime.prepareGrant,
   commitRuntimeCapabilityGrant: runtime.commitGrant,
   executeRuntimeToolCall: runtime.executeTool,
@@ -156,6 +158,7 @@ describe("desktop semantic capability grants", () => {
     runtime.commitGrant.mockResolvedValue({ id: "grant-1" });
     runtime.executeTool.mockResolvedValue({ ok: true, output: "cited results" });
     runtime.resolveRoute.mockResolvedValue(null);
+    runtime.attestMissionMcp.mockResolvedValue(null);
     mcpFactory.mockReset();
   });
 
@@ -264,6 +267,36 @@ describe("desktop semantic capability grants", () => {
       implementation: { kind: "mcp", evidence: "adapter-validated" },
       citations: [{ citationId: "source-1", trust: "external-untrusted" }]
     });
+  });
+
+  it("uses the same native mission receipt boundary for an MCP substitution", async () => {
+    const missionBinding = {
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-start",
+      toolEventId: "event-tool", callKey: "connection-search-once", idempotencyKey: "tool-1",
+      expectedRunRevision: 4, expectedLastSequence: 3
+    };
+    runtime.resolveRoute.mockResolvedValue({
+      configurationReference: "work-search", transport: "stdio", connectionId: "connection-mcp",
+      connectionRevision: 2, capabilityId: "knowledge.content.search", toolName: "search_work"
+    });
+    runtime.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-mcp" } });
+    mcpFactory.mockResolvedValue(new SemanticMcpTransport());
+    runtime.executeTool.mockResolvedValue({ ok: true, output: JSON.stringify({
+      kind: "mcp-connected-source-search",
+      proposal: { workspaceId: "workspace-1", sessionId: "mcp-session-1", toolName: "search_work", arguments: { contractVersion: "fable.connected-source-search.v1", query: "Q3" } },
+      permitId: "permit-1", workspaceId: "workspace-1", query: "Q3", connectionId: "connection-mcp",
+      matchedGrantIds: ["grant-mcp"], degraded: false, degradationReasons: []
+    }) });
+    const attested = { capabilityId: "knowledge.content.search", connectionId: "connection-mcp", result: { trust: "external-untrusted" } };
+    runtime.attestMissionMcp.mockResolvedValue(attested);
+    const executor = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      { workspaceId: "workspace-1", missionWorkerToolExecution: missionBinding }
+    );
+    await expect(executor(connectionApproval, JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })))
+      .resolves.toBe(JSON.stringify(attested));
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ missionWorkerToolExecution: missionBinding }));
+    expect(runtime.attestMissionMcp).toHaveBeenCalledWith("permit-1");
   });
 
   it("does not silently fall back to native when the selected MCP route is unavailable", async () => {

@@ -292,6 +292,21 @@ established. Older direct terminal events remain readable as legacy exact
 replays. Canonical route selection and price/cost provenance remain open until
 API providers are represented by canonical workspace Connections.
 
+Mission-owned `knowledge.content.search` can now cross the same exact-action
+approval and scoped standing-grant boundary through either the native Connection
+resolver or an explicitly bound MCP tool. The worker's exact assigned grant is
+consumed before egress; another active grant is never substituted. Native results
+and native-correlated MCP JSON-RPC responses are normalized to the same cited
+search contract, stamped `external-untrusted` with no instruction authority, and
+atomically appended as `tool-call-completed` with a domain-separated reference to
+an owner-qualified encrypted schema-v28 receipt. MCP settlement is driven only by
+the response Rust observed for the exact single-use permit; the renderer can
+neither supply evidence nor skip execution. Exact event-plus-receipt replay occurs
+before consuming another one-shot approval. This is durable, transport-neutral
+tool evidence, not yet a completed cited-brief mission: tool-bearing provider
+turn continuation, final cited Markdown validation, and the product journey remain
+open, so the Wave 4A boxes remain unchecked.
+
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
 checkpoint replay boundaries, advancing recovery attempts, cooperative
