@@ -1322,6 +1322,8 @@ pub struct WorkflowRunRecord {
     pub scheduled_job_id: Option<String>,
     #[serde(default)]
     pub permission_profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_route: Option<ProviderRouteExecutionBinding>,
     pub input: serde_json::Value,
     /// Vec<WorkflowStepRecord> stored as JSON (the step shape is the TS layer's).
     pub steps: serde_json::Value,

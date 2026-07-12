@@ -432,6 +432,11 @@ Completed and recovered ordinary chat responses now expose that persisted
 selection as a compact route receipt. It shows the canonical plain-language
 reason and workspace scope while withholding opaque route, workspace, and
 boundary identifiers; legacy runs without route evidence make no routing claim.
+Scheduled native prompts attach the same route receipt to the durable workflow
+run only after execution finishes. Rust permits that one post-execution
+attribution transition, rejects running, changed, removed, fallback, non-schedule,
+or secret-bearing route claims, and the run-detail surface reuses the same
+secret-safe explanation.
 Durable observation history and visible product receipts for other mission shapes
 remain open. The cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and

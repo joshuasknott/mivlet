@@ -24,6 +24,7 @@ import {
 } from "../lib/run-status";
 import { formatForInspection } from "../lib/safe-output";
 import { RunStatusBadge } from "./RunStatusBadge";
+import { ProviderRouteSummary } from "./workspace-cards";
 
 /**
  * Run-detail inspection surface.
@@ -126,6 +127,8 @@ export function RunDetail({
           </div>
         )}
       </header>
+
+      {run.providerRoute ? <ProviderRouteSummary route={run.providerRoute} /> : null}
 
       {run.failureReason ? (
         <section className="run-detail__error" aria-label="Run error">

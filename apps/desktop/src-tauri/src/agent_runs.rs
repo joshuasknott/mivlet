@@ -292,38 +292,7 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
         .map(|receipt| normalize_context_receipt(receipt, &run.id, run.thread_id.as_deref()))
         .transpose()?;
     if let Some(route) = &mut run.provider_route {
-        route.workspace_id = normalize_spaces(&route.workspace_id);
-        route.selection.provider_route_id = normalize_spaces(&route.selection.provider_route_id);
-        route.selection.selected_at = normalize_spaces(&route.selection.selected_at);
-        route.selection.reason = normalize_spaces(&route.selection.reason);
-        route.selection.boundary_policy_ref = route
-            .selection
-            .boundary_policy_ref
-            .take()
-            .map(|value| normalize_spaces(&value))
-            .filter(|value| !value.is_empty());
-        route.selection.fallback_from_provider_route_id = route
-            .selection
-            .fallback_from_provider_route_id
-            .take()
-            .map(|value| normalize_spaces(&value))
-            .filter(|value| !value.is_empty());
-        if route.workspace_id.is_empty()
-            || route.workspace_id.len() > 160
-            || route.selection.provider_route_id.is_empty()
-            || route.selection.provider_route_id.len() > 240
-            || route.selection.reason.is_empty()
-            || route.selection.reason.len() > 500
-            || contains_secret_shape(&route.selection.reason)
-            || route
-                .selection
-                .boundary_policy_ref
-                .as_ref()
-                .is_none_or(|value| value.len() > 240)
-            || chrono::DateTime::parse_from_rfc3339(&route.selection.selected_at).is_err()
-        {
-            return Err("Agent run provider route is invalid.".to_string());
-        }
+        normalize_provider_route_binding(route)?;
     }
     run.exchanges = run
         .exchanges
@@ -376,6 +345,44 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
         }
     }
     Ok(run)
+}
+
+pub(crate) fn normalize_provider_route_binding(
+    route: &mut crate::models::ProviderRouteExecutionBinding,
+) -> Result<(), String> {
+    route.workspace_id = normalize_spaces(&route.workspace_id);
+    route.selection.provider_route_id = normalize_spaces(&route.selection.provider_route_id);
+    route.selection.selected_at = normalize_spaces(&route.selection.selected_at);
+    route.selection.reason = normalize_spaces(&route.selection.reason);
+    route.selection.boundary_policy_ref = route
+        .selection
+        .boundary_policy_ref
+        .take()
+        .map(|value| normalize_spaces(&value))
+        .filter(|value| !value.is_empty());
+    route.selection.fallback_from_provider_route_id = route
+        .selection
+        .fallback_from_provider_route_id
+        .take()
+        .map(|value| normalize_spaces(&value))
+        .filter(|value| !value.is_empty());
+    if route.workspace_id.is_empty()
+        || route.workspace_id.len() > 160
+        || route.selection.provider_route_id.is_empty()
+        || route.selection.provider_route_id.len() > 240
+        || route.selection.reason.is_empty()
+        || route.selection.reason.len() > 500
+        || contains_secret_shape(&route.selection.reason)
+        || route
+            .selection
+            .boundary_policy_ref
+            .as_ref()
+            .is_none_or(|value| value.len() > 240)
+        || chrono::DateTime::parse_from_rfc3339(&route.selection.selected_at).is_err()
+    {
+        return Err("Provider route evidence is invalid.".to_string());
+    }
+    Ok(())
 }
 
 pub(crate) fn read_agent_runs(path: &Path) -> Result<Vec<PersistedAgentRun>, String> {

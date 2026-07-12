@@ -28,6 +28,7 @@ import type {
   ApprovalRequest,
   BackendProvider,
   FirstWaveConnectorId,
+  ProviderRouteExecutionBinding,
   ScheduledExecutionRoute,
   WorkflowDefinition,
   WorkflowRun
@@ -174,6 +175,7 @@ export function useScheduledAgent(
       }
 
       try {
+        let selectedProviderRoute: ProviderRouteExecutionBinding | undefined;
         const executePrompt = async (prompt: string) => {
           const routeModel = run.execution?.policy === "pinned" && run.execution.modelId
             ? run.execution.modelId
@@ -188,6 +190,11 @@ export function useScheduledAgent(
                 requiresTools: false
               })
             : undefined;
+          if (selectedProviderRoute && providerRoute
+            && selectedProviderRoute.selection.providerRouteId !== providerRoute.selection.providerRouteId) {
+            throw new Error("The scheduled provider route changed during execution.");
+          }
+          selectedProviderRoute ??= providerRoute;
           const result = await executeScheduledPrompt({
             runId: run.runId,
             route: run.execution,
@@ -277,6 +284,11 @@ export function useScheduledAgent(
             }
           }
         );
+
+        if (selectedProviderRoute) {
+          workflowRun.providerRoute = selectedProviderRoute;
+          await saveRuntimeWorkflowRun(workflowRun);
+        }
 
         const transcript = workflowRun.steps
           .map((step) => (typeof step.output === "string" ? step.output : ""))

@@ -183,6 +183,15 @@ fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String
             .unwrap_or("[redacted connector data]")
             .to_string()
     });
+    if let Some(route) = &mut run.provider_route {
+        crate::agent_runs::normalize_provider_route_binding(route)?;
+        if run.trigger != "schedule"
+            || route.selection.fallback_from_provider_route_id.is_some()
+            || !matches!(run.status.as_str(), "completed" | "failed" | "blocked-auth" | "cancelled")
+        {
+            return Err("Workflow provider route evidence is invalid.".to_string());
+        }
+    }
     if let Some(profile) = run.permission_profile.take() {
         let profile = normalize_spaces(&profile).to_ascii_lowercase();
         let mode = match profile.as_str() {
@@ -242,11 +251,35 @@ fn write_runs(path: &Path, runs: &[WorkflowRunRecord]) -> Result<(), String> {
 pub fn persist_run(path: &Path, run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String> {
     let run = normalize_run(run)?;
     let mut runs = read_runs(path)?;
+    if let Some(existing) = runs.iter().find(|existing| existing.id == run.id) {
+        ensure_provider_route_transition(existing, &run)?;
+    }
     runs.retain(|r| r.id != run.id);
     runs.insert(0, run.clone());
     runs.truncate(MAX_WORKFLOW_RUNS);
     write_runs(path, &runs)?;
     Ok(run)
+}
+
+fn ensure_provider_route_transition(
+    existing: &WorkflowRunRecord,
+    incoming: &WorkflowRunRecord,
+) -> Result<(), String> {
+    if existing.provider_route.is_some() && existing.provider_route != incoming.provider_route {
+        return Err("A workflow run provider route cannot be changed or removed.".to_string());
+    }
+    if existing.provider_route.is_none()
+        && incoming.provider_route.is_some()
+        && !matches!(
+            incoming.status.as_str(),
+            "completed" | "failed" | "blocked-auth" | "cancelled"
+        )
+    {
+        return Err(
+            "A workflow run route receipt requires completed execution evidence.".to_string(),
+        );
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -262,6 +295,19 @@ pub fn save_workflow_run(
         .map_err(|_| "Fable could not encode workflow run.".to_string())?;
     if crate::store::with_store(|store| {
         store.transaction(|tx| {
+            if let Some(existing) = workflow::list_runs(tx, store, &scope, None)?
+                .into_iter()
+                .find(|value| {
+                    value.get("id").and_then(serde_json::Value::as_str) == Some(run.id.as_str())
+                })
+            {
+                let existing =
+                    serde_json::from_value::<WorkflowRunRecord>(existing).map_err(|_| {
+                        crate::store::StoreError::Invalid("Stored workflow run is invalid.".into())
+                    })?;
+                ensure_provider_route_transition(&existing, &run)
+                    .map_err(crate::store::StoreError::Invalid)?;
+            }
             workflow::upsert_run(
                 tx,
                 store,
@@ -415,6 +461,7 @@ mod tests {
             trigger: "manual".to_string(),
             scheduled_job_id: None,
             permission_profile: None,
+            provider_route: None,
             input: serde_json::json!({}),
             steps: serde_json::json!([]),
             failure_reason: None,
@@ -441,6 +488,44 @@ mod tests {
             created_at: "2026-06-28T10:00:00Z".to_string(),
             updated_at: "2026-06-28T10:00:00Z".to_string(),
         }
+    }
+
+    fn route_binding() -> crate::models::ProviderRouteExecutionBinding {
+        crate::models::ProviderRouteExecutionBinding {
+            workspace_id: "workspace-1".into(),
+            selection: crate::models::ProviderRouteSelection {
+                provider_route_id: "provider-route:v2:openai:test".into(),
+                selected_at: "2026-07-12T12:00:00Z".into(),
+                reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.".into(),
+                fallback_from_provider_route_id: None,
+                boundary_policy_ref: Some("boundary:member-private:account-owned-provider:openai:local-credential-egress".into()),
+            },
+        }
+    }
+
+    #[test]
+    fn scheduled_route_receipt_is_safe_and_can_only_be_added_once_after_execution() {
+        let mut completed = sample_run("run-route", "completed");
+        completed.trigger = "schedule".into();
+        completed.permission_profile = Some("trusted".into());
+        completed.provider_route = Some(route_binding());
+        assert!(normalize_run(completed.clone()).is_ok());
+
+        let mut running = completed.clone();
+        running.status = "running".into();
+        let mut without_route = running.clone();
+        without_route.provider_route = None;
+        assert!(ensure_provider_route_transition(&without_route, &running).is_err());
+        assert!(ensure_provider_route_transition(&without_route, &completed).is_ok());
+
+        let mut changed = completed.clone();
+        changed.provider_route.as_mut().unwrap().selection.reason = "Changed".into();
+        assert!(ensure_provider_route_transition(&completed, &changed).is_err());
+
+        let mut secret = completed;
+        secret.provider_route.as_mut().unwrap().selection.reason =
+            "Authorization: Bearer provider-secret".into();
+        assert!(normalize_run(secret).is_err());
     }
 
     #[test]

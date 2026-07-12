@@ -135,6 +135,33 @@ describe("RunDetail — lifecycle + inspection", () => {
     expect(screen.getByText("v2")).toBeInTheDocument();
   });
 
+  it("shows a scheduled route receipt without opaque authority ids", () => {
+    render(
+      <RunDetail
+        run={makeRun({ providerRoute: {
+          workspaceId: "workspace-private" as never,
+          selection: {
+            providerRouteId: "provider-route-private" as never,
+            selectedAt: "2026-07-12T12:00:00Z" as never,
+            reason: "Selected OpenAI GPT-5 for model.generate; healthy route.",
+            boundaryPolicyRef: "boundary-private"
+          }
+        } })}
+        queue={[]}
+        notifications={[]}
+        retrying={false}
+        onRetry={vi.fn()}
+        onCancel={vi.fn()}
+        onBack={vi.fn()}
+      />
+    );
+    const receipt = screen.getByLabelText("Route receipt");
+    expect(receipt).toHaveTextContent("Selected OpenAI GPT-5");
+    expect(receipt).not.toHaveTextContent("provider-route-private");
+    expect(receipt).not.toHaveTextContent("workspace-private");
+    expect(receipt).not.toHaveTextContent("boundary-private");
+  });
+
   it("renders attempt history with status, retryable flag, and error", () => {
     render(
       <RunDetail

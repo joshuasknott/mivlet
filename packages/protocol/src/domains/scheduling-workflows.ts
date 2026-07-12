@@ -4,6 +4,7 @@ import type {
   PermissionMode,
   PermissionProfileId
 } from "./approvals.js";
+import type { ProviderRouteExecutionBinding } from "./agent-runtime.js";
 
 export type AutomationStatus = "draft" | "active" | "paused";
 
@@ -444,6 +445,8 @@ export interface WorkflowRun {
   scheduledJobId?: string;
   /** Permission profile captured when the run starts. */
   permissionProfile?: PermissionProfileId;
+  /** Exact native provider route retained after a routed scheduled execution. */
+  providerRoute?: ProviderRouteExecutionBinding;
   /** Inputs supplied to the run. */
   input: Record<string, unknown>;
   /** Per-step records, in execution order. */
