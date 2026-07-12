@@ -17,6 +17,7 @@ pub struct NativeWorkerExecutionBinding {
     pub worker_id: String,
     pub worker_started_event_id: String,
     pub completion_event_id: String,
+    pub failure_event_id: String,
     pub idempotency_key: String,
     pub expected_run_revision: i64,
     pub expected_last_sequence: i64,
@@ -34,6 +35,15 @@ pub(crate) struct NativeWorkerCompletionAuthority {
 pub(crate) enum NativeWorkerCompletionPreflight {
     Execute(NativeWorkerCompletionAuthority),
     AlreadyCompleted,
+}
+
+pub(crate) enum NativeWorkerTerminalOutcome {
+    Completed,
+    Failed {
+        code: &'static str,
+        message: &'static str,
+        retryable: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -135,14 +145,17 @@ pub(crate) fn preflight_native_worker_completion(
                 })?;
             validate_openai_worker_body(body, model, objective, max_tokens)
                 .map_err(crate::store::StoreError::Invalid)?;
-            let event_key = native_completion_event_key(binding)
-                .map_err(crate::store::StoreError::Invalid)?;
-            if let Some(existing) = journal.events.iter().find(|event| {
-                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
-            }) {
-                exact_native_completion_replay(existing, binding)
-                    .map_err(crate::store::StoreError::Invalid)?;
-                return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
+            for event_key in native_terminal_event_keys(binding)
+                .map_err(crate::store::StoreError::Invalid)?
+            {
+                if let Some(existing) = journal.events.iter().find(|event| {
+                    event.get("idempotencyKey").and_then(Value::as_str)
+                        == Some(event_key.as_str())
+                }) {
+                    exact_native_terminal_replay(existing, binding)
+                        .map_err(crate::store::StoreError::Invalid)?;
+                    return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
+                }
             }
             validate_native_completion_head(&journal, binding)
                 .map_err(crate::store::StoreError::Invalid)?;
@@ -159,6 +172,7 @@ pub(crate) fn preflight_native_worker_completion(
 
 pub(crate) fn settle_native_worker_completion(
     authority: &NativeWorkerCompletionAuthority,
+    outcome: NativeWorkerTerminalOutcome,
 ) -> Result<(), String> {
     let _identity_guard =
         crate::clerk_identity::lock_native_identity_generation(&authority.identity)?;
@@ -189,12 +203,34 @@ pub(crate) fn settle_native_worker_completion(
             .ok_or_else(|| {
                 crate::store::StoreError::Invalid("Mission run disappeared.".into())
             })?;
-            let event_key = native_completion_event_key(&authority.binding)
-                .map_err(crate::store::StoreError::Invalid)?;
+            let (event_key, event_id, event_type, payload) = match outcome {
+                NativeWorkerTerminalOutcome::Completed => (
+                    native_terminal_event_keys(&authority.binding)
+                        .map_err(crate::store::StoreError::Invalid)?[0]
+                        .clone(),
+                    authority.binding.completion_event_id.as_str(),
+                    "worker-completed",
+                    json!({"workerId":authority.binding.worker_id,"outputs":[]}),
+                ),
+                NativeWorkerTerminalOutcome::Failed {
+                    code,
+                    message,
+                    retryable,
+                } => (
+                    native_terminal_event_keys(&authority.binding)
+                        .map_err(crate::store::StoreError::Invalid)?[1]
+                        .clone(),
+                    authority.binding.failure_event_id.as_str(),
+                    "worker-failed",
+                    json!({"workerId":authority.binding.worker_id,"error":{
+                        "code":code,"category":"provider","message":message,"retryable":retryable
+                    }}),
+                ),
+            };
             if let Some(existing) = journal.events.iter().find(|event| {
                 event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
             }) {
-                exact_native_completion_replay(existing, &authority.binding)
+                exact_native_terminal_replay(existing, &authority.binding)
                     .map_err(crate::store::StoreError::Invalid)?;
                 return Ok(());
             }
@@ -213,12 +249,12 @@ pub(crate) fn settle_native_worker_completion(
                 "workspaceId":workspace,"visibility":"member-private","ownerMemberId":authority.member_id,
                 "authority":"local","schemaVersion":1,"revision":1,
                 "createdByInternalUserId":authority.internal_user_id,"createdAt":at,"updatedAt":at,
-                "id":authority.binding.completion_event_id,"runId":authority.binding.run_id,
-                "type":"worker-completed","sequence":sequence,"previousEventId":authority.binding.worker_started_event_id,
+                "id":event_id,"runId":authority.binding.run_id,
+                "type":event_type,"sequence":sequence,"previousEventId":authority.binding.worker_started_event_id,
                 "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
                 "occurredAt":at,"actor":{"kind":"system"},
                 "correlationKey":format!("native-worker-completion:v1:run-revision:{}", authority.binding.expected_run_revision),
-                "idempotencyKey":event_key,"payload":{"workerId":authority.binding.worker_id,"outputs":[]}
+                "idempotencyKey":event_key,"payload":payload
             });
             let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
                 crate::store::StoreError::Invalid("Mission run record is invalid.".into())
@@ -230,7 +266,7 @@ pub(crate) fn settle_native_worker_completion(
             projected.insert("updatedAt".into(), json!(at));
             projected.insert(
                 "eventHead".into(),
-                json!({"lastSequence":sequence,"lastEventId":authority.binding.completion_event_id}),
+                json!({"lastSequence":sequence,"lastEventId":event_id}),
             );
             mission_run::append(
                 tx,
@@ -240,8 +276,8 @@ pub(crate) fn settle_native_worker_completion(
                 &authority.binding.run_id,
                 authority.binding.expected_run_revision,
                 authority.binding.expected_last_sequence,
-                &authority.binding.completion_event_id,
-                "worker-completed",
+                event_id,
+                event_type,
                 &event_key,
                 &event,
                 &Value::Object(projected),
@@ -252,15 +288,18 @@ pub(crate) fn settle_native_worker_completion(
         .map_err(|error| error.to_string())
 }
 
-fn native_completion_event_key(binding: &NativeWorkerExecutionBinding) -> Result<String, String> {
-    Ok(format!(
-        "worker-complete:{}",
-        bounded(
-            &binding.idempotency_key,
-            "Worker completion idempotency key",
-            200,
-        )?
-    ))
+fn native_terminal_event_keys(
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<[String; 2], String> {
+    let key = bounded(
+        &binding.idempotency_key,
+        "Worker terminal idempotency key",
+        200,
+    )?;
+    Ok([
+        format!("worker-complete:{key}"),
+        format!("worker-fail:{key}"),
+    ])
 }
 
 fn validate_native_completion_head(
@@ -272,11 +311,14 @@ fn validate_native_completion_head(
         &binding.worker_id,
         &binding.worker_started_event_id,
         &binding.completion_event_id,
+        &binding.failure_event_id,
         &binding.idempotency_key,
     ] {
         bounded(value, "Native worker execution identity", 200)?;
     }
     if binding.worker_started_event_id == binding.completion_event_id
+        || binding.worker_started_event_id == binding.failure_event_id
+        || binding.completion_event_id == binding.failure_event_id
         || journal.run.get("status").and_then(Value::as_str) != Some("running")
         || journal.run.get("revision").and_then(Value::as_i64)
             != Some(binding.expected_run_revision)
@@ -355,7 +397,7 @@ fn validate_openai_worker_body(
     Ok(())
 }
 
-fn exact_native_completion_replay(
+fn exact_native_terminal_replay(
     event: &Value,
     binding: &NativeWorkerExecutionBinding,
 ) -> Result<(), String> {
@@ -363,25 +405,97 @@ fn exact_native_completion_replay(
         "native-worker-completion:v1:run-revision:{}",
         binding.expected_run_revision
     );
-    if event.get("id").and_then(Value::as_str) == Some(binding.completion_event_id.as_str())
+    let event_type = event.get("type").and_then(Value::as_str);
+    let (expected_event_id, expected_key, payload_valid) = match event_type {
+        Some("worker-completed") => (
+            binding.completion_event_id.as_str(),
+            format!("worker-complete:{}", binding.idempotency_key),
+            event
+                .pointer("/payload/outputs")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty),
+        ),
+        Some("worker-failed") => (
+            binding.failure_event_id.as_str(),
+            format!("worker-fail:{}", binding.idempotency_key),
+            native_failure_payload_valid(event),
+        ),
+        _ => return Err("Worker terminal idempotency key represents another result.".into()),
+    };
+    if event.get("id").and_then(Value::as_str) == Some(expected_event_id)
         && event.get("runId").and_then(Value::as_str) == Some(binding.run_id.as_str())
-        && event.get("type").and_then(Value::as_str) == Some("worker-completed")
+        && event.get("idempotencyKey").and_then(Value::as_str) == Some(expected_key.as_str())
         && event.get("previousEventId").and_then(Value::as_str)
             == Some(binding.worker_started_event_id.as_str())
         && event.pointer("/payload/workerId").and_then(Value::as_str)
             == Some(binding.worker_id.as_str())
-        && event
-            .pointer("/payload/outputs")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty)
+        && payload_valid
         && event.get("sequence").and_then(Value::as_i64) == Some(binding.expected_last_sequence + 1)
         && event.get("correlationKey").and_then(Value::as_str)
             == Some(expected_correlation.as_str())
     {
         Ok(())
     } else {
-        Err("Worker completion idempotency key represents another result.".into())
+        Err("Worker terminal idempotency key represents another result.".into())
     }
+}
+
+fn native_failure_payload_valid(event: &Value) -> bool {
+    let Some(payload) = event.get("payload").and_then(Value::as_object) else {
+        return false;
+    };
+    if exact_keys(payload, &["workerId", "error"]).is_err() {
+        return false;
+    }
+    let Some(error) = payload.get("error").and_then(Value::as_object) else {
+        return false;
+    };
+    if exact_keys(error, &["code", "category", "message", "retryable"]).is_err()
+        || error.get("category").and_then(Value::as_str) != Some("provider")
+        || error.get("retryable").and_then(Value::as_bool).is_none()
+    {
+        return false;
+    }
+    matches!(
+        (
+            error.get("code").and_then(Value::as_str),
+            error.get("message").and_then(Value::as_str),
+            error.get("retryable").and_then(Value::as_bool),
+        ),
+        (
+            Some("native-provider-transport-failed"),
+            Some("The native provider connection failed after retrying."),
+            Some(true)
+        ) | (
+            Some("native-provider-temporarily-unavailable"),
+            Some("The native provider remained unavailable after retrying."),
+            Some(true)
+        ) | (
+            Some("native-provider-request-rejected"),
+            Some("The native provider rejected the request."),
+            Some(false)
+        ) | (
+            Some("native-provider-response-too-large"),
+            Some("The native provider response exceeded Fable's limit."),
+            Some(false)
+        ) | (
+            Some("native-provider-stream-interrupted"),
+            Some("The native provider stream ended unexpectedly."),
+            Some(true)
+        ) | (
+            Some("native-provider-payload-error"),
+            Some("The native provider returned an error payload."),
+            Some(false)
+        ) | (
+            Some("native-provider-output-limit"),
+            Some("The native provider reached the worker output limit."),
+            Some(false)
+        ) | (
+            Some("native-provider-terminal-incomplete"),
+            Some("The native provider ended without a successful stop."),
+            Some(false)
+        )
+    )
 }
 
 #[tauri::command]
@@ -1615,18 +1729,32 @@ mod tests {
             worker_id: "worker-1".into(),
             worker_started_event_id: "event-3".into(),
             completion_event_id: "event-4".into(),
-            idempotency_key: "complete-1".into(),
+            failure_event_id: "event-5".into(),
+            idempotency_key: "terminal-1".into(),
             expected_run_revision: 4,
             expected_last_sequence: 3,
         };
         let mut event = json!({
             "id":"event-4","runId":"run-1","type":"worker-completed",
             "previousEventId":"event-3","sequence":4,
+            "idempotencyKey":"worker-complete:terminal-1",
             "correlationKey":"native-worker-completion:v1:run-revision:4",
             "payload":{"workerId":"worker-1","outputs":[]}
         });
-        assert!(exact_native_completion_replay(&event, &binding).is_ok());
+        assert!(exact_native_terminal_replay(&event, &binding).is_ok());
         event["correlationKey"] = json!("native-worker-completion:v1:run-revision:3");
-        assert!(exact_native_completion_replay(&event, &binding).is_err());
+        assert!(exact_native_terminal_replay(&event, &binding).is_err());
+        let failed = json!({
+            "id":"event-5","runId":"run-1","type":"worker-failed",
+            "previousEventId":"event-3","sequence":4,
+            "idempotencyKey":"worker-fail:terminal-1",
+            "correlationKey":"native-worker-completion:v1:run-revision:4",
+            "payload":{"workerId":"worker-1","error":{
+                "code":"native-provider-request-rejected","category":"provider",
+                "message":"The native provider rejected the request.",
+                "retryable":false
+            }}
+        });
+        assert!(exact_native_terminal_replay(&failed, &binding).is_ok());
     }
 }

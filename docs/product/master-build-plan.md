@@ -252,10 +252,16 @@ the current run revision and journal head before provider egress. It permits no
 tools, context, capabilities, grants, or expected outputs; Rust validates the
 exact request shape, observes a clean provider `stop`, rechecks account and
 workspace authority after the await, and appends an idempotent native-built
-`worker-completed` event with an empty output list. This does not claim semantic
-output evidence: tool-bearing workers, durable output receipts and provenance,
-other providers and runtimes, failure events, live grant consumption at tool
-use, handoffs, and the desktop experience remain open.
+`worker-completed` event with an empty output list. A process-local lease rejects
+duplicate concurrent egress for the same started worker. Definitive transport,
+HTTP, response-bound, provider-payload, output-limit, and incomplete-terminal
+failures append a separate native-built `worker-failed` event with static
+secret-free details and conservative branch-specific retryability; cancellation
+remains resumable rather than being mislabeled as failure. Success and failure
+replay through distinct exact event identities without repeating provider
+egress. This does not claim semantic output evidence: tool-bearing workers,
+durable output receipts and provenance, other providers and runtimes, live grant
+consumption at tool use, handoffs, and the desktop experience remain open.
 
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
@@ -274,9 +280,10 @@ only from the durable journal; persist only the closed portable replay shape;
 bind its hash to run, event, attempt, and reference; select the newest checkpoint
 by event sequence; restore into exactly the next attempt; and make an exact
 restore replay stable even after a newer checkpoint exists. The narrow OpenAI
-path described above persists one truthful production `worker-completed` event,
-but general worker execution events, semantic output receipts, and desktop
-recovery wiring are still open, so the durable-run box remains unchecked.
+path described above persists truthful production `worker-completed` and
+`worker-failed` events, but general worker execution events, semantic output
+receipts, and desktop recovery wiring are still open, so the durable-run box
+remains unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.

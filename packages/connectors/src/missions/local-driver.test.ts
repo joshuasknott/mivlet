@@ -100,7 +100,7 @@ describe("portable local worker driver", () => {
     const runtime = backend([{ type: "done", finishReason: "stop" }]);
     const missionWorkerExecution = {
       runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3",
-      completionEventId: "event-4", idempotencyKey: "complete-1",
+      completionEventId: "event-4", failureEventId: "event-5", idempotencyKey: "terminal-1",
       expectedRunRevision: 4, expectedLastSequence: 3
     };
     await executeLocalWorker({ worker: { ...worker(), tools: [] }, backend: runtime.value,

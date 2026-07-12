@@ -441,12 +441,53 @@ impl OpenAiTerminalObservation {
     }
 }
 
+#[derive(Clone, Copy)]
+struct MissionProviderFailure {
+    code: &'static str,
+    message: &'static str,
+    retryable: bool,
+}
+
 /// Cancel map: requestId -> oneshot sender. Dropping/sending cancels the future.
 type CancelMap = HashMap<String, tokio::sync::watch::Sender<bool>>;
 static CANCEL_MAP: OnceLock<Mutex<CancelMap>> = OnceLock::new();
 
 fn cancel_map() -> &'static Mutex<CancelMap> {
     CANCEL_MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static MISSION_EXECUTIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn mission_executions() -> &'static Mutex<HashSet<String>> {
+    MISSION_EXECUTIONS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+struct MissionExecutionLease {
+    key: String,
+}
+
+impl Drop for MissionExecutionLease {
+    fn drop(&mut self) {
+        if let Ok(mut executions) = mission_executions().lock() {
+            executions.remove(&self.key);
+        }
+    }
+}
+
+fn acquire_mission_execution(
+    binding: &crate::mission_workers::NativeWorkerExecutionBinding,
+) -> Result<MissionExecutionLease, String> {
+    let key = format!(
+        "{}\0{}\0{}",
+        binding.run_id, binding.worker_id, binding.worker_started_event_id
+    );
+    let mut executions = mission_executions()
+        .lock()
+        .map_err(|_| "Fable could not access the mission execution registry.".to_string())?;
+    if !executions.insert(key.clone()) {
+        return Err("This mission worker is already executing.".into());
+    }
+    Ok(MissionExecutionLease { key })
 }
 
 /// Look up the key for a provider, preferring the OS keychain and falling back
@@ -615,6 +656,12 @@ pub async fn stream_backend_completion(
         }
         None => None,
     };
+    let _mission_execution_lease = request
+        .mission_worker_execution
+        .as_ref()
+        .filter(|_| mission_authority.is_some())
+        .map(acquire_mission_execution)
+        .transpose()?;
     let credential = require_key(&request.provider_id)?;
     let connection =
         resolve_provider_connection(&request.provider_id, &credential, &request.model)?;
@@ -637,6 +684,7 @@ pub async fn stream_backend_completion(
     let mut completed = false;
     let mut transport_failed = false;
     let mut terminal_observation = OpenAiTerminalObservation::default();
+    let mut mission_failure: Option<MissionProviderFailure> = None;
 
     for attempt in 0..MAX_ATTEMPTS {
         let mut req = client.post(&url).json(&request.body);
@@ -714,6 +762,11 @@ pub async fn stream_backend_completion(
                 );
                 completed = true;
                 transport_failed = true;
+                mission_failure = Some(MissionProviderFailure {
+                    code: "native-provider-transport-failed",
+                    message: "The native provider connection failed after retrying.",
+                    retryable: true,
+                });
                 break;
             }
         };
@@ -763,6 +816,19 @@ pub async fn stream_backend_completion(
             );
             completed = true;
             transport_failed = true;
+            mission_failure = Some(if retryable {
+                MissionProviderFailure {
+                    code: "native-provider-temporarily-unavailable",
+                    message: "The native provider remained unavailable after retrying.",
+                    retryable: true,
+                }
+            } else {
+                MissionProviderFailure {
+                    code: "native-provider-request-rejected",
+                    message: "The native provider rejected the request.",
+                    retryable: false,
+                }
+            });
             break;
         }
 
@@ -791,6 +857,11 @@ pub async fn stream_backend_completion(
                                 });
                                 completed = true;
                                 transport_failed = true;
+                                mission_failure = Some(MissionProviderFailure {
+                                    code: "native-provider-response-too-large",
+                                    message: "The native provider response exceeded Fable's limit.",
+                                    retryable: false,
+                                });
                                 break;
                             }
                             while let Some(newline_pos) = buffer.find('\n') {
@@ -815,6 +886,11 @@ pub async fn stream_backend_completion(
                             });
                             completed = true;
                             transport_failed = true;
+                            mission_failure = Some(MissionProviderFailure {
+                                code: "native-provider-stream-interrupted",
+                                message: "The native provider stream ended unexpectedly.",
+                                retryable: true,
+                            });
                             break;
                         }
                         None => {
@@ -842,12 +918,44 @@ pub async fn stream_backend_completion(
         .map(|mut map| map.remove(&request.request_id));
     let terminal = if cancelled { "[CANCELLED]" } else { "[DONE]" };
     let _ = app.emit(&channel, terminal);
-    let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
-        if !cancelled && completed && !transport_failed && terminal_observation.clean_stop() {
-            crate::mission_workers::settle_native_worker_completion(authority)
+    if mission_authority.is_some() && !cancelled && completed && mission_failure.is_none() {
+        mission_failure = if terminal_observation.provider_error {
+            Some(MissionProviderFailure {
+                code: "native-provider-payload-error",
+                message: "The native provider returned an error payload.",
+                retryable: false,
+            })
+        } else if terminal_observation.finish_reason.as_deref() == Some("length") {
+            Some(MissionProviderFailure {
+                code: "native-provider-output-limit",
+                message: "The native provider reached the worker output limit.",
+                retryable: false,
+            })
+        } else if !terminal_observation.clean_stop() {
+            Some(MissionProviderFailure {
+                code: "native-provider-terminal-incomplete",
+                message: "The native provider ended without a successful stop.",
+                retryable: false,
+            })
         } else {
-            Ok(())
-        }
+            None
+        };
+    }
+    let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
+        let outcome = if !cancelled && completed && mission_failure.is_none() {
+            Some(crate::mission_workers::NativeWorkerTerminalOutcome::Completed)
+        } else {
+            mission_failure.map(|failure| {
+                crate::mission_workers::NativeWorkerTerminalOutcome::Failed {
+                    code: failure.code,
+                    message: failure.message,
+                    retryable: failure.retryable,
+                }
+            })
+        };
+        outcome.map_or(Ok(()), |outcome| {
+            crate::mission_workers::settle_native_worker_completion(authority, outcome)
+        })
     } else {
         Ok(())
     };
@@ -855,6 +963,8 @@ pub async fn stream_backend_completion(
     // (observation only; no payload content is retained).
     let (status, code) = if cancelled {
         ("cancelled", "cancelled")
+    } else if let Some(failure) = mission_failure {
+        ("failed", failure.code)
     } else if transport_failed {
         ("failed", "provider-failed")
     } else if completed {
@@ -1340,6 +1450,24 @@ mod transport_policy_tests {
         assert!(observation.clean_stop());
         observation.observe(r#"{"error":{"message":"late failure"}}"#);
         assert!(!observation.clean_stop());
+    }
+
+    #[test]
+    fn mission_execution_lease_rejects_concurrent_provider_egress() {
+        let binding = crate::mission_workers::NativeWorkerExecutionBinding {
+            run_id: "lease-run".into(),
+            worker_id: "lease-worker".into(),
+            worker_started_event_id: "lease-start".into(),
+            completion_event_id: "lease-complete".into(),
+            failure_event_id: "lease-fail".into(),
+            idempotency_key: "lease-terminal".into(),
+            expected_run_revision: 3,
+            expected_last_sequence: 3,
+        };
+        let lease = acquire_mission_execution(&binding).expect("first lease");
+        assert!(acquire_mission_execution(&binding).is_err());
+        drop(lease);
+        assert!(acquire_mission_execution(&binding).is_ok());
     }
 
     #[test]
