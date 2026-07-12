@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it } from "vitest";
-import { RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -93,5 +93,24 @@ describe("RunContextSummary", () => {
     expect(within(summaries[0]).queryByText("Later source")).not.toBeInTheDocument();
     expect(within(summaries[1]).getByText("Later source")).toBeInTheDocument();
     expect(within(summaries[1]).queryByText("Launch notes")).not.toBeInTheDocument();
+  });
+
+  it("shows the durable route reason without exposing opaque authority ids", () => {
+    render(<ProviderRouteSummary route={{
+      workspaceId: "workspace-private" as never,
+      selection: {
+        providerRouteId: "provider-route-secret" as never,
+        selectedAt: "2026-07-12T12:00:00Z" as never,
+        reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.",
+        boundaryPolicyRef: "boundary-private"
+      }
+    }} />);
+    const summary = screen.getByLabelText("Route receipt");
+    expect(summary).toHaveTextContent("Checked before connecting");
+    expect(summary).toHaveTextContent("Selected OpenAI GPT-5");
+    expect(summary).toHaveTextContent("This workspace");
+    expect(summary).not.toHaveTextContent("provider-route-secret");
+    expect(summary).not.toHaveTextContent("workspace-private");
+    expect(summary).not.toHaveTextContent("boundary-private");
   });
 });

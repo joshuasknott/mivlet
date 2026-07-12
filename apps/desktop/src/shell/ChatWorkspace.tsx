@@ -17,7 +17,7 @@ import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, DirectiveCards, MissionRunReceipt, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, DirectiveCards, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -454,7 +454,7 @@ export function ChatWorkspace() {
           ? {
               ...message,
               content,
-              ...(agent.state.running && agent.state.currentRunId ? { runId: agent.state.currentRunId } : {})
+              ...(agent.state.currentRunId ? { runId: agent.state.currentRunId } : {})
             }
           : message
       )
@@ -495,6 +495,9 @@ export function ChatWorkspace() {
           >
             <p>{message.content}</p>
             {message.role === "assistant" && message.missionReceipt ? <MissionRunReceipt receipt={message.missionReceipt} /> : null}
+            {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
+              <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
+            ) : null}
             {message.role === "assistant" && message.runId && agent.state.contextReceipts[message.runId] ? (
               <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
             ) : null}

@@ -245,6 +245,7 @@ describe("useNativeAgent", () => {
     expect(mocks.streamRequests[0]).toBeDefined();
     expect(saved[0].providerRoute).toMatchObject({ workspaceId: "workspace-1", selection: { providerRouteId: "route-openai-gpt-5" } });
     expect(mocks.streamRequests[0].providerRoute).toEqual(saved[0].providerRoute);
+    expect(result.current.state.providerRoutes[preparedContext.receipt.runId]).toEqual(saved[0].providerRoute);
     expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toEqual(preparedContext.receipt);
   });
 
@@ -264,6 +265,7 @@ describe("useNativeAgent", () => {
     await act(async () => { await result.current.run(baseRequest, preparedContext); });
     expect(mocks.streamCalls).toBe(0);
     expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toBeUndefined();
+    expect(result.current.state.providerRoutes[preparedContext.receipt.runId]).toBeUndefined();
     expect(result.current.state.currentRunId).toBeNull();
   });
 
@@ -274,11 +276,13 @@ describe("useNativeAgent", () => {
       providerId: "openai", model: "gpt-5", status, transcript: "response", turn: 0,
       pendingApprovalIds: [], recoverable: status !== "completed", retryCount: 0,
       createdAt: "2026-07-11T12:00:00.000Z", updatedAt: "2026-07-11T12:00:01.000Z",
-      contextReceipt: { ...preparedContext.receipt, runId: `run-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] }
+      contextReceipt: { ...preparedContext.receipt, runId: `run-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] },
+      providerRoute: { workspaceId: "workspace-1" as never, selection: { providerRouteId: `route-${status}` as never, selectedAt: "2026-07-12T12:00:00Z" as never, reason: `Selected route ${status}.` } }
     }));
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
     await waitFor(() => expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3));
     expect(result.current.state.contextReceipts["run-interrupted"]?.contributions[0].reason).toBe("retrieved");
+    expect(result.current.state.providerRoutes["run-completed"]?.selection.reason).toBe("Selected route completed.");
   });
 
   it("surfaces interrupted runs and retries from the durable user prompt", async () => {

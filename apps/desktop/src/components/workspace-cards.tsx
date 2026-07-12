@@ -1,6 +1,7 @@
 import type {
   ConnectorManifest,
   KnowledgeCitation,
+  ProviderRouteExecutionBinding,
   RunContextReceipt,
   ThreadSummary,
   WorkspaceDirective
@@ -99,6 +100,16 @@ export function MissionRunReceipt({ receipt }: { receipt: {
         <li>{receipt.sourceCount} cited {receipt.sourceCount === 1 ? "source" : "sources"}</li>
         <li>{receipt.trust === "provider-generated-with-external-evidence" ? "External evidence kept untrusted" : receipt.trust}</li>
       </ul>
+    </details>
+  );
+}
+
+export function ProviderRouteSummary({ route }: { route: ProviderRouteExecutionBinding }) {
+  return (
+    <details className="run-context-summary" aria-label="Route receipt">
+      <summary><strong>Route</strong><span>Checked before connecting</span></summary>
+      <p className="run-context-summary__audience"><strong>Why</strong><span>{route.selection.reason}</span></p>
+      <p className="run-context-summary__audience"><strong>Scope</strong><span>This workspace</span></p>
     </details>
   );
 }

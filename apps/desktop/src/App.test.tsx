@@ -1765,6 +1765,8 @@ describe("Fable home", () => {
     expect(await screen.findByText(/interrupted run · gpt-5/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /retry from prompt/i }));
     expect(await screen.findByText("Recovered answer")).toBeInTheDocument();
+    expect(screen.getByLabelText("Route receipt")).toHaveTextContent("Selected openai gpt-5.");
+    expect(screen.getByLabelText("Route receipt")).not.toHaveTextContent("route-openai-gpt-5");
     expect(screen.queryByText(/interrupted run · gpt-5/i)).not.toBeInTheDocument();
   });
 

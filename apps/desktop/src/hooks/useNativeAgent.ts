@@ -26,6 +26,7 @@ import type {
   PersistedAgentRun,
   PermissionMode,
   PreparedRunContext,
+  ProviderRouteExecutionBinding,
   RunContextReceipt
 } from "@fable/protocol";
 import {
@@ -71,6 +72,8 @@ export interface NativeAgentState {
   recoverableRuns: PersistedAgentRun[];
   /** Immutable context evidence keyed by canonical run id, including recovered completed runs. */
   contextReceipts: Record<string, RunContextReceipt>;
+  /** Secret-free durable provider route evidence keyed by canonical run id. */
+  providerRoutes: Record<string, ProviderRouteExecutionBinding>;
   /** Canonical id for the current or most recently started run. */
   currentRunId: string | null;
   /** True when there is no desktop runtime to carry the request. */
@@ -126,6 +129,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     status: "idle",
     recoverableRuns: [],
     contextReceipts: {},
+    providerRoutes: {},
     currentRunId: null,
     noTransport: !hasDesktopRuntime()
   });
@@ -165,6 +169,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (run.contextReceipt) receipts[run.id] = run.contextReceipt;
           return receipts;
         }, { ...current.contextReceipts }),
+        providerRoutes: runs.reduce<Record<string, ProviderRouteExecutionBinding>>((routes, run) => {
+          if (run.providerRoute) routes[run.id] = run.providerRoute;
+          return routes;
+        }, { ...current.providerRoutes }),
         recoverableRuns: runs.filter(
           (run) =>
             (run.status === "interrupted" || run.status === "failed") && run.recoverable
@@ -287,6 +295,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           : current.recoverableRuns,
         currentRunId: runId,
         contextReceipts: { ...current.contextReceipts, [runId]: prepared.receipt },
+        providerRoutes: providerRoute ? { ...current.providerRoutes, [runId]: providerRoute } : current.providerRoutes,
         noTransport: false
       }));
       // Mark active before the first durable write so a second click cannot
@@ -341,7 +350,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         setState((current) => {
           const contextReceipts = { ...current.contextReceipts };
           delete contextReceipts[runId];
-          return { ...current, running: false, status: "failed", lastError: message, recoverableRuns: [failed, ...current.recoverableRuns], contextReceipts, currentRunId: null };
+          const providerRoutes = { ...current.providerRoutes };
+          delete providerRoutes[runId];
+          return { ...current, running: false, status: "failed", lastError: message, recoverableRuns: [failed, ...current.recoverableRuns], contextReceipts, providerRoutes, currentRunId: null };
         });
         try { await saveRuntimeAgentRun(failed); } catch { /* persistence is already the reported terminal failure */ }
         activeRunIdRef.current = null;

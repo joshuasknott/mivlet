@@ -314,6 +314,7 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
             || route.selection.provider_route_id.len() > 240
             || route.selection.reason.is_empty()
             || route.selection.reason.len() > 500
+            || contains_secret_shape(&route.selection.reason)
             || route
                 .selection
                 .boundary_policy_ref
@@ -784,6 +785,14 @@ mod tests {
         };
         initial.provider_route = Some(route.clone());
         assert!(normalize_agent_run(initial.clone()).is_ok());
+        let mut secret_bearing = initial.clone();
+        secret_bearing
+            .provider_route
+            .as_mut()
+            .unwrap()
+            .selection
+            .reason = "Authorization: Bearer provider-secret".into();
+        assert!(normalize_agent_run(secret_bearing).is_err());
         let mut changed = initial.clone();
         changed.provider_route.as_mut().unwrap().selection.reason = "Changed".into();
         assert!(ensure_run_evidence_immutable(&initial, &changed).is_err());

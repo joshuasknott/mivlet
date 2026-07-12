@@ -428,6 +428,10 @@ rechecks the active account, membership, workspace, provider, model, route id,
 reason, boundary, and absence of fallback before credential access. Native API
 egress without either that binding or the separate mission-worker journal
 authority fails closed; ambiguous dual authority is rejected.
+Completed and recovered ordinary chat responses now expose that persisted
+selection as a compact route receipt. It shows the canonical plain-language
+reason and workspace scope while withholding opaque route, workspace, and
+boundary identifiers; legacy runs without route evidence make no routing claim.
 Durable observation history and visible product receipts for other mission shapes
 remain open. The cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
