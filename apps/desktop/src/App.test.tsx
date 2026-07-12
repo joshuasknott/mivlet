@@ -1239,12 +1239,12 @@ describe("Fable home", () => {
     expect(composer).toHaveValue("/goal ");
   });
 
-  it("/remember creates durable memory instead of just inserting text", async () => {
+  it("natural remember creates durable memory instead of reaching the model", async () => {
     const user = await renderWorkspace();
 
     await user.type(
       screen.getByLabelText(/universal composer/i),
-      "/remember Prefers dark mode for long sessions"
+      "Remember that I prefer dark mode for long sessions"
     );
     await user.keyboard("{Enter}");
 
@@ -1256,7 +1256,7 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
     await user.click(await screen.findByRole("tab", { name: /^memories$/i }));
     // The memory is created and rendered (title appears in list + detail).
-    expect((await screen.findAllByText(/Prefers dark mode/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/prefer dark mode/i)).length).toBeGreaterThan(0);
   });
 
   it("/remember refuses a secret-shaped value without saving it", async () => {
@@ -1276,7 +1276,7 @@ describe("Fable home", () => {
     expect(screen.queryByText(/super-secret/i)).not.toBeInTheDocument();
   });
 
-  it("/goal creates structured Fable state persisted in the snapshot", async () => {
+  it("natural goal creates structured Fable state persisted in the snapshot", async () => {
     // Seed a snapshot so the runtime-save path is active for this session.
     runtimeMocks.snapshot = {
       version: 1,
@@ -1303,7 +1303,7 @@ describe("Fable home", () => {
 
     await user.type(
       screen.getByLabelText(/universal composer/i),
-      "/goal Ship the v2 onboarding flow"
+      "Set a goal to ship the v2 onboarding flow"
     );
     await user.keyboard("{Enter}");
 
@@ -1319,10 +1319,10 @@ describe("Fable home", () => {
     });
   });
 
-  it("/schedule creates a durable schedule from natural language", async () => {
+  it("natural schedule phrasing creates a durable schedule", async () => {
     const user = await renderWorkspace();
 
-    await user.type(screen.getByLabelText(/universal composer/i), "/schedule daily at 09:00");
+    await user.type(screen.getByLabelText(/universal composer/i), "Remind me daily at 09:00");
     await user.keyboard("{Enter}");
 
     const conversation = await screen.findByRole("region", { name: /conversation/i });
@@ -1410,6 +1410,14 @@ describe("Fable home", () => {
     expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     // The newline was not inserted into the composer.
     expect(composer).toHaveValue("");
+  });
+
+  it("natural plan phrasing creates structured plan state", async () => {
+    const user = await renderWorkspace();
+    await user.type(screen.getByLabelText(/universal composer/i), "Create a plan to migrate the config store");
+    await user.keyboard("{Enter}");
+    const conversation = await screen.findByRole("region", { name: /conversation/i });
+    expect(await within(conversation).findByText(/plan saved/i)).toBeInTheDocument();
   });
 
   it("routes an explicit connected-source cited brief through the mission journey", async () => {

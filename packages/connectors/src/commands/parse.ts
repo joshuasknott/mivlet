@@ -24,9 +24,21 @@ const COMMAND_NAMES = FABLE_COMMAND_TOKENS.map((token) => token.slice(1));
  * must be delimited from a longer word by whitespace or end-of-text.
  */
 export function parseComposerText(text: string): ParseCommandOutcome {
-  const natural = text.trim().toLowerCase().replace(/\s+/g, " ");
+  const compact = text.trim().replace(/\s+/g, " ");
+  const natural = compact.toLowerCase();
   if (["stop current work", "cancel current work", "stop what you're doing", "stop what you are doing"].includes(natural)) {
     return { status: "command", request: { name: "stop", args: "" } };
+  }
+  const naturalCommands: Array<[FableCommandName, RegExp]> = [
+    ["remember", /^remember that (.+)$/i],
+    ["goal", /^(?:create|set) a goal to (.+)$/i],
+    ["goal", /^my goal is to (.+)$/i],
+    ["plan", /^(?:create|make) a plan to (.+)$/i],
+    ["schedule", /^(?:schedule|remind me) ((?:every day|daily|weekly(?: on [a-z]+)?|monthly(?: on \d{1,2})?) at \d{1,2}:\d{2}|at \d{4}-\d{2}-\d{2} \d{1,2}:\d{2})$/i]
+  ];
+  for (const [name, pattern] of naturalCommands) {
+    const match = pattern.exec(compact);
+    if (match) return { status: "command", request: { name, args: match[1] } };
   }
   if (!text.trimStart().startsWith("/")) {
     return { status: "prompt", text };

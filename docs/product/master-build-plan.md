@@ -396,7 +396,7 @@ external evidence gate rather than a checked repository claim.
 - [ ] Route by capability, quality, cost, speed, privacy, context, tools, health, preference, and risk.
 - [ ] Enforce provider pins/exclusions and safe fallback boundaries.
 - [ ] Show compact receipts for medium work and inspectable plans for consequential work.
-- [ ] Make `/goal`, `/plan`, `/schedule`, `/remember`, and `/stop` Fable-native with natural-language parity.
+- [x] Make `/goal`, `/plan`, `/schedule`, `/remember`, and `/stop` Fable-native with natural-language parity.
 - [ ] Add visible routing explanations and time/token/cost/iteration budgets.
 
 Repo-local routing foundation now selects deterministically over already-authorized
@@ -420,7 +420,9 @@ checkboxes stay unchecked because the experience is not yet general. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
 cancel path, and appends a durable cancellation request for the active cited
-mission. Natural-language parity for the other four commands remains open.
+mission. Conservative, explicit natural-language forms for goal, plan, schedule,
+and memory now reach the same structured durable command handlers; conversational
+uses of those words remain ordinary prompts.
 
 ### Wave 4C - Multi-worker coordination
 
