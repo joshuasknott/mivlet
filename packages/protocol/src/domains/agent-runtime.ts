@@ -503,6 +503,8 @@ export interface MissionWorkerExecutionBinding {
   workerStartedEventId: string;
   usageEventId: string;
   completionEventId: string;
+  /** Reserved journal identity for a Rust-derived policy evaluation, when the step has one. */
+  evaluationEventId: string;
   failureEventId: string;
   idempotencyKey: string;
   expectedRunRevision: number;

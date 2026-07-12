@@ -351,9 +351,15 @@ external attestation, checks required evidence, records bounded usage/cost, and
 preserves useful incomplete work with explicit remaining work and a recovery
 recommendation. Required deliverables, every required criterion, any configured
 minimum, and required human acceptance must all be satisfied before `succeeded`.
-This portable aggregation is not native evaluation authority; trusted evaluator
-wiring, production terminal events, and the inspectable journey remain open, so
-the acceptance/evaluation box stays unchecked.
+The cited-brief native settlement now adds one narrow trusted policy evaluator:
+after the completion event and encrypted v2 output receipt are saved in the same
+transaction, Rust reloads the selected plan and exact worker step, evaluates only
+its policy-owned criteria, and appends `evaluation-recorded`. Pass/fail and
+evidence references come only from the attested receipt, retained citation ids,
+and any exact required evidence; renderer assertions cannot create acceptance.
+Human, worker, and external evaluators, multi-output and mission-level result
+aggregation, terminal result persistence, and the inspectable journey remain
+open, so the acceptance/evaluation box stays unchecked.
 
 ### Wave 4B - Routing and experience
 

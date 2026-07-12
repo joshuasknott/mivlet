@@ -19,6 +19,7 @@ pub struct NativeWorkerExecutionBinding {
     pub worker_started_event_id: String,
     pub usage_event_id: String,
     pub completion_event_id: String,
+    pub evaluation_event_id: String,
     pub failure_event_id: String,
     pub idempotency_key: String,
     pub expected_run_revision: i64,
@@ -902,7 +903,7 @@ pub(crate) fn settle_native_worker_completion(
                 &Value::Object(projected),
                 &at,
             )?;
-            if let Some((key, reference, hash, size, receipt)) = receipt {
+            if let Some((key, reference, hash, size, receipt_value)) = receipt.as_ref() {
                 crate::store::repos::mission_worker_output::put(
                     tx,
                     store,
@@ -911,17 +912,210 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.binding.run_id,
                     &authority.binding.worker_id,
                     &authority.binding.completion_event_id,
-                    &key,
-                    &reference,
-                    &hash,
-                    size,
-                    &receipt,
+                    key,
+                    reference,
+                    hash,
+                    *size,
+                    receipt_value,
+                    &at,
+                )?;
+            }
+            if let Some((_, reference, _, _, receipt_value)) = receipt.as_ref() {
+                append_native_policy_evaluation(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &authority.internal_user_id,
+                    &journal,
+                    &authority.binding,
+                    reference,
+                    receipt_value,
+                    terminal_expected_revision + 1,
+                    sequence,
+                    event_id,
                     &at,
                 )?;
             }
             Ok(())
         })
         .map_err(|error| error.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_native_policy_evaluation(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+    output_reference: &str,
+    receipt: &Value,
+    expected_revision: i64,
+    expected_sequence: i64,
+    previous_event_id: &str,
+    at: &str,
+) -> crate::store::Result<()> {
+    let worker = journal
+        .events
+        .iter()
+        .find_map(|event| {
+            (event.get("type").and_then(Value::as_str) == Some("worker-created")
+                && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                    == Some(binding.worker_id.as_str()))
+            .then(|| event.pointer("/payload/worker"))
+            .flatten()
+        })
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission worker assignment is unavailable.".into())
+        })?;
+    let step_key = worker
+        .get("stepKey")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission worker step is invalid.".into())
+        })?;
+    let mission_id = journal
+        .run
+        .get("missionId")
+        .or_else(|| journal.run.pointer("/initiator/missionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+        })?;
+    let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    validate_lifecycle(&journal.run, &lifecycle).map_err(crate::store::StoreError::Invalid)?;
+    let step = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .and_then(|steps| {
+            steps
+                .iter()
+                .find(|step| step.get("key").and_then(Value::as_str) == Some(step_key))
+        })
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission worker plan step is unavailable.".into())
+        })?;
+    let criterion_keys = step
+        .get("acceptanceCriterionKeys")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Mission worker acceptance criteria are invalid.".into(),
+            )
+        })?;
+    let criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
+        })?;
+    let available_evidence = std::iter::once(output_reference.to_string())
+        .chain(
+            receipt
+                .get("citations")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|citation| {
+                    citation
+                        .get("citationId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                }),
+        )
+        .collect::<BTreeSet<_>>();
+    let mut results = Vec::new();
+    for key in criterion_keys.iter().filter_map(Value::as_str) {
+        let criterion = criteria
+            .iter()
+            .find(|criterion| criterion.get("key").and_then(Value::as_str) == Some(key))
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Mission worker references an unknown acceptance criterion.".into(),
+                )
+            })?;
+        if criterion.get("evaluator").and_then(Value::as_str) != Some("policy") {
+            continue;
+        }
+        let required = criterion
+            .get("evidenceRequired")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        let passed = receipt.get("version").and_then(Value::as_i64) == Some(2)
+            && receipt.get("trust").and_then(Value::as_str)
+                == Some("provider-generated-with-external-evidence")
+            && receipt
+                .get("citations")
+                .and_then(Value::as_array)
+                .is_some_and(|values| !values.is_empty())
+            && required
+                .iter()
+                .all(|reference| available_evidence.contains(*reference));
+        results.push(json!({"criterionKey":key,"passed":passed,
+            "summary":if passed{"The cited brief is backed by Rust-attested connected-source evidence."}else{"The cited brief does not satisfy its required attested evidence."},
+            "evidenceRefs":available_evidence.iter().cloned().collect::<Vec<_>>() }));
+    }
+    if results.is_empty() {
+        return Ok(());
+    }
+    let idempotency_key = format!(
+        "worker-evaluation:{}",
+        bounded(
+            &binding.idempotency_key,
+            "Worker evaluation idempotency key",
+            200
+        )
+        .map_err(crate::store::StoreError::Invalid)?
+    );
+    let passed = results
+        .iter()
+        .all(|result| result.get("passed").and_then(Value::as_bool) == Some(true));
+    let evaluation = json!({"evaluationKey":format!("native-policy:{}",binding.evaluation_event_id),
+        "target":{"kind":"worker","workerId":binding.worker_id},
+        "verdict":if passed{"pass"}else{"fail"},
+        "criteria":results,"summary":"Fable evaluated the durable cited output against its policy criteria.",
+        "recommendedAction":if passed{"accept"}else{"revise"},
+        "evaluatedAt":at});
+    let sequence = expected_sequence + 1;
+    let event = json!({"workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
+        "createdAt":at,"updatedAt":at,"id":binding.evaluation_event_id,"runId":binding.run_id,"type":"evaluation-recorded",
+        "sequence":sequence,"previousEventId":previous_event_id,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":idempotency_key,"payload":{"evaluation":evaluation}});
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("revision".into(), json!(expected_revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":binding.evaluation_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        expected_revision,
+        expected_sequence,
+        &binding.evaluation_event_id,
+        "evaluation-recorded",
+        &idempotency_key,
+        &event,
+        &Value::Object(projected),
+        at,
+    )?;
+    Ok(())
 }
 
 fn native_terminal_event_keys(
@@ -1176,6 +1370,7 @@ fn validate_native_completion_head(
         &binding.worker_started_event_id,
         &binding.usage_event_id,
         &binding.completion_event_id,
+        &binding.evaluation_event_id,
         &binding.failure_event_id,
         &binding.idempotency_key,
     ] {
@@ -1192,6 +1387,7 @@ fn validate_native_completion_head(
             binding.worker_started_event_id.as_str(),
             binding.usage_event_id.as_str(),
             binding.completion_event_id.as_str(),
+            binding.evaluation_event_id.as_str(),
             binding.failure_event_id.as_str(),
         ]
         .contains(&evidence.tool_event_id.as_str())
@@ -1208,9 +1404,13 @@ fn validate_native_completion_head(
     if binding.worker_started_event_id == binding.usage_event_id
         || binding.worker_started_event_id == binding.completion_event_id
         || binding.worker_started_event_id == binding.failure_event_id
+        || binding.worker_started_event_id == binding.evaluation_event_id
         || binding.usage_event_id == binding.completion_event_id
+        || binding.usage_event_id == binding.evaluation_event_id
         || binding.usage_event_id == binding.failure_event_id
+        || binding.completion_event_id == binding.evaluation_event_id
         || binding.completion_event_id == binding.failure_event_id
+        || binding.evaluation_event_id == binding.failure_event_id
         || journal.run.get("status").and_then(Value::as_str) != Some("running")
         || journal.run.get("revision").and_then(Value::as_i64)
             != Some(binding.expected_run_revision)
@@ -2986,6 +3186,7 @@ mod tests {
             worker_started_event_id: "event-3".into(),
             usage_event_id: "event-usage".into(),
             completion_event_id: "event-4".into(),
+            evaluation_event_id: "event-evaluation".into(),
             failure_event_id: "event-5".into(),
             idempotency_key: "terminal-1".into(),
             expected_run_revision: 4,
@@ -3049,5 +3250,15 @@ mod tests {
         };
         assert!(exact_native_terminal_replay(&budget_failure, &binding, None).is_ok());
         assert!(validate_usage_replay(&failed_journal, &budget_failure, &binding, "gpt-5").is_ok());
+        let live = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":4,"eventHead":{"lastSequence":3,"lastEventId":"event-3"}}),
+            events: vec![
+                json!({"id":"event-3","type":"worker-started","payload":{"workerId":"worker-1"}}),
+            ],
+        };
+        assert!(validate_native_completion_head(&live, &binding).is_ok());
+        let mut colliding = binding.clone();
+        colliding.evaluation_event_id = colliding.completion_event_id.clone();
+        assert!(validate_native_completion_head(&live, &colliding).is_err());
     }
 }

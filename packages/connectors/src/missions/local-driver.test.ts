@@ -100,7 +100,7 @@ describe("portable local worker driver", () => {
     const runtime = backend([{ type: "done", finishReason: "stop" }]);
     const missionWorkerExecution = {
       runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
-      completionEventId: "event-4", failureEventId: "event-5", idempotencyKey: "terminal-1",
+      completionEventId: "event-4", evaluationEventId: "event-evaluation", failureEventId: "event-5", idempotencyKey: "terminal-1",
       expectedRunRevision: 4, expectedLastSequence: 3
     };
     await executeLocalWorker({ worker: { ...worker(), tools: [] }, backend: runtime.value,
@@ -115,7 +115,7 @@ describe("portable local worker driver", () => {
     const runtime = backend([{ type: "text-delta", text: "# Brief" }, { type: "done", finishReason: "stop" }]);
     const missionWorkerExecution = {
       runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
-      completionEventId: "event-4", failureEventId: "event-5", idempotencyKey: "terminal-1",
+      completionEventId: "event-4", evaluationEventId: "event-evaluation", failureEventId: "event-5", idempotencyKey: "terminal-1",
       expectedRunRevision: 4, expectedLastSequence: 3
     };
     const outputWorker = { ...worker(), tools: [], outputContract: {
@@ -136,7 +136,7 @@ describe("portable local worker driver", () => {
     } };
     const missionWorkerExecution = {
       runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
-      completionEventId: "event-5", failureEventId: "event-6", idempotencyKey: "terminal-1",
+      completionEventId: "event-5", evaluationEventId: "event-evaluation", failureEventId: "event-6", idempotencyKey: "terminal-1",
       expectedRunRevision: 5, expectedLastSequence: 4,
       toolEvidence: { toolEventId: "event-4", outputReference: "mission-tool:v1:event-4:call-1:sha256:abc" }
     };
