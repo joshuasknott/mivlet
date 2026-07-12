@@ -219,7 +219,7 @@ selected plan, and immutable revision atomically and restores it after process
 restart. Authenticated native create/read/revise commands derive workspace,
 member, actor, authority, lifecycle, timestamps, and revisions; they repeat the
 bounded-plan validation before persistence rather than trusting the renderer.
-Worker execution, run events, and the inspectable product journey remain open,
+Production worker execution and the inspectable product journey remain open,
 so the Wave 4A boxes stay unchecked.
 
 The next repository slice compiles one selected step into a scope-matched,
@@ -240,8 +240,15 @@ atomically, and reopens the owner-qualified chain after restart. Native command
 support now creates a root run only from the authenticated member's ready,
 currently selected persisted mission plan; reads only that owner's journal;
 and appends an idempotent native-built cooperative cancellation without
-accepting renderer authority, actor, status, sequence, or time. Checkpoint state
-blobs and production worker execution-event persistence are still open, so the
+accepting renderer authority, actor, status, sequence, or time. Schema v26 adds
+owner-qualified encrypted checkpoint state linked by composite foreign key to
+the exact immutable checkpoint event. Authenticated create/restore commands
+derive completed workers, plan steps, committed effects, active work, and waits
+only from the durable journal; persist only the closed portable replay shape;
+bind its hash to run, event, attempt, and reference; select the newest checkpoint
+by event sequence; restore into exactly the next attempt; and make an exact
+restore replay stable even after a newer checkpoint exists. Production worker
+execution-event persistence and desktop recovery wiring are still open, so the
 durable-run box remains unchecked.
 
 ### Wave 4B - Routing and experience

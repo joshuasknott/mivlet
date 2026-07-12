@@ -117,6 +117,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 24 -> 25: add the encrypted append-only mission run journal.
             // Migration creates no runs, checkpoints, or execution authority.
             24 => apply_v24_to_v25(conn)?,
+            // 25 -> 26: persist redacted checkpoint state separately from the
+            // immutable checkpoint event. No checkpoint is inferred.
+            25 => apply_v25_to_v26(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -126,6 +129,27 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v25_to_v26(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mission_checkpoint_state (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL, checkpoint_event_id TEXT NOT NULL,
+          attempt_number INTEGER NOT NULL CHECK(attempt_number >= 1),
+          state_reference TEXT NOT NULL, state_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+          payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,checkpoint_event_id),
+          UNIQUE(workspace_id,owner_member_id,run_id,state_reference),
+          FOREIGN KEY(workspace_id,owner_member_id,checkpoint_event_id)
+            REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_checkpoint_run
+          ON mission_checkpoint_state(workspace_id,owner_member_id,run_id,created_at);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1336,8 +1360,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v25 is current; v25 -> v26 has no registered migration.
-        let err = apply(&conn, 25, 26).unwrap_err();
+        // v26 is current; v26 -> v27 has no registered migration.
+        let err = apply(&conn, 26, 27).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -1391,6 +1415,24 @@ mod tests {
                 .unwrap();
             assert_eq!(count, 0);
         }
+    }
+
+    #[test]
+    fn v25_to_v26_adds_empty_checkpoint_state_without_inferred_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE workspace(id TEXT PRIMARY KEY);")
+            .unwrap();
+        apply(&conn, 25, 26).unwrap();
+        let exists:i64=conn.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='mission_checkpoint_state');",[],|row|row.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mission_checkpoint_state;",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(exists, 1);
+        assert_eq!(count, 0);
     }
 
     #[test]

@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 25;
+pub const CURRENT_SCHEMA_VERSION: u32 = 26;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -1580,6 +1580,19 @@ CREATE TABLE IF NOT EXISTS mission_run_event (
 );
 CREATE INDEX IF NOT EXISTS idx_mission_run_event_run
   ON mission_run_event(workspace_id,owner_member_id,run_id,sequence);
+CREATE TABLE IF NOT EXISTS mission_checkpoint_state (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL, checkpoint_event_id TEXT NOT NULL,
+  attempt_number INTEGER NOT NULL CHECK(attempt_number >= 1),
+  state_reference TEXT NOT NULL, state_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,checkpoint_event_id),
+  UNIQUE(workspace_id,owner_member_id,run_id,state_reference),
+  FOREIGN KEY(workspace_id,owner_member_id,checkpoint_event_id)
+    REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mission_checkpoint_run
+  ON mission_checkpoint_state(workspace_id,owner_member_id,run_id,created_at);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (

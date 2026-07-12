@@ -157,6 +157,8 @@ pub fn run() {
             mission_runs::mission_run_create,
             mission_runs::mission_run_get,
             mission_runs::mission_run_request_cancellation,
+            mission_runs::mission_run_create_checkpoint,
+            mission_runs::mission_run_restore_checkpoint,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
             artifacts::artifact_review_action,

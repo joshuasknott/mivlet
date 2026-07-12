@@ -32,6 +32,7 @@ pub mod knowledge_source;
 pub mod mcp_local_server;
 pub mod memory_record;
 pub mod message;
+pub mod mission_checkpoint;
 pub mod mission_plan;
 pub mod mission_run;
 pub mod preferences;

@@ -1,10 +1,16 @@
 //! Authenticated mission-run creation, read, and cooperative cancellation.
 
 use chrono::{SecondsFormat, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::store::repos::{mission_plan, mission_run, scope::DataScope, workspace_directory};
+use crate::store::repos::{
+    mission_checkpoint, mission_plan, mission_run, scope::DataScope, workspace_directory,
+};
+
+const MAX_CHECKPOINT_STATE_BYTES: usize = 256_000;
 
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -29,6 +35,37 @@ pub struct MissionRunCancelInput {
     expected_last_sequence: i64,
     mode: String,
     reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionCheckpointCreateInput {
+    run_id: String,
+    event_id: String,
+    idempotency_key: String,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+    attempt_number: i64,
+    durable_through_sequence: i64,
+    resume_after_event_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionCheckpointRestoreInput {
+    run_id: String,
+    event_id: String,
+    idempotency_key: String,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+    new_attempt_number: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionCheckpointRestoreResult {
+    journal: mission_run::MissionRunJournalRow,
+    checkpoint: mission_checkpoint::CheckpointStateRow,
 }
 
 fn authorized(
@@ -154,6 +191,220 @@ pub fn mission_run_request_cancellation(
                 &projected,
                 &at,
             )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_run_create_checkpoint(
+    input: MissionCheckpointCreateInput,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let (scope, context, member) = authorized(tx)?;
+            validate_key(&input.idempotency_key, "Checkpoint idempotency key", 200)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let journal =
+                mission_run::get(tx, store, &scope, &member, &input.run_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            let facts = derive_replay_facts(&journal.events, input.durable_through_sequence)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let state = facts.state.clone();
+            let reference = format!("checkpoint:{}", input.event_id);
+            let state_hash = checkpoint_state_hash(
+                &input.run_id,
+                &input.event_id,
+                input.attempt_number,
+                &reference,
+                &state,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            let event_key = format!("checkpoint:{}", input.idempotency_key.trim());
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            }) {
+                exact_checkpoint_replay(existing, &input, &state_hash, &facts)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                let stored =
+                    mission_checkpoint::get_by_event(tx, store, &scope, &member, &input.event_id)?
+                        .ok_or_else(|| {
+                            crate::store::StoreError::Invalid(
+                                "Checkpoint state is unavailable for the replayed event.".into(),
+                            )
+                        })?;
+                if stored.state_hash != state_hash || stored.state != state {
+                    return Err(crate::store::StoreError::Invalid(
+                        "Replayed checkpoint state does not match the original request.".into(),
+                    ));
+                }
+                return Ok(journal);
+            }
+            let at = now();
+            let (projected, event, reference) = build_checkpoint(
+                &journal,
+                &input,
+                &state_hash,
+                &facts,
+                &context.internal_user_id,
+                &member,
+                &at,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            let saved = mission_run::append(
+                tx,
+                store,
+                &scope,
+                &member,
+                &input.run_id,
+                input.expected_run_revision,
+                input.expected_last_sequence,
+                &input.event_id,
+                "checkpoint-created",
+                &event_key,
+                &event,
+                &projected,
+                &at,
+            )?;
+            mission_checkpoint::put(
+                tx,
+                store,
+                &scope,
+                &member,
+                &input.run_id,
+                &input.event_id,
+                input.attempt_number,
+                &reference,
+                &state_hash,
+                &state,
+                &at,
+            )?;
+            Ok(saved)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_run_restore_checkpoint(
+    input: MissionCheckpointRestoreInput,
+) -> Result<MissionCheckpointRestoreResult, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let (scope, context, member) = authorized(tx)?;
+            validate_key(
+                &input.idempotency_key,
+                "Checkpoint restore idempotency key",
+                200,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            let journal =
+                mission_run::get(tx, store, &scope, &member, &input.run_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            let event_key = format!("restore:{}", input.idempotency_key.trim());
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            }) {
+                let checkpoint_event_id = existing
+                    .pointer("/payload/checkpointEventId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        crate::store::StoreError::Invalid(
+                            "Replayed checkpoint restore is invalid.".into(),
+                        )
+                    })?;
+                let checkpoint = mission_checkpoint::get_by_event(
+                    tx,
+                    store,
+                    &scope,
+                    &member,
+                    checkpoint_event_id,
+                )?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Checkpoint state is unavailable for the replayed restore.".into(),
+                    )
+                })?;
+                let checkpoint_event = journal
+                    .events
+                    .iter()
+                    .find(|event| {
+                        event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id)
+                            && event.get("type").and_then(Value::as_str)
+                                == Some("checkpoint-created")
+                    })
+                    .ok_or_else(|| {
+                        crate::store::StoreError::Invalid(
+                            "Checkpoint event is unavailable for the replayed restore.".into(),
+                        )
+                    })?;
+                verify_checkpoint_state(&checkpoint, checkpoint_event)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                exact_restore_replay(existing, &input, &checkpoint)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                return Ok(MissionCheckpointRestoreResult {
+                    journal,
+                    checkpoint,
+                });
+            }
+            let checkpoint = mission_checkpoint::latest(tx, store, &scope, &member, &input.run_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run has no restorable checkpoint.".into(),
+                    )
+                })?;
+            let checkpoint_event = journal
+                .events
+                .iter()
+                .find(|event| {
+                    event.get("id").and_then(Value::as_str)
+                        == Some(checkpoint.checkpoint_event_id.as_str())
+                        && event.get("type").and_then(Value::as_str) == Some("checkpoint-created")
+                })
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Checkpoint event is unavailable in this run.".into(),
+                    )
+                })?;
+            verify_checkpoint_state(&checkpoint, checkpoint_event)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let at = now();
+            let (projected, event) = build_checkpoint_restore(
+                &journal.run,
+                &input,
+                &checkpoint,
+                &context.internal_user_id,
+                &member,
+                &at,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            let journal = mission_run::append(
+                tx,
+                store,
+                &scope,
+                &member,
+                &input.run_id,
+                input.expected_run_revision,
+                input.expected_last_sequence,
+                &input.event_id,
+                "checkpoint-restored",
+                &event_key,
+                &event,
+                &projected,
+                &at,
+            )?;
+            Ok(MissionCheckpointRestoreResult {
+                journal,
+                checkpoint,
+            })
         })
         .map_err(|error| error.to_string())
 }
@@ -288,6 +539,357 @@ fn build_cancellation(
         json!({"lastSequence":sequence,"lastEventId":input.event_id}),
     );
     Ok((Value::Object(projected), Value::Object(event)))
+}
+
+fn build_checkpoint(
+    journal: &mission_run::MissionRunJournalRow,
+    input: &MissionCheckpointCreateInput,
+    state_hash: &str,
+    facts: &ReplayFacts,
+    actor: &str,
+    member: &str,
+    at: &str,
+) -> Result<(Value, Value, String), String> {
+    let current = &journal.run;
+    validate_live_head(
+        current,
+        input.expected_run_revision,
+        input.expected_last_sequence,
+    )?;
+    let current_attempt = current
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    if input.attempt_number != current_attempt {
+        return Err("Checkpoint attempt does not match the current run attempt.".into());
+    }
+    if input.durable_through_sequence < 1
+        || input.durable_through_sequence >= input.expected_last_sequence + 1
+    {
+        return Err("Checkpoint durable sequence is invalid.".into());
+    }
+    let resume = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(input.resume_after_event_id.as_str())
+    });
+    if resume
+        .and_then(|event| event.get("sequence"))
+        .and_then(Value::as_i64)
+        != Some(input.durable_through_sequence)
+    {
+        return Err("Checkpoint replay boundary is unavailable in this run.".into());
+    }
+    let workspace = current
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Mission run workspace is invalid.".to_string())?;
+    let previous = current
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Mission run event head is invalid.".to_string())?;
+    let sequence = input.expected_last_sequence + 1;
+    let reference = format!("checkpoint:{}", input.event_id);
+    let checkpoint = json!({"kind":"manual","attemptNumber":input.attempt_number,"createdAt":at,
+        "replayBoundary":{"durableThroughSequence":input.durable_through_sequence,"resumeAfterEventId":input.resume_after_event_id,
+        "completedPlanStepKeys":facts.completed_plan_step_keys,"completedWorkerIds":facts.completed_worker_ids,"committedEffectKeys":facts.committed_effect_keys},
+        "stateStorage":"portable-redacted","stateReference":reference,"stateHash":state_hash,"executionNodeId":"local-desktop"});
+    let mut event = object(metadata(workspace, member, actor, at, 1))?;
+    event.extend(object(json!({"id":input.event_id,"runId":input.run_id,"type":"checkpoint-created","sequence":sequence,
+        "previousEventId":previous,"attemptNumber":input.attempt_number,"occurredAt":at,
+        "actor":{"kind":"internal-user","internalUserId":actor,"memberId":member},
+        "idempotencyKey":format!("checkpoint:{}",input.idempotency_key.trim()),"payload":{"checkpoint":checkpoint}}))?);
+    let mut projected = object(current.clone())?;
+    projected.insert("revision".into(), json!(input.expected_run_revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":input.event_id}),
+    );
+    Ok((Value::Object(projected), Value::Object(event), reference))
+}
+
+fn build_checkpoint_restore(
+    current: &Value,
+    input: &MissionCheckpointRestoreInput,
+    checkpoint: &mission_checkpoint::CheckpointStateRow,
+    actor: &str,
+    member: &str,
+    at: &str,
+) -> Result<(Value, Value), String> {
+    validate_live_head(
+        current,
+        input.expected_run_revision,
+        input.expected_last_sequence,
+    )?;
+    let current_attempt = current
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    if input.new_attempt_number != current_attempt + 1
+        || input.new_attempt_number <= checkpoint.attempt_number
+    {
+        return Err("Checkpoint restore must advance exactly one run attempt.".into());
+    }
+    let workspace = current
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Mission run workspace is invalid.".to_string())?;
+    let previous = current
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Mission run event head is invalid.".to_string())?;
+    let sequence = input.expected_last_sequence + 1;
+    let mut event = object(metadata(workspace, member, actor, at, 1))?;
+    event.extend(object(json!({"id":input.event_id,"runId":input.run_id,"type":"checkpoint-restored","sequence":sequence,
+        "previousEventId":previous,"attemptNumber":input.new_attempt_number,"occurredAt":at,
+        "actor":{"kind":"internal-user","internalUserId":actor,"memberId":member},
+        "idempotencyKey":format!("restore:{}",input.idempotency_key.trim()),
+        "payload":{"checkpointEventId":checkpoint.checkpoint_event_id,"newAttemptNumber":input.new_attempt_number}}))?);
+    let mut projected = object(current.clone())?;
+    projected.insert("revision".into(), json!(input.expected_run_revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "currentAttemptNumber".into(),
+        json!(input.new_attempt_number),
+    );
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":input.event_id}),
+    );
+    Ok((Value::Object(projected), Value::Object(event)))
+}
+
+fn validate_live_head(current: &Value, revision: i64, sequence: i64) -> Result<(), String> {
+    let status = current.get("status").and_then(Value::as_str).unwrap_or("");
+    if matches!(
+        status,
+        "completed" | "partially-completed" | "failed" | "cancelled" | "cancelling"
+    ) {
+        return Err("Mission run is not available for checkpoint recovery.".into());
+    }
+    if current.get("revision").and_then(Value::as_i64) != Some(revision)
+        || current
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(sequence)
+    {
+        return Err("The mission run changed before the checkpoint operation.".into());
+    }
+    Ok(())
+}
+
+struct ReplayFacts {
+    completed_plan_step_keys: Vec<String>,
+    completed_worker_ids: Vec<String>,
+    committed_effect_keys: Vec<String>,
+    state: Value,
+}
+
+fn derive_replay_facts(events: &[Value], durable_through: i64) -> Result<ReplayFacts, String> {
+    let mut worker_steps = BTreeMap::<String, String>::new();
+    let mut active_workers = BTreeSet::<String>::new();
+    let mut completed_workers = BTreeSet::<String>::new();
+    let mut completed_steps = BTreeSet::<String>::new();
+    let mut committed_effects = BTreeSet::<String>::new();
+    let mut pending_waits = BTreeSet::<String>::new();
+    for event in events.iter().filter(|event| {
+        event
+            .get("sequence")
+            .and_then(Value::as_i64)
+            .is_some_and(|sequence| sequence <= durable_through)
+    }) {
+        match event.get("type").and_then(Value::as_str).unwrap_or("") {
+            "worker-created" => {
+                let worker = event
+                    .pointer("/payload/worker")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| "Worker creation event is invalid.".to_string())?;
+                let id = required(worker, "id")?;
+                if let Some(step) = worker.get("planStepKey").and_then(Value::as_str) {
+                    worker_steps.insert(id, step.to_string());
+                }
+            }
+            "worker-started" => {
+                if let Some(id) = event.pointer("/payload/workerId").and_then(Value::as_str) {
+                    active_workers.insert(id.to_string());
+                }
+            }
+            "worker-completed" => {
+                if let Some(id) = event.pointer("/payload/workerId").and_then(Value::as_str) {
+                    active_workers.remove(id);
+                    completed_workers.insert(id.to_string());
+                    if let Some(step) = worker_steps.get(id) {
+                        completed_steps.insert(step.clone());
+                    }
+                }
+            }
+            "worker-failed" => {
+                if let Some(id) = event.pointer("/payload/workerId").and_then(Value::as_str) {
+                    active_workers.remove(id);
+                }
+            }
+            "side-effect-recorded" => {
+                if matches!(
+                    event
+                        .pointer("/payload/receipt/outcome")
+                        .and_then(Value::as_str),
+                    Some("committed" | "deduplicated")
+                ) {
+                    if let Some(key) = event
+                        .pointer("/payload/receipt/boundary/effectKey")
+                        .and_then(Value::as_str)
+                    {
+                        committed_effects.insert(key.to_string());
+                    }
+                }
+            }
+            "worker-waiting" => {
+                if let Some(key) = event.pointer("/payload/waitKey").and_then(Value::as_str) {
+                    pending_waits.insert(key.to_string());
+                }
+            }
+            "approval-requested" | "human-input-requested" => {
+                if let Some(key) = event
+                    .pointer("/payload/wait/waitKey")
+                    .and_then(Value::as_str)
+                {
+                    pending_waits.insert(key.to_string());
+                }
+            }
+            "approval-resolved" | "human-input-received" => {
+                if let Some(key) = event
+                    .pointer("/payload/resolution/waitKey")
+                    .and_then(Value::as_str)
+                {
+                    pending_waits.remove(key);
+                }
+            }
+            _ => {}
+        }
+    }
+    let active_plan_step_keys = active_workers
+        .iter()
+        .filter_map(|id| worker_steps.get(id).cloned())
+        .collect::<BTreeSet<_>>();
+    let state = json!({"activeWorkerIds":active_workers,"activePlanStepKeys":active_plan_step_keys,"pendingWaitKeys":pending_waits});
+    let bytes = serde_json::to_vec(&state)
+        .map_err(|_| "Checkpoint state could not be encoded.".to_string())?;
+    if bytes.len() > MAX_CHECKPOINT_STATE_BYTES {
+        return Err("Checkpoint state exceeds its storage limit.".into());
+    }
+    Ok(ReplayFacts {
+        completed_plan_step_keys: completed_steps.into_iter().collect(),
+        completed_worker_ids: completed_workers.into_iter().collect(),
+        committed_effect_keys: committed_effects.into_iter().collect(),
+        state,
+    })
+}
+
+fn checkpoint_state_hash(
+    run_id: &str,
+    event_id: &str,
+    attempt: i64,
+    reference: &str,
+    state: &Value,
+) -> Result<String, String> {
+    let envelope = json!({"runId":run_id,"checkpointEventId":event_id,"attemptNumber":attempt,"stateReference":reference,"state":state});
+    let bytes = serde_json::to_vec(&envelope)
+        .map_err(|_| "Checkpoint state could not be encoded.".to_string())?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+fn verify_checkpoint_state(
+    checkpoint: &mission_checkpoint::CheckpointStateRow,
+    event: &Value,
+) -> Result<(), String> {
+    if event.get("id").and_then(Value::as_str) != Some(checkpoint.checkpoint_event_id.as_str())
+        || event.get("runId").and_then(Value::as_str) != Some(checkpoint.run_id.as_str())
+        || event
+            .pointer("/payload/checkpoint/attemptNumber")
+            .and_then(Value::as_i64)
+            != Some(checkpoint.attempt_number)
+        || event
+            .pointer("/payload/checkpoint/stateReference")
+            .and_then(Value::as_str)
+            != Some(checkpoint.state_reference.as_str())
+        || event
+            .pointer("/payload/checkpoint/stateHash")
+            .and_then(Value::as_str)
+            != Some(checkpoint.state_hash.as_str())
+    {
+        return Err("Checkpoint state metadata does not match its immutable event.".into());
+    }
+    let hash = checkpoint_state_hash(
+        &checkpoint.run_id,
+        &checkpoint.checkpoint_event_id,
+        checkpoint.attempt_number,
+        &checkpoint.state_reference,
+        &checkpoint.state,
+    )?;
+    if hash != checkpoint.state_hash {
+        return Err("Checkpoint state failed its integrity check.".into());
+    }
+    Ok(())
+}
+fn exact_checkpoint_replay(
+    event: &Value,
+    input: &MissionCheckpointCreateInput,
+    state_hash: &str,
+    facts: &ReplayFacts,
+) -> Result<(), String> {
+    if event.get("id").and_then(Value::as_str) == Some(input.event_id.as_str())
+        && event.get("type").and_then(Value::as_str) == Some("checkpoint-created")
+        && event
+            .pointer("/payload/checkpoint/stateHash")
+            .and_then(Value::as_str)
+            == Some(state_hash)
+        && event.get("sequence").and_then(Value::as_i64) == Some(input.expected_last_sequence + 1)
+        && event.get("sequence").and_then(Value::as_i64) == Some(input.expected_run_revision)
+        && event
+            .pointer("/payload/checkpoint/attemptNumber")
+            .and_then(Value::as_i64)
+            == Some(input.attempt_number)
+        && event
+            .pointer("/payload/checkpoint/replayBoundary/durableThroughSequence")
+            .and_then(Value::as_i64)
+            == Some(input.durable_through_sequence)
+        && event
+            .pointer("/payload/checkpoint/replayBoundary/resumeAfterEventId")
+            .and_then(Value::as_str)
+            == Some(input.resume_after_event_id.as_str())
+        && event.pointer("/payload/checkpoint/replayBoundary/completedPlanStepKeys")
+            == Some(&json!(facts.completed_plan_step_keys))
+        && event.pointer("/payload/checkpoint/replayBoundary/completedWorkerIds")
+            == Some(&json!(facts.completed_worker_ids))
+        && event.pointer("/payload/checkpoint/replayBoundary/committedEffectKeys")
+            == Some(&json!(facts.committed_effect_keys))
+    {
+        Ok(())
+    } else {
+        Err("Checkpoint idempotency key already represents another request.".into())
+    }
+}
+fn exact_restore_replay(
+    event: &Value,
+    input: &MissionCheckpointRestoreInput,
+    checkpoint: &mission_checkpoint::CheckpointStateRow,
+) -> Result<(), String> {
+    if event.get("id").and_then(Value::as_str) == Some(input.event_id.as_str())
+        && event.get("type").and_then(Value::as_str) == Some("checkpoint-restored")
+        && event
+            .pointer("/payload/checkpointEventId")
+            .and_then(Value::as_str)
+            == Some(checkpoint.checkpoint_event_id.as_str())
+        && event
+            .pointer("/payload/newAttemptNumber")
+            .and_then(Value::as_i64)
+            == Some(input.new_attempt_number)
+        && event.get("sequence").and_then(Value::as_i64) == Some(input.expected_last_sequence + 1)
+        && event.get("sequence").and_then(Value::as_i64) == Some(input.expected_run_revision)
+    {
+        Ok(())
+    } else {
+        Err("Checkpoint restore idempotency key already represents another request.".into())
+    }
 }
 
 fn metadata(workspace: &str, member: &str, actor: &str, at: &str, revision: i64) -> Value {
@@ -473,5 +1075,106 @@ mod tests {
             ..input
         };
         assert!(exact_create_replay(&journal, &changed).is_err());
+    }
+
+    #[test]
+    fn checkpoint_creation_and_restore_bind_hash_boundary_and_attempt() {
+        let current = json!({"id":"run-1","workspaceId":"workspace-1","status":"running","revision":6,"currentAttemptNumber":1,"eventHead":{"lastSequence":5,"lastEventId":"event-5"}});
+        let journal = mission_run::MissionRunJournalRow {
+            run: current,
+            events: vec![
+                json!({"id":"event-1","type":"run-created","sequence":1}),
+                json!({"id":"event-2","type":"worker-created","sequence":2,"payload":{"worker":{"id":"worker-1","planStepKey":"search"}}}),
+                json!({"id":"event-3","type":"worker-started","sequence":3,"payload":{"workerId":"worker-1"}}),
+                json!({"id":"event-4","type":"worker-completed","sequence":4,"payload":{"workerId":"worker-1","outputs":[]}}),
+                json!({"id":"event-5","type":"side-effect-recorded","sequence":5,"payload":{"receipt":{"outcome":"committed","boundary":{"effectKey":"effect-1"}}}}),
+            ],
+        };
+        let input = MissionCheckpointCreateInput {
+            run_id: "run-1".into(),
+            event_id: "event-6".into(),
+            idempotency_key: "save-1".into(),
+            expected_run_revision: 6,
+            expected_last_sequence: 5,
+            attempt_number: 1,
+            durable_through_sequence: 5,
+            resume_after_event_id: "event-5".into(),
+        };
+        let facts = derive_replay_facts(&journal.events, input.durable_through_sequence).unwrap();
+        assert_eq!(facts.completed_plan_step_keys, ["search"]);
+        assert_eq!(facts.completed_worker_ids, ["worker-1"]);
+        assert_eq!(facts.committed_effect_keys, ["effect-1"]);
+        assert_eq!(facts.state["activeWorkerIds"], json!([]));
+        let state = facts.state.clone();
+        let reference = "checkpoint:event-6";
+        let hash = checkpoint_state_hash("run-1", "event-6", 1, reference, &state).unwrap();
+        let (projected, event, reference) = build_checkpoint(
+            &journal,
+            &input,
+            &hash,
+            &facts,
+            "user-real",
+            "member-real",
+            "t6",
+        )
+        .unwrap();
+        assert_eq!(projected["eventHead"]["lastSequence"], 6);
+        assert_eq!(event["payload"]["checkpoint"]["stateHash"], hash);
+        assert_eq!(
+            event["payload"]["checkpoint"]["replayBoundary"]["completedWorkerIds"],
+            json!(["worker-1"])
+        );
+        let changed_facts = derive_replay_facts(&journal.events, 4).unwrap();
+        let changed = MissionCheckpointCreateInput {
+            run_id: "run-1".into(),
+            event_id: "event-6".into(),
+            idempotency_key: "save-1".into(),
+            expected_run_revision: 6,
+            expected_last_sequence: 5,
+            attempt_number: 1,
+            durable_through_sequence: 4,
+            resume_after_event_id: "event-4".into(),
+        };
+        assert!(exact_checkpoint_replay(&event, &changed, &hash, &changed_facts).is_err());
+        let checkpoint = mission_checkpoint::CheckpointStateRow {
+            run_id: "run-1".into(),
+            checkpoint_event_id: "event-6".into(),
+            attempt_number: 1,
+            state_reference: reference,
+            state_hash: hash,
+            created_at: "t6".into(),
+            state,
+        };
+        verify_checkpoint_state(&checkpoint, &event).unwrap();
+        let restore = MissionCheckpointRestoreInput {
+            run_id: "run-1".into(),
+            event_id: "event-7".into(),
+            idempotency_key: "restore-1".into(),
+            expected_run_revision: 7,
+            expected_last_sequence: 6,
+            new_attempt_number: 2,
+        };
+        let (restored, restore_event) = build_checkpoint_restore(
+            &projected,
+            &restore,
+            &checkpoint,
+            "user-real",
+            "member-real",
+            "t7",
+        )
+        .unwrap();
+        assert_eq!(restored["currentAttemptNumber"], 2);
+        assert_eq!(restore_event["payload"]["checkpointEventId"], "event-6");
+    }
+
+    #[test]
+    fn checkpoint_state_tracks_first_class_wait_requests_and_resolutions() {
+        let events = vec![
+            json!({"sequence":1,"type":"approval-requested","payload":{"wait":{"waitKey":"approval-1"}}}),
+            json!({"sequence":2,"type":"human-input-requested","payload":{"wait":{"waitKey":"input-1"}}}),
+            json!({"sequence":3,"type":"approval-resolved","payload":{"resolution":{"waitKey":"approval-1"}}}),
+        ];
+        let facts = derive_replay_facts(&events, 3).unwrap();
+        assert_eq!(facts.state["pendingWaitKeys"], json!(["input-1"]));
     }
 }
