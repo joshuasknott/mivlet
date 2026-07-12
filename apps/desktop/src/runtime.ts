@@ -2572,6 +2572,7 @@ export interface RuntimeStreamRequest {
   requestId: string;
   model: string;
   body: unknown;
+  providerRoute?: import("@fable/protocol").ProviderRouteExecutionBinding;
   missionWorkerExecution?: import("@fable/protocol").MissionWorkerExecutionBinding;
 }
 

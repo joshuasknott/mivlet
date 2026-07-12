@@ -432,6 +432,7 @@ pub struct BackendStreamRequest {
     /// transport contract is explicit even though Rust routes the body verbatim.
     pub model: String,
     pub body: serde_json::Value,
+    pub provider_route: Option<crate::models::ProviderRouteExecutionBinding>,
     pub mission_worker_execution: Option<crate::mission_workers::NativeWorkerExecutionBinding>,
 }
 
@@ -733,6 +734,22 @@ pub async fn stream_backend_completion(
     }
     if request.body.to_string().len() > 2 * 1024 * 1024 {
         return Err("Native provider request body exceeds the supported limit.".to_string());
+    }
+    match (&request.mission_worker_execution, &request.provider_route) {
+        (Some(_), Some(_)) => {
+            return Err("Native provider egress has ambiguous route authority.".to_string())
+        }
+        (None, Some(binding)) => {
+            crate::backends::validate_current_native_provider_route(
+                &request.provider_id,
+                &request.model,
+                binding,
+            )?;
+        }
+        (None, None) => {
+            return Err("Native provider egress requires an authorized provider route.".to_string())
+        }
+        (Some(_), None) => {}
     }
     let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
     let mission_preflight = request

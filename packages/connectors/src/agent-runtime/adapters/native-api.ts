@@ -93,6 +93,7 @@ export function createNativeApiBackend(
       messages: request.messages,
       tools: request.tools,
       maxTokens: request.maxTokens,
+      ...(request.providerRoute ? { providerRoute: request.providerRoute } : {}),
       ...(request.missionWorkerExecution ? { missionWorkerExecution: request.missionWorkerExecution } : {})
     };
     const eventStream = runAgentLoop(handle.transport, nativeRequest, {

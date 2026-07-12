@@ -55,6 +55,7 @@ const mocks = vi.hoisted(() => ({
     requestId: string;
     model: string;
     body: unknown;
+    providerRoute?: unknown;
   }>,
   cancelCalls: [] as string[],
   // The joined integration test scripts the mocked Rust tool boundary here:
@@ -65,7 +66,20 @@ const mocks = vi.hoisted(() => ({
   saveError: null as Error | null,
   recoveredRuns: [] as PersistedAgentRun[],
   listedRuns: null as PersistedAgentRun[] | null,
-  toolResult: { ok: true, output: "Fetched body text from Rust." }
+  toolResult: { ok: true, output: "Fetched body text from Rust." },
+  selectRoute: vi.fn(async (input: { providerId: string; model: string }) => ({
+    workspaceId: "workspace-1",
+    selection: {
+      providerRouteId: `route-${input.providerId}-${input.model}`,
+      selectedAt: "2026-07-12T12:00:00.000Z",
+      reason: `Selected ${input.providerId} ${input.model}.`,
+      boundaryPolicyRef: `boundary-${input.providerId}`
+    }
+  }))
+}));
+
+vi.mock("../lib/provider-route-selection", () => ({
+  selectNativeProviderRoute: mocks.selectRoute
 }));
 
 vi.mock("../runtime", () => ({
@@ -87,7 +101,7 @@ vi.mock("../runtime", () => ({
     return () => {};
   }),
   streamRuntimeCompletion: vi.fn(
-    async (request: { providerId: string; requestId: string; model: string; body: unknown }) => {
+    async (request: { providerId: string; requestId: string; model: string; body: unknown; providerRoute?: unknown }) => {
       mocks.streamCalls += 1;
       mocks.persistenceEvents.push("egress");
       // Record the egress request so the per-provider routing tests can assert
@@ -229,6 +243,8 @@ describe("useNativeAgent", () => {
     expect(mocks.persistenceEvents.indexOf("save")).toBeLessThan(mocks.persistenceEvents.indexOf("egress"));
     expect(saved.every((run) => run.contextReceipt === preparedContext.receipt)).toBe(true);
     expect(mocks.streamRequests[0]).toBeDefined();
+    expect(saved[0].providerRoute).toMatchObject({ workspaceId: "workspace-1", selection: { providerRouteId: "route-openai-gpt-5" } });
+    expect(mocks.streamRequests[0].providerRoute).toEqual(saved[0].providerRoute);
     expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toEqual(preparedContext.receipt);
   });
 

@@ -291,6 +291,39 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
         .context_receipt
         .map(|receipt| normalize_context_receipt(receipt, &run.id, run.thread_id.as_deref()))
         .transpose()?;
+    if let Some(route) = &mut run.provider_route {
+        route.workspace_id = normalize_spaces(&route.workspace_id);
+        route.selection.provider_route_id = normalize_spaces(&route.selection.provider_route_id);
+        route.selection.selected_at = normalize_spaces(&route.selection.selected_at);
+        route.selection.reason = normalize_spaces(&route.selection.reason);
+        route.selection.boundary_policy_ref = route
+            .selection
+            .boundary_policy_ref
+            .take()
+            .map(|value| normalize_spaces(&value))
+            .filter(|value| !value.is_empty());
+        route.selection.fallback_from_provider_route_id = route
+            .selection
+            .fallback_from_provider_route_id
+            .take()
+            .map(|value| normalize_spaces(&value))
+            .filter(|value| !value.is_empty());
+        if route.workspace_id.is_empty()
+            || route.workspace_id.len() > 160
+            || route.selection.provider_route_id.is_empty()
+            || route.selection.provider_route_id.len() > 240
+            || route.selection.reason.is_empty()
+            || route.selection.reason.len() > 500
+            || route
+                .selection
+                .boundary_policy_ref
+                .as_ref()
+                .is_none_or(|value| value.len() > 240)
+            || chrono::DateTime::parse_from_rfc3339(&route.selection.selected_at).is_err()
+        {
+            return Err("Agent run provider route is invalid.".to_string());
+        }
+    }
     run.exchanges = run
         .exchanges
         .into_iter()
@@ -389,7 +422,7 @@ pub(crate) fn persist_agent_run(
             }
             return Err("A terminal agent run is immutable.".to_string());
         }
-        ensure_context_receipt_immutable(existing, &run)?;
+        ensure_run_evidence_immutable(existing, &run)?;
     }
     runs.retain(|existing| existing.id != run.id);
     runs.insert(0, run.clone());
@@ -398,12 +431,15 @@ pub(crate) fn persist_agent_run(
     Ok(run)
 }
 
-fn ensure_context_receipt_immutable(
+fn ensure_run_evidence_immutable(
     existing: &PersistedAgentRun,
     incoming: &PersistedAgentRun,
 ) -> Result<(), String> {
     if existing.context_receipt.is_some() && existing.context_receipt != incoming.context_receipt {
         return Err("A run context receipt cannot be changed or removed.".to_string());
+    }
+    if existing.provider_route != incoming.provider_route {
+        return Err("A run provider route cannot be changed or removed.".to_string());
     }
     Ok(())
 }
@@ -545,7 +581,7 @@ pub fn save_agent_run(
                     serde_json::from_value(existing.payload.clone()).map_err(|_| {
                         crate::store::StoreError::Invalid("Agent run payload is invalid.".into())
                     })?;
-                ensure_context_receipt_immutable(&existing_value, &run)
+                ensure_run_evidence_immutable(&existing_value, &run)
                     .map_err(crate::store::StoreError::Invalid)?;
                 let terminal = matches!(
                     existing.status.as_str(),
@@ -723,6 +759,7 @@ mod tests {
             }],
             parent_run_id: None,
             context_receipt: None,
+            provider_route: None,
             pending_approval_ids: vec!["approval-1".to_string()],
             recoverable: true,
             retry_count: 1,
@@ -730,6 +767,28 @@ mod tests {
             created_at: "2026-06-27T12:00:00Z".to_string(),
             updated_at: "2026-06-27T12:00:01Z".to_string(),
         }
+    }
+
+    #[test]
+    fn provider_route_is_structurally_valid_and_immutable_from_first_save() {
+        let mut initial = fixture("streaming");
+        let route = crate::models::ProviderRouteExecutionBinding {
+            workspace_id: "workspace-1".into(),
+            selection: crate::models::ProviderRouteSelection {
+                provider_route_id: "provider-route:v2:openai:test".into(),
+                selected_at: "2026-07-12T12:00:00Z".into(),
+                reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.".into(),
+                fallback_from_provider_route_id: None,
+                boundary_policy_ref: Some("boundary:member-private:account-owned-provider:openai:local-credential-egress".into()),
+            },
+        };
+        initial.provider_route = Some(route.clone());
+        assert!(normalize_agent_run(initial.clone()).is_ok());
+        let mut changed = initial.clone();
+        changed.provider_route.as_mut().unwrap().selection.reason = "Changed".into();
+        assert!(ensure_run_evidence_immutable(&initial, &changed).is_err());
+        let legacy = fixture("streaming");
+        assert!(ensure_run_evidence_immutable(&legacy, &initial).is_err());
     }
 
     fn receipt() -> RunContextReceipt {

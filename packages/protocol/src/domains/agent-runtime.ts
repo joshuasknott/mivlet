@@ -4,7 +4,8 @@ import type {
   ApprovalRiskLevel,
   PermissionMode
 } from "./approvals.js";
-import type { InternalUserId, MemberId } from "../spine/primitives.js";
+import type { InternalUserId, MemberId, WorkspaceId } from "../spine/primitives.js";
+import type { ProviderRouteSelection } from "../spine/missions.js";
 
 export type AgentRunStatus =
   | "queued"
@@ -153,6 +154,8 @@ export interface PersistedAgentRun {
   parentRunId?: string;
   /** Immutable bounded-context evidence captured before provider egress. */
   contextReceipt?: RunContextReceipt;
+  /** Exact portable provider route selected before native provider egress. */
+  providerRoute?: ProviderRouteExecutionBinding;
   turn: number;
   usage?: {
     inputTokens: number;
@@ -492,8 +495,16 @@ export interface NativeCompletionRequest {
   tools: NativeToolSpec[];
   /** Max output tokens; provider shapers clamp to the provider's limit. */
   maxTokens: number;
+  /** Exact portable route binding for an ordinary native provider run. */
+  providerRoute?: ProviderRouteExecutionBinding;
   /** Optional native-only completion binding for one already-started mission worker. */
   missionWorkerExecution?: MissionWorkerExecutionBinding;
+}
+
+/** Workspace-fenced route authority carried unchanged from selection to egress. */
+export interface ProviderRouteExecutionBinding {
+  workspaceId: WorkspaceId;
+  selection: ProviderRouteSelection;
 }
 
 /** Secret-free journal identity; Rust revalidates every field before provider egress. */
@@ -599,6 +610,7 @@ export interface AgentRunRequest {
   tools: NativeToolSpec[];
   /** Max output tokens; adapters clamp to the model's known ceiling. */
   maxTokens: number;
+  providerRoute?: ProviderRouteExecutionBinding;
   missionWorkerExecution?: MissionWorkerExecutionBinding;
 }
 

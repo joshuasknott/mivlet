@@ -420,6 +420,14 @@ provider/model route as a no-fallback pin through the portable selector, then
 requires Rust's independently derived `route-selected` id to match. Missing,
 wrong-workspace, unhealthy, insufficient-context, or changed routes fail closed;
 unobserved quality, latency, and cost stay explicitly unobserved rather than zero.
+Ordinary interactive native-provider turns and scheduled native prompts now use
+the same exact no-fallback selector before execution. Interactive runs persist
+the workspace-fenced selection with their durable recovery record, both paths
+carry it unchanged through the provider-neutral backend, and Rust independently
+rechecks the active account, membership, workspace, provider, model, route id,
+reason, boundary, and absence of fallback before credential access. Native API
+egress without either that binding or the separate mission-worker journal
+authority fails closed; ambiguous dual authority is rejected.
 Durable observation history and visible product receipts for other mission shapes
 remain open. The cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and

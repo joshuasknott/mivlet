@@ -42,6 +42,7 @@ import {
 } from "@fable/connectors";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
+import { selectNativeProviderRoute } from "../lib/provider-route-selection";
 import {
   cancelRuntimeCompletion,
   listenRuntimeSchedulerCancelRequest,
@@ -174,6 +175,19 @@ export function useScheduledAgent(
 
       try {
         const executePrompt = async (prompt: string) => {
+          const routeModel = run.execution?.policy === "pinned" && run.execution.modelId
+            ? run.execution.modelId
+            : routeProvider?.models.find((candidate) => candidate.available)?.id ?? run.execution?.modelId;
+          const providerRoute = routeProvider?.backendType === "native-api"
+            && routeProvider.authState === "connected" && backend && routeModel
+            ? await selectNativeProviderRoute({
+                providerId: routeProvider.id,
+                model: routeModel,
+                requiredInputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+                requiredOutputTokens: 1024,
+                requiresTools: false
+              })
+            : undefined;
           const result = await executeScheduledPrompt({
             runId: run.runId,
             route: run.execution,
@@ -181,6 +195,7 @@ export function useScheduledAgent(
             backend,
             prompt,
             maxTokens: 1024,
+            ...(providerRoute ? { providerRoute } : {}),
             execute: optionsRef.current.execute,
             shouldCancel: () => cancelRef.current,
             onToolCall: (event) => optionsRef.current.onToolApproval(event)

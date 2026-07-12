@@ -27,6 +27,7 @@ import type {
   BackendAgentEvent,
   BackendProvider,
   PermissionMode,
+  ProviderRouteExecutionBinding,
   ScheduledExecutionRoute
 } from "@fable/protocol";
 import type { AgentBackend } from "../agent-runtime";
@@ -49,6 +50,7 @@ export interface ScheduledExecutionInput {
   backend: AgentBackend | null;
   prompt: string;
   maxTokens: number;
+  providerRoute?: ProviderRouteExecutionBinding;
   /** Executes an approved tool call (routed through Fable's approval gate). */
   execute: ToolExecutor;
   /** Cooperative cancellation hook, checked between events. */
@@ -126,7 +128,8 @@ export async function executeScheduledPrompt(
     model: modelId,
     messages: [{ role: "user", content: input.prompt }],
     tools: [],
-    maxTokens: input.maxTokens
+    maxTokens: input.maxTokens,
+    ...(input.providerRoute ? { providerRoute: input.providerRoute } : {})
   };
   const stream = input.backend.run(request, {
     execute: input.execute,

@@ -5,6 +5,7 @@ import type {
   BackendAgentEvent,
   BackendProvider,
   PermissionMode,
+  ProviderRouteExecutionBinding,
   ScheduledExecutionRoute
 } from "@fable/protocol";
 import type { AgentBackend } from "../agent-runtime";
@@ -14,13 +15,14 @@ import { executeScheduledPrompt } from "./execution";
 function fakeBackend(
   providerId: string,
   events: BackendAgentEvent[],
-  opts: { runReturnsNull?: boolean } = {}
+  opts: { runReturnsNull?: boolean; onRequest?: (request: AgentRunRequest) => void } = {}
 ): AgentBackend {
   return {
     backend: {} as BackendProvider,
     providerId,
     capabilities: ["streaming"],
-    run(_request: AgentRunRequest, _options: AgentRunOptions): AsyncIterable<BackendAgentEvent> | null {
+    run(request: AgentRunRequest, _options: AgentRunOptions): AsyncIterable<BackendAgentEvent> | null {
+      opts.onRequest?.(request);
       if (opts.runReturnsNull) return null;
       async function* gen(): AsyncIterable<BackendAgentEvent> {
         for (const event of events) yield event;
@@ -62,6 +64,19 @@ const baseInput = {
 };
 
 describe("executeScheduledPrompt", () => {
+  it("carries the preselected provider route unchanged into scheduled execution", async () => {
+    let observed: AgentRunRequest | undefined;
+    const providerRoute = {
+      workspaceId: "workspace-1",
+      selection: { providerRouteId: "route-1", selectedAt: "2026-07-12T12:00:00Z", reason: "Selected route.", boundaryPolicyRef: "boundary-1" }
+    } as unknown as ProviderRouteExecutionBinding;
+    await executeScheduledPrompt({
+      ...baseInput, runId: "run-route", provider: connectedProvider(), providerRoute,
+      backend: fakeBackend("openai", [{ type: "done", finishReason: "stop" }], { onRequest: (request) => { observed = request; } })
+    });
+    expect(observed?.providerRoute).toEqual(providerRoute);
+  });
+
   it("returns completed when the stream ends with done", async () => {
     const result = await executeScheduledPrompt({
       ...baseInput,

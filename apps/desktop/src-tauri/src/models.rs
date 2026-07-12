@@ -510,6 +510,25 @@ pub struct RunContextReceipt {
     pub contributions: Vec<RunContextContribution>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderRouteSelection {
+    pub provider_route_id: String,
+    pub selected_at: String,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_from_provider_route_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_policy_ref: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderRouteExecutionBinding {
+    pub workspace_id: String,
+    pub selection: ProviderRouteSelection,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PersistedAgentRun {
@@ -526,6 +545,8 @@ pub struct PersistedAgentRun {
     pub parent_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_receipt: Option<RunContextReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_route: Option<ProviderRouteExecutionBinding>,
     pub turn: usize,
     pub usage: Option<AgentRunUsage>,
     pub pending_approval_ids: Vec<String>,

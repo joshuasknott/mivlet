@@ -799,6 +799,59 @@ pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
     format!("boundary:member-private:account-owned-provider:{provider_id}:local-credential-egress")
 }
 
+pub(crate) fn validate_current_native_provider_route(
+    provider_id: &str,
+    model: &str,
+    binding: &crate::models::ProviderRouteExecutionBinding,
+) -> Result<String, String> {
+    let internal_user_id = require_current_internal_user()?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let expected = store
+        .with_conn(|tx| {
+            let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            if context.member_id.is_none() {
+                return Err(crate::store::StoreError::Invalid(
+                    "An active Fable workspace membership is required for provider routing.".into(),
+                ));
+            }
+            let workspace_id = context
+                .active_workspace
+                .fable_workspace_id
+                .clone()
+                .unwrap_or(context.active_workspace.local_workspace_id.clone());
+            if workspace_id != binding.workspace_id {
+                return Err(crate::store::StoreError::Invalid(
+                    "The selected provider route is not scoped to the active workspace.".into(),
+                ));
+            }
+            validate_account_native_provider_model(tx, &internal_user_id, provider_id, model)
+                .map_err(crate::store::StoreError::Invalid)
+        })
+        .map_err(|error| error.to_string())?;
+    validate_native_provider_route_binding(provider_id, model, &expected, binding)?;
+    Ok(expected)
+}
+
+fn validate_native_provider_route_binding(
+    provider_id: &str,
+    model: &str,
+    expected_route_id: &str,
+    binding: &crate::models::ProviderRouteExecutionBinding,
+) -> Result<(), String> {
+    let expected_reason = native_provider_route_reason(provider_id, model)?;
+    let expected_boundary = native_provider_route_boundary(provider_id);
+    if binding.selection.provider_route_id != expected_route_id
+        || binding.selection.reason != expected_reason
+        || binding.selection.boundary_policy_ref.as_deref() != Some(expected_boundary.as_str())
+        || binding.selection.fallback_from_provider_route_id.is_some()
+        || chrono::DateTime::parse_from_rfc3339(&binding.selection.selected_at).is_err()
+    {
+        return Err("Native provider egress does not match its selected route.".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let internal_user_id = require_current_internal_user()?;
@@ -1315,6 +1368,33 @@ mod provider_route_tests {
         assert_eq!(
             route["boundaries"]["placementBoundary"],
             "local-credential-egress"
+        );
+    }
+
+    #[test]
+    fn native_egress_accepts_only_the_exact_no_fallback_route_selection() {
+        let expected = account_native_provider_route_id("user-1", "openai", "gpt-5");
+        let mut binding = crate::models::ProviderRouteExecutionBinding {
+            workspace_id: "workspace-1".into(),
+            selection: crate::models::ProviderRouteSelection {
+                provider_route_id: expected.clone(),
+                selected_at: "2026-07-12T12:00:00Z".into(),
+                reason: native_provider_route_reason("openai", "gpt-5").unwrap(),
+                fallback_from_provider_route_id: None,
+                boundary_policy_ref: Some(native_provider_route_boundary("openai")),
+            },
+        };
+        assert!(
+            validate_native_provider_route_binding("openai", "gpt-5", &expected, &binding).is_ok()
+        );
+        binding.selection.fallback_from_provider_route_id = Some("other-route".into());
+        assert!(
+            validate_native_provider_route_binding("openai", "gpt-5", &expected, &binding).is_err()
+        );
+        binding.selection.fallback_from_provider_route_id = None;
+        binding.selection.reason = "Renderer supplied reason".into();
+        assert!(
+            validate_native_provider_route_binding("openai", "gpt-5", &expected, &binding).is_err()
         );
     }
 }

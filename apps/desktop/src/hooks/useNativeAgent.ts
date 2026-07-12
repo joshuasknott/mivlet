@@ -46,6 +46,7 @@ import {
   saveRuntimeAgentRun
 } from "../runtime";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
+import { selectNativeProviderRoute } from "../lib/provider-route-selection";
 
 /** True when the desktop (Tauri) runtime is present (drives the noTransport state). */
 function hasDesktopRuntime(): boolean {
@@ -249,6 +250,31 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             }
           };
       const runId = prepared.receipt.runId;
+      // Reserve the run before asynchronous route selection so two rapid sends
+      // cannot both acquire provider authority before either durable write.
+      activeRunIdRef.current = runId;
+      let providerRoute: Awaited<ReturnType<typeof selectNativeProviderRoute>> | undefined;
+      const provider = options.providers.find((candidate) => candidate.id === providerId);
+      if (provider?.backendType === "native-api") {
+        try {
+          const requiredInputTokens = Math.max(1, Math.ceil((
+            request.messages.reduce((total, message) => total + message.content.length, 0)
+            + prepared.systemPrefix.length
+          ) / 4));
+          providerRoute = await selectNativeProviderRoute({
+            providerId,
+            model: request.model,
+            requiredInputTokens,
+            requiredOutputTokens: request.maxTokens,
+            requiresTools: request.tools.length > 0
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Fable could not select an authorized provider route.";
+          setState((current) => ({ ...current, lastError: message, status: "failed", currentRunId: null }));
+          activeRunIdRef.current = null;
+          return;
+        }
+      }
       setState((current) => ({
         ...current,
         transcript: "",
@@ -265,7 +291,6 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       }));
       // Mark active before the first durable write so a second click cannot
       // start an overlapping run while initial persistence is still pending.
-      activeRunIdRef.current = runId;
       const initialExchanges: PersistedAgentExchange[] = request.messages
         .filter(
           (message): message is typeof message & { role: "user" | "assistant" | "tool" } =>
@@ -287,6 +312,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         exchanges: initialExchanges,
         parentRunId,
         contextReceipt: prepared.receipt,
+        ...(providerRoute ? { providerRoute } : {}),
         turn: 0,
         pendingApprovalIds: [],
         recoverable: true,
@@ -334,7 +360,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // (native-API today) builds its egress transport from deps and returns null
       // when no transport is available (browser preview). The event handling below
       // is provider-neutral — it consumes the universal BackendAgentEvent stream.
-      const eventStream = backend.run(request, {
+      const eventStream = backend.run({ ...request, ...(providerRoute ? { providerRoute } : {}) }, {
         // The real executor is wired by App.tsx from the shell's shared
         // approval gate + the Rust tool boundary; until then (or in tests)
         // the fail-closed stub keeps tool calls surfacing as approvals that
@@ -579,7 +605,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         activeWriterRef.current = null;
       }
     },
-    [backend]
+    [backend, options.providers]
   );
 
   const retry = useCallback(

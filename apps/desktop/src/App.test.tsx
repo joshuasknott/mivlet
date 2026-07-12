@@ -84,6 +84,18 @@ vi.mock("./lib/cited-brief-mission", () => ({
   })
 }));
 
+vi.mock("./lib/provider-route-selection", () => ({
+  selectNativeProviderRoute: vi.fn(async (input: { providerId: string; model: string }) => ({
+    workspaceId: "test-workspace",
+    selection: {
+      providerRouteId: `route-${input.providerId}-${input.model}`,
+      selectedAt: "2026-07-12T12:00:00.000Z",
+      reason: `Selected ${input.providerId} ${input.model}.`,
+      boundaryPolicyRef: `boundary-${input.providerId}`
+    }
+  }))
+}));
+
 vi.mock("./hooks/useProjects", () => ({
   useProjects: () => ({
     projects: runtimeMocks.projectRecords.filter((project) => project.lifecycle === "active"),
