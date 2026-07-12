@@ -399,6 +399,17 @@ external evidence gate rather than a checked repository claim.
 - [ ] Make `/goal`, `/plan`, `/schedule`, `/remember`, and `/stop` Fable-native with natural-language parity.
 - [ ] Add visible routing explanations and time/token/cost/iteration budgets.
 
+Repo-local routing foundation now selects deterministically over already-authorized
+Fable `ProviderRoute` candidates. It filters workspace, semantic capability,
+state/health, tools, context capacity, exact privacy/billing/provider/placement
+boundaries, placement kinds, risk, request and route budgets, currency, and
+require/exclude preferences before scoring quality, estimated cost, and speed.
+Preferred fallback must be explicit and cannot cross a boundary; decisions retain
+the rejected reasons, selected score/explanation, fallback source, and stable
+boundary reference. A durable authenticated route catalogue, worker event wiring,
+price/quality observations, and visible product receipts remain open, so the Wave
+4B checkboxes stay unchecked.
+
 ### Wave 4C - Multi-worker coordination
 
 - [ ] Add parallel workers, joins, and deterministic aggregation.
