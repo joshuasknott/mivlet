@@ -11,6 +11,7 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
+import { isCitedBriefMissionPrompt } from "../lib/cited-brief-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
@@ -76,7 +77,7 @@ export function ChatWorkspace() {
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
-  const { runtime, agent, durableConversation, voice, scheduledActive, resetCancellation } = controller;
+  const { runtime, agent, durableConversation, voice, scheduledActive, runCitedBrief, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -740,6 +741,23 @@ export function ChatWorkspace() {
     if (!validation.ok) {
       agent.reportError(validation.error ?? "The selected model cannot run.");
       appendConversationMessage("assistant", validation.error ?? "The selected model cannot run.");
+      return;
+    }
+    if (isCitedBriefMissionPrompt(prompt)) {
+      const assistantMessageId = appendConversationMessage("assistant", "Searching connected work sources...");
+      resetCancellation();
+      void runCitedBrief(prompt, resolvedComposerModelId, runProjectId ?? undefined)
+        .then((result) => {
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId ? { ...entry, content: result.text, runId: result.runId } : entry
+          ));
+        })
+        .catch((cause) => {
+          const message = cause instanceof Error ? cause.message : "Fable could not complete the connected-source brief.";
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId ? { ...entry, content: message } : entry
+          ));
+        });
       return;
     }
     const request = buildAgentRequest({

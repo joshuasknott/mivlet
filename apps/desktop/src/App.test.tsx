@@ -23,6 +23,7 @@ const runtimeMocks = vi.hoisted(() => ({
   agentRuns: [] as PersistedAgentRun[],
   conversationThreads: [] as Array<Record<string, unknown>>,
   projectRecords: [] as Array<Record<string, unknown>>,
+  citedBriefCalls: [] as Array<Record<string, unknown>>,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
   savedScheduledJobs: [] as unknown[],
@@ -73,6 +74,14 @@ const runtimeMocks = vi.hoisted(() => ({
     },
     devices: []
   } as AccountWorkspaceStatus
+}));
+
+vi.mock("./lib/cited-brief-mission", () => ({
+  isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
+  executeCitedBriefMission: vi.fn(async (input: Record<string, unknown>) => {
+    runtimeMocks.citedBriefCalls.push(input);
+    return { missionId: "mission-ui", runId: "mission-run-ui", valueReference: "mission-output:v1:ui", text: "Durable cited brief [source-1].", journal: {} };
+  })
 }));
 
 vi.mock("./hooks/useProjects", () => ({
@@ -382,6 +391,7 @@ describe("Fable home", () => {
     runtimeMocks.agentRuns = [];
     runtimeMocks.conversationThreads = [];
     runtimeMocks.projectRecords = [];
+    runtimeMocks.citedBriefCalls = [];
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
     connectRuntimeBackendSpy.mockClear();
@@ -1400,6 +1410,27 @@ describe("Fable home", () => {
     expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     // The newline was not inserted into the composer.
     expect(composer).toHaveValue("");
+  });
+
+  it("routes an explicit connected-source cited brief through the mission journey", async () => {
+    const user = userEvent.setup();
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    render(<App />);
+    const composer = await screen.findByLabelText(/universal composer/i);
+    await user.type(composer, "Search my connected work sources and produce a trustworthy cited brief.");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Durable cited brief [source-1].")).toBeInTheDocument();
+    expect(runtimeMocks.citedBriefCalls).toHaveLength(1);
+    expect(runtimeMocks.citedBriefCalls[0]).toMatchObject({
+      workspaceId: "preview-default",
+      missionScopeWorkspaceId: "preview-workspace",
+      model: "gpt-5"
+    });
   });
 
   it("inserts a newline on Shift+Enter instead of sending", async () => {

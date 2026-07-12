@@ -676,5 +676,5 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     }));
   }, []);
 
-  return { state, run, retry, cancel, reportError };
+  return { state, run, retry, cancel, reportError, backend };
 }

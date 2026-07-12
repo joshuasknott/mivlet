@@ -302,10 +302,9 @@ atomically appended as `tool-call-completed` with a domain-separated reference t
 an owner-qualified encrypted schema-v28 receipt. MCP settlement is driven only by
 the response Rust observed for the exact single-use permit; the renderer can
 neither supply evidence nor skip execution. Exact event-plus-receipt replay occurs
-before consuming another one-shot approval. This is durable, transport-neutral
-tool evidence, not yet a completed cited-brief mission: tool-bearing provider
-turn continuation, final cited Markdown validation, and the product journey remain
-open, so the Wave 4A boxes remain unchecked.
+before consuming another one-shot approval. This is the durable,
+transport-neutral tool-evidence stage consumed by the completed cited-brief
+journey described below; by itself it does not claim provider output or acceptance.
 
 The same worker can now continue from that exact encrypted tool receipt without
 another tool call. The portable driver canonicalizes only the Rust-attested result
@@ -317,8 +316,9 @@ evidence. Unknown or unmapped citations fail closed. Usage records one prior too
 call, and the completion atomically stores a v2 output receipt whose trust is
 `provider-generated-with-external-evidence` and whose citations retain their
 `external-untrusted` classification. This closes the repository-local native/MCP
-semantic substitution through durable cited output. A composed product/UI journey
-and live accounts remain open, so no live Wave 3D or Wave 4A checkbox is claimed.
+semantic substitution through durable cited output. The desktop composition below
+now consumes it; live account/native/MCP validation remains open, so no live Wave
+3D or full Wave 4A checkbox is claimed.
 
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
@@ -358,7 +358,7 @@ its policy-owned criteria, and appends `evaluation-recorded`. Pass/fail and
 evidence references come only from the attested receipt, retained citation ids,
 and any exact required evidence; renderer assertions cannot create acceptance.
 Human, worker, and external evaluators, multi-output and mission-level result
-aggregation, general terminal result persistence, and the inspectable journey remain
+aggregation, general terminal result persistence, and inspectable plans remain
 open, so the acceptance/evaluation box stays unchecked.
 
 For the deliberately narrow single-step cited-brief shape, accepted policy
@@ -368,7 +368,7 @@ no human gate, and every mission criterion to be policy-owned and met. The
 durable result is derived from the encrypted receipt plus native usage and
 evaluation facts, then stored on the run projection for restart-safe reads.
 Multi-step aggregation, partial/failure outcomes, other evaluator kinds,
-general mission-level aggregation, and the product journey remain open.
+general mission-level aggregation, and other product journeys remain open.
 
 The authenticated lifecycle now also projects those journal facts back to the
 selected mission. Creating the first run atomically advances the exact
@@ -378,13 +378,18 @@ derived `MissionResult` naming only that producing run. No renderer-selected
 status, result, actor, or time crosses this boundary; stale transitions roll
 back. General multi-run and partial/failed mission aggregation remains open.
 
-The desktop runtime now exposes the authenticated plan, run, worker, and output
-commands needed to compose that journey through Tauri. Browser preview returns
-no synthetic mission state, and focused boundary coverage proves the wrapper
-passes only plan content plus opaque lifecycle/event identities while Rust keeps
-scope, actor, authority, time, evaluation, and result ownership. The shell does
-not yet orchestrate provider/tool execution through this facade, so this is IPC
-composition evidence rather than a claimed user journey.
+The desktop runtime exposes the authenticated plan, run, worker, and output
+commands needed to compose that journey through Tauri. The shell now recognizes
+the explicit natural-language benchmark request, obtains the separately confirmed
+one-use capability grant, creates and starts the bounded mission, executes the
+already-planned semantic search through its own exact-action approval, and sends
+only the attested evidence into the final provider turn. It preserves an explicit
+MCP route when one is configured, otherwise uses the native resolver, then reloads
+the terminal journal and encrypted output receipt before showing the Markdown in
+the conversation. Browser preview creates no mission state. Focused orchestration
+and rendered-shell tests cover this composition, but actual Tauri execution and
+restart with production account/provider/native/MCP services remains a live
+external evidence gate rather than a checked repository claim.
 
 ### Wave 4B - Routing and experience
 
