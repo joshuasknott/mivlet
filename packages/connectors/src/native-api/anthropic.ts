@@ -12,7 +12,7 @@
 
 import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
 import { buildToolApproval } from "./approvals";
-import { priceFor } from "./pricing";
+import { hasKnownPrice, priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";
 import { extractPayload, splitLines } from "./transport";
 
@@ -165,7 +165,8 @@ export function parseAnthropicLine(
         inputTokens: state.inputTokens,
         outputTokens: usage.output_tokens ?? 0,
         costUsd: priceFor("anthropic", state.inputTokens, usage.output_tokens ?? 0),
-        costEstimated: true
+        costEstimated: true,
+        costUnknown: !hasKnownPrice("anthropic")
       });
     }
     if (delta?.stop_reason) {

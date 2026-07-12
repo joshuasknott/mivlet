@@ -425,6 +425,10 @@ cancel path, and appends a durable cancellation request for the active cited
 mission. Conservative, explicit natural-language forms for goal, plan, schedule,
 and memory now reach the same structured durable command handlers; conversational
 uses of those words remain ordinary prompts.
+Provider-wide hosted-model rates have also been removed from ordinary agent
+usage: provider identity alone cannot prove a model price, so cost stays unknown
+until an exact model-specific, source-attributed observation exists. Token usage
+remains visible.
 
 ### Wave 4C - Multi-worker coordination
 
