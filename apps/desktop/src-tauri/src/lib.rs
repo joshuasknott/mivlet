@@ -35,6 +35,7 @@ mod mcp_process;
 mod memory;
 mod mission_plans;
 mod mission_runs;
+mod mission_workers;
 mod models;
 mod native_api;
 mod notifications;
@@ -159,6 +160,7 @@ pub fn run() {
             mission_runs::mission_run_request_cancellation,
             mission_runs::mission_run_create_checkpoint,
             mission_runs::mission_run_restore_checkpoint,
+            mission_workers::mission_worker_create,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
             artifacts::artifact_review_action,

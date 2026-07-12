@@ -469,11 +469,14 @@ fn validate_generated_plan(
             "step dependencies",
             max_dependencies as usize,
         )?;
-        strings(
+        let capabilities = strings(
             step.get("requiredCapabilities"),
             "required capabilities",
             64,
         )?;
+        if capabilities.iter().collect::<BTreeSet<_>>().len() != capabilities.len() {
+            return Err("Generated plan capabilities must be unique per step.".into());
+        }
         for value in strings(
             step.get("acceptanceCriterionKeys"),
             "acceptance criteria",
@@ -737,6 +740,14 @@ mod tests {
             build_initial_records(&unknown_criterion, "w", "m", "u", "now")
                 .unwrap_err()
                 .contains("unknown acceptance")
+        );
+        let mut duplicate_capability = input();
+        duplicate_capability.steps[0]["requiredCapabilities"] =
+            json!(["source.file.search", "source.file.search"]);
+        assert!(
+            build_initial_records(&duplicate_capability, "w", "m", "u", "now")
+                .unwrap_err()
+                .contains("capabilities must be unique")
         );
     }
 

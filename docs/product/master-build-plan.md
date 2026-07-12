@@ -231,6 +231,20 @@ on overrun, and preserves partial streamed work. Durable worker/run records,
 grant revalidation at execution time, handoff execution, and product wiring are
 still open; this evidence therefore does not complete the worker or driver box.
 
+Native worker creation now persists the first production `worker-created` event
+through the authenticated run journal. Rust reloads the exact selected mission,
+plan revision, and step; requires durable dependency completion; rejects reused
+worker or step assignments; separately clamps lifetime assignments to plan
+steps and active concurrency to mission/parallel bounds; derives actor, scope,
+role, outputs, stop conditions, and the tighter numeric/monetary budget; and
+normalizes selected declared context to `untrusted`. The renderer cannot name a
+tool: native code maps only the registered connected-source read capabilities
+to `connection-read`, requires the exact active read grant in the authenticated
+workspace/project scope, and rejects capabilities without a native mission
+binding. The event is revision/sequence fenced and exact-replay safe. Worker
+start/completion/failure events, live grant consumption at tool use, backend
+execution wiring, handoffs, and desktop experience remain open.
+
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
 checkpoint replay boundaries, advancing recovery attempts, cooperative
