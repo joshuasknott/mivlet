@@ -501,6 +501,7 @@ export interface MissionWorkerExecutionBinding {
   runId: string;
   workerId: string;
   workerStartedEventId: string;
+  routeSelectedEventId: string;
   usageEventId: string;
   completionEventId: string;
   /** Reserved journal identity for a Rust-derived policy evaluation, when the step has one. */
@@ -523,6 +524,7 @@ export interface MissionWorkerToolExecutionBinding {
   runId: string;
   workerId: string;
   workerStartedEventId: string;
+  routeSelectedEventId: string;
   toolEventId: string;
   callKey: string;
   idempotencyKey: string;

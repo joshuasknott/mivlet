@@ -739,6 +739,29 @@ fn build_provider(entry: &'static BackendCatalogEntry, auth_state: String) -> Ba
     }
 }
 
+pub(crate) fn validate_account_native_provider_model(
+    tx: &rusqlite::Connection,
+    internal_user_id: &str,
+    provider_id: &str,
+    model: &str,
+) -> Result<String, String> {
+    let entry = catalog_entry(provider_id)
+        .filter(|entry| entry.backend_type == "native-api")
+        .ok_or_else(|| "Mission routing requires a registered native API provider.".to_string())?;
+    if !crate::store::repos::backend_connection::list(tx, internal_user_id)
+        .map_err(|error| error.to_string())?
+        .iter()
+        .any(|id| id == provider_id)
+    {
+        return Err("Mission routing requires this account's connected provider.".into());
+    }
+    if !entry.models.iter().any(|(id, _)| *id == model) {
+        return Err("Mission routing requires an available catalog model.".into());
+    }
+    let digest = Sha256::digest(format!("{internal_user_id}:{provider_id}").as_bytes());
+    Ok(format!("provider-route:v1:{provider_id}:{digest:x}"))
+}
+
 /// Apply the provider-owned Codex CLI install/auth status without exposing its
 /// executable path or any token-bearing data. The version is normalized and
 /// the auth method is reduced to a controlled label before it reaches UI copy.

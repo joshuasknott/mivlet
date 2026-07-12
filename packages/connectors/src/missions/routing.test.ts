@@ -36,15 +36,15 @@ describe("mission provider routing", () => {
   });
 
   it("enforces provider pins and exclusions without silent fallback", () => {
-    expect(selectMissionProviderRoute(request({ preference: { policy: "require", providerRouteIds: ["route-pinned"], allowFallback: false } }), [
+    expect(selectMissionProviderRoute(request({ preference: { policy: "require", providerRouteIds: ["route-pinned"] as never, allowFallback: false } }), [
       candidate("route-other"), candidate("route-pinned", { qualityScore: 0.2 })
     ]).selection.providerRouteId).toBe("route-pinned");
-    expect(() => selectMissionProviderRoute(request({ preference: { policy: "exclude", providerRouteIds: ["route-only"], allowFallback: false } }), [candidate("route-only")]))
+    expect(() => selectMissionProviderRoute(request({ preference: { policy: "exclude", providerRouteIds: ["route-only"] as never, allowFallback: false } }), [candidate("route-only")]))
       .toThrow(MissionRoutingError);
   });
 
   it("permits only explicit same-boundary fallback and reports rejected routes", () => {
-    const decision = selectMissionProviderRoute(request({ preference: { policy: "prefer", providerRouteIds: ["route-offline"], allowFallback: true } }), [
+    const decision = selectMissionProviderRoute(request({ preference: { policy: "prefer", providerRouteIds: ["route-offline"] as never, allowFallback: true } }), [
       candidate("route-offline", { route: { ...candidate("route-offline").route, state: "unavailable" } as never }),
       candidate("route-wrong-boundary", { route: { ...candidate("route-wrong-boundary").route, boundaries: { ...boundaries, privacyBoundary: "public" } } as never }),
       candidate("route-fallback")

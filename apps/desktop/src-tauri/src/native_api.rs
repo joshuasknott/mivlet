@@ -1666,6 +1666,7 @@ mod transport_policy_tests {
             run_id: "lease-run".into(),
             worker_id: "lease-worker".into(),
             worker_started_event_id: "lease-start".into(),
+            route_selected_event_id: "lease-route".into(),
             usage_event_id: "lease-usage".into(),
             completion_event_id: "lease-complete".into(),
             evaluation_event_id: "lease-evaluation".into(),

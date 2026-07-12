@@ -17,6 +17,7 @@ pub struct NativeWorkerExecutionBinding {
     pub run_id: String,
     pub worker_id: String,
     pub worker_started_event_id: String,
+    pub route_selected_event_id: String,
     pub usage_event_id: String,
     pub completion_event_id: String,
     pub evaluation_event_id: String,
@@ -42,6 +43,7 @@ pub struct NativeWorkerToolExecutionBinding {
     pub run_id: String,
     pub worker_id: String,
     pub worker_started_event_id: String,
+    pub route_selected_event_id: String,
     pub tool_event_id: String,
     pub call_key: String,
     pub idempotency_key: String,
@@ -80,6 +82,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     member_id: String,
     internal_user_id: String,
     requested_model: String,
+    provider_route_id: String,
     output: Option<NativeWorkerOutputSpec>,
     max_input_tokens: Option<i64>,
     max_output_tokens: i64,
@@ -149,6 +152,9 @@ pub struct MissionWorkerStartInput {
     worker_id: String,
     run_start_event_id: Option<String>,
     worker_started_event_id: String,
+    route_selected_event_id: String,
+    provider_id: String,
+    model_reference: String,
     idempotency_key: String,
     expected_run_revision: i64,
     expected_last_sequence: i64,
@@ -398,7 +404,7 @@ pub(crate) fn settle_native_connected_search(
             "workspaceId":authority.local_workspace_id,"visibility":"member-private","ownerMemberId":authority.member_id,
             "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":authority.internal_user_id,
             "createdAt":at,"updatedAt":at,"id":authority.binding.tool_event_id,"runId":authority.binding.run_id,
-            "type":"tool-call-completed","sequence":sequence,"previousEventId":authority.binding.worker_started_event_id,
+            "type":"tool-call-completed","sequence":sequence,"previousEventId":authority.binding.route_selected_event_id,
             "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),"occurredAt":at,
             "actor":{"kind":"system"},"idempotencyKey":key,
             "payload":{"result":{"callKey":authority.binding.call_key,"workerId":authority.binding.worker_id,
@@ -467,6 +473,15 @@ pub(crate) fn preflight_native_worker_completion(
                         "Mission worker assignment is unavailable.".into(),
                     )
                 })?;
+            let provider_route_id = validate_selected_provider_route(
+                tx,
+                &context.internal_user_id,
+                &journal,
+                binding,
+                provider_id,
+                model,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
             let evidence = match binding.tool_evidence.as_ref() {
                 Some(evidence) => Some(load_native_tool_evidence(
                     tx, store, &scope, &member, &journal, binding, worker, evidence,
@@ -516,7 +531,7 @@ pub(crate) fn preflight_native_worker_completion(
                     validate_usage_replay(&journal, existing, binding, model)
                         .map_err(crate::store::StoreError::Invalid)?;
                     validate_output_receipt_replay(
-                        tx, store, &scope, &member, existing, binding, output.as_ref(),
+                        tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
                     )?;
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
@@ -530,6 +545,7 @@ pub(crate) fn preflight_native_worker_completion(
                 member_id: member,
                 internal_user_id: context.internal_user_id,
                 requested_model: model.to_string(),
+                provider_route_id,
                 output,
                 max_input_tokens,
                 max_output_tokens: max_tokens,
@@ -706,6 +722,7 @@ pub(crate) fn settle_native_worker_completion(
                     store,
                     &scope,
                     &authority.member_id,
+                    &journal,
                     existing,
                     &authority.binding,
                     authority.output.as_ref(),
@@ -770,7 +787,7 @@ pub(crate) fn settle_native_worker_completion(
                                 "outputKey":spec.key,"valueReference":value_reference,
                                 "contentHash":content_hash,"sizeBytes":size_bytes,"text":text,
                                 "mediaType":"text/markdown","encoding":"utf-8",
-                                "observedProvider":"openai","requestedModel":authority.requested_model,
+                                "observedProvider":"openai","providerRouteId":authority.provider_route_id,"requestedModel":authority.requested_model,
                                 "trust":if authority.evidence.is_some(){"provider-generated-with-external-evidence"}else{"provider-generated"},
                                 "citations":citations,"createdAt":at
                             });
@@ -835,7 +852,7 @@ pub(crate) fn settle_native_worker_completion(
                     "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":usage_key,
                     "payload":{"usage":{"usageKey":format!("native-usage:{}",authority.binding.usage_event_id),
                         "runId":authority.binding.run_id,"workerId":authority.binding.worker_id,
-                        "modelReference":authority.requested_model,"inputTokens":input_tokens,
+                        "providerRouteId":authority.provider_route_id,"modelReference":authority.requested_model,"inputTokens":input_tokens,
                         "outputTokens":output_tokens,"toolCalls":if authority.evidence.is_some(){1}else{0},"costs":[],"measuredAt":at}}
                 });
                 let mut usage_projection = journal.run.as_object().cloned().ok_or_else(|| {
@@ -934,6 +951,7 @@ pub(crate) fn settle_native_worker_completion(
                     receipt_value,
                     usage,
                     &authority.requested_model,
+                    &authority.provider_route_id,
                     terminal_expected_revision + 1,
                     sequence,
                     event_id,
@@ -958,6 +976,7 @@ fn append_native_policy_evaluation(
     receipt: &Value,
     usage: Option<(i64, i64)>,
     requested_model: &str,
+    provider_route_id: &str,
     expected_revision: i64,
     expected_sequence: i64,
     previous_event_id: &str,
@@ -1136,6 +1155,7 @@ fn append_native_policy_evaluation(
             &evaluation,
             usage,
             requested_model,
+            provider_route_id,
             expected_revision + 1,
             sequence,
             at,
@@ -1160,6 +1180,7 @@ fn append_single_worker_run_result(
     evaluation: &Value,
     usage: Option<(i64, i64)>,
     requested_model: &str,
+    provider_route_id: &str,
     expected_revision: i64,
     expected_sequence: i64,
     at: &str,
@@ -1259,7 +1280,7 @@ fn append_single_worker_run_result(
             "summary":"The native policy evaluator accepted the attested cited output."})).collect::<Vec<_>>();
     let output = json!({"key":output_key,"summary":"Native worker text output","valueReference":output_reference});
     let usage_value = json!({"usageKey":format!("native-usage:{}",binding.usage_event_id),"runId":binding.run_id,
-        "workerId":binding.worker_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
+        "workerId":binding.worker_id,"providerRouteId":provider_route_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
         "toolCalls":1,"costs":[],"measuredAt":at});
     let result = json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
         "outputs":[output],"acceptance":acceptance,"evaluations":[evaluation],"usage":[usage_value],"completedAt":at});
@@ -1343,7 +1364,7 @@ fn native_completion_base_event(binding: &NativeWorkerExecutionBinding) -> &str 
     binding
         .tool_evidence
         .as_ref()
-        .map_or(binding.worker_started_event_id.as_str(), |evidence| {
+        .map_or(binding.route_selected_event_id.as_str(), |evidence| {
             evidence.tool_event_id.as_str()
         })
 }
@@ -1372,7 +1393,7 @@ fn validate_native_tool_head(
             .run
             .pointer("/eventHead/lastEventId")
             .and_then(Value::as_str)
-            != Some(binding.worker_started_event_id.as_str())
+            != Some(binding.route_selected_event_id.as_str())
     {
         return Err(
             "The mission run changed before the connected-source tool could execute.".into(),
@@ -1388,6 +1409,18 @@ fn validate_native_tool_head(
     }) {
         return Err("The mission worker start fact is invalid.".into());
     }
+    let route = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(binding.route_selected_event_id.as_str())
+    });
+    if route.is_none_or(|event| {
+        event.get("type").and_then(Value::as_str) != Some("route-selected")
+            || event.get("previousEventId").and_then(Value::as_str)
+                != Some(binding.worker_started_event_id.as_str())
+            || event.pointer("/payload/workerId").and_then(Value::as_str)
+                != Some(binding.worker_id.as_str())
+    }) {
+        return Err("The mission worker route selection fact is invalid.".into());
+    }
     Ok(())
 }
 
@@ -1396,13 +1429,18 @@ fn validate_native_tool_binding(binding: &NativeWorkerToolExecutionBinding) -> R
         &binding.run_id,
         &binding.worker_id,
         &binding.worker_started_event_id,
+        &binding.route_selected_event_id,
+        &binding.route_selected_event_id,
         &binding.tool_event_id,
         &binding.call_key,
         &binding.idempotency_key,
     ] {
         bounded(value, "Native worker tool identity", 200)?;
     }
-    if binding.worker_started_event_id == binding.tool_event_id {
+    if binding.worker_started_event_id == binding.route_selected_event_id
+        || binding.worker_started_event_id == binding.tool_event_id
+        || binding.route_selected_event_id == binding.tool_event_id
+    {
         return Err("Mission tool event identities must be distinct.".into());
     }
     Ok(())
@@ -1582,6 +1620,7 @@ fn validate_native_completion_head(
         )?;
         if [
             binding.worker_started_event_id.as_str(),
+            binding.route_selected_event_id.as_str(),
             binding.usage_event_id.as_str(),
             binding.completion_event_id.as_str(),
             binding.evaluation_event_id.as_str(),
@@ -1596,10 +1635,16 @@ fn validate_native_completion_head(
     let expected_head = binding
         .tool_evidence
         .as_ref()
-        .map_or(binding.worker_started_event_id.as_str(), |evidence| {
+        .map_or(binding.route_selected_event_id.as_str(), |evidence| {
             evidence.tool_event_id.as_str()
         });
-    if binding.worker_started_event_id == binding.usage_event_id
+    if binding.worker_started_event_id == binding.route_selected_event_id
+        || binding.route_selected_event_id == binding.usage_event_id
+        || binding.route_selected_event_id == binding.completion_event_id
+        || binding.route_selected_event_id == binding.failure_event_id
+        || binding.route_selected_event_id == binding.evaluation_event_id
+        || binding.route_selected_event_id == binding.result_event_id
+        || binding.worker_started_event_id == binding.usage_event_id
         || binding.worker_started_event_id == binding.completion_event_id
         || binding.worker_started_event_id == binding.failure_event_id
         || binding.worker_started_event_id == binding.evaluation_event_id
@@ -1640,6 +1685,50 @@ fn validate_native_completion_head(
         );
     }
     Ok(())
+}
+
+fn validate_selected_provider_route(
+    tx: &rusqlite::Connection,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+    provider_id: &str,
+    model: &str,
+) -> Result<String, String> {
+    let expected = crate::backends::validate_account_native_provider_model(
+        tx,
+        internal_user_id,
+        provider_id,
+        model,
+    )?;
+    let event = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str)
+                == Some(binding.route_selected_event_id.as_str())
+        })
+        .ok_or_else(|| "Mission provider route selection is unavailable.".to_string())?;
+    let selection = event
+        .pointer("/payload/selection")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Mission provider route selection is invalid.".to_string())?;
+    let reason = format!("Selected the connected {provider_id} account route for {model}.");
+    let boundary = format!(
+        "boundary:member-private:user-provider-account:{provider_id}:local-credential-egress"
+    );
+    if event.get("type").and_then(Value::as_str) != Some("route-selected")
+        || event.get("previousEventId").and_then(Value::as_str)
+            != Some(binding.worker_started_event_id.as_str())
+        || event.pointer("/payload/workerId").and_then(Value::as_str)
+            != Some(binding.worker_id.as_str())
+        || selection.get("providerRouteId").and_then(Value::as_str) != Some(expected.as_str())
+        || selection.get("reason").and_then(Value::as_str) != Some(reason.as_str())
+        || selection.get("boundaryPolicyRef").and_then(Value::as_str) != Some(boundary.as_str())
+    {
+        return Err("Mission provider egress does not match its selected route.".into());
+    }
+    Ok(expected)
 }
 
 fn native_output_spec(worker: &Value) -> Result<Option<NativeWorkerOutputSpec>, String> {
@@ -1942,6 +2031,7 @@ fn validate_output_receipt_replay(
     store: &crate::store::Store,
     scope: &crate::store::repos::scope::DataScope,
     owner: &str,
+    journal: &mission_run::MissionRunJournalRow,
     event: &Value,
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
@@ -1968,12 +2058,32 @@ fn validate_output_receipt_replay(
         || receipt.worker_id != binding.worker_id
         || receipt.completion_event_id != binding.completion_event_id
         || receipt.output_key != spec.key
+        || receipt
+            .receipt
+            .get("providerRouteId")
+            .and_then(Value::as_str)
+            != journal_provider_route_id(journal, binding)
     {
         return Err(crate::store::StoreError::Invalid(
             "Worker completion output receipt represents another result.".into(),
         ));
     }
     Ok(())
+}
+
+fn journal_provider_route_id<'a>(
+    journal: &'a mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Option<&'a str> {
+    journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str)
+                == Some(binding.route_selected_event_id.as_str())
+        })
+        .and_then(|event| event.pointer("/payload/selection/providerRouteId"))
+        .and_then(Value::as_str)
 }
 
 fn validate_usage_replay(
@@ -2005,7 +2115,17 @@ fn validate_usage_replay(
         .and_then(Value::as_array)
         .is_some_and(Vec::is_empty);
     let expected_key = native_usage_event_key(binding)?;
-    if usage.get("type").and_then(Value::as_str) != Some("usage-recorded")
+    let selected_route = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str)
+                == Some(binding.route_selected_event_id.as_str())
+        })
+        .and_then(|event| event.pointer("/payload/selection/providerRouteId"))
+        .and_then(Value::as_str);
+    if selected_route.is_none()
+        || usage.get("type").and_then(Value::as_str) != Some("usage-recorded")
         || usage.get("sequence").and_then(Value::as_i64) != Some(binding.expected_last_sequence + 1)
         || usage.get("previousEventId").and_then(Value::as_str)
             != Some(native_completion_base_event(binding))
@@ -2018,6 +2138,10 @@ fn validate_usage_replay(
             .pointer("/payload/usage/workerId")
             .and_then(Value::as_str)
             != Some(binding.worker_id.as_str())
+        || usage
+            .pointer("/payload/usage/providerRouteId")
+            .and_then(Value::as_str)
+            != selected_route
         || usage
             .pointer("/payload/usage/modelReference")
             .and_then(Value::as_str)
@@ -2286,6 +2410,20 @@ pub fn mission_worker_start(
                 event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
             }) {
                 exact_start_replay(existing, &input).map_err(crate::store::StoreError::Invalid)?;
+                let route_key = format!("worker-route:{key}");
+                let route = journal
+                    .events
+                    .iter()
+                    .find(|event| {
+                        event.get("idempotencyKey").and_then(Value::as_str)
+                            == Some(route_key.as_str())
+                    })
+                    .ok_or_else(|| {
+                        crate::store::StoreError::Invalid(
+                            "Worker route selection is missing.".into(),
+                        )
+                    })?;
+                exact_route_replay(route, &input).map_err(crate::store::StoreError::Invalid)?;
                 return Ok(journal);
             }
             validate_start_head(&journal, &input).map_err(crate::store::StoreError::Invalid)?;
@@ -2348,6 +2486,13 @@ pub fn mission_worker_start(
             let at = now();
             validate_grants(tx, store, &scope, mission, step, &mappings, &at)
                 .map_err(crate::store::StoreError::Invalid)?;
+            let provider_route_id = crate::backends::validate_account_native_provider_model(
+                tx,
+                &context.internal_user_id,
+                &input.provider_id,
+                &input.model_reference,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
             let mut current = journal;
             if current.run.get("status").and_then(Value::as_str) != Some("running") {
                 let start_event_id = input.run_start_event_id.as_deref().ok_or_else(|| {
@@ -2374,7 +2519,7 @@ pub fn mission_worker_start(
                     "A running mission does not accept another run-start event.".into(),
                 ));
             }
-            append_worker_started(
+            let started = append_worker_started(
                 tx,
                 store,
                 &scope,
@@ -2383,6 +2528,18 @@ pub fn mission_worker_start(
                 &current,
                 &input,
                 &event_key,
+                &at,
+            )?;
+            append_route_selected(
+                tx,
+                store,
+                &scope,
+                &member,
+                &context.internal_user_id,
+                &started,
+                &input,
+                &provider_route_id,
+                &format!("worker-route:{key}"),
                 &at,
             )
         })
@@ -2396,8 +2553,16 @@ fn validate_start_head(
     bounded(&input.run_id, "Mission run", 160)?;
     bounded(&input.worker_id, "Worker", 160)?;
     bounded(&input.worker_started_event_id, "Worker start event", 160)?;
+    bounded(&input.route_selected_event_id, "Route selection event", 160)?;
+    bounded(&input.provider_id, "Route provider", 80)?;
+    bounded(&input.model_reference, "Route model", 300)?;
     if input.run_start_event_id.as_deref() == Some(input.worker_started_event_id.as_str()) {
         return Err("Run-start and worker-start events require distinct ids.".into());
+    }
+    if input.route_selected_event_id == input.worker_started_event_id
+        || input.run_start_event_id.as_deref() == Some(input.route_selected_event_id.as_str())
+    {
+        return Err("Run-start, worker-start, and route events require distinct ids.".into());
     }
     if journal.run.get("revision").and_then(Value::as_i64) != Some(input.expected_run_revision)
         || journal
@@ -2627,6 +2792,125 @@ fn exact_start_replay(event: &Value, input: &MissionWorkerStartInput) -> Result<
         Ok(())
     } else {
         Err("Worker start idempotency key already represents another start.".into())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_route_selected(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    member: &str,
+    actor: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    input: &MissionWorkerStartInput,
+    provider_route_id: &str,
+    event_key: &str,
+    at: &str,
+) -> crate::store::Result<mission_run::MissionRunJournalRow> {
+    let revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+        })?;
+    let last_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let previous = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let workspace = journal
+        .run
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+        })?;
+    let reason = format!(
+        "Selected the connected {} account route for {}.",
+        input.provider_id, input.model_reference
+    );
+    let boundary = format!(
+        "boundary:member-private:user-provider-account:{}:local-credential-egress",
+        input.provider_id
+    );
+    let selection = json!({"providerRouteId":provider_route_id,"selectedAt":at,"reason":reason,"boundaryPolicyRef":boundary});
+    let sequence = last_sequence + 1;
+    let event = json!({
+        "workspaceId":workspace,"visibility":"member-private","ownerMemberId":member,"authority":"local",
+        "schemaVersion":1,"revision":1,"createdByInternalUserId":actor,"createdAt":at,"updatedAt":at,
+        "id":input.route_selected_event_id,"runId":input.run_id,"type":"route-selected","sequence":sequence,
+        "previousEventId":previous,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":event_key,
+        "payload":{"workerId":input.worker_id,"selection":selection}
+    });
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("revision".into(), json!(revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert("selectedRoute".into(), selection);
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":input.route_selected_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        member,
+        &input.run_id,
+        revision,
+        last_sequence,
+        &input.route_selected_event_id,
+        "route-selected",
+        event_key,
+        &event,
+        &Value::Object(projected),
+        at,
+    )
+}
+
+fn exact_route_replay(event: &Value, input: &MissionWorkerStartInput) -> Result<(), String> {
+    let added = if input.run_start_event_id.is_some() {
+        3
+    } else {
+        2
+    };
+    let selection = event.pointer("/payload/selection");
+    if event.get("id").and_then(Value::as_str) == Some(input.route_selected_event_id.as_str())
+        && event.get("runId").and_then(Value::as_str) == Some(input.run_id.as_str())
+        && event.get("type").and_then(Value::as_str) == Some("route-selected")
+        && event.pointer("/payload/workerId").and_then(Value::as_str)
+            == Some(input.worker_id.as_str())
+        && event.get("previousEventId").and_then(Value::as_str)
+            == Some(input.worker_started_event_id.as_str())
+        && event.get("sequence").and_then(Value::as_i64)
+            == Some(input.expected_last_sequence + added)
+        && selection
+            .and_then(|value| value.get("reason"))
+            .and_then(Value::as_str)
+            == Some(
+                format!(
+                    "Selected the connected {} account route for {}.",
+                    input.provider_id, input.model_reference
+                )
+                .as_str(),
+            )
+    {
+        Ok(())
+    } else {
+        Err("Worker route idempotency key already represents another selection.".into())
     }
 }
 
@@ -3322,6 +3606,9 @@ mod tests {
             worker_id: "worker-1".into(),
             run_start_event_id: Some("event-3".into()),
             worker_started_event_id: "event-4".into(),
+            route_selected_event_id: "event-5".into(),
+            provider_id: "openai".into(),
+            model_reference: "gpt-5".into(),
             idempotency_key: "start-1".into(),
             expected_run_revision: 3,
             expected_last_sequence: 2,
@@ -3329,6 +3616,8 @@ mod tests {
         assert!(validate_start_head(&journal, &input).is_ok());
         let event = json!({"id":"event-4","runId":"run-1","type":"worker-started","sequence":4,"previousEventId":"event-3","payload":{"workerId":"worker-1"}});
         assert!(exact_start_replay(&event, &input).is_ok());
+        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","selection":{"reason":"Selected the connected openai account route for gpt-5."}}});
+        assert!(exact_route_replay(&route, &input).is_ok());
         journal.events.push(event);
         assert!(validate_start_head(&journal, &input).is_err());
     }
@@ -3389,6 +3678,7 @@ mod tests {
             run_id: "run-1".into(),
             worker_id: "worker-1".into(),
             worker_started_event_id: "event-3".into(),
+            route_selected_event_id: "event-route".into(),
             usage_event_id: "event-usage".into(),
             completion_event_id: "event-4".into(),
             evaluation_event_id: "event-evaluation".into(),
@@ -3401,7 +3691,7 @@ mod tests {
         };
         let mut event = json!({
             "id":"event-4","runId":"run-1","type":"worker-completed",
-            "previousEventId":"event-3","sequence":4,
+            "previousEventId":"event-route","sequence":4,
             "idempotencyKey":"worker-complete:terminal-1",
             "correlationKey":"native-worker-completion:v1:run-revision:4",
             "payload":{"workerId":"worker-1","outputs":[]}
@@ -3411,7 +3701,7 @@ mod tests {
         assert!(exact_native_terminal_replay(&event, &binding, None).is_err());
         let failed = json!({
             "id":"event-5","runId":"run-1","type":"worker-failed",
-            "previousEventId":"event-3","sequence":4,
+            "previousEventId":"event-route","sequence":4,
             "idempotencyKey":"worker-fail:terminal-1",
             "correlationKey":"native-worker-completion:v1:run-revision:4",
             "payload":{"workerId":"worker-1","error":{
@@ -3423,9 +3713,9 @@ mod tests {
         assert!(exact_native_terminal_replay(&failed, &binding, None).is_ok());
         let usage = json!({
             "id":"event-usage","runId":"run-1","type":"usage-recorded","sequence":4,
-            "previousEventId":"event-3","idempotencyKey":"worker-usage:terminal-1",
+            "previousEventId":"event-route","idempotencyKey":"worker-usage:terminal-1",
             "payload":{"usage":{"usageKey":"native-usage:event-usage","runId":"run-1",
-                "workerId":"worker-1","modelReference":"gpt-5","inputTokens":12,
+                "workerId":"worker-1","providerRouteId":"provider-route-1","modelReference":"gpt-5","inputTokens":12,
                 "outputTokens":3,"toolCalls":0,"costs":[],"measuredAt":"t"}}
         });
         let terminal = json!({
@@ -3436,7 +3726,11 @@ mod tests {
         });
         let journal = mission_run::MissionRunJournalRow {
             run: json!({}),
-            events: vec![usage.clone(), terminal.clone()],
+            events: vec![
+                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                usage.clone(),
+                terminal.clone(),
+            ],
         };
         assert!(exact_native_terminal_replay(&terminal, &binding, None).is_ok());
         assert!(validate_usage_replay(&journal, &terminal, &binding, "gpt-5").is_ok());
@@ -3452,14 +3746,19 @@ mod tests {
         });
         let failed_journal = mission_run::MissionRunJournalRow {
             run: json!({}),
-            events: vec![usage, budget_failure.clone()],
+            events: vec![
+                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                usage,
+                budget_failure.clone(),
+            ],
         };
         assert!(exact_native_terminal_replay(&budget_failure, &binding, None).is_ok());
         assert!(validate_usage_replay(&failed_journal, &budget_failure, &binding, "gpt-5").is_ok());
         let live = mission_run::MissionRunJournalRow {
-            run: json!({"status":"running","revision":4,"eventHead":{"lastSequence":3,"lastEventId":"event-3"}}),
+            run: json!({"status":"running","revision":4,"eventHead":{"lastSequence":3,"lastEventId":"event-route"}}),
             events: vec![
                 json!({"id":"event-3","type":"worker-started","payload":{"workerId":"worker-1"}}),
+                json!({"id":"event-route","type":"route-selected","previousEventId":"event-3","payload":{"workerId":"worker-1"}}),
             ],
         };
         assert!(validate_native_completion_head(&live, &binding).is_ok());

@@ -109,8 +109,10 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   const worker = findWorker(journal, workerId);
   const runStartEventId = id("event");
   const workerStartedEventId = id("event");
+  const routeSelectedEventId = id("event");
   journal = requireJournal(await startRuntimeMissionWorker({
-    runId, workerId, runStartEventId, workerStartedEventId,
+    runId, workerId, runStartEventId, workerStartedEventId, routeSelectedEventId,
+    providerId: input.backend.providerId, modelReference: input.model,
     idempotencyKey: id("worker-start"), ...head(journal)
   }));
 
@@ -129,7 +131,7 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       workspaceId: input.workspaceId,
       projectId: input.projectId,
       missionWorkerToolExecution: {
-        runId, workerId, workerStartedEventId, toolEventId,
+        runId, workerId, workerStartedEventId, routeSelectedEventId, toolEventId,
         callKey: approval.id, idempotencyKey: id("worker-tool"),
         ...toolHead
       },
@@ -148,7 +150,7 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
     prompt: objective, toolSpecs: [], execute: async () => { throw new Error("The final cited-writing turn cannot call tools."); },
     missionToolEvidence: evidence,
     missionWorkerExecution: {
-      runId, workerId, workerStartedEventId,
+      runId, workerId, workerStartedEventId, routeSelectedEventId,
       usageEventId: id("event"), completionEventId: id("event"), evaluationEventId: id("event"), resultEventId: id("event"), failureEventId: id("event"),
       idempotencyKey: id("worker-terminal"), ...finalHead,
       toolEvidence: { toolEventId, outputReference }

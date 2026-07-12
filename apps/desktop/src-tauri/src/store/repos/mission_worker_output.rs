@@ -232,7 +232,7 @@ fn validate_receipt(
             "Worker output receipt is invalid.".into(),
         ));
     };
-    const KEYS: [&str; 18] = [
+    const KEYS: [&str; 19] = [
         "version",
         "workspaceId",
         "ownerMemberId",
@@ -247,6 +247,7 @@ fn validate_receipt(
         "mediaType",
         "encoding",
         "observedProvider",
+        "providerRouteId",
         "requestedModel",
         "trust",
         "citations",
@@ -277,7 +278,8 @@ fn validate_receipt(
         }
         _ => false,
     };
-    if object.len() != KEYS.len()
+    let route = receipt.get("providerRouteId").and_then(Value::as_str);
+    if !(object.len() == KEYS.len() || (object.len() == KEYS.len() - 1 && route.is_none()))
         || object.keys().any(|key| !KEYS.contains(&key.as_str()))
         || !provenance_valid
         || receipt.get("workspaceId").and_then(Value::as_str) != Some(workspace)
@@ -292,6 +294,7 @@ fn validate_receipt(
         || receipt.get("mediaType").and_then(Value::as_str) != Some("text/markdown")
         || receipt.get("encoding").and_then(Value::as_str) != Some("utf-8")
         || receipt.get("observedProvider").and_then(Value::as_str) != Some("openai")
+        || route.is_some_and(|value| value.is_empty() || value.len() > 200)
         || model.is_empty()
         || model.len() > 200
         || text.trim().is_empty()

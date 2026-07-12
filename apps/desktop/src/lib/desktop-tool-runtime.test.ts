@@ -271,7 +271,7 @@ describe("desktop semantic capability grants", () => {
 
   it("uses the same native mission receipt boundary for an MCP substitution", async () => {
     const missionBinding = {
-      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-start",
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-start", routeSelectedEventId: "event-route",
       toolEventId: "event-tool", callKey: "connection-search-once", idempotencyKey: "tool-1",
       expectedRunRevision: 4, expectedLastSequence: 3
     };

@@ -2980,6 +2980,9 @@ export interface RuntimeMissionWorkerStartInput {
   workerId: string;
   runStartEventId?: string;
   workerStartedEventId: string;
+  routeSelectedEventId: string;
+  providerId: string;
+  modelReference: string;
   idempotencyKey: string;
   expectedRunRevision: number;
   expectedLastSequence: number;

@@ -99,7 +99,7 @@ describe("portable local worker driver", () => {
   it("carries only an exact objective-only native mission binding", async () => {
     const runtime = backend([{ type: "done", finishReason: "stop" }]);
     const missionWorkerExecution = {
-      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", routeSelectedEventId: "event-route", usageEventId: "event-usage",
       completionEventId: "event-4", evaluationEventId: "event-evaluation", resultEventId: "event-result", failureEventId: "event-5", idempotencyKey: "terminal-1",
       expectedRunRevision: 4, expectedLastSequence: 3
     };
@@ -114,7 +114,7 @@ describe("portable local worker driver", () => {
   it("binds the persisted Markdown output contract into the native prompt", async () => {
     const runtime = backend([{ type: "text-delta", text: "# Brief" }, { type: "done", finishReason: "stop" }]);
     const missionWorkerExecution = {
-      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", routeSelectedEventId: "event-route", usageEventId: "event-usage",
       completionEventId: "event-4", evaluationEventId: "event-evaluation", resultEventId: "event-result", failureEventId: "event-5", idempotencyKey: "terminal-1",
       expectedRunRevision: 4, expectedLastSequence: 3
     };
@@ -135,7 +135,7 @@ describe("portable local worker driver", () => {
       trust: "external-untrusted", instructionAuthority: "none"
     } };
     const missionWorkerExecution = {
-      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", routeSelectedEventId: "event-route", usageEventId: "event-usage",
       completionEventId: "event-5", evaluationEventId: "event-evaluation", resultEventId: "event-result", failureEventId: "event-6", idempotencyKey: "terminal-1",
       expectedRunRevision: 5, expectedLastSequence: 4,
       toolEvidence: { toolEventId: "event-4", outputReference: "mission-tool:v1:event-4:call-1:sha256:abc" }

@@ -406,9 +406,13 @@ boundaries, placement kinds, risk, request and route budgets, currency, and
 require/exclude preferences before scoring quality, estimated cost, and speed.
 Preferred fallback must be explicit and cannot cross a boundary; decisions retain
 the rejected reasons, selected score/explanation, fallback source, and stable
-boundary reference. A durable authenticated route catalogue, worker event wiring,
-price/quality observations, and visible product receipts remain open, so the Wave
-4B checkboxes stay unchecked.
+boundary reference. The native OpenAI mission path now derives a stable private
+account route only from current account-owned provider metadata and an exact
+catalogue model, appends `route-selected` immediately after `worker-started`, and
+revalidates that route before egress. Tool execution, usage, output receipts, and
+terminal run results remain bound to the selected route across replay and restart.
+A multi-route durable catalogue, price/quality observations, and visible product
+receipts remain open, so the Wave 4B checkboxes stay unchecked.
 
 ### Wave 4C - Multi-worker coordination
 

@@ -41,13 +41,13 @@ describe("cited brief mission composition", () => {
     mocks.createPlan.mockResolvedValue({ mission: {} });
     mocks.createRun.mockResolvedValue(journal(2, 1, []));
     mocks.createWorker.mockResolvedValue(journal(3, 2, [{ type: "worker-created", payload: { worker } }]));
-    mocks.startWorker.mockResolvedValue(journal(5, 4, [{ type: "worker-created", payload: { worker } }]));
+    mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }]));
     mocks.buildToolApproval.mockReturnValue({ id: "base", service: "openai", action: "connection-read", mode: "read-only", riskLevel: "medium", dataUsed: [], consequence: "Search", requestedAt: "t", decisions: ["once", "deny"] });
     mocks.desktopExecutor.mockReturnValue(vi.fn().mockResolvedValue(JSON.stringify({ result: { citations: [{ citationId: "source-1" }] } })));
     mocks.executeLocalWorker.mockResolvedValue({ status: "completed", events: [], text: "Brief", usage: {}, retryable: false });
     mocks.getRun
-      .mockResolvedValueOnce(journal(6, 5, [{ id: "event-13", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
-      .mockResolvedValueOnce(journal(10, 9, [], { status: "completed", terminalResult: { outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(11, 10, [], { status: "completed", terminalResult: { outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
     mocks.readOutput.mockResolvedValue({ receipt: { text: "Trustworthy brief [source-1]." } });
   });
 
@@ -72,13 +72,13 @@ describe("cited brief mission composition", () => {
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
       toolSpecs: [], missionToolEvidence: { result: { citations: [{ citationId: "source-1" }] } },
       missionWorkerExecution: {
-        runId: "mission-run-4", workerId: "worker-5", workerStartedEventId: "event-11",
-        toolEvidence: { toolEventId: "event-13", outputReference: "mission-tool:v1:evidence" },
-        expectedRunRevision: 6, expectedLastSequence: 5
+        runId: "mission-run-4", workerId: "worker-5", workerStartedEventId: "event-11", routeSelectedEventId: "event-12",
+        toolEvidence: { toolEventId: "event-14", outputReference: "mission-tool:v1:evidence" },
+        expectedRunRevision: 7, expectedLastSequence: 6
       }
     });
     expect(mocks.desktopExecutor).toHaveBeenCalledWith(gate, expect.objectContaining({
-      missionWorkerToolExecution: expect.objectContaining({ toolEventId: "event-13", callKey: "native-mission-run-4-call-14" })
+      missionWorkerToolExecution: expect.objectContaining({ routeSelectedEventId: "event-12", toolEventId: "event-14", callKey: "native-mission-run-4-call-15" })
     }));
     expect(mocks.createWorker).toHaveBeenCalledWith(expect.objectContaining({
       grants: [{ capabilityId: "knowledge.content.search", capabilityGrantId: "grant-1" }]
