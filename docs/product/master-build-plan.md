@@ -416,8 +416,11 @@ receipts for other mission shapes remain open. The cited-brief result now shows 
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,
 cited-source count, external-evidence trust classification, and the persisted
-input/output token, tool-call, time, and attempt ceilings. Cost is explicitly
-unavailable rather than estimated without price provenance. The Wave 4B
+input/output token, tool-call, time, and attempt ceilings. Exact `gpt-5` usage
+also carries a Fable-calculated USD observation from the reviewed official
+standard API list rate; the durable pricing reference records the source, review
+date, and input/output rates, while every other model remains explicitly unknown.
+The Wave 4B
 checkboxes stay unchecked because the experience is not yet general. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent

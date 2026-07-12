@@ -839,6 +839,7 @@ pub(crate) fn settle_native_worker_completion(
             let mut terminal_expected_sequence = authority.binding.expected_last_sequence;
             let mut terminal_previous_event = native_completion_base_event(&authority.binding);
             if let Some((input_tokens, output_tokens)) = usage {
+                let costs = exact_model_costs(&authority.requested_model, input_tokens, output_tokens);
                 let usage_sequence = authority.binding.expected_last_sequence + 1;
                 let usage_key = native_usage_event_key(&authority.binding)
                     .map_err(crate::store::StoreError::Invalid)?;
@@ -853,7 +854,7 @@ pub(crate) fn settle_native_worker_completion(
                     "payload":{"usage":{"usageKey":format!("native-usage:{}",authority.binding.usage_event_id),
                         "runId":authority.binding.run_id,"workerId":authority.binding.worker_id,
                         "providerRouteId":authority.provider_route_id,"modelReference":authority.requested_model,"inputTokens":input_tokens,
-                        "outputTokens":output_tokens,"toolCalls":if authority.evidence.is_some(){1}else{0},"costs":[],"measuredAt":at}}
+                        "outputTokens":output_tokens,"toolCalls":if authority.evidence.is_some(){1}else{0},"costs":costs,"measuredAt":at}}
                 });
                 let mut usage_projection = journal.run.as_object().cloned().ok_or_else(|| {
                     crate::store::StoreError::Invalid("Mission run record is invalid.".into())
@@ -1279,9 +1280,10 @@ fn append_single_worker_run_result(
         .map(|key| json!({"criterionKey":key,"status":"met","evidenceRefs":evidence_refs.iter().cloned().collect::<Vec<_>>(),
             "summary":"The native policy evaluator accepted the attested cited output."})).collect::<Vec<_>>();
     let output = json!({"key":output_key,"summary":"Native worker text output","valueReference":output_reference});
+    let costs = exact_model_costs(requested_model, input_tokens, output_tokens);
     let usage_value = json!({"usageKey":format!("native-usage:{}",binding.usage_event_id),"runId":binding.run_id,
         "workerId":binding.worker_id,"providerRouteId":provider_route_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
-        "toolCalls":1,"costs":[],"measuredAt":at});
+        "toolCalls":1,"costs":costs,"measuredAt":at});
     let result = json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
         "outputs":[output],"acceptance":acceptance,"evaluations":[evaluation],"usage":[usage_value],"completedAt":at});
     let mission_result = json!({"outcome":"succeeded","summary":result.get("summary"),"producingRunIds":[binding.run_id],
@@ -2110,10 +2112,18 @@ fn validate_usage_replay(
             event.get("id").and_then(Value::as_str) == Some(binding.usage_event_id.as_str())
         })
         .ok_or_else(|| "Worker terminal usage event is missing.".to_string())?;
-    let costs_empty = usage
-        .pointer("/payload/usage/costs")
-        .and_then(Value::as_array)
-        .is_some_and(Vec::is_empty);
+    let input_tokens = usage
+        .pointer("/payload/usage/inputTokens")
+        .and_then(Value::as_i64);
+    let output_tokens = usage
+        .pointer("/payload/usage/outputTokens")
+        .and_then(Value::as_i64);
+    let expected_costs = Value::Array(
+        input_tokens
+            .zip(output_tokens)
+            .map(|(input, output)| exact_model_costs(model, input, output))
+            .unwrap_or_default(),
+    );
     let expected_key = native_usage_event_key(binding)?;
     let selected_route = journal
         .events
@@ -2146,14 +2156,8 @@ fn validate_usage_replay(
             .pointer("/payload/usage/modelReference")
             .and_then(Value::as_str)
             != Some(model)
-        || usage
-            .pointer("/payload/usage/inputTokens")
-            .and_then(Value::as_i64)
-            .is_none_or(|v| v < 0)
-        || usage
-            .pointer("/payload/usage/outputTokens")
-            .and_then(Value::as_i64)
-            .is_none_or(|v| v < 0)
+        || input_tokens.is_none_or(|v| v < 0)
+        || output_tokens.is_none_or(|v| v < 0)
         || usage
             .pointer("/payload/usage/toolCalls")
             .and_then(Value::as_i64)
@@ -2162,11 +2166,34 @@ fn validate_usage_replay(
             } else {
                 0
             })
-        || !costs_empty
+        || usage.pointer("/payload/usage/costs") != Some(&expected_costs)
     {
         return Err("Worker terminal usage event represents another result.".into());
     }
     Ok(())
+}
+
+const GPT5_PRICING_REFERENCE: &str = "https://openai.com/index/introducing-gpt-5-for-developers/#pricing|reviewed=2026-07-12|standard-input-usd-per-1m=1.25|standard-output-usd-per-1m=10";
+
+fn exact_model_costs(model: &str, input_tokens: i64, output_tokens: i64) -> Vec<Value> {
+    if model != "gpt-5" || input_tokens < 0 || output_tokens < 0 {
+        return Vec::new();
+    }
+    let nanos = i128::from(input_tokens) * 1_250 + i128::from(output_tokens) * 10_000;
+    vec![json!({
+        "amount":{"amount":decimal_usd_from_nanos(nanos),"currencyCode":"USD"},
+        "provenance":"fable-calculated","pricingReference":GPT5_PRICING_REFERENCE
+    })]
+}
+
+fn decimal_usd_from_nanos(nanos: i128) -> String {
+    let whole = nanos / 1_000_000_000;
+    let fractional = nanos % 1_000_000_000;
+    if fractional == 0 {
+        return whole.to_string();
+    }
+    let fraction = format!("{fractional:09}").trim_end_matches('0').to_string();
+    format!("{whole}.{fraction}")
 }
 
 fn native_failure_payload_valid(event: &Value) -> bool {
@@ -3716,7 +3743,8 @@ mod tests {
             "previousEventId":"event-route","idempotencyKey":"worker-usage:terminal-1",
             "payload":{"usage":{"usageKey":"native-usage:event-usage","runId":"run-1",
                 "workerId":"worker-1","providerRouteId":"provider-route-1","modelReference":"gpt-5","inputTokens":12,
-                "outputTokens":3,"toolCalls":0,"costs":[],"measuredAt":"t"}}
+                "outputTokens":3,"toolCalls":0,"costs":[{"amount":{"amount":"0.000045","currencyCode":"USD"},
+                "provenance":"fable-calculated","pricingReference":GPT5_PRICING_REFERENCE}],"measuredAt":"t"}}
         });
         let terminal = json!({
             "id":"event-4","runId":"run-1","type":"worker-completed","sequence":5,
@@ -3734,6 +3762,11 @@ mod tests {
         };
         assert!(exact_native_terminal_replay(&terminal, &binding, None).is_ok());
         assert!(validate_usage_replay(&journal, &terminal, &binding, "gpt-5").is_ok());
+        assert_eq!(
+            exact_model_costs("gpt-5", 12, 3)[0]["amount"]["amount"],
+            "0.000045"
+        );
+        assert!(exact_model_costs("gpt-5.2", 12, 3).is_empty());
         let budget_failure = json!({
             "id":"event-5","runId":"run-1","type":"worker-failed","sequence":5,
             "previousEventId":"event-usage","idempotencyKey":"worker-fail:terminal-1",

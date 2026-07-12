@@ -53,6 +53,9 @@ export interface CitedBriefMissionReceipt {
   maxToolCalls: number;
   maxDurationMs: number;
   maxAttempts: number;
+  costAmount?: string;
+  costCurrency?: string;
+  pricingReference?: string;
 }
 
 export function isCitedBriefMissionPrompt(value: string): boolean {
@@ -200,6 +203,9 @@ function citedBriefReceipt(journal: Record<string, unknown>, output: Record<stri
   const selection = route?.selection as Record<string, unknown> | undefined;
   const usageEvent = events.find((event) => event.type === "usage-recorded")?.payload as Record<string, unknown> | undefined;
   const usage = usageEvent?.usage as Record<string, unknown> | undefined;
+  const costs = Array.isArray(usage?.costs) ? usage.costs : [];
+  const cost = costs.length === 1 ? costs[0] as Record<string, unknown> : undefined;
+  const amount = cost?.amount as Record<string, unknown> | undefined;
   const citations = Array.isArray(output.citations) ? output.citations : [];
   const mission = plan.mission as Record<string, unknown> | undefined;
   const budget = mission?.budget as Record<string, unknown> | undefined;
@@ -228,7 +234,10 @@ function citedBriefReceipt(journal: Record<string, unknown>, output: Record<stri
     maxOutputTokens: limit(budget?.maxOutputTokens),
     maxToolCalls: limit(budget?.maxToolCalls),
     maxDurationMs: limit(budget?.maxDurationMs),
-    maxAttempts: limit(budget?.maxAttempts)
+    maxAttempts: limit(budget?.maxAttempts),
+    ...(typeof amount?.amount === "string" && typeof amount.currencyCode === "string" && typeof cost?.pricingReference === "string"
+      ? { costAmount: amount.amount, costCurrency: amount.currencyCode, pricingReference: cost.pricingReference }
+      : {})
   };
 }
 

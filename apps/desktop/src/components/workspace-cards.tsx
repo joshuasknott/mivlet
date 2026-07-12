@@ -81,6 +81,7 @@ export function MissionRunReceipt({ receipt }: { receipt: {
   provider: string; model: string; routeReason: string; inputTokens: number;
   outputTokens: number; toolCalls: number; sourceCount: number; trust: string;
   maxInputTokens: number; maxOutputTokens: number; maxToolCalls: number; maxDurationMs: number; maxAttempts: number;
+  costAmount?: string; costCurrency?: string; pricingReference?: string;
 } }) {
   const provider = receipt.provider === "openai" ? "OpenAI" : receipt.provider;
   return (
@@ -93,7 +94,8 @@ export function MissionRunReceipt({ receipt }: { receipt: {
         <li>{receipt.outputTokens} / {receipt.maxOutputTokens} output tokens</li>
         <li>{receipt.toolCalls} / {receipt.maxToolCalls} read {receipt.maxToolCalls === 1 ? "action" : "actions"}</li>
         <li>Up to {Math.round(receipt.maxDurationMs / 1000)} seconds</li>
-        <li>{receipt.maxAttempts} {receipt.maxAttempts === 1 ? "attempt" : "attempts"} · cost unavailable</li>
+        <li>{receipt.maxAttempts} {receipt.maxAttempts === 1 ? "attempt" : "attempts"} · {receipt.costAmount && receipt.costCurrency ? `${receipt.costCurrency} ${receipt.costAmount}` : "cost unavailable"}</li>
+        {receipt.pricingReference ? <li>Standard API list price · reviewed 12 Jul 2026</li> : null}
         <li>{receipt.sourceCount} cited {receipt.sourceCount === 1 ? "source" : "sources"}</li>
         <li>{receipt.trust === "provider-generated-with-external-evidence" ? "External evidence kept untrusted" : receipt.trust}</li>
       </ul>
