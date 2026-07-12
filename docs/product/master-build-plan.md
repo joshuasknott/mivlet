@@ -251,6 +251,19 @@ restore replay stable even after a newer checkpoint exists. Production worker
 execution-event persistence and desktop recovery wiring are still open, so the
 durable-run box remains unchecked.
 
+The portable completion boundary now converts a bounded local-worker outcome
+into a `RunResult` without equating provider completion with mission success.
+It accepts only declared unique deliverables, matches evaluations to the exact
+worker or run, requires identified internal reviewers for human criteria and
+identified reviewer workers for worker criteria, refuses to claim unsupported
+external attestation, checks required evidence, records bounded usage/cost, and
+preserves useful incomplete work with explicit remaining work and a recovery
+recommendation. Required deliverables, every required criterion, any configured
+minimum, and required human acceptance must all be satisfied before `succeeded`.
+This portable aggregation is not native evaluation authority; trusted evaluator
+wiring, production terminal events, and the inspectable journey remain open, so
+the acceptance/evaluation box stays unchecked.
+
 ### Wave 4B - Routing and experience
 
 - [ ] Route by capability, quality, cost, speed, privacy, context, tools, health, preference, and risk.
