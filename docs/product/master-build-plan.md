@@ -307,6 +307,19 @@ tool evidence, not yet a completed cited-brief mission: tool-bearing provider
 turn continuation, final cited Markdown validation, and the product journey remain
 open, so the Wave 4A boxes remain unchecked.
 
+The same worker can now continue from that exact encrypted tool receipt without
+another tool call. The portable driver canonicalizes only the Rust-attested result
+into the native-reconstructed final prompt; Rust independently reloads the receipt,
+worker, grant, Connection scope, and current tool-event head before OpenAI egress.
+The final Markdown must cite only available `[source-N]` ids, include a Sources
+mapping with each used title and URI, and explicitly disclose empty or degraded
+evidence. Unknown or unmapped citations fail closed. Usage records one prior tool
+call, and the completion atomically stores a v2 output receipt whose trust is
+`provider-generated-with-external-evidence` and whose citations retain their
+`external-untrusted` classification. This closes the repository-local native/MCP
+semantic substitution through durable cited output. A composed product/UI journey
+and live accounts remain open, so no live Wave 3D or Wave 4A checkbox is claimed.
+
 Run-journal evidence now includes a deterministic portable reducer for legal
 status transitions, contiguous previous-event links, exact idempotent replay,
 checkpoint replay boundaries, advancing recovery attempts, cooperative

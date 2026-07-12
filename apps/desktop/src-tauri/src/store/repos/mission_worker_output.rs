@@ -261,9 +261,25 @@ fn validate_receipt(
         .and_then(Value::as_str)
         .unwrap_or_default();
     let computed_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+    let version = receipt
+        .get("version")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let citations = receipt.get("citations").and_then(Value::as_array);
+    let provenance_valid = match (
+        version,
+        receipt.get("trust").and_then(Value::as_str),
+        citations,
+    ) {
+        (1, Some("provider-generated"), Some(citations)) => citations.is_empty(),
+        (2, Some("provider-generated-with-external-evidence"), Some(citations)) => {
+            citations.len() <= 50 && citations.iter().all(valid_external_citation)
+        }
+        _ => false,
+    };
     if object.len() != KEYS.len()
         || object.keys().any(|key| !KEYS.contains(&key.as_str()))
-        || receipt.get("version").and_then(Value::as_i64) != Some(1)
+        || !provenance_valid
         || receipt.get("workspaceId").and_then(Value::as_str) != Some(workspace)
         || receipt.get("ownerMemberId").and_then(Value::as_str) != Some(owner)
         || receipt.get("runId").and_then(Value::as_str) != Some(run)
@@ -278,11 +294,6 @@ fn validate_receipt(
         || receipt.get("observedProvider").and_then(Value::as_str) != Some("openai")
         || model.is_empty()
         || model.len() > 200
-        || receipt.get("trust").and_then(Value::as_str) != Some("provider-generated")
-        || receipt
-            .get("citations")
-            .and_then(Value::as_array)
-            .is_none_or(|v| !v.is_empty())
         || text.trim().is_empty()
         || text.as_bytes().len() as i64 != size
         || computed_hash != hash
@@ -294,6 +305,59 @@ fn validate_receipt(
         ));
     }
     Ok(())
+}
+
+fn valid_external_citation(citation: &Value) -> bool {
+    let Some(object) = citation.as_object() else {
+        return false;
+    };
+    const KEYS: [&str; 8] = [
+        "citationId",
+        "sourceId",
+        "title",
+        "snippet",
+        "uri",
+        "provenance",
+        "freshness",
+        "trust",
+    ];
+    !object.keys().any(|key| !KEYS.contains(&key.as_str()))
+        && citation
+            .get("citationId")
+            .and_then(Value::as_str)
+            .is_some_and(|v| v.starts_with("source-") && v.len() <= 120)
+        && citation
+            .get("sourceId")
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty() && v.len() <= 512)
+        && citation
+            .get("title")
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty() && v.len() <= 512)
+        && citation
+            .get("snippet")
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty() && v.len() <= 4_096)
+        && citation
+            .get("provenance")
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty() && v.len() <= 512)
+        && citation
+            .get("freshness")
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.is_empty() && v.len() <= 200)
+        && citation.get("trust").and_then(Value::as_str) == Some("external-untrusted")
+        && citation.get("uri").is_none_or(|value| {
+            value.as_str().is_some_and(|uri| {
+                uri.len() <= 2_048
+                    && url::Url::parse(uri).ok().is_some_and(|parsed| {
+                        matches!(parsed.scheme(), "http" | "https")
+                            && parsed.host_str().is_some()
+                            && parsed.username().is_empty()
+                            && parsed.password().is_none()
+                    })
+            })
+        })
 }
 
 pub fn binding_reference(
@@ -394,5 +458,53 @@ mod tests {
             })
             .unwrap();
         assert!(!String::from_utf8_lossy(&ciphertext).contains(text));
+    }
+
+    #[test]
+    fn cited_output_receipt_retains_external_evidence_without_instruction_authority() {
+        let text = "Launch in Q3 [source-1].\n\n## Sources\n- [source-1] Launch plan";
+        let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+        let reference = binding_reference(
+            "w1", "member-1", "run-1", "worker-1", "event-5", "brief", &hash,
+        );
+        let receipt = json!({
+            "version":2,"workspaceId":"w1","ownerMemberId":"member-1","runId":"run-1","workerId":"worker-1",
+            "completionEventId":"event-5","outputKey":"brief","valueReference":reference,"contentHash":hash,
+            "sizeBytes":text.len(),"text":text,"mediaType":"text/markdown","encoding":"utf-8",
+            "observedProvider":"openai","requestedModel":"gpt-5","trust":"provider-generated-with-external-evidence",
+            "citations":[{"citationId":"source-1","sourceId":"doc-1","title":"Launch plan","snippet":"Q3",
+                "uri":"https://example.com/launch","provenance":"Notion","freshness":"2026-07-11T20:00:00Z","trust":"external-untrusted"}],
+            "createdAt":"t"
+        });
+        validate_receipt(
+            &receipt,
+            "w1",
+            "member-1",
+            "run-1",
+            "worker-1",
+            "event-5",
+            "brief",
+            &reference,
+            &hash,
+            text.len() as i64,
+            "t",
+        )
+        .unwrap();
+        let mut forged = receipt;
+        forged["citations"][0]["trust"] = json!("trusted");
+        assert!(validate_receipt(
+            &forged,
+            "w1",
+            "member-1",
+            "run-1",
+            "worker-1",
+            "event-5",
+            "brief",
+            &reference,
+            &hash,
+            text.len() as i64,
+            "t"
+        )
+        .is_err());
     }
 }

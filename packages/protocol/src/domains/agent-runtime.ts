@@ -507,6 +507,11 @@ export interface MissionWorkerExecutionBinding {
   idempotencyKey: string;
   expectedRunRevision: number;
   expectedLastSequence: number;
+  /** Exact native-attested connected-source result consumed by a final cited-brief turn. */
+  toolEvidence?: {
+    toolEventId: string;
+    outputReference: string;
+  };
 }
 
 /** Secret-free identity for one exact mission-owned connected-source tool result. */

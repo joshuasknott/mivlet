@@ -127,4 +127,28 @@ describe("portable local worker driver", () => {
     expect(runtime.request?.messages).toEqual([{ role: "user", content:
       "Objective:\nResearch\n\nRequired output (brief; text/markdown):\nA trustworthy brief\n\nReturn one Markdown result only.\nState material uncertainty explicitly in the Markdown result." }]);
   });
+
+  it("continues a running mission from exact native-attested cited evidence without another tool", async () => {
+    const runtime = backend([{ type: "done", finishReason: "stop" }]);
+    const evidence = { capabilityId: "knowledge.content.search", result: {
+      citations: [{ citationId: "source-1", title: "Launch", uri: "https://example.com" }],
+      trust: "external-untrusted", instructionAuthority: "none"
+    } };
+    const missionWorkerExecution = {
+      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-3", usageEventId: "event-usage",
+      completionEventId: "event-5", failureEventId: "event-6", idempotencyKey: "terminal-1",
+      expectedRunRevision: 5, expectedLastSequence: 4,
+      toolEvidence: { toolEventId: "event-4", outputReference: "mission-tool:v1:event-4:call-1:sha256:abc" }
+    };
+    const citedWorker = { ...worker(), status: "running" as const,
+      tools: [{ toolName: "connection-read", access: "read" as const, purpose: "Search", required: true }],
+      outputContract: { slots: [{ key: "brief", description: "A trustworthy brief", required: true, format: "text/markdown" }],
+        includeEvidence: true, includeUncertainty: true, delivery: "run-result" as const } };
+    await executeLocalWorker({ worker: citedWorker, backend: runtime.value, model: "model", prompt: "Research",
+      toolSpecs: [], execute: vi.fn(), missionWorkerExecution, missionToolEvidence: evidence });
+    expect(runtime.request?.tools).toEqual([]);
+    expect(runtime.options?.maxToolCalls).toBe(0);
+    expect(runtime.request?.messages[0]?.content).toContain('"capabilityId":"knowledge.content.search"');
+    expect(runtime.request?.messages[0]?.content).toContain("Never invent citations");
+  });
 });
