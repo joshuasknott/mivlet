@@ -226,6 +226,128 @@ pub fn get(
     .transpose()
 }
 
+pub fn mark_running(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    at: &str,
+) -> Result<()> {
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "ready",
+        "running",
+        None,
+        at,
+    )
+}
+
+pub fn mark_completed(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    terminal_result: &Value,
+    at: &str,
+) -> Result<()> {
+    if terminal_result.get("outcome").and_then(Value::as_str) != Some("succeeded")
+        || terminal_result
+            .get("producingRunIds")
+            .and_then(Value::as_array)
+            .is_none_or(|ids| ids.len() != 1)
+    {
+        return Err(StoreError::Invalid(
+            "Mission terminal result is invalid.".into(),
+        ));
+    }
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "running",
+        "completed",
+        Some(terminal_result),
+        at,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn transition_status(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    expected_status: &str,
+    next_status: &str,
+    terminal_result: Option<&Value>,
+    at: &str,
+) -> Result<()> {
+    let owner = normalize_id(owner_member_id, "Member")?;
+    let mut mission = lifecycle
+        .mission
+        .as_object()
+        .cloned()
+        .ok_or_else(|| StoreError::Invalid("Mission is invalid.".into()))?;
+    let mission_id = normalize_id(
+        mission.get("id").and_then(Value::as_str).unwrap_or(""),
+        "Mission",
+    )?;
+    let revision = mission
+        .get("revision")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| StoreError::Invalid("Mission revision is invalid.".into()))?;
+    let plan_id = normalize_id(
+        mission
+            .get("currentPlanId")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+        "Mission plan",
+    )?;
+    let plan_revision_id = normalize_id(
+        mission
+            .get("currentPlanRevisionId")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+        "Plan revision",
+    )?;
+    if mission.get("status").and_then(Value::as_str) != Some(expected_status) {
+        return Err(StoreError::Invalid(
+            "Mission lifecycle status changed.".into(),
+        ));
+    }
+    mission.insert("status".into(), Value::String(next_status.into()));
+    mission.insert("revision".into(), Value::from(revision + 1));
+    mission.insert("updatedAt".into(), Value::String(at.into()));
+    if let Some(result) = terminal_result {
+        mission.insert("terminalResult".into(), result.clone());
+    }
+    let sealed = seal_json(
+        store,
+        &Value::Object(mission),
+        &mission_aad(scope.workspace_id(), &owner, &mission_id),
+    )?;
+    let changed = tx.execute(
+        "UPDATE mission_record SET status=?1,revision=revision+1,updated_at=?2,payload=?3,payload_nonce=?4 WHERE workspace_id=?5 AND owner_member_id=?6 AND id=?7 AND status=?8 AND revision=?9 AND current_plan_id=?10 AND current_plan_revision_id=?11;",
+        rusqlite::params![next_status,at,sealed.ciphertext,sealed.nonce,scope.workspace_id(),owner,mission_id,expected_status,revision,plan_id,plan_revision_id],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "Mission lifecycle changed before its run could be projected.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn ensure_links(
     mission: &Value,
     plan: &Value,
@@ -411,5 +533,61 @@ mod tests {
                 .current_revision["id"],
             "revision-1"
         );
+    }
+
+    #[test]
+    fn mission_status_projects_run_start_and_exact_terminal_result() {
+        let store = store();
+        store.transaction(|tx| { tx.execute("INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('w1','One','t','t');",[])?; Ok(()) }).unwrap();
+        let scope = DataScope::workspace("w1").unwrap();
+        let (mut mission, plan, revision) = values(1, "revision-1", None);
+        mission["status"] = json!("ready");
+        mission["updatedAt"] = json!("t1");
+        let lifecycle = store
+            .transaction(|tx| {
+                create(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    "user-1",
+                    "mission-1",
+                    "plan-1",
+                    "revision-1",
+                    "delegated",
+                    &mission,
+                    &plan,
+                    &revision,
+                    "t1",
+                )
+            })
+            .unwrap();
+        store
+            .transaction(|tx| mark_running(tx, &store, &scope, "member-1", &lifecycle, "t2"))
+            .unwrap();
+        let running = store
+            .with_conn(|tx| get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(running.mission["status"], "running");
+        assert_eq!(running.mission["revision"], 2);
+        let result = json!({"outcome":"succeeded","summary":"Done","producingRunIds":["run-1"],"outputs":[],"acceptance":[],"completedAt":"t3"});
+        store
+            .transaction(|tx| {
+                mark_completed(tx, &store, &scope, "member-1", &running, &result, "t3")
+            })
+            .unwrap();
+        let completed = store
+            .with_conn(|tx| get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(completed.mission["status"], "completed");
+        assert_eq!(completed.mission["revision"], 3);
+        assert_eq!(completed.mission["terminalResult"], result);
+        assert!(store
+            .transaction(|tx| mark_completed(
+                tx, &store, &scope, "member-1", &running, &result, "t4"
+            ))
+            .is_err());
     }
 }

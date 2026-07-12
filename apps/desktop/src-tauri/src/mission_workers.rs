@@ -1263,6 +1263,8 @@ fn append_single_worker_run_result(
         "toolCalls":1,"costs":[],"measuredAt":at});
     let result = json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
         "outputs":[output],"acceptance":acceptance,"evaluations":[evaluation],"usage":[usage_value],"completedAt":at});
+    let mission_result = json!({"outcome":"succeeded","summary":result.get("summary"),"producingRunIds":[binding.run_id],
+        "outputs":result.get("outputs"),"acceptance":result.get("acceptance"),"completedAt":at});
     let idempotency_key = format!(
         "run-result:{}",
         bounded(&binding.idempotency_key, "Run result idempotency key", 200)
@@ -1298,6 +1300,15 @@ fn append_single_worker_run_result(
         &idempotency_key,
         &event,
         &Value::Object(projected),
+        at,
+    )?;
+    mission_plan::mark_completed(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        &mission_result,
         at,
     )?;
     Ok(())
@@ -2625,9 +2636,11 @@ fn validate_lifecycle(
 ) -> Result<(), String> {
     let mission = object(&lifecycle.mission, "Mission")?;
     let revision = object(&lifecycle.current_revision, "Plan revision")?;
-    if mission.get("status").and_then(Value::as_str) != Some("ready")
-        || mission.get("currentPlanRevisionId").and_then(Value::as_str)
-            != revision.get("id").and_then(Value::as_str)
+    if !matches!(
+        mission.get("status").and_then(Value::as_str),
+        Some("ready" | "running")
+    ) || mission.get("currentPlanRevisionId").and_then(Value::as_str)
+        != revision.get("id").and_then(Value::as_str)
         || run.get("planRevisionId").and_then(Value::as_str)
             != revision.get("id").and_then(Value::as_str)
         || run.get("workspaceId") != mission.get("workspaceId")

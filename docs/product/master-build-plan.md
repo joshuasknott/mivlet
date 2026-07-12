@@ -368,7 +368,15 @@ no human gate, and every mission criterion to be policy-owned and met. The
 durable result is derived from the encrypted receipt plus native usage and
 evaluation facts, then stored on the run projection for restart-safe reads.
 Multi-step aggregation, partial/failure outcomes, other evaluator kinds,
-mission-level completion, and the product journey remain open.
+general mission-level aggregation, and the product journey remain open.
+
+The authenticated lifecycle now also projects those journal facts back to the
+selected mission. Creating the first run atomically advances the exact
+revision-fenced mission from ready to running. The eligible terminal cited run
+advances it from running to completed in the same transaction and stores a
+derived `MissionResult` naming only that producing run. No renderer-selected
+status, result, actor, or time crosses this boundary; stale transitions roll
+back. General multi-run and partial/failed mission aggregation remains open.
 
 ### Wave 4B - Routing and experience
 

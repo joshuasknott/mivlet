@@ -112,7 +112,7 @@ pub fn mission_run_create(
             let (run, event) =
                 build_run_created(&lifecycle, &input, &context.internal_user_id, &member, &at)
                     .map_err(crate::store::StoreError::Invalid)?;
-            mission_run::create(
+            let journal = mission_run::create(
                 tx,
                 store,
                 &scope,
@@ -124,7 +124,9 @@ pub fn mission_run_create(
                 &run,
                 &event,
                 &at,
-            )
+            )?;
+            mission_plan::mark_running(tx, store, &scope, &member, &lifecycle, &at)?;
+            Ok(journal)
         })
         .map_err(|error| error.to_string())
 }
