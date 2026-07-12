@@ -3,6 +3,7 @@ import type { Spine } from "@fable/protocol";
 type ProviderRoute = Spine.Connections.ProviderRoute;
 type ProviderRoutePreference = Spine.Missions.ProviderRoutePreference;
 type ProviderRouteSelection = Spine.Missions.ProviderRouteSelection;
+type ProviderRouteObservationSnapshot = Spine.Missions.ProviderRouteObservationSnapshot;
 
 export interface MissionRouteCandidate {
   route: ProviderRoute;
@@ -11,6 +12,7 @@ export interface MissionRouteCandidate {
   contextWindowTokens: number;
   qualityScore?: number;
   estimatedLatencyMs?: number;
+  observation?: ProviderRouteObservationSnapshot;
   estimatedCostMinorUnits?: number;
   risk: "low" | "medium" | "high" | "critical";
 }
@@ -52,6 +54,7 @@ export function selectMissionProviderRoute(
   candidates: readonly MissionRouteCandidate[]
 ): MissionRouteDecision {
   validateRequest(request);
+  candidates.forEach(validateCandidateObservation);
   const rejected: Array<{ providerRouteId: string; reasons: string[] }> = [];
   const eligible = candidates.flatMap((candidate) => {
     const reasons = rejectionReasons(request, candidate);
@@ -80,11 +83,27 @@ export function selectMissionProviderRoute(
       reason,
       ...(fallbackFromProviderRouteId ? { fallbackFromProviderRouteId } : {}),
       boundaryPolicyRef: boundaryReference(request.boundaries)
+      ,...(selected.candidate.observation ? { observation: selected.candidate.observation } : {})
     },
     score: selected.score,
     reason,
     rejected
   };
+}
+
+function validateCandidateObservation(candidate: MissionRouteCandidate): void {
+  if (candidate.estimatedLatencyMs === undefined && candidate.observation === undefined) return;
+  const observation = candidate.observation;
+  if (!observation
+    || candidate.estimatedLatencyMs !== observation.medianLatencyMs
+    || !observation.reference.startsWith("route-observation-summary:v1:")
+    || !Number.isInteger(observation.sampleCount) || observation.sampleCount < 1
+    || !Number.isInteger(observation.medianLatencyMs) || observation.medianLatencyMs < 0
+    || !Number.isInteger(observation.usageSampleCount) || observation.usageSampleCount < 0
+    || observation.usageSampleCount > observation.sampleCount
+    || !Number.isFinite(Date.parse(observation.latestObservedAt))) {
+    throw new MissionRoutingError("Observed route latency requires a valid immutable observation snapshot.");
+  }
 }
 
 function rejectionReasons(request: MissionRouteRequest, candidate: MissionRouteCandidate): string[] {

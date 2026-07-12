@@ -2578,6 +2578,7 @@ export interface RuntimeStreamRequest {
 
 export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
   observationSummary?: {
+    reference: string;
     sampleCount: number;
     medianLatencyMs: number;
     usageSampleCount: number;

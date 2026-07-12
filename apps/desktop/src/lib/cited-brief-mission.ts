@@ -97,6 +97,10 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   }, routes.map((route) => ({
     route, capabilityIds: ["model.generate"], supportsTools: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.tools === true,
     contextWindowTokens: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.contextWindow ?? 0,
+    ...(route.observationSummary ? {
+      estimatedLatencyMs: route.observationSummary.medianLatencyMs,
+      observation: route.observationSummary
+    } : {}),
     risk: "medium" as const
   })));
 

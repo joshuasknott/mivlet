@@ -33,6 +33,10 @@ export async function selectNativeProviderRoute(input: {
     capabilityIds: ["model.generate"],
     supportsTools: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.tools === true,
     contextWindowTokens: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.contextWindow ?? 0,
+    ...(route.observationSummary ? {
+      estimatedLatencyMs: route.observationSummary.medianLatencyMs,
+      observation: route.observationSummary
+    } : {}),
     risk: "medium" as const
   })));
   return { workspaceId: pinnedRoute.workspaceId, selection: decision.selection };

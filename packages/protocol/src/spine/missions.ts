@@ -386,12 +386,21 @@ export interface WorkerHandoffContract {
   acceptedArtifactKinds?: readonly string[];
 }
 
+export interface ProviderRouteObservationSnapshot {
+  reference: string;
+  sampleCount: number;
+  medianLatencyMs: number;
+  usageSampleCount: number;
+  latestObservedAt: IsoDateTime;
+}
+
 export interface ProviderRouteSelection {
   providerRouteId: ProviderRouteId;
   selectedAt: IsoDateTime;
   reason: string;
   fallbackFromProviderRouteId?: ProviderRouteId;
   boundaryPolicyRef?: string;
+  observation?: ProviderRouteObservationSnapshot;
 }
 
 export interface ExecutionNodeSelection {

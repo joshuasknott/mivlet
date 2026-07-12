@@ -3,6 +3,13 @@ import { MissionRoutingError, selectMissionProviderRoute, type MissionRouteCandi
 
 const boundaries = { privacyBoundary: "private", billingBoundary: "personal", providerBoundary: "approved", placementBoundary: "local-or-approved-hosted" };
 function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): MissionRouteCandidate {
+  const observation = {
+    reference: `route-observation-summary:v1:${id}`,
+    sampleCount: 2,
+    medianLatencyMs: 1_000,
+    usageSampleCount: 1,
+    latestObservedAt: "2026-07-12T00:30:00Z"
+  };
   return {
     route: {
       id, recordType: "provider-route", connectionId: `connection-${id}`, kind: "api-model", displayName: id,
@@ -13,7 +20,10 @@ function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): 
       createdByInternalUserId: "user-1", createdAt: "2026-07-12T00:00:00Z", updatedAt: "2026-07-12T00:00:00Z"
     } as never,
     capabilityIds: ["knowledge.content.search"], supportsTools: true, contextWindowTokens: 64_000,
-    qualityScore: 0.8, estimatedLatencyMs: 1_000, estimatedCostMinorUnits: 5, risk: "medium", ...overrides
+    qualityScore: 0.8, estimatedLatencyMs: 1_000, observation, estimatedCostMinorUnits: 5, risk: "medium", ...overrides,
+    ...(overrides.estimatedLatencyMs !== undefined && !Object.prototype.hasOwnProperty.call(overrides, "observation")
+      ? { observation: { ...observation, medianLatencyMs: overrides.estimatedLatencyMs } }
+      : {})
   };
 }
 function request(overrides: Partial<MissionRouteRequest> = {}): MissionRouteRequest {
@@ -80,5 +90,17 @@ describe("mission provider routing", () => {
     expect(decision.reason).toContain("quality unobserved");
     expect(decision.reason).toContain("cost unobserved");
     expect(decision.reason).toContain("latency unobserved");
+    expect(decision.selection.observation).toBeUndefined();
+  });
+
+  it("binds observed latency evidence into the immutable selection", () => {
+    const decision = selectMissionProviderRoute(request(), [candidate("route-observed")]);
+    expect(decision.selection.observation).toEqual(candidate("route-observed").observation);
+  });
+
+  it("rejects observed latency without matching evidence", () => {
+    expect(() => selectMissionProviderRoute(request(), [
+      candidate("route-invalid", { observation: undefined })
+    ])).toThrow("Observed route latency requires a valid immutable observation snapshot");
   });
 });

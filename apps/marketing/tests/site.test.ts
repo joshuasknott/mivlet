@@ -5,14 +5,18 @@ import { join } from 'node:path';
 const DIST = 'dist';
 
 describe('marketing site build artifacts (M-*)', () => {
-  it('M-01 home has the new hero and provider section', () => {
+  it('M-01 home has the light product-led hero and provider section', () => {
     const p = join(DIST, 'index.html');
     if (!existsSync(p)) { console.warn('dist not present; run build first'); return; }
     const html = readFileSync(p, 'utf8');
     expect(html).toMatch(/Where people and agents/i);
-    expect(html).toMatch(/fable-product-demo\.mp4/i);
-    expect(html).toMatch(/Codex/i);
+    expect(html).toMatch(/fable-workspace\.jpg/i);
+    expect(html).toMatch(/fable-knowledge\.png/i);
+    expect(html).toMatch(/fable-connections\.png/i);
+    expect(html).toMatch(/ChatGPT/i);
     expect(html).toMatch(/OpenCode/i);
+    expect(html).not.toMatch(/>Codex</i);
+    expect(html).not.toMatch(/fable-product-demo\.mp4/i);
     expect(html).not.toMatch(/Hugging Face/i);
     expect(html).not.toMatch(/Windows preview/i);
     expect(html).not.toMatch(/All claims are grounded in the repository/i);

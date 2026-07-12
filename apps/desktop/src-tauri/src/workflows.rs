@@ -502,6 +502,7 @@ mod tests {
                 reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.".into(),
                 fallback_from_provider_route_id: None,
                 boundary_policy_ref: Some("boundary:member-private:account-owned-provider:openai:local-credential-egress".into()),
+                observation: None,
             },
         }
     }

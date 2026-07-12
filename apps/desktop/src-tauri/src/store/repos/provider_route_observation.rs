@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 use crate::store::repos::{open_json, seal_json};
 use crate::store::vault::Sealed;
@@ -31,6 +32,7 @@ struct ProviderRouteObservationPayload {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderRouteObservationSummary {
+    pub reference: String,
     pub sample_count: usize,
     pub median_latency_ms: u64,
     pub usage_sample_count: usize,
@@ -185,8 +187,15 @@ pub fn summaries(
                 latencies.sort_unstable();
                 let median_latency_ms = latencies[latencies.len() / 2];
                 (
-                    route_id,
+                    route_id.clone(),
                     ProviderRouteObservationSummary {
+                        reference: summary_reference(
+                            &route_id,
+                            latencies.len(),
+                            median_latency_ms,
+                            usage_sample_count,
+                            &latest_observed_at,
+                        ),
                         sample_count: latencies.len(),
                         median_latency_ms,
                         usage_sample_count,
@@ -196,6 +205,19 @@ pub fn summaries(
             },
         )
         .collect())
+}
+
+pub fn summary_reference(
+    provider_route_id: &str,
+    sample_count: usize,
+    median_latency_ms: u64,
+    usage_sample_count: usize,
+    latest_observed_at: &str,
+) -> String {
+    let digest = Sha256::digest(format!(
+        "{provider_route_id}:{sample_count}:{median_latency_ms}:{usage_sample_count}:{latest_observed_at}"
+    ));
+    format!("route-observation-summary:v1:{digest:x}")
 }
 
 fn load_exact(

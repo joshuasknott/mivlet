@@ -765,7 +765,7 @@ pub(crate) fn validate_account_native_provider_model(
     ))
 }
 
-fn account_native_provider_route_id(
+pub(crate) fn account_native_provider_route_id(
     internal_user_id: &str,
     provider_id: &str,
     model: &str,
@@ -795,6 +795,33 @@ pub(crate) fn native_provider_route_reason(
     Ok(format!("Selected {} {} for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", entry.label, label))
 }
 
+pub(crate) fn native_provider_route_reason_with_observation(
+    provider_id: &str,
+    model: &str,
+    observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
+) -> Result<String, String> {
+    let reason = native_provider_route_reason(provider_id, model)?;
+    Ok(match observation {
+        Some(value) => reason.replace(
+            "latency unobserved",
+            &format!("estimated latency {} ms", value.median_latency_ms),
+        ),
+        None => reason,
+    })
+}
+
+pub(crate) fn provider_route_observation_snapshot(
+    summary: &crate::store::repos::provider_route_observation::ProviderRouteObservationSummary,
+) -> crate::models::ProviderRouteObservationSnapshot {
+    crate::models::ProviderRouteObservationSnapshot {
+        reference: summary.reference.clone(),
+        sample_count: summary.sample_count,
+        median_latency_ms: summary.median_latency_ms,
+        usage_sample_count: summary.usage_sample_count,
+        latest_observed_at: summary.latest_observed_at.clone(),
+    }
+}
+
 pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
     format!("boundary:member-private:account-owned-provider:{provider_id}:local-credential-egress")
 }
@@ -807,7 +834,7 @@ pub(crate) fn validate_current_native_provider_route(
     let internal_user_id = require_current_internal_user()?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let expected = store
+    let (expected, observation) = store
         .with_conn(|tx| {
             let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
             if context.member_id.is_none() {
@@ -825,11 +852,15 @@ pub(crate) fn validate_current_native_provider_route(
                     "The selected provider route is not scoped to the active workspace.".into(),
                 ));
             }
-            validate_account_native_provider_model(tx, &internal_user_id, provider_id, model)
-                .map_err(crate::store::StoreError::Invalid)
+            let expected = validate_account_native_provider_model(tx, &internal_user_id, provider_id, model)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let observations = crate::store::repos::provider_route_observation::summaries(
+                tx, store, &internal_user_id,
+            )?;
+            Ok((expected.clone(), observations.get(&expected).map(provider_route_observation_snapshot)))
         })
         .map_err(|error| error.to_string())?;
-    validate_native_provider_route_binding(provider_id, model, &expected, binding)?;
+    validate_native_provider_route_binding(provider_id, model, &expected, observation.as_ref(), binding)?;
     Ok(expected)
 }
 
@@ -898,17 +929,66 @@ fn validate_native_provider_route_binding(
     provider_id: &str,
     model: &str,
     expected_route_id: &str,
+    expected_observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
     binding: &crate::models::ProviderRouteExecutionBinding,
 ) -> Result<(), String> {
-    let expected_reason = native_provider_route_reason(provider_id, model)?;
+    validate_provider_route_observation_snapshot(expected_route_id, binding.selection.observation.as_ref())?;
+    let expected_reason = native_provider_route_reason_with_observation(provider_id, model, expected_observation)?;
     let expected_boundary = native_provider_route_boundary(provider_id);
     if binding.selection.provider_route_id != expected_route_id
         || binding.selection.reason != expected_reason
+        || binding.selection.observation.as_ref() != expected_observation
         || binding.selection.boundary_policy_ref.as_deref() != Some(expected_boundary.as_str())
         || binding.selection.fallback_from_provider_route_id.is_some()
         || chrono::DateTime::parse_from_rfc3339(&binding.selection.selected_at).is_err()
     {
         return Err("Native provider egress does not match its selected route.".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_persisted_native_provider_route_selection(
+    provider_id: &str,
+    model: &str,
+    expected_route_id: &str,
+    selection: &crate::models::ProviderRouteSelection,
+) -> Result<(), String> {
+    validate_provider_route_observation_snapshot(expected_route_id, selection.observation.as_ref())?;
+    let expected_reason = native_provider_route_reason_with_observation(
+        provider_id,
+        model,
+        selection.observation.as_ref(),
+    )?;
+    if selection.provider_route_id != expected_route_id
+        || selection.reason != expected_reason
+        || selection.boundary_policy_ref.as_deref()
+            != Some(native_provider_route_boundary(provider_id).as_str())
+        || selection.fallback_from_provider_route_id.is_some()
+        || chrono::DateTime::parse_from_rfc3339(&selection.selected_at).is_err()
+    {
+        return Err("Native provider route selection is invalid.".into());
+    }
+    Ok(())
+}
+
+fn validate_provider_route_observation_snapshot(
+    provider_route_id: &str,
+    observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
+) -> Result<(), String> {
+    let Some(observation) = observation else { return Ok(()); };
+    let expected = crate::store::repos::provider_route_observation::summary_reference(
+        provider_route_id,
+        observation.sample_count,
+        observation.median_latency_ms,
+        observation.usage_sample_count,
+        &observation.latest_observed_at,
+    );
+    if observation.reference != expected
+        || observation.sample_count == 0
+        || observation.usage_sample_count > observation.sample_count
+        || chrono::DateTime::parse_from_rfc3339(&observation.latest_observed_at).is_err()
+    {
+        return Err("Provider route observation snapshot is invalid.".into());
     }
     Ok(())
 }
@@ -1438,6 +1518,13 @@ mod provider_route_tests {
         let observations = std::collections::BTreeMap::from([(
             gpt5,
             crate::store::repos::provider_route_observation::ProviderRouteObservationSummary {
+                reference: crate::store::repos::provider_route_observation::summary_reference(
+                    &account_native_provider_route_id("user-1", "openai", "gpt-5"),
+                    3,
+                    200,
+                    2,
+                    "2026-07-12T02:00:00Z",
+                ),
                 sample_count: 3,
                 median_latency_ms: 200,
                 usage_sample_count: 2,
@@ -1478,6 +1565,7 @@ mod provider_route_tests {
                 reason: native_provider_route_reason("openai", "gpt-5").unwrap(),
                 fallback_from_provider_route_id: None,
                 boundary_policy_ref: Some(native_provider_route_boundary("openai")),
+                observation: None,
             },
         };
         assert!(

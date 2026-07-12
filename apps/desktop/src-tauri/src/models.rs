@@ -512,6 +512,16 @@ pub struct RunContextReceipt {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderRouteObservationSnapshot {
+    pub reference: String,
+    pub sample_count: usize,
+    pub median_latency_ms: u64,
+    pub usage_sample_count: usize,
+    pub latest_observed_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderRouteSelection {
     pub provider_route_id: String,
     pub selected_at: String,
@@ -520,6 +530,8 @@ pub struct ProviderRouteSelection {
     pub fallback_from_provider_route_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary_policy_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<ProviderRouteObservationSnapshot>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

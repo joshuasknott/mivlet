@@ -4,8 +4,9 @@ export interface Props {
   title: string;
   description?: string;
   noindex?: boolean;
+  pageClass?: string;
 }
-const { title, description = "Local-first AI, open by design.", noindex = false } = Astro.props;
+const { title, description = "Local-first AI, open by design.", noindex = false, pageClass = '' } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site || 'https://fable.tools').href;
 const year = 2026;
 ---
@@ -22,21 +23,21 @@ const year = 2026;
   <meta property="og:title" content={title} />
   <meta property="og:description" content={description} />
   <meta property="og:image" content="/og-image.png" />
-  <meta name="theme-color" content="#050505" />
-  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content={pageClass === 'home-page' ? '#fbfbfa' : '#050505'} />
+  <meta name="color-scheme" content={pageClass === 'home-page' ? 'light' : 'dark'} />
 </head>
-<body>
+<body class={pageClass}>
   <a href="#main" class="skip-link">Skip to main content</a>
   <header class="site-header">
     <nav class="site-nav" aria-label="Primary">
       <a href="/" class="logo-container" aria-label="Fable home">
         <img src="/brand/fable-tech-dragon-transparent.png" alt="" class="logo-image" />
+        <span class="logo-wordmark">Fable</span>
       </a>
       <ul class="nav-links">
         <li><a href="/#product">Product</a></li>
         <li><a href="/#providers">Providers</a></li>
         <li><a href="/#connectors">Connectors</a></li>
-        <li><a href="/open-source">Open Source</a></li>
       </ul>
       <a class="header-cta" href="/#updates">Join waitlist</a>
     </nav>
