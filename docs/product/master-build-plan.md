@@ -412,7 +412,11 @@ catalogue model, appends `route-selected` immediately after `worker-started`, an
 revalidates that route before egress. Tool execution, usage, output receipts, and
 terminal run results remain bound to the selected route across replay and restart.
 A multi-route durable catalogue, price/quality observations, and visible product
-receipts remain open, so the Wave 4B checkboxes stay unchecked.
+receipts for other mission shapes remain open. The cited-brief result now shows a
+compact expandable receipt derived only from the reloaded durable journal and
+encrypted output receipt: provider/model route explanation, token and tool usage,
+cited-source count, and external-evidence trust classification. The Wave 4B
+checkboxes stay unchecked because the experience is not yet general.
 
 ### Wave 4C - Multi-worker coordination
 

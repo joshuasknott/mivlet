@@ -34,6 +34,18 @@ export interface CitedBriefMissionResult {
   text: string;
   valueReference: string;
   journal: Record<string, unknown>;
+  receipt: CitedBriefMissionReceipt;
+}
+
+export interface CitedBriefMissionReceipt {
+  provider: string;
+  model: string;
+  routeReason: string;
+  inputTokens: number;
+  outputTokens: number;
+  toolCalls: number;
+  sourceCount: number;
+  trust: string;
 }
 
 export function isCitedBriefMissionPrompt(value: string): boolean {
@@ -159,12 +171,40 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   if (completion.status !== "completed") throw new Error(completion.reason ?? "The cited brief did not complete.");
   journal = requireJournal(await getRuntimeMissionRun(runId));
   const valueReference = terminalOutputReference(journal);
-  const receipt = await readRuntimeMissionWorkerOutput(valueReference);
-  const text = typeof receipt?.receipt === "object" && receipt.receipt
-    ? (receipt.receipt as Record<string, unknown>).text
+  const output = await readRuntimeMissionWorkerOutput(valueReference);
+  const outputReceipt = typeof output?.receipt === "object" && output.receipt
+    ? output.receipt as Record<string, unknown>
     : undefined;
-  if (typeof text !== "string" || !text.trim()) throw new Error("The durable cited brief is unavailable.");
-  return { missionId, runId, text, valueReference, journal };
+  const text = outputReceipt?.text;
+  if (!outputReceipt || typeof text !== "string" || !text.trim()) throw new Error("The durable cited brief is unavailable.");
+  return { missionId, runId, text, valueReference, journal, receipt: citedBriefReceipt(journal, outputReceipt) };
+}
+
+function citedBriefReceipt(journal: Record<string, unknown>, output: Record<string, unknown>): CitedBriefMissionReceipt {
+  const events = journal.events as Array<Record<string, unknown>>;
+  const route = events.find((event) => event.type === "route-selected")?.payload as Record<string, unknown> | undefined;
+  const selection = route?.selection as Record<string, unknown> | undefined;
+  const usageEvent = events.find((event) => event.type === "usage-recorded")?.payload as Record<string, unknown> | undefined;
+  const usage = usageEvent?.usage as Record<string, unknown> | undefined;
+  const citations = Array.isArray(output.citations) ? output.citations : [];
+  const requiredText = (value: unknown, message: string) => {
+    if (typeof value !== "string" || !value.trim()) throw new Error(message);
+    return value;
+  };
+  const count = (value: unknown) => {
+    if (!Number.isInteger(value) || (value as number) < 0) throw new Error("The durable mission usage receipt is invalid.");
+    return value as number;
+  };
+  return {
+    provider: requiredText(output.observedProvider, "The durable mission provider receipt is invalid."),
+    model: requiredText(output.requestedModel, "The durable mission model receipt is invalid."),
+    routeReason: requiredText(selection?.reason, "The durable mission route receipt is invalid."),
+    inputTokens: count(usage?.inputTokens),
+    outputTokens: count(usage?.outputTokens),
+    toolCalls: count(usage?.toolCalls),
+    sourceCount: citations.length,
+    trust: requiredText(output.trust, "The durable mission trust receipt is invalid.")
+  };
 }
 
 function secureId(prefix: string): string {

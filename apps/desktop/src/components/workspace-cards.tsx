@@ -77,6 +77,26 @@ export function RunContextSummary({ receipt }: { receipt: RunContextReceipt }) {
   );
 }
 
+export function MissionRunReceipt({ receipt }: { receipt: {
+  provider: string; model: string; routeReason: string; inputTokens: number;
+  outputTokens: number; toolCalls: number; sourceCount: number; trust: string;
+} }) {
+  const provider = receipt.provider === "openai" ? "OpenAI" : receipt.provider;
+  return (
+    <details className="run-context-summary" aria-label="Run receipt">
+      <summary><strong>Run receipt</strong><span>{provider} · {receipt.inputTokens + receipt.outputTokens} tokens</span></summary>
+      <p className="run-context-summary__audience"><strong>Route</strong><span>{receipt.routeReason}</span></p>
+      <ul className="run-context-summary__reasons" aria-label="Run facts">
+        <li>{receipt.model}</li>
+        <li>{receipt.inputTokens} in · {receipt.outputTokens} out</li>
+        <li>{receipt.toolCalls} read {receipt.toolCalls === 1 ? "action" : "actions"}</li>
+        <li>{receipt.sourceCount} cited {receipt.sourceCount === 1 ? "source" : "sources"}</li>
+        <li>{receipt.trust === "provider-generated-with-external-evidence" ? "External evidence kept untrusted" : receipt.trust}</li>
+      </ul>
+    </details>
+  );
+}
+
 /**
  * Composer-adjacent presentational components: directive prompt starters,
  * citation results, and the active thread context strip.

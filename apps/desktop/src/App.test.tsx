@@ -80,7 +80,7 @@ vi.mock("./lib/cited-brief-mission", () => ({
   isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
   executeCitedBriefMission: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.citedBriefCalls.push(input);
-    return { missionId: "mission-ui", runId: "mission-run-ui", valueReference: "mission-output:v1:ui", text: "Durable cited brief [source-1].", journal: {} };
+    return { missionId: "mission-ui", runId: "mission-run-ui", valueReference: "mission-output:v1:ui", text: "Durable cited brief [source-1].", journal: {}, receipt: { provider: "openai", model: "gpt-5", routeReason: "Selected the connected openai account route for gpt-5.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence" } };
   })
 }));
 
@@ -1425,6 +1425,7 @@ describe("Fable home", () => {
     await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Durable cited brief [source-1].")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
     expect(runtimeMocks.citedBriefCalls).toHaveLength(1);
     expect(runtimeMocks.citedBriefCalls[0]).toMatchObject({
       workspaceId: "preview-default",

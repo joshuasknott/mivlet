@@ -11,13 +11,13 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { isCitedBriefMissionPrompt } from "../lib/cited-brief-mission";
+import { isCitedBriefMissionPrompt, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, DirectiveCards, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, DirectiveCards, MissionRunReceipt, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -34,6 +34,7 @@ type ConversationMessage = {
   role: "user" | "assistant";
   content: string;
   runId?: string;
+  missionReceipt?: CitedBriefMissionReceipt;
 };
 
 function messageId(prefix: string) {
@@ -493,6 +494,7 @@ export function ChatWorkspace() {
             className={`conversation-message conversation-message--${message.role}`}
           >
             <p>{message.content}</p>
+            {message.role === "assistant" && message.missionReceipt ? <MissionRunReceipt receipt={message.missionReceipt} /> : null}
             {message.role === "assistant" && message.runId && agent.state.contextReceipts[message.runId] ? (
               <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
             ) : null}
@@ -749,7 +751,7 @@ export function ChatWorkspace() {
       void runCitedBrief(prompt, resolvedComposerModelId, runProjectId ?? undefined)
         .then((result) => {
           setConversationMessages((current) => current.map((entry) =>
-            entry.id === assistantMessageId ? { ...entry, content: result.text, runId: result.runId } : entry
+            entry.id === assistantMessageId ? { ...entry, content: result.text, runId: result.runId, missionReceipt: result.receipt } : entry
           ));
         })
         .catch((cause) => {

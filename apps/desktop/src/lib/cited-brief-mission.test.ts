@@ -47,8 +47,11 @@ describe("cited brief mission composition", () => {
     mocks.executeLocalWorker.mockResolvedValue({ status: "completed", events: [], text: "Brief", usage: {}, retryable: false });
     mocks.getRun
       .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
-      .mockResolvedValueOnce(journal(11, 10, [], { status: "completed", terminalResult: { outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
-    mocks.readOutput.mockResolvedValue({ receipt: { text: "Trustworthy brief [source-1]." } });
+      .mockResolvedValueOnce(journal(11, 10, [
+        { type: "route-selected", payload: { selection: { reason: "Selected the connected openai account route for gpt-5." } } },
+        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1 } } }
+      ], { status: "completed", terminalResult: { outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
+    mocks.readOutput.mockResolvedValue({ receipt: { text: "Trustworthy brief [source-1].", observedProvider: "openai", requestedModel: "gpt-5", trust: "provider-generated-with-external-evidence", citations: [{ citationId: "source-1" }] } });
   });
 
   it("routes only an explicit connected-source cited-brief request", () => {
@@ -68,6 +71,7 @@ describe("cited brief mission composition", () => {
     });
 
     expect(result.text).toBe("Trustworthy brief [source-1].");
+    expect(result.receipt).toMatchObject({ provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1 });
     expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(1);
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
       toolSpecs: [], missionToolEvidence: { result: { citations: [{ citationId: "source-1" }] } },
