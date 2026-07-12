@@ -1669,6 +1669,7 @@ mod transport_policy_tests {
             usage_event_id: "lease-usage".into(),
             completion_event_id: "lease-complete".into(),
             evaluation_event_id: "lease-evaluation".into(),
+            result_event_id: "lease-result".into(),
             failure_event_id: "lease-fail".into(),
             idempotency_key: "lease-terminal".into(),
             expected_run_revision: 3,

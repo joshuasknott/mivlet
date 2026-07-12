@@ -358,8 +358,17 @@ its policy-owned criteria, and appends `evaluation-recorded`. Pass/fail and
 evidence references come only from the attested receipt, retained citation ids,
 and any exact required evidence; renderer assertions cannot create acceptance.
 Human, worker, and external evaluators, multi-output and mission-level result
-aggregation, terminal result persistence, and the inspectable journey remain
+aggregation, general terminal result persistence, and the inspectable journey remain
 open, so the acceptance/evaluation box stays unchecked.
+
+For the deliberately narrow single-step cited-brief shape, accepted policy
+evaluation now continues in that transaction to a terminal `run-completed`.
+Rust requires exactly one plan step, one created worker, one required deliverable,
+no human gate, and every mission criterion to be policy-owned and met. The
+durable result is derived from the encrypted receipt plus native usage and
+evaluation facts, then stored on the run projection for restart-safe reads.
+Multi-step aggregation, partial/failure outcomes, other evaluator kinds,
+mission-level completion, and the product journey remain open.
 
 ### Wave 4B - Routing and experience
 

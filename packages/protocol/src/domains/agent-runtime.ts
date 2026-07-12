@@ -505,6 +505,8 @@ export interface MissionWorkerExecutionBinding {
   completionEventId: string;
   /** Reserved journal identity for a Rust-derived policy evaluation, when the step has one. */
   evaluationEventId: string;
+  /** Reserved journal identity for a narrowly derived successful run result, when eligible. */
+  resultEventId: string;
   failureEventId: string;
   idempotencyKey: string;
   expectedRunRevision: number;
