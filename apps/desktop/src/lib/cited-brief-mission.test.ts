@@ -4,7 +4,7 @@ import { executeCitedBriefMission, isCitedBriefMissionPrompt } from "./cited-bri
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({
   executeLocalWorker: mocks.executeLocalWorker,
@@ -18,6 +18,7 @@ vi.mock("../runtime", () => ({
   commitRuntimeCapabilityGrant: mocks.commitGrant,
   createRuntimeMissionPlan: mocks.createPlan,
   createRuntimeMissionRun: mocks.createRun,
+  createRuntimeMissionCheckpoint: mocks.createCheckpoint,
   createRuntimeMissionWorker: mocks.createWorker,
   startRuntimeMissionWorker: mocks.startWorker,
   getRuntimeMissionRun: mocks.getRun,
@@ -51,11 +52,14 @@ describe("cited brief mission composition", () => {
     mocks.createRun.mockResolvedValue(journal(2, 1, []));
     mocks.createWorker.mockResolvedValue(journal(3, 2, [{ type: "worker-created", payload: { worker } }]));
     mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }, { type: "route-selected", payload: { selection: { providerRouteId: "provider-route-ui" } } }]));
+    mocks.createCheckpoint.mockImplementation(async (input: { eventId: string }) => journal(8, 7, [{
+      id: input.eventId, type: "checkpoint-created", sequence: 7
+    }], { eventHead: { lastSequence: 7, lastEventId: input.eventId } }));
     mocks.buildToolApproval.mockReturnValue({ id: "base", service: "openai", action: "connection-read", mode: "read-only", riskLevel: "medium", dataUsed: [], consequence: "Search", requestedAt: "t", decisions: ["once", "deny"] });
     mocks.desktopExecutor.mockReturnValue(vi.fn().mockResolvedValue(JSON.stringify({ result: { citations: [{ citationId: "source-1" }] } })));
     mocks.executeLocalWorker.mockResolvedValue({ status: "completed", events: [], text: "Brief", usage: {}, retryable: false });
     mocks.getRun
-      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(11, 10, [
         { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
         { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } },
@@ -91,7 +95,7 @@ describe("cited brief mission composition", () => {
       missionWorkerExecution: {
         runId: "mission-run-4", workerId: "worker-5", workerStartedEventId: "event-11", routeSelectedEventId: "event-12",
         toolEvidence: { toolEventId: "event-14", outputReference: "mission-tool:v1:evidence" },
-        expectedRunRevision: 7, expectedLastSequence: 6
+        checkpointEventId: "event-17", expectedRunRevision: 8, expectedLastSequence: 7
       }
     });
     expect(mocks.desktopExecutor).toHaveBeenCalledWith(gate, expect.objectContaining({
@@ -100,6 +104,11 @@ describe("cited brief mission composition", () => {
     expect(mocks.createWorker).toHaveBeenCalledWith(expect.objectContaining({
       grants: [{ capabilityId: "knowledge.content.search", capabilityGrantId: "grant-1" }]
     }));
+    expect(mocks.createCheckpoint).toHaveBeenCalledWith({
+      runId: "mission-run-4", eventId: "event-17", idempotencyKey: "cited-evidence:event-14",
+      expectedRunRevision: 7, expectedLastSequence: 6, attemptNumber: 1,
+      durableThroughSequence: 6, resumeAfterEventId: "event-14"
+    });
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
     expect(cancelMission).toBeTypeOf("function");
@@ -109,7 +118,7 @@ describe("cited brief mission composition", () => {
     let counter = 0;
     mocks.getRun
       .mockReset()
-      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(11, 10, [
         { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
         { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [] } } },
@@ -140,7 +149,7 @@ describe("cited brief mission composition", () => {
     mocks.executeLocalWorker.mockResolvedValue({ status: "failed", events: [], text: "", usage: {}, reason: "renderer reason", retryable: false });
     mocks.getRun
       .mockReset()
-      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(10, 9, [{
         id: "head-9", type: "run-failed", payload: { error: {
           code: "native-provider-request-rejected", category: "provider",
@@ -167,8 +176,8 @@ describe("cited brief mission composition", () => {
     };
     mocks.getRun
       .mockReset()
-      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
-      .mockResolvedValueOnce(journal(7, 6, []))
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(8, 7, []))
       .mockResolvedValueOnce(journal(9, 8, [{
         id: "event-19", type: "run-cancelled", payload: { cancellation }
       }], { status: "cancelled", cancellation, eventHead: { lastSequence: 8, lastEventId: "event-19" } }));
@@ -189,7 +198,7 @@ describe("cited brief mission composition", () => {
     })).rejects.toThrow("User requested stop.");
 
     expect(mocks.cancelRun).toHaveBeenCalledWith(expect.objectContaining({
-      runId: "mission-run-4", mode: "cooperative", expectedRunRevision: 7, expectedLastSequence: 6
+      runId: "mission-run-4", mode: "cooperative", expectedRunRevision: 8, expectedLastSequence: 7
     }));
     expect(backendCancel).toHaveBeenCalledWith("mission-run-4");
     expect(mocks.readOutput).not.toHaveBeenCalled();

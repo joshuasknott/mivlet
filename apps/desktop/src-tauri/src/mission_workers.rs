@@ -27,6 +27,8 @@ pub struct NativeWorkerExecutionBinding {
     pub expected_run_revision: i64,
     pub expected_last_sequence: i64,
     #[serde(default)]
+    pub checkpoint_event_id: Option<String>,
+    #[serde(default)]
     pub tool_evidence: Option<NativeWorkerToolEvidenceBinding>,
 }
 
@@ -1759,6 +1761,13 @@ fn native_usage_event_key(binding: &NativeWorkerExecutionBinding) -> Result<Stri
 
 fn native_completion_base_event(binding: &NativeWorkerExecutionBinding) -> &str {
     binding
+        .checkpoint_event_id
+        .as_deref()
+        .unwrap_or_else(|| native_pre_checkpoint_base_event(binding))
+}
+
+fn native_pre_checkpoint_base_event(binding: &NativeWorkerExecutionBinding) -> &str {
+    binding
         .tool_evidence
         .as_ref()
         .map_or(binding.route_selected_event_id.as_str(), |evidence| {
@@ -2029,12 +2038,68 @@ fn validate_native_completion_head(
             return Err("Native worker evidence and terminal event ids must be distinct.".into());
         }
     }
-    let expected_head = binding
-        .tool_evidence
-        .as_ref()
-        .map_or(binding.route_selected_event_id.as_str(), |evidence| {
-            evidence.tool_event_id.as_str()
-        });
+    if let Some(checkpoint_event_id) = binding.checkpoint_event_id.as_deref() {
+        bounded(checkpoint_event_id, "Native worker checkpoint event", 200)?;
+        if [
+            binding.worker_started_event_id.as_str(),
+            binding.route_selected_event_id.as_str(),
+            binding.usage_event_id.as_str(),
+            binding.completion_event_id.as_str(),
+            binding.evaluation_event_id.as_str(),
+            binding.result_event_id.as_str(),
+            binding.failure_event_id.as_str(),
+        ]
+        .contains(&checkpoint_event_id)
+            || binding
+                .tool_evidence
+                .as_ref()
+                .is_some_and(|evidence| evidence.tool_event_id == checkpoint_event_id)
+        {
+            return Err(
+                "Native worker checkpoint and execution event ids must be distinct.".into(),
+            );
+        }
+        let replay_base = native_pre_checkpoint_base_event(binding);
+        let replay_sequence = journal
+            .events
+            .iter()
+            .find(|event| event.get("id").and_then(Value::as_str) == Some(replay_base))
+            .and_then(|event| event.get("sequence"))
+            .and_then(Value::as_i64);
+        let checkpoint = journal
+            .events
+            .iter()
+            .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id));
+        if replay_sequence.is_none()
+            || checkpoint.is_none_or(|event| {
+                event.get("type").and_then(Value::as_str) != Some("checkpoint-created")
+                    || event.get("previousEventId").and_then(Value::as_str) != Some(replay_base)
+                    || event
+                        .pointer("/payload/checkpoint/replayBoundary/resumeAfterEventId")
+                        .and_then(Value::as_str)
+                        != Some(replay_base)
+                    || event
+                        .pointer("/payload/checkpoint/replayBoundary/durableThroughSequence")
+                        .and_then(Value::as_i64)
+                        != replay_sequence
+                    || event
+                        .pointer("/payload/checkpoint/attemptNumber")
+                        .and_then(Value::as_i64)
+                        != Some(
+                            journal
+                                .run
+                                .get("currentAttemptNumber")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(1),
+                        )
+            })
+        {
+            return Err(
+                "Native worker checkpoint does not bind the durable execution boundary.".into(),
+            );
+        }
+    }
+    let expected_head = native_completion_base_event(binding);
     if binding.worker_started_event_id == binding.route_selected_event_id
         || binding.route_selected_event_id == binding.usage_event_id
         || binding.route_selected_event_id == binding.completion_event_id
@@ -4455,6 +4520,7 @@ mod tests {
             idempotency_key: "terminal-1".into(),
             expected_run_revision: 4,
             expected_last_sequence: 3,
+            checkpoint_event_id: None,
             tool_evidence: None,
         };
         let mut event = json!({
@@ -4572,6 +4638,7 @@ mod tests {
             idempotency_key: "terminal-1".into(),
             expected_run_revision: 4,
             expected_last_sequence: 3,
+            checkpoint_event_id: None,
             tool_evidence: None,
         };
         let cancellation = json!({
@@ -4607,6 +4674,49 @@ mod tests {
     }
 
     #[test]
+    fn native_completion_accepts_only_the_exact_durable_checkpoint_head() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-start".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-complete".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-result".into(),
+            failure_event_id: "event-failure".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 6,
+            expected_last_sequence: 5,
+            checkpoint_event_id: Some("event-checkpoint".into()),
+            tool_evidence: Some(NativeWorkerToolEvidenceBinding {
+                tool_event_id: "event-tool".into(),
+                output_reference: "mission-tool:v1:evidence".into(),
+            }),
+        };
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":6,"currentAttemptNumber":1,
+                "eventHead":{"lastSequence":5,"lastEventId":"event-checkpoint"}}),
+            events: vec![
+                json!({"id":"event-start","type":"worker-started","sequence":2,
+                    "payload":{"workerId":"worker-1"}}),
+                json!({"id":"event-route","type":"route-selected","sequence":3,
+                    "previousEventId":"event-start"}),
+                json!({"id":"event-tool","type":"tool-call-completed","sequence":4,
+                    "previousEventId":"event-route"}),
+                json!({"id":"event-checkpoint","type":"checkpoint-created","sequence":5,
+                    "previousEventId":"event-tool","payload":{"checkpoint":{"attemptNumber":1,
+                    "replayBoundary":{"durableThroughSequence":4,"resumeAfterEventId":"event-tool"}}}}),
+            ],
+        };
+        assert!(validate_native_completion_head(&journal, &binding).is_ok());
+        let mut changed = journal;
+        changed.events[3]["payload"]["checkpoint"]["replayBoundary"]["durableThroughSequence"] =
+            json!(3);
+        assert!(validate_native_completion_head(&changed, &binding).is_err());
+    }
+
+    #[test]
     fn policy_result_replay_requires_exact_terminal_acceptance_outcome() {
         let binding = NativeWorkerExecutionBinding {
             run_id: "run-1".into(),
@@ -4621,6 +4731,7 @@ mod tests {
             idempotency_key: "terminal-1".into(),
             expected_run_revision: 4,
             expected_last_sequence: 3,
+            checkpoint_event_id: None,
             tool_evidence: Some(NativeWorkerToolEvidenceBinding {
                 tool_event_id: "event-tool".into(),
                 output_reference: "mission-tool:v1:evidence".into(),

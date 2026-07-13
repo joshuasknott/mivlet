@@ -2999,6 +2999,17 @@ export interface RuntimeMissionRunFinalizeCancellationInput {
   expectedLastSequence: number;
 }
 
+export interface RuntimeMissionCheckpointCreateInput {
+  runId: string;
+  eventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  attemptNumber: number;
+  durableThroughSequence: number;
+  resumeAfterEventId: string;
+}
+
 export interface RuntimeMissionWorkerCreateInput {
   runId: string;
   eventId: string;
@@ -3064,6 +3075,12 @@ export async function finalizeRuntimeMissionRunCancellation(input: RuntimeMissio
 export async function recoverRuntimeInterruptedCitedMissions() {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Array<Record<string, unknown>>>("mission_run_recover_interrupted_cited"); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function createRuntimeMissionCheckpoint(input: RuntimeMissionCheckpointCreateInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_run_create_checkpoint", { input }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

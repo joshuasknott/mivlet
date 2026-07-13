@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createRuntimeMissionCheckpoint,
   createRuntimeMissionPlan,
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
@@ -35,6 +36,11 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeMissionWorkerOutput("mission-output:v1:ref")).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
+    await expect(createRuntimeMissionCheckpoint({
+      runId: "run-1", eventId: "event-checkpoint", idempotencyKey: "checkpoint-1",
+      expectedRunRevision: 4, expectedLastSequence: 3, attemptNumber: 1,
+      durableThroughSequence: 3, resumeAfterEventId: "event-tool"
+    })).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -65,6 +71,12 @@ describe("mission runtime boundary", () => {
     await readRuntimeMissionWorkerOutput("mission-output:v1:ref");
     await listRuntimeNativeProviderRoutes();
     await recoverRuntimeInterruptedCitedMissions();
+    const checkpoint = {
+      runId: "run-1", eventId: "event-checkpoint", idempotencyKey: "checkpoint-1",
+      expectedRunRevision: 4, expectedLastSequence: 3, attemptNumber: 1,
+      durableThroughSequence: 3, resumeAfterEventId: "event-tool"
+    };
+    await createRuntimeMissionCheckpoint(checkpoint);
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["mission_plan_create", { input: plan }],
@@ -76,7 +88,8 @@ describe("mission runtime boundary", () => {
       ["mission_run_request_cancellation", { input: cancel }],
       ["mission_worker_output_read", { valueReference: "mission-output:v1:ref" }],
       ["list_native_provider_routes"],
-      ["mission_run_recover_interrupted_cited"]
+      ["mission_run_recover_interrupted_cited"],
+      ["mission_run_create_checkpoint", { input: checkpoint }]
     ]);
   });
 });

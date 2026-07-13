@@ -3,6 +3,7 @@ import { buildToolApproval, catalogueCapabilities, executeLocalWorker, selectMis
 import { Spine, type ApprovalRequest, type ApprovalResolutionRequest } from "@fable/protocol";
 import {
   commitRuntimeCapabilityGrant,
+  createRuntimeMissionCheckpoint,
   createRuntimeMissionPlan,
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
@@ -235,6 +236,17 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   try { evidence = JSON.parse(evidenceOutput); } catch { throw new Error("The connected-source evidence is invalid."); }
   journal = requireJournal(await getRuntimeMissionRun(runId));
   const outputReference = toolOutputReference(journal, toolEventId);
+  const durableThroughSequence = eventSequence(journal, toolEventId);
+  const checkpointEventId = id("event");
+  journal = requireJournal(await createRuntimeMissionCheckpoint({
+    runId,
+    eventId: checkpointEventId,
+    idempotencyKey: `cited-evidence:${toolEventId}`,
+    ...head(journal),
+    attemptNumber: currentAttemptNumber(journal),
+    durableThroughSequence,
+    resumeAfterEventId: toolEventId
+  }));
 
   if (cancellationInitiated) await finalizeEarlyCancellation();
 
@@ -249,6 +261,7 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       runId, workerId, workerStartedEventId, routeSelectedEventId,
       usageEventId: id("event"), completionEventId: id("event"), evaluationEventId: id("event"), resultEventId: id("event"), failureEventId: id("event"),
       idempotencyKey: id("worker-terminal"), ...finalHead,
+      checkpointEventId,
       toolEvidence: { toolEventId, outputReference }
     }
   });
@@ -409,6 +422,22 @@ function terminalCitedOutcome(journal: Record<string, unknown>): TerminalCitedOu
     return { outcome: "partial", valueReference: value, acceptanceSummary: summary };
   }
   throw new Error("The mission did not reach a durable terminal outcome.");
+}
+
+function eventSequence(journal: Record<string, unknown>, eventId: string): number {
+  const event = (journal.events as Array<Record<string, unknown>>).find((candidate) => candidate.id === eventId);
+  if (!event || !Number.isInteger(event.sequence) || (event.sequence as number) < 1) {
+    throw new Error("The durable mission replay boundary is unavailable.");
+  }
+  return event.sequence as number;
+}
+
+function currentAttemptNumber(journal: Record<string, unknown>): number {
+  const value = (journal.run as Record<string, unknown>).currentAttemptNumber ?? 1;
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new Error("The durable mission attempt is invalid.");
+  }
+  return value as number;
 }
 
 function terminalCitedFailure(journal: Record<string, unknown>): string {

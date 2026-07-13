@@ -523,6 +523,8 @@ export interface MissionWorkerExecutionBinding {
   idempotencyKey: string;
   expectedRunRevision: number;
   expectedLastSequence: number;
+  /** Exact durable replay boundary immediately preceding provider egress. */
+  checkpointEventId?: string;
   /** Exact native-attested connected-source result consumed by a final cited-brief turn. */
   toolEvidence?: {
     toolEventId: string;

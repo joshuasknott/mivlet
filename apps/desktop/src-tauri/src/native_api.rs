@@ -1738,6 +1738,7 @@ mod transport_policy_tests {
             idempotency_key: "lease-terminal".into(),
             expected_run_revision: 3,
             expected_last_sequence: 3,
+            checkpoint_event_id: None,
             tool_evidence: None,
         };
         let lease = acquire_mission_execution(&binding).expect("first lease");

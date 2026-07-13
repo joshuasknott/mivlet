@@ -352,11 +352,17 @@ derive completed workers, plan steps, committed effects, active work, and waits
 only from the durable journal; persist only the closed portable replay shape;
 bind its hash to run, event, attempt, and reference; select the newest checkpoint
 by event sequence; restore into exactly the next attempt; and make an exact
-restore replay stable even after a newer checkpoint exists. The narrow OpenAI
+restore replay stable even after a newer checkpoint exists. The cited desktop
+journey now creates that checkpoint immediately after the attested connected-source
+tool receipt and before provider egress. The final provider request carries its
+exact checkpoint event identity, and Rust accepts it only when that event is the
+current head and immediately binds the same tool event, sequence, and attempt;
+neither an arbitrary later checkpoint nor renderer-declared state can authorize
+egress. The narrow OpenAI
 path described above persists truthful production `worker-completed` and
 `worker-failed` events plus one atomic encrypted Markdown receipt, but general
-worker execution events, cited/artifact output provenance, and desktop recovery
-wiring are still open, so the durable-run box remains unchecked.
+worker execution events, cited/artifact output provenance, and automatic checkpoint
+resume are still open, so the durable-run box remains unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.
