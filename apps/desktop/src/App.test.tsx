@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses } from "./runtime";
+import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts } from "./runtime";
 import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -22,6 +22,7 @@ const runtimeMocks = vi.hoisted(() => ({
   connectorOAuthCalls: [] as string[],
   agentRuns: [] as PersistedAgentRun[],
   conversationThreads: [] as Array<Record<string, unknown>>,
+  conversationMessages: [] as Array<Record<string, unknown>>,
   projectRecords: [] as Array<Record<string, unknown>>,
   citedBriefCalls: [] as Array<Record<string, unknown>>,
   // In-memory durable scheduler store so cross-session recovery tests exercise
@@ -141,7 +142,7 @@ vi.mock("./runtime", () => ({
   getRuntimeConversationThread: vi.fn(async (threadId: string) =>
     runtimeMocks.conversationThreads.find((thread) => thread.id === threadId) ?? null),
   updateRuntimeConversationThread: vi.fn(async () => null),
-  listRuntimeConversationMessages: vi.fn(async () => []),
+  listRuntimeConversationMessages: vi.fn(async () => runtimeMocks.conversationMessages),
   appendRuntimeConversationMessage: vi.fn(async (input: any) => ({
     message: {
       id: input.messageId,
@@ -403,6 +404,7 @@ describe("Fable home", () => {
     runtimeMocks.connectorOAuthCalls = [];
     runtimeMocks.agentRuns = [];
     runtimeMocks.conversationThreads = [];
+    runtimeMocks.conversationMessages = [];
     runtimeMocks.projectRecords = [];
     runtimeMocks.citedBriefCalls = [];
     runtimeMocks.savedScheduledJobs = [];
@@ -410,6 +412,8 @@ describe("Fable home", () => {
     connectRuntimeBackendSpy.mockClear();
     vi.mocked(listRuntimeConnectorStatuses).mockReset();
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
+    vi.mocked(listRuntimeThreadArtifacts).mockReset();
+    vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
     removeDesktopRuntime();
   });
 
@@ -1469,6 +1473,93 @@ describe("Fable home", () => {
       sourceThreadId: expect.any(String),
       model: "gpt-5"
     });
+  });
+
+  it("rehydrates an accepted cited mission response with its canonical artifact action", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-cited-restart", title: "Cited restart", lifecycle: "active",
+      updatedAt: "2026-07-13T12:00:00Z",
+      messageHead: { lastSequence: 2, lastMessageId: "message-cited-assistant" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-cited-user", threadId: "thread-cited-restart", kind: "user",
+        sequence: 1, runId: "mission-run-restart", currentRevisionId: "revision-cited-user",
+        currentRevisionNumber: 1, currentRevisionState: "terminal"
+      },
+      currentRevision: {
+        id: "revision-cited-user", threadId: "thread-cited-restart", messageId: "message-cited-user",
+        messageRevisionNumber: 1, state: "terminal",
+        content: "Search my connected work sources and produce a trustworthy cited brief."
+      }
+    }, {
+      message: {
+        id: "message-cited-assistant", threadId: "thread-cited-restart", kind: "assistant",
+        sequence: 2, runId: "mission-run-restart", currentRevisionId: "revision-cited-assistant",
+        currentRevisionNumber: 1, currentRevisionState: "terminal",
+        detail: {
+          type: "mission-result", missionId: "mission-restart", resultEventId: "event-result-restart",
+          outcome: "accepted", artifactId: "mission-artifact-restart",
+          artifactVersionId: "mission-artifact-version-restart"
+        }
+      },
+      currentRevision: {
+        id: "revision-cited-assistant", threadId: "thread-cited-restart", messageId: "message-cited-assistant",
+        messageRevisionNumber: 1, state: "terminal", content: "Restart-safe cited brief [source-1]."
+      }
+    }];
+    vi.mocked(listRuntimeThreadArtifacts).mockResolvedValueOnce([{
+      artifact: {
+        id: "mission-artifact-restart", title: "Connected work brief", status: "accepted", revision: 1,
+        currentVersionId: "mission-artifact-version-restart", producingRunId: "mission-run-restart",
+        context: { threadId: "thread-cited-restart" }, reviews: []
+      },
+      currentVersion: {
+        id: "mission-artifact-version-restart", artifactId: "mission-artifact-restart", version: 1,
+        status: "available", content: { kind: "inline", text: "Restart-safe cited brief [source-1]." },
+        citations: [{ id: "source-1" }]
+      },
+      versions: [], sourceMessageId: null
+    }] as never);
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Cited restart" }));
+
+    expect(await screen.findByText("Restart-safe cited brief [source-1].")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
+  });
+
+  it("rehydrates a partial cited mission response without offering artifact creation", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-partial-restart", title: "Partial restart", lifecycle: "active",
+      updatedAt: "2026-07-13T12:00:00Z",
+      messageHead: { lastSequence: 1, lastMessageId: "message-partial-assistant" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-partial-assistant", threadId: "thread-partial-restart", kind: "assistant",
+        sequence: 1, runId: "mission-run-partial", currentRevisionId: "revision-partial-assistant",
+        currentRevisionNumber: 1, currentRevisionState: "terminal",
+        detail: {
+          type: "mission-result", missionId: "mission-partial", resultEventId: "event-result-partial",
+          outcome: "partial"
+        }
+      },
+      currentRevision: {
+        id: "revision-partial-assistant", threadId: "thread-partial-restart", messageId: "message-partial-assistant",
+        messageRevisionNumber: 1, state: "terminal",
+        content: "Draft preserved, but not accepted: evidence missing."
+      }
+    }];
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Partial restart" }));
+
+    expect(await screen.findByText("Draft preserved, but not accepted: evidence missing.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
 
   it("inserts a newline on Shift+Enter instead of sending", async () => {

@@ -1,5 +1,7 @@
 import type { ContractError } from "./missions.js";
 import type {
+  ArtifactId,
+  ArtifactVersionId,
   ConversationTombstoneId,
   DeviceId,
   InternalUserId,
@@ -7,6 +9,7 @@ import type {
   MemberId,
   MessageId,
   MessageRevisionId,
+  MissionId,
   ProjectId,
   Revision,
   RunEventId,
@@ -142,8 +145,28 @@ export type MessageExecutionLink =
   | { runId: RunId; runEventId?: RunEventId }
   | { runId?: never; runEventId?: never };
 
+/** Native-owned linkage for a terminal cited mission response. */
+export type MissionResultMessageDetail =
+  | {
+      type: "mission-result";
+      missionId: MissionId;
+      resultEventId: RunEventId;
+      outcome: "accepted";
+      artifactId: ArtifactId;
+      artifactVersionId: ArtifactVersionId;
+    }
+  | {
+      type: "mission-result";
+      missionId: MissionId;
+      resultEventId: RunEventId;
+      outcome: "partial";
+      artifactId?: never;
+      artifactVersionId?: never;
+    };
+
 export type MessageKindDetail =
-  | { kind: "user" | "assistant"; detail?: never }
+  | { kind: "user"; detail?: never }
+  | { kind: "assistant"; detail?: MissionResultMessageDetail }
   | {
       kind: "tool";
       detail:

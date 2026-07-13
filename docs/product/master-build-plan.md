@@ -431,6 +431,22 @@ canonical Knowledge surface, the accepted version reuses the existing explicit
 two-step exact-version project handoff; no mission-specific transfer authority is
 invented. A handoff planned and journaled as part of a future mission remains open.
 
+The cited result now survives conversation restart as the same exchange rather
+than only as a mission journal and artifact. The immutable plan revision retains
+the exact submitted prompt encrypted at rest. During eligible terminal settlement,
+Rust derives that prompt and the accepted or explicitly not-accepted response from
+the selected plan, output receipt, policy result, and artifact binding, then appends
+deterministic terminal user/assistant messages to the real source thread in the same
+transaction as the run, mission, and artifact facts. Only native settlement can add
+the assistant's compact `mission-result` linkage; it contains result/artifact ids and
+outcome, not copied receipt prose or authority. Exact terminal replay verifies both
+encrypted message checkpoints and their adjacency. Desktop hydration uses that
+linkage to restore the accepted `View artifact` action or suppress artifact creation
+for a partial draft without reconstructing a receipt from mutable UI state. Existing
+pre-terminal failure/cancellation paths still keep their current error presentation;
+general mission transcript projection and restart hydration of the full compact run
+receipt remain open.
+
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes
 the explicit natural-language benchmark request, obtains the separately confirmed

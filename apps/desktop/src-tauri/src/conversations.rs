@@ -145,6 +145,14 @@ pub fn conversation_list_messages(thread_id: String) -> Result<Vec<message::Mess
 }
 #[tauri::command]
 pub fn conversation_append_message(input: AppendMessage) -> Result<message::MessageRow, String> {
+    if input.kind == "assistant"
+        && input.detail.get("type").and_then(Value::as_str) == Some("mission-result")
+    {
+        return Err(
+            "Mission-result conversation messages are written only by native mission settlement."
+                .into(),
+        );
+    }
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;

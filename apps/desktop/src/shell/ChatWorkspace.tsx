@@ -35,6 +35,7 @@ type ConversationMessage = {
   content: string;
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
+  missionOutcome?: "accepted" | "partial";
   missionArtifactId?: string;
 };
 
@@ -388,12 +389,21 @@ export function ChatWorkspace() {
     // erase the optimistic first exchange; explicit thread selection already
     // clears the feed before hydration, so this cannot leak another thread.
     if (hydrated.messages.length === 0 && conversationMessages.length > 0) return;
-    setConversationMessages(hydrated.messages.map(({ message, currentRevision }) => ({
-      id: message.id,
-      role: message.kind === "user" ? "user" : "assistant",
-      content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content,
-      runId: message.kind === "assistant" ? message.runId : undefined
-    })));
+    setConversationMessages(hydrated.messages.map(({ message, currentRevision }) => {
+      const missionResult = message.kind === "assistant" && message.detail?.type === "mission-result"
+        ? message.detail
+        : undefined;
+      return {
+        id: message.id,
+        role: message.kind === "user" ? "user" : "assistant",
+        content: currentRevision.state === "redacted" ? "This message was removed." : currentRevision.content,
+        runId: message.kind === "assistant" ? message.runId : undefined,
+        ...(missionResult ? {
+          missionOutcome: missionResult.outcome,
+          ...(missionResult.outcome === "accepted" ? { missionArtifactId: missionResult.artifactId } : {})
+        } : {})
+      };
+    }));
   }, [conversationMessages.length, durableConversation.state.conversation, selectedConversationThreadId]);
 
   useEffect(() => {
@@ -493,7 +503,7 @@ export function ChatWorkspace() {
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
             || entry.artifact.id === message.missionArtifactId
-            || (message.missionReceipt !== undefined && entry.artifact.producingRunId === message.runId)
+            || (message.missionOutcome === "accepted" && entry.artifact.producingRunId === message.runId)
           );
           return (
             <article
@@ -509,7 +519,7 @@ export function ChatWorkspace() {
                 <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
               ) : null}
               {message.role === "assistant" && message.runId && message.content
-                && (!message.missionReceipt || existingArtifact) ? (
+                && (!message.missionOutcome || existingArtifact) ? (
                 <ResponseArtifactAction
                   threadId={selectedConversationThreadId ?? ""}
                   messageId={message.id}
@@ -770,6 +780,7 @@ export function ChatWorkspace() {
               content: result.text,
               runId: result.runId,
               missionReceipt: result.receipt,
+              missionOutcome: result.outcome,
               ...(result.artifactId ? { missionArtifactId: result.artifactId } : {})
             } : entry
           ));

@@ -6,10 +6,14 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::store::repos::{capability_grant, mission_plan, mission_run, workspace_directory};
+use crate::store::repos::{
+    capability_grant, message, mission_plan, mission_run, thread, workspace_directory,
+};
 
 const MAX_CONTEXT: usize = 32;
 const MAX_TOOLS: usize = 32;
+const CITED_PARTIAL_ACCEPTANCE_SUMMARY: &str =
+    "The cited draft was preserved, but it did not satisfy the required evidence policy.";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -556,6 +560,9 @@ pub(crate) fn preflight_native_worker_completion(
                     validate_accepted_mission_artifact_replay(
                         tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
                     )?;
+                    validate_cited_mission_transcript_replay(
+                        tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
+                    )?;
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
             }
@@ -777,6 +784,16 @@ pub(crate) fn settle_native_worker_completion(
                 )
                 .map_err(crate::store::StoreError::Invalid)?;
                 validate_accepted_mission_artifact_replay(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &journal,
+                    existing,
+                    &authority.binding,
+                    authority.output.as_ref(),
+                )?;
+                validate_cited_mission_transcript_replay(
                     tx,
                     store,
                     &scope,
@@ -1286,6 +1303,238 @@ fn append_native_policy_evaluation(
     Ok(())
 }
 
+#[derive(Debug)]
+struct CitedMissionTranscript {
+    thread_id: String,
+    user_message_id: String,
+    user_revision_id: String,
+    assistant_message_id: String,
+    assistant_revision_id: String,
+    prompt: String,
+    response: String,
+    assistant_detail: Value,
+}
+
+fn cited_transcript_identity(run_id: &str, role: &str) -> (String, String, String) {
+    let digest =
+        Sha256::digest(format!("fable.cited-mission-transcript.v1\0{run_id}\0{role}").as_bytes());
+    let suffix = format!("{digest:x}");
+    (
+        format!("mission-transcript-{role}-{suffix}"),
+        format!("mission-transcript-revision-{role}-{suffix}"),
+        format!("mission-transcript:v1:{role}:{suffix}"),
+    )
+}
+
+fn cited_mission_transcript(
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    binding: &NativeWorkerExecutionBinding,
+    receipt: &Value,
+    result_event: &Value,
+    accepted_artifact: Option<&crate::store::repos::artifact::AcceptedMissionArtifactBinding>,
+) -> crate::store::Result<CitedMissionTranscript> {
+    let mission_id = lifecycle
+        .mission
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission identity is invalid.".into())
+        })?;
+    let thread_id = lifecycle
+        .mission
+        .pointer("/scope/sourceThreadId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited mission source conversation is unavailable.".into(),
+            )
+        })?;
+    if journal.run.get("sourceThreadId").and_then(Value::as_str) != Some(thread_id) {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission run does not match its source conversation.".into(),
+        ));
+    }
+    let prompt = lifecycle
+        .current_revision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission prompt is unavailable.".into())
+        })?;
+    let text = receipt
+        .get("text")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission response is unavailable.".into())
+        })?;
+    let (response, assistant_detail) = if let Some(artifact) = accepted_artifact {
+        let exact = result_event.get("id").and_then(Value::as_str)
+            == Some(binding.result_event_id.as_str())
+            && result_event.get("type").and_then(Value::as_str) == Some("run-completed")
+            && result_event
+                .pointer("/payload/result/outputs/0/artifactId")
+                .and_then(Value::as_str)
+                == Some(artifact.artifact_id.as_str())
+            && result_event
+                .pointer("/payload/result/outputs/0/artifactVersionId")
+                .and_then(Value::as_str)
+                == Some(artifact.artifact_version_id.as_str());
+        if !exact {
+            return Err(crate::store::StoreError::Invalid(
+                "Accepted cited mission transcript does not match its terminal result.".into(),
+            ));
+        }
+        (
+            text.to_string(),
+            json!({
+                "type":"mission-result",
+                "missionId":mission_id,
+                "resultEventId":binding.result_event_id,
+                "outcome":"accepted",
+                "artifactId":artifact.artifact_id,
+                "artifactVersionId":artifact.artifact_version_id
+            }),
+        )
+    } else {
+        let exact = result_event.get("id").and_then(Value::as_str)
+            == Some(binding.result_event_id.as_str())
+            && result_event.get("type").and_then(Value::as_str) == Some("run-failed")
+            && result_event
+                .pointer("/payload/error/code")
+                .and_then(Value::as_str)
+                == Some("policy-acceptance-failed")
+            && result_event
+                .pointer("/payload/partial/summary")
+                .and_then(Value::as_str)
+                == Some(CITED_PARTIAL_ACCEPTANCE_SUMMARY);
+        if !exact {
+            return Err(crate::store::StoreError::Invalid(
+                "Partial cited mission transcript does not match its terminal result.".into(),
+            ));
+        }
+        (
+            format!(
+                "Draft preserved, but not accepted: {CITED_PARTIAL_ACCEPTANCE_SUMMARY}\n\n{text}"
+            ),
+            json!({
+                "type":"mission-result",
+                "missionId":mission_id,
+                "resultEventId":binding.result_event_id,
+                "outcome":"partial"
+            }),
+        )
+    };
+    let (user_message_id, user_revision_id, _) = cited_transcript_identity(&binding.run_id, "user");
+    let (assistant_message_id, assistant_revision_id, _) =
+        cited_transcript_identity(&binding.run_id, "assistant");
+    Ok(CitedMissionTranscript {
+        thread_id: thread_id.to_string(),
+        user_message_id,
+        user_revision_id,
+        assistant_message_id,
+        assistant_revision_id,
+        prompt: prompt.to_string(),
+        response,
+        assistant_detail,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_cited_mission_transcript(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    binding: &NativeWorkerExecutionBinding,
+    receipt: &Value,
+    result_event: &Value,
+    accepted_artifact: Option<&crate::store::repos::artifact::AcceptedMissionArtifactBinding>,
+    at: &str,
+) -> crate::store::Result<()> {
+    let transcript = cited_mission_transcript(
+        journal,
+        lifecycle,
+        binding,
+        receipt,
+        result_event,
+        accepted_artifact,
+    )?;
+    let head = thread::get(tx, store, scope, &transcript.thread_id)?.ok_or_else(|| {
+        crate::store::StoreError::Invalid(
+            "Cited mission source conversation is unavailable.".into(),
+        )
+    })?;
+    let (_, _, user_idempotency) = cited_transcript_identity(&binding.run_id, "user");
+    let user = message::append(
+        tx,
+        store,
+        scope,
+        &transcript.thread_id,
+        &transcript.user_message_id,
+        "user",
+        &Value::Null,
+        Some(&binding.run_id),
+        head.last_sequence + 1,
+        head.last_sequence,
+        head.last_message_id.as_deref(),
+        &user_idempotency,
+        &transcript.user_revision_id,
+        "terminal",
+        "initial",
+        &json!(transcript.prompt),
+        at,
+    )?;
+    let (_, _, assistant_idempotency) = cited_transcript_identity(&binding.run_id, "assistant");
+    let assistant = message::append(
+        tx,
+        store,
+        scope,
+        &transcript.thread_id,
+        &transcript.assistant_message_id,
+        "assistant",
+        &transcript.assistant_detail,
+        Some(&binding.run_id),
+        head.last_sequence + 2,
+        head.last_sequence + 1,
+        Some(&transcript.user_message_id),
+        &assistant_idempotency,
+        &transcript.assistant_revision_id,
+        "terminal",
+        "initial",
+        &json!(transcript.response),
+        at,
+    )?;
+    let exact_user = user.kind == "user"
+        && user.run_id.as_deref() == Some(binding.run_id.as_str())
+        && user.sequence == head.last_sequence + 1
+        && user.detail.is_null()
+        && user.current_revision_id == transcript.user_revision_id
+        && user.current_revision_number == 1
+        && user.current_revision_state == "terminal"
+        && user.content == json!(transcript.prompt)
+        && user.created_at == at;
+    let exact_assistant = assistant.kind == "assistant"
+        && assistant.run_id.as_deref() == Some(binding.run_id.as_str())
+        && assistant.sequence == head.last_sequence + 2
+        && assistant.detail == transcript.assistant_detail
+        && assistant.current_revision_id == transcript.assistant_revision_id
+        && assistant.current_revision_number == 1
+        && assistant.current_revision_state == "terminal"
+        && assistant.content == json!(transcript.response)
+        && assistant.created_at == at;
+    if exact_user && exact_assistant {
+        Ok(())
+    } else {
+        Err(crate::store::StoreError::Invalid(
+            "Cited mission transcript identity is already in use.".into(),
+        ))
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn append_single_worker_run_result(
     tx: &rusqlite::Connection,
@@ -1444,14 +1693,16 @@ fn append_single_worker_run_result(
             )
         })
         .collect::<Vec<_>>();
-    let partial = (!passed).then(|| json!({
-        "summary":"The cited draft was preserved, but it did not satisfy the required evidence policy.",
-        "completedOutputs":[output.clone()],
-        "remainingWork":failed_criteria,
-        "acceptance":acceptance.clone(),
-        "recoverable":true,
-        "recommendedNextAction":"stop"
-    }));
+    let partial = (!passed).then(|| {
+        json!({
+            "summary":CITED_PARTIAL_ACCEPTANCE_SUMMARY,
+            "completedOutputs":[output.clone()],
+            "remainingWork":failed_criteria,
+            "acceptance":acceptance.clone(),
+            "recoverable":true,
+            "recommendedNextAction":"stop"
+        })
+    });
     let result = passed.then(|| json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
         "outputs":[output.clone()],"acceptance":acceptance.clone(),"evaluations":[evaluation],"usage":[usage_value],"completedAt":at}));
     let mission_result = if let Some(result) = result.as_ref() {
@@ -1533,6 +1784,18 @@ fn append_single_worker_run_result(
             artifact,
         )?;
     }
+    append_cited_mission_transcript(
+        tx,
+        store,
+        scope,
+        journal,
+        lifecycle,
+        binding,
+        receipt,
+        &event,
+        artifact_binding.as_ref(),
+        at,
+    )?;
     if passed {
         mission_plan::mark_completed(
             tx,
@@ -2981,6 +3244,125 @@ fn validate_accepted_mission_artifact_replay(
         &expected,
         &receipt.content_hash,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_cited_mission_transcript_replay(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    terminal: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> crate::store::Result<()> {
+    if terminal.get("type").and_then(Value::as_str) != Some("worker-completed")
+        || output.is_none_or(|spec| !spec.include_evidence)
+    {
+        return Ok(());
+    }
+    let mission_id = journal
+        .run
+        .get("missionId")
+        .or_else(|| journal.run.pointer("/initiator/missionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited mission transcript has no selected mission.".into(),
+            )
+        })?;
+    let lifecycle =
+        mission_plan::get(tx, store, scope, owner_member_id, mission_id)?.ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission plan is unavailable.".into())
+        })?;
+    let output_reference = terminal
+        .pointer("/payload/outputs/0/valueReference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission output reference is missing.".into())
+        })?;
+    let receipt = crate::store::repos::mission_worker_output::get_by_reference(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        output_reference,
+    )?
+    .ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission output receipt is missing.".into())
+    })?;
+    let result_event = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str) == Some(binding.result_event_id.as_str())
+        })
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission terminal result is missing.".into())
+        })?;
+    let passed = journal.events.iter().any(|event| {
+        event.get("id").and_then(Value::as_str) == Some(binding.evaluation_event_id.as_str())
+            && event
+                .pointer("/payload/evaluation/verdict")
+                .and_then(Value::as_str)
+                == Some("pass")
+    });
+    let accepted_artifact = passed.then(|| {
+        crate::store::repos::artifact::accepted_mission_output_binding(
+            scope.workspace_id(),
+            owner_member_id,
+            &binding.run_id,
+            &binding.worker_id,
+            &binding.completion_event_id,
+            &receipt.output_key,
+            &receipt.content_hash,
+        )
+    });
+    let expected = cited_mission_transcript(
+        journal,
+        &lifecycle,
+        binding,
+        &receipt.receipt,
+        result_event,
+        accepted_artifact.as_ref(),
+    )?;
+    let messages = message::list(tx, store, scope, &expected.thread_id)?;
+    let user = messages
+        .iter()
+        .find(|candidate| candidate.id == expected.user_message_id);
+    let assistant = messages
+        .iter()
+        .find(|candidate| candidate.id == expected.assistant_message_id);
+    let occurred_at = result_event.get("occurredAt").and_then(Value::as_str);
+    let exact_user = user.is_some_and(|candidate| {
+        candidate.kind == "user"
+            && candidate.run_id.as_deref() == Some(binding.run_id.as_str())
+            && candidate.detail.is_null()
+            && candidate.current_revision_id == expected.user_revision_id
+            && candidate.current_revision_number == 1
+            && candidate.current_revision_state == "terminal"
+            && candidate.content == json!(expected.prompt)
+            && occurred_at == Some(candidate.created_at.as_str())
+    });
+    let exact_assistant = assistant.is_some_and(|candidate| {
+        candidate.kind == "assistant"
+            && candidate.run_id.as_deref() == Some(binding.run_id.as_str())
+            && candidate.detail == expected.assistant_detail
+            && candidate.current_revision_id == expected.assistant_revision_id
+            && candidate.current_revision_number == 1
+            && candidate.current_revision_state == "terminal"
+            && candidate.content == json!(expected.response)
+            && occurred_at == Some(candidate.created_at.as_str())
+            && user.is_some_and(|user| candidate.sequence == user.sequence + 1)
+    });
+    if exact_user && exact_assistant {
+        Ok(())
+    } else {
+        Err(crate::store::StoreError::Invalid(
+            "Cited mission transcript replay does not match its terminal result.".into(),
+        ))
+    }
 }
 
 fn journal_provider_route_id<'a>(
@@ -4937,6 +5319,139 @@ mod tests {
         mismatched.events[2]["payload"]["error"]["category"] = json!("provider");
         assert!(
             validate_native_result_replay(&mismatched, &terminal, &binding, Some(&output)).is_err()
+        );
+    }
+
+    #[test]
+    fn cited_terminal_transcript_is_derived_from_durable_mission_facts() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-transcript".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-start".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-complete".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-result".into(),
+            failure_event_id: "event-failure".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+            checkpoint_event_id: None,
+            tool_evidence: None,
+        };
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({"id":"mission-1","scope":{"sourceThreadId":"thread-1"}}),
+            plan: json!({}),
+            current_revision: json!({"summary":"Search the connected launch notes."}),
+        };
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"sourceThreadId":"thread-1"}),
+            events: vec![],
+        };
+        let receipt = json!({"text":"Launch is planned for Q3 [source-1]."});
+        let artifact = crate::store::repos::artifact::AcceptedMissionArtifactBinding {
+            artifact_id: "artifact-1".into(),
+            artifact_version_id: "artifact-version-1".into(),
+        };
+        let accepted_event = json!({
+            "id":"event-result","type":"run-completed","payload":{"result":{"outputs":[{
+                "artifactId":"artifact-1","artifactVersionId":"artifact-version-1"
+            }]}}
+        });
+        let accepted = cited_mission_transcript(
+            &journal,
+            &lifecycle,
+            &binding,
+            &receipt,
+            &accepted_event,
+            Some(&artifact),
+        )
+        .unwrap();
+        assert_eq!(accepted.thread_id, "thread-1");
+        assert_eq!(accepted.prompt, "Search the connected launch notes.");
+        assert_eq!(accepted.response, "Launch is planned for Q3 [source-1].");
+        assert_eq!(accepted.assistant_detail["outcome"], "accepted");
+        assert_eq!(accepted.assistant_detail["artifactId"], "artifact-1");
+        assert_eq!(
+            accepted.user_message_id,
+            cited_transcript_identity("run-transcript", "user").0
+        );
+
+        let partial_event = json!({
+            "id":"event-result","type":"run-failed","payload":{
+                "error":{"code":"policy-acceptance-failed"},
+                "partial":{"summary":CITED_PARTIAL_ACCEPTANCE_SUMMARY}
+            }
+        });
+        let partial = cited_mission_transcript(
+            &journal,
+            &lifecycle,
+            &binding,
+            &receipt,
+            &partial_event,
+            None,
+        )
+        .unwrap();
+        assert_eq!(partial.assistant_detail["outcome"], "partial");
+        assert!(partial.assistant_detail.get("artifactId").is_none());
+        assert!(partial
+            .response
+            .starts_with("Draft preserved, but not accepted:"));
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cited-transcript.db");
+        let vault =
+            crate::store::vault::Vault::new(&crate::store::vault::MasterKey::generate().unwrap())
+                .unwrap();
+        {
+            let store = crate::store::Store::open(&path, vault.clone()).unwrap();
+            let scope = crate::store::repos::scope::DataScope::workspace("workspace-1").unwrap();
+            store
+                .transaction(|tx| {
+                    tx.execute(
+                        "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('workspace-1','W','t','t')",
+                        [],
+                    )?;
+                    thread::create(
+                        tx,
+                        &store,
+                        &scope,
+                        "thread-1",
+                        None,
+                        "Cited brief",
+                        "2026-07-13T12:00:00Z",
+                        &json!({}),
+                    )?;
+                    append_cited_mission_transcript(
+                        tx,
+                        &store,
+                        &scope,
+                        &journal,
+                        &lifecycle,
+                        &binding,
+                        &receipt,
+                        &accepted_event,
+                        Some(&artifact),
+                        "2026-07-13T12:01:00Z",
+                    )
+                })
+                .unwrap();
+        }
+        let reopened = crate::store::Store::open(&path, vault).unwrap();
+        let scope = crate::store::repos::scope::DataScope::workspace("workspace-1").unwrap();
+        let messages = reopened
+            .with_conn(|tx| message::list(tx, &reopened, &scope, "thread-1"))
+            .unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(
+            messages[0].content,
+            json!("Search the connected launch notes.")
+        );
+        assert_eq!(messages[1].detail["outcome"], "accepted");
+        assert_eq!(
+            messages[1].content,
+            json!("Launch is planned for Q3 [source-1].")
         );
     }
 }
