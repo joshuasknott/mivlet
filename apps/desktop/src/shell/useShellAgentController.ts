@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useRef } from "react";
 import { createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
-import { executeCitedBriefMission } from "../lib/cited-brief-mission";
+import { executeCitedBriefMission, resumeInterruptedCitedBriefMissions } from "../lib/cited-brief-mission";
 import { useNativeAgent } from "../hooks/useNativeAgent";
 import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/useDurableConversation";
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
-import { recoverRuntimeInterruptedCitedMissions } from "../runtime";
 
 export function useShellAgentController({ onDictation, onVoiceCancel, threadId }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void; threadId?: string }) {
   const approvalGate = useMemo(() => createApprovalGate(), []);
@@ -15,11 +14,8 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const cancelRequestedRef = useRef(false);
   const citedMissionRunningRef = useRef(false);
   const citedMissionCancelRef = useRef<(() => Promise<void>) | null>(null);
+  const citedRecoveryScopeRef = useRef<string | null>(null);
   const activeWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId;
-  useEffect(() => {
-    if (!activeWorkspaceId) return;
-    void recoverRuntimeInterruptedCitedMissions().catch(() => undefined);
-  }, [activeWorkspaceId]);
   useEffect(() => { approvalGate.replaceStandingGrants([...runtime.sessionApprovalGrants, ...runtime.approvalRules]); }, [approvalGate, runtime.sessionApprovalGrants, runtime.approvalRules]);
   const queueToolApproval = (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => { if (approvalGate.register(event.approval)) runtime.recordBackendToolCall(event); };
   const executor = useMemo(
@@ -34,6 +30,23 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const cancelApprovals = () => { approvalGate.cancelPending(); runtime.clearBackendToolApprovals(); };
   const durableConversation = useDurableConversation({ workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId, threadId });
   const agent = useNativeAgent({ providers: runtime.backendProviders, activeProviderId: runtime.connectedAgentBackend?.id, models: runtime.selectableModels, threadId, createDurableRunWriter: createDesktopDurableRunWriter, execute: executor, shouldCancel: () => cancelRequestedRef.current, onCancel: () => { cancelRequestedRef.current = true; cancelApprovals(); }, onToolCall: queueToolApproval });
+  useEffect(() => {
+    if (!activeWorkspaceId || !agent.backend || agent.backend.providerId !== "openai" || agent.state.running) return;
+    const scopeKey = `${activeWorkspaceId}:${agent.backend.providerId}`;
+    if (citedRecoveryScopeRef.current === scopeKey || citedMissionRunningRef.current) return;
+    citedRecoveryScopeRef.current = scopeKey;
+    citedMissionRunningRef.current = true;
+    void resumeInterruptedCitedBriefMissions({
+      backend: agent.backend,
+      onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
+    }).catch(() => {
+      citedRecoveryScopeRef.current = null;
+    }).finally(async () => {
+      citedMissionRunningRef.current = false;
+      citedMissionCancelRef.current = null;
+      await durableConversation.refresh();
+    });
+  }, [activeWorkspaceId, agent.backend, agent.state.running, durableConversation.refresh]);
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
   const voice = useVoice(voiceProvider, onDictation, { disabled: false, onCancel: onVoiceCancel });
   useEffect(() => { if (!runtime.isChatView) voice.reset(); }, [runtime.isChatView, voice.reset]);

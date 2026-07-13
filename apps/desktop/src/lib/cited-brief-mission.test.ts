@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt } from "./cited-brief-mission";
+import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, resumeInterruptedCitedBriefMissions } from "./cited-brief-mission";
 
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), restoreCheckpoint: vi.fn(), recoverCited: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({
   executeLocalWorker: mocks.executeLocalWorker,
@@ -19,6 +19,8 @@ vi.mock("../runtime", () => ({
   createRuntimeMissionPlan: mocks.createPlan,
   createRuntimeMissionRun: mocks.createRun,
   createRuntimeMissionCheckpoint: mocks.createCheckpoint,
+  restoreRuntimeMissionCheckpoint: mocks.restoreCheckpoint,
+  recoverRuntimeInterruptedCitedMissions: mocks.recoverCited,
   createRuntimeMissionWorker: mocks.createWorker,
   startRuntimeMissionWorker: mocks.startWorker,
   getRuntimeMissionRun: mocks.getRun,
@@ -48,7 +50,7 @@ describe("cited brief mission composition", () => {
     mocks.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-1" } });
     mocks.resolveMcpRoute.mockResolvedValue(null);
     mocks.listRoutes.mockResolvedValue([{ id: "provider-route-ui", recordType: "provider-route", connectionId: "connection-openai", kind: "api-model", displayName: "OpenAI GPT-5", providerFamily: "openai", modelOrRuntimeReference: "gpt-5", state: "available", health: { state: "healthy" }, placement: { allowedKinds: ["local-desktop"], requiresCredentialHoldingNode: true }, boundaries: { privacyBoundary: "member-private", billingBoundary: "account-owned-provider", providerBoundary: "openai", placementBoundary: "local-credential-egress" }, credentialBinding: { custody: "os-secure-store", state: "available", refreshSupported: false }, workspaceId: "hosted-workspace", visibility: "member-private", ownerMemberId: "member-1", authority: "local", schemaVersion: 1, revision: 1, createdByInternalUserId: "user-1", createdAt: "t", updatedAt: "t" }]);
-    mocks.createPlan.mockResolvedValue({ mission: { budget: { maxDurationMs: 120000, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxAttempts: 1 } } });
+    mocks.createPlan.mockResolvedValue({ mission: { budget: { maxDurationMs: 120000, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxAttempts: 2 } } });
     mocks.createRun.mockResolvedValue(journal(2, 1, []));
     mocks.createWorker.mockResolvedValue(journal(3, 2, [{ type: "worker-created", payload: { worker } }]));
     mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }, { type: "route-selected", payload: { selection: { providerRouteId: "provider-route-ui" } } }]));
@@ -93,9 +95,11 @@ describe("cited brief mission composition", () => {
     expect(result.text).toBe("Trustworthy brief [source-1].");
     expect(result.outcome).toBe("accepted");
     expect(result).toMatchObject({ artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1" });
-    expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD" });
+    expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD" });
     expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
-      missionScope: expect.objectContaining({ workspaceId: "hosted-workspace", sourceThreadId: "thread-1" })
+      missionScope: expect.objectContaining({ workspaceId: "hosted-workspace", sourceThreadId: "thread-1" }),
+      budget: expect.objectContaining({ maxAttempts: 2 }),
+      steps: [expect.objectContaining({ estimatedBudget: expect.objectContaining({ maxAttempts: 1 }) })]
     }));
     expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(1);
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
@@ -120,6 +124,127 @@ describe("cited brief mission composition", () => {
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
     expect(cancelMission).toBeTypeOf("function");
+  });
+
+  it("resumes only the checkpointed final writing turn without repeating search authority", async () => {
+    const recovery = {
+      status: "resumable" as const,
+      runId: "mission-run-4",
+      sourceThreadId: "thread-1",
+      worker,
+      providerId: "openai",
+      modelReference: "gpt-5",
+      workerStartedEventId: "event-worker-started",
+      routeSelectedEventId: "event-route",
+      checkpointEventId: "event-checkpoint",
+      checkpointRestoreEventId: "event-restore",
+      toolEventId: "event-tool",
+      outputReference: "mission-tool:v1:evidence",
+      evidence: { result: { citations: [{ citationId: "source-1" }] } },
+      restoreIdempotencyKey: "restart-restore-1",
+      terminalIdempotencyKey: "restart-terminal-1",
+      usageEventId: "event-usage",
+      completionEventId: "event-completion",
+      evaluationEventId: "event-evaluation",
+      resultEventId: "event-result",
+      failureEventId: "event-failure",
+      expectedRunRevision: 8,
+      expectedLastSequence: 7,
+      newAttemptNumber: 2
+    };
+    mocks.recoverCited.mockResolvedValue([recovery]);
+    mocks.restoreCheckpoint.mockResolvedValue({
+      journal: journal(9, 8, [{ id: "event-restore", type: "checkpoint-restored", sequence: 8 }], {
+        currentAttemptNumber: 2,
+        eventHead: { lastSequence: 8, lastEventId: "event-restore" }
+      }),
+      checkpoint: {}
+    });
+    mocks.getRun.mockReset().mockResolvedValue(journal(12, 11, [{
+      id: "head-11", type: "run-completed", payload: { result: { outcome: "succeeded", outputs: [{
+        valueReference: "mission-output:v1:brief", artifactId: "artifact-1", artifactVersionId: "version-1"
+      }] } }
+    }], {
+      status: "completed",
+      terminalResult: { outcome: "succeeded", summary: "Accepted.", outputs: [{
+        valueReference: "mission-output:v1:brief", artifactId: "artifact-1", artifactVersionId: "version-1"
+      }] }
+    }));
+
+    await expect(resumeInterruptedCitedBriefMissions({
+      backend: { providerId: "openai" } as never
+    })).resolves.toEqual({ resumed: 1, terminalized: 0, failed: 0 });
+
+    expect(mocks.restoreCheckpoint).toHaveBeenCalledWith({
+      runId: "mission-run-4", eventId: "event-restore", idempotencyKey: "restart-restore-1",
+      expectedRunRevision: 8, expectedLastSequence: 7, newAttemptNumber: 2
+    });
+    expect(mocks.executeLocalWorker).toHaveBeenCalledWith(expect.objectContaining({
+      model: "gpt-5",
+      prompt: "objective",
+      toolSpecs: [],
+      missionToolEvidence: recovery.evidence,
+      missionWorkerExecution: expect.objectContaining({
+        expectedRunRevision: 9,
+        expectedLastSequence: 8,
+        checkpointEventId: "event-checkpoint",
+        checkpointRestoreEventId: "event-restore",
+        toolEvidence: { toolEventId: "event-tool", outputReference: "mission-tool:v1:evidence" }
+      })
+    }));
+    expect(mocks.prepareGrant).not.toHaveBeenCalled();
+    expect(mocks.commitGrant).not.toHaveBeenCalled();
+    expect(mocks.desktopExecutor).not.toHaveBeenCalled();
+    expect(mocks.createPlan).not.toHaveBeenCalled();
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  it("lets a durable cancellation win during the resumed provider turn", async () => {
+    const cancellation = {
+      requestKey: "stop-resume", requestedAt: "2026-07-13T12:00:00.000Z",
+      requestedByInternalUserId: "user-1", scope: "run", mode: "cooperative",
+      reason: "User requested stop."
+    };
+    mocks.recoverCited.mockResolvedValue([{
+      status: "resumable", runId: "mission-run-4", sourceThreadId: "thread-1", worker,
+      providerId: "openai", modelReference: "gpt-5", workerStartedEventId: "event-worker-started",
+      routeSelectedEventId: "event-route", checkpointEventId: "event-checkpoint",
+      checkpointRestoreEventId: "event-restore", toolEventId: "event-tool",
+      outputReference: "mission-tool:v1:evidence", evidence: { result: { citations: [] } },
+      restoreIdempotencyKey: "restart-restore-1", terminalIdempotencyKey: "restart-terminal-1",
+      usageEventId: "event-usage", completionEventId: "event-completion",
+      evaluationEventId: "event-evaluation", resultEventId: "event-result",
+      failureEventId: "event-failure", expectedRunRevision: 8, expectedLastSequence: 7,
+      newAttemptNumber: 2
+    }]);
+    const restored = journal(9, 8, [{ id: "event-restore", type: "checkpoint-restored", sequence: 8 }], {
+      currentAttemptNumber: 2, eventHead: { lastSequence: 8, lastEventId: "event-restore" }
+    });
+    const cancelled = journal(11, 10, [{
+      id: "event-cancelled", type: "run-cancelled", payload: { cancellation }
+    }], { status: "cancelled", cancellation, eventHead: { lastSequence: 10, lastEventId: "event-cancelled" } });
+    mocks.restoreCheckpoint.mockResolvedValue({ journal: restored, checkpoint: {} });
+    mocks.getRun.mockReset().mockResolvedValueOnce(restored).mockResolvedValueOnce(cancelled);
+    const backendCancel = vi.fn().mockResolvedValue(undefined);
+    let cancel: (() => Promise<void>) | null = null;
+    mocks.executeLocalWorker.mockImplementationOnce(async ({ signal }: { signal: AbortSignal }) => {
+      await cancel?.();
+      expect(signal.aborted).toBe(true);
+      return { status: "cancelled", events: [], text: "", usage: {}, retryable: false };
+    });
+
+    await expect(resumeInterruptedCitedBriefMissions({
+      backend: { providerId: "openai", cancel: backendCancel } as never,
+      onCancellationReady: (value) => { cancel = value; }
+    })).resolves.toEqual({ resumed: 1, terminalized: 0, failed: 0 });
+
+    expect(mocks.cancelRun).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "mission-run-4", expectedRunRevision: 9, expectedLastSequence: 8,
+      mode: "cooperative", reason: "User requested stop."
+    }));
+    expect(backendCancel).toHaveBeenCalledWith("mission-run-4");
+    expect(mocks.desktopExecutor).not.toHaveBeenCalled();
+    expect(mocks.prepareGrant).not.toHaveBeenCalled();
   });
 
   it("accepts only the closed secret-safe cited receipt projection", () => {

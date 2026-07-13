@@ -84,6 +84,43 @@ pub struct MissionCheckpointRestoreResult {
     checkpoint: mission_checkpoint::CheckpointStateRow,
 }
 
+#[derive(Serialize)]
+#[allow(clippy::large_enum_variant)]
+#[serde(
+    tag = "status",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CitedMissionRestartRecovery {
+    Resumable {
+        run_id: String,
+        source_thread_id: String,
+        worker: Value,
+        provider_id: String,
+        model_reference: String,
+        worker_started_event_id: String,
+        route_selected_event_id: String,
+        checkpoint_event_id: String,
+        checkpoint_restore_event_id: String,
+        tool_event_id: String,
+        output_reference: String,
+        evidence: Value,
+        restore_idempotency_key: String,
+        terminal_idempotency_key: String,
+        usage_event_id: String,
+        completion_event_id: String,
+        evaluation_event_id: String,
+        result_event_id: String,
+        failure_event_id: String,
+        expected_run_revision: i64,
+        expected_last_sequence: i64,
+        new_attempt_number: i64,
+    },
+    Terminalized {
+        journal: mission_run::MissionRunJournalRow,
+    },
+}
+
 fn authorized(
     tx: &rusqlite::Connection,
 ) -> crate::store::Result<(
@@ -353,8 +390,7 @@ pub fn mission_run_finalize_cancellation(
 }
 
 #[tauri::command]
-pub fn mission_run_recover_interrupted_cited(
-) -> Result<Vec<mission_run::MissionRunJournalRow>, String> {
+pub fn mission_run_recover_interrupted_cited() -> Result<Vec<CitedMissionRestartRecovery>, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let (scope, context, member) = store
@@ -425,7 +461,7 @@ fn recover_interrupted_cited_run(
     member: &str,
     internal_user_id: &str,
     run_id: &str,
-) -> crate::store::Result<Option<mission_run::MissionRunJournalRow>> {
+) -> crate::store::Result<Option<CitedMissionRestartRecovery>> {
     let journal = mission_run::get(tx, store, scope, member, run_id)?.ok_or_else(|| {
         crate::store::StoreError::Invalid("Mission run disappeared during recovery.".into())
     })?;
@@ -447,6 +483,21 @@ fn recover_interrupted_cited_run(
         .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
     if !is_cited_recovery_shape(&journal.run, &lifecycle) {
         return Ok(None);
+    }
+    if journal.run.get("status").and_then(Value::as_str) == Some("running") {
+        match cited_restart_resume_descriptor(
+            tx,
+            store,
+            scope,
+            member,
+            internal_user_id,
+            &journal,
+            &lifecycle,
+        ) {
+            Ok(Some(resume)) => return Ok(Some(resume)),
+            Ok(None) | Err(crate::store::StoreError::Invalid(_)) => {}
+            Err(error) => return Err(error),
+        }
     }
     let revision = journal
         .run
@@ -588,7 +639,321 @@ fn recover_interrupted_cited_run(
         &event,
         &at,
     )?;
-    Ok(Some(settled))
+    Ok(Some(CitedMissionRestartRecovery::Terminalized {
+        journal: settled,
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cited_restart_resume_descriptor(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    member: &str,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+) -> crate::store::Result<Option<CitedMissionRestartRecovery>> {
+    let run_id = journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run identity is invalid.".into())
+        })?;
+    let current_attempt = journal
+        .run
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    let max_attempts = lifecycle
+        .mission
+        .pointer("/budget/maxAttempts")
+        .and_then(Value::as_i64);
+    if current_attempt != 1 || max_attempts != Some(2) {
+        return Ok(None);
+    }
+    let revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+        })?;
+    let last_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let checkpoint_event_id = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let checkpoint_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id));
+    if checkpoint_event
+        .and_then(|event| event.get("type"))
+        .and_then(Value::as_str)
+        != Some("checkpoint-created")
+    {
+        return Ok(None);
+    }
+    let checkpoint =
+        mission_checkpoint::latest(tx, store, scope, member, run_id)?.ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery checkpoint is missing.".into())
+        })?;
+    if checkpoint.checkpoint_event_id != checkpoint_event_id {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited recovery checkpoint is not the current run head.".into(),
+        ));
+    }
+    let checkpoint_event = checkpoint_event.expect("checked checkpoint event");
+    verify_checkpoint_state(&checkpoint, checkpoint_event)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let worker_events = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .collect::<Vec<_>>();
+    let started_events = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-started"))
+        .collect::<Vec<_>>();
+    let route_events = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("route-selected"))
+        .collect::<Vec<_>>();
+    let tool_events = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("tool-call-completed"))
+        .collect::<Vec<_>>();
+    if worker_events.len() != 1
+        || started_events.len() != 1
+        || route_events.len() != 1
+        || tool_events.len() != 1
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited recovery requires one exact worker evidence chain.".into(),
+        ));
+    }
+    let worker = worker_events[0]
+        .pointer("/payload/worker")
+        .cloned()
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery worker is missing.".into())
+        })?;
+    let worker_id = worker.get("id").and_then(Value::as_str).ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited recovery worker is invalid.".into())
+    })?;
+    let step_key = worker
+        .get("planStepKey")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery worker step is invalid.".into())
+        })?;
+    let worker_started_event_id = started_events[0]
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery worker start is invalid.".into())
+        })?;
+    let route_selected_event_id = route_events[0]
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery route is invalid.".into())
+        })?;
+    let tool_event_id = tool_events[0]
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery tool result is invalid.".into())
+        })?;
+    let output_reference = tool_events[0]
+        .pointer("/payload/result/outputReference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited recovery evidence reference is invalid.".into(),
+            )
+        })?;
+    let provider_id = route_events[0]
+        .pointer("/payload/providerId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery provider is unavailable.".into())
+        })?;
+    let model_reference = route_events[0]
+        .pointer("/payload/modelReference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery model is unavailable.".into())
+        })?;
+    let selection_value = route_events[0]
+        .pointer("/payload/selection")
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery route selection is invalid.".into())
+        })?;
+    let selection =
+        serde_json::from_value::<crate::models::ProviderRouteSelection>(selection_value.clone())
+            .map_err(|_| {
+                crate::store::StoreError::Invalid(
+                    "Cited recovery route selection is invalid.".into(),
+                )
+            })?;
+    let provider_route_id = crate::backends::validate_account_native_provider_model(
+        tx,
+        internal_user_id,
+        provider_id,
+        model_reference,
+    )
+    .map_err(crate::store::StoreError::Invalid)?;
+    crate::backends::validate_native_provider_route_selection_in_tx(
+        tx,
+        store,
+        internal_user_id,
+        provider_id,
+        model_reference,
+        &provider_route_id,
+        Some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION),
+        &selection,
+    )
+    .map_err(crate::store::StoreError::Invalid)?;
+    let route_sequence = route_events[0].get("sequence").and_then(Value::as_i64);
+    let tool_sequence = tool_events[0].get("sequence").and_then(Value::as_i64);
+    let exact = worker.get("runId").and_then(Value::as_str) == Some(run_id)
+        && worker.get("planRevisionId") == lifecycle.current_revision.get("id")
+        && worker.get("planStepKey").and_then(Value::as_str) == Some(step_key)
+        && worker
+            .pointer("/budget/maxAttempts")
+            .and_then(Value::as_i64)
+            == Some(1)
+        && worker
+            .pointer("/outputContract/includeEvidence")
+            .and_then(Value::as_bool)
+            == Some(true)
+        && started_events[0]
+            .pointer("/payload/workerId")
+            .and_then(Value::as_str)
+            == Some(worker_id)
+        && route_events[0]
+            .get("previousEventId")
+            .and_then(Value::as_str)
+            == Some(worker_started_event_id)
+        && route_events[0]
+            .pointer("/payload/workerId")
+            .and_then(Value::as_str)
+            == Some(worker_id)
+        && journal.run.get("selectedRoute") == Some(selection_value)
+        && tool_events[0]
+            .get("previousEventId")
+            .and_then(Value::as_str)
+            == Some(route_selected_event_id)
+        && tool_events[0]
+            .pointer("/payload/result/workerId")
+            .and_then(Value::as_str)
+            == Some(worker_id)
+        && tool_events[0]
+            .pointer("/payload/result/toolName")
+            .and_then(Value::as_str)
+            == Some("connection-read")
+        && route_sequence
+            .zip(tool_sequence)
+            .is_some_and(|(route, tool)| tool == route + 1)
+        && tool_sequence.is_some_and(|tool| last_sequence == tool + 1)
+        && checkpoint_event
+            .get("previousEventId")
+            .and_then(Value::as_str)
+            == Some(tool_event_id)
+        && checkpoint_event
+            .pointer("/payload/checkpoint/replayBoundary/resumeAfterEventId")
+            .and_then(Value::as_str)
+            == Some(tool_event_id)
+        && checkpoint_event
+            .pointer("/payload/checkpoint/replayBoundary/durableThroughSequence")
+            .and_then(Value::as_i64)
+            == tool_sequence
+        && checkpoint_event
+            .pointer("/payload/checkpoint/replayBoundary/completedWorkerIds")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && checkpoint_event
+            .pointer("/payload/checkpoint/replayBoundary/committedEffectKeys")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+        && checkpoint.attempt_number == current_attempt
+        && checkpoint.state
+            == json!({"activeWorkerIds":[worker_id],"activePlanStepKeys":[step_key],"pendingWaitKeys":[]});
+    if !exact {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited recovery evidence chain does not match its durable checkpoint.".into(),
+        ));
+    }
+    let evidence_binding = crate::mission_workers::NativeWorkerToolEvidenceBinding {
+        tool_event_id: tool_event_id.to_string(),
+        output_reference: output_reference.to_string(),
+    };
+    let evidence = crate::mission_workers::load_cited_tool_evidence(
+        tx,
+        store,
+        scope,
+        member,
+        journal,
+        run_id,
+        worker_id,
+        &worker,
+        &evidence_binding,
+    )?;
+    let source_thread_id = lifecycle
+        .mission
+        .pointer("/scope/sourceThreadId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery thread is unavailable.".into())
+        })?;
+    let identity = format!(
+        "fable.cited-restart-resume.v1\0{}\0{}\0{}\0{}",
+        scope.workspace_id(),
+        member,
+        run_id,
+        checkpoint_event_id
+    );
+    let digest = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    let event_id = |role: &str| format!("mission-resume-{role}-{}", &digest[..32]);
+    Ok(Some(CitedMissionRestartRecovery::Resumable {
+        run_id: run_id.to_string(),
+        source_thread_id: source_thread_id.to_string(),
+        worker,
+        provider_id: provider_id.to_string(),
+        model_reference: model_reference.to_string(),
+        worker_started_event_id: worker_started_event_id.to_string(),
+        route_selected_event_id: route_selected_event_id.to_string(),
+        checkpoint_event_id: checkpoint_event_id.to_string(),
+        checkpoint_restore_event_id: event_id("restore"),
+        tool_event_id: tool_event_id.to_string(),
+        output_reference: output_reference.to_string(),
+        evidence,
+        restore_idempotency_key: format!("cited-restart-restore:v1:{}", &digest[..32]),
+        terminal_idempotency_key: format!("cited-restart-terminal:v1:{}", &digest[..32]),
+        usage_event_id: event_id("usage"),
+        completion_event_id: event_id("completion"),
+        evaluation_event_id: event_id("evaluation"),
+        result_event_id: event_id("result"),
+        failure_event_id: event_id("failure"),
+        expected_run_revision: revision,
+        expected_last_sequence: last_sequence,
+        new_attempt_number: current_attempt + 1,
+    }))
 }
 
 fn is_cited_recovery_shape(run: &Value, lifecycle: &mission_plan::MissionPlanLifecycleRow) -> bool {
@@ -1613,6 +1978,9 @@ mod tests {
             })
             .unwrap()
             .unwrap();
+        let CitedMissionRestartRecovery::Terminalized { journal: recovered } = recovered else {
+            panic!("legacy one-attempt cited runs must be terminalized");
+        };
         assert_eq!(recovered.run["status"], "failed");
         assert_eq!(recovered.events.last().unwrap()["type"], "run-failed");
         assert_eq!(

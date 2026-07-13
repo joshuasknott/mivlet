@@ -525,6 +525,8 @@ export interface MissionWorkerExecutionBinding {
   expectedLastSequence: number;
   /** Exact durable replay boundary immediately preceding provider egress. */
   checkpointEventId?: string;
+  /** Exact one-attempt restart restoration of `checkpointEventId`, when resumed. */
+  checkpointRestoreEventId?: string;
   /** Exact native-attested connected-source result consumed by a final cited-brief turn. */
   toolEvidence?: {
     toolEventId: string;

@@ -3010,6 +3010,43 @@ export interface RuntimeMissionCheckpointCreateInput {
   resumeAfterEventId: string;
 }
 
+export interface RuntimeMissionCheckpointRestoreInput {
+  runId: string;
+  eventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  newAttemptNumber: number;
+}
+
+export type RuntimeCitedMissionRestartRecovery =
+  | {
+      status: "resumable";
+      runId: string;
+      sourceThreadId: string;
+      worker: Spine.Missions.Worker;
+      providerId: string;
+      modelReference: string;
+      workerStartedEventId: string;
+      routeSelectedEventId: string;
+      checkpointEventId: string;
+      checkpointRestoreEventId: string;
+      toolEventId: string;
+      outputReference: string;
+      evidence: unknown;
+      restoreIdempotencyKey: string;
+      terminalIdempotencyKey: string;
+      usageEventId: string;
+      completionEventId: string;
+      evaluationEventId: string;
+      resultEventId: string;
+      failureEventId: string;
+      expectedRunRevision: number;
+      expectedLastSequence: number;
+      newAttemptNumber: number;
+    }
+  | { status: "terminalized"; journal: Record<string, unknown> };
+
 export interface RuntimeMissionWorkerCreateInput {
   runId: string;
   eventId: string;
@@ -3072,15 +3109,21 @@ export async function finalizeRuntimeMissionRunCancellation(input: RuntimeMissio
   catch (error) { throw toRuntimeError(error); }
 }
 
-export async function recoverRuntimeInterruptedCitedMissions() {
+export async function recoverRuntimeInterruptedCitedMissions(): Promise<RuntimeCitedMissionRestartRecovery[] | null> {
   if (!hasTauriRuntime()) return null;
-  try { return await invoke<Array<Record<string, unknown>>>("mission_run_recover_interrupted_cited"); }
+  try { return await invoke<RuntimeCitedMissionRestartRecovery[]>("mission_run_recover_interrupted_cited"); }
   catch (error) { throw toRuntimeError(error); }
 }
 
 export async function createRuntimeMissionCheckpoint(input: RuntimeMissionCheckpointCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_run_create_checkpoint", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function restoreRuntimeMissionCheckpoint(input: RuntimeMissionCheckpointRestoreInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<{ journal: Record<string, unknown>; checkpoint: Record<string, unknown> }>("mission_run_restore_checkpoint", { input }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

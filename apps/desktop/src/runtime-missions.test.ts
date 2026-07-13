@@ -11,6 +11,7 @@ import {
   readRuntimeMissionWorkerOutput,
   recoverRuntimeInterruptedCitedMissions,
   requestRuntimeMissionRunCancellation,
+  restoreRuntimeMissionCheckpoint,
   startRuntimeMissionWorker
 } from "./runtime";
 
@@ -38,6 +39,10 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionReceipts("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
+    await expect(restoreRuntimeMissionCheckpoint({
+      runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
+      expectedRunRevision: 5, expectedLastSequence: 4, newAttemptNumber: 2
+    })).resolves.toBeNull();
     await expect(createRuntimeMissionCheckpoint({
       runId: "run-1", eventId: "event-checkpoint", idempotencyKey: "checkpoint-1",
       expectedRunRevision: 4, expectedLastSequence: 3, attemptNumber: 1,
@@ -74,6 +79,11 @@ describe("mission runtime boundary", () => {
     await readRuntimeCitedMissionReceipts("thread-1", ["message-1"]);
     await listRuntimeNativeProviderRoutes();
     await recoverRuntimeInterruptedCitedMissions();
+    const restore = {
+      runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
+      expectedRunRevision: 5, expectedLastSequence: 4, newAttemptNumber: 2
+    };
+    await restoreRuntimeMissionCheckpoint(restore);
     const checkpoint = {
       runId: "run-1", eventId: "event-checkpoint", idempotencyKey: "checkpoint-1",
       expectedRunRevision: 4, expectedLastSequence: 3, attemptNumber: 1,
@@ -93,6 +103,7 @@ describe("mission runtime boundary", () => {
       ["mission_worker_cited_receipts_read", { input: { threadId: "thread-1", messageIds: ["message-1"] } }],
       ["list_native_provider_routes"],
       ["mission_run_recover_interrupted_cited"],
+      ["mission_run_restore_checkpoint", { input: restore }],
       ["mission_run_create_checkpoint", { input: checkpoint }]
     ]);
   });

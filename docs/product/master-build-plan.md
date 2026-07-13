@@ -342,10 +342,17 @@ with an explicit `MissionResult`, and the desktop refuses to surface cancellatio
 until it reloads that terminal fact. On the first authenticated hydration for an
 account/workspace/member in each process, a process-start epoch now finds only
 older nonterminal cited journals. Rust reconciles an older stored cancellation to
-cancelled and any other exact one-step cited shape to retryable failed with a
-deterministic `mission-interrupted` fact, without replaying tools, approvals, or
-provider egress. Current-process runs and active native leases are excluded.
-General checkpoint-driven resume and multi-worker recovery remain open. Schema v26 adds
+cancelled. For the exact one-step cited shape whose attested search result is the
+current checkpoint head, whose persisted route is still authorized, and whose
+mission has its single restart attempt available, Rust returns a closed resume
+descriptor containing the reloaded encrypted evidence and deterministic restore
+and terminal identities. The desktop restores exactly attempt two and runs only
+the tool-free final provider-writing turn. Rust accepts settlement only from the
+exact restore head and original checkpoint/tool chain, so search execution, grant
+consumption, and approval cannot repeat. Invalid, legacy, pre-checkpoint, changed,
+or attempt-exhausted journals retain the conservative deterministic
+`mission-interrupted` terminal path. Current-process runs and active native leases
+are excluded. General checkpoint-driven resume and multi-worker recovery remain open. Schema v26 adds
 owner-qualified encrypted checkpoint state linked by composite foreign key to
 the exact immutable checkpoint event. Authenticated create/restore commands
 derive completed workers, plan steps, committed effects, active work, and waits
@@ -362,7 +369,7 @@ egress. The narrow OpenAI path described above persists truthful production
 `worker-completed` and `worker-failed` events plus one atomic encrypted Markdown
 receipt. Accepted cited output now has the exact artifact provenance described
 below, but general worker execution events, other mission artifact shapes, and
-automatic checkpoint resume are still open, so the durable-run box remains
+general/multi-worker checkpoint resume are still open, so the durable-run box remains
 unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome

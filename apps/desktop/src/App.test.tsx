@@ -80,6 +80,7 @@ const runtimeMocks = vi.hoisted(() => ({
 vi.mock("./lib/cited-brief-mission", () => ({
   isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
   isCitedBriefMissionReceipt: (value: unknown) => typeof value === "object" && value !== null,
+  resumeInterruptedCitedBriefMissions: vi.fn(async () => ({ resumed: 0, terminalized: 0, failed: 0 })),
   executeCitedBriefMission: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.citedBriefCalls.push(input);
     return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };

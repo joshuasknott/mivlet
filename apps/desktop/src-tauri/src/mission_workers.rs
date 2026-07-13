@@ -33,6 +33,8 @@ pub struct NativeWorkerExecutionBinding {
     #[serde(default)]
     pub checkpoint_event_id: Option<String>,
     #[serde(default)]
+    pub checkpoint_restore_event_id: Option<String>,
+    #[serde(default)]
     pub tool_evidence: Option<NativeWorkerToolEvidenceBinding>,
 }
 
@@ -1158,6 +1160,31 @@ fn load_native_tool_evidence(
     worker: &Value,
     evidence: &NativeWorkerToolEvidenceBinding,
 ) -> crate::store::Result<Value> {
+    load_cited_tool_evidence(
+        tx,
+        store,
+        scope,
+        member,
+        journal,
+        &binding.run_id,
+        &binding.worker_id,
+        worker,
+        evidence,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn load_cited_tool_evidence(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    member: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    run_id: &str,
+    worker_id: &str,
+    worker: &Value,
+    evidence: &NativeWorkerToolEvidenceBinding,
+) -> crate::store::Result<Value> {
     bounded(&evidence.tool_event_id, "Mission tool evidence event", 200)
         .map_err(crate::store::StoreError::Invalid)?;
     if !evidence.output_reference.starts_with("mission-tool:v1:")
@@ -1180,7 +1207,7 @@ fn load_native_tool_evidence(
         || event
             .pointer("/payload/result/workerId")
             .and_then(Value::as_str)
-            != Some(binding.worker_id.as_str())
+            != Some(worker_id)
         || event
             .pointer("/payload/result/toolName")
             .and_then(Value::as_str)
@@ -1204,8 +1231,8 @@ fn load_native_tool_evidence(
     .ok_or_else(|| {
         crate::store::StoreError::Invalid("Mission tool evidence receipt is unavailable.".into())
     })?;
-    if receipt.run_id != binding.run_id
-        || receipt.worker_id != binding.worker_id
+    if receipt.run_id != run_id
+        || receipt.worker_id != worker_id
         || receipt.tool_event_id != evidence.tool_event_id
     {
         return Err(crate::store::StoreError::Invalid(
@@ -3092,8 +3119,9 @@ fn native_usage_event_key(binding: &NativeWorkerExecutionBinding) -> Result<Stri
 
 fn native_completion_base_event(binding: &NativeWorkerExecutionBinding) -> &str {
     binding
-        .checkpoint_event_id
+        .checkpoint_restore_event_id
         .as_deref()
+        .or(binding.checkpoint_event_id.as_deref())
         .unwrap_or_else(|| native_pre_checkpoint_base_event(binding))
 }
 
@@ -3369,6 +3397,9 @@ fn validate_native_completion_head(
             return Err("Native worker evidence and terminal event ids must be distinct.".into());
         }
     }
+    if binding.checkpoint_restore_event_id.is_some() && binding.checkpoint_event_id.is_none() {
+        return Err("Native worker checkpoint restoration has no source checkpoint.".into());
+    }
     if let Some(checkpoint_event_id) = binding.checkpoint_event_id.as_deref() {
         bounded(checkpoint_event_id, "Native worker checkpoint event", 200)?;
         if [
@@ -3385,6 +3416,7 @@ fn validate_native_completion_head(
                 .tool_evidence
                 .as_ref()
                 .is_some_and(|evidence| evidence.tool_event_id == checkpoint_event_id)
+            || binding.checkpoint_restore_event_id.as_deref() == Some(checkpoint_event_id)
         {
             return Err(
                 "Native worker checkpoint and execution event ids must be distinct.".into(),
@@ -3401,6 +3433,19 @@ fn validate_native_completion_head(
             .events
             .iter()
             .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id));
+        let current_attempt = journal
+            .run
+            .get("currentAttemptNumber")
+            .and_then(Value::as_i64)
+            .unwrap_or(1);
+        if binding.checkpoint_restore_event_id.is_some() && current_attempt <= 1 {
+            return Err("Native worker checkpoint restoration attempt is invalid.".into());
+        }
+        let expected_checkpoint_attempt = if binding.checkpoint_restore_event_id.is_some() {
+            current_attempt - 1
+        } else {
+            current_attempt
+        };
         if replay_sequence.is_none()
             || checkpoint.is_none_or(|event| {
                 event.get("type").and_then(Value::as_str) != Some("checkpoint-created")
@@ -3416,21 +3461,64 @@ fn validate_native_completion_head(
                     || event
                         .pointer("/payload/checkpoint/attemptNumber")
                         .and_then(Value::as_i64)
-                        != Some(
-                            journal
-                                .run
-                                .get("currentAttemptNumber")
-                                .and_then(Value::as_i64)
-                                .unwrap_or(1),
-                        )
+                        != Some(expected_checkpoint_attempt)
             })
         {
             return Err(
                 "Native worker checkpoint does not bind the durable execution boundary.".into(),
             );
         }
+        if let Some(restore_event_id) = binding.checkpoint_restore_event_id.as_deref() {
+            bounded(
+                restore_event_id,
+                "Native worker checkpoint restore event",
+                200,
+            )?;
+            let restore = journal
+                .events
+                .iter()
+                .find(|event| event.get("id").and_then(Value::as_str) == Some(restore_event_id));
+            if current_attempt <= 1
+                || restore.is_none_or(|event| {
+                    event.get("type").and_then(Value::as_str) != Some("checkpoint-restored")
+                        || event.get("previousEventId").and_then(Value::as_str)
+                            != Some(checkpoint_event_id)
+                        || event
+                            .pointer("/payload/checkpointEventId")
+                            .and_then(Value::as_str)
+                            != Some(checkpoint_event_id)
+                        || event
+                            .pointer("/payload/newAttemptNumber")
+                            .and_then(Value::as_i64)
+                            != Some(current_attempt)
+                        || event.get("attemptNumber").and_then(Value::as_i64)
+                            != Some(current_attempt)
+                })
+            {
+                return Err(
+                    "Native worker checkpoint restoration does not match its durable attempt."
+                        .into(),
+                );
+            }
+        }
     }
     let expected_head = native_completion_base_event(binding);
+    let terminal_ids = [
+        binding.worker_started_event_id.as_str(),
+        binding.route_selected_event_id.as_str(),
+        binding.usage_event_id.as_str(),
+        binding.completion_event_id.as_str(),
+        binding.evaluation_event_id.as_str(),
+        binding.result_event_id.as_str(),
+        binding.failure_event_id.as_str(),
+    ];
+    if binding
+        .checkpoint_restore_event_id
+        .as_deref()
+        .is_some_and(|restore| terminal_ids.contains(&restore))
+    {
+        return Err("Native worker checkpoint restoration identity is reused.".into());
+    }
     if binding.worker_started_event_id == binding.route_selected_event_id
         || binding.route_selected_event_id == binding.usage_event_id
         || binding.route_selected_event_id == binding.completion_event_id
@@ -5249,7 +5337,8 @@ fn append_route_selected(
         "id":input.route_selected_event_id,"runId":input.run_id,"type":"route-selected","sequence":sequence,
         "previousEventId":previous,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
         "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":event_key,
-        "payload":{"workerId":input.worker_id,"selection":selection}
+        "payload":{"workerId":input.worker_id,"providerId":input.provider_id,
+            "modelReference":input.model_reference,"selection":selection}
     });
     let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
         crate::store::StoreError::Invalid("Mission run record is invalid.".into())
@@ -5290,6 +5379,12 @@ fn exact_route_replay(event: &Value, input: &MissionWorkerStartInput) -> Result<
         && event.get("type").and_then(Value::as_str) == Some("route-selected")
         && event.pointer("/payload/workerId").and_then(Value::as_str)
             == Some(input.worker_id.as_str())
+        && event.pointer("/payload/providerId").and_then(Value::as_str)
+            == Some(input.provider_id.as_str())
+        && event
+            .pointer("/payload/modelReference")
+            .and_then(Value::as_str)
+            == Some(input.model_reference.as_str())
         && event.get("previousEventId").and_then(Value::as_str)
             == Some(input.worker_started_event_id.as_str())
         && event.get("sequence").and_then(Value::as_i64)
@@ -6044,7 +6139,7 @@ mod tests {
         assert!(validate_start_head(&journal, &input).is_ok());
         let event = json!({"id":"event-4","runId":"run-1","type":"worker-started","sequence":4,"previousEventId":"event-3","payload":{"workerId":"worker-1"}});
         assert!(exact_start_replay(&event, &input).is_ok());
-        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","selection":input.route_selection}});
+        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","providerId":"openai","modelReference":"gpt-5","selection":input.route_selection}});
         assert!(exact_route_replay(&route, &input).is_ok());
         journal.events.push(event);
         assert!(validate_start_head(&journal, &input).is_err());
@@ -6116,6 +6211,7 @@ mod tests {
             expected_run_revision: 4,
             expected_last_sequence: 3,
             checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
             tool_evidence: None,
         };
         let mut event = json!({
@@ -6234,6 +6330,7 @@ mod tests {
             expected_run_revision: 4,
             expected_last_sequence: 3,
             checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
             tool_evidence: None,
         };
         let cancellation = json!({
@@ -6284,6 +6381,7 @@ mod tests {
             expected_run_revision: 6,
             expected_last_sequence: 5,
             checkpoint_event_id: Some("event-checkpoint".into()),
+            checkpoint_restore_event_id: None,
             tool_evidence: Some(NativeWorkerToolEvidenceBinding {
                 tool_event_id: "event-tool".into(),
                 output_reference: "mission-tool:v1:evidence".into(),
@@ -6305,6 +6403,24 @@ mod tests {
             ],
         };
         assert!(validate_native_completion_head(&journal, &binding).is_ok());
+        let mut restored_binding = binding.clone();
+        restored_binding.expected_run_revision = 7;
+        restored_binding.expected_last_sequence = 6;
+        restored_binding.checkpoint_restore_event_id = Some("event-restore".into());
+        let mut restored = mission_run::MissionRunJournalRow {
+            run: journal.run.clone(),
+            events: journal.events.clone(),
+        };
+        restored.run = json!({"status":"running","revision":7,"currentAttemptNumber":2,
+            "eventHead":{"lastSequence":6,"lastEventId":"event-restore"}});
+        restored
+            .events
+            .push(json!({"id":"event-restore","type":"checkpoint-restored",
+            "sequence":6,"previousEventId":"event-checkpoint","attemptNumber":2,
+            "payload":{"checkpointEventId":"event-checkpoint","newAttemptNumber":2}}));
+        assert!(validate_native_completion_head(&restored, &restored_binding).is_ok());
+        restored.events[4]["payload"]["checkpointEventId"] = json!("event-other");
+        assert!(validate_native_completion_head(&restored, &restored_binding).is_err());
         let mut changed = journal;
         changed.events[3]["payload"]["checkpoint"]["replayBoundary"]["durableThroughSequence"] =
             json!(3);
@@ -6327,6 +6443,7 @@ mod tests {
             expected_run_revision: 4,
             expected_last_sequence: 3,
             checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
             tool_evidence: Some(NativeWorkerToolEvidenceBinding {
                 tool_event_id: "event-tool".into(),
                 output_reference: "mission-tool:v1:evidence".into(),
@@ -6378,6 +6495,7 @@ mod tests {
             expected_run_revision: 4,
             expected_last_sequence: 3,
             checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
             tool_evidence: None,
         };
         let lifecycle = mission_plan::MissionPlanLifecycleRow {
@@ -6618,6 +6736,7 @@ mod tests {
             expected_run_revision: 3,
             expected_last_sequence: 2,
             checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
             tool_evidence: None,
         };
         {
