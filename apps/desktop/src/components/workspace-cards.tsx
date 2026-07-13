@@ -111,6 +111,45 @@ export function MissionRunReceipt({ receipt }: { receipt: {
   );
 }
 
+export function MissionPlanSummary({ plan }: { plan: {
+  title: string; summary: string; executionLabel: string;
+  step: { title: string; objective: string; capability: string; output: string };
+  acceptance: string[];
+  budget: { maxInputTokens: number; maxOutputTokens: number; maxToolCalls: number; maxDurationMs: number; maxAttempts: number };
+} }) {
+  return (
+    <details className="run-context-summary run-context-summary--plan" aria-label="Mission plan">
+      <summary><strong>Plan</strong><span>{plan.executionLabel}</span></summary>
+      <p className="run-context-summary__audience"><strong>Goal</strong><span>{plan.title}</span></p>
+      <p className="run-context-summary__audience"><strong>Question</strong><span>{plan.summary}</span></p>
+      <ol className="run-context-summary__sources" aria-label="Plan steps">
+        <li>
+          <strong>{plan.step.title}</strong>
+          <span>{plan.step.objective}</span>
+          <p>Uses: {plan.step.capability}</p>
+          <p>Produces: {plan.step.output}</p>
+        </li>
+      </ol>
+      <ul className="run-context-summary__reasons" aria-label="Plan acceptance and limits">
+        {plan.acceptance.map((criterion) => <li key={criterion}>Accepted when: {criterion}</li>)}
+        <li>{plan.budget.maxInputTokens} input tokens</li>
+        <li>{plan.budget.maxOutputTokens} output tokens</li>
+        <li>{plan.budget.maxToolCalls} read action</li>
+        <li>Up to {Math.round(plan.budget.maxDurationMs / 1000)} seconds</li>
+        <li>{plan.budget.maxAttempts} attempts including restart recovery</li>
+      </ul>
+    </details>
+  );
+}
+
+export function MissionPlanUnavailable() {
+  return (
+    <p className="run-context-summary__audience" aria-label="Mission plan unavailable">
+      <strong>Plan</strong><span>Unavailable</span>
+    </p>
+  );
+}
+
 export function ProviderRouteSummary({ route }: { route: ProviderRouteExecutionBinding }) {
   return (
     <details className="run-context-summary" aria-label="Route receipt">

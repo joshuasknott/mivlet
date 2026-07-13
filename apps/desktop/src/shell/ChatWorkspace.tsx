@@ -11,13 +11,13 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
+import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimeThreadArtifacts, readRuntimeCitedMissionReceipts, type RuntimeArtifactBundle } from "../runtime";
+import { getRuntimeArtifact, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, DirectiveCards, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, DirectiveCards, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -35,6 +35,7 @@ type ConversationMessage = {
   content: string;
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
+  missionPlan?: CitedBriefMissionPlanSummary;
   missionOutcome?: "accepted" | "partial" | "failed" | "cancelled";
   missionArtifactId?: string;
 };
@@ -86,6 +87,10 @@ export function ChatWorkspace() {
     key: string;
     receipts: Record<string, CitedBriefMissionReceipt>;
   }>({ key: "", receipts: {} });
+  const [hydratedMissionPlans, setHydratedMissionPlans] = useState<{
+    key: string;
+    plans: Record<string, CitedBriefMissionPlanSummary>;
+  }>({ key: "", plans: {} });
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
@@ -93,6 +98,8 @@ export function ChatWorkspace() {
   const draftHydrationKey = useRef<string | null>(null);
   const missionReceiptHydrationKey = useRef<string | null>(null);
   const missionReceiptHydrationRequestKey = useRef<string | null>(null);
+  const missionPlanHydrationKey = useRef<string | null>(null);
+  const missionPlanHydrationRequestKey = useRef<string | null>(null);
   const activeAssistantMessageId = useRef<string | null>(null);
   const hydratedConversation = durableConversation.state.conversation;
   const boundWorkspaceId =
@@ -391,10 +398,23 @@ export function ChatWorkspace() {
       && message.detail?.type === "mission-result"
       && (message.detail.outcome === "accepted" || message.detail.outcome === "partial")
   ) ?? [];
+  const terminalCitedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
+    message.kind === "assistant"
+      && message.detail?.type === "mission-result"
+      && (message.detail.outcome === "accepted" || message.detail.outcome === "partial"
+        || message.detail.outcome === "failed" || message.detail.outcome === "cancelled")
+  ) ?? [];
   const activeMissionReceiptHydrationKey = selectedConversationThreadId
     && hydratedConversation?.thread.id === selectedConversationThreadId
     && citedMissionMessages.length > 0
     ? `${invitationContextKey}:${boundWorkspaceId ?? "unbound"}:${hydratedConversation.thread.id}:${citedMissionMessages
+      .map(({ message }) => `${message.id}:${message.currentRevisionId}`)
+      .join("|")}`
+    : "";
+  const activeMissionPlanHydrationKey = selectedConversationThreadId
+    && hydratedConversation?.thread.id === selectedConversationThreadId
+    && terminalCitedMissionMessages.length > 0
+    ? `${invitationContextKey}:${boundWorkspaceId ?? "unbound"}:${hydratedConversation.thread.id}:${terminalCitedMissionMessages
       .map(({ message }) => `${message.id}:${message.currentRevisionId}`)
       .join("|")}`
     : "";
@@ -468,6 +488,44 @@ export function ChatWorkspace() {
       }
     };
   }, [activeMissionReceiptHydrationKey]);
+
+  useEffect(() => {
+    const hydrated = hydratedConversation;
+    if (!hydrated || !activeMissionPlanHydrationKey) return;
+    const missionMessages = terminalCitedMissionMessages;
+    const hydrationKey = activeMissionPlanHydrationKey;
+    if (missionPlanHydrationKey.current === hydrationKey
+      || missionPlanHydrationRequestKey.current === hydrationKey) return;
+    missionPlanHydrationRequestKey.current = hydrationKey;
+    let active = true;
+    const batches = Array.from(
+      { length: Math.ceil(missionMessages.length / 32) },
+      (_, index) => missionMessages.slice(index * 32, index * 32 + 32).map(({ message }) => message.id)
+    );
+    void Promise.all(batches.map((messageIds) =>
+      readRuntimeCitedMissionPlanSummaries(hydrated.thread.id, messageIds)
+    )).then((results) => {
+      if (!active) return;
+      missionPlanHydrationRequestKey.current = null;
+      missionPlanHydrationKey.current = hydrationKey;
+      const plans = new Map(results
+        .flatMap((result) => result ?? [])
+        .flatMap((result) => result.status === "available" && isCitedBriefMissionPlanSummary(result.plan)
+          ? [[result.messageId, result.plan] as const]
+          : []));
+      setHydratedMissionPlans({ key: hydrationKey, plans: Object.fromEntries(plans) });
+    }).catch(() => {
+      if (active && missionPlanHydrationRequestKey.current === hydrationKey) {
+        missionPlanHydrationRequestKey.current = null;
+      }
+    });
+    return () => {
+      active = false;
+      if (missionPlanHydrationRequestKey.current === hydrationKey) {
+        missionPlanHydrationRequestKey.current = null;
+      }
+    };
+  }, [activeMissionPlanHydrationKey]);
 
   useEffect(() => {
     let active = true;
@@ -567,6 +625,12 @@ export function ChatWorkspace() {
             ?? (hydratedMissionReceipts.key === activeMissionReceiptHydrationKey
               ? hydratedMissionReceipts.receipts[message.id]
               : undefined);
+          const missionPlan = message.missionPlan
+            ?? (hydratedMissionPlans.key === activeMissionPlanHydrationKey
+              ? hydratedMissionPlans.plans[message.id]
+              : undefined);
+          const missionPlanUnavailable = !missionPlan && Boolean(message.missionOutcome)
+            && hydratedMissionPlans.key === activeMissionPlanHydrationKey;
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
             || entry.artifact.id === message.missionArtifactId
@@ -578,6 +642,8 @@ export function ChatWorkspace() {
               className={`conversation-message conversation-message--${message.role}`}
             >
               <p>{message.content}</p>
+              {message.role === "assistant" && missionPlan ? <MissionPlanSummary plan={missionPlan} /> : null}
+              {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
               {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
                 <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
@@ -839,13 +905,18 @@ export function ChatWorkspace() {
     if (isCitedBriefMissionPrompt(prompt)) {
       const assistantMessageId = appendConversationMessage("assistant", "Searching connected work sources...");
       resetCancellation();
-      void runCitedBrief(prompt, resolvedComposerModelId, runProjectId ?? undefined)
+      void runCitedBrief(prompt, resolvedComposerModelId, runProjectId ?? undefined, (plan) => {
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId ? { ...entry, missionPlan: plan } : entry
+        ));
+      })
         .then((result) => {
           setConversationMessages((current) => current.map((entry) =>
             entry.id === assistantMessageId ? {
               ...entry,
               content: result.text,
               runId: result.runId,
+              missionPlan: result.plan,
               missionReceipt: result.receipt,
               missionOutcome: result.outcome,
               ...(result.artifactId ? { missionArtifactId: result.artifactId } : {})

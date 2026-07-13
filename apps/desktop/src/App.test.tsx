@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts, readRuntimeCitedMissionReceipts } from "./runtime";
+import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts } from "./runtime";
 import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -80,12 +80,22 @@ const runtimeMocks = vi.hoisted(() => ({
 vi.mock("./lib/cited-brief-mission", () => ({
   isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
   isCitedBriefMissionReceipt: (value: unknown) => typeof value === "object" && value !== null,
+  isCitedBriefMissionPlanSummary: (value: unknown) => typeof value === "object" && value !== null,
   resumeInterruptedCitedBriefMissions: vi.fn(async () => ({ resumed: 0, terminalized: 0, failed: 0 })),
   executeCitedBriefMission: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.citedBriefCalls.push(input);
-    return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
+    const plan = { title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step", step: { title: "Research and write", objective: "Search and write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." }, acceptance: ["Use only attested citations."], budget: { maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2 } };
+    (input.onPlanReady as ((plan: unknown) => void) | undefined)?.(plan);
+    return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, plan, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
   })
 }));
+
+const testCitedPlan = {
+  title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step",
+  step: { title: "Research and write", objective: "Search and write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." },
+  acceptance: ["Use only attested citations."],
+  budget: { maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2 }
+};
 
 vi.mock("./lib/provider-route-selection", () => ({
   selectNativeProviderRoute: vi.fn(async (input: { providerId: string; model: string }) => ({
@@ -189,6 +199,8 @@ vi.mock("./runtime", () => ({
   listRuntimeThreadArtifacts: vi.fn(async () => []),
   getRuntimeArtifact: vi.fn(async () => null),
   readRuntimeCitedMissionReceipts: vi.fn(async (_threadId: string, messageIds: string[]) =>
+    messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
+  readRuntimeCitedMissionPlanSummaries: vi.fn(async (_threadId: string, messageIds: string[]) =>
     messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
   beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
     runtimeMocks.connectorOAuthCalls.push(request.connectorId);
@@ -420,6 +432,9 @@ describe("Fable home", () => {
     vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
     vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
     vi.mocked(readRuntimeCitedMissionReceipts).mockImplementation(async (_threadId, messageIds) =>
+      messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));
+    vi.mocked(readRuntimeCitedMissionPlanSummaries).mockReset();
+    vi.mocked(readRuntimeCitedMissionPlanSummaries).mockImplementation(async (_threadId, messageIds) =>
       messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));
     removeDesktopRuntime();
   });
@@ -1470,6 +1485,7 @@ describe("Fable home", () => {
     await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Durable cited brief [source-1].")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Mission plan" })).toHaveTextContent("One focused research step");
     expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
@@ -1538,6 +1554,9 @@ describe("Fable home", () => {
         costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price"
       }
     }]);
+    vi.mocked(readRuntimeCitedMissionPlanSummaries).mockResolvedValue([{
+      messageId: "message-cited-assistant", status: "available", plan: testCitedPlan
+    }]);
 
     await renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
@@ -1547,6 +1566,10 @@ describe("Fable home", () => {
     await waitFor(() => expect(readRuntimeCitedMissionReceipts).toHaveBeenCalledWith(
       "thread-cited-restart", ["message-cited-assistant"]
     ));
+    await waitFor(() => expect(readRuntimeCitedMissionPlanSummaries).toHaveBeenCalledWith(
+      "thread-cited-restart", ["message-cited-assistant"]
+    ));
+    expect(screen.getByRole("group", { name: "Mission plan" })).toHaveTextContent("Use only attested citations");
     expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
@@ -1641,6 +1664,10 @@ describe("Fable home", () => {
     expect(await screen.findByText("Mission failed: The mission stopped because its only worker failed.")).toBeInTheDocument();
     expect(screen.getByText("Mission cancelled: The mission stopped after its cancellation request was observed.")).toBeInTheDocument();
     expect(readRuntimeCitedMissionReceipts).not.toHaveBeenCalled();
+    await waitFor(() => expect(readRuntimeCitedMissionPlanSummaries).toHaveBeenCalledWith(
+      "thread-status-restart", ["message-failed-assistant", "message-cancelled-assistant"]
+    ));
+    expect(screen.getAllByLabelText("Mission plan unavailable")).toHaveLength(2);
     expect(screen.queryByRole("group", { name: "Run receipt" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });

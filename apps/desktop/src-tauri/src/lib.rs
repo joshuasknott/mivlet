@@ -155,6 +155,8 @@ pub fn run() {
             goals::goal_restore,
             mission_plans::mission_plan_create,
             mission_plans::mission_plan_get,
+            mission_plans::mission_plan_cited_summary_get,
+            mission_plans::mission_plan_cited_summaries_read,
             mission_plans::mission_plan_revise,
             mission_runs::mission_run_create,
             mission_runs::mission_run_get,

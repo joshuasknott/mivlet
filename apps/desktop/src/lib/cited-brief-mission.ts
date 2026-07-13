@@ -8,6 +8,7 @@ import {
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
   finalizeRuntimeMissionRunCancellation,
+  getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
   prepareRuntimeCapabilityGrant,
@@ -35,6 +36,7 @@ export interface CitedBriefMissionInput {
   queueApproval: (approval: ApprovalRequest, tool: string, argumentsJson: string) => void;
   createId?: (prefix: string) => string;
   onCancellationReady?: (cancel: () => Promise<void>) => void;
+  onPlanReady?: (plan: CitedBriefMissionPlanSummary) => void;
 }
 
 export interface CitedBriefMissionResult {
@@ -47,6 +49,22 @@ export interface CitedBriefMissionResult {
   artifactVersionId?: string;
   journal: Record<string, unknown>;
   receipt: CitedBriefMissionReceipt;
+  plan: CitedBriefMissionPlanSummary;
+}
+
+export interface CitedBriefMissionPlanSummary {
+  title: string;
+  summary: string;
+  executionLabel: string;
+  step: { title: string; objective: string; capability: string; output: string };
+  acceptance: string[];
+  budget: {
+    maxInputTokens: number;
+    maxOutputTokens: number;
+    maxToolCalls: number;
+    maxDurationMs: number;
+    maxAttempts: number;
+  };
 }
 
 export interface CitedBriefMissionReceipt {
@@ -103,6 +121,24 @@ export function isCitedBriefMissionReceipt(value: unknown): value is CitedBriefM
     && optional.every((key) => typeof receipt[key] === "string" && (receipt[key] as string).trim().length > 0);
   return exactKeys && strings && counts && limits && cost
     && (receipt.acceptanceStatus === "accepted" || receipt.acceptanceStatus === "not-accepted");
+}
+
+export function isCitedBriefMissionPlanSummary(value: unknown): value is CitedBriefMissionPlanSummary {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const plan = value as Record<string, unknown>;
+  const exact = ["title", "summary", "executionLabel", "step", "acceptance", "budget"];
+  if (Object.keys(plan).length !== exact.length || !Object.keys(plan).every((key) => exact.includes(key))) return false;
+  if (!["title", "summary", "executionLabel"].every((key) => typeof plan[key] === "string" && (plan[key] as string).trim())) return false;
+  const step = plan.step as Record<string, unknown> | undefined;
+  if (!step || Array.isArray(step) || Object.keys(step).length !== 4
+    || !["title", "objective", "capability", "output"].every((key) => typeof step[key] === "string" && (step[key] as string).trim())) return false;
+  if (!Array.isArray(plan.acceptance) || plan.acceptance.length === 0 || plan.acceptance.length > 8
+    || plan.acceptance.some((item) => typeof item !== "string" || !item.trim())) return false;
+  const budget = plan.budget as Record<string, unknown> | undefined;
+  const limits = ["maxInputTokens", "maxOutputTokens", "maxToolCalls", "maxDurationMs", "maxAttempts"];
+  return Boolean(budget) && !Array.isArray(budget) && Object.keys(budget!).length === limits.length
+    && Object.keys(budget!).every((key) => limits.includes(key))
+    && limits.every((key) => Number.isInteger(budget![key]) && (budget![key] as number) > 0);
 }
 
 export function isCitedBriefMissionPrompt(value: string): boolean {
@@ -178,6 +214,11 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
     steps: [{ key: "research", kind: "investigate", title: "Research and write", objective, dependsOnStepKeys: [], requiredCapabilities: ["knowledge.content.search"], expectedOutputs: [{ key: "brief", description: "A trustworthy Markdown brief with exact source citations.", required: true, format: "text/markdown" }], acceptanceCriterionKeys: ["cited"], optional: false, estimatedBudget: { maxDurationMs: 120_000, maxInputTokens: 32_000, maxOutputTokens: 2_048, maxToolCalls: 1, maxAttempts: 1 } }]
   });
   if (!plan) throw new Error("Mission planning requires the desktop runtime.");
+  const projectedPlan = await getRuntimeCitedMissionPlanSummary(missionId);
+  if (!isCitedBriefMissionPlanSummary(projectedPlan)) {
+    throw new Error("The cited mission's inspectable plan is unavailable.");
+  }
+  input.onPlanReady?.(projectedPlan);
 
   let journal = requireJournal(await createRuntimeMissionRun({ missionId, runId, eventId: id("event"), idempotencyKey: id("create") }));
   const cancellation = new AbortController();
@@ -342,7 +383,8 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       artifactVersionId: terminal.artifactVersionId
     } : {}),
     journal,
-    receipt: citedBriefReceipt(journal, outputReceipt, plan, terminal)
+    receipt: citedBriefReceipt(journal, outputReceipt, plan, terminal),
+    plan: projectedPlan
   };
   } catch (error) {
     if (cancellationInitiated && !nativeProviderStarted) await finalizeEarlyCancellation();

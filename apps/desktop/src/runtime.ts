@@ -3103,6 +3103,12 @@ export async function requestRuntimeMissionRunCancellation(input: RuntimeMission
   catch (error) { throw toRuntimeError(error); }
 }
 
+export async function getRuntimeCitedMissionPlanSummary(missionId: string) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_plan_cited_summary_get", { missionId }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
 export async function finalizeRuntimeMissionRunCancellation(input: RuntimeMissionRunFinalizeCancellationInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_run_finalize_cancellation", { input }); }
@@ -3153,6 +3159,19 @@ export async function readRuntimeCitedMissionReceipts(threadId: string, messageI
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<RuntimeCitedMissionReceiptProjection[]>("mission_worker_cited_receipts_read", {
+      input: { threadId, messageIds }
+    });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export type RuntimeCitedMissionPlanSummaryProjection =
+  | { messageId: string; status: "available"; plan: Record<string, unknown> }
+  | { messageId: string; status: "unavailable" };
+
+export async function readRuntimeCitedMissionPlanSummaries(threadId: string, messageIds: string[]) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeCitedMissionPlanSummaryProjection[]>("mission_plan_cited_summaries_read", {
       input: { threadId, messageIds }
     });
   } catch (error) { throw toRuntimeError(error); }

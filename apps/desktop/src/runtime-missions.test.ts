@@ -5,9 +5,11 @@ import {
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
   getRuntimeMissionPlan,
+  getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
   readRuntimeCitedMissionReceipts,
+  readRuntimeCitedMissionPlanSummaries,
   readRuntimeMissionWorkerOutput,
   recoverRuntimeInterruptedCitedMissions,
   requestRuntimeMissionRunCancellation,
@@ -34,9 +36,11 @@ describe("mission runtime boundary", () => {
 
   it("does not simulate mission durability outside Tauri", async () => {
     await expect(getRuntimeMissionPlan("mission-1")).resolves.toBeNull();
+    await expect(getRuntimeCitedMissionPlanSummary("mission-1")).resolves.toBeNull();
     await expect(getRuntimeMissionRun("run-1")).resolves.toBeNull();
     await expect(readRuntimeMissionWorkerOutput("mission-output:v1:ref")).resolves.toBeNull();
     await expect(readRuntimeCitedMissionReceipts("thread-1", ["message-1"])).resolves.toBeNull();
+    await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
     await expect(restoreRuntimeMissionCheckpoint({
@@ -72,11 +76,13 @@ describe("mission runtime boundary", () => {
     await createRuntimeMissionWorker(worker);
     await startRuntimeMissionWorker(start);
     await getRuntimeMissionPlan("mission-1");
+    await getRuntimeCitedMissionPlanSummary("mission-1");
     await getRuntimeMissionRun("run-1");
     const cancel = { runId: "run-1", eventId: "event-cancel", requestKey: "stop-1", expectedRunRevision: 3, expectedLastSequence: 2, mode: "cooperative" as const, reason: "User requested stop." };
     await requestRuntimeMissionRunCancellation(cancel);
     await readRuntimeMissionWorkerOutput("mission-output:v1:ref");
     await readRuntimeCitedMissionReceipts("thread-1", ["message-1"]);
+    await readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"]);
     await listRuntimeNativeProviderRoutes();
     await recoverRuntimeInterruptedCitedMissions();
     const restore = {
@@ -97,10 +103,12 @@ describe("mission runtime boundary", () => {
       ["mission_worker_create", { input: worker }],
       ["mission_worker_start", { input: start }],
       ["mission_plan_get", { missionId: "mission-1" }],
+      ["mission_plan_cited_summary_get", { missionId: "mission-1" }],
       ["mission_run_get", { runId: "run-1" }],
       ["mission_run_request_cancellation", { input: cancel }],
       ["mission_worker_output_read", { valueReference: "mission-output:v1:ref" }],
       ["mission_worker_cited_receipts_read", { input: { threadId: "thread-1", messageIds: ["message-1"] } }],
+      ["mission_plan_cited_summaries_read", { input: { threadId: "thread-1", messageIds: ["message-1"] } }],
       ["list_native_provider_routes"],
       ["mission_run_recover_interrupted_cited"],
       ["mission_run_restore_checkpoint", { input: restore }],

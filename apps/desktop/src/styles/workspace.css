@@ -185,6 +185,14 @@ kbd {
   font-weight: 600;
 }
 
+.run-context-summary--plan {
+  width: min(720px, 100%);
+}
+
+.run-context-summary--plan summary {
+  min-height: 44px;
+}
+
 .run-context-summary__reasons {
   display: flex;
   flex-wrap: wrap;
@@ -209,6 +217,11 @@ kbd {
 
 .run-context-summary__audience span {
   color: var(--ink-muted);
+}
+
+.run-context-summary__audience strong {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .run-context-summary__reasons li,

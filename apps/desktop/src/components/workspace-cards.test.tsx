@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it } from "vitest";
-import { MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { MissionPlanSummary, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -126,5 +126,21 @@ describe("RunContextSummary", () => {
     }} />);
     expect(screen.getByText("Policy acceptance met")).toBeInTheDocument();
     expect(screen.getByText("Standard API list price · reviewed 13 Jul 2026")).toBeInTheDocument();
+  });
+
+  it("shows a compact plan without exposing internal mission authority", () => {
+    render(<MissionPlanSummary plan={{
+      title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step",
+      step: { title: "Research and write", objective: "Search, then write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." },
+      acceptance: ["Use only attested citations."],
+      budget: { maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2 }
+    }} />);
+    const plan = screen.getByLabelText("Mission plan");
+    expect(plan).toHaveTextContent("One focused research step");
+    expect(plan).toHaveTextContent("Search connected work sources");
+    expect(plan).toHaveTextContent("Accepted when: Use only attested citations.");
+    expect(plan).toHaveTextContent("2 attempts including restart recovery");
+    expect(plan).not.toHaveTextContent("mission-");
+    expect(plan).not.toHaveTextContent("knowledge.content.search");
   });
 });

@@ -5,12 +5,15 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::store::repos::{mission_plan, scope::DataScope, workspace_directory};
+use crate::store::repos::{
+    message, mission_plan, mission_run, scope::DataScope, workspace_directory,
+};
 
 const MAX_PLAN_BYTES: usize = 256_000;
 const MAX_STEPS: usize = 32;
 const MAX_DEPENDENCIES: usize = 8;
 const MAX_REVISIONS: i64 = 12;
+const MAX_CITED_PLAN_MESSAGES: usize = 32;
 
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -49,6 +52,13 @@ pub struct MissionPlanReviseInput {
     summary: String,
     bounds: Value,
     steps: Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CitedMissionPlanSummaryReadInput {
+    thread_id: String,
+    message_ids: Vec<String>,
 }
 
 fn authorized(
@@ -125,6 +135,78 @@ pub fn mission_plan_get(
 }
 
 #[tauri::command]
+pub fn mission_plan_cited_summary_get(mission_id: String) -> Result<Value, String> {
+    if mission_id.trim().is_empty() || mission_id.len() > 160 {
+        return Err("Cited mission plan request is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let (scope, _, member) = authorized(tx)?;
+            let lifecycle = mission_plan::get(tx, store, &scope, &member, &mission_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Cited mission plan is unavailable in this workspace.".into(),
+                    )
+                })?;
+            project_cited_plan_summary(&lifecycle, None).map_err(crate::store::StoreError::Invalid)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_plan_cited_summaries_read(
+    input: CitedMissionPlanSummaryReadInput,
+) -> Result<Vec<Value>, String> {
+    if input.thread_id.trim().is_empty()
+        || input.thread_id.len() > 160
+        || input.message_ids.is_empty()
+        || input.message_ids.len() > MAX_CITED_PLAN_MESSAGES
+        || input
+            .message_ids
+            .iter()
+            .any(|id| id.trim().is_empty() || id.len() > 160)
+        || input.message_ids.iter().collect::<BTreeSet<_>>().len() != input.message_ids.len()
+    {
+        return Err("Cited mission plan summary request is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let (scope, _, member) = authorized(tx)?;
+            let messages = message::list(tx, store, &scope, &input.thread_id)?;
+            Ok(input
+                .message_ids
+                .iter()
+                .map(|message_id| {
+                    let summary = messages
+                        .iter()
+                        .find(|candidate| candidate.id == *message_id)
+                        .ok_or_else(|| {
+                            crate::store::StoreError::Invalid(
+                                "Cited mission plan message is unavailable.".into(),
+                            )
+                        })
+                        .and_then(|message| {
+                            project_cited_plan_summary_for_message(
+                                tx, store, &scope, &member, message,
+                            )
+                        });
+                    match summary {
+                        Ok(plan) => {
+                            json!({"messageId":message_id,"status":"available","plan":plan})
+                        }
+                        Err(_) => json!({"messageId":message_id,"status":"unavailable"}),
+                    }
+                })
+                .collect())
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn mission_plan_revise(
     input: MissionPlanReviseInput,
 ) -> Result<mission_plan::MissionPlanLifecycleRow, String> {
@@ -161,6 +243,256 @@ pub fn mission_plan_revise(
             )
         })
         .map_err(|error| error.to_string())
+}
+
+fn project_cited_plan_summary_for_message(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    member: &str,
+    message: &message::MessageRow,
+) -> crate::store::Result<Value> {
+    let detail = message.detail.as_object().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission plan message detail is invalid.".into())
+    })?;
+    let run_id = message.run_id.as_deref().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission plan run is missing.".into())
+    })?;
+    let mission_id = detail
+        .get("missionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission plan identity is invalid.".into())
+        })?;
+    let result_event_id = detail
+        .get("resultEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission result identity is invalid.".into())
+        })?;
+    let outcome = detail
+        .get("outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission outcome is invalid.".into())
+        })?;
+    let expected_keys = if outcome == "accepted" {
+        [
+            "type",
+            "missionId",
+            "resultEventId",
+            "outcome",
+            "artifactId",
+            "artifactVersionId",
+        ]
+        .as_slice()
+    } else {
+        ["type", "missionId", "resultEventId", "outcome"].as_slice()
+    };
+    if message.kind != "assistant"
+        || message.current_revision_state != "terminal"
+        || message.current_revision_number != 1
+        || detail.get("type").and_then(Value::as_str) != Some("mission-result")
+        || !matches!(outcome, "accepted" | "partial" | "failed" | "cancelled")
+        || detail.len() != expected_keys.len()
+        || detail
+            .keys()
+            .any(|key| !expected_keys.contains(&key.as_str()))
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission plan message linkage is invalid.".into(),
+        ));
+    }
+    let journal = mission_run::get(tx, store, scope, member, run_id)?.ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission plan journal is unavailable.".into())
+    })?;
+    let lifecycle = mission_plan::get(tx, store, scope, member, mission_id)?.ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission plan is unavailable.".into())
+    })?;
+    let result_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id));
+    let terminal_matches = match outcome {
+        "accepted" => {
+            journal.run.get("status").and_then(Value::as_str) == Some("completed")
+                && result_event
+                    .and_then(|event| event.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("run-completed")
+        }
+        "partial" => {
+            journal.run.get("status").and_then(Value::as_str) == Some("partially-completed")
+                && result_event
+                    .and_then(|event| event.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("run-failed")
+                && result_event
+                    .and_then(|event| event.pointer("/payload/error/code"))
+                    .and_then(Value::as_str)
+                    == Some("policy-acceptance-failed")
+        }
+        "failed" => {
+            journal.run.get("status").and_then(Value::as_str) == Some("failed")
+                && result_event
+                    .and_then(|event| event.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("run-failed")
+        }
+        "cancelled" => {
+            journal.run.get("status").and_then(Value::as_str) == Some("cancelled")
+                && result_event
+                    .and_then(|event| event.get("type"))
+                    .and_then(Value::as_str)
+                    == Some("run-cancelled")
+        }
+        _ => false,
+    };
+    if !terminal_matches
+        || journal
+            .run
+            .pointer("/initiator/missionId")
+            .and_then(Value::as_str)
+            != Some(mission_id)
+        || journal.run.get("sourceThreadId").and_then(Value::as_str)
+            != Some(message.thread_id.as_str())
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(result_event_id)
+        || lifecycle
+            .mission
+            .pointer("/scope/sourceThreadId")
+            .and_then(Value::as_str)
+            != Some(message.thread_id.as_str())
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission plan scope is invalid.".into(),
+        ));
+    }
+    project_cited_plan_summary(&lifecycle, Some(&message.thread_id))
+        .map_err(crate::store::StoreError::Invalid)
+}
+
+pub(crate) fn project_cited_plan_summary(
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    expected_thread_id: Option<&str>,
+) -> Result<Value, String> {
+    let mission = lifecycle
+        .mission
+        .as_object()
+        .ok_or_else(|| "Cited mission record is invalid.".to_string())?;
+    let revision = lifecycle
+        .current_revision
+        .as_object()
+        .ok_or_else(|| "Cited mission plan revision is invalid.".to_string())?;
+    let steps = revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| steps.len() == 1)
+        .ok_or_else(|| "Cited mission plan must contain one step.".to_string())?;
+    let step = steps[0]
+        .as_object()
+        .ok_or_else(|| "Cited mission plan step is invalid.".to_string())?;
+    let outputs = step
+        .get("expectedOutputs")
+        .and_then(Value::as_array)
+        .filter(|outputs| outputs.len() == 1)
+        .ok_or_else(|| "Cited mission plan output is invalid.".to_string())?;
+    let output = outputs[0]
+        .as_object()
+        .ok_or_else(|| "Cited mission plan output is invalid.".to_string())?;
+    let criteria = mission
+        .get("acceptance")
+        .and_then(|value| value.get("criteria"))
+        .and_then(Value::as_array)
+        .filter(|criteria| !criteria.is_empty() && criteria.len() <= 8)
+        .ok_or_else(|| "Cited mission acceptance is invalid.".to_string())?;
+    let budget = mission
+        .get("budget")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Cited mission budget is invalid.".to_string())?;
+    let required_text =
+        |value: Option<&Value>, label: &str, max: usize| -> Result<String, String> {
+            value
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && value.len() <= max)
+                .map(str::to_string)
+                .ok_or_else(|| format!("Cited mission {label} is invalid."))
+        };
+    let positive = |key: &str| -> Result<i64, String> {
+        budget
+            .get(key)
+            .and_then(Value::as_i64)
+            .filter(|value| *value > 0)
+            .ok_or_else(|| format!("Cited mission {key} is invalid."))
+    };
+    let source_thread_id = mission
+        .get("scope")
+        .and_then(|value| value.get("sourceThreadId"))
+        .and_then(Value::as_str);
+    let capabilities = step.get("requiredCapabilities").and_then(Value::as_array);
+    let step_criteria = step
+        .get("acceptanceCriterionKeys")
+        .and_then(Value::as_array);
+    let exact = mission.get("executionDepth").and_then(Value::as_str) == Some("delegated")
+        && lifecycle.plan.get("status").and_then(Value::as_str) == Some("current")
+        && mission.get("currentPlanRevisionId") == revision.get("id")
+        && lifecycle.plan.get("currentRevisionId") == revision.get("id")
+        && expected_thread_id.is_none_or(|expected| source_thread_id == Some(expected))
+        && step.get("kind").and_then(Value::as_str) == Some("investigate")
+        && capabilities.is_some_and(|values| {
+            values.len() == 1 && values[0].as_str() == Some("knowledge.content.search")
+        })
+        && output.get("required").and_then(Value::as_bool) == Some(true)
+        && output.get("format").and_then(Value::as_str) == Some("text/markdown")
+        && criteria.iter().all(|criterion| {
+            criterion.get("required").and_then(Value::as_bool) == Some(true)
+                && criterion.get("evaluator").and_then(Value::as_str) == Some("policy")
+        })
+        && step_criteria.is_some_and(|keys| {
+            keys.len() == criteria.len()
+                && criteria
+                    .iter()
+                    .all(|criterion| criterion.get("key").is_some_and(|key| keys.contains(key)))
+        })
+        && budget.get("maxWorkers").and_then(Value::as_i64) == Some(1)
+        && budget.get("maxToolCalls").and_then(Value::as_i64) == Some(1)
+        && budget.get("maxAttempts").and_then(Value::as_i64) == Some(2);
+    if !exact {
+        return Err("Mission is not the exact inspectable cited-plan shape.".into());
+    }
+    let acceptance = criteria
+        .iter()
+        .map(|criterion| {
+            required_text(
+                criterion.get("description"),
+                "acceptance description",
+                1_000,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({
+        "title":required_text(mission.get("outcome").and_then(|value| value.get("title")), "outcome title", 200)?,
+        "summary":required_text(revision.get("summary"), "summary", 2_000)?,
+        "executionLabel":"One focused research step",
+        "step":{
+            "title":required_text(step.get("title"), "step title", 200)?,
+            "objective":required_text(step.get("objective"), "step objective", 4_000)?,
+            "capability":"Search connected work sources",
+            "output":required_text(output.get("description"), "output description", 1_000)?
+        },
+        "acceptance":acceptance,
+        "budget":{
+            "maxInputTokens":positive("maxInputTokens")?,
+            "maxOutputTokens":positive("maxOutputTokens")?,
+            "maxToolCalls":positive("maxToolCalls")?,
+            "maxDurationMs":positive("maxDurationMs")?,
+            "maxAttempts":positive("maxAttempts")?
+        }
+    }))
 }
 
 #[derive(Debug)]
@@ -705,6 +1037,19 @@ mod tests {
         })).unwrap()
     }
 
+    fn cited_input() -> MissionPlanCreateInput {
+        serde_json::from_value(json!({
+            "missionId":"mission-secret","planId":"plan-secret","planRevisionId":"revision-secret","executionDepth":"delegated",
+            "outcome":{"title":"Connected work brief","desiredOutcome":"Produce a cited brief","deliverables":[{"key":"brief","description":"A trustworthy Markdown brief.","required":true}]},
+            "missionScope":{"workspaceId":"hosted-secret","sourceThreadId":"thread-1","departmentIds":[],"context":[]},
+            "constraints":[],
+            "acceptance":{"requiresHumanAcceptance":false,"minimumRequiredCriteria":1,"criteria":[{"key":"cited","description":"Use only attested citations.","required":true,"evaluator":"policy"}]},
+            "budget":{"maxDurationMs":120000,"maxInputTokens":32000,"maxOutputTokens":2048,"maxToolCalls":1,"maxWorkers":1,"maxAttempts":2},
+            "summary":"What changed?","bounds":{"maxSteps":1,"maxDependenciesPerStep":0,"maxParallelSteps":1,"maxRevisions":1},
+            "steps":[{"key":"research","kind":"investigate","title":"Research and write","objective":"Search connected work sources, then write a cited brief.","dependsOnStepKeys":[],"requiredCapabilities":["knowledge.content.search"],"expectedOutputs":[{"key":"brief","description":"A trustworthy Markdown brief.","required":true,"format":"text/markdown"}],"acceptanceCriterionKeys":["cited"],"optional":false,"estimatedBudget":{"maxAttempts":1}}]
+        })).unwrap()
+    }
+
     #[test]
     fn native_boundary_derives_authority_and_validates_sizing() {
         let input = input();
@@ -715,6 +1060,48 @@ mod tests {
         assert_eq!(records.mission["ownerMemberId"], "member-real");
         assert_eq!(records.mission["createdByInternalUserId"], "user-real");
         assert_eq!(records.mission["status"], "ready");
+    }
+
+    #[test]
+    fn cited_plan_projection_is_bounded_readable_and_secret_safe() {
+        let input = cited_input();
+        let records = build_initial_records(
+            &input,
+            "workspace-secret",
+            "member-secret",
+            "user-secret",
+            "now",
+        )
+        .unwrap();
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: records.mission,
+            plan: records.plan,
+            current_revision: records.revision,
+        };
+        let summary = project_cited_plan_summary(&lifecycle, Some("thread-1")).unwrap();
+        assert_eq!(summary["executionLabel"], "One focused research step");
+        assert_eq!(
+            summary["step"]["capability"],
+            "Search connected work sources"
+        );
+        assert_eq!(summary["budget"]["maxAttempts"], 2);
+        let serialized = serde_json::to_string(&summary).unwrap();
+        for secret in [
+            "mission-secret",
+            "plan-secret",
+            "revision-secret",
+            "workspace-secret",
+            "member-secret",
+            "user-secret",
+            "hosted-secret",
+            "knowledge.content.search",
+        ] {
+            assert!(!serialized.contains(secret));
+        }
+        let mut changed = lifecycle;
+        changed.mission["budget"]["maxAttempts"] = json!(3);
+        assert!(project_cited_plan_summary(&changed, Some("thread-1")).is_err());
+        assert!(project_cited_plan_summary(&changed, Some("thread-other")).is_err());
     }
 
     #[test]

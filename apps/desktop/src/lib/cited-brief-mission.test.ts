@@ -3,7 +3,7 @@ import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissio
 
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
-  prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), createRun: vi.fn(),
+  prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), getPlanSummary: vi.fn(), createRun: vi.fn(),
   createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), restoreCheckpoint: vi.fn(), recoverCited: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({
@@ -17,6 +17,7 @@ vi.mock("../runtime", () => ({
   prepareRuntimeCapabilityGrant: mocks.prepareGrant,
   commitRuntimeCapabilityGrant: mocks.commitGrant,
   createRuntimeMissionPlan: mocks.createPlan,
+  getRuntimeCitedMissionPlanSummary: mocks.getPlanSummary,
   createRuntimeMissionRun: mocks.createRun,
   createRuntimeMissionCheckpoint: mocks.createCheckpoint,
   restoreRuntimeMissionCheckpoint: mocks.restoreCheckpoint,
@@ -43,6 +44,12 @@ const worker = {
 const journal = (revision: number, sequence: number, events: unknown[], extra: Record<string, unknown> = {}) => ({
   run: { id: "mission-run-4", status: "running", revision, eventHead: { lastSequence: sequence, lastEventId: `head-${sequence}` }, ...extra }, events
 });
+const planSummary = {
+  title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step",
+  step: { title: "Research and write", objective: "Search and write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." },
+  acceptance: ["Use only attested citations."],
+  budget: { maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2 }
+};
 
 describe("cited brief mission composition", () => {
   beforeEach(() => {
@@ -51,6 +58,7 @@ describe("cited brief mission composition", () => {
     mocks.resolveMcpRoute.mockResolvedValue(null);
     mocks.listRoutes.mockResolvedValue([{ id: "provider-route-ui", recordType: "provider-route", connectionId: "connection-openai", kind: "api-model", displayName: "OpenAI GPT-5", providerFamily: "openai", modelOrRuntimeReference: "gpt-5", state: "available", health: { state: "healthy" }, placement: { allowedKinds: ["local-desktop"], requiresCredentialHoldingNode: true }, boundaries: { privacyBoundary: "member-private", billingBoundary: "account-owned-provider", providerBoundary: "openai", placementBoundary: "local-credential-egress" }, credentialBinding: { custody: "os-secure-store", state: "available", refreshSupported: false }, workspaceId: "hosted-workspace", visibility: "member-private", ownerMemberId: "member-1", authority: "local", schemaVersion: 1, revision: 1, createdByInternalUserId: "user-1", createdAt: "t", updatedAt: "t" }]);
     mocks.createPlan.mockResolvedValue({ mission: { budget: { maxDurationMs: 120000, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxAttempts: 2 } } });
+    mocks.getPlanSummary.mockResolvedValue(planSummary);
     mocks.createRun.mockResolvedValue(journal(2, 1, []));
     mocks.createWorker.mockResolvedValue(journal(3, 2, [{ type: "worker-created", payload: { worker } }]));
     mocks.startWorker.mockResolvedValue(journal(6, 5, [{ type: "worker-created", payload: { worker } }, { type: "route-selected", payload: { selection: { providerRouteId: "provider-route-ui" } } }]));
@@ -94,6 +102,7 @@ describe("cited brief mission composition", () => {
 
     expect(result.text).toBe("Trustworthy brief [source-1].");
     expect(result.outcome).toBe("accepted");
+    expect(result.plan).toEqual(planSummary);
     expect(result).toMatchObject({ artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1" });
     expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD" });
     expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
@@ -101,6 +110,7 @@ describe("cited brief mission composition", () => {
       budget: expect.objectContaining({ maxAttempts: 2 }),
       steps: [expect.objectContaining({ estimatedBudget: expect.objectContaining({ maxAttempts: 1 }) })]
     }));
+    expect(mocks.getPlanSummary).toHaveBeenCalledWith("mission-1");
     expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(1);
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
       toolSpecs: [], missionToolEvidence: { result: { citations: [{ citationId: "source-1" }] } },

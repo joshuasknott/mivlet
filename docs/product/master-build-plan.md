@@ -388,7 +388,7 @@ its policy-owned criteria, and appends `evaluation-recorded`. Pass/fail and
 evidence references come only from the attested receipt, retained citation ids,
 and any exact required evidence; renderer assertions cannot create acceptance.
 Human, worker, and external evaluators, multi-output and mission-level result
-aggregation, general terminal result persistence, and inspectable plans remain
+aggregation, general terminal result persistence, and inspectable plans for other mission shapes remain
 open, so the acceptance/evaluation box stays unchecked.
 
 For the deliberately narrow single-step cited-brief shape, policy evaluation
@@ -580,7 +580,21 @@ The Wave 4B
 checkboxes stay unchecked because the experience is not yet general. The cited
 accepted/partial receipt now survives restart through the exact native projection
 described above; this does not claim receipt coverage for other mission shapes or
-inspectable consequential-work plans. `/stop`
+general inspectable consequential-work plans.
+The exact one-step cited journey now also exposes its immutable native-selected
+plan as a compact expandable view as soon as plan creation succeeds and beside
+the terminal conversation after restart. The authenticated projection is limited
+to the readable goal/question, one step, a plain connected-search capability
+label, required Markdown output, policy acceptance descriptions, and the persisted
+time/token/tool/attempt ceilings. It requires the exact active member/workspace,
+selected revision, source thread, run, terminal message, and result head during
+hydration; accepted, partial, failed, and cancelled outcomes share the same
+projection. Internal mission/plan/revision, grant, Connection, route, owner,
+credential, context, and reasoning fields never cross the boundary. Corrupt,
+changed, legacy, or non-cited facts show `Plan unavailable` instead of an inferred
+plan. This completes inspectability only for the narrow cited benchmark; general
+consequential and multi-worker plan views remain open, so the combined Wave 4B
+checkbox stays unchecked. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
 cancel path, and persists the durable cancellation request plus terminal cancelled
