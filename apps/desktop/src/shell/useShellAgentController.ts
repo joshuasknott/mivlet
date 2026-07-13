@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import { executeCitedBriefMission, resumeInterruptedCitedBriefMissions, type CitedBriefMissionPlanSummary } from "../lib/cited-brief-mission";
@@ -13,6 +13,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const runtime = useShellRuntime({ approvalGate });
   const cancelRequestedRef = useRef(false);
   const citedMissionRunningRef = useRef(false);
+  const [citedMissionRunning, setCitedMissionRunning] = useState(false);
   const citedMissionCancelRef = useRef<(() => Promise<void>) | null>(null);
   const citedRecoveryScopeRef = useRef<string | null>(null);
   const activeWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId;
@@ -36,6 +37,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     if (citedRecoveryScopeRef.current === scopeKey || citedMissionRunningRef.current) return;
     citedRecoveryScopeRef.current = scopeKey;
     citedMissionRunningRef.current = true;
+    setCitedMissionRunning(true);
     void resumeInterruptedCitedBriefMissions({
       backend: agent.backend,
       onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
@@ -43,6 +45,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       citedRecoveryScopeRef.current = null;
     }).finally(async () => {
       citedMissionRunningRef.current = false;
+      setCitedMissionRunning(false);
       citedMissionCancelRef.current = null;
       await durableConversation.refresh();
     });
@@ -61,6 +64,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       throw new Error("Connected-source research requires the desktop runtime and a connected OpenAI API provider.");
     }
     citedMissionRunningRef.current = true;
+    setCitedMissionRunning(true);
     try {
       return await executeCitedBriefMission({
         query,
@@ -78,6 +82,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       });
     } finally {
       citedMissionRunningRef.current = false;
+      setCitedMissionRunning(false);
       citedMissionCancelRef.current = null;
     }
   };
@@ -91,5 +96,5 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     await agent.cancel();
     return true;
   };
-  return { runtime, agent, durableConversation, voice, scheduledActive: scheduledAgent.active, runCitedBrief, stopCurrentWork, resetCancellation: () => { cancelRequestedRef.current = false; } };
+  return { runtime, agent, durableConversation, voice, scheduledActive: scheduledAgent.active, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation: () => { cancelRequestedRef.current = false; } };
 }

@@ -17,7 +17,7 @@ import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { getRuntimeArtifact, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, DirectiveCards, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, DirectiveCards, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -81,7 +81,7 @@ export function ChatWorkspace() {
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
-  const { runtime, agent, durableConversation, voice, scheduledActive, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
+  const { runtime, agent, durableConversation, voice, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const [hydratedMissionReceipts, setHydratedMissionReceipts] = useState<{
     key: string;
@@ -94,12 +94,14 @@ export function ChatWorkspace() {
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
+  const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
   const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
   const draftHydrationKey = useRef<string | null>(null);
   const missionReceiptHydrationKey = useRef<string | null>(null);
   const missionReceiptHydrationRequestKey = useRef<string | null>(null);
   const missionPlanHydrationKey = useRef<string | null>(null);
   const missionPlanHydrationRequestKey = useRef<string | null>(null);
+  const newMissionLaunchRef = useRef<string | null>(null);
   const activeAssistantMessageId = useRef<string | null>(null);
   const hydratedConversation = durableConversation.state.conversation;
   const boundWorkspaceId =
@@ -424,6 +426,10 @@ export function ChatWorkspace() {
     if (!selectedConversationThreadId || !hydrated || hydrated.thread.id !== selectedConversationThreadId) {
       return;
     }
+    // A new cited mission launched from a hydrated terminal result owns an
+    // optimistic exchange until that fresh mission settles. The prior durable
+    // snapshot must not erase it merely because the local message count changed.
+    if (newMissionLaunchRef.current) return;
     // A freshly created thread hydrates before its serialized run writer has
     // appended the first records. Do not let that valid-but-stale empty read
     // erase the optimistic first exchange; explicit thread selection already
@@ -631,6 +637,11 @@ export function ChatWorkspace() {
               : undefined);
           const missionPlanUnavailable = !missionPlan && Boolean(message.missionOutcome)
             && hydratedMissionPlans.key === activeMissionPlanHydrationKey;
+          const canStartNewMission = message.role === "assistant" && Boolean(missionPlan)
+            && (message.missionOutcome === "partial" || message.missionOutcome === "failed"
+              || message.missionOutcome === "cancelled");
+          const newMissionBusy = citedMissionRunning || agent.state.running || Boolean(pendingPrompt)
+            || newMissionSourceMessageId !== null;
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
             || entry.artifact.id === message.missionArtifactId
@@ -645,6 +656,16 @@ export function ChatWorkspace() {
               {message.role === "assistant" && missionPlan ? <MissionPlanSummary plan={missionPlan} /> : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
+              {canStartNewMission && missionPlan ? (
+                <NewCitedMissionAction
+                  disabled={newMissionBusy}
+                  starting={newMissionSourceMessageId === message.id}
+                  onStart={() => runPrompt(missionPlan.summary, {
+                    forceCitedMission: true,
+                    newMissionSourceMessageId: message.id
+                  })}
+                />
+              ) : null}
               {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
                 <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
               ) : null}
@@ -878,17 +899,42 @@ export function ChatWorkspace() {
     });
   }
 
-  function runPrompt(rawPrompt: string, options: { appendUserMessage?: boolean } = {}) {
+  function runPrompt(rawPrompt: string, options: {
+    appendUserMessage?: boolean;
+    forceCitedMission?: boolean;
+    newMissionSourceMessageId?: string;
+  } = {}) {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
+    const sourceMessageId = options.newMissionSourceMessageId;
+    if (sourceMessageId && (newMissionLaunchRef.current || citedMissionRunning || agent.state.running || pendingPrompt)) {
+      return;
+    }
+    const finishNewMissionLaunch = () => {
+      if (!sourceMessageId || newMissionLaunchRef.current !== sourceMessageId) return;
+      newMissionLaunchRef.current = null;
+      setNewMissionSourceMessageId(null);
+    };
+    if (sourceMessageId) {
+      newMissionLaunchRef.current = sourceMessageId;
+      setNewMissionSourceMessageId(sourceMessageId);
+    }
     if (options.appendUserMessage !== false) {
       appendConversationMessage("user", prompt);
     }
     runtime.setComposerValue("");
     const nativeConnected = runtime.connectedAgentBackend;
     if (!nativeConnected) {
+      if (options.forceCitedMission) {
+        const error = "Starting a new cited mission requires a connected OpenAI API provider.";
+        agent.reportError(error);
+        appendConversationMessage("assistant", error);
+        finishNewMissionLaunch();
+        return;
+      }
       runtime.submitPrompt(prompt);
       runtime.setComposerValue("");
+      finishNewMissionLaunch();
       return;
     }
     const validation = validateModelSelection(
@@ -900,9 +946,10 @@ export function ChatWorkspace() {
     if (!validation.ok) {
       agent.reportError(validation.error ?? "The selected model cannot run.");
       appendConversationMessage("assistant", validation.error ?? "The selected model cannot run.");
+      finishNewMissionLaunch();
       return;
     }
-    if (isCitedBriefMissionPrompt(prompt)) {
+    if (options.forceCitedMission || isCitedBriefMissionPrompt(prompt)) {
       const assistantMessageId = appendConversationMessage("assistant", "Searching connected work sources...");
       resetCancellation();
       void runCitedBrief(prompt, resolvedComposerModelId, runProjectId ?? undefined, (plan) => {
@@ -939,9 +986,11 @@ export function ChatWorkspace() {
           setConversationMessages((current) => current.map((entry) =>
             entry.id === assistantMessageId ? { ...entry, content: message } : entry
           ));
-        });
+        })
+        .finally(finishNewMissionLaunch);
       return;
     }
+    finishNewMissionLaunch();
     const request = buildAgentRequest({
       model: resolvedComposerModelId,
       prompt,

@@ -594,7 +594,17 @@ credential, context, and reasoning fields never cross the boundary. Corrupt,
 changed, legacy, or non-cited facts show `Plan unavailable` instead of an inferred
 plan. This completes inspectability only for the narrow cited benchmark; general
 consequential and multi-worker plan views remain open, so the combined Wave 4B
-checkbox stays unchecked. `/stop`
+checkbox stays unchecked. A partial, failed, or cancelled cited result with that
+authenticated plan projection now offers `Run again as a new mission` both live
+and after restart. The action uses only the projected original question, stays
+single-flight, and re-enters the current conversation/project scope, provider
+route, capability-grant, and exact-action approval boundaries. The normal mission
+composer creates fresh mission, plan, revision, run, worker, event, checkpoint,
+and idempotency identities; it never reopens the terminal journal or reuses its
+checkpoint, consumed grant, route selection, or approval. Accepted results and
+unavailable plans offer no action. This is a narrow new-mission recovery path,
+not same-mission retry, general resume, escalation, or multi-worker recovery, so
+the Wave 4A and 4C retry boxes remain unchecked. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
 cancel path, and persists the durable cancellation request plus terminal cancelled

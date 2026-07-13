@@ -1,7 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
-import { describe, expect, it } from "vitest";
-import { MissionPlanSummary, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { describe, expect, it, vi } from "vitest";
+import { MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -142,5 +142,18 @@ describe("RunContextSummary", () => {
     expect(plan).toHaveTextContent("2 attempts including restart recovery");
     expect(plan).not.toHaveTextContent("mission-");
     expect(plan).not.toHaveTextContent("knowledge.content.search");
+  });
+
+  it("makes the fresh-authority boundary explicit before starting another mission", () => {
+    const onStart = vi.fn();
+    const { rerender } = render(<NewCitedMissionAction disabled={false} starting={false} onStart={onStart} />);
+    const action = screen.getByLabelText("New mission option");
+    expect(action).toHaveTextContent("Starts fresh with the current scope, provider route, access, and approvals.");
+    fireEvent.click(screen.getByRole("button", { name: "Run again as a new mission" }));
+    expect(onStart).toHaveBeenCalledOnce();
+
+    rerender(<NewCitedMissionAction disabled starting onStart={onStart} />);
+    expect(screen.getByRole("button", { name: "Starting new mission..." })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Starting new mission..." })).toHaveAttribute("aria-busy", "true");
   });
 });

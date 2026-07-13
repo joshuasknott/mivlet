@@ -150,6 +150,31 @@ export function MissionPlanUnavailable() {
   );
 }
 
+export function NewCitedMissionAction({
+  disabled,
+  starting,
+  onStart
+}: {
+  disabled: boolean;
+  starting: boolean;
+  onStart: () => void;
+}) {
+  return (
+    <div className="mission-new-run" aria-label="New mission option">
+      <button
+        type="button"
+        className="button button--secondary"
+        disabled={disabled}
+        aria-busy={starting || undefined}
+        onClick={onStart}
+      >
+        {starting ? "Starting new mission..." : "Run again as a new mission"}
+      </button>
+      <span>Starts fresh with the current scope, provider route, access, and approvals.</span>
+    </div>
+  );
+}
+
 export function ProviderRouteSummary({ route }: { route: ProviderRouteExecutionBinding }) {
   return (
     <details className="run-context-summary" aria-label="Route receipt">

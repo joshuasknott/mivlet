@@ -253,6 +253,24 @@ kbd {
   color: var(--ink-secondary);
 }
 
+.mission-new-run {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  width: min(720px, 100%);
+  margin-top: 10px;
+}
+
+.mission-new-run .button {
+  min-height: 44px;
+}
+
+.mission-new-run > span {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
 .conversation-message--assistant .run-context-summary__sources p {
   max-width: none;
   margin: 0;

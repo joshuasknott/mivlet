@@ -6,6 +6,7 @@ import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
 import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts } from "./runtime";
+import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -25,6 +26,7 @@ const runtimeMocks = vi.hoisted(() => ({
   conversationMessages: [] as Array<Record<string, unknown>>,
   projectRecords: [] as Array<Record<string, unknown>>,
   citedBriefCalls: [] as Array<Record<string, unknown>>,
+  citedBriefGate: null as Promise<void> | null,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
   savedScheduledJobs: [] as unknown[],
@@ -86,6 +88,7 @@ vi.mock("./lib/cited-brief-mission", () => ({
     runtimeMocks.citedBriefCalls.push(input);
     const plan = { title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step", step: { title: "Research and write", objective: "Search and write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." }, acceptance: ["Use only attested citations."], budget: { maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2 } };
     (input.onPlanReady as ((plan: unknown) => void) | undefined)?.(plan);
+    if (runtimeMocks.citedBriefGate) await runtimeMocks.citedBriefGate;
     return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, plan, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
   })
 }));
@@ -423,6 +426,7 @@ describe("Fable home", () => {
     runtimeMocks.conversationMessages = [];
     runtimeMocks.projectRecords = [];
     runtimeMocks.citedBriefCalls = [];
+    runtimeMocks.citedBriefGate = null;
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
     connectRuntimeBackendSpy.mockClear();
@@ -1496,6 +1500,38 @@ describe("Fable home", () => {
       sourceThreadId: expect.any(String),
       model: "gpt-5"
     });
+    expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
+  });
+
+  it("offers a fresh mission after a live cited result is not accepted", async () => {
+    vi.mocked(executeCitedBriefMission).mockImplementationOnce(async (input) => {
+      runtimeMocks.citedBriefCalls.push(input as unknown as Record<string, unknown>);
+      input.onPlanReady?.(testCitedPlan);
+      return {
+        missionId: "mission-live-partial", runId: "mission-run-live-partial",
+        outcome: "partial", valueReference: "mission-output:v1:partial",
+        text: "Draft preserved, but not accepted: evidence missing.", journal: {} as never,
+        plan: testCitedPlan,
+        receipt: {
+          acceptanceStatus: "not-accepted", acceptanceSummary: "evidence missing",
+          provider: "openai", model: "gpt-5", routeReason: "Selected exact route.",
+          inputTokens: 90, outputTokens: 40, toolCalls: 1, sourceCount: 0,
+          trust: "provider-generated-with-external-evidence", maxInputTokens: 32000,
+          maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2
+        }
+      };
+    });
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    const user = await renderWorkspace();
+    await user.type(screen.getByLabelText(/universal composer/i), "Search my connected work sources and produce a trustworthy cited brief.");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText("Draft preserved, but not accepted: evidence missing.")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Run again as a new mission" })).toBeEnabled();
   });
 
   it("rehydrates an accepted cited mission response with its canonical artifact action", async () => {
@@ -1572,10 +1608,18 @@ describe("Fable home", () => {
     expect(screen.getByRole("group", { name: "Mission plan" })).toHaveTextContent("Use only attested citations");
     expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
 
   it("rehydrates a partial cited mission response without offering artifact creation", async () => {
+    let releaseCitedBrief!: () => void;
+    runtimeMocks.citedBriefGate = new Promise<void>((resolve) => { releaseCitedBrief = resolve; });
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "tool-requests"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
     runtimeMocks.conversationThreads = [{
       id: "thread-partial-restart", title: "Partial restart", lifecycle: "active",
       updatedAt: "2026-07-13T12:00:00Z",
@@ -1606,8 +1650,11 @@ describe("Fable home", () => {
         maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1
       }
     }]);
+    vi.mocked(readRuntimeCitedMissionPlanSummaries).mockResolvedValue([{
+      messageId: "message-partial-assistant", status: "available", plan: testCitedPlan
+    }]);
 
-    await renderWorkspace();
+    const user = await renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Partial restart" }));
 
@@ -1616,6 +1663,24 @@ describe("Fable home", () => {
       "thread-partial-restart", ["message-partial-assistant"]
     ));
     expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("Policy acceptance not met");
+    const newMission = await screen.findByRole("button", { name: "Run again as a new mission" });
+    expect(screen.getByLabelText("New mission option")).toHaveTextContent("Starts fresh with the current scope");
+    await user.click(newMission);
+    await waitFor(() => expect(runtimeMocks.citedBriefCalls).toHaveLength(1));
+    const starting = screen.getByRole("button", { name: "Starting new mission..." });
+    expect(starting).toBeDisabled();
+    await user.click(starting);
+    expect(runtimeMocks.citedBriefCalls).toHaveLength(1);
+    expect(runtimeMocks.citedBriefCalls[0]).toMatchObject({
+      query: "What changed?",
+      workspaceId: "preview-default",
+      missionScopeWorkspaceId: "preview-workspace",
+      sourceThreadId: "thread-partial-restart",
+      model: "gpt-5"
+    });
+    expect(runtimeMocks.citedBriefCalls[0]?.projectId).toBeUndefined();
+    releaseCitedBrief();
+    expect(await screen.findByText("Durable cited brief [source-1].")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
 
@@ -1668,6 +1733,7 @@ describe("Fable home", () => {
       "thread-status-restart", ["message-failed-assistant", "message-cancelled-assistant"]
     ));
     expect(screen.getAllByLabelText("Mission plan unavailable")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Run receipt" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
