@@ -503,6 +503,7 @@ mod tests {
                 fallback_from_provider_route_id: None,
                 boundary_policy_ref: Some("boundary:member-private:account-owned-provider:openai:local-credential-egress".into()),
                 observation: None,
+                cost: None,
             },
         }
     }

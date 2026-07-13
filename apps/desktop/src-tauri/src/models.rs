@@ -522,6 +522,33 @@ pub struct ProviderRouteObservationSnapshot {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderRoutePricingEvidence {
+    pub reference: String,
+    pub currency_code: String,
+    pub input_rate_minor_units: u64,
+    pub output_rate_minor_units: u64,
+    pub unit_tokens: u64,
+    pub source_url: String,
+    pub reviewed_at: String,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderRouteCostSnapshot {
+    pub reference: String,
+    pub currency_code: String,
+    pub input_rate_minor_units: u64,
+    pub output_rate_minor_units: u64,
+    pub unit_tokens: u64,
+    pub source_url: String,
+    pub reviewed_at: String,
+    pub estimated_input_tokens: u64,
+    pub estimated_output_tokens: u64,
+    pub estimated_cost_minor_units: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProviderRouteSelection {
     pub provider_route_id: String,
     pub selected_at: String,
@@ -532,6 +559,8 @@ pub struct ProviderRouteSelection {
     pub boundary_policy_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observation: Option<ProviderRouteObservationSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<ProviderRouteCostSnapshot>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

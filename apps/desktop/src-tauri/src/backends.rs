@@ -795,18 +795,57 @@ pub(crate) fn native_provider_route_reason(
     Ok(format!("Selected {} {} for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", entry.label, label))
 }
 
-pub(crate) fn native_provider_route_reason_with_observation(
+fn native_provider_route_reason_with_evidence(
     provider_id: &str,
     model: &str,
     observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
+    cost: Option<&crate::models::ProviderRouteCostSnapshot>,
 ) -> Result<String, String> {
     let reason = native_provider_route_reason(provider_id, model)?;
+    let reason = match cost {
+        Some(value) => reason.replace(
+            "cost unobserved",
+            &format!(
+                "estimated cost {} {} minor units",
+                value.estimated_cost_minor_units, value.currency_code
+            ),
+        ),
+        None => reason,
+    };
     Ok(match observation {
         Some(value) => reason.replace(
             "latency unobserved",
             &format!("estimated latency {} ms", value.median_latency_ms),
         ),
         None => reason,
+    })
+}
+
+const GPT5_PRICING_SOURCE: &str = "https://developers.openai.com/api/docs/models/gpt-5";
+const GPT5_PRICING_REVIEWED_AT: &str = "2026-07-13T00:00:00Z";
+
+pub(crate) fn exact_model_pricing_evidence(
+    provider_id: &str,
+    model: &str,
+) -> Option<crate::models::ProviderRoutePricingEvidence> {
+    if provider_id != "openai" || model != "gpt-5" {
+        return None;
+    }
+    let currency_code = "USD";
+    let input_rate_minor_units = 125;
+    let output_rate_minor_units = 1_000;
+    let unit_tokens = 1_000_000;
+    let digest = Sha256::digest(format!(
+        "{provider_id}:{model}:{currency_code}:{input_rate_minor_units}:{output_rate_minor_units}:{unit_tokens}:{GPT5_PRICING_SOURCE}:{GPT5_PRICING_REVIEWED_AT}"
+    ));
+    Some(crate::models::ProviderRoutePricingEvidence {
+        reference: format!("route-pricing:v1:{digest:x}"),
+        currency_code: currency_code.into(),
+        input_rate_minor_units,
+        output_rate_minor_units,
+        unit_tokens,
+        source_url: GPT5_PRICING_SOURCE.into(),
+        reviewed_at: GPT5_PRICING_REVIEWED_AT.into(),
     })
 }
 
@@ -860,7 +899,14 @@ pub(crate) fn validate_current_native_provider_route(
             Ok((expected.clone(), observations.get(&expected).map(provider_route_observation_snapshot)))
         })
         .map_err(|error| error.to_string())?;
-    validate_native_provider_route_binding(provider_id, model, &expected, observation.as_ref(), binding)?;
+    validate_native_provider_route_binding(
+        provider_id,
+        model,
+        &expected,
+        observation.as_ref(),
+        exact_model_pricing_evidence(provider_id, model).as_ref(),
+        binding,
+    )?;
     Ok(expected)
 }
 
@@ -930,10 +976,25 @@ fn validate_native_provider_route_binding(
     model: &str,
     expected_route_id: &str,
     expected_observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
+    expected_pricing: Option<&crate::models::ProviderRoutePricingEvidence>,
     binding: &crate::models::ProviderRouteExecutionBinding,
 ) -> Result<(), String> {
-    validate_provider_route_observation_snapshot(expected_route_id, binding.selection.observation.as_ref())?;
-    let expected_reason = native_provider_route_reason_with_observation(provider_id, model, expected_observation)?;
+    validate_provider_route_observation_snapshot(
+        expected_route_id,
+        binding.selection.observation.as_ref(),
+    )?;
+    validate_provider_route_cost_snapshot(
+        provider_id,
+        model,
+        expected_pricing,
+        binding.selection.cost.as_ref(),
+    )?;
+    let expected_reason = native_provider_route_reason_with_evidence(
+        provider_id,
+        model,
+        expected_observation,
+        binding.selection.cost.as_ref(),
+    )?;
     let expected_boundary = native_provider_route_boundary(provider_id);
     if binding.selection.provider_route_id != expected_route_id
         || binding.selection.reason != expected_reason
@@ -953,11 +1014,22 @@ pub(crate) fn validate_persisted_native_provider_route_selection(
     expected_route_id: &str,
     selection: &crate::models::ProviderRouteSelection,
 ) -> Result<(), String> {
-    validate_provider_route_observation_snapshot(expected_route_id, selection.observation.as_ref())?;
-    let expected_reason = native_provider_route_reason_with_observation(
+    validate_provider_route_observation_snapshot(
+        expected_route_id,
+        selection.observation.as_ref(),
+    )?;
+    let pricing = exact_model_pricing_evidence(provider_id, model);
+    validate_provider_route_cost_snapshot(
+        provider_id,
+        model,
+        pricing.as_ref(),
+        selection.cost.as_ref(),
+    )?;
+    let expected_reason = native_provider_route_reason_with_evidence(
         provider_id,
         model,
         selection.observation.as_ref(),
+        selection.cost.as_ref(),
     )?;
     if selection.provider_route_id != expected_route_id
         || selection.reason != expected_reason
@@ -971,11 +1043,63 @@ pub(crate) fn validate_persisted_native_provider_route_selection(
     Ok(())
 }
 
+fn validate_provider_route_cost_snapshot(
+    provider_id: &str,
+    model: &str,
+    expected_pricing: Option<&crate::models::ProviderRoutePricingEvidence>,
+    cost: Option<&crate::models::ProviderRouteCostSnapshot>,
+) -> Result<(), String> {
+    let Some(cost) = cost else {
+        return Ok(());
+    };
+    let Some(expected) = expected_pricing else {
+        return Err("Provider route cost has no exact-model pricing evidence.".into());
+    };
+    if cost.unit_tokens == 0 {
+        return Err("Provider route cost snapshot is invalid.".into());
+    }
+    let numerator = u128::from(cost.estimated_input_tokens)
+        .checked_mul(u128::from(cost.input_rate_minor_units))
+        .and_then(|value| {
+            u128::from(cost.estimated_output_tokens)
+                .checked_mul(u128::from(cost.output_rate_minor_units))
+                .and_then(|output| value.checked_add(output))
+        })
+        .ok_or_else(|| "Provider route cost estimate is invalid.".to_string())?;
+    let unit = u128::from(cost.unit_tokens);
+    let estimated = numerator
+        .checked_add(unit.saturating_sub(1))
+        .map(|value| value / unit)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| "Provider route cost estimate is invalid.".to_string())?;
+    if cost.reference != expected.reference
+        || cost.currency_code != expected.currency_code
+        || cost.input_rate_minor_units != expected.input_rate_minor_units
+        || cost.output_rate_minor_units != expected.output_rate_minor_units
+        || cost.unit_tokens != expected.unit_tokens
+        || cost.source_url != expected.source_url
+        || cost.reviewed_at != expected.reviewed_at
+        || cost.currency_code != "USD"
+        || estimated != cost.estimated_cost_minor_units
+        || chrono::DateTime::parse_from_rfc3339(&cost.reviewed_at).is_err()
+        || !cost
+            .source_url
+            .starts_with("https://developers.openai.com/")
+        || provider_id != "openai"
+        || model != "gpt-5"
+    {
+        return Err("Provider route cost snapshot is invalid.".into());
+    }
+    Ok(())
+}
+
 fn validate_provider_route_observation_snapshot(
     provider_route_id: &str,
     observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
 ) -> Result<(), String> {
-    let Some(observation) = observation else { return Ok(()); };
+    let Some(observation) = observation else {
+        return Ok(());
+    };
     let expected = crate::store::repos::provider_route_observation::summary_reference(
         provider_route_id,
         observation.sample_count,
@@ -985,7 +1109,9 @@ fn validate_provider_route_observation_snapshot(
     );
     if observation.reference != expected
         || observation.sample_count == 0
+        || observation.sample_count > 50
         || observation.usage_sample_count > observation.sample_count
+        || observation.median_latency_ms > 24 * 60 * 60 * 1_000
         || chrono::DateTime::parse_from_rfc3339(&observation.latest_observed_at).is_err()
     {
         return Err("Provider route observation snapshot is invalid.".into());
@@ -1084,6 +1210,12 @@ fn build_account_native_provider_routes(
                     .as_object_mut()
                     .expect("provider route projection is an object")
                     .insert("observationSummary".into(), serde_json::json!(summary));
+            }
+            if let Some(pricing) = exact_model_pricing_evidence(&row.provider_id, model) {
+                route
+                    .as_object_mut()
+                    .expect("provider route projection is an object")
+                    .insert("pricingSummary".into(), serde_json::json!(pricing));
             }
             routes.push(route);
         }
@@ -1547,6 +1679,13 @@ mod provider_route_tests {
         assert_eq!(route["workspaceId"], "workspace-1");
         assert_eq!(route["credentialBinding"]["custody"], "os-secure-store");
         assert_eq!(route["observationSummary"]["medianLatencyMs"], 200);
+        assert_eq!(route["pricingSummary"]["currencyCode"], "USD");
+        assert_eq!(route["pricingSummary"]["inputRateMinorUnits"], 125);
+        assert_eq!(route["pricingSummary"]["outputRateMinorUnits"], 1_000);
+        assert_eq!(
+            route["pricingSummary"]["sourceUrl"],
+            "https://developers.openai.com/api/docs/models/gpt-5"
+        );
         assert_eq!(route["updatedAt"], "2026-07-12T02:00:00Z");
         assert_eq!(
             route["boundaries"]["placementBoundary"],
@@ -1566,19 +1705,112 @@ mod provider_route_tests {
                 fallback_from_provider_route_id: None,
                 boundary_policy_ref: Some(native_provider_route_boundary("openai")),
                 observation: None,
+                cost: None,
             },
         };
-        assert!(
-            validate_native_provider_route_binding("openai", "gpt-5", &expected, &binding).is_ok()
-        );
+        assert!(validate_native_provider_route_binding(
+            "openai", "gpt-5", &expected, None, None, &binding,
+        )
+        .is_ok());
         binding.selection.fallback_from_provider_route_id = Some("other-route".into());
-        assert!(
-            validate_native_provider_route_binding("openai", "gpt-5", &expected, &binding).is_err()
-        );
+        assert!(validate_native_provider_route_binding(
+            "openai", "gpt-5", &expected, None, None, &binding,
+        )
+        .is_err());
         binding.selection.fallback_from_provider_route_id = None;
         binding.selection.reason = "Renderer supplied reason".into();
-        assert!(
-            validate_native_provider_route_binding("openai", "gpt-5", &expected, &binding).is_err()
-        );
+        assert!(validate_native_provider_route_binding(
+            "openai", "gpt-5", &expected, None, None, &binding,
+        )
+        .is_err());
+
+        let observation = crate::models::ProviderRouteObservationSnapshot {
+            reference: crate::store::repos::provider_route_observation::summary_reference(
+                &expected,
+                3,
+                200,
+                2,
+                "2026-07-12T02:00:00Z",
+            ),
+            sample_count: 3,
+            median_latency_ms: 200,
+            usage_sample_count: 2,
+            latest_observed_at: "2026-07-12T02:00:00Z".into(),
+        };
+        binding.selection.reason =
+            native_provider_route_reason_with_evidence("openai", "gpt-5", Some(&observation), None)
+                .unwrap();
+        binding.selection.observation = Some(observation.clone());
+        assert!(validate_native_provider_route_binding(
+            "openai",
+            "gpt-5",
+            &expected,
+            Some(&observation),
+            None,
+            &binding,
+        )
+        .is_ok());
+        binding.selection.observation.as_mut().unwrap().sample_count += 1;
+        assert!(validate_native_provider_route_binding(
+            "openai",
+            "gpt-5",
+            &expected,
+            Some(&observation),
+            None,
+            &binding,
+        )
+        .is_err());
+
+        binding.selection.observation = Some(observation.clone());
+        let pricing = exact_model_pricing_evidence("openai", "gpt-5").unwrap();
+        let cost = crate::models::ProviderRouteCostSnapshot {
+            reference: pricing.reference.clone(),
+            currency_code: pricing.currency_code.clone(),
+            input_rate_minor_units: pricing.input_rate_minor_units,
+            output_rate_minor_units: pricing.output_rate_minor_units,
+            unit_tokens: pricing.unit_tokens,
+            source_url: pricing.source_url.clone(),
+            reviewed_at: pricing.reviewed_at.clone(),
+            estimated_input_tokens: 2_000,
+            estimated_output_tokens: 1_000,
+            estimated_cost_minor_units: 2,
+        };
+        binding.selection.reason = native_provider_route_reason_with_evidence(
+            "openai",
+            "gpt-5",
+            Some(&observation),
+            Some(&cost),
+        )
+        .unwrap();
+        binding.selection.cost = Some(cost);
+        assert!(validate_native_provider_route_binding(
+            "openai",
+            "gpt-5",
+            &expected,
+            Some(&observation),
+            Some(&pricing),
+            &binding,
+        )
+        .is_ok());
+        let encoded = serde_json::to_value(&binding).unwrap();
+        let decoded =
+            serde_json::from_value::<crate::models::ProviderRouteExecutionBinding>(encoded)
+                .unwrap();
+        assert_eq!(decoded, binding);
+        binding
+            .selection
+            .cost
+            .as_mut()
+            .unwrap()
+            .estimated_cost_minor_units = 1;
+        assert!(validate_native_provider_route_binding(
+            "openai",
+            "gpt-5",
+            &expected,
+            Some(&observation),
+            Some(&pricing),
+            &binding,
+        )
+        .is_err());
     }
 }

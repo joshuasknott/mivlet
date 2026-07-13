@@ -2179,17 +2179,40 @@ fn validate_usage_replay(
     Ok(())
 }
 
-const GPT5_PRICING_REFERENCE: &str = "https://openai.com/index/introducing-gpt-5-for-developers/#pricing|reviewed=2026-07-12|standard-input-usd-per-1m=1.25|standard-output-usd-per-1m=10";
-
 fn exact_model_costs(model: &str, input_tokens: i64, output_tokens: i64) -> Vec<Value> {
-    if model != "gpt-5" || input_tokens < 0 || output_tokens < 0 {
+    let Some(pricing) = crate::backends::exact_model_pricing_evidence("openai", model) else {
+        return Vec::new();
+    };
+    if input_tokens < 0 || output_tokens < 0 {
         return Vec::new();
     }
-    let nanos = i128::from(input_tokens) * 1_250 + i128::from(output_tokens) * 10_000;
+    let nanos = (i128::from(input_tokens) * i128::from(pricing.input_rate_minor_units)
+        + i128::from(output_tokens) * i128::from(pricing.output_rate_minor_units))
+        * 10_000_000
+        / i128::from(pricing.unit_tokens);
+    let pricing_reference = format!(
+        "{}|reviewed={}|standard-input-usd-per-1m={}|standard-output-usd-per-1m={}",
+        pricing.source_url,
+        &pricing.reviewed_at[..10],
+        decimal_usd_from_minor(pricing.input_rate_minor_units),
+        decimal_usd_from_minor(pricing.output_rate_minor_units),
+    );
     vec![json!({
         "amount":{"amount":decimal_usd_from_nanos(nanos),"currencyCode":"USD"},
-        "provenance":"fable-calculated","pricingReference":GPT5_PRICING_REFERENCE
+        "provenance":"fable-calculated","pricingReference":pricing_reference
     })]
+}
+
+fn decimal_usd_from_minor(minor_units: u64) -> String {
+    let whole = minor_units / 100;
+    let fractional = minor_units % 100;
+    if fractional == 0 {
+        whole.to_string()
+    } else if fractional % 10 == 0 {
+        format!("{whole}.{}", fractional / 10)
+    } else {
+        format!("{whole}.{fractional:02}")
+    }
 }
 
 fn decimal_usd_from_nanos(nanos: i128) -> String {
@@ -3746,7 +3769,7 @@ mod tests {
             "payload":{"usage":{"usageKey":"native-usage:event-usage","runId":"run-1",
                 "workerId":"worker-1","providerRouteId":"provider-route-1","modelReference":"gpt-5","inputTokens":12,
                 "outputTokens":3,"toolCalls":0,"costs":[{"amount":{"amount":"0.000045","currencyCode":"USD"},
-                "provenance":"fable-calculated","pricingReference":GPT5_PRICING_REFERENCE}],"measuredAt":"t"}}
+                "provenance":"fable-calculated","pricingReference":"https://developers.openai.com/api/docs/models/gpt-5|reviewed=2026-07-13|standard-input-usd-per-1m=1.25|standard-output-usd-per-1m=10"}],"measuredAt":"t"}}
         });
         let terminal = json!({
             "id":"event-4","runId":"run-1","type":"worker-completed","sequence":5,

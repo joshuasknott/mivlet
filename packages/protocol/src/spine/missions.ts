@@ -394,6 +394,22 @@ export interface ProviderRouteObservationSnapshot {
   latestObservedAt: IsoDateTime;
 }
 
+export interface ProviderRoutePricingEvidence {
+  reference: string;
+  currencyCode: string;
+  inputRateMinorUnits: number;
+  outputRateMinorUnits: number;
+  unitTokens: number;
+  sourceUrl: string;
+  reviewedAt: IsoDateTime;
+}
+
+export interface ProviderRouteCostSnapshot extends ProviderRoutePricingEvidence {
+  estimatedInputTokens: number;
+  estimatedOutputTokens: number;
+  estimatedCostMinorUnits: number;
+}
+
 export interface ProviderRouteSelection {
   providerRouteId: ProviderRouteId;
   selectedAt: IsoDateTime;
@@ -401,6 +417,7 @@ export interface ProviderRouteSelection {
   fallbackFromProviderRouteId?: ProviderRouteId;
   boundaryPolicyRef?: string;
   observation?: ProviderRouteObservationSnapshot;
+  cost?: ProviderRouteCostSnapshot;
 }
 
 export interface ExecutionNodeSelection {

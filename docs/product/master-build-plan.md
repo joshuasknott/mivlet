@@ -2,7 +2,7 @@
 
 **Status:** Authoritative execution tracker
 
-**Last updated:** 11 July 2026
+**Last updated:** 13 July 2026
 
 The [Product Blueprint](vision.md) describes the Fable we are building. This document is the ordered checklist for building it. [Status](status.md) records what is factually implemented now.
 
@@ -14,7 +14,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 | 1. Essential Fable | Account + provider + durable conversation | In progress |
 | 2. Work context | Workspaces, projects, context, memory, and artifacts | In progress |
 | 3. Connection fabric | Native connections and MCP satisfy portable capabilities | In progress |
-| 4. Dynamic missions | Fable sizes, plans, routes, and supervises work | Not started |
+| 4. Dynamic missions | Fable sizes, plans, routes, and supervises work | In progress |
 | 5. Embedded routines | Successful work can run later or from events | Not started |
 | 6. Departments | Optional configurable operating contexts | Not started |
 | 7. Pipelines | Guided benchmark outcomes and useful connector breadth | Not started |
@@ -444,11 +444,20 @@ request-derived observation id. Changed replay, unconnected providers,
 cross-account reads, malformed values, and more than fifty retained samples per
 route fail closed or are bounded; migration creates no inferred evidence. The
 authenticated route catalogue projects only sample count, median latency,
-usage-sample count, and latest observation time. These aggregates remain
-non-authoritative and do not enter route scoring yet: a changing aggregate must
-first gain a revision-bound selection reference so immutable mission replay
-cannot reinterpret an older decision. Quality observations, revision-bound
-scoring, and visible product receipts for other mission shapes remain open. The
+usage-sample count, latest observation time, and a content-derived summary
+reference. The portable selector may use that median latency only when the exact
+summary snapshot is captured in the immutable route selection. Rust recomputes
+the reference, bounds the evidence, requires the current snapshot before egress,
+and validates the retained snapshot independently during replay so a later
+aggregate cannot reinterpret the earlier decision. Exact `gpt-5` routes also
+project a source-attributed standard-API price record reviewed on 13 July 2026.
+The selector calculates a conservative USD-minor-unit ceiling from the requested
+input/output token bounds and retains the exact rates, source, review time, token
+bounds, and estimate in the immutable selection. Rust independently verifies the
+model-specific record and arithmetic before egress and during persisted replay;
+every unsupported model remains cost-unobserved. Quality observations, broader
+exact-model pricing, and visible product receipts for other mission shapes remain
+open. The
 cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,

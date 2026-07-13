@@ -2584,6 +2584,7 @@ export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
     usageSampleCount: number;
     latestObservedAt: string;
   };
+  pricingSummary?: Spine.Missions.ProviderRoutePricingEvidence;
 };
 
 export async function listRuntimeNativeProviderRoutes() {

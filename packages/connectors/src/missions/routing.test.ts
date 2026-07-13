@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { MissionRoutingError, selectMissionProviderRoute, type MissionRouteCandidate, type MissionRouteRequest } from "./routing";
 
 const boundaries = { privacyBoundary: "private", billingBoundary: "personal", providerBoundary: "approved", placementBoundary: "local-or-approved-hosted" };
+function pricing(id: string, inputRateMinorUnits = 1, outputRateMinorUnits = 3) {
+  return {
+    reference: `route-pricing:v1:${id}`,
+    currencyCode: "USD",
+    inputRateMinorUnits,
+    outputRateMinorUnits,
+    unitTokens: 1_000,
+    sourceUrl: "https://example.com/model-pricing",
+    reviewedAt: "2026-07-13T00:00:00Z"
+  };
+}
 function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): MissionRouteCandidate {
   const observation = {
     reference: `route-observation-summary:v1:${id}`,
@@ -10,7 +21,7 @@ function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): 
     usageSampleCount: 1,
     latestObservedAt: "2026-07-12T00:30:00Z"
   };
-  return {
+  const result: MissionRouteCandidate = {
     route: {
       id, recordType: "provider-route", connectionId: `connection-${id}`, kind: "api-model", displayName: id,
       providerFamily: id, modelOrRuntimeReference: "model", state: "available", health: { state: "healthy" },
@@ -20,11 +31,17 @@ function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): 
       createdByInternalUserId: "user-1", createdAt: "2026-07-12T00:00:00Z", updatedAt: "2026-07-12T00:00:00Z"
     } as never,
     capabilityIds: ["knowledge.content.search"], supportsTools: true, contextWindowTokens: 64_000,
-    qualityScore: 0.8, estimatedLatencyMs: 1_000, observation, estimatedCostMinorUnits: 5, risk: "medium", ...overrides,
+    qualityScore: 0.8, estimatedLatencyMs: 1_000, observation, pricing: pricing(id), risk: "medium", ...overrides,
     ...(overrides.estimatedLatencyMs !== undefined && !Object.prototype.hasOwnProperty.call(overrides, "observation")
       ? { observation: { ...observation, medianLatencyMs: overrides.estimatedLatencyMs } }
       : {})
   };
+  if (Object.prototype.hasOwnProperty.call(overrides, "estimatedLatencyMs")
+    && overrides.estimatedLatencyMs === undefined
+    && !Object.prototype.hasOwnProperty.call(overrides, "observation")) {
+    delete result.observation;
+  }
+  return result;
 }
 function request(overrides: Partial<MissionRouteRequest> = {}): MissionRouteRequest {
   return {
@@ -38,8 +55,8 @@ function request(overrides: Partial<MissionRouteRequest> = {}): MissionRouteRequ
 describe("mission provider routing", () => {
   it("selects deterministically from quality, cost, and speed", () => {
     const decision = selectMissionProviderRoute(request(), [
-      candidate("route-slow", { qualityScore: 0.9, estimatedLatencyMs: 8_000, estimatedCostMinorUnits: 10 }),
-      candidate("route-balanced", { qualityScore: 0.88, estimatedLatencyMs: 500, estimatedCostMinorUnits: 2 })
+      candidate("route-slow", { qualityScore: 0.9, estimatedLatencyMs: 8_000, pricing: pricing("slow", 2, 6) }),
+      candidate("route-balanced", { qualityScore: 0.88, estimatedLatencyMs: 500, pricing: pricing("balanced", 0, 2) })
     ]);
     expect(decision.selection.providerRouteId).toBe("route-balanced");
     expect(decision.selection.boundaryPolicyRef).toContain("boundary:private");
@@ -69,7 +86,7 @@ describe("mission provider routing", () => {
 
   it("fails closed for tools, context, cost, health, placement, and risk", () => {
     const constrained = candidate("route-denied", {
-      supportsTools: false, contextWindowTokens: 100, estimatedCostMinorUnits: 30, risk: "high",
+      supportsTools: false, contextWindowTokens: 100, pricing: pricing("denied", 0, 30), risk: "high",
       route: { ...candidate("route-denied").route, health: { state: "offline" }, placement: { allowedKinds: ["local-desktop"], requiresCredentialHoldingNode: true } } as never
     });
     try {
@@ -85,12 +102,31 @@ describe("mission provider routing", () => {
 
   it("selects without inventing quality, latency, or cost observations", () => {
     const decision = selectMissionProviderRoute(request({ maxCostMinorUnits: undefined }), [
-      candidate("route-unobserved", { qualityScore: undefined, estimatedLatencyMs: undefined, estimatedCostMinorUnits: undefined })
+      candidate("route-unobserved", { qualityScore: undefined, estimatedLatencyMs: undefined, pricing: undefined })
     ]);
     expect(decision.reason).toContain("quality unobserved");
     expect(decision.reason).toContain("cost unobserved");
     expect(decision.reason).toContain("latency unobserved");
     expect(decision.selection.observation).toBeUndefined();
+    expect(decision.selection.cost).toBeUndefined();
+  });
+
+  it("binds source-attributed exact-model cost into the immutable selection", () => {
+    const decision = selectMissionProviderRoute(request(), [candidate("route-priced")]);
+    expect(decision.selection.cost).toMatchObject({
+      reference: "route-pricing:v1:route-priced",
+      estimatedInputTokens: 2_000,
+      estimatedOutputTokens: 1_000,
+      estimatedCostMinorUnits: 5,
+      currencyCode: "USD"
+    });
+    expect(decision.reason).toContain("estimated cost 5 USD minor units");
+  });
+
+  it("rejects cost estimates without valid source-attributed pricing", () => {
+    expect(() => selectMissionProviderRoute(request(), [
+      candidate("route-invalid-price", { pricing: { ...pricing("invalid"), sourceUrl: "http://localhost/pricing" } })
+    ])).toThrow("Route cost requires valid source-attributed exact-model pricing evidence");
   });
 
   it("binds observed latency evidence into the immutable selection", () => {

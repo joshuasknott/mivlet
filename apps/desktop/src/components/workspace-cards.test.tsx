@@ -1,7 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it } from "vitest";
-import { ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -112,5 +112,17 @@ describe("RunContextSummary", () => {
     expect(summary).not.toHaveTextContent("provider-route-secret");
     expect(summary).not.toHaveTextContent("workspace-private");
     expect(summary).not.toHaveTextContent("boundary-private");
+  });
+
+  it("shows the review date retained by source-attributed mission pricing", () => {
+    render(<MissionRunReceipt receipt={{
+      provider: "openai", model: "gpt-5", routeReason: "Selected exact route.",
+      inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1,
+      trust: "provider-generated-with-external-evidence", maxInputTokens: 2_000,
+      maxOutputTokens: 1_000, maxToolCalls: 1, maxDurationMs: 60_000, maxAttempts: 1,
+      costAmount: "0.00095", costCurrency: "USD",
+      pricingReference: "https://developers.openai.com/api/docs/models/gpt-5|reviewed=2026-07-13|standard-input-usd-per-1m=1.25|standard-output-usd-per-1m=10"
+    }} />);
+    expect(screen.getByText("Standard API list price · reviewed 13 Jul 2026")).toBeInTheDocument();
   });
 });

@@ -85,6 +85,10 @@ export function MissionRunReceipt({ receipt }: { receipt: {
   costAmount?: string; costCurrency?: string; pricingReference?: string;
 } }) {
   const provider = receipt.provider === "openai" ? "OpenAI" : receipt.provider;
+  const reviewed = receipt.pricingReference?.match(/(?:^|\|)reviewed=(\d{4})-(\d{2})-(\d{2})(?:\||$)/);
+  const pricingLabel = reviewed
+    ? `Standard API list price · reviewed ${Number(reviewed[3])} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(reviewed[2]) - 1]} ${reviewed[1]}`
+    : "Source-attributed API price";
   return (
     <details className="run-context-summary" aria-label="Run receipt">
       <summary><strong>Run receipt</strong><span>{provider} · {receipt.inputTokens + receipt.outputTokens} tokens</span></summary>
@@ -96,7 +100,7 @@ export function MissionRunReceipt({ receipt }: { receipt: {
         <li>{receipt.toolCalls} / {receipt.maxToolCalls} read {receipt.maxToolCalls === 1 ? "action" : "actions"}</li>
         <li>Up to {Math.round(receipt.maxDurationMs / 1000)} seconds</li>
         <li>{receipt.maxAttempts} {receipt.maxAttempts === 1 ? "attempt" : "attempts"} · {receipt.costAmount && receipt.costCurrency ? `${receipt.costCurrency} ${receipt.costAmount}` : "cost unavailable"}</li>
-        {receipt.pricingReference ? <li>Standard API list price · reviewed 12 Jul 2026</li> : null}
+        {receipt.pricingReference ? <li>{pricingLabel}</li> : null}
         <li>{receipt.sourceCount} cited {receipt.sourceCount === 1 ? "source" : "sources"}</li>
         <li>{receipt.trust === "provider-generated-with-external-evidence" ? "External evidence kept untrusted" : receipt.trust}</li>
       </ul>

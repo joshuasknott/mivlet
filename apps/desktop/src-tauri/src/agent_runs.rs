@@ -293,6 +293,12 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
         .transpose()?;
     if let Some(route) = &mut run.provider_route {
         normalize_provider_route_binding(route)?;
+        crate::backends::validate_persisted_native_provider_route_selection(
+            &run.provider_id,
+            &run.model,
+            &route.selection.provider_route_id,
+            &route.selection,
+        )?;
     }
     run.exchanges = run
         .exchanges
@@ -789,6 +795,7 @@ mod tests {
                 fallback_from_provider_route_id: None,
                 boundary_policy_ref: Some("boundary:member-private:account-owned-provider:openai:local-credential-egress".into()),
                 observation: None,
+                cost: None,
             },
         };
         initial.provider_route = Some(route.clone());

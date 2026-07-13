@@ -101,6 +101,7 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       estimatedLatencyMs: route.observationSummary.medianLatencyMs,
       observation: route.observationSummary
     } : {}),
+    ...(route.pricingSummary ? { pricing: route.pricingSummary } : {}),
     risk: "medium" as const
   })));
 

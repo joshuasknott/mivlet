@@ -10,6 +10,11 @@ const route = {
   state: "available", health: { state: "healthy" }, placement: { allowedKinds: ["local-desktop"], requiresCredentialHoldingNode: true },
   boundaries: { privacyBoundary: "member-private", billingBoundary: "account-owned-provider", providerBoundary: "openai", placementBoundary: "local-credential-egress" },
   credentialBinding: { custody: "os-secure-store", state: "available", refreshSupported: false },
+  pricingSummary: {
+    reference: "route-pricing:v1:gpt5", currencyCode: "USD", inputRateMinorUnits: 125,
+    outputRateMinorUnits: 1000, unitTokens: 1_000_000,
+    sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5", reviewedAt: "2026-07-13T00:00:00Z"
+  },
   workspaceId: "workspace-1", visibility: "member-private", ownerMemberId: "member-1", authority: "local",
   schemaVersion: 1, revision: 1, createdByInternalUserId: "user-1", createdAt: "2026-07-12T10:00:00Z", updatedAt: "2026-07-12T10:00:00Z"
 };
@@ -23,7 +28,11 @@ describe("native provider route selection", () => {
       requiredOutputTokens: 1024, requiresTools: false
     })).resolves.toMatchObject({
       workspaceId: "workspace-1",
-      selection: { providerRouteId: "provider-route-openai-gpt5", boundaryPolicyRef: expect.stringContaining("member-private") }
+      selection: {
+        providerRouteId: "provider-route-openai-gpt5",
+        boundaryPolicyRef: expect.stringContaining("member-private"),
+        cost: { estimatedInputTokens: 100, estimatedOutputTokens: 1024, estimatedCostMinorUnits: 2 }
+      }
     });
   });
 
