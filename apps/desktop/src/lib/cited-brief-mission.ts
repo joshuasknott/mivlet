@@ -224,7 +224,11 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       toolEvidence: { toolEventId, outputReference }
     }
   });
-  if (completion.status !== "completed") throw new Error(completion.reason ?? "The cited brief did not complete.");
+  if (completion.status === "cancelled") throw new Error(completion.reason ?? "The cited brief was cancelled.");
+  if (completion.status !== "completed") {
+    journal = requireJournal(await getRuntimeMissionRun(runId));
+    throw new Error(terminalCitedFailure(journal));
+  }
   journal = requireJournal(await getRuntimeMissionRun(runId));
   const terminal = terminalCitedOutcome(journal);
   const valueReference = terminal.valueReference;
@@ -367,6 +371,22 @@ function terminalCitedOutcome(journal: Record<string, unknown>): TerminalCitedOu
     return { outcome: "partial", valueReference: value, acceptanceSummary: summary };
   }
   throw new Error("The mission did not reach a durable terminal outcome.");
+}
+
+function terminalCitedFailure(journal: Record<string, unknown>): string {
+  const run = journal.run as Record<string, unknown>;
+  const eventHead = run.eventHead as Record<string, unknown> | undefined;
+  const terminalEvent = (journal.events as Array<Record<string, unknown>>).find((candidate) => candidate.id === eventHead?.lastEventId);
+  const payload = terminalEvent?.payload as Record<string, unknown> | undefined;
+  const error = payload?.error as Record<string, unknown> | undefined;
+  const category = error?.category;
+  const message = error?.message;
+  if (run.status !== "failed" || terminalEvent?.type !== "run-failed"
+    || (category !== "provider" && category !== "budget-exceeded")
+    || typeof message !== "string" || !message.trim()) {
+    throw new Error("The cited mission failure did not reach a durable terminal outcome.");
+  }
+  return message;
 }
 
 function journalSelectedRouteId(journal: Record<string, unknown>): string | undefined {

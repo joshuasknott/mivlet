@@ -259,7 +259,11 @@ failures append a separate native-built `worker-failed` event with static
 secret-free details and conservative branch-specific retryability; cancellation
 remains resumable rather than being mislabeled as failure. Success and failure
 replay through distinct exact event identities without repeating provider
-egress. This does not claim semantic output evidence: tool-bearing workers,
+egress. For the eligible one-step shape, a worker failure now continues in the
+same transaction to terminal `run-failed`, projects the run and selected mission
+to `failed`, and retains a failure `MissionResult` with every unevaluated
+criterion explicit. Token-limit failures use the canonical `budget-exceeded`
+category; provider failures remain provider failures. This does not claim semantic output evidence: tool-bearing workers,
 durable output receipts and provenance, other providers and runtimes, live grant
 consumption at tool use, handoffs, and the desktop experience remain open.
 
@@ -380,8 +384,9 @@ revision-fenced mission from ready to running. The eligible terminal cited run
 advances it from running to either completed or partially-completed in the same
 transaction and stores a derived `MissionResult` naming only that producing run.
 No renderer-selected status, result, actor, or time crosses this boundary; stale
-transitions roll back. General multi-run and failed mission aggregation remains
-open.
+transitions roll back. An eligible only-worker provider or budget failure instead
+advances both run and mission to failed with the exact worker error retained on
+the terminal run event. General multi-run failure aggregation remains open.
 
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes
@@ -393,7 +398,9 @@ MCP route when one is configured, otherwise uses the native resolver, then reloa
 the terminal journal and encrypted output receipt before showing the Markdown in
 the conversation. An accepted output carries an accepted receipt; a policy-failed
 draft remains readable but is prefixed as not accepted and its receipt exposes the
-failed acceptance summary. Browser preview creates no mission state. Focused orchestration
+failed acceptance summary. A provider or budget failure is surfaced only after the
+desktop reloads and validates the matching durable terminal run failure. Browser
+preview creates no mission state. Focused orchestration
 and rendered-shell tests cover this composition, but actual Tauri execution and
 restart with production account/provider/native/MCP services remains a live
 external evidence gate rather than a checked repository claim.

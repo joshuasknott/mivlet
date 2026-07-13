@@ -543,7 +543,7 @@ pub(crate) fn preflight_native_worker_completion(
                     validate_output_receipt_replay(
                         tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
                     )?;
-                    validate_policy_result_replay(&journal, existing, binding, output.as_ref())
+                    validate_native_result_replay(&journal, existing, binding, output.as_ref())
                         .map_err(crate::store::StoreError::Invalid)?;
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
@@ -740,7 +740,7 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.binding,
                     authority.output.as_ref(),
                 )?;
-                validate_policy_result_replay(
+                validate_native_result_replay(
                     &journal,
                     existing,
                     &authority.binding,
@@ -846,7 +846,7 @@ pub(crate) fn settle_native_worker_completion(
                         usage = Some((input, output));
                     }
                     let category = if code == "native-worker-token-budget-exceeded" {
-                        "budget"
+                        "budget-exceeded"
                     } else {
                         "provider"
                     };
@@ -974,6 +974,26 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.provider_id,
                     &authority.requested_model,
                     &authority.provider_route_id,
+                    terminal_expected_revision + 1,
+                    sequence,
+                    event_id,
+                    &at,
+                )?;
+            } else if event_type == "worker-failed" {
+                let error = event.pointer("/payload/error").ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission worker failure error is unavailable.".into(),
+                    )
+                })?;
+                append_single_worker_run_failure(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &authority.internal_user_id,
+                    &journal,
+                    &authority.binding,
+                    error,
                     terminal_expected_revision + 1,
                     sequence,
                     event_id,
@@ -1449,6 +1469,134 @@ fn append_single_worker_run_result(
             at,
         )?;
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_single_worker_run_failure(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+    error: &Value,
+    expected_revision: i64,
+    expected_sequence: i64,
+    previous_event_id: &str,
+    at: &str,
+) -> crate::store::Result<()> {
+    let mission_id = journal
+        .run
+        .get("missionId")
+        .or_else(|| journal.run.pointer("/initiator/missionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+        })?;
+    let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    validate_lifecycle(&journal.run, &lifecycle).map_err(crate::store::StoreError::Invalid)?;
+    let worker = journal
+        .events
+        .iter()
+        .find_map(|event| {
+            (event.get("type").and_then(Value::as_str) == Some("worker-created")
+                && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                    == Some(binding.worker_id.as_str()))
+            .then(|| event.pointer("/payload/worker"))
+            .flatten()
+        })
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission worker assignment is unavailable.".into())
+        })?;
+    let step_key = worker
+        .get("planStepKey")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission worker step is invalid.".into())
+        })?;
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission plan steps are invalid.".into())
+        })?;
+    let created_workers = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .count();
+    if steps.len() != 1
+        || created_workers != 1
+        || steps[0].get("key").and_then(Value::as_str) != Some(step_key)
+    {
+        return Ok(());
+    }
+    let criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
+        })?;
+    let acceptance = criteria
+        .iter()
+        .filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+        .map(|key| {
+            json!({"criterionKey":key,"status":"not-evaluated","evidenceRefs":[],
+            "summary":"The mission stopped before this criterion could be accepted."})
+        })
+        .collect::<Vec<_>>();
+    let mission_result = json!({"outcome":"failed","summary":"The mission stopped because its only worker failed.",
+        "producingRunIds":[binding.run_id],"outputs":[],"acceptance":acceptance,"completedAt":at});
+    let idempotency_key = format!(
+        "run-result:{}",
+        bounded(&binding.idempotency_key, "Run result idempotency key", 200)
+            .map_err(crate::store::StoreError::Invalid)?
+    );
+    let sequence = expected_sequence + 1;
+    let event = json!({"workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,"createdAt":at,"updatedAt":at,
+        "id":binding.result_event_id,"runId":binding.run_id,"type":"run-failed","sequence":sequence,
+        "previousEventId":previous_event_id,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":idempotency_key,"payload":{"error":error}});
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("status".into(), json!("failed"));
+    projected.insert("revision".into(), json!(expected_revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":binding.result_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        expected_revision,
+        expected_sequence,
+        &binding.result_event_id,
+        "run-failed",
+        &idempotency_key,
+        &event,
+        &Value::Object(projected),
+        at,
+    )?;
+    mission_plan::mark_failed(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &lifecycle,
+        &mission_result,
+        at,
+    )?;
     Ok(())
 }
 
@@ -2190,12 +2338,46 @@ fn validate_output_receipt_replay(
     Ok(())
 }
 
-fn validate_policy_result_replay(
+fn validate_native_result_replay(
     journal: &mission_run::MissionRunJournalRow,
     terminal: &Value,
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
 ) -> Result<(), String> {
+    if terminal.get("type").and_then(Value::as_str) == Some("worker-failed") {
+        let terminal_sequence = terminal
+            .get("sequence")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| "Worker failure terminal sequence is invalid.".to_string())?;
+        let result = journal.events.iter().find(|event| {
+            event.get("id").and_then(Value::as_str) == Some(binding.result_event_id.as_str())
+        });
+        let Some(result) = result else {
+            return if output.is_some_and(|spec| spec.include_evidence) {
+                Err("Policy-bearing worker failure run result is missing.".into())
+            } else {
+                Ok(())
+            };
+        };
+        let result_key = format!("run-result:{}", binding.idempotency_key);
+        if result.get("type").and_then(Value::as_str) == Some("run-failed")
+            && result.get("runId").and_then(Value::as_str) == Some(binding.run_id.as_str())
+            && result.get("previousEventId").and_then(Value::as_str)
+                == Some(binding.failure_event_id.as_str())
+            && result.get("sequence").and_then(Value::as_i64) == Some(terminal_sequence + 1)
+            && result.get("idempotencyKey").and_then(Value::as_str) == Some(result_key.as_str())
+            && result.pointer("/payload/error") == terminal.pointer("/payload/error")
+            && journal.run.get("status").and_then(Value::as_str) == Some("failed")
+            && journal
+                .run
+                .pointer("/eventHead/lastEventId")
+                .and_then(Value::as_str)
+                == Some(binding.result_event_id.as_str())
+        {
+            return Ok(());
+        }
+        return Err("Worker failure run result does not match its terminal fact.".into());
+    }
     let Some(output) = output.filter(|spec| spec.include_evidence) else {
         return Ok(());
     };
@@ -2475,7 +2657,7 @@ fn native_failure_payload_valid(event: &Value) -> bool {
         return false;
     }
     if error.get("code").and_then(Value::as_str) == Some("native-worker-token-budget-exceeded") {
-        return error.get("category").and_then(Value::as_str) == Some("budget")
+        return error.get("category").and_then(Value::as_str) == Some("budget-exceeded")
             && error.get("message").and_then(Value::as_str)
                 == Some("The native provider usage exceeded the worker token budget.")
             && error.get("retryable").and_then(Value::as_bool) == Some(false);
@@ -4080,7 +4262,7 @@ mod tests {
             "previousEventId":"event-usage","idempotencyKey":"worker-fail:terminal-1",
             "correlationKey":"native-worker-completion:v1:run-revision:4",
             "payload":{"workerId":"worker-1","error":{
-                "code":"native-worker-token-budget-exceeded","category":"budget",
+                "code":"native-worker-token-budget-exceeded","category":"budget-exceeded",
                 "message":"The native provider usage exceeded the worker token budget.",
                 "retryable":false
             }}
@@ -4095,6 +4277,22 @@ mod tests {
         };
         assert!(exact_native_terminal_replay(&budget_failure, &binding, None).is_ok());
         assert!(validate_usage_replay(&failed_journal, &budget_failure, &binding, "gpt-5").is_ok());
+        let run_failure = json!({
+            "id":"event-result","runId":"run-1","type":"run-failed","sequence":6,
+            "previousEventId":"event-5","idempotencyKey":"run-result:terminal-1",
+            "payload":{"error":budget_failure.pointer("/payload/error").unwrap()}
+        });
+        let terminal_failed_journal = mission_run::MissionRunJournalRow {
+            run: json!({"status":"failed","eventHead":{"lastEventId":"event-result"}}),
+            events: vec![budget_failure.clone(), run_failure],
+        };
+        assert!(validate_native_result_replay(
+            &terminal_failed_journal,
+            &budget_failure,
+            &binding,
+            None
+        )
+        .is_ok());
         let live = mission_run::MissionRunJournalRow {
             run: json!({"status":"running","revision":4,"eventHead":{"lastSequence":3,"lastEventId":"event-route"}}),
             events: vec![
@@ -4149,12 +4347,12 @@ mod tests {
             events: vec![terminal.clone(), evaluation.clone(), failed.clone()],
         };
         assert!(
-            validate_policy_result_replay(&journal, &terminal, &binding, Some(&output)).is_ok()
+            validate_native_result_replay(&journal, &terminal, &binding, Some(&output)).is_ok()
         );
         let mut mismatched = journal;
         mismatched.events[2]["payload"]["error"]["category"] = json!("provider");
         assert!(
-            validate_policy_result_replay(&mismatched, &terminal, &binding, Some(&output)).is_err()
+            validate_native_result_replay(&mismatched, &terminal, &binding, Some(&output)).is_err()
         );
     }
 }

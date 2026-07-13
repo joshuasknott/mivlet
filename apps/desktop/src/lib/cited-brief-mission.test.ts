@@ -135,4 +135,25 @@ describe("cited brief mission composition", () => {
     expect(result.receipt).toMatchObject({ acceptanceStatus: "not-accepted" });
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
   });
+
+  it("surfaces only a durable terminal provider failure", async () => {
+    let counter = 0;
+    mocks.executeLocalWorker.mockResolvedValue({ status: "failed", events: [], text: "", usage: {}, reason: "renderer reason", retryable: false });
+    mocks.getRun
+      .mockReset()
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(10, 9, [{
+        id: "head-9", type: "run-failed", payload: { error: {
+          code: "native-provider-request-rejected", category: "provider",
+          message: "The native provider rejected the request.", retryable: false
+        } }
+      }], { status: "failed" }));
+
+    await expect(executeCitedBriefMission({
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
+    })).rejects.toThrow("The native provider rejected the request.");
+    expect(mocks.readOutput).not.toHaveBeenCalled();
+  });
 });

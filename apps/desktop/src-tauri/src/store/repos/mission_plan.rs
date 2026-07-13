@@ -312,6 +312,38 @@ pub fn mark_partially_completed(
     )
 }
 
+pub fn mark_failed(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    terminal_result: &Value,
+    at: &str,
+) -> Result<()> {
+    if terminal_result.get("outcome").and_then(Value::as_str) != Some("failed")
+        || terminal_result
+            .get("producingRunIds")
+            .and_then(Value::as_array)
+            .is_none_or(|ids| ids.len() != 1)
+    {
+        return Err(StoreError::Invalid(
+            "Mission failure result is invalid.".into(),
+        ));
+    }
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "running",
+        "failed",
+        Some(terminal_result),
+        at,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn transition_status(
     tx: &Connection,
@@ -670,6 +702,52 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(projected.mission["status"], "partially-completed");
+        assert_eq!(projected.mission["terminalResult"], result);
+    }
+
+    #[test]
+    fn mission_status_projects_exact_failure_result() {
+        let store = store();
+        store.transaction(|tx| { tx.execute("INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('w1','One','t','t');",[])?; Ok(()) }).unwrap();
+        let scope = DataScope::workspace("w1").unwrap();
+        let (mut mission, plan, revision) = values(1, "revision-1", None);
+        mission["status"] = json!("ready");
+        mission["updatedAt"] = json!("t1");
+        let lifecycle = store
+            .transaction(|tx| {
+                create(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    "user-1",
+                    "mission-1",
+                    "plan-1",
+                    "revision-1",
+                    "delegated",
+                    &mission,
+                    &plan,
+                    &revision,
+                    "t1",
+                )
+            })
+            .unwrap();
+        store
+            .transaction(|tx| mark_running(tx, &store, &scope, "member-1", &lifecycle, "t2"))
+            .unwrap();
+        let running = store
+            .with_conn(|tx| get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        let result = json!({"outcome":"failed","summary":"Worker failed","producingRunIds":["run-1"],"outputs":[],"acceptance":[],"completedAt":"t3"});
+        store
+            .transaction(|tx| mark_failed(tx, &store, &scope, "member-1", &running, &result, "t3"))
+            .unwrap();
+        let projected = store
+            .with_conn(|tx| get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(projected.mission["status"], "failed");
         assert_eq!(projected.mission["terminalResult"], result);
     }
 }
