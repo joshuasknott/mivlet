@@ -526,6 +526,13 @@ Completed and recovered ordinary chat responses now expose that persisted
 selection as a compact route receipt. It shows the canonical plain-language
 reason and workspace scope while withholding opaque route, workspace, and
 boundary identifiers; legacy runs without route evidence make no routing claim.
+The same per-response receipt now retains final provider usage both live and
+after restart. It shows actual input/output tokens and an observed or explicitly
+unknown cost. When the immutable route carries exact source-attributed pricing,
+it also shows the request's input estimate, output-token maximum, and conservative
+currency ceiling; unsupported models stay honestly unknown. Usage is keyed to the
+canonical run rather than the latest activity panel, so later responses cannot
+rewrite an earlier receipt.
 Scheduled native prompts attach the same route receipt to the durable workflow
 run only after execution finishes. Rust permits that one post-execution
 attribution transition, rejects running, changed, removed, fallback, non-schedule,

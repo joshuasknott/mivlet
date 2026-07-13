@@ -109,9 +109,46 @@ describe("RunContextSummary", () => {
     expect(summary).toHaveTextContent("Checked before connecting");
     expect(summary).toHaveTextContent("Selected OpenAI GPT-5");
     expect(summary).toHaveTextContent("This workspace");
+    expect(summary).toHaveTextContent("Cost ceilingUnknown for this model");
     expect(summary).not.toHaveTextContent("provider-route-secret");
     expect(summary).not.toHaveTextContent("workspace-private");
     expect(summary).not.toHaveTextContent("boundary-private");
+  });
+
+  it("shows persisted per-run usage and source-attributed token and cost ceilings", () => {
+    render(<ProviderRouteSummary
+      route={{
+        workspaceId: "workspace-private" as never,
+        selection: {
+          providerRouteId: "provider-route-secret" as never,
+          selectedAt: "2026-07-13T12:00:00Z" as never,
+          reason: "Selected OpenAI GPT-5 for model.generate.",
+          boundaryPolicyRef: "boundary-private",
+          cost: {
+            reference: "official-price|reviewed=2026-07-13",
+            currencyCode: "USD",
+            inputRateMinorUnits: 125,
+            outputRateMinorUnits: 1000,
+            unitTokens: 1_000_000,
+            sourceUrl: "https://developers.openai.com/api/docs/models/gpt-5",
+            reviewedAt: "2026-07-13T00:00:00Z" as never,
+            estimatedInputTokens: 400,
+            estimatedOutputTokens: 2_048,
+            estimatedCostMinorUnits: 3
+          }
+        }
+      }}
+      usage={{ inputTokens: 120, outputTokens: 80, costUsd: 0.00095 }}
+    />);
+    const summary = screen.getByLabelText("Route receipt");
+    expect(summary).toHaveTextContent("400 input estimate · 2048 output max");
+    expect(summary).toHaveTextContent("USD 0.03 estimated maximum");
+    expect(summary).toHaveTextContent("120 input · 80 output");
+    expect(summary).toHaveTextContent("$0.000950");
+    expect(summary).not.toHaveTextContent("provider-route-secret");
+    expect(summary).not.toHaveTextContent("workspace-private");
+    expect(summary).not.toHaveTextContent("boundary-private");
+    expect(summary).not.toHaveTextContent("official-price");
   });
 
   it("shows the review date retained by source-attributed mission pricing", () => {

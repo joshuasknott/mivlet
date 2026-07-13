@@ -2040,6 +2040,7 @@ describe("Fable home", () => {
     ];
     runtimeMocks.lines = [
       'data: {"choices":[{"delta":{"content":"Recovered answer"}}]}',
+      'data: {"usage":{"prompt_tokens":42,"completion_tokens":7}}',
       'data: {"choices":[{"finish_reason":"stop"}]}'
     ];
 
@@ -2050,6 +2051,8 @@ describe("Fable home", () => {
     await user.click(screen.getByRole("button", { name: /retry from prompt/i }));
     expect(await screen.findByText("Recovered answer")).toBeInTheDocument();
     expect(screen.getByLabelText("Route receipt")).toHaveTextContent("Selected openai gpt-5.");
+    expect(screen.getByLabelText("Route receipt")).toHaveTextContent("42 input · 7 output");
+    expect(screen.getByLabelText("Route receipt")).toHaveTextContent("Cost ceilingUnknown for this model");
     expect(screen.getByLabelText("Route receipt")).not.toHaveTextContent("route-openai-gpt-5");
     expect(screen.queryByText(/interrupted run · gpt-5/i)).not.toBeInTheDocument();
   });

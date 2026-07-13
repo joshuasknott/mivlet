@@ -277,12 +277,14 @@ describe("useNativeAgent", () => {
       pendingApprovalIds: [], recoverable: status !== "completed", retryCount: 0,
       createdAt: "2026-07-11T12:00:00.000Z", updatedAt: "2026-07-11T12:00:01.000Z",
       contextReceipt: { ...preparedContext.receipt, runId: `run-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] },
-      providerRoute: { workspaceId: "workspace-1" as never, selection: { providerRouteId: `route-${status}` as never, selectedAt: "2026-07-12T12:00:00Z" as never, reason: `Selected route ${status}.` } }
+      providerRoute: { workspaceId: "workspace-1" as never, selection: { providerRouteId: `route-${status}` as never, selectedAt: "2026-07-12T12:00:00Z" as never, reason: `Selected route ${status}.` } },
+      usage: { inputTokens: 40 + index, outputTokens: 5 + index, costUsd: 0, costUnknown: true }
     }));
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
     await waitFor(() => expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3));
     expect(result.current.state.contextReceipts["run-interrupted"]?.contributions[0].reason).toBe("retrieved");
     expect(result.current.state.providerRoutes["run-completed"]?.selection.reason).toBe("Selected route completed.");
+    expect(result.current.state.usageReceipts["run-failed"]).toMatchObject({ inputTokens: 41, outputTokens: 6, costUnknown: true });
   });
 
   it("surfaces interrupted runs and retries from the durable user prompt", async () => {
@@ -403,6 +405,10 @@ describe("useNativeAgent", () => {
     expect(result.current.state.usage).not.toBeNull();
     expect(result.current.state.usage?.inputTokens).toBe(42);
     expect(result.current.state.usage?.outputTokens).toBe(7);
+    expect(result.current.state.usageReceipts[result.current.state.currentRunId ?? ""]).toMatchObject({
+      inputTokens: 42,
+      outputTokens: 7
+    });
     // costUsd is provider-priced; just assert it is a finite number.
     expect(Number.isFinite(result.current.state.usage?.costUsd ?? NaN)).toBe(true);
   });

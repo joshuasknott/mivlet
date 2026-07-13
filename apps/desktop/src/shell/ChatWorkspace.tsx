@@ -667,7 +667,10 @@ export function ChatWorkspace() {
                 />
               ) : null}
               {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
-                <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
+                <ProviderRouteSummary
+                  route={agent.state.providerRoutes[message.runId]}
+                  usage={agent.state.usageReceipts[message.runId]}
+                />
               ) : null}
               {message.role === "assistant" && message.runId && agent.state.contextReceipts[message.runId] ? (
                 <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />

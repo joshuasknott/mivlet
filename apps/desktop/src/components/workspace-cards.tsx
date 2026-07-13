@@ -1,6 +1,7 @@
 import type {
   ConnectorManifest,
   KnowledgeCitation,
+  PersistedAgentRun,
   ProviderRouteExecutionBinding,
   RunContextReceipt,
   ThreadSummary,
@@ -175,12 +176,55 @@ export function NewCitedMissionAction({
   );
 }
 
-export function ProviderRouteSummary({ route }: { route: ProviderRouteExecutionBinding }) {
+type AgentRunUsage = NonNullable<PersistedAgentRun["usage"]>;
+
+function observedCost(usage: AgentRunUsage): string {
+  if (usage.costUnknown) return "Unknown";
+  return `$${usage.costUsd.toFixed(6)}${usage.costEstimated ? " estimated" : ""}`;
+}
+
+function costCeiling(route: ProviderRouteExecutionBinding): string | null {
+  const cost = route.selection.cost;
+  if (!cost) return null;
+  return `${cost.currencyCode} ${(cost.estimatedCostMinorUnits / 100).toFixed(2)}`;
+}
+
+export function ProviderRouteSummary({
+  route,
+  usage
+}: {
+  route: ProviderRouteExecutionBinding;
+  usage?: AgentRunUsage;
+}) {
+  const cost = route.selection.cost;
   return (
     <details className="run-context-summary" aria-label="Route receipt">
       <summary><strong>Route</strong><span>Checked before connecting</span></summary>
       <p className="run-context-summary__audience"><strong>Why</strong><span>{route.selection.reason}</span></p>
       <p className="run-context-summary__audience"><strong>Scope</strong><span>This workspace</span></p>
+      {cost ? (
+        <>
+          <p className="run-context-summary__audience">
+            <strong>Token ceiling</strong>
+            <span>{cost.estimatedInputTokens} input estimate · {cost.estimatedOutputTokens} output max</span>
+          </p>
+          <p className="run-context-summary__audience">
+            <strong>Cost ceiling</strong>
+            <span>{costCeiling(route)} estimated maximum</span>
+          </p>
+        </>
+      ) : (
+        <p className="run-context-summary__audience"><strong>Cost ceiling</strong><span>Unknown for this model</span></p>
+      )}
+      {usage ? (
+        <>
+          <p className="run-context-summary__audience">
+            <strong>Used</strong>
+            <span>{usage.inputTokens} input · {usage.outputTokens} output</span>
+          </p>
+          <p className="run-context-summary__audience"><strong>Cost</strong><span>{observedCost(usage)}</span></p>
+        </>
+      ) : null}
     </details>
   );
 }

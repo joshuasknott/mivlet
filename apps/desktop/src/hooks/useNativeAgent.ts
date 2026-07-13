@@ -74,6 +74,8 @@ export interface NativeAgentState {
   contextReceipts: Record<string, RunContextReceipt>;
   /** Secret-free durable provider route evidence keyed by canonical run id. */
   providerRoutes: Record<string, ProviderRouteExecutionBinding>;
+  /** Final provider usage keyed by canonical run id, including restarted history. */
+  usageReceipts: Record<string, NonNullable<PersistedAgentRun["usage"]>>;
   /** Canonical id for the current or most recently started run. */
   currentRunId: string | null;
   /** True when there is no desktop runtime to carry the request. */
@@ -130,6 +132,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     recoverableRuns: [],
     contextReceipts: {},
     providerRoutes: {},
+    usageReceipts: {},
     currentRunId: null,
     noTransport: !hasDesktopRuntime()
   });
@@ -173,6 +176,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (run.providerRoute) routes[run.id] = run.providerRoute;
           return routes;
         }, { ...current.providerRoutes }),
+        usageReceipts: runs.reduce<Record<string, NonNullable<PersistedAgentRun["usage"]>>>((receipts, run) => {
+          if (run.usage) receipts[run.id] = run.usage;
+          return receipts;
+        }, { ...current.usageReceipts }),
         recoverableRuns: runs.filter(
           (run) =>
             (run.status === "interrupted" || run.status === "failed") && run.recoverable
@@ -442,25 +449,21 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             };
             if (durableWriter) await durableWriter.checkpointAssistant(persisted.transcript);
           } else if (event.type === "usage") {
+            const usage = {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              costUsd: event.costUsd,
+              costEstimated: event.costEstimated,
+              costUnknown: event.costUnknown
+            };
             setState((current) => ({
               ...current,
-              usage: {
-                inputTokens: event.inputTokens,
-                outputTokens: event.outputTokens,
-                costUsd: event.costUsd,
-                costEstimated: event.costEstimated,
-                costUnknown: event.costUnknown
-              }
+              usage,
+              usageReceipts: { ...current.usageReceipts, [runId]: usage }
             }));
             persisted = {
               ...persisted,
-              usage: {
-                inputTokens: event.inputTokens,
-                outputTokens: event.outputTokens,
-                costUsd: event.costUsd,
-                costEstimated: event.costEstimated,
-                costUnknown: event.costUnknown
-              },
+              usage,
               updatedAt: new Date().toISOString()
             };
           } else if (event.type === "tool-call") {
