@@ -2992,6 +2992,13 @@ export interface RuntimeMissionRunCancelInput {
   reason?: string;
 }
 
+export interface RuntimeMissionRunFinalizeCancellationInput {
+  runId: string;
+  eventId: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
 export interface RuntimeMissionWorkerCreateInput {
   runId: string;
   eventId: string;
@@ -3045,6 +3052,12 @@ export async function getRuntimeMissionRun(runId: string) {
 export async function requestRuntimeMissionRunCancellation(input: RuntimeMissionRunCancelInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_run_request_cancellation", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function finalizeRuntimeMissionRunCancellation(input: RuntimeMissionRunFinalizeCancellationInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_run_finalize_cancellation", { input }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

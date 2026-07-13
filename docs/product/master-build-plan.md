@@ -257,7 +257,7 @@ duplicate concurrent egress for the same started worker. Definitive transport,
 HTTP, response-bound, provider-payload, output-limit, and incomplete-terminal
 failures append a separate native-built `worker-failed` event with static
 secret-free details and conservative branch-specific retryability; cancellation
-remains resumable rather than being mislabeled as failure. Success and failure
+is retained as its own terminal state rather than being mislabeled as failure. Success and failure
 replay through distinct exact event identities without repeating provider
 egress. For the eligible one-step shape, a worker failure now continues in the
 same transaction to terminal `run-failed`, projects the run and selected mission
@@ -333,7 +333,13 @@ atomically, and reopens the owner-qualified chain after restart. Native command
 support now creates a root run only from the authenticated member's ready,
 currently selected persisted mission plan; reads only that owner's journal;
 and appends an idempotent native-built cooperative cancellation without
-accepting renderer authority, actor, status, sequence, or time. Schema v26 adds
+accepting renderer authority, actor, status, sequence, or time. The cited journey
+binds that request to the real stop boundary: Rust finalizes pre-provider work only
+when no native mission execution lease exists, while an in-flight provider request
+is terminalized only after its transport observes cancellation. Both paths append
+exact-replay-safe `run-cancelled`, project the revision-fenced mission to cancelled
+with an explicit `MissionResult`, and the desktop refuses to surface cancellation
+until it reloads that terminal fact. Schema v26 adds
 owner-qualified encrypted checkpoint state linked by composite foreign key to
 the exact immutable checkpoint event. Authenticated create/restore commands
 derive completed workers, plan steps, committed effects, active work, and waits
@@ -503,8 +509,9 @@ The Wave 4B
 checkboxes stay unchecked because the experience is not yet general. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
-cancel path, and appends a durable cancellation request for the active cited
-mission. Conservative, explicit natural-language forms for goal, plan, schedule,
+cancel path, and persists the durable cancellation request plus terminal cancelled
+run and mission state for the active cited journey. Conservative, explicit
+natural-language forms for goal, plan, schedule,
 and memory now reach the same structured durable command handlers; conversational
 uses of those words remain ordinary prompts.
 Provider-wide hosted-model rates have also been removed from ordinary agent

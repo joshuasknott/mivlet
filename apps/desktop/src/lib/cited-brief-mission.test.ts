@@ -4,7 +4,7 @@ import { executeCitedBriefMission, isCitedBriefMissionPrompt } from "./cited-bri
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), listRoutes: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({
   executeLocalWorker: mocks.executeLocalWorker,
@@ -23,6 +23,7 @@ vi.mock("../runtime", () => ({
   getRuntimeMissionRun: mocks.getRun,
   readRuntimeMissionWorkerOutput: mocks.readOutput,
   requestRuntimeMissionRunCancellation: mocks.cancelRun,
+  finalizeRuntimeMissionRunCancellation: mocks.finalizeCancellation,
   listRuntimeNativeProviderRoutes: mocks.listRoutes,
   resolveRuntimeMcpCapabilityRoute: mocks.resolveMcpRoute
 }));
@@ -101,9 +102,7 @@ describe("cited brief mission composition", () => {
     }));
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
-    mocks.getRun.mockResolvedValue(journal(7, 6, []));
-    await cancelMission?.();
-    expect(mocks.cancelRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "mission-run-4", mode: "cooperative", expectedRunRevision: 7, expectedLastSequence: 6 }));
+    expect(cancelMission).toBeTypeOf("function");
   });
 
   it("returns preserved output as an explicit unaccepted partial outcome", async () => {
@@ -155,5 +154,81 @@ describe("cited brief mission composition", () => {
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     })).rejects.toThrow("The native provider rejected the request.");
     expect(mocks.readOutput).not.toHaveBeenCalled();
+  });
+
+  it("persists a cancellation request, stops provider egress, and trusts only the terminal cancellation fact", async () => {
+    let counter = 0;
+    let cancelMission: (() => Promise<void>) | undefined;
+    const backendCancel = vi.fn().mockResolvedValue(undefined);
+    const cancellation = {
+      requestKey: "stop-18", requestedAt: "2026-07-13T12:00:00.000Z",
+      requestedByInternalUserId: "user-1", scope: "run", mode: "cooperative",
+      reason: "User requested stop."
+    };
+    mocks.getRun
+      .mockReset()
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(7, 6, []))
+      .mockResolvedValueOnce(journal(9, 8, [{
+        id: "event-19", type: "run-cancelled", payload: { cancellation }
+      }], { status: "cancelled", cancellation, eventHead: { lastSequence: 8, lastEventId: "event-19" } }));
+    mocks.executeLocalWorker.mockImplementation(async (workerInput: { signal: AbortSignal }) => {
+      await cancelMission?.();
+      expect(workerInput.signal.aborted).toBe(true);
+      // The provider can finish its stream just before the durable settlement
+      // observes the already-persisted cancellation request; cancellation wins.
+      return { status: "completed", events: [], text: "", usage: {}, retryable: false };
+    });
+
+    await expect(executeCitedBriefMission({
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      backend: { providerId: "openai", cancel: backendCancel } as never, model: "gpt-5",
+      approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
+      onCancellationReady: (cancel) => { cancelMission = cancel; }
+    })).rejects.toThrow("User requested stop.");
+
+    expect(mocks.cancelRun).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "mission-run-4", mode: "cooperative", expectedRunRevision: 7, expectedLastSequence: 6
+    }));
+    expect(backendCancel).toHaveBeenCalledWith("mission-run-4");
+    expect(mocks.readOutput).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes cancellation before provider egress starts", async () => {
+    let counter = 0;
+    let cancelMission: (() => Promise<void>) | undefined;
+    const backendCancel = vi.fn().mockResolvedValue(undefined);
+    const cancellation = {
+      requestKey: "stop-9", requestedAt: "2026-07-13T12:00:00.000Z",
+      requestedByInternalUserId: "user-1", scope: "run", mode: "cooperative",
+      reason: "User requested stop."
+    };
+    const cancelling = journal(3, 2, [{
+      id: "event-stop", type: "cancellation-requested", payload: { cancellation }
+    }], { status: "cancelling", cancellation, eventHead: { lastSequence: 2, lastEventId: "event-stop" } });
+    const cancelled = journal(4, 3, [{
+      id: "event-terminal", type: "run-cancelled", payload: { cancellation }
+    }], { status: "cancelled", cancellation, eventHead: { lastSequence: 3, lastEventId: "event-terminal" } });
+    mocks.getRun.mockReset().mockResolvedValueOnce(journal(2, 1, [])).mockResolvedValueOnce(cancelling);
+    mocks.finalizeCancellation.mockResolvedValue(cancelled);
+    mocks.createWorker.mockImplementationOnce(async () => {
+      await cancelMission?.();
+      throw new Error("The worker start was interrupted.");
+    });
+
+    await expect(executeCitedBriefMission({
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      backend: { providerId: "openai", cancel: backendCancel } as never, model: "gpt-5",
+      approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
+      onCancellationReady: (cancel) => { cancelMission = cancel; }
+    })).rejects.toThrow("User requested stop.");
+
+    expect(mocks.finalizeCancellation).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "mission-run-4", expectedRunRevision: 3, expectedLastSequence: 2
+    }));
+    expect(backendCancel).toHaveBeenCalledWith("mission-run-4");
+    expect(mocks.executeLocalWorker).not.toHaveBeenCalled();
   });
 });

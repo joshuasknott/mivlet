@@ -6,6 +6,7 @@ import {
   createRuntimeMissionPlan,
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
+  finalizeRuntimeMissionRunCancellation,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
   prepareRuntimeCapabilityGrant,
@@ -134,13 +135,36 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   if (!plan) throw new Error("Mission planning requires the desktop runtime.");
 
   let journal = requireJournal(await createRuntimeMissionRun({ missionId, runId, eventId: id("event"), idempotencyKey: id("create") }));
-  input.onCancellationReady?.(async () => {
-    const current = requireJournal(await getRuntimeMissionRun(runId));
-    await requestRuntimeMissionRunCancellation({
-      runId, eventId: id("event"), requestKey: id("stop"), ...head(current),
-      mode: "cooperative", reason: "User requested stop."
-    });
+  const cancellation = new AbortController();
+  let cancellationRequest: Promise<void> | undefined;
+  let cancellationInitiated = false;
+  let nativeProviderStarted = false;
+  let earlyCancellationFinalization: Promise<never> | undefined;
+  input.onCancellationReady?.(() => {
+    cancellationInitiated = true;
+    cancellationRequest ??= (async () => {
+      const current = requireJournal(await getRuntimeMissionRun(runId));
+      await requestRuntimeMissionRunCancellation({
+        runId, eventId: id("event"), requestKey: id("stop"), ...head(current),
+        mode: "cooperative", reason: "User requested stop."
+      });
+      cancellation.abort();
+      await input.backend.cancel(runId);
+    })();
+    return cancellationRequest;
   });
+  const finalizeEarlyCancellation = () => {
+    earlyCancellationFinalization ??= (async () => {
+      await cancellationRequest;
+      const current = requireJournal(await getRuntimeMissionRun(runId));
+      const settled = requireJournal(await finalizeRuntimeMissionRunCancellation({
+        runId, eventId: id("event"), ...head(current)
+      }));
+      throw new Error(terminalCitedCancellation(settled));
+    })();
+    return earlyCancellationFinalization;
+  };
+  try {
   journal = requireJournal(await createRuntimeMissionWorker({
     runId, eventId: id("event"), idempotencyKey: id("worker-create"),
     ...head(journal), workerId, stepKey: "research", context: [],
@@ -212,11 +236,15 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   journal = requireJournal(await getRuntimeMissionRun(runId));
   const outputReference = toolOutputReference(journal, toolEventId);
 
+  if (cancellationInitiated) await finalizeEarlyCancellation();
+
   const finalHead = head(journal);
+  nativeProviderStarted = true;
   const completion = await executeLocalWorker({
     worker: { ...worker, status: "running" }, backend: input.backend, model: input.model,
     prompt: objective, toolSpecs: [], execute: async () => { throw new Error("The final cited-writing turn cannot call tools."); },
     missionToolEvidence: evidence,
+    signal: cancellation.signal,
     missionWorkerExecution: {
       runId, workerId, workerStartedEventId, routeSelectedEventId,
       usageEventId: id("event"), completionEventId: id("event"), evaluationEventId: id("event"), resultEventId: id("event"), failureEventId: id("event"),
@@ -224,12 +252,18 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       toolEvidence: { toolEventId, outputReference }
     }
   });
-  if (completion.status === "cancelled") throw new Error(completion.reason ?? "The cited brief was cancelled.");
+  if (completion.status === "cancelled") {
+    journal = requireJournal(await getRuntimeMissionRun(runId));
+    throw new Error(terminalCitedCancellation(journal));
+  }
   if (completion.status !== "completed") {
     journal = requireJournal(await getRuntimeMissionRun(runId));
     throw new Error(terminalCitedFailure(journal));
   }
   journal = requireJournal(await getRuntimeMissionRun(runId));
+  if ((journal.run as Record<string, unknown>).status === "cancelled") {
+    throw new Error(terminalCitedCancellation(journal));
+  }
   const terminal = terminalCitedOutcome(journal);
   const valueReference = terminal.valueReference;
   const output = await readRuntimeMissionWorkerOutput(valueReference);
@@ -249,6 +283,10 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
     journal,
     receipt: citedBriefReceipt(journal, outputReceipt, plan, terminal)
   };
+  } catch (error) {
+    if (cancellationInitiated && !nativeProviderStarted) await finalizeEarlyCancellation();
+    throw error;
+  }
 }
 
 function citedBriefReceipt(
@@ -387,6 +425,22 @@ function terminalCitedFailure(journal: Record<string, unknown>): string {
     throw new Error("The cited mission failure did not reach a durable terminal outcome.");
   }
   return message;
+}
+
+function terminalCitedCancellation(journal: Record<string, unknown>): string {
+  const run = journal.run as Record<string, unknown>;
+  const eventHead = run.eventHead as Record<string, unknown> | undefined;
+  const terminalEvent = (journal.events as Array<Record<string, unknown>>).find((candidate) => candidate.id === eventHead?.lastEventId);
+  const cancellation = (terminalEvent?.payload as Record<string, unknown> | undefined)?.cancellation as Record<string, unknown> | undefined;
+  const projected = run.cancellation as Record<string, unknown> | undefined;
+  if (run.status !== "cancelled" || terminalEvent?.type !== "run-cancelled"
+    || typeof cancellation?.requestKey !== "string" || cancellation.requestKey !== projected?.requestKey
+    || cancellation.scope !== "run" || typeof cancellation.requestedAt !== "string") {
+    throw new Error("The cited mission cancellation did not reach a durable terminal outcome.");
+  }
+  return typeof cancellation.reason === "string" && cancellation.reason.trim()
+    ? cancellation.reason
+    : "The cited brief was cancelled.";
 }
 
 function journalSelectedRouteId(journal: Record<string, unknown>): string | undefined {

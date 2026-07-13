@@ -39,6 +39,15 @@ pub struct MissionRunCancelInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionRunFinalizeCancellationInput {
+    run_id: String,
+    event_id: String,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MissionCheckpointCreateInput {
     run_id: String,
     event_id: String,
@@ -193,6 +202,116 @@ pub fn mission_run_request_cancellation(
                 &projected,
                 &at,
             )
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_run_finalize_cancellation(
+    input: MissionRunFinalizeCancellationInput,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let (scope, context, member) = authorized(tx)?;
+            validate_key(&input.run_id, "Mission run", 160)
+                .and_then(|_| validate_key(&input.event_id, "Cancellation terminal event", 200))
+                .map_err(crate::store::StoreError::Invalid)?;
+            if crate::native_api::mission_run_has_active_native_execution(&input.run_id)
+                .map_err(crate::store::StoreError::Invalid)?
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "Native provider cancellation has not settled yet.".into(),
+                ));
+            }
+            let journal = mission_run::get(tx, store, &scope, &member, &input.run_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            let cancellation = journal.run.get("cancellation").cloned().ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission cancellation request is unavailable.".into())
+            })?;
+            let request_key = cancellation
+                .get("requestKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission cancellation request is invalid.".into())
+                })?;
+            let key = format!("cancel-finalize:{request_key}");
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(key.as_str())
+            }) {
+                if existing.get("id").and_then(Value::as_str) == Some(input.event_id.as_str())
+                    && existing.get("type").and_then(Value::as_str) == Some("run-cancelled")
+                    && existing.pointer("/payload/cancellation") == Some(&cancellation)
+                    && journal.run.get("status").and_then(Value::as_str) == Some("cancelled")
+                {
+                    return Ok(journal);
+                }
+                return Err(crate::store::StoreError::Invalid(
+                    "Cancellation terminal idempotency key represents another event.".into(),
+                ));
+            }
+            if journal.run.get("status").and_then(Value::as_str) != Some("cancelling")
+                || journal.run.get("revision").and_then(Value::as_i64)
+                    != Some(input.expected_run_revision)
+                || journal.run.pointer("/eventHead/lastSequence").and_then(Value::as_i64)
+                    != Some(input.expected_last_sequence)
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "Mission cancellation changed before it could be finalized.".into(),
+                ));
+            }
+            let previous = journal.run.pointer("/eventHead/lastEventId").and_then(Value::as_str)
+                .ok_or_else(|| crate::store::StoreError::Invalid("Mission cancellation event is unavailable.".into()))?;
+            let requested = journal.events.iter().find(|event| event.get("id").and_then(Value::as_str) == Some(previous))
+                .ok_or_else(|| crate::store::StoreError::Invalid("Mission cancellation event is unavailable.".into()))?;
+            if requested.get("type").and_then(Value::as_str) != Some("cancellation-requested")
+                || requested.pointer("/payload/cancellation") != Some(&cancellation)
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "Mission cancellation head is invalid.".into(),
+                ));
+            }
+            let at = now();
+            let sequence = input.expected_last_sequence + 1;
+            let event = json!({
+                "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":member,
+                "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":context.internal_user_id,"createdAt":at,"updatedAt":at,
+                "id":input.event_id,"runId":input.run_id,"type":"run-cancelled","sequence":sequence,"previousEventId":previous,
+                "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+                "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":key,"payload":{"cancellation":cancellation}
+            });
+            let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+            })?;
+            projected.insert("status".into(), json!("cancelled"));
+            projected.insert("revision".into(), json!(input.expected_run_revision + 1));
+            projected.insert("updatedAt".into(), json!(at));
+            projected.insert("eventHead".into(), json!({"lastSequence":sequence,"lastEventId":input.event_id}));
+            let settled = mission_run::append(
+                tx, store, &scope, &member, &input.run_id, input.expected_run_revision,
+                input.expected_last_sequence, &input.event_id, "run-cancelled", &key, &event,
+                &Value::Object(projected), &at,
+            )?;
+            let mission_id = journal.run.get("missionId")
+                .or_else(|| journal.run.pointer("/initiator/missionId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| crate::store::StoreError::Invalid("Mission run has no selected mission.".into()))?;
+            let lifecycle = mission_plan::get(tx, store, &scope, &member, mission_id)?
+                .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+            let acceptance = lifecycle.mission.pointer("/acceptance/criteria").and_then(Value::as_array)
+                .into_iter().flatten().filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+                .map(|criterion_key| json!({"criterionKey":criterion_key,"status":"not-evaluated","evidenceRefs":[],
+                    "summary":"The mission was cancelled before this criterion could be accepted."}))
+                .collect::<Vec<_>>();
+            let result = json!({"outcome":"cancelled","summary":"The mission stopped after its cancellation request was observed.",
+                "producingRunIds":[input.run_id],"outputs":[],"acceptance":acceptance,"completedAt":at});
+            mission_plan::mark_cancelled(tx, store, &scope, &member, &lifecycle, &result, &at)?;
+            Ok(settled)
         })
         .map_err(|error| error.to_string())
 }

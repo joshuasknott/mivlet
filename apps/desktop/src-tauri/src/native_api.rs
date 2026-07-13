@@ -592,6 +592,14 @@ fn acquire_mission_execution(
     Ok(MissionExecutionLease { key })
 }
 
+pub(crate) fn mission_run_has_active_native_execution(run_id: &str) -> Result<bool, String> {
+    let prefix = format!("{run_id}\0");
+    mission_executions()
+        .lock()
+        .map(|executions| executions.iter().any(|key| key.starts_with(&prefix)))
+        .map_err(|_| "Fable could not access the mission execution registry.".to_string())
+}
+
 /// Look up the key for a provider, preferring the OS keychain and falling back
 /// to the in-memory store. Returns Err if neither has a credential — the
 /// command then fails closed (no egress). The resolved key never crosses into
@@ -752,6 +760,14 @@ pub async fn stream_backend_completion(
         (Some(_), None) => {}
     }
     let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
+    // Register the mission execution before reading its journal. This closes the
+    // preflight-to-egress race with early cancellation finalization: either the
+    // finalizer observes this lease, or this preflight observes its terminal fact.
+    let _mission_execution_lease = request
+        .mission_worker_execution
+        .as_ref()
+        .map(acquire_mission_execution)
+        .transpose()?;
     let mission_preflight = request
         .mission_worker_execution
         .as_ref()
@@ -774,12 +790,6 @@ pub async fn stream_backend_completion(
         }
         None => None,
     };
-    let _mission_execution_lease = request
-        .mission_worker_execution
-        .as_ref()
-        .filter(|_| mission_authority.is_some())
-        .map(acquire_mission_execution)
-        .transpose()?;
     let observation_started = Instant::now();
     let credential = require_key(&request.provider_id)?;
     let connection =
@@ -1128,7 +1138,9 @@ pub async fn stream_backend_completion(
         }
     }
     let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
-        let outcome = if !cancelled && completed && mission_failure.is_none() {
+        let outcome = if cancelled {
+            Some(crate::mission_workers::NativeWorkerTerminalOutcome::Cancelled)
+        } else if completed && mission_failure.is_none() {
             Some(
                 crate::mission_workers::NativeWorkerTerminalOutcome::Completed {
                     text: terminal_observation

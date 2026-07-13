@@ -344,6 +344,38 @@ pub fn mark_failed(
     )
 }
 
+pub fn mark_cancelled(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    terminal_result: &Value,
+    at: &str,
+) -> Result<()> {
+    if terminal_result.get("outcome").and_then(Value::as_str) != Some("cancelled")
+        || terminal_result
+            .get("producingRunIds")
+            .and_then(Value::as_array)
+            .is_none_or(|ids| ids.len() != 1)
+    {
+        return Err(StoreError::Invalid(
+            "Mission cancellation result is invalid.".into(),
+        ));
+    }
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "running",
+        "cancelled",
+        Some(terminal_result),
+        at,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn transition_status(
     tx: &Connection,

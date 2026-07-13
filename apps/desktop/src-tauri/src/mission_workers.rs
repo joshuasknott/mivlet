@@ -138,6 +138,7 @@ pub(crate) enum NativeWorkerTerminalOutcome {
         retryable: bool,
         usage: Option<(i64, i64)>,
     },
+    Cancelled,
 }
 
 #[derive(Deserialize)]
@@ -536,8 +537,13 @@ pub(crate) fn preflight_native_worker_completion(
                     event.get("idempotencyKey").and_then(Value::as_str)
                         == Some(event_key.as_str())
                 }) {
-                    exact_native_terminal_replay(existing, binding, output.as_ref())
-                        .map_err(crate::store::StoreError::Invalid)?;
+                    if existing.get("type").and_then(Value::as_str) == Some("run-cancelled") {
+                        exact_native_cancellation_replay(&journal, existing, binding)
+                            .map_err(crate::store::StoreError::Invalid)?;
+                    } else {
+                        exact_native_terminal_replay(existing, binding, output.as_ref())
+                            .map_err(crate::store::StoreError::Invalid)?;
+                    }
                     validate_usage_replay(&journal, existing, binding, model)
                         .map_err(crate::store::StoreError::Invalid)?;
                     validate_output_receipt_replay(
@@ -702,6 +708,19 @@ pub(crate) fn settle_native_worker_completion(
             .ok_or_else(|| {
                 crate::store::StoreError::Invalid("Mission run disappeared.".into())
             })?;
+            if matches!(outcome, NativeWorkerTerminalOutcome::Cancelled)
+                || journal.run.get("status").and_then(Value::as_str) == Some("cancelling")
+            {
+                return append_native_run_cancellation(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &authority.internal_user_id,
+                    &journal,
+                    &authority.binding,
+                );
+            }
             let (event_key, event_id, event_type) = match &outcome {
                 NativeWorkerTerminalOutcome::Completed { .. } => (
                     native_terminal_event_keys(&authority.binding)
@@ -717,12 +736,17 @@ pub(crate) fn settle_native_worker_completion(
                     authority.binding.failure_event_id.as_str(),
                     "worker-failed",
                 ),
+                NativeWorkerTerminalOutcome::Cancelled => unreachable!(),
             };
             if let Some(existing) = journal.events.iter().find(|event| {
                 event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
             }) {
-                exact_native_terminal_replay(existing, &authority.binding, authority.output.as_ref())
-                    .map_err(crate::store::StoreError::Invalid)?;
+                exact_native_terminal_replay(
+                    existing,
+                    &authority.binding,
+                    authority.output.as_ref(),
+                )
+                .map_err(crate::store::StoreError::Invalid)?;
                 validate_usage_replay(
                     &journal,
                     existing,
@@ -854,6 +878,7 @@ pub(crate) fn settle_native_worker_completion(
                         "code":code,"category":category,"message":message,"retryable":retryable
                     }})
                 },
+                NativeWorkerTerminalOutcome::Cancelled => unreachable!(),
             };
             let mut terminal_expected_revision = authority.binding.expected_run_revision;
             let mut terminal_expected_sequence = authority.binding.expected_last_sequence;
@@ -1600,9 +1625,115 @@ fn append_single_worker_run_failure(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn append_native_run_cancellation(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> crate::store::Result<()> {
+    let key =
+        native_terminal_event_keys(binding).map_err(crate::store::StoreError::Invalid)?[2].clone();
+    if let Some(existing) = journal
+        .events
+        .iter()
+        .find(|event| event.get("idempotencyKey").and_then(Value::as_str) == Some(key.as_str()))
+    {
+        return exact_native_cancellation_replay(journal, existing, binding)
+            .map_err(crate::store::StoreError::Invalid);
+    }
+    let cancellation_event = validate_native_cancellation_head(journal, binding)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let cancellation = cancellation_event
+        .pointer("/payload/cancellation")
+        .cloned()
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission cancellation fact is invalid.".into())
+        })?;
+    let at = now();
+    let sequence = binding.expected_last_sequence + 2;
+    let event = json!({
+        "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,"createdAt":at,"updatedAt":at,
+        "id":binding.result_event_id,"runId":binding.run_id,"type":"run-cancelled","sequence":sequence,
+        "previousEventId":cancellation_event.get("id"),"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "occurredAt":at,"actor":{"kind":"system"},
+        "correlationKey":format!("native-worker-completion:v1:run-revision:{}",binding.expected_run_revision),
+        "idempotencyKey":key,"payload":{"cancellation":cancellation}
+    });
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("status".into(), json!("cancelled"));
+    projected.insert("revision".into(), json!(binding.expected_run_revision + 2));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":binding.result_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        binding.expected_run_revision + 1,
+        binding.expected_last_sequence + 1,
+        &binding.result_event_id,
+        "run-cancelled",
+        &key,
+        &event,
+        &Value::Object(projected),
+        &at,
+    )?;
+
+    let mission_id = journal
+        .run
+        .get("missionId")
+        .or_else(|| journal.run.pointer("/initiator/missionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+        })?;
+    let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    validate_lifecycle(&journal.run, &lifecycle).map_err(crate::store::StoreError::Invalid)?;
+    let acceptance = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+        .map(|criterion_key| {
+            json!({
+                "criterionKey":criterion_key,"status":"not-evaluated","evidenceRefs":[],
+                "summary":"The mission was cancelled before this criterion could be accepted."
+            })
+        })
+        .collect::<Vec<_>>();
+    let mission_result = json!({
+        "outcome":"cancelled","summary":"The mission stopped after its cancellation request was observed.",
+        "producingRunIds":[binding.run_id],"outputs":[],"acceptance":acceptance,"completedAt":at
+    });
+    mission_plan::mark_cancelled(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &lifecycle,
+        &mission_result,
+        &at,
+    )?;
+    Ok(())
+}
+
 fn native_terminal_event_keys(
     binding: &NativeWorkerExecutionBinding,
-) -> Result<[String; 2], String> {
+) -> Result<[String; 3], String> {
     let key = bounded(
         &binding.idempotency_key,
         "Worker terminal idempotency key",
@@ -1611,6 +1742,7 @@ fn native_terminal_event_keys(
     Ok([
         format!("worker-complete:{key}"),
         format!("worker-fail:{key}"),
+        format!("worker-cancel:{key}"),
     ])
 }
 
@@ -2200,7 +2332,53 @@ fn validate_openai_worker_body(
     Ok(())
 }
 
-fn exact_native_terminal_replay(
+fn validate_native_cancellation_head<'a>(
+    journal: &'a mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<&'a Value, String> {
+    let event = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str)
+                == journal
+                    .run
+                    .pointer("/eventHead/lastEventId")
+                    .and_then(Value::as_str)
+        })
+        .ok_or_else(|| "Mission cancellation event is unavailable.".to_string())?;
+    let cancellation = event.pointer("/payload/cancellation");
+    let request_key = cancellation
+        .and_then(|value| value.get("requestKey"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Mission cancellation request key is invalid.".to_string())?;
+    if journal.run.get("status").and_then(Value::as_str) != Some("cancelling")
+        || journal.run.get("revision").and_then(Value::as_i64)
+            != Some(binding.expected_run_revision + 1)
+        || journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(binding.expected_last_sequence + 1)
+        || event.get("type").and_then(Value::as_str) != Some("cancellation-requested")
+        || event.get("sequence").and_then(Value::as_i64) != Some(binding.expected_last_sequence + 1)
+        || event.get("previousEventId").and_then(Value::as_str)
+            != Some(native_completion_base_event(binding))
+        || event.get("idempotencyKey").and_then(Value::as_str)
+            != Some(format!("cancel:{request_key}").as_str())
+        || cancellation != journal.run.get("cancellation")
+        || cancellation
+            .and_then(|value| value.get("scope"))
+            .and_then(Value::as_str)
+            != Some("run")
+    {
+        return Err("Mission cancellation does not match the executing worker.".into());
+    }
+    Ok(event)
+}
+
+fn exact_native_terminal_replay_with_journal(
+    journal: &mission_run::MissionRunJournalRow,
     event: &Value,
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
@@ -2210,6 +2388,53 @@ fn exact_native_terminal_replay(
         binding.expected_run_revision
     );
     let event_type = event.get("type").and_then(Value::as_str);
+    if event_type == Some("run-cancelled") {
+        let cancellation_event = journal
+            .events
+            .iter()
+            .find(|candidate| {
+                candidate.get("id").and_then(Value::as_str)
+                    == event.get("previousEventId").and_then(Value::as_str)
+            })
+            .ok_or_else(|| "Mission cancellation replay fact is missing.".to_string())?;
+        let cancellation = cancellation_event.pointer("/payload/cancellation");
+        let request_key = cancellation
+            .and_then(|value| value.get("requestKey"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission cancellation replay request is invalid.".to_string())?;
+        let valid = event.get("id").and_then(Value::as_str)
+            == Some(binding.result_event_id.as_str())
+            && event.get("runId").and_then(Value::as_str) == Some(binding.run_id.as_str())
+            && event.get("idempotencyKey").and_then(Value::as_str)
+                == Some(format!("worker-cancel:{}", binding.idempotency_key).as_str())
+            && event.get("sequence").and_then(Value::as_i64)
+                == Some(binding.expected_last_sequence + 2)
+            && event.get("correlationKey").and_then(Value::as_str)
+                == Some(expected_correlation.as_str())
+            && event.pointer("/payload/cancellation") == cancellation
+            && cancellation_event.get("type").and_then(Value::as_str)
+                == Some("cancellation-requested")
+            && cancellation_event.get("sequence").and_then(Value::as_i64)
+                == Some(binding.expected_last_sequence + 1)
+            && cancellation_event
+                .get("previousEventId")
+                .and_then(Value::as_str)
+                == Some(native_completion_base_event(binding))
+            && cancellation_event
+                .get("idempotencyKey")
+                .and_then(Value::as_str)
+                == Some(format!("cancel:{request_key}").as_str())
+            && journal.run.get("status").and_then(Value::as_str) == Some("cancelled")
+            && journal.run.get("cancellation") == cancellation
+            && journal
+                .run
+                .pointer("/eventHead/lastEventId")
+                .and_then(Value::as_str)
+                == Some(binding.result_event_id.as_str());
+        return valid
+            .then_some(())
+            .ok_or_else(|| "Mission cancellation replay fact is invalid.".to_string());
+    }
     let (expected_event_id, expected_key, expected_previous, expected_sequence, payload_valid) =
         match event_type {
             Some("worker-completed") => {
@@ -2293,6 +2518,26 @@ fn exact_native_terminal_replay(
     }
 }
 
+fn exact_native_cancellation_replay(
+    journal: &mission_run::MissionRunJournalRow,
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<(), String> {
+    exact_native_terminal_replay_with_journal(journal, event, binding, None)
+}
+
+fn exact_native_terminal_replay(
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> Result<(), String> {
+    let empty = mission_run::MissionRunJournalRow {
+        run: json!({}),
+        events: Vec::new(),
+    };
+    exact_native_terminal_replay_with_journal(&empty, event, binding, output)
+}
+
 fn validate_output_receipt_replay(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -2344,6 +2589,9 @@ fn validate_native_result_replay(
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
 ) -> Result<(), String> {
+    if terminal.get("type").and_then(Value::as_str) == Some("run-cancelled") {
+        return Ok(());
+    }
     if terminal.get("type").and_then(Value::as_str) == Some("worker-failed") {
         let terminal_sequence = terminal
             .get("sequence")
@@ -2518,6 +2766,9 @@ fn validate_usage_replay(
     binding: &NativeWorkerExecutionBinding,
     model: &str,
 ) -> Result<(), String> {
+    if terminal.get("type").and_then(Value::as_str) == Some("run-cancelled") {
+        return Ok(());
+    }
     if terminal.get("previousEventId").and_then(Value::as_str)
         == Some(native_completion_base_event(binding))
     {
@@ -4304,6 +4555,55 @@ mod tests {
         let mut colliding = binding.clone();
         colliding.evaluation_event_id = colliding.completion_event_id.clone();
         assert!(validate_native_completion_head(&live, &colliding).is_err());
+    }
+
+    #[test]
+    fn native_cancellation_requires_the_exact_request_head_and_terminal_replay() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-3".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-complete".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-result".into(),
+            failure_event_id: "event-failure".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+            tool_evidence: None,
+        };
+        let cancellation = json!({
+            "requestKey":"stop-1","requestedAt":"t","requestedByInternalUserId":"user-1",
+            "scope":"run","mode":"cooperative","reason":"User requested stop."
+        });
+        let requested = json!({
+            "id":"event-stop","runId":"run-1","type":"cancellation-requested","sequence":4,
+            "previousEventId":"event-route","idempotencyKey":"cancel:stop-1",
+            "payload":{"cancellation":cancellation}
+        });
+        let cancelling = mission_run::MissionRunJournalRow {
+            run: json!({"status":"cancelling","revision":5,"cancellation":cancellation,
+                "eventHead":{"lastSequence":4,"lastEventId":"event-stop"}}),
+            events: vec![requested.clone()],
+        };
+        assert!(validate_native_cancellation_head(&cancelling, &binding).is_ok());
+
+        let terminal = json!({
+            "id":"event-result","runId":"run-1","type":"run-cancelled","sequence":5,
+            "previousEventId":"event-stop","idempotencyKey":"worker-cancel:terminal-1",
+            "correlationKey":"native-worker-completion:v1:run-revision:4",
+            "payload":{"cancellation":cancellation}
+        });
+        let mut settled = mission_run::MissionRunJournalRow {
+            run: json!({"status":"cancelled","revision":6,"cancellation":cancellation,
+                "eventHead":{"lastSequence":5,"lastEventId":"event-result"}}),
+            events: vec![requested, terminal.clone()],
+        };
+        assert!(exact_native_cancellation_replay(&settled, &terminal, &binding).is_ok());
+        settled.events[1]["payload"]["cancellation"]["requestKey"] = json!("stop-other");
+        assert!(exact_native_cancellation_replay(&settled, &settled.events[1], &binding).is_err());
     }
 
     #[test]
