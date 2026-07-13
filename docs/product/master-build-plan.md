@@ -442,10 +442,16 @@ the assistant's compact `mission-result` linkage; it contains result/artifact id
 outcome, not copied receipt prose or authority. Exact terminal replay verifies both
 encrypted message checkpoints and their adjacency. Desktop hydration uses that
 linkage to restore the accepted `View artifact` action or suppress artifact creation
-for a partial draft without reconstructing a receipt from mutable UI state. Existing
-pre-terminal failure/cancellation paths still keep their current error presentation;
-general mission transcript projection and restart hydration of the full compact run
-receipt remain open.
+for a partial draft without reconstructing authority from mutable UI state. A bounded
+authenticated native projection now also rebuilds the compact cited receipt after
+restart. For each terminal assistant marker it requires the exact owner-qualified
+journal, message detail, route, usage, evaluation, output receipt, durable budgets,
+result event, and accepted-artifact binding, and returns only the existing secret-safe
+receipt fields. Corrupt, ambiguous, or legacy evidence is unavailable rather than
+inferred; the desktop reads markers in bounded batches and shows the same accepted or
+not-accepted receipt used at settlement. Existing pre-terminal failure/cancellation
+paths still keep their current error presentation, and general mission transcript
+projection remains open.
 
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes
@@ -560,7 +566,10 @@ also carries a Fable-calculated USD observation from the reviewed official
 standard API list rate; the durable pricing reference records the source, review
 date, and input/output rates, while every other model remains explicitly unknown.
 The Wave 4B
-checkboxes stay unchecked because the experience is not yet general. `/stop`
+checkboxes stay unchecked because the experience is not yet general. The cited
+accepted/partial receipt now survives restart through the exact native projection
+described above; this does not claim receipt coverage for other mission shapes or
+inspectable consequential-work plans. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
 cancel path, and persists the durable cancellation request plus terminal cancelled

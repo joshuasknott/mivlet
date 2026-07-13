@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts } from "./runtime";
+import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts, readRuntimeCitedMissionReceipts } from "./runtime";
 import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -79,6 +79,7 @@ const runtimeMocks = vi.hoisted(() => ({
 
 vi.mock("./lib/cited-brief-mission", () => ({
   isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
+  isCitedBriefMissionReceipt: (value: unknown) => typeof value === "object" && value !== null,
   executeCitedBriefMission: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.citedBriefCalls.push(input);
     return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
@@ -186,6 +187,8 @@ vi.mock("./runtime", () => ({
   createRuntimeResponseArtifact: vi.fn(async () => null),
   listRuntimeThreadArtifacts: vi.fn(async () => []),
   getRuntimeArtifact: vi.fn(async () => null),
+  readRuntimeCitedMissionReceipts: vi.fn(async (_threadId: string, messageIds: string[]) =>
+    messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
   beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
     runtimeMocks.connectorOAuthCalls.push(request.connectorId);
     return null;
@@ -414,6 +417,9 @@ describe("Fable home", () => {
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
     vi.mocked(listRuntimeThreadArtifacts).mockReset();
     vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
+    vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
+    vi.mocked(readRuntimeCitedMissionReceipts).mockImplementation(async (_threadId, messageIds) =>
+      messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));
     removeDesktopRuntime();
   });
 
@@ -1521,12 +1527,26 @@ describe("Fable home", () => {
       },
       versions: [], sourceMessageId: null
     }] as never);
+    vi.mocked(readRuntimeCitedMissionReceipts).mockResolvedValue([{
+      messageId: "message-cited-assistant", status: "available", receipt: {
+        acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.",
+        provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate.",
+        inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1,
+        trust: "provider-generated-with-external-evidence", maxInputTokens: 32000,
+        maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1,
+        costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price"
+      }
+    }]);
 
     await renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Cited restart" }));
 
     expect(await screen.findByText("Restart-safe cited brief [source-1].")).toBeInTheDocument();
+    await waitFor(() => expect(readRuntimeCitedMissionReceipts).toHaveBeenCalledWith(
+      "thread-cited-restart", ["message-cited-assistant"]
+    ));
+    expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
@@ -1553,12 +1573,25 @@ describe("Fable home", () => {
         content: "Draft preserved, but not accepted: evidence missing."
       }
     }];
+    vi.mocked(readRuntimeCitedMissionReceipts).mockResolvedValue([{
+      messageId: "message-partial-assistant", status: "available", receipt: {
+        acceptanceStatus: "not-accepted", acceptanceSummary: "evidence missing",
+        provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate.",
+        inputTokens: 90, outputTokens: 40, toolCalls: 1, sourceCount: 0,
+        trust: "provider-generated-with-external-evidence", maxInputTokens: 32000,
+        maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1
+      }
+    }]);
 
     await renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Partial restart" }));
 
     expect(await screen.findByText("Draft preserved, but not accepted: evidence missing.")).toBeInTheDocument();
+    await waitFor(() => expect(readRuntimeCitedMissionReceipts).toHaveBeenCalledWith(
+      "thread-partial-restart", ["message-partial-assistant"]
+    ));
+    expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("Policy acceptance not met");
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
 

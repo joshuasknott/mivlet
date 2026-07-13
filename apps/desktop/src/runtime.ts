@@ -3102,6 +3102,19 @@ export async function readRuntimeMissionWorkerOutput(valueReference: string) {
   catch (error) { throw toRuntimeError(error); }
 }
 
+export type RuntimeCitedMissionReceiptProjection =
+  | { messageId: string; status: "available"; receipt: Record<string, unknown> }
+  | { messageId: string; status: "unavailable" };
+
+export async function readRuntimeCitedMissionReceipts(threadId: string, messageIds: string[]) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeCitedMissionReceiptProjection[]>("mission_worker_cited_receipts_read", {
+      input: { threadId, messageIds }
+    });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
 // ---------------------------------------------------------------------------
 // MCP local STDIO process bridge. Rust resolves an opaque encrypted launch
 // reference, owns the child and validates every frame; TypeScript sees only

@@ -7,6 +7,7 @@ import {
   getRuntimeMissionPlan,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
+  readRuntimeCitedMissionReceipts,
   readRuntimeMissionWorkerOutput,
   recoverRuntimeInterruptedCitedMissions,
   requestRuntimeMissionRunCancellation,
@@ -34,6 +35,7 @@ describe("mission runtime boundary", () => {
     await expect(getRuntimeMissionPlan("mission-1")).resolves.toBeNull();
     await expect(getRuntimeMissionRun("run-1")).resolves.toBeNull();
     await expect(readRuntimeMissionWorkerOutput("mission-output:v1:ref")).resolves.toBeNull();
+    await expect(readRuntimeCitedMissionReceipts("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
     await expect(createRuntimeMissionCheckpoint({
@@ -69,6 +71,7 @@ describe("mission runtime boundary", () => {
     const cancel = { runId: "run-1", eventId: "event-cancel", requestKey: "stop-1", expectedRunRevision: 3, expectedLastSequence: 2, mode: "cooperative" as const, reason: "User requested stop." };
     await requestRuntimeMissionRunCancellation(cancel);
     await readRuntimeMissionWorkerOutput("mission-output:v1:ref");
+    await readRuntimeCitedMissionReceipts("thread-1", ["message-1"]);
     await listRuntimeNativeProviderRoutes();
     await recoverRuntimeInterruptedCitedMissions();
     const checkpoint = {
@@ -87,6 +90,7 @@ describe("mission runtime boundary", () => {
       ["mission_run_get", { runId: "run-1" }],
       ["mission_run_request_cancellation", { input: cancel }],
       ["mission_worker_output_read", { valueReference: "mission-output:v1:ref" }],
+      ["mission_worker_cited_receipts_read", { input: { threadId: "thread-1", messageIds: ["message-1"] } }],
       ["list_native_provider_routes"],
       ["mission_run_recover_interrupted_cited"],
       ["mission_run_create_checkpoint", { input: checkpoint }]

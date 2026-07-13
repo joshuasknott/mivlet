@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeCitedBriefMission, isCitedBriefMissionPrompt } from "./cited-brief-mission";
+import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt } from "./cited-brief-mission";
 
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
@@ -120,6 +120,20 @@ describe("cited brief mission composition", () => {
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
     expect(cancelMission).toBeTypeOf("function");
+  });
+
+  it("accepts only the closed secret-safe cited receipt projection", () => {
+    const receipt = {
+      acceptanceStatus: "accepted", acceptanceSummary: "Accepted", provider: "openai", model: "gpt-5",
+      routeReason: "Selected route.", inputTokens: 12, outputTokens: 3, toolCalls: 1, sourceCount: 1,
+      trust: "provider-generated-with-external-evidence", maxInputTokens: 100, maxOutputTokens: 50,
+      maxToolCalls: 1, maxDurationMs: 1000, maxAttempts: 1,
+      costAmount: "0.01", costCurrency: "USD", pricingReference: "official"
+    };
+    expect(isCitedBriefMissionReceipt(receipt)).toBe(true);
+    expect(isCitedBriefMissionReceipt({ ...receipt, credentialBinding: "secret" })).toBe(false);
+    expect(isCitedBriefMissionReceipt({ ...receipt, costCurrency: undefined })).toBe(false);
+    expect(isCitedBriefMissionReceipt({ ...receipt, inputTokens: -1 })).toBe(false);
   });
 
   it("returns preserved output as an explicit unaccepted partial outcome", async () => {

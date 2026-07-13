@@ -67,6 +67,30 @@ export interface CitedBriefMissionReceipt {
   pricingReference?: string;
 }
 
+export function isCitedBriefMissionReceipt(value: unknown): value is CitedBriefMissionReceipt {
+  if (typeof value !== "object" || value === null) return false;
+  const receipt = value as Record<string, unknown>;
+  const required = [
+    "acceptanceStatus", "acceptanceSummary", "provider", "model", "routeReason",
+    "inputTokens", "outputTokens", "toolCalls", "sourceCount", "trust",
+    "maxInputTokens", "maxOutputTokens", "maxToolCalls", "maxDurationMs", "maxAttempts"
+  ];
+  const optional = ["costAmount", "costCurrency", "pricingReference"];
+  const exactKeys = Object.keys(receipt).every((key) => required.includes(key) || optional.includes(key))
+    && required.every((key) => key in receipt);
+  const strings = ["acceptanceSummary", "provider", "model", "routeReason", "trust"]
+    .every((key) => typeof receipt[key] === "string" && (receipt[key] as string).trim().length > 0);
+  const counts = ["inputTokens", "outputTokens", "toolCalls", "sourceCount"]
+    .every((key) => Number.isInteger(receipt[key]) && (receipt[key] as number) >= 0);
+  const limits = ["maxInputTokens", "maxOutputTokens", "maxToolCalls", "maxDurationMs", "maxAttempts"]
+    .every((key) => Number.isInteger(receipt[key]) && (receipt[key] as number) > 0);
+  const presentCost = optional.filter((key) => key in receipt);
+  const cost = presentCost.length === 0 || presentCost.length === optional.length
+    && optional.every((key) => typeof receipt[key] === "string" && (receipt[key] as string).trim().length > 0);
+  return exactKeys && strings && counts && limits && cost
+    && (receipt.acceptanceStatus === "accepted" || receipt.acceptanceStatus === "not-accepted");
+}
+
 export function isCitedBriefMissionPrompt(value: string): boolean {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
   return /\b(search|research|find)\b/.test(normalized)

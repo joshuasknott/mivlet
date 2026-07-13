@@ -11,11 +11,11 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { isCitedBriefMissionPrompt, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
+import { isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
+import { getRuntimeArtifact, listRuntimeThreadArtifacts, readRuntimeCitedMissionReceipts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, DirectiveCards, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -82,12 +82,19 @@ export function ChatWorkspace() {
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
+  const [hydratedMissionReceipts, setHydratedMissionReceipts] = useState<{
+    key: string;
+    receipts: Record<string, CitedBriefMissionReceipt>;
+  }>({ key: "", receipts: {} });
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
   const draftHydrationKey = useRef<string | null>(null);
+  const missionReceiptHydrationKey = useRef<string | null>(null);
+  const missionReceiptHydrationRequestKey = useRef<string | null>(null);
   const activeAssistantMessageId = useRef<string | null>(null);
+  const hydratedConversation = durableConversation.state.conversation;
   const boundWorkspaceId =
     runtime.accountWorkspaceStatus.accountBound &&
     (runtime.accountWorkspaceStatus.state === "ready" ||
@@ -379,6 +386,17 @@ export function ChatWorkspace() {
     }
   }, [projectStore.loading, selectedProject, selectedProjectId]);
 
+  const citedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
+    message.kind === "assistant" && message.detail?.type === "mission-result"
+  ) ?? [];
+  const activeMissionReceiptHydrationKey = selectedConversationThreadId
+    && hydratedConversation?.thread.id === selectedConversationThreadId
+    && citedMissionMessages.length > 0
+    ? `${invitationContextKey}:${boundWorkspaceId ?? "unbound"}:${hydratedConversation.thread.id}:${citedMissionMessages
+      .map(({ message }) => `${message.id}:${message.currentRevisionId}`)
+      .join("|")}`
+    : "";
+
   useEffect(() => {
     const hydrated = durableConversation.state.conversation;
     if (!selectedConversationThreadId || !hydrated || hydrated.thread.id !== selectedConversationThreadId) {
@@ -405,6 +423,49 @@ export function ChatWorkspace() {
       };
     }));
   }, [conversationMessages.length, durableConversation.state.conversation, selectedConversationThreadId]);
+
+  useEffect(() => {
+    const hydrated = hydratedConversation;
+    if (!hydrated || !activeMissionReceiptHydrationKey) return;
+    const missionMessages = citedMissionMessages;
+    const hydrationKey = activeMissionReceiptHydrationKey;
+    if (
+      missionReceiptHydrationKey.current === hydrationKey
+      || missionReceiptHydrationRequestKey.current === hydrationKey
+    ) return;
+    missionReceiptHydrationRequestKey.current = hydrationKey;
+    let active = true;
+    const batches = Array.from(
+      { length: Math.ceil(missionMessages.length / 32) },
+      (_, index) => missionMessages.slice(index * 32, index * 32 + 32).map(({ message }) => message.id)
+    );
+    void Promise.all(batches.map((messageIds) =>
+      readRuntimeCitedMissionReceipts(hydrated.thread.id, messageIds)
+    )).then((results) => {
+      if (!active) return;
+      missionReceiptHydrationRequestKey.current = null;
+      missionReceiptHydrationKey.current = hydrationKey;
+      const receipts = new Map(results
+        .flatMap((result) => result ?? [])
+        .flatMap((result) => result.status === "available" && isCitedBriefMissionReceipt(result.receipt)
+          ? [[result.messageId, result.receipt] as const]
+          : []));
+      setHydratedMissionReceipts({
+        key: hydrationKey,
+        receipts: Object.fromEntries(receipts)
+      });
+    }).catch(() => {
+      if (active && missionReceiptHydrationRequestKey.current === hydrationKey) {
+        missionReceiptHydrationRequestKey.current = null;
+      }
+    });
+    return () => {
+      active = false;
+      if (missionReceiptHydrationRequestKey.current === hydrationKey) {
+        missionReceiptHydrationRequestKey.current = null;
+      }
+    };
+  }, [activeMissionReceiptHydrationKey]);
 
   useEffect(() => {
     let active = true;
@@ -500,6 +561,10 @@ export function ChatWorkspace() {
     return (
       <section className="conversation-feed" aria-label="Conversation">
         {conversationMessages.map((message) => {
+          const missionReceipt = message.missionReceipt
+            ?? (hydratedMissionReceipts.key === activeMissionReceiptHydrationKey
+              ? hydratedMissionReceipts.receipts[message.id]
+              : undefined);
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
             || entry.artifact.id === message.missionArtifactId
@@ -511,7 +576,7 @@ export function ChatWorkspace() {
               className={`conversation-message conversation-message--${message.role}`}
             >
               <p>{message.content}</p>
-              {message.role === "assistant" && message.missionReceipt ? <MissionRunReceipt receipt={message.missionReceipt} /> : null}
+              {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
               {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
                 <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
               ) : null}

@@ -184,6 +184,15 @@ struct WorkerGrantInput {
     capability_grant_id: String,
 }
 
+const MAX_CITED_RECEIPT_MESSAGES: usize = 32;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CitedReceiptReadInput {
+    thread_id: String,
+    message_ids: Vec<String>,
+}
+
 #[tauri::command]
 pub fn mission_worker_output_read(
     value_reference: String,
@@ -214,6 +223,558 @@ pub fn mission_worker_output_read(
             )
         })
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_worker_cited_receipts_read(
+    input: CitedReceiptReadInput,
+) -> Result<Vec<Value>, String> {
+    if input.thread_id.trim().is_empty()
+        || input.thread_id.len() > 160
+        || input.message_ids.is_empty()
+        || input.message_ids.len() > MAX_CITED_RECEIPT_MESSAGES
+        || input
+            .message_ids
+            .iter()
+            .any(|id| id.trim().is_empty() || id.len() > 160)
+        || input.message_ids.iter().collect::<BTreeSet<_>>().len() != input.message_ids.len()
+    {
+        return Err("Cited mission receipt request is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required.".into(),
+                )
+            })?;
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                context.active_workspace.local_workspace_id,
+            )?;
+            let messages = message::list(tx, store, &scope, &input.thread_id)?;
+            Ok(input
+                .message_ids
+                .iter()
+                .map(|message_id| {
+                    let receipt = messages
+                        .iter()
+                        .find(|candidate| candidate.id == *message_id)
+                        .ok_or_else(|| {
+                            crate::store::StoreError::Invalid(
+                                "Cited mission message is unavailable.".into(),
+                            )
+                        })
+                        .and_then(|message| {
+                            project_cited_mission_receipt(tx, store, &scope, &member, message)
+                        });
+                    match receipt {
+                        Ok(receipt) => json!({
+                            "messageId":message_id,
+                            "status":"available",
+                            "receipt":receipt
+                        }),
+                        Err(_) => json!({
+                            "messageId":message_id,
+                            "status":"unavailable"
+                        }),
+                    }
+                })
+                .collect())
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn project_cited_mission_receipt(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    message: &message::MessageRow,
+) -> crate::store::Result<Value> {
+    let detail = message.detail.as_object().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission message detail is invalid.".into())
+    })?;
+    let run_id = message.run_id.as_deref().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission message run is missing.".into())
+    })?;
+    let mission_id = detail
+        .get("missionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission message identity is invalid.".into())
+        })?;
+    let result_event_id = detail
+        .get("resultEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission result identity is invalid.".into())
+        })?;
+    let outcome = detail
+        .get("outcome")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission outcome is invalid.".into())
+        })?;
+    let detail_keys = if outcome == "accepted" {
+        [
+            "type",
+            "missionId",
+            "resultEventId",
+            "outcome",
+            "artifactId",
+            "artifactVersionId",
+        ]
+        .as_slice()
+    } else {
+        ["type", "missionId", "resultEventId", "outcome"].as_slice()
+    };
+    if message.kind != "assistant"
+        || message.current_revision_state != "terminal"
+        || message.current_revision_number != 1
+        || detail.get("type").and_then(Value::as_str) != Some("mission-result")
+        || !matches!(outcome, "accepted" | "partial")
+        || detail.len() != detail_keys.len()
+        || detail
+            .keys()
+            .any(|key| !detail_keys.contains(&key.as_str()))
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission message linkage is invalid.".into(),
+        ));
+    }
+    let journal =
+        mission_run::get(tx, store, scope, owner_member_id, run_id)?.ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission journal is unavailable.".into())
+        })?;
+    let lifecycle =
+        mission_plan::get(tx, store, scope, owner_member_id, mission_id)?.ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission plan is unavailable.".into())
+        })?;
+    if journal.run.get("id").and_then(Value::as_str) != Some(run_id)
+        || journal
+            .run
+            .pointer("/initiator/missionId")
+            .and_then(Value::as_str)
+            != Some(mission_id)
+        || journal.run.get("sourceThreadId").and_then(Value::as_str)
+            != Some(message.thread_id.as_str())
+        || lifecycle
+            .mission
+            .pointer("/scope/sourceThreadId")
+            .and_then(Value::as_str)
+            != Some(message.thread_id.as_str())
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(result_event_id)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission receipt scope is invalid.".into(),
+        ));
+    }
+    let result_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission result is unavailable.".into())
+        })?;
+    let (output_reference, acceptance_summary) = match outcome {
+        "accepted"
+            if journal.run.get("status").and_then(Value::as_str) == Some("completed")
+                && result_event.get("type").and_then(Value::as_str) == Some("run-completed") =>
+        {
+            (
+                result_event
+                    .pointer("/payload/result/outputs/0/valueReference")
+                    .and_then(Value::as_str),
+                result_event
+                    .pointer("/payload/result/summary")
+                    .and_then(Value::as_str),
+            )
+        }
+        "partial"
+            if journal.run.get("status").and_then(Value::as_str) == Some("partially-completed")
+                && result_event.get("type").and_then(Value::as_str) == Some("run-failed")
+                && result_event
+                    .pointer("/payload/error/code")
+                    .and_then(Value::as_str)
+                    == Some("policy-acceptance-failed") =>
+        {
+            (
+                result_event
+                    .pointer("/payload/partial/completedOutputs/0/valueReference")
+                    .and_then(Value::as_str),
+                result_event
+                    .pointer("/payload/partial/summary")
+                    .and_then(Value::as_str),
+            )
+        }
+        _ => (None, None),
+    };
+    let output_reference = output_reference.ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission output is unavailable.".into())
+    })?;
+    let acceptance_summary = acceptance_summary.ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission acceptance is unavailable.".into())
+    })?;
+    let output = crate::store::repos::mission_worker_output::get_by_reference(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        output_reference,
+    )?
+    .ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission output receipt is unavailable.".into())
+    })?;
+    let mut evaluations = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("evaluation-recorded"))
+        .filter(|event| {
+            event
+                .pointer("/payload/evaluation/target/workerId")
+                .and_then(Value::as_str)
+                == Some(output.worker_id.as_str())
+        });
+    let evaluation = evaluations.next().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission evaluation is unavailable.".into())
+    })?;
+    if evaluations.next().is_some() {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission evaluation is ambiguous.".into(),
+        ));
+    }
+    let expected_verdict = if outcome == "accepted" {
+        "pass"
+    } else {
+        "fail"
+    };
+    if evaluation
+        .pointer("/payload/evaluation/verdict")
+        .and_then(Value::as_str)
+        != Some(expected_verdict)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission evaluation does not match its outcome.".into(),
+        ));
+    }
+    validate_cited_receipt_artifact_link(
+        tx,
+        scope,
+        owner_member_id,
+        journal
+            .run
+            .get("createdByInternalUserId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Cited mission receipt creator is unavailable.".into(),
+                )
+            })?,
+        detail,
+        run_id,
+        result_event,
+        evaluation,
+        &output,
+        outcome,
+    )?;
+    let text = output
+        .receipt
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission response is unavailable.".into())
+        })?;
+    let expected_content = if outcome == "partial" {
+        format!("Draft preserved, but not accepted: {acceptance_summary}\n\n{text}")
+    } else {
+        text.to_string()
+    };
+    if message.content != json!(expected_content) {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission message does not match its durable output.".into(),
+        ));
+    }
+    let mut routes = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("route-selected"));
+    let route = routes
+        .next()
+        .and_then(|event| event.pointer("/payload/selection"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission route is unavailable.".into())
+        })?;
+    if routes.next().is_some() {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission route is ambiguous.".into(),
+        ));
+    }
+    let mut usages = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("usage-recorded"));
+    let usage = usages
+        .next()
+        .and_then(|event| event.pointer("/payload/usage"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission usage is unavailable.".into())
+        })?;
+    if usages.next().is_some() {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission usage is ambiguous.".into(),
+        ));
+    }
+    if route.get("providerRouteId") != output.receipt.get("providerRouteId")
+        || usage.get("providerRouteId") != route.get("providerRouteId")
+        || usage.get("modelReference") != output.receipt.get("requestedModel")
+        || usage.get("runId").and_then(Value::as_str) != Some(run_id)
+        || usage.get("workerId").and_then(Value::as_str) != Some(output.worker_id.as_str())
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission receipt facts do not share one route.".into(),
+        ));
+    }
+    let budget = lifecycle.mission.get("budget").ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission budget is unavailable.".into())
+    })?;
+    let mut receipt = json!({
+        "acceptanceStatus":if outcome == "accepted"{"accepted"}else{"not-accepted"},
+        "acceptanceSummary":acceptance_summary,
+        "provider":output.receipt.get("observedProvider"),
+        "model":output.receipt.get("requestedModel"),
+        "routeReason":route.get("reason"),
+        "inputTokens":usage.get("inputTokens"),
+        "outputTokens":usage.get("outputTokens"),
+        "toolCalls":usage.get("toolCalls"),
+        "sourceCount":output.receipt.get("citations").and_then(Value::as_array).map(Vec::len),
+        "trust":output.receipt.get("trust"),
+        "maxInputTokens":budget.get("maxInputTokens"),
+        "maxOutputTokens":budget.get("maxOutputTokens"),
+        "maxToolCalls":budget.get("maxToolCalls"),
+        "maxDurationMs":budget.get("maxDurationMs"),
+        "maxAttempts":budget.get("maxAttempts")
+    });
+    if let Some(cost) = usage
+        .get("costs")
+        .and_then(Value::as_array)
+        .filter(|costs| costs.len() == 1)
+        .and_then(|costs| costs.first())
+    {
+        if let Some(object) = receipt.as_object_mut() {
+            object.insert(
+                "costAmount".into(),
+                cost.pointer("/amount/amount")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            );
+            object.insert(
+                "costCurrency".into(),
+                cost.pointer("/amount/currencyCode")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            );
+            object.insert(
+                "pricingReference".into(),
+                cost.get("pricingReference").cloned().unwrap_or(Value::Null),
+            );
+        }
+    }
+    validate_cited_receipt_projection(&receipt)?;
+    Ok(receipt)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_cited_receipt_artifact_link(
+    tx: &rusqlite::Connection,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    internal_user_id: &str,
+    detail: &Map<String, Value>,
+    run_id: &str,
+    result_event: &Value,
+    evaluation_event: &Value,
+    output: &crate::store::repos::mission_worker_output::MissionWorkerOutputRow,
+    outcome: &str,
+) -> crate::store::Result<()> {
+    let private = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+        scope.clone(),
+        internal_user_id,
+        Some(owner_member_id),
+    )?;
+    let result_event_id = result_event
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission result identity is invalid.".into())
+        })?;
+    let evaluation_event_id = evaluation_event
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited mission evaluation identity is invalid.".into(),
+            )
+        })?;
+    if outcome == "accepted" {
+        let expected = crate::store::repos::artifact::accepted_mission_output_binding(
+            scope.workspace_id(),
+            owner_member_id,
+            run_id,
+            &output.worker_id,
+            &output.completion_event_id,
+            &output.output_key,
+            &output.content_hash,
+        );
+        let matches = detail.get("artifactId").and_then(Value::as_str)
+            == Some(expected.artifact_id.as_str())
+            && detail.get("artifactVersionId").and_then(Value::as_str)
+                == Some(expected.artifact_version_id.as_str())
+            && result_event
+                .pointer("/payload/result/outputs/0/artifactId")
+                .and_then(Value::as_str)
+                == Some(expected.artifact_id.as_str())
+            && result_event
+                .pointer("/payload/result/outputs/0/artifactVersionId")
+                .and_then(Value::as_str)
+                == Some(expected.artifact_version_id.as_str());
+        let source = crate::store::repos::artifact::get_mission_source_binding(
+            tx,
+            &private,
+            owner_member_id,
+            run_id,
+            &output.output_key,
+            &output.completion_event_id,
+            evaluation_event_id,
+            result_event_id,
+            &output.value_reference,
+            &output.content_hash,
+        )?;
+        if matches && source.as_ref() == Some(&expected) {
+            Ok(())
+        } else {
+            Err(crate::store::StoreError::Invalid(
+                "Cited mission artifact receipt linkage is invalid.".into(),
+            ))
+        }
+    } else if !detail.contains_key("artifactId")
+        && !detail.contains_key("artifactVersionId")
+        && result_event
+            .pointer("/payload/partial/completedOutputs/0/artifactId")
+            .is_none()
+        && result_event
+            .pointer("/payload/partial/completedOutputs/0/artifactVersionId")
+            .is_none()
+        && !crate::store::repos::artifact::mission_source_exists(
+            tx,
+            &private,
+            owner_member_id,
+            run_id,
+            &output.output_key,
+        )?
+    {
+        Ok(())
+    } else {
+        Err(crate::store::StoreError::Invalid(
+            "A partial cited mission cannot expose an artifact receipt.".into(),
+        ))
+    }
+}
+
+fn validate_cited_receipt_projection(receipt: &Value) -> crate::store::Result<()> {
+    let object = receipt.as_object().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission receipt is invalid.".into())
+    })?;
+    const REQUIRED: [&str; 15] = [
+        "acceptanceStatus",
+        "acceptanceSummary",
+        "provider",
+        "model",
+        "routeReason",
+        "inputTokens",
+        "outputTokens",
+        "toolCalls",
+        "sourceCount",
+        "trust",
+        "maxInputTokens",
+        "maxOutputTokens",
+        "maxToolCalls",
+        "maxDurationMs",
+        "maxAttempts",
+    ];
+    const COST: [&str; 3] = ["costAmount", "costCurrency", "pricingReference"];
+    let strings_valid = [
+        "acceptanceSummary",
+        "provider",
+        "model",
+        "routeReason",
+        "trust",
+    ]
+    .iter()
+    .all(|key| {
+        object
+            .get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty() && value.len() <= 2_000)
+    });
+    let counts_valid = ["inputTokens", "outputTokens", "toolCalls", "sourceCount"]
+        .iter()
+        .all(|key| {
+            object
+                .get(*key)
+                .and_then(Value::as_i64)
+                .is_some_and(|value| value >= 0)
+        });
+    let limits_valid = [
+        "maxInputTokens",
+        "maxOutputTokens",
+        "maxToolCalls",
+        "maxDurationMs",
+        "maxAttempts",
+    ]
+    .iter()
+    .all(|key| {
+        object
+            .get(*key)
+            .and_then(Value::as_i64)
+            .is_some_and(|value| value > 0)
+    });
+    let cost_count = COST.iter().filter(|key| object.contains_key(**key)).count();
+    let cost_valid = cost_count == 0
+        || (cost_count == COST.len()
+            && COST.iter().all(|key| {
+                object
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.trim().is_empty() && value.len() <= 1_000)
+            }));
+    let exact_keys = object.len() == REQUIRED.len() + cost_count
+        && object
+            .keys()
+            .all(|key| REQUIRED.contains(&key.as_str()) || COST.contains(&key.as_str()));
+    if exact_keys
+        && strings_valid
+        && counts_valid
+        && limits_valid
+        && cost_valid
+        && matches!(
+            object.get("acceptanceStatus").and_then(Value::as_str),
+            Some("accepted" | "not-accepted")
+        )
+    {
+        Ok(())
+    } else {
+        Err(crate::store::StoreError::Invalid(
+            "Cited mission receipt projection is invalid.".into(),
+        ))
+    }
 }
 
 pub(crate) fn preflight_native_connected_search(
@@ -5453,5 +6014,189 @@ mod tests {
             messages[1].content,
             json!("Launch is planned for Q3 [source-1].")
         );
+    }
+
+    #[test]
+    fn partial_cited_receipt_projection_is_exact_and_survives_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cited-receipt.db");
+        let vault =
+            crate::store::vault::Vault::new(&crate::store::vault::MasterKey::generate().unwrap())
+                .unwrap();
+        let at = "2026-07-13T12:00:00Z";
+        let text = "Draft with retained evidence [source-1].";
+        let hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+        let reference = crate::store::repos::mission_worker_output::binding_reference(
+            "workspace-1",
+            "member-1",
+            "run-1",
+            "worker-1",
+            "event-complete",
+            "brief",
+            &hash,
+        );
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-start".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-complete".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-result".into(),
+            failure_event_id: "event-failure".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 3,
+            expected_last_sequence: 2,
+            checkpoint_event_id: None,
+            tool_evidence: None,
+        };
+        {
+            let store = crate::store::Store::open(&path, vault.clone()).unwrap();
+            let scope = crate::store::repos::scope::DataScope::workspace("workspace-1").unwrap();
+            store.transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('workspace-1','W',?1,?1)",
+                    [at],
+                )?;
+                thread::create(tx, &store, &scope, "thread-1", None, "Cited brief", at, &json!({}))?;
+                let mission = json!({
+                    "id":"mission-1","currentPlanId":"plan-1","currentPlanRevisionId":"revision-1",
+                    "scope":{"sourceThreadId":"thread-1"},
+                    "budget":{"maxInputTokens":32000,"maxOutputTokens":2048,"maxToolCalls":1,
+                        "maxDurationMs":120000,"maxAttempts":1}
+                });
+                let plan = json!({
+                    "id":"plan-1","missionId":"mission-1","currentRevisionId":"revision-1",
+                    "currentRevisionNumber":1
+                });
+                let plan_revision = json!({
+                    "id":"revision-1","planId":"plan-1","missionId":"mission-1",
+                    "planRevisionNumber":1,"summary":"Search connected work."
+                });
+                let lifecycle = mission_plan::create(
+                    tx, &store, &scope, "member-1", "user-1", "mission-1", "plan-1",
+                    "revision-1", "delegated", &mission, &plan, &plan_revision, at,
+                )?;
+                let mut run = json!({
+                    "id":"run-1","workspaceId":"workspace-1","status":"running","revision":1,
+                    "sourceThreadId":"thread-1","initiator":{"kind":"mission","missionId":"mission-1"},
+                    "createdByInternalUserId":"user-1","eventHead":{"lastSequence":1,"lastEventId":"event-created"}
+                });
+                let created = json!({
+                    "id":"event-created","runId":"run-1","type":"run-created","sequence":1,
+                    "idempotencyKey":"created-1"
+                });
+                mission_run::create(
+                    tx, &store, &scope, "member-1", "user-1", "run-1", "event-created",
+                    "created-1", &run, &created, at,
+                )?;
+                let route = json!({
+                    "id":"event-route","runId":"run-1","type":"route-selected","sequence":2,
+                    "previousEventId":"event-created","idempotencyKey":"route-1",
+                    "payload":{"selection":{"providerRouteId":"route-openai","reason":"Selected OpenAI GPT-5 for model.generate."}}
+                });
+                run["revision"] = json!(2);
+                run["eventHead"] = json!({"lastSequence":2,"lastEventId":"event-route"});
+                mission_run::append(
+                    tx, &store, &scope, "member-1", "run-1", 1, 1, "event-route",
+                    "route-selected", "route-1", &route, &run, at,
+                )?;
+                let usage = json!({
+                    "id":"event-usage","runId":"run-1","type":"usage-recorded","sequence":3,
+                    "previousEventId":"event-route","idempotencyKey":"usage-1","payload":{"usage":{
+                        "runId":"run-1","workerId":"worker-1","providerRouteId":"route-openai",
+                        "modelReference":"gpt-5","inputTokens":90,"outputTokens":40,"toolCalls":1,
+                        "costs":[]}}
+                });
+                run["revision"] = json!(3);
+                run["eventHead"] = json!({"lastSequence":3,"lastEventId":"event-usage"});
+                mission_run::append(
+                    tx, &store, &scope, "member-1", "run-1", 2, 2, "event-usage",
+                    "usage-recorded", "usage-1", &usage, &run, at,
+                )?;
+                let completion = json!({
+                    "id":"event-complete","runId":"run-1","type":"worker-completed","sequence":4,
+                    "previousEventId":"event-usage","idempotencyKey":"complete-1","payload":{
+                        "workerId":"worker-1","outputs":[{"key":"brief","valueReference":reference}]}
+                });
+                run["revision"] = json!(4);
+                run["eventHead"] = json!({"lastSequence":4,"lastEventId":"event-complete"});
+                mission_run::append(
+                    tx, &store, &scope, "member-1", "run-1", 3, 3, "event-complete",
+                    "worker-completed", "complete-1", &completion, &run, at,
+                )?;
+                let output_receipt = json!({
+                    "version":2,"workspaceId":"workspace-1","ownerMemberId":"member-1","runId":"run-1",
+                    "workerId":"worker-1","completionEventId":"event-complete","outputKey":"brief",
+                    "valueReference":reference,"contentHash":hash,"sizeBytes":text.len(),"text":text,
+                    "mediaType":"text/markdown","encoding":"utf-8","observedProvider":"openai",
+                    "providerRouteId":"route-openai","requestedModel":"gpt-5",
+                    "trust":"provider-generated-with-external-evidence","citations":[{
+                        "citationId":"source-1","sourceId":"doc-1","title":"Plan","snippet":"Evidence",
+                        "uri":"https://example.com/plan","provenance":"connection:doc-1",
+                        "freshness":"current","trust":"external-untrusted"}],"createdAt":at
+                });
+                crate::store::repos::mission_worker_output::put(
+                    tx, &store, &scope, "member-1", "run-1", "worker-1", "event-complete",
+                    "brief", &reference, &hash, text.len() as i64, &output_receipt, at,
+                )?;
+                let evaluation = json!({
+                    "id":"event-evaluation","runId":"run-1","type":"evaluation-recorded","sequence":5,
+                    "previousEventId":"event-complete","idempotencyKey":"evaluation-1","payload":{
+                        "evaluation":{"verdict":"fail","target":{"kind":"worker","workerId":"worker-1"}}}
+                });
+                run["revision"] = json!(5);
+                run["eventHead"] = json!({"lastSequence":5,"lastEventId":"event-evaluation"});
+                mission_run::append(
+                    tx, &store, &scope, "member-1", "run-1", 4, 4, "event-evaluation",
+                    "evaluation-recorded", "evaluation-1", &evaluation, &run, at,
+                )?;
+                let result = json!({
+                    "id":"event-result","runId":"run-1","type":"run-failed","sequence":6,
+                    "previousEventId":"event-evaluation","idempotencyKey":"result-1","occurredAt":at,
+                    "payload":{"error":{"code":"policy-acceptance-failed"},"partial":{
+                        "summary":CITED_PARTIAL_ACCEPTANCE_SUMMARY,
+                        "completedOutputs":[{"key":"brief","valueReference":reference}]}}
+                });
+                run["status"] = json!("partially-completed");
+                run["revision"] = json!(6);
+                run["eventHead"] = json!({"lastSequence":6,"lastEventId":"event-result"});
+                mission_run::append(
+                    tx, &store, &scope, "member-1", "run-1", 5, 5, "event-result",
+                    "run-failed", "result-1", &result, &run, at,
+                )?;
+                let journal = mission_run::get(tx, &store, &scope, "member-1", "run-1")?.unwrap();
+                append_cited_mission_transcript(
+                    tx, &store, &scope, &journal, &lifecycle, &binding, &output_receipt,
+                    &result, None, at,
+                )?;
+                Ok(())
+            }).unwrap();
+        }
+        let store = crate::store::Store::open(&path, vault).unwrap();
+        let scope = crate::store::repos::scope::DataScope::workspace("workspace-1").unwrap();
+        let (receipt, forged_rejected) = store
+            .with_conn(|tx| {
+                let messages = message::list(tx, &store, &scope, "thread-1")?;
+                let receipt =
+                    project_cited_mission_receipt(tx, &store, &scope, "member-1", &messages[1])?;
+                let mut forged = messages[1].clone();
+                forged.detail["outcome"] = json!("accepted");
+                forged.detail["artifactId"] = json!("forged-artifact");
+                forged.detail["artifactVersionId"] = json!("forged-version");
+                Ok((
+                    receipt,
+                    project_cited_mission_receipt(tx, &store, &scope, "member-1", &forged).is_err(),
+                ))
+            })
+            .unwrap();
+        assert_eq!(receipt["acceptanceStatus"], "not-accepted");
+        assert_eq!(receipt["provider"], "openai");
+        assert_eq!(receipt["inputTokens"], 90);
+        assert_eq!(receipt["sourceCount"], 1);
+        assert_eq!(receipt["maxOutputTokens"], 2048);
+        assert!(receipt.get("costAmount").is_none());
+        assert!(forged_rejected);
     }
 }
