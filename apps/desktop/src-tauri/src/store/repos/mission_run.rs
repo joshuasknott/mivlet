@@ -203,6 +203,26 @@ pub fn get(
     }))
 }
 
+pub fn list_nonterminal_ids_before(
+    tx: &Connection,
+    scope: &DataScope,
+    owner_member_id: &str,
+    before: &str,
+) -> Result<Vec<String>> {
+    scope.ensure_exists(tx)?;
+    let owner = normalize_id(owner_member_id, "Member")?;
+    let mut statement = tx.prepare(
+        "SELECT id FROM mission_run_record WHERE workspace_id=?1 AND owner_member_id=?2 AND terminal=0 AND updated_at<?3 ORDER BY updated_at,id;",
+    )?;
+    let ids = statement
+        .query_map(
+            rusqlite::params![scope.workspace_id(), owner, before],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_event(
     tx: &Connection,
@@ -460,6 +480,16 @@ mod tests {
             .unwrap();
         assert_eq!(reopened.run["status"], "running");
         assert_eq!(reopened.events.len(), 2);
+        assert_eq!(
+            store
+                .with_conn(|tx| list_nonterminal_ids_before(tx, &scope, "member-1", "t3"))
+                .unwrap(),
+            vec!["run-1"]
+        );
+        assert!(store
+            .with_conn(|tx| list_nonterminal_ids_before(tx, &scope, "member-1", "t2"))
+            .unwrap()
+            .is_empty());
         assert!(store
             .with_conn(|tx| get(tx, &store, &scope, "member-2", "run-1"))
             .unwrap()

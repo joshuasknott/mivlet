@@ -4,16 +4,23 @@ use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::sync::{Mutex, OnceLock};
 
 use crate::store::repos::{
     mission_checkpoint, mission_plan, mission_run, scope::DataScope, workspace_directory,
 };
 
 const MAX_CHECKPOINT_STATE_BYTES: usize = 256_000;
+static RECOVERED_CITED_SCOPES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static MISSION_RECOVERY_EPOCH: OnceLock<String> = OnceLock::new();
 
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
+pub(crate) fn initialize_recovery_epoch() {
+    let _ = MISSION_RECOVERY_EPOCH.set(now());
 }
 
 #[derive(Deserialize)]
@@ -314,6 +321,275 @@ pub fn mission_run_finalize_cancellation(
             Ok(settled)
         })
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_run_recover_interrupted_cited(
+) -> Result<Vec<mission_run::MissionRunJournalRow>, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let (scope, context, member) = store
+        .with_conn(authorized)
+        .map_err(|error| error.to_string())?;
+    let recovery_scope = format!(
+        "{}\0{}\0{}",
+        context.internal_user_id,
+        scope.workspace_id(),
+        member
+    );
+    {
+        let mut recovered = RECOVERED_CITED_SCOPES
+            .get_or_init(|| Mutex::new(HashSet::new()))
+            .lock()
+            .map_err(|_| "Fable could not access mission recovery state.".to_string())?;
+        if !recovered.insert(recovery_scope.clone()) {
+            return Ok(Vec::new());
+        }
+    }
+    let result = (|| {
+        let recovery_epoch = MISSION_RECOVERY_EPOCH
+            .get()
+            .ok_or_else(|| "Mission recovery epoch is unavailable.".to_string())?;
+        let ids = store
+            .with_conn(|tx| {
+                mission_run::list_nonterminal_ids_before(tx, &scope, &member, recovery_epoch)
+            })
+            .map_err(|error| error.to_string())?;
+        let mut journals = Vec::new();
+        for run_id in ids {
+            if crate::native_api::mission_run_has_active_native_execution(&run_id)? {
+                continue;
+            }
+            let recovered = store
+                .transaction(|tx| {
+                    recover_interrupted_cited_run(
+                        tx,
+                        store,
+                        &scope,
+                        &member,
+                        &context.internal_user_id,
+                        &run_id,
+                    )
+                })
+                .map_err(|error| error.to_string())?;
+            if let Some(journal) = recovered {
+                journals.push(journal);
+            }
+        }
+        Ok(journals)
+    })();
+    if result.is_err() {
+        if let Ok(mut recovered) = RECOVERED_CITED_SCOPES
+            .get_or_init(|| Mutex::new(HashSet::new()))
+            .lock()
+        {
+            recovered.remove(&recovery_scope);
+        }
+    }
+    result
+}
+
+fn recover_interrupted_cited_run(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    member: &str,
+    internal_user_id: &str,
+    run_id: &str,
+) -> crate::store::Result<Option<mission_run::MissionRunJournalRow>> {
+    let journal = mission_run::get(tx, store, scope, member, run_id)?.ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run disappeared during recovery.".into())
+    })?;
+    if matches!(
+        journal.run.get("status").and_then(Value::as_str),
+        Some("completed" | "partially-completed" | "failed" | "cancelled")
+    ) {
+        return Ok(None);
+    }
+    let mission_id = journal
+        .run
+        .get("missionId")
+        .or_else(|| journal.run.pointer("/initiator/missionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+        })?;
+    let lifecycle = mission_plan::get(tx, store, scope, member, mission_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    if !is_cited_recovery_shape(&journal.run, &lifecycle) {
+        return Ok(None);
+    }
+    let revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+        })?;
+    let last_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let previous = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let status = journal
+        .run
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let at = now();
+    let identity = format!(
+        "{}\0{}\0{}\0{}",
+        scope.workspace_id(),
+        member,
+        run_id,
+        revision
+    );
+    let digest = format!("{:x}", Sha256::digest(identity.as_bytes()));
+    let event_id = format!("mission-recovery-{}", &digest[..32]);
+    let event_key = format!("restart-recovery:v1:{revision}:{last_sequence}");
+    let sequence = last_sequence + 1;
+    let (event_type, payload, next_status, outcome, summary) = if status == "cancelling" {
+        let cancellation = journal.run.get("cancellation").cloned().ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Interrupted cancellation request is unavailable.".into(),
+            )
+        })?;
+        let requested = journal
+            .events
+            .iter()
+            .find(|event| event.get("id").and_then(Value::as_str) == Some(previous))
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Interrupted cancellation event is unavailable.".into(),
+                )
+            })?;
+        if requested.get("type").and_then(Value::as_str) != Some("cancellation-requested")
+            || requested.pointer("/payload/cancellation") != Some(&cancellation)
+        {
+            return Err(crate::store::StoreError::Invalid(
+                "Interrupted cancellation head is invalid.".into(),
+            ));
+        }
+        (
+            "run-cancelled",
+            json!({"cancellation":cancellation}),
+            "cancelled",
+            "cancelled",
+            "The mission was cancelled before Fable restarted.",
+        )
+    } else {
+        (
+            "run-failed",
+            json!({"error":{"code":"mission-interrupted","category":"interrupted",
+                "message":"The mission was interrupted before it reached a terminal result.",
+                "retryable":true,"causedByEventId":previous}}),
+            "failed",
+            "failed",
+            "The mission was interrupted before it reached a terminal result.",
+        )
+    };
+    let event = json!({
+        "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":member,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,"createdAt":at,"updatedAt":at,
+        "id":event_id,"runId":run_id,"type":event_type,"sequence":sequence,"previousEventId":previous,
+        "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":event_key,"payload":payload
+    });
+    let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("status".into(), json!(next_status));
+    projected.insert("revision".into(), json!(revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":event_id}),
+    );
+    let settled = mission_run::append(
+        tx,
+        store,
+        scope,
+        member,
+        run_id,
+        revision,
+        last_sequence,
+        &event_id,
+        event_type,
+        &event_key,
+        &event,
+        &Value::Object(projected),
+        &at,
+    )?;
+    let acceptance = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+        .map(|criterion_key| {
+            json!({"criterionKey":criterion_key,"status":"not-evaluated","evidenceRefs":[],
+            "summary":"The mission ended before this criterion could be accepted."})
+        })
+        .collect::<Vec<_>>();
+    let terminal_result = json!({"outcome":outcome,"summary":summary,"producingRunIds":[run_id],
+        "outputs":[],"acceptance":acceptance,"completedAt":at});
+    if outcome == "cancelled" {
+        mission_plan::mark_cancelled(tx, store, scope, member, &lifecycle, &terminal_result, &at)?;
+    } else {
+        mission_plan::mark_failed(tx, store, scope, member, &lifecycle, &terminal_result, &at)?;
+    }
+    Ok(Some(settled))
+}
+
+fn is_cited_recovery_shape(run: &Value, lifecycle: &mission_plan::MissionPlanLifecycleRow) -> bool {
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array);
+    let criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array);
+    lifecycle.mission.get("status").and_then(Value::as_str) == Some("running")
+        && run.get("planRevisionId") == lifecycle.current_revision.get("id")
+        && lifecycle
+            .mission
+            .pointer("/acceptance/requiresHumanAcceptance")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && steps.is_some_and(|steps| {
+            steps.len() == 1
+                && steps[0]
+                    .get("requiredCapabilities")
+                    .and_then(Value::as_array)
+                    .is_some_and(|capabilities| {
+                        capabilities.len() == 1 && capabilities[0] == "knowledge.content.search"
+                    })
+                && steps[0]
+                    .get("expectedOutputs")
+                    .and_then(Value::as_array)
+                    .is_some_and(|outputs| {
+                        outputs.len() == 1
+                            && outputs[0].get("format").and_then(Value::as_str)
+                                == Some("text/markdown")
+                    })
+        })
+        && criteria.is_some_and(|criteria| {
+            !criteria.is_empty()
+                && criteria.iter().all(|criterion| {
+                    criterion.get("evaluator").and_then(Value::as_str) == Some("policy")
+                })
+        })
 }
 
 #[tauri::command]
@@ -1120,6 +1396,7 @@ fn exact_cancellation_replay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::vault::{MasterKey, Vault};
 
     fn lifecycle() -> mission_plan::MissionPlanLifecycleRow {
         mission_plan::MissionPlanLifecycleRow {
@@ -1174,6 +1451,125 @@ mod tests {
             ..input
         };
         assert!(exact_cancellation_replay(&event, &changed, "user-real").is_err());
+    }
+
+    #[test]
+    fn restart_recovery_is_limited_to_the_exact_cited_plan_shape() {
+        let run = json!({"planRevisionId":"revision-1"});
+        let mut cited = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({"status":"running","acceptance":{"requiresHumanAcceptance":false,
+                "criteria":[{"key":"cited","evaluator":"policy"}]}}),
+            plan: json!({}),
+            current_revision: json!({"id":"revision-1","steps":[{
+                "requiredCapabilities":["knowledge.content.search"],
+                "expectedOutputs":[{"format":"text/markdown"}]
+            }]}),
+        };
+        assert!(is_cited_recovery_shape(&run, &cited));
+        cited.current_revision["steps"][0]["requiredCapabilities"] = json!(["model.generate"]);
+        assert!(!is_cited_recovery_shape(&run, &cited));
+        cited.current_revision["steps"][0]["requiredCapabilities"] =
+            json!(["knowledge.content.search"]);
+        cited.mission["acceptance"]["requiresHumanAcceptance"] = json!(true);
+        assert!(!is_cited_recovery_shape(&run, &cited));
+    }
+
+    #[test]
+    fn stale_cited_run_recovery_atomically_fails_run_and_mission() {
+        let store = crate::store::Store::open_in_memory(
+            Vault::new(&MasterKey::generate().unwrap()).unwrap(),
+        )
+        .unwrap();
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('w1','One','t','t');",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let scope = DataScope::workspace("w1").unwrap();
+        let mission = json!({
+            "id":"mission-1","workspaceId":"w1","visibility":"member-private","ownerMemberId":"member-1",
+            "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":"user-1","createdAt":"t1","updatedAt":"t1",
+            "status":"ready","executionDepth":"delegated","currentPlanId":"plan-1","currentPlanRevisionId":"revision-1",
+            "scope":{"workspaceId":"w1","departmentIds":[],"context":[]},"budget":{"maxAttempts":1},
+            "acceptance":{"requiresHumanAcceptance":false,"criteria":[{"key":"cited","evaluator":"policy"}]}
+        });
+        let plan = json!({"id":"plan-1","missionId":"mission-1","status":"current","currentRevisionId":"revision-1","currentRevisionNumber":1,"revision":1});
+        let revision = json!({
+            "id":"revision-1","planId":"plan-1","missionId":"mission-1","planRevisionNumber":1,
+            "steps":[{"requiredCapabilities":["knowledge.content.search"],
+                "expectedOutputs":[{"format":"text/markdown"}]}]
+        });
+        let lifecycle = store
+            .transaction(|tx| {
+                mission_plan::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    "user-1",
+                    "mission-1",
+                    "plan-1",
+                    "revision-1",
+                    "delegated",
+                    &mission,
+                    &plan,
+                    &revision,
+                    "t1",
+                )
+            })
+            .unwrap();
+        let input = MissionRunCreateInput {
+            mission_id: "mission-1".into(),
+            run_id: "run-1".into(),
+            event_id: "event-1".into(),
+            idempotency_key: "create-1".into(),
+        };
+        let (run, event) =
+            build_run_created(&lifecycle, &input, "user-1", "member-1", "t2").unwrap();
+        store
+            .transaction(|tx| {
+                mission_run::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    "user-1",
+                    "run-1",
+                    "event-1",
+                    "create:create-1",
+                    &run,
+                    &event,
+                    "t2",
+                )?;
+                mission_plan::mark_running(tx, &store, &scope, "member-1", &lifecycle, "t2")?;
+                Ok(())
+            })
+            .unwrap();
+        let recovered = store
+            .transaction(|tx| {
+                recover_interrupted_cited_run(tx, &store, &scope, "member-1", "user-1", "run-1")
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.run["status"], "failed");
+        assert_eq!(recovered.events.last().unwrap()["type"], "run-failed");
+        assert_eq!(
+            recovered.events.last().unwrap()["payload"]["error"]["code"],
+            "mission-interrupted"
+        );
+        let recovered_mission = store
+            .with_conn(|tx| mission_plan::get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered_mission.mission["status"], "failed");
+        assert_eq!(
+            recovered_mission.mission["terminalResult"]["outcome"],
+            "failed"
+        );
     }
 
     #[test]

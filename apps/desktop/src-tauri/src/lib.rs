@@ -79,6 +79,7 @@ pub fn run() {
             let handle = app.handle().clone();
             let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
+            mission_runs::initialize_recovery_epoch();
             // Load the durable scheduler store once and manage it as process
             // state. The in-process tick leases due entries; because Tauri is
             // a single shared process, the lease map is the cross-window duplicate-
@@ -159,6 +160,7 @@ pub fn run() {
             mission_runs::mission_run_get,
             mission_runs::mission_run_request_cancellation,
             mission_runs::mission_run_finalize_cancellation,
+            mission_runs::mission_run_recover_interrupted_cited,
             mission_runs::mission_run_create_checkpoint,
             mission_runs::mission_run_restore_checkpoint,
             mission_workers::mission_worker_create,

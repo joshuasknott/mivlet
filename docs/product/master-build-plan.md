@@ -339,7 +339,13 @@ when no native mission execution lease exists, while an in-flight provider reque
 is terminalized only after its transport observes cancellation. Both paths append
 exact-replay-safe `run-cancelled`, project the revision-fenced mission to cancelled
 with an explicit `MissionResult`, and the desktop refuses to surface cancellation
-until it reloads that terminal fact. Schema v26 adds
+until it reloads that terminal fact. On the first authenticated hydration for an
+account/workspace/member in each process, a process-start epoch now finds only
+older nonterminal cited journals. Rust reconciles an older stored cancellation to
+cancelled and any other exact one-step cited shape to retryable failed with a
+deterministic `mission-interrupted` fact, without replaying tools, approvals, or
+provider egress. Current-process runs and active native leases are excluded.
+General checkpoint-driven resume and multi-worker recovery remain open. Schema v26 adds
 owner-qualified encrypted checkpoint state linked by composite foreign key to
 the exact immutable checkpoint event. Authenticated create/restore commands
 derive completed workers, plan steps, committed effects, active work, and waits

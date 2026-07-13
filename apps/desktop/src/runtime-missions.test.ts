@@ -7,6 +7,7 @@ import {
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
   readRuntimeMissionWorkerOutput,
+  recoverRuntimeInterruptedCitedMissions,
   requestRuntimeMissionRunCancellation,
   startRuntimeMissionWorker
 } from "./runtime";
@@ -33,6 +34,7 @@ describe("mission runtime boundary", () => {
     await expect(getRuntimeMissionRun("run-1")).resolves.toBeNull();
     await expect(readRuntimeMissionWorkerOutput("mission-output:v1:ref")).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
+    await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -62,6 +64,7 @@ describe("mission runtime boundary", () => {
     await requestRuntimeMissionRunCancellation(cancel);
     await readRuntimeMissionWorkerOutput("mission-output:v1:ref");
     await listRuntimeNativeProviderRoutes();
+    await recoverRuntimeInterruptedCitedMissions();
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["mission_plan_create", { input: plan }],
@@ -72,7 +75,8 @@ describe("mission runtime boundary", () => {
       ["mission_run_get", { runId: "run-1" }],
       ["mission_run_request_cancellation", { input: cancel }],
       ["mission_worker_output_read", { valueReference: "mission-output:v1:ref" }],
-      ["list_native_provider_routes"]
+      ["list_native_provider_routes"],
+      ["mission_run_recover_interrupted_cited"]
     ]);
   });
 });

@@ -3061,6 +3061,12 @@ export async function finalizeRuntimeMissionRunCancellation(input: RuntimeMissio
   catch (error) { throw toRuntimeError(error); }
 }
 
+export async function recoverRuntimeInterruptedCitedMissions() {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Array<Record<string, unknown>>>("mission_run_recover_interrupted_cited"); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
 export async function createRuntimeMissionWorker(input: RuntimeMissionWorkerCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_worker_create", { input }); }

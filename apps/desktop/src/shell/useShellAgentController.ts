@@ -7,6 +7,7 @@ import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
+import { recoverRuntimeInterruptedCitedMissions } from "../runtime";
 
 export function useShellAgentController({ onDictation, onVoiceCancel, threadId }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void; threadId?: string }) {
   const approvalGate = useMemo(() => createApprovalGate(), []);
@@ -14,6 +15,11 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const cancelRequestedRef = useRef(false);
   const citedMissionRunningRef = useRef(false);
   const citedMissionCancelRef = useRef<(() => Promise<void>) | null>(null);
+  const activeWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId;
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    void recoverRuntimeInterruptedCitedMissions().catch(() => undefined);
+  }, [activeWorkspaceId]);
   useEffect(() => { approvalGate.replaceStandingGrants([...runtime.sessionApprovalGrants, ...runtime.approvalRules]); }, [approvalGate, runtime.sessionApprovalGrants, runtime.approvalRules]);
   const queueToolApproval = (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => { if (approvalGate.register(event.approval)) runtime.recordBackendToolCall(event); };
   const executor = useMemo(

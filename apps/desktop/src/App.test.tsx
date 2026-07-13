@@ -126,6 +126,7 @@ const connectedCodex: BackendProvider = {
 };
 
 vi.mock("./runtime", () => ({
+  recoverRuntimeInterruptedCitedMissions: vi.fn(async () => null),
   createRuntimeConversationThread: vi.fn(async (input: { title?: string }) => {
     const thread = {
       id: "test-durable-thread",
