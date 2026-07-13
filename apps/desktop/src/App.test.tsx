@@ -1595,6 +1595,55 @@ describe("Fable home", () => {
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
 
+  it("rehydrates cited mission failure and cancellation statuses without requesting receipts", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-status-restart", title: "Status restart", lifecycle: "active",
+      updatedAt: "2026-07-13T12:00:00Z",
+      messageHead: { lastSequence: 2, lastMessageId: "message-cancelled-assistant" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-failed-assistant", threadId: "thread-status-restart", kind: "assistant",
+        sequence: 1, runId: "mission-run-failed", currentRevisionId: "revision-failed-assistant",
+        currentRevisionNumber: 1, currentRevisionState: "terminal",
+        detail: {
+          type: "mission-result", missionId: "mission-failed", resultEventId: "event-result-failed",
+          outcome: "failed"
+        }
+      },
+      currentRevision: {
+        id: "revision-failed-assistant", threadId: "thread-status-restart", messageId: "message-failed-assistant",
+        messageRevisionNumber: 1, state: "terminal",
+        content: "Mission failed: The mission stopped because its only worker failed."
+      }
+    }, {
+      message: {
+        id: "message-cancelled-assistant", threadId: "thread-status-restart", kind: "assistant",
+        sequence: 2, runId: "mission-run-cancelled", currentRevisionId: "revision-cancelled-assistant",
+        currentRevisionNumber: 1, currentRevisionState: "terminal",
+        detail: {
+          type: "mission-result", missionId: "mission-cancelled", resultEventId: "event-result-cancelled",
+          outcome: "cancelled"
+        }
+      },
+      currentRevision: {
+        id: "revision-cancelled-assistant", threadId: "thread-status-restart", messageId: "message-cancelled-assistant",
+        messageRevisionNumber: 1, state: "terminal",
+        content: "Mission cancelled: The mission stopped after its cancellation request was observed."
+      }
+    }];
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Status restart" }));
+
+    expect(await screen.findByText("Mission failed: The mission stopped because its only worker failed.")).toBeInTheDocument();
+    expect(screen.getByText("Mission cancelled: The mission stopped after its cancellation request was observed.")).toBeInTheDocument();
+    expect(readRuntimeCitedMissionReceipts).not.toHaveBeenCalled();
+    expect(screen.queryByRole("group", { name: "Run receipt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
+  });
+
   it("inserts a newline on Shift+Enter instead of sending", async () => {
     const user = userEvent.setup();
     render(<App />);

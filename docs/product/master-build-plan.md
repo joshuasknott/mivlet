@@ -449,9 +449,13 @@ journal, message detail, route, usage, evaluation, output receipt, durable budge
 result event, and accepted-artifact binding, and returns only the existing secret-safe
 receipt fields. Corrupt, ambiguous, or legacy evidence is unavailable rather than
 inferred; the desktop reads markers in bounded batches and shows the same accepted or
-not-accepted receipt used at settlement. Existing pre-terminal failure/cancellation
-paths still keep their current error presentation, and general mission transcript
-projection remains open.
+not-accepted receipt used at settlement. The same narrow cited shape now also commits
+deterministic failed or cancelled user/assistant checkpoints atomically with provider
+failure, early or in-flight cancellation, and stale-run restart reconciliation. Those
+assistant markers contain only the durable terminal result identity and outcome, offer
+no receipt or artifact action, and exact terminal replays validate their encrypted
+content and adjacency. General and multi-worker mission transcript projection remains
+open.
 
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes

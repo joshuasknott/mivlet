@@ -159,7 +159,7 @@ export type MissionResultMessageDetail =
       type: "mission-result";
       missionId: MissionId;
       resultEventId: RunEventId;
-      outcome: "partial";
+      outcome: "partial" | "failed" | "cancelled";
       artifactId?: never;
       artifactVersionId?: never;
     };

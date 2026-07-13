@@ -35,7 +35,7 @@ type ConversationMessage = {
   content: string;
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
-  missionOutcome?: "accepted" | "partial";
+  missionOutcome?: "accepted" | "partial" | "failed" | "cancelled";
   missionArtifactId?: string;
 };
 
@@ -387,7 +387,9 @@ export function ChatWorkspace() {
   }, [projectStore.loading, selectedProject, selectedProjectId]);
 
   const citedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
-    message.kind === "assistant" && message.detail?.type === "mission-result"
+    message.kind === "assistant"
+      && message.detail?.type === "mission-result"
+      && (message.detail.outcome === "accepted" || message.detail.outcome === "partial")
   ) ?? [];
   const activeMissionReceiptHydrationKey = selectedConversationThreadId
     && hydratedConversation?.thread.id === selectedConversationThreadId

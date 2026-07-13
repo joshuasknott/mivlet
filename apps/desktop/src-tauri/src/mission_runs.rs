@@ -256,6 +256,22 @@ pub fn mission_run_finalize_cancellation(
                     && existing.pointer("/payload/cancellation") == Some(&cancellation)
                     && journal.run.get("status").and_then(Value::as_str) == Some("cancelled")
                 {
+                    let mission_id = journal.run.get("missionId")
+                        .or_else(|| journal.run.pointer("/initiator/missionId"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| crate::store::StoreError::Invalid("Mission run has no selected mission.".into()))?;
+                    let lifecycle = mission_plan::get(tx, store, &scope, &member, mission_id)?
+                        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+                    if is_cited_transcript_shape(&journal.run, &lifecycle) {
+                        crate::mission_workers::validate_cited_terminal_status_transcript_replay(
+                            tx,
+                            store,
+                            &scope,
+                            &member,
+                            &journal,
+                            &lifecycle,
+                        )?;
+                    }
                     return Ok(journal);
                 }
                 return Err(crate::store::StoreError::Invalid(
@@ -318,6 +334,19 @@ pub fn mission_run_finalize_cancellation(
             let result = json!({"outcome":"cancelled","summary":"The mission stopped after its cancellation request was observed.",
                 "producingRunIds":[input.run_id],"outputs":[],"acceptance":acceptance,"completedAt":at});
             mission_plan::mark_cancelled(tx, store, &scope, &member, &lifecycle, &result, &at)?;
+            if is_cited_recovery_shape(&journal.run, &lifecycle) {
+                crate::mission_workers::append_cited_terminal_status_transcript(
+                    tx,
+                    store,
+                    &scope,
+                    &member,
+                    &settled,
+                    &lifecycle,
+                    &result,
+                    &event,
+                    &at,
+                )?;
+            }
             Ok(settled)
         })
         .map_err(|error| error.to_string())
@@ -548,10 +577,29 @@ fn recover_interrupted_cited_run(
     } else {
         mission_plan::mark_failed(tx, store, scope, member, &lifecycle, &terminal_result, &at)?;
     }
+    crate::mission_workers::append_cited_terminal_status_transcript(
+        tx,
+        store,
+        scope,
+        member,
+        &settled,
+        &lifecycle,
+        &terminal_result,
+        &event,
+        &at,
+    )?;
     Ok(Some(settled))
 }
 
 fn is_cited_recovery_shape(run: &Value, lifecycle: &mission_plan::MissionPlanLifecycleRow) -> bool {
+    lifecycle.mission.get("status").and_then(Value::as_str) == Some("running")
+        && is_cited_transcript_shape(run, lifecycle)
+}
+
+fn is_cited_transcript_shape(
+    run: &Value,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+) -> bool {
     let steps = lifecycle
         .current_revision
         .get("steps")
@@ -560,8 +608,7 @@ fn is_cited_recovery_shape(run: &Value, lifecycle: &mission_plan::MissionPlanLif
         .mission
         .pointer("/acceptance/criteria")
         .and_then(Value::as_array);
-    lifecycle.mission.get("status").and_then(Value::as_str) == Some("running")
-        && run.get("planRevisionId") == lifecycle.current_revision.get("id")
+    run.get("planRevisionId") == lifecycle.current_revision.get("id")
         && lifecycle
             .mission
             .pointer("/acceptance/requiresHumanAcceptance")
@@ -1486,6 +1533,16 @@ mod tests {
                     "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('w1','One','t','t');",
                     [],
                 )?;
+                crate::store::repos::thread::create(
+                    tx,
+                    &store,
+                    &DataScope::workspace("w1")?,
+                    "thread-1",
+                    None,
+                    "Cited recovery",
+                    "t",
+                    &json!({}),
+                )?;
                 Ok(())
             })
             .unwrap();
@@ -1494,12 +1551,13 @@ mod tests {
             "id":"mission-1","workspaceId":"w1","visibility":"member-private","ownerMemberId":"member-1",
             "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":"user-1","createdAt":"t1","updatedAt":"t1",
             "status":"ready","executionDepth":"delegated","currentPlanId":"plan-1","currentPlanRevisionId":"revision-1",
-            "scope":{"workspaceId":"w1","departmentIds":[],"context":[]},"budget":{"maxAttempts":1},
+            "scope":{"workspaceId":"w1","sourceThreadId":"thread-1","departmentIds":[],"context":[]},"budget":{"maxAttempts":1},
             "acceptance":{"requiresHumanAcceptance":false,"criteria":[{"key":"cited","evaluator":"policy"}]}
         });
         let plan = json!({"id":"plan-1","missionId":"mission-1","status":"current","currentRevisionId":"revision-1","currentRevisionNumber":1,"revision":1});
         let revision = json!({
             "id":"revision-1","planId":"plan-1","missionId":"mission-1","planRevisionNumber":1,
+            "summary":"Search the connected launch notes.",
             "steps":[{"requiredCapabilities":["knowledge.content.search"],
                 "expectedOutputs":[{"format":"text/markdown"}]}]
         });
@@ -1569,6 +1627,21 @@ mod tests {
         assert_eq!(
             recovered_mission.mission["terminalResult"]["outcome"],
             "failed"
+        );
+        let messages = store
+            .with_conn(|tx| crate::store::repos::message::list(tx, &store, &scope, "thread-1"))
+            .unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(
+            messages[0].content,
+            json!("Search the connected launch notes.")
+        );
+        assert_eq!(messages[1].detail["outcome"], "failed");
+        assert_eq!(
+            messages[1].content,
+            json!(
+                "Mission failed: The mission was interrupted before it reached a terminal result."
+            )
         );
     }
 

@@ -2097,6 +2097,344 @@ fn append_cited_mission_transcript(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(crate) fn append_cited_terminal_status_transcript(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    terminal_result: &Value,
+    result_event: &Value,
+    at: &str,
+) -> crate::store::Result<()> {
+    let run_id = journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission run identity is invalid.".into())
+        })?;
+    let mission_id = lifecycle
+        .mission
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission identity is invalid.".into())
+        })?;
+    let thread_id = lifecycle
+        .mission
+        .pointer("/scope/sourceThreadId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited mission source conversation is unavailable.".into(),
+            )
+        })?;
+    let prompt = lifecycle
+        .current_revision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission prompt is unavailable.".into())
+        })?;
+    let outcome = terminal_result
+        .get("outcome")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "failed" | "cancelled"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission terminal outcome is invalid.".into())
+        })?;
+    let summary = terminal_result
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission terminal summary is invalid.".into())
+        })?;
+    let result_event_id = result_event
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission result identity is invalid.".into())
+        })?;
+    let expected_event_type = if outcome == "failed" {
+        "run-failed"
+    } else {
+        "run-cancelled"
+    };
+    let expected_status = if outcome == "failed" {
+        "failed"
+    } else {
+        "cancelled"
+    };
+    let producing_runs = terminal_result
+        .get("producingRunIds")
+        .and_then(Value::as_array);
+    let outputs = terminal_result.get("outputs").and_then(Value::as_array);
+    let event_payload_valid = if outcome == "failed" {
+        result_event.pointer("/payload/error").is_some()
+    } else {
+        result_event.pointer("/payload/cancellation").is_some()
+    };
+    let exact = journal.run.get("ownerMemberId").and_then(Value::as_str) == Some(owner_member_id)
+        && journal.run.get("sourceThreadId").and_then(Value::as_str) == Some(thread_id)
+        && journal.run.get("status").and_then(Value::as_str) == Some(expected_status)
+        && journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            == Some(result_event_id)
+        && result_event.get("runId").and_then(Value::as_str) == Some(run_id)
+        && result_event.get("type").and_then(Value::as_str) == Some(expected_event_type)
+        && producing_runs.is_some_and(|ids| ids.len() == 1 && ids[0].as_str() == Some(run_id))
+        && outputs.is_some_and(Vec::is_empty)
+        && terminal_result.get("completedAt").and_then(Value::as_str) == Some(at)
+        && event_payload_valid;
+    if !exact {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission terminal transcript does not match its durable result.".into(),
+        ));
+    }
+    let response = if outcome == "failed" {
+        format!("Mission failed: {summary}")
+    } else {
+        format!("Mission cancelled: {summary}")
+    };
+    let assistant_detail = json!({
+        "type":"mission-result",
+        "missionId":mission_id,
+        "resultEventId":result_event_id,
+        "outcome":outcome
+    });
+    let (user_message_id, user_revision_id, user_idempotency) =
+        cited_transcript_identity(run_id, "user");
+    let (assistant_message_id, assistant_revision_id, assistant_idempotency) =
+        cited_transcript_identity(run_id, "assistant");
+    let head = thread::get(tx, store, scope, thread_id)?.ok_or_else(|| {
+        crate::store::StoreError::Invalid(
+            "Cited mission source conversation is unavailable.".into(),
+        )
+    })?;
+    let user = message::append(
+        tx,
+        store,
+        scope,
+        thread_id,
+        &user_message_id,
+        "user",
+        &Value::Null,
+        Some(run_id),
+        head.last_sequence + 1,
+        head.last_sequence,
+        head.last_message_id.as_deref(),
+        &user_idempotency,
+        &user_revision_id,
+        "terminal",
+        "initial",
+        &json!(prompt),
+        at,
+    )?;
+    let assistant = message::append(
+        tx,
+        store,
+        scope,
+        thread_id,
+        &assistant_message_id,
+        "assistant",
+        &assistant_detail,
+        Some(run_id),
+        head.last_sequence + 2,
+        head.last_sequence + 1,
+        Some(&user_message_id),
+        &assistant_idempotency,
+        &assistant_revision_id,
+        "terminal",
+        "initial",
+        &json!(response),
+        at,
+    )?;
+    let exact_user = user.kind == "user"
+        && user.run_id.as_deref() == Some(run_id)
+        && user.sequence == head.last_sequence + 1
+        && user.detail.is_null()
+        && user.current_revision_id == user_revision_id
+        && user.current_revision_number == 1
+        && user.current_revision_state == "terminal"
+        && user.content == json!(prompt)
+        && user.created_at == at;
+    let exact_assistant = assistant.kind == "assistant"
+        && assistant.run_id.as_deref() == Some(run_id)
+        && assistant.sequence == head.last_sequence + 2
+        && assistant.detail == assistant_detail
+        && assistant.current_revision_id == assistant_revision_id
+        && assistant.current_revision_number == 1
+        && assistant.current_revision_state == "terminal"
+        && assistant.content == json!(response)
+        && assistant.created_at == at;
+    if exact_user && exact_assistant {
+        Ok(())
+    } else {
+        Err(crate::store::StoreError::Invalid(
+            "Cited mission transcript identity is already in use.".into(),
+        ))
+    }
+}
+
+pub(crate) fn validate_cited_terminal_status_transcript_replay(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+) -> crate::store::Result<()> {
+    let run_id = journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission run identity is invalid.".into())
+        })?;
+    let mission_id = lifecycle
+        .mission
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission identity is invalid.".into())
+        })?;
+    let thread_id = lifecycle
+        .mission
+        .pointer("/scope/sourceThreadId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited mission source conversation is unavailable.".into(),
+            )
+        })?;
+    let prompt = lifecycle
+        .current_revision
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission prompt is unavailable.".into())
+        })?;
+    let terminal_result = lifecycle.mission.get("terminalResult").ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited mission terminal result is missing.".into())
+    })?;
+    let outcome = terminal_result
+        .get("outcome")
+        .and_then(Value::as_str)
+        .filter(|value| matches!(*value, "failed" | "cancelled"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission terminal outcome is invalid.".into())
+        })?;
+    let summary = terminal_result
+        .get("summary")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission terminal summary is invalid.".into())
+        })?;
+    let completed_at = terminal_result
+        .get("completedAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission completion time is invalid.".into())
+        })?;
+    let result_event_id = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission result identity is invalid.".into())
+        })?;
+    let result_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission terminal event is missing.".into())
+        })?;
+    let expected_event_type = if outcome == "failed" {
+        "run-failed"
+    } else {
+        "run-cancelled"
+    };
+    let response = if outcome == "failed" {
+        format!("Mission failed: {summary}")
+    } else {
+        format!("Mission cancelled: {summary}")
+    };
+    let detail = json!({
+        "type":"mission-result",
+        "missionId":mission_id,
+        "resultEventId":result_event_id,
+        "outcome":outcome
+    });
+    let durable_facts_match = journal.run.get("ownerMemberId").and_then(Value::as_str)
+        == Some(owner_member_id)
+        && journal.run.get("sourceThreadId").and_then(Value::as_str) == Some(thread_id)
+        && journal.run.get("status").and_then(Value::as_str) == Some(outcome)
+        && result_event.get("runId").and_then(Value::as_str) == Some(run_id)
+        && result_event.get("type").and_then(Value::as_str) == Some(expected_event_type)
+        && result_event.get("occurredAt").and_then(Value::as_str) == Some(completed_at)
+        && terminal_result
+            .get("producingRunIds")
+            .and_then(Value::as_array)
+            .is_some_and(|ids| ids.len() == 1 && ids[0].as_str() == Some(run_id))
+        && terminal_result
+            .get("outputs")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty);
+    if !durable_facts_match {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission terminal transcript does not match its durable result.".into(),
+        ));
+    }
+    let (user_message_id, user_revision_id, _) = cited_transcript_identity(run_id, "user");
+    let (assistant_message_id, assistant_revision_id, _) =
+        cited_transcript_identity(run_id, "assistant");
+    let messages = message::list(tx, store, scope, thread_id)?;
+    let user = messages
+        .iter()
+        .find(|message| message.id == user_message_id);
+    let assistant = messages
+        .iter()
+        .find(|message| message.id == assistant_message_id);
+    let exact_user = user.is_some_and(|message| {
+        message.kind == "user"
+            && message.run_id.as_deref() == Some(run_id)
+            && message.detail.is_null()
+            && message.current_revision_id == user_revision_id
+            && message.current_revision_number == 1
+            && message.current_revision_state == "terminal"
+            && message.content == json!(prompt)
+            && message.created_at == completed_at
+    });
+    let exact_assistant = assistant.is_some_and(|message| {
+        message.kind == "assistant"
+            && message.run_id.as_deref() == Some(run_id)
+            && message.detail == detail
+            && message.current_revision_id == assistant_revision_id
+            && message.current_revision_number == 1
+            && message.current_revision_state == "terminal"
+            && message.content == json!(response)
+            && message.created_at == completed_at
+            && user.is_some_and(|user| message.sequence == user.sequence + 1)
+    });
+    if exact_user && exact_assistant {
+        Ok(())
+    } else {
+        Err(crate::store::StoreError::Invalid(
+            "Cited mission terminal transcript replay does not match its durable result.".into(),
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn append_single_worker_run_result(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -2482,7 +2820,7 @@ fn append_single_worker_run_failure(
         "eventHead".into(),
         json!({"lastSequence":sequence,"lastEventId":binding.result_event_id}),
     );
-    mission_run::append(
+    let settled = mission_run::append(
         tx,
         store,
         scope,
@@ -2506,6 +2844,19 @@ fn append_single_worker_run_failure(
         &mission_result,
         at,
     )?;
+    if is_cited_terminal_status_shape(journal, &lifecycle) {
+        append_cited_terminal_status_transcript(
+            tx,
+            store,
+            scope,
+            owner_member_id,
+            &settled,
+            &lifecycle,
+            &mission_result,
+            &event,
+            at,
+        )?;
+    }
     Ok(())
 }
 
@@ -2526,8 +2877,31 @@ fn append_native_run_cancellation(
         .iter()
         .find(|event| event.get("idempotencyKey").and_then(Value::as_str) == Some(key.as_str()))
     {
-        return exact_native_cancellation_replay(journal, existing, binding)
-            .map_err(crate::store::StoreError::Invalid);
+        exact_native_cancellation_replay(journal, existing, binding)
+            .map_err(crate::store::StoreError::Invalid)?;
+        let mission_id = journal
+            .run
+            .get("missionId")
+            .or_else(|| journal.run.pointer("/initiator/missionId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+            })?;
+        let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
+            })?;
+        if is_cited_terminal_status_shape(journal, &lifecycle) {
+            validate_cited_terminal_status_transcript_replay(
+                tx,
+                store,
+                scope,
+                owner_member_id,
+                journal,
+                &lifecycle,
+            )?;
+        }
+        return Ok(());
     }
     let cancellation_event = validate_native_cancellation_head(journal, binding)
         .map_err(crate::store::StoreError::Invalid)?;
@@ -2558,7 +2932,7 @@ fn append_native_run_cancellation(
         "eventHead".into(),
         json!({"lastSequence":sequence,"lastEventId":binding.result_event_id}),
     );
-    mission_run::append(
+    let settled = mission_run::append(
         tx,
         store,
         scope,
@@ -2612,7 +2986,82 @@ fn append_native_run_cancellation(
         &mission_result,
         &at,
     )?;
+    if is_cited_terminal_status_shape(journal, &lifecycle) {
+        append_cited_terminal_status_transcript(
+            tx,
+            store,
+            scope,
+            owner_member_id,
+            &settled,
+            &lifecycle,
+            &mission_result,
+            &event,
+            &at,
+        )?;
+    }
     Ok(())
+}
+
+fn is_cited_terminal_status_shape(
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+) -> bool {
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array);
+    let criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array);
+    let workers = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .collect::<Vec<_>>();
+    lifecycle
+        .mission
+        .pointer("/scope/sourceThreadId")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        && lifecycle
+            .current_revision
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+        && lifecycle
+            .mission
+            .pointer("/acceptance/requiresHumanAcceptance")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && steps.is_some_and(|steps| {
+            steps.len() == 1
+                && steps[0]
+                    .get("requiredCapabilities")
+                    .and_then(Value::as_array)
+                    .is_some_and(|capabilities| {
+                        capabilities.len() == 1 && capabilities[0] == "knowledge.content.search"
+                    })
+                && steps[0]
+                    .get("expectedOutputs")
+                    .and_then(Value::as_array)
+                    .is_some_and(|outputs| {
+                        outputs.len() == 1
+                            && outputs[0].get("format").and_then(Value::as_str)
+                                == Some("text/markdown")
+                    })
+                && workers.len() == 1
+                && workers[0]
+                    .pointer("/payload/worker/planStepKey")
+                    .and_then(Value::as_str)
+                    == steps[0].get("key").and_then(Value::as_str)
+        })
+        && criteria.is_some_and(|criteria| {
+            !criteria.is_empty()
+                && criteria.iter().all(|criterion| {
+                    criterion.get("evaluator").and_then(Value::as_str) == Some("policy")
+                })
+        })
 }
 
 fn native_terminal_event_keys(
@@ -3818,6 +4267,36 @@ fn validate_cited_mission_transcript_replay(
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
 ) -> crate::store::Result<()> {
+    if matches!(
+        terminal.get("type").and_then(Value::as_str),
+        Some("worker-failed" | "run-cancelled")
+    ) {
+        let mission_id = journal
+            .run
+            .get("missionId")
+            .or_else(|| journal.run.pointer("/initiator/missionId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Cited mission transcript has no selected mission.".into(),
+                )
+            })?;
+        let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Cited mission plan is unavailable.".into())
+            })?;
+        if is_cited_terminal_status_shape(journal, &lifecycle) {
+            return validate_cited_terminal_status_transcript_replay(
+                tx,
+                store,
+                scope,
+                owner_member_id,
+                journal,
+                &lifecycle,
+            );
+        }
+        return Ok(());
+    }
     if terminal.get("type").and_then(Value::as_str) != Some("worker-completed")
         || output.is_none_or(|spec| !spec.include_evidence)
     {
@@ -5995,7 +6474,81 @@ mod tests {
                         &accepted_event,
                         Some(&artifact),
                         "2026-07-13T12:01:00Z",
-                    )
+                    )?;
+                    for (thread_id, run_id, outcome, status, event_type, summary) in [
+                        (
+                            "thread-failed",
+                            "run-failed",
+                            "failed",
+                            "failed",
+                            "run-failed",
+                            "The mission stopped because its only worker failed.",
+                        ),
+                        (
+                            "thread-cancelled",
+                            "run-cancelled",
+                            "cancelled",
+                            "cancelled",
+                            "run-cancelled",
+                            "The mission stopped after its cancellation request was observed.",
+                        ),
+                    ] {
+                        thread::create(
+                            tx,
+                            &store,
+                            &scope,
+                            thread_id,
+                            None,
+                            "Cited status",
+                            "2026-07-13T12:00:00Z",
+                            &json!({}),
+                        )?;
+                        let result_event = if outcome == "failed" {
+                            json!({"id":format!("event-{outcome}"),"runId":run_id,
+                                "type":event_type,"occurredAt":"2026-07-13T12:02:00Z",
+                                "payload":{"error":{"code":"provider-failed"}}})
+                        } else {
+                            json!({"id":format!("event-{outcome}"),"runId":run_id,
+                                "type":event_type,"occurredAt":"2026-07-13T12:02:00Z",
+                                "payload":{"cancellation":{"requestKey":"cancel-1"}}})
+                        };
+                        let terminal_result = json!({"outcome":outcome,"summary":summary,
+                            "producingRunIds":[run_id],"outputs":[],"acceptance":[],
+                            "completedAt":"2026-07-13T12:02:00Z"});
+                        let status_lifecycle = mission_plan::MissionPlanLifecycleRow {
+                            mission: json!({"id":format!("mission-{outcome}"),
+                                "scope":{"sourceThreadId":thread_id},
+                                "terminalResult":terminal_result.clone()}),
+                            plan: json!({}),
+                            current_revision: json!({"summary":format!("Prompt for {outcome} mission.")}),
+                        };
+                        let status_journal = mission_run::MissionRunJournalRow {
+                            run: json!({"id":run_id,"ownerMemberId":"member-1",
+                                "sourceThreadId":thread_id,"status":status,
+                                "eventHead":{"lastEventId":format!("event-{outcome}")}}),
+                            events: vec![result_event.clone()],
+                        };
+                        append_cited_terminal_status_transcript(
+                            tx,
+                            &store,
+                            &scope,
+                            "member-1",
+                            &status_journal,
+                            &status_lifecycle,
+                            &terminal_result,
+                            &result_event,
+                            "2026-07-13T12:02:00Z",
+                        )?;
+                        validate_cited_terminal_status_transcript_replay(
+                            tx,
+                            &store,
+                            &scope,
+                            "member-1",
+                            &status_journal,
+                            &status_lifecycle,
+                        )?;
+                    }
+                    Ok(())
                 })
                 .unwrap();
         }
@@ -6013,6 +6566,22 @@ mod tests {
         assert_eq!(
             messages[1].content,
             json!("Launch is planned for Q3 [source-1].")
+        );
+        let failed_messages = reopened
+            .with_conn(|tx| message::list(tx, &reopened, &scope, "thread-failed"))
+            .unwrap();
+        assert_eq!(failed_messages[1].detail["outcome"], "failed");
+        assert_eq!(
+            failed_messages[1].content,
+            json!("Mission failed: The mission stopped because its only worker failed.")
+        );
+        let cancelled_messages = reopened
+            .with_conn(|tx| message::list(tx, &reopened, &scope, "thread-cancelled"))
+            .unwrap();
+        assert_eq!(cancelled_messages[1].detail["outcome"], "cancelled");
+        assert_eq!(
+            cancelled_messages[1].content,
+            json!("Mission cancelled: The mission stopped after its cancellation request was observed.")
         );
     }
 
