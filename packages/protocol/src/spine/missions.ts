@@ -394,6 +394,20 @@ export interface ProviderRouteObservationSnapshot {
   latestObservedAt: IsoDateTime;
 }
 
+export interface ProviderRouteQualitySnapshot {
+  reference: string;
+  policyRevisionRef: string;
+  sampleCount: number;
+  passedCount: number;
+  routingScoreBasisPoints: number;
+  latestEvaluatedAt: IsoDateTime;
+}
+
+/** Exact native acceptance contract used by the current cited-brief evaluator. */
+// Digest input: native-cited-brief-policy:v1|receipt.version=2|trust=provider-generated-with-external-evidence|citations.nonempty|requiredEvidence.subset
+export const NATIVE_CITED_BRIEF_POLICY_REVISION =
+  "native-policy:cited-brief:v1:2c6c266fe616417ded9cf81a667dddca7a5590204e84c708b1f4ca32d6eb5527";
+
 export interface ProviderRoutePricingEvidence {
   reference: string;
   currencyCode: string;
@@ -417,6 +431,7 @@ export interface ProviderRouteSelection {
   fallbackFromProviderRouteId?: ProviderRouteId;
   boundaryPolicyRef?: string;
   observation?: ProviderRouteObservationSnapshot;
+  quality?: ProviderRouteQualitySnapshot;
   cost?: ProviderRouteCostSnapshot;
 }
 

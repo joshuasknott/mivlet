@@ -799,9 +799,20 @@ fn native_provider_route_reason_with_evidence(
     provider_id: &str,
     model: &str,
     observation: Option<&crate::models::ProviderRouteObservationSnapshot>,
+    quality: Option<&crate::models::ProviderRouteQualitySnapshot>,
     cost: Option<&crate::models::ProviderRouteCostSnapshot>,
 ) -> Result<String, String> {
     let reason = native_provider_route_reason(provider_id, model)?;
+    let reason = match quality {
+        Some(value) => reason.replace(
+            "quality unobserved",
+            &format!(
+                "policy evidence {} of {} outputs passed",
+                value.passed_count, value.sample_count
+            ),
+        ),
+        None => reason,
+    };
     let reason = match cost {
         Some(value) => reason.replace(
             "cost unobserved",
@@ -823,6 +834,9 @@ fn native_provider_route_reason_with_evidence(
 
 const GPT5_PRICING_SOURCE: &str = "https://developers.openai.com/api/docs/models/gpt-5";
 const GPT5_PRICING_REVIEWED_AT: &str = "2026-07-13T00:00:00Z";
+// Digest input: native-cited-brief-policy:v1|receipt.version=2|trust=provider-generated-with-external-evidence|citations.nonempty|requiredEvidence.subset
+pub(crate) const NATIVE_CITED_BRIEF_POLICY_REVISION: &str =
+    "native-policy:cited-brief:v1:2c6c266fe616417ded9cf81a667dddca7a5590204e84c708b1f4ca32d6eb5527";
 
 pub(crate) fn exact_model_pricing_evidence(
     provider_id: &str,
@@ -858,6 +872,19 @@ pub(crate) fn provider_route_observation_snapshot(
         median_latency_ms: summary.median_latency_ms,
         usage_sample_count: summary.usage_sample_count,
         latest_observed_at: summary.latest_observed_at.clone(),
+    }
+}
+
+pub(crate) fn provider_route_quality_snapshot(
+    summary: &crate::store::repos::provider_route_quality_observation::ProviderRouteQualitySummary,
+) -> crate::models::ProviderRouteQualitySnapshot {
+    crate::models::ProviderRouteQualitySnapshot {
+        reference: summary.reference.clone(),
+        policy_revision_ref: summary.policy_revision_ref.clone(),
+        sample_count: summary.sample_count,
+        passed_count: summary.passed_count,
+        routing_score_basis_points: summary.routing_score_basis_points,
+        latest_evaluated_at: summary.latest_evaluated_at.clone(),
     }
 }
 
@@ -993,12 +1020,14 @@ fn validate_native_provider_route_binding(
         provider_id,
         model,
         expected_observation,
+        None,
         binding.selection.cost.as_ref(),
     )?;
     let expected_boundary = native_provider_route_boundary(provider_id);
     if binding.selection.provider_route_id != expected_route_id
         || binding.selection.reason != expected_reason
         || binding.selection.observation.as_ref() != expected_observation
+        || binding.selection.quality.is_some()
         || binding.selection.boundary_policy_ref.as_deref() != Some(expected_boundary.as_str())
         || binding.selection.fallback_from_provider_route_id.is_some()
         || chrono::DateTime::parse_from_rfc3339(&binding.selection.selected_at).is_err()
@@ -1014,10 +1043,35 @@ pub(crate) fn validate_persisted_native_provider_route_selection(
     expected_route_id: &str,
     selection: &crate::models::ProviderRouteSelection,
 ) -> Result<(), String> {
+    validate_persisted_native_provider_route_selection_for_policy(
+        provider_id,
+        model,
+        expected_route_id,
+        None,
+        selection,
+    )
+}
+
+pub(crate) fn validate_persisted_native_provider_route_selection_for_policy(
+    provider_id: &str,
+    model: &str,
+    expected_route_id: &str,
+    quality_policy_ref: Option<&str>,
+    selection: &crate::models::ProviderRouteSelection,
+) -> Result<(), String> {
     validate_provider_route_observation_snapshot(
         expected_route_id,
         selection.observation.as_ref(),
     )?;
+    validate_provider_route_quality_snapshot(expected_route_id, selection.quality.as_ref())?;
+    if selection
+        .quality
+        .as_ref()
+        .is_some_and(|quality| Some(quality.policy_revision_ref.as_str()) != quality_policy_ref)
+        || (quality_policy_ref.is_none() && selection.quality.is_some())
+    {
+        return Err("Native provider route policy evidence does not match its evaluator.".into());
+    }
     let pricing = exact_model_pricing_evidence(provider_id, model);
     validate_provider_route_cost_snapshot(
         provider_id,
@@ -1029,6 +1083,7 @@ pub(crate) fn validate_persisted_native_provider_route_selection(
         provider_id,
         model,
         selection.observation.as_ref(),
+        selection.quality.as_ref(),
         selection.cost.as_ref(),
     )?;
     if selection.provider_route_id != expected_route_id
@@ -1039,6 +1094,70 @@ pub(crate) fn validate_persisted_native_provider_route_selection(
         || chrono::DateTime::parse_from_rfc3339(&selection.selected_at).is_err()
     {
         return Err("Native provider route selection is invalid.".into());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn validate_native_provider_route_selection_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    internal_user_id: &str,
+    provider_id: &str,
+    model: &str,
+    expected_route_id: &str,
+    quality_policy_ref: Option<&str>,
+    selection: &crate::models::ProviderRouteSelection,
+) -> Result<(), String> {
+    let observations =
+        crate::store::repos::provider_route_observation::summaries(tx, store, internal_user_id)
+            .map_err(|error| error.to_string())?;
+    let expected_observation = observations
+        .get(expected_route_id)
+        .map(provider_route_observation_snapshot);
+    let expected_quality = match quality_policy_ref {
+        Some(policy_revision_ref) => {
+            crate::store::repos::provider_route_quality_observation::summaries_for_policy(
+                tx,
+                store,
+                internal_user_id,
+                policy_revision_ref,
+            )
+            .map_err(|error| error.to_string())?
+            .get(expected_route_id)
+            .map(provider_route_quality_snapshot)
+        }
+        None => None,
+    };
+    validate_provider_route_observation_snapshot(
+        expected_route_id,
+        selection.observation.as_ref(),
+    )?;
+    validate_provider_route_quality_snapshot(expected_route_id, selection.quality.as_ref())?;
+    let pricing = exact_model_pricing_evidence(provider_id, model);
+    validate_provider_route_cost_snapshot(
+        provider_id,
+        model,
+        pricing.as_ref(),
+        selection.cost.as_ref(),
+    )?;
+    let expected_reason = native_provider_route_reason_with_evidence(
+        provider_id,
+        model,
+        expected_observation.as_ref(),
+        expected_quality.as_ref(),
+        selection.cost.as_ref(),
+    )?;
+    if selection.provider_route_id != expected_route_id
+        || selection.reason != expected_reason
+        || selection.observation != expected_observation
+        || selection.quality != expected_quality
+        || selection.boundary_policy_ref.as_deref()
+            != Some(native_provider_route_boundary(provider_id).as_str())
+        || selection.fallback_from_provider_route_id.is_some()
+        || chrono::DateTime::parse_from_rfc3339(&selection.selected_at).is_err()
+    {
+        return Err("Native provider route selection does not match current evidence.".into());
     }
     Ok(())
 }
@@ -1119,12 +1238,45 @@ fn validate_provider_route_observation_snapshot(
     Ok(())
 }
 
+fn validate_provider_route_quality_snapshot(
+    provider_route_id: &str,
+    quality: Option<&crate::models::ProviderRouteQualitySnapshot>,
+) -> Result<(), String> {
+    let Some(quality) = quality else {
+        return Ok(());
+    };
+    if quality.sample_count == 0
+        || quality.sample_count > 50
+        || quality.passed_count > quality.sample_count
+    {
+        return Err("Provider route policy snapshot is invalid.".into());
+    }
+    let expected_score = ((quality.passed_count + 1) * 10_000) / (quality.sample_count + 2);
+    let expected_reference =
+        crate::store::repos::provider_route_quality_observation::summary_reference(
+            provider_route_id,
+            &quality.policy_revision_ref,
+            quality.sample_count,
+            quality.passed_count,
+            quality.routing_score_basis_points,
+            &quality.latest_evaluated_at,
+        );
+    if quality.reference != expected_reference
+        || quality.policy_revision_ref != NATIVE_CITED_BRIEF_POLICY_REVISION
+        || usize::from(quality.routing_score_basis_points) != expected_score
+        || chrono::DateTime::parse_from_rfc3339(&quality.latest_evaluated_at).is_err()
+    {
+        return Err("Provider route policy snapshot is invalid.".into());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let internal_user_id = require_current_internal_user()?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let (workspace_id, member_id, rows, observations) = store.with_conn(|tx| {
+    let (workspace_id, member_id, rows, observations, quality) = store.with_conn(|tx| {
         let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
         let member = context.member_id.clone().ok_or_else(|| crate::store::StoreError::Invalid(
             "An active Fable workspace membership is required for provider routes.".into()))?;
@@ -1136,7 +1288,13 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
             store,
             &internal_user_id,
         )?;
-        Ok((workspace, member, rows, observations))
+        let quality = crate::store::repos::provider_route_quality_observation::summaries_for_policy(
+            tx,
+            store,
+            &internal_user_id,
+            NATIVE_CITED_BRIEF_POLICY_REVISION,
+        )?;
+        Ok((workspace, member, rows, observations, quality))
     }).map_err(|error| error.to_string())?;
     let stores = CredentialStores {
         internal_user_id: internal_user_id.clone(),
@@ -1156,6 +1314,7 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
         &rows,
         &availability,
         &observations,
+        &quality,
     ))
 }
 
@@ -1168,6 +1327,10 @@ fn build_account_native_provider_routes(
     observations: &std::collections::BTreeMap<
         String,
         crate::store::repos::provider_route_observation::ProviderRouteObservationSummary,
+    >,
+    quality: &std::collections::BTreeMap<
+        String,
+        crate::store::repos::provider_route_quality_observation::ProviderRouteQualitySummary,
     >,
 ) -> Vec<serde_json::Value> {
     let mut routes = Vec::new();
@@ -1188,7 +1351,15 @@ fn build_account_native_provider_routes(
             let route_updated_at = observations
                 .get(&route_id)
                 .map(|summary| summary.latest_observed_at.as_str())
-                .unwrap_or(row.updated_at.as_str());
+                .into_iter()
+                .chain(
+                    quality
+                        .get(&route_id)
+                        .map(|summary| summary.latest_evaluated_at.as_str()),
+                )
+                .chain(std::iter::once(row.updated_at.as_str()))
+                .max()
+                .expect("provider route update time has a connection fallback");
             let mut route = serde_json::json!({
                 "id":&route_id,
                 "recordType":"provider-route","connectionId":connection_id,"kind":"api-model",
@@ -1210,6 +1381,12 @@ fn build_account_native_provider_routes(
                     .as_object_mut()
                     .expect("provider route projection is an object")
                     .insert("observationSummary".into(), serde_json::json!(summary));
+            }
+            if let Some(summary) = quality.get(&route_id) {
+                route
+                    .as_object_mut()
+                    .expect("provider route projection is an object")
+                    .insert("qualitySummary".into(), serde_json::json!(summary));
             }
             if let Some(pricing) = exact_model_pricing_evidence(&row.provider_id, model) {
                 route
@@ -1648,7 +1825,7 @@ mod provider_route_tests {
         ];
         let availability = HashMap::from([("openai".to_string(), true)]);
         let observations = std::collections::BTreeMap::from([(
-            gpt5,
+            gpt5.clone(),
             crate::store::repos::provider_route_observation::ProviderRouteObservationSummary {
                 reference: crate::store::repos::provider_route_observation::summary_reference(
                     &account_native_provider_route_id("user-1", "openai", "gpt-5"),
@@ -1663,6 +1840,25 @@ mod provider_route_tests {
                 latest_observed_at: "2026-07-12T02:00:00Z".into(),
             },
         )]);
+        let quality = std::collections::BTreeMap::from([(
+            gpt5.clone(),
+            crate::store::repos::provider_route_quality_observation::ProviderRouteQualitySummary {
+                reference:
+                    crate::store::repos::provider_route_quality_observation::summary_reference(
+                        &gpt5,
+                        NATIVE_CITED_BRIEF_POLICY_REVISION,
+                        3,
+                        2,
+                        6_000,
+                        "2026-07-12T03:00:00Z",
+                    ),
+                policy_revision_ref: NATIVE_CITED_BRIEF_POLICY_REVISION.into(),
+                sample_count: 3,
+                passed_count: 2,
+                routing_score_basis_points: 6_000,
+                latest_evaluated_at: "2026-07-12T03:00:00Z".into(),
+            },
+        )]);
         let routes = build_account_native_provider_routes(
             "user-1",
             "workspace-1",
@@ -1670,6 +1866,7 @@ mod provider_route_tests {
             &rows,
             &availability,
             &observations,
+            &quality,
         );
         let route = routes
             .iter()
@@ -1679,6 +1876,8 @@ mod provider_route_tests {
         assert_eq!(route["workspaceId"], "workspace-1");
         assert_eq!(route["credentialBinding"]["custody"], "os-secure-store");
         assert_eq!(route["observationSummary"]["medianLatencyMs"], 200);
+        assert_eq!(route["qualitySummary"]["passedCount"], 2);
+        assert_eq!(route["qualitySummary"]["routingScoreBasisPoints"], 6_000);
         assert_eq!(route["pricingSummary"]["currencyCode"], "USD");
         assert_eq!(route["pricingSummary"]["inputRateMinorUnits"], 125);
         assert_eq!(route["pricingSummary"]["outputRateMinorUnits"], 1_000);
@@ -1686,7 +1885,7 @@ mod provider_route_tests {
             route["pricingSummary"]["sourceUrl"],
             "https://developers.openai.com/api/docs/models/gpt-5"
         );
-        assert_eq!(route["updatedAt"], "2026-07-12T02:00:00Z");
+        assert_eq!(route["updatedAt"], "2026-07-12T03:00:00Z");
         assert_eq!(
             route["boundaries"]["placementBoundary"],
             "local-credential-egress"
@@ -1705,6 +1904,7 @@ mod provider_route_tests {
                 fallback_from_provider_route_id: None,
                 boundary_policy_ref: Some(native_provider_route_boundary("openai")),
                 observation: None,
+                quality: None,
                 cost: None,
             },
         };
@@ -1737,9 +1937,14 @@ mod provider_route_tests {
             usage_sample_count: 2,
             latest_observed_at: "2026-07-12T02:00:00Z".into(),
         };
-        binding.selection.reason =
-            native_provider_route_reason_with_evidence("openai", "gpt-5", Some(&observation), None)
-                .unwrap();
+        binding.selection.reason = native_provider_route_reason_with_evidence(
+            "openai",
+            "gpt-5",
+            Some(&observation),
+            None,
+            None,
+        )
+        .unwrap();
         binding.selection.observation = Some(observation.clone());
         assert!(validate_native_provider_route_binding(
             "openai",
@@ -1779,6 +1984,7 @@ mod provider_route_tests {
             "openai",
             "gpt-5",
             Some(&observation),
+            None,
             Some(&cost),
         )
         .unwrap();
@@ -1812,5 +2018,71 @@ mod provider_route_tests {
             &binding,
         )
         .is_err());
+    }
+
+    #[test]
+    fn persisted_cited_route_accepts_only_its_exact_policy_cohort() {
+        let expected = account_native_provider_route_id("user-1", "openai", "gpt-5");
+        let quality = crate::models::ProviderRouteQualitySnapshot {
+            reference: crate::store::repos::provider_route_quality_observation::summary_reference(
+                &expected,
+                NATIVE_CITED_BRIEF_POLICY_REVISION,
+                3,
+                2,
+                6_000,
+                "2026-07-13T00:00:00Z",
+            ),
+            policy_revision_ref: NATIVE_CITED_BRIEF_POLICY_REVISION.into(),
+            sample_count: 3,
+            passed_count: 2,
+            routing_score_basis_points: 6_000,
+            latest_evaluated_at: "2026-07-13T00:00:00Z".into(),
+        };
+        let mut selection = crate::models::ProviderRouteSelection {
+            provider_route_id: expected.clone(),
+            selected_at: "2026-07-13T00:01:00Z".into(),
+            reason: native_provider_route_reason_with_evidence(
+                "openai",
+                "gpt-5",
+                None,
+                Some(&quality),
+                None,
+            )
+            .unwrap(),
+            fallback_from_provider_route_id: None,
+            boundary_policy_ref: Some(native_provider_route_boundary("openai")),
+            observation: None,
+            quality: Some(quality),
+            cost: None,
+        };
+        assert!(
+            validate_persisted_native_provider_route_selection_for_policy(
+                "openai",
+                "gpt-5",
+                &expected,
+                Some(NATIVE_CITED_BRIEF_POLICY_REVISION),
+                &selection,
+            )
+            .is_ok()
+        );
+        assert!(validate_persisted_native_provider_route_selection(
+            "openai", "gpt-5", &expected, &selection,
+        )
+        .is_err());
+        selection
+            .quality
+            .as_mut()
+            .unwrap()
+            .routing_score_basis_points = 6_001;
+        assert!(
+            validate_persisted_native_provider_route_selection_for_policy(
+                "openai",
+                "gpt-5",
+                &expected,
+                Some(NATIVE_CITED_BRIEF_POLICY_REVISION),
+                &selection,
+            )
+            .is_err()
+        );
     }
 }

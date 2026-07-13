@@ -81,6 +81,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     local_workspace_id: String,
     member_id: String,
     internal_user_id: String,
+    provider_id: String,
     requested_model: String,
     provider_route_id: String,
     output: Option<NativeWorkerOutputSpec>,
@@ -163,6 +164,7 @@ pub struct MissionWorkerStartInput {
     route_selected_event_id: String,
     provider_id: String,
     model_reference: String,
+    route_selection: crate::models::ProviderRouteSelection,
     idempotency_key: String,
     expected_run_revision: i64,
     expected_last_sequence: i64,
@@ -552,6 +554,7 @@ pub(crate) fn preflight_native_worker_completion(
                 local_workspace_id: scope.workspace_id().to_string(),
                 member_id: member,
                 internal_user_id: context.internal_user_id,
+                provider_id: provider_id.to_string(),
                 requested_model: model.to_string(),
                 provider_route_id,
                 output,
@@ -959,6 +962,7 @@ pub(crate) fn settle_native_worker_completion(
                     reference,
                     receipt_value,
                     usage,
+                    &authority.provider_id,
                     &authority.requested_model,
                     &authority.provider_route_id,
                     terminal_expected_revision + 1,
@@ -984,6 +988,7 @@ fn append_native_policy_evaluation(
     output_reference: &str,
     receipt: &Value,
     usage: Option<(i64, i64)>,
+    provider_id: &str,
     requested_model: &str,
     provider_route_id: &str,
     expected_revision: i64,
@@ -1148,6 +1153,47 @@ fn append_native_policy_evaluation(
         &Value::Object(projected),
         at,
     )?;
+    let workspace_id = journal
+        .run
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+        })?;
+    let plan_revision_id = lifecycle
+        .current_revision
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission plan revision is invalid.".into())
+        })?;
+    let observation_digest =
+        Sha256::digest(format!("{internal_user_id}:{}", binding.evaluation_event_id).as_bytes());
+    let observation_id = format!("route-policy-observation:v1:{observation_digest:x}");
+    if let Err(error) = crate::store::repos::provider_route_quality_observation::record(
+        tx,
+        store,
+        internal_user_id,
+        provider_id,
+        provider_route_id,
+        crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION,
+        &observation_id,
+        requested_model,
+        workspace_id,
+        owner_member_id,
+        plan_revision_id,
+        &binding.run_id,
+        &binding.worker_id,
+        &binding.route_selected_event_id,
+        &binding.evaluation_event_id,
+        passed,
+        results.len(),
+        at,
+    ) {
+        // Quality evidence is advisory telemetry. A corrupt or unavailable
+        // cohort must never roll back a valid provider settlement.
+        eprintln!("route-policy observation record failed: {error}");
+    }
     if passed {
         append_single_worker_run_result(
             tx,
@@ -1721,18 +1767,22 @@ fn validate_selected_provider_route(
         .ok_or_else(|| "Mission provider route selection is unavailable.".to_string())?;
     let selection = event
         .pointer("/payload/selection")
-        .and_then(Value::as_object)
         .ok_or_else(|| "Mission provider route selection is invalid.".to_string())?;
-    let reason = crate::backends::native_provider_route_reason(provider_id, model)?;
-    let boundary = crate::backends::native_provider_route_boundary(provider_id);
+    let selection =
+        serde_json::from_value::<crate::models::ProviderRouteSelection>(selection.clone())
+            .map_err(|_| "Mission provider route selection is invalid.".to_string())?;
+    crate::backends::validate_persisted_native_provider_route_selection_for_policy(
+        provider_id,
+        model,
+        &expected,
+        Some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION),
+        &selection,
+    )?;
     if event.get("type").and_then(Value::as_str) != Some("route-selected")
         || event.get("previousEventId").and_then(Value::as_str)
             != Some(binding.worker_started_event_id.as_str())
         || event.pointer("/payload/workerId").and_then(Value::as_str)
             != Some(binding.worker_id.as_str())
-        || selection.get("providerRouteId").and_then(Value::as_str) != Some(expected.as_str())
-        || selection.get("reason").and_then(Value::as_str) != Some(reason.as_str())
-        || selection.get("boundaryPolicyRef").and_then(Value::as_str) != Some(boundary.as_str())
     {
         return Err("Mission provider egress does not match its selected route.".into());
     }
@@ -2549,6 +2599,19 @@ pub fn mission_worker_start(
                 &input.model_reference,
             )
             .map_err(crate::store::StoreError::Invalid)?;
+            crate::backends::validate_native_provider_route_selection_in_tx(
+                tx,
+                store,
+                &context.internal_user_id,
+                &input.provider_id,
+                &input.model_reference,
+                &provider_route_id,
+                Some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION),
+                &input.route_selection,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            validate_route_cost_matches_step(step, &input.route_selection)
+                .map_err(crate::store::StoreError::Invalid)?;
             let mut current = journal;
             if current.run.get("status").and_then(Value::as_str) != Some("running") {
                 let start_event_id = input.run_start_event_id.as_deref().ok_or_else(|| {
@@ -2892,11 +2955,14 @@ fn append_route_selected(
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
         })?;
-    let reason =
-        crate::backends::native_provider_route_reason(&input.provider_id, &input.model_reference)
-            .map_err(crate::store::StoreError::Invalid)?;
-    let boundary = crate::backends::native_provider_route_boundary(&input.provider_id);
-    let selection = json!({"providerRouteId":provider_route_id,"selectedAt":at,"reason":reason,"boundaryPolicyRef":boundary});
+    if input.route_selection.provider_route_id != provider_route_id {
+        return Err(crate::store::StoreError::Invalid(
+            "Worker route selection does not match its authorized provider route.".into(),
+        ));
+    }
+    let selection = serde_json::to_value(&input.route_selection).map_err(|_| {
+        crate::store::StoreError::Invalid("Worker route selection is invalid.".into())
+    })?;
     let sequence = last_sequence + 1;
     let event = json!({
         "workspaceId":workspace,"visibility":"member-private","ownerMemberId":member,"authority":"local",
@@ -2950,20 +3016,41 @@ fn exact_route_replay(event: &Value, input: &MissionWorkerStartInput) -> Result<
         && event.get("sequence").and_then(Value::as_i64)
             == Some(input.expected_last_sequence + added)
         && selection
-            .and_then(|value| value.get("reason"))
-            .and_then(Value::as_str)
             == Some(
-                crate::backends::native_provider_route_reason(
-                    &input.provider_id,
-                    &input.model_reference,
-                )?
-                .as_str(),
+                &serde_json::to_value(&input.route_selection)
+                    .map_err(|_| "Worker route selection is invalid.".to_string())?,
             )
     {
         Ok(())
     } else {
         Err("Worker route idempotency key already represents another selection.".into())
     }
+}
+
+fn validate_route_cost_matches_step(
+    step: &Value,
+    selection: &crate::models::ProviderRouteSelection,
+) -> Result<(), String> {
+    let Some(cost) = selection.cost.as_ref() else {
+        return Ok(());
+    };
+    let budget = step
+        .get("estimatedBudget")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Worker route cost requires an exact step budget.".to_string())?;
+    let input_tokens = budget
+        .get("maxInputTokens")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "Worker route input budget is invalid.".to_string())?;
+    let output_tokens = budget
+        .get("maxOutputTokens")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "Worker route output budget is invalid.".to_string())?;
+    if cost.estimated_input_tokens != input_tokens || cost.estimated_output_tokens != output_tokens
+    {
+        return Err("Worker route cost does not match its exact step budget.".into());
+    }
+    Ok(())
 }
 
 fn validate_lifecycle(
@@ -3661,6 +3748,16 @@ mod tests {
             route_selected_event_id: "event-5".into(),
             provider_id: "openai".into(),
             model_reference: "gpt-5".into(),
+            route_selection: crate::models::ProviderRouteSelection {
+                provider_route_id: "provider-route:v2:openai:test".into(),
+                selected_at: "2026-07-13T00:00:00Z".into(),
+                reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.".into(),
+                fallback_from_provider_route_id: None,
+                boundary_policy_ref: Some(crate::backends::native_provider_route_boundary("openai")),
+                observation: None,
+                quality: None,
+                cost: None,
+            },
             idempotency_key: "start-1".into(),
             expected_run_revision: 3,
             expected_last_sequence: 2,
@@ -3668,7 +3765,7 @@ mod tests {
         assert!(validate_start_head(&journal, &input).is_ok());
         let event = json!({"id":"event-4","runId":"run-1","type":"worker-started","sequence":4,"previousEventId":"event-3","payload":{"workerId":"worker-1"}});
         assert!(exact_start_replay(&event, &input).is_ok());
-        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","selection":{"reason":"Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route."}}});
+        let route = json!({"id":"event-5","runId":"run-1","type":"route-selected","sequence":5,"previousEventId":"event-4","payload":{"workerId":"worker-1","selection":input.route_selection}});
         assert!(exact_route_replay(&route, &input).is_ok());
         journal.events.push(event);
         assert!(validate_start_head(&journal, &input).is_err());

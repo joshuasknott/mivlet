@@ -408,18 +408,21 @@ Preferred fallback must be explicit and cannot cross a boundary; decisions retai
 the rejected reasons, selected score/explanation, fallback source, and stable
 boundary reference. The native OpenAI mission path now derives a stable private
 account route only from current account-owned provider metadata and an exact
-catalogue model, appends `route-selected` immediately after `worker-started`, and
-revalidates that route before egress. Tool execution, usage, output receipts, and
-terminal run results remain bound to the selected route across replay and restart.
+catalogue model. The desktop passes the complete immutable selection into the
+native worker start; Rust independently re-derives its current route, latency,
+policy-evaluation, price, token-bound, reason, and boundary evidence before
+appending that exact selection immediately after `worker-started`. Tool execution,
+usage, output receipts, and terminal run results remain bound to it across replay
+and restart.
 An authenticated native command now projects model-specific `ProviderRoute`
 records from durable account-owned backend metadata and current credential
 availability into the active member/workspace scope. Route and Connection ids
 are opaque and stable, credential references remain secret-free, and live egress
 still rechecks the credential. The cited journey requires the user-selected
 provider/model route as a no-fallback pin through the portable selector, then
-requires Rust's independently derived `route-selected` id to match. Missing,
-wrong-workspace, unhealthy, insufficient-context, or changed routes fail closed;
-unobserved quality, latency, and cost stay explicitly unobserved rather than zero.
+requires Rust to validate and retain the same selection. Missing, wrong-workspace,
+unhealthy, insufficient-context, or changed routes fail closed; unobserved
+quality, latency, and cost stay explicitly unobserved rather than zero.
 Ordinary interactive native-provider turns and scheduled native prompts now use
 the same exact no-fallback selector before execution. Interactive runs persist
 the workspace-fenced selection with their durable recovery record, both paths
@@ -455,9 +458,24 @@ The selector calculates a conservative USD-minor-unit ceiling from the requested
 input/output token bounds and retains the exact rates, source, review time, token
 bounds, and estimate in the immutable selection. Rust independently verifies the
 model-specific record and arithmetic before egress and during persisted replay;
-every unsupported model remains cost-unobserved. Quality observations, broader
-exact-model pricing, and visible product receipts for other mission shapes remain
-open. The
+every unsupported model remains cost-unobserved.
+Schema v30 adds encrypted native cited-policy outcomes without inferring historical
+evidence. Each row is bound to the exact account route, evaluator implementation
+revision, workspace/member, plan revision, run, worker, route event, evaluation
+event, criterion count, verdict, and evaluation time. Retention is capped at the
+newest fifty outcomes per route and evaluator revision. The catalogue exposes only
+the matching current cited-policy cohort as an immutable content-derived summary:
+raw passed/sample counts, a Laplace-smoothed routing score, latest evaluation time,
+and exact policy revision. The selector ignores it unless the request names that
+same revision; ordinary chat therefore remains quality-unobserved. A cited mission
+may score and explain the matching snapshot, while Rust requires the current exact
+snapshot at worker start and validates the persisted snapshot independently during
+settlement and replay. A native policy fail counts as a policy outcome, not a
+provider/model failure, and observation-storage failure cannot roll back a valid
+provider settlement. This evidence says only whether outputs passed that exact
+citation-structure policy; general model quality, factual correctness, user
+satisfaction, broader evaluator revisions, broader exact-model pricing, and visible
+receipts for other mission shapes remain open. The
 cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,

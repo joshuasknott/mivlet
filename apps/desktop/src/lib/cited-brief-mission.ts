@@ -1,6 +1,6 @@
 import type { AgentBackend, ApprovalGate } from "@fable/connectors";
 import { buildToolApproval, catalogueCapabilities, executeLocalWorker, selectMissionProviderRoute } from "@fable/connectors";
-import type { ApprovalRequest, ApprovalResolutionRequest, Spine } from "@fable/protocol";
+import { Spine, type ApprovalRequest, type ApprovalResolutionRequest } from "@fable/protocol";
 import {
   commitRuntimeCapabilityGrant,
   createRuntimeMissionPlan,
@@ -88,23 +88,6 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
     && route.workspaceId === input.missionScopeWorkspaceId);
   const capabilities = catalogueCapabilities(input.backend.providerId, input.model);
   if (!pinnedRoute || !capabilities) throw new Error("The selected model has no authorized mission route.");
-  const routeDecision = selectMissionProviderRoute({
-    workspaceId: input.missionScopeWorkspaceId, capabilityId: "model.generate",
-    requiredInputTokens: 32_000, requiredOutputTokens: 2_048, requiresTools: false,
-    allowedPlacementKinds: ["local-desktop"], boundaries: pinnedRoute.boundaries,
-    allowDegraded: false, maximumRisk: "medium", selectedAt: new Date().toISOString(),
-    preference: { policy: "require", providerRouteIds: [pinnedRoute.id], allowFallback: false }
-  }, routes.map((route) => ({
-    route, capabilityIds: ["model.generate"], supportsTools: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.tools === true,
-    contextWindowTokens: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.contextWindow ?? 0,
-    ...(route.observationSummary ? {
-      estimatedLatencyMs: route.observationSummary.medianLatencyMs,
-      observation: route.observationSummary
-    } : {}),
-    ...(route.pricingSummary ? { pricing: route.pricingSummary } : {}),
-    risk: "medium" as const
-  })));
-
   const mcpRoute = await resolveRuntimeMcpCapabilityRoute(input.workspaceId, "knowledge.content.search");
   const grantProposal = {
     workspaceId: input.workspaceId,
@@ -164,9 +147,34 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   const runStartEventId = id("event");
   const workerStartedEventId = id("event");
   const routeSelectedEventId = id("event");
+  const currentRoutes = await listRuntimeNativeProviderRoutes();
+  if (!currentRoutes) throw new Error("Mission routing requires the desktop runtime.");
+  const currentPinnedRoute = currentRoutes.find((route) => route.providerFamily === input.backend.providerId
+    && route.modelOrRuntimeReference === input.model
+    && route.workspaceId === input.missionScopeWorkspaceId);
+  if (!currentPinnedRoute) throw new Error("The selected model no longer has an authorized mission route.");
+  const routeDecision = selectMissionProviderRoute({
+    workspaceId: input.missionScopeWorkspaceId, capabilityId: "model.generate",
+    requiredInputTokens: 32_000, requiredOutputTokens: 2_048, requiresTools: false,
+    allowedPlacementKinds: ["local-desktop"], boundaries: currentPinnedRoute.boundaries,
+    allowDegraded: false, maximumRisk: "medium", selectedAt: new Date().toISOString(),
+    qualityPolicyRef: Spine.Missions.NATIVE_CITED_BRIEF_POLICY_REVISION,
+    preference: { policy: "require", providerRouteIds: [currentPinnedRoute.id], allowFallback: false }
+  }, currentRoutes.map((route) => ({
+    route, capabilityIds: ["model.generate"], supportsTools: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.tools === true,
+    contextWindowTokens: catalogueCapabilities(route.providerFamily, route.modelOrRuntimeReference)?.contextWindow ?? 0,
+    ...(route.observationSummary ? {
+      estimatedLatencyMs: route.observationSummary.medianLatencyMs,
+      observation: route.observationSummary
+    } : {}),
+    ...(route.pricingSummary ? { pricing: route.pricingSummary } : {}),
+    ...(route.qualitySummary ? { quality: route.qualitySummary } : {}),
+    risk: "medium" as const
+  })));
   journal = requireJournal(await startRuntimeMissionWorker({
     runId, workerId, runStartEventId, workerStartedEventId, routeSelectedEventId,
     providerId: input.backend.providerId, modelReference: input.model,
+    routeSelection: routeDecision.selection,
     idempotencyKey: id("worker-start"), ...head(journal)
   }));
   if (journalSelectedRouteId(journal) !== routeDecision.selection.providerRouteId) {

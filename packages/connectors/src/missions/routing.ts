@@ -4,6 +4,7 @@ type ProviderRoute = Spine.Connections.ProviderRoute;
 type ProviderRoutePreference = Spine.Missions.ProviderRoutePreference;
 type ProviderRouteSelection = Spine.Missions.ProviderRouteSelection;
 type ProviderRouteObservationSnapshot = Spine.Missions.ProviderRouteObservationSnapshot;
+type ProviderRouteQualitySnapshot = Spine.Missions.ProviderRouteQualitySnapshot;
 type ProviderRoutePricingEvidence = Spine.Missions.ProviderRoutePricingEvidence;
 type ProviderRouteCostSnapshot = Spine.Missions.ProviderRouteCostSnapshot;
 
@@ -12,7 +13,7 @@ export interface MissionRouteCandidate {
   capabilityIds: readonly string[];
   supportsTools: boolean;
   contextWindowTokens: number;
-  qualityScore?: number;
+  quality?: ProviderRouteQualitySnapshot;
   estimatedLatencyMs?: number;
   observation?: ProviderRouteObservationSnapshot;
   pricing?: ProviderRoutePricingEvidence;
@@ -31,6 +32,8 @@ export interface MissionRouteRequest {
   maximumRisk: MissionRouteCandidate["risk"];
   maxCostMinorUnits?: number;
   currency?: string;
+  /** Only an exact matching evaluator cohort may influence this decision. */
+  qualityPolicyRef?: string;
   preference?: ProviderRoutePreference;
   weights?: { quality: number; cost: number; speed: number };
   selectedAt: string;
@@ -58,6 +61,7 @@ export function selectMissionProviderRoute(
   validateRequest(request);
   candidates.forEach((candidate) => {
     validateCandidateObservation(candidate);
+    validateCandidateQuality(candidate);
     validateCandidatePricing(candidate);
   });
   const rejected: Array<{ providerRouteId: string; reasons: string[] }> = [];
@@ -81,6 +85,7 @@ export function selectMissionProviderRoute(
   const fallbackFromProviderRouteId = fellBack
     ? request.preference?.providerRouteIds.find((id) => candidates.some((candidate) => candidate.route.id === id))
     : undefined;
+  const selectedQuality = matchingQuality(request, selected.candidate);
   const reason = routeReason(request, selected.candidate, selected.cost, fellBack === true);
   return {
     selection: {
@@ -90,12 +95,27 @@ export function selectMissionProviderRoute(
       ...(fallbackFromProviderRouteId ? { fallbackFromProviderRouteId } : {}),
       boundaryPolicyRef: boundaryReference(request.boundaries),
       ...(selected.candidate.observation ? { observation: selected.candidate.observation } : {}),
+      ...(selectedQuality ? { quality: selectedQuality } : {}),
       ...(selected.cost ? { cost: selected.cost } : {})
     },
     score: selected.score,
     reason,
     rejected
   };
+}
+
+function validateCandidateQuality(candidate: MissionRouteCandidate): void {
+  const quality = candidate.quality;
+  if (!quality) return;
+  if (!quality.reference.startsWith("route-policy-summary:v1:")
+    || !quality.policyRevisionRef.startsWith("native-policy:")
+    || !Number.isInteger(quality.sampleCount) || quality.sampleCount < 1 || quality.sampleCount > 50
+    || !Number.isInteger(quality.passedCount) || quality.passedCount < 0 || quality.passedCount > quality.sampleCount
+    || !Number.isInteger(quality.routingScoreBasisPoints) || quality.routingScoreBasisPoints < 0 || quality.routingScoreBasisPoints > 10_000
+    || quality.routingScoreBasisPoints !== Math.floor((quality.passedCount + 1) * 10_000 / (quality.sampleCount + 2))
+    || !Number.isFinite(Date.parse(quality.latestEvaluatedAt))) {
+    throw new MissionRoutingError("Route policy evidence requires a valid immutable evaluator-revision snapshot.");
+  }
 }
 
 function validateCandidatePricing(candidate: MissionRouteCandidate): void {
@@ -172,7 +192,9 @@ function score(request: MissionRouteRequest, candidate: MissionRouteCandidate, c
   const speedScore = candidate.estimatedLatencyMs === undefined ? 0.5 : 1 / (1 + candidate.estimatedLatencyMs / 1_000);
   const preferenceBonus = request.preference?.policy === "prefer" && request.preference.providerRouteIds.includes(candidate.route.id) ? 1 : 0;
   const healthPenalty = candidate.route.state === "degraded" || candidate.route.health.state === "degraded" ? 0.15 : 0;
-  return round(weights.quality * (candidate.qualityScore ?? 0.5) + weights.cost * costScore + weights.speed * speedScore + preferenceBonus - healthPenalty);
+  const quality = matchingQuality(request, candidate);
+  const qualityScore = quality ? quality.routingScoreBasisPoints / 10_000 : 0.5;
+  return round(weights.quality * qualityScore + weights.cost * costScore + weights.speed * speedScore + preferenceBonus - healthPenalty);
 }
 
 function validateRequest(request: MissionRouteRequest): void {
@@ -182,6 +204,9 @@ function validateRequest(request: MissionRouteRequest): void {
   }
   if (!request.allowedPlacementKinds.length || !Number.isFinite(Date.parse(request.selectedAt))) {
     throw new MissionRoutingError("Mission route placement or selection time is invalid.");
+  }
+  if (request.qualityPolicyRef !== undefined && (!request.qualityPolicyRef.startsWith("native-policy:") || request.qualityPolicyRef.length > 240)) {
+    throw new MissionRoutingError("Mission route quality policy reference is invalid.");
   }
   const weights = request.weights ?? { quality: 0.5, cost: 0.25, speed: 0.25 };
   if ([weights.quality, weights.cost, weights.speed].some((value) => !Number.isFinite(value) || value < 0) || weights.quality + weights.cost + weights.speed <= 0) {
@@ -193,15 +218,22 @@ function validateRequest(request: MissionRouteRequest): void {
 }
 
 function routeReason(request: MissionRouteRequest, candidate: MissionRouteCandidate, cost: ProviderRouteCostSnapshot | undefined, fallback: boolean): string {
+  const quality = matchingQuality(request, candidate);
   const parts = [
     `Selected ${candidate.route.displayName} for ${request.capabilityId}`,
-    candidate.qualityScore === undefined ? "quality unobserved" : `quality ${candidate.qualityScore.toFixed(2)}`,
+    quality === undefined ? "quality unobserved" : `policy evidence ${quality.passedCount} of ${quality.sampleCount} outputs passed`,
     cost === undefined ? "cost unobserved" : `estimated cost ${cost.estimatedCostMinorUnits} ${cost.currencyCode} minor units`,
     candidate.estimatedLatencyMs === undefined ? "latency unobserved" : `estimated latency ${candidate.estimatedLatencyMs} ms`,
     candidate.route.health.state === "degraded" || candidate.route.state === "degraded" ? "degraded route allowed" : "healthy route",
     fallback ? "same-boundary fallback" : undefined
   ].filter(Boolean);
   return `${parts.join("; ")}.`;
+}
+
+function matchingQuality(request: MissionRouteRequest, candidate: MissionRouteCandidate): ProviderRouteQualitySnapshot | undefined {
+  return request.qualityPolicyRef !== undefined && candidate.quality?.policyRevisionRef === request.qualityPolicyRef
+    ? candidate.quality
+    : undefined;
 }
 
 function isPublicHttpsUrl(value: string): boolean {

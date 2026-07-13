@@ -2585,6 +2585,7 @@ export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
     latestObservedAt: string;
   };
   pricingSummary?: Spine.Missions.ProviderRoutePricingEvidence;
+  qualitySummary?: Spine.Missions.ProviderRouteQualitySnapshot;
 };
 
 export async function listRuntimeNativeProviderRoutes() {
@@ -3011,6 +3012,7 @@ export interface RuntimeMissionWorkerStartInput {
   routeSelectedEventId: string;
   providerId: string;
   modelReference: string;
+  routeSelection: Spine.Missions.ProviderRouteSelection;
   idempotencyKey: string;
   expectedRunRevision: number;
   expectedLastSequence: number;

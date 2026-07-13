@@ -50,7 +50,7 @@ describe("mission runtime boundary", () => {
     };
     const run = { missionId: "mission-1", runId: "run-1", eventId: "event-create", idempotencyKey: "create-1" };
     const worker = { runId: "run-1", eventId: "event-worker", idempotencyKey: "worker-1", expectedRunRevision: 2, expectedLastSequence: 1, workerId: "worker-1", stepKey: "search", context: [], grants: [{ capabilityId: "knowledge.content.search", capabilityGrantId: "grant-1" }] };
-    const start = { runId: "run-1", workerId: "worker-1", runStartEventId: "event-run-start", workerStartedEventId: "event-worker-start", routeSelectedEventId: "event-route", providerId: "openai", modelReference: "gpt-5", idempotencyKey: "start-1", expectedRunRevision: 3, expectedLastSequence: 2 };
+    const start = { runId: "run-1", workerId: "worker-1", runStartEventId: "event-run-start", workerStartedEventId: "event-worker-start", routeSelectedEventId: "event-route", providerId: "openai", modelReference: "gpt-5", routeSelection: { providerRouteId: "route-1" as never, selectedAt: "2026-07-13T00:00:00Z", reason: "Selected route.", boundaryPolicyRef: "boundary:test" }, idempotencyKey: "start-1", expectedRunRevision: 3, expectedLastSequence: 2 };
 
     await createRuntimeMissionPlan(plan);
     await createRuntimeMissionRun(run);

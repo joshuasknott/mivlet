@@ -38,6 +38,7 @@ export async function selectNativeProviderRoute(input: {
       observation: route.observationSummary
     } : {}),
     ...(route.pricingSummary ? { pricing: route.pricingSummary } : {}),
+    ...(route.qualitySummary ? { quality: route.qualitySummary } : {}),
     risk: "medium" as const
   })));
   return { workspaceId: pinnedRoute.workspaceId, selection: decision.selection };

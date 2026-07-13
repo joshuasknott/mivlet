@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { MissionRoutingError, selectMissionProviderRoute, type MissionRouteCandidate, type MissionRouteRequest } from "./routing";
 
 const boundaries = { privacyBoundary: "private", billingBoundary: "personal", providerBoundary: "approved", placementBoundary: "local-or-approved-hosted" };
+const policy = "native-policy:cited-brief:v1:test";
+function quality(id: string, passedCount = 4, sampleCount = 5, policyRevisionRef = policy) {
+  return {
+    reference: `route-policy-summary:v1:${id}`,
+    policyRevisionRef,
+    sampleCount,
+    passedCount,
+    routingScoreBasisPoints: Math.floor((passedCount + 1) * 10_000 / (sampleCount + 2)),
+    latestEvaluatedAt: "2026-07-12T00:45:00Z"
+  };
+}
 function pricing(id: string, inputRateMinorUnits = 1, outputRateMinorUnits = 3) {
   return {
     reference: `route-pricing:v1:${id}`,
@@ -31,7 +42,7 @@ function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): 
       createdByInternalUserId: "user-1", createdAt: "2026-07-12T00:00:00Z", updatedAt: "2026-07-12T00:00:00Z"
     } as never,
     capabilityIds: ["knowledge.content.search"], supportsTools: true, contextWindowTokens: 64_000,
-    qualityScore: 0.8, estimatedLatencyMs: 1_000, observation, pricing: pricing(id), risk: "medium", ...overrides,
+    quality: quality(id), estimatedLatencyMs: 1_000, observation, pricing: pricing(id), risk: "medium", ...overrides,
     ...(overrides.estimatedLatencyMs !== undefined && !Object.prototype.hasOwnProperty.call(overrides, "observation")
       ? { observation: { ...observation, medianLatencyMs: overrides.estimatedLatencyMs } }
       : {})
@@ -48,15 +59,15 @@ function request(overrides: Partial<MissionRouteRequest> = {}): MissionRouteRequ
     workspaceId: "workspace-1", capabilityId: "knowledge.content.search", requiredInputTokens: 2_000,
     requiredOutputTokens: 1_000, requiresTools: true, allowedPlacementKinds: ["fable-managed"], boundaries,
     allowDegraded: false, maximumRisk: "medium", maxCostMinorUnits: 20, currency: "USD",
-    selectedAt: "2026-07-12T01:00:00Z", ...overrides
+    qualityPolicyRef: policy, selectedAt: "2026-07-12T01:00:00Z", ...overrides
   };
 }
 
 describe("mission provider routing", () => {
   it("selects deterministically from quality, cost, and speed", () => {
     const decision = selectMissionProviderRoute(request(), [
-      candidate("route-slow", { qualityScore: 0.9, estimatedLatencyMs: 8_000, pricing: pricing("slow", 2, 6) }),
-      candidate("route-balanced", { qualityScore: 0.88, estimatedLatencyMs: 500, pricing: pricing("balanced", 0, 2) })
+      candidate("route-slow", { quality: quality("slow", 9, 10), estimatedLatencyMs: 8_000, pricing: pricing("slow", 2, 6) }),
+      candidate("route-balanced", { quality: quality("balanced", 8, 10), estimatedLatencyMs: 500, pricing: pricing("balanced", 0, 2) })
     ]);
     expect(decision.selection.providerRouteId).toBe("route-balanced");
     expect(decision.selection.boundaryPolicyRef).toContain("boundary:private");
@@ -64,7 +75,7 @@ describe("mission provider routing", () => {
 
   it("enforces provider pins and exclusions without silent fallback", () => {
     expect(selectMissionProviderRoute(request({ preference: { policy: "require", providerRouteIds: ["route-pinned"] as never, allowFallback: false } }), [
-      candidate("route-other"), candidate("route-pinned", { qualityScore: 0.2 })
+      candidate("route-other"), candidate("route-pinned", { quality: quality("pinned", 0, 3) })
     ]).selection.providerRouteId).toBe("route-pinned");
     expect(() => selectMissionProviderRoute(request({ preference: { policy: "exclude", providerRouteIds: ["route-only"] as never, allowFallback: false } }), [candidate("route-only")]))
       .toThrow(MissionRoutingError);
@@ -102,13 +113,25 @@ describe("mission provider routing", () => {
 
   it("selects without inventing quality, latency, or cost observations", () => {
     const decision = selectMissionProviderRoute(request({ maxCostMinorUnits: undefined }), [
-      candidate("route-unobserved", { qualityScore: undefined, estimatedLatencyMs: undefined, pricing: undefined })
+      candidate("route-unobserved", { quality: undefined, estimatedLatencyMs: undefined, pricing: undefined })
     ]);
     expect(decision.reason).toContain("quality unobserved");
     expect(decision.reason).toContain("cost unobserved");
     expect(decision.reason).toContain("latency unobserved");
     expect(decision.selection.observation).toBeUndefined();
     expect(decision.selection.cost).toBeUndefined();
+  });
+
+  it("uses and binds policy evidence only for an exact requested evaluator revision", () => {
+    const matched = selectMissionProviderRoute(request(), [candidate("route-policy")]);
+    expect(matched.selection.quality).toEqual(candidate("route-policy").quality);
+    expect(matched.reason).toContain("policy evidence 4 of 5 outputs passed");
+
+    const unmatched = selectMissionProviderRoute(request({ qualityPolicyRef: "native-policy:other:v1" }), [
+      candidate("route-policy")
+    ]);
+    expect(unmatched.selection.quality).toBeUndefined();
+    expect(unmatched.reason).toContain("quality unobserved");
   });
 
   it("binds source-attributed exact-model cost into the immutable selection", () => {
