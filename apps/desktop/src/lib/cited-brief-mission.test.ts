@@ -57,8 +57,9 @@ describe("cited brief mission composition", () => {
       .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(11, 10, [
         { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
-        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } }
-      ], { status: "completed", terminalResult: { outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
+        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } },
+        { id: "head-10", type: "run-completed", payload: { result: { outcome: "succeeded" } } }
+      ], { status: "completed", terminalResult: { outcome: "succeeded", summary: "The cited brief and its required policy acceptance are complete.", outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
     mocks.readOutput.mockResolvedValue({ receipt: { text: "Trustworthy brief [source-1].", observedProvider: "openai", requestedModel: "gpt-5", trust: "provider-generated-with-external-evidence", citations: [{ citationId: "source-1" }] } });
   });
 
@@ -81,7 +82,8 @@ describe("cited brief mission composition", () => {
     });
 
     expect(result.text).toBe("Trustworthy brief [source-1].");
-    expect(result.receipt).toMatchObject({ provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD" });
+    expect(result.outcome).toBe("accepted");
+    expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD" });
     expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(1);
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
       toolSpecs: [], missionToolEvidence: { result: { citations: [{ citationId: "source-1" }] } },
@@ -102,5 +104,35 @@ describe("cited brief mission composition", () => {
     mocks.getRun.mockResolvedValue(journal(7, 6, []));
     await cancelMission?.();
     expect(mocks.cancelRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "mission-run-4", mode: "cooperative", expectedRunRevision: 7, expectedLastSequence: 6 }));
+  });
+
+  it("returns preserved output as an explicit unaccepted partial outcome", async () => {
+    let counter = 0;
+    mocks.getRun
+      .mockReset()
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(11, 10, [
+        { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
+        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [] } } },
+        { id: "head-10", type: "run-failed", payload: {
+          error: { code: "policy-acceptance-failed", category: "validation", message: "Not accepted", retryable: false },
+          partial: {
+            summary: "The cited draft was preserved, but it did not satisfy the required evidence policy.",
+            completedOutputs: [{ key: "brief", valueReference: "mission-output:v1:brief" }],
+            remainingWork: ["Meet acceptance criterion: Cite evidence"], acceptance: [], recoverable: true, recommendedNextAction: "stop"
+          }
+        } }
+      ], { status: "partially-completed" }));
+    const result = await executeCitedBriefMission({
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
+    });
+
+    expect(result.outcome).toBe("partial");
+    expect(result.text).toContain("Draft preserved, but not accepted");
+    expect(result.text).toContain("Trustworthy brief [source-1].");
+    expect(result.receipt).toMatchObject({ acceptanceStatus: "not-accepted" });
+    expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
   });
 });

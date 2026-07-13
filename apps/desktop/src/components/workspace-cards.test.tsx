@@ -116,6 +116,7 @@ describe("RunContextSummary", () => {
 
   it("shows the review date retained by source-attributed mission pricing", () => {
     render(<MissionRunReceipt receipt={{
+      acceptanceStatus: "accepted", acceptanceSummary: "Required policy acceptance is complete.",
       provider: "openai", model: "gpt-5", routeReason: "Selected exact route.",
       inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1,
       trust: "provider-generated-with-external-evidence", maxInputTokens: 2_000,
@@ -123,6 +124,7 @@ describe("RunContextSummary", () => {
       costAmount: "0.00095", costCurrency: "USD",
       pricingReference: "https://developers.openai.com/api/docs/models/gpt-5|reviewed=2026-07-13|standard-input-usd-per-1m=1.25|standard-output-usd-per-1m=10"
     }} />);
+    expect(screen.getByText("Policy acceptance met")).toBeInTheDocument();
     expect(screen.getByText("Standard API list price · reviewed 13 Jul 2026")).toBeInTheDocument();
   });
 });

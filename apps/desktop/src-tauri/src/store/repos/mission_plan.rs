@@ -279,6 +279,39 @@ pub fn mark_completed(
     )
 }
 
+pub fn mark_partially_completed(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    terminal_result: &Value,
+    at: &str,
+) -> Result<()> {
+    if terminal_result.get("outcome").and_then(Value::as_str) != Some("partial")
+        || terminal_result.get("partial").is_none()
+        || terminal_result
+            .get("producingRunIds")
+            .and_then(Value::as_array)
+            .is_none_or(|ids| ids.len() != 1)
+    {
+        return Err(StoreError::Invalid(
+            "Mission partial result is invalid.".into(),
+        ));
+    }
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "running",
+        "partially-completed",
+        Some(terminal_result),
+        at,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn transition_status(
     tx: &Connection,
@@ -589,5 +622,54 @@ mod tests {
                 tx, &store, &scope, "member-1", &running, &result, "t4"
             ))
             .is_err());
+    }
+
+    #[test]
+    fn mission_status_projects_exact_partial_result() {
+        let store = store();
+        store.transaction(|tx| { tx.execute("INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('w1','One','t','t');",[])?; Ok(()) }).unwrap();
+        let scope = DataScope::workspace("w1").unwrap();
+        let (mut mission, plan, revision) = values(1, "revision-1", None);
+        mission["status"] = json!("ready");
+        mission["updatedAt"] = json!("t1");
+        let lifecycle = store
+            .transaction(|tx| {
+                create(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    "user-1",
+                    "mission-1",
+                    "plan-1",
+                    "revision-1",
+                    "delegated",
+                    &mission,
+                    &plan,
+                    &revision,
+                    "t1",
+                )
+            })
+            .unwrap();
+        store
+            .transaction(|tx| mark_running(tx, &store, &scope, "member-1", &lifecycle, "t2"))
+            .unwrap();
+        let running = store
+            .with_conn(|tx| get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        let partial = json!({"summary":"Draft preserved","completedOutputs":[],"remainingWork":["Meet policy"],"acceptance":[],"recoverable":true,"recommendedNextAction":"stop"});
+        let result = json!({"outcome":"partial","summary":"Draft not accepted","producingRunIds":["run-1"],"outputs":[],"acceptance":[],"partial":partial,"completedAt":"t3"});
+        store
+            .transaction(|tx| {
+                mark_partially_completed(tx, &store, &scope, "member-1", &running, &result, "t3")
+            })
+            .unwrap();
+        let projected = store
+            .with_conn(|tx| get(tx, &store, &scope, "member-1", "mission-1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(projected.mission["status"], "partially-completed");
+        assert_eq!(projected.mission["terminalResult"], result);
     }
 }

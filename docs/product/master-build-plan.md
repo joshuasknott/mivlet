@@ -361,22 +361,27 @@ Human, worker, and external evaluators, multi-output and mission-level result
 aggregation, general terminal result persistence, and inspectable plans remain
 open, so the acceptance/evaluation box stays unchecked.
 
-For the deliberately narrow single-step cited-brief shape, accepted policy
-evaluation now continues in that transaction to a terminal `run-completed`.
+For the deliberately narrow single-step cited-brief shape, policy evaluation
+now always continues in that transaction to a terminal run outcome.
 Rust requires exactly one plan step, one created worker, one required deliverable,
-no human gate, and every mission criterion to be policy-owned and met. The
-durable result is derived from the encrypted receipt plus native usage and
-evaluation facts, then stored on the run projection for restart-safe reads.
-Multi-step aggregation, partial/failure outcomes, other evaluator kinds,
-general mission-level aggregation, and other product journeys remain open.
+no human gate, and every mission criterion to be policy-owned and evaluated.
+A pass appends `run-completed` and stores the derived successful `RunResult` on
+the run projection. A fail appends `run-failed` with a validation-category policy
+error and a recoverable `PartialOutcome` that preserves the exact output,
+per-criterion acceptance, remaining work, and a stop recommendation; it projects
+the run to `partially-completed` without blaming the provider. Exact settlement
+replay requires the original evaluation and its matching accepted or partial
+terminal fact. Multi-step aggregation, other evaluator kinds, general mission-
+level aggregation, and other product journeys remain open.
 
 The authenticated lifecycle now also projects those journal facts back to the
 selected mission. Creating the first run atomically advances the exact
 revision-fenced mission from ready to running. The eligible terminal cited run
-advances it from running to completed in the same transaction and stores a
-derived `MissionResult` naming only that producing run. No renderer-selected
-status, result, actor, or time crosses this boundary; stale transitions roll
-back. General multi-run and partial/failed mission aggregation remains open.
+advances it from running to either completed or partially-completed in the same
+transaction and stores a derived `MissionResult` naming only that producing run.
+No renderer-selected status, result, actor, or time crosses this boundary; stale
+transitions roll back. General multi-run and failed mission aggregation remains
+open.
 
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes
@@ -386,7 +391,9 @@ already-planned semantic search through its own exact-action approval, and sends
 only the attested evidence into the final provider turn. It preserves an explicit
 MCP route when one is configured, otherwise uses the native resolver, then reloads
 the terminal journal and encrypted output receipt before showing the Markdown in
-the conversation. Browser preview creates no mission state. Focused orchestration
+the conversation. An accepted output carries an accepted receipt; a policy-failed
+draft remains readable but is prefixed as not accepted and its receipt exposes the
+failed acceptance summary. Browser preview creates no mission state. Focused orchestration
 and rendered-shell tests cover this composition, but actual Tauri execution and
 restart with production account/provider/native/MCP services remains a live
 external evidence gate rather than a checked repository claim.
@@ -480,7 +487,8 @@ cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,
 cited-source count, external-evidence trust classification, and the persisted
-input/output token, tool-call, time, and attempt ceilings. Exact `gpt-5` usage
+input/output token, tool-call, time, and attempt ceilings. It also names the
+accepted or not-accepted policy state and its durable summary. Exact `gpt-5` usage
 also carries a Fable-calculated USD observation from the reviewed official
 standard API list rate; the durable pricing reference records the source, review
 date, and input/output rates, while every other model remains explicitly unknown.

@@ -543,6 +543,8 @@ pub(crate) fn preflight_native_worker_completion(
                     validate_output_receipt_replay(
                         tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
                     )?;
+                    validate_policy_result_replay(&journal, existing, binding, output.as_ref())
+                        .map_err(crate::store::StoreError::Invalid)?;
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
             }
@@ -738,6 +740,13 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.binding,
                     authority.output.as_ref(),
                 )?;
+                validate_policy_result_replay(
+                    &journal,
+                    existing,
+                    &authority.binding,
+                    authority.output.as_ref(),
+                )
+                .map_err(crate::store::StoreError::Invalid)?;
                 return Ok(());
             }
             validate_native_completion_head(&journal, &authority.binding)
@@ -1194,28 +1203,26 @@ fn append_native_policy_evaluation(
         // cohort must never roll back a valid provider settlement.
         eprintln!("route-policy observation record failed: {error}");
     }
-    if passed {
-        append_single_worker_run_result(
-            tx,
-            store,
-            scope,
-            owner_member_id,
-            internal_user_id,
-            journal,
-            binding,
-            &lifecycle,
-            worker,
-            receipt,
-            output_reference,
-            &evaluation,
-            usage,
-            requested_model,
-            provider_route_id,
-            expected_revision + 1,
-            sequence,
-            at,
-        )?;
-    }
+    append_single_worker_run_result(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        internal_user_id,
+        journal,
+        binding,
+        &lifecycle,
+        worker,
+        receipt,
+        output_reference,
+        &evaluation,
+        usage,
+        requested_model,
+        provider_route_id,
+        expected_revision + 1,
+        sequence,
+        at,
+    )?;
     Ok(())
 }
 
@@ -1269,30 +1276,20 @@ fn append_single_worker_run_result(
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
         })?;
-    let evaluated_keys = evaluation
+    let evaluation_results = evaluation
         .get("criteria")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter(|result| result.get("passed").and_then(Value::as_bool) == Some(true))
+        .collect::<Vec<_>>();
+    let evaluated_keys = evaluation_results
+        .iter()
         .filter_map(|result| result.get("criterionKey").and_then(Value::as_str))
         .collect::<BTreeSet<_>>();
     let output_key = receipt
         .get("outputKey")
         .and_then(Value::as_str)
         .unwrap_or("");
-    let minimum = lifecycle
-        .mission
-        .pointer("/acceptance/minimumRequiredCriteria")
-        .and_then(Value::as_u64)
-        .unwrap_or_else(|| {
-            mission_criteria
-                .iter()
-                .filter(|criterion| {
-                    criterion.get("required").and_then(Value::as_bool) == Some(true)
-                })
-                .count() as u64
-        });
     let eligible = steps.len() == 1
         && created_workers == 1
         && worker.get("id").and_then(Value::as_str) == Some(binding.worker_id.as_str())
@@ -1310,54 +1307,106 @@ fn append_single_worker_run_result(
                     .get("key")
                     .and_then(Value::as_str)
                     .is_some_and(|key| evaluated_keys.contains(key))
-        })
-        && evaluated_keys.len() as u64 >= minimum;
+        });
     if !eligible {
         return Ok(());
     }
-    let evidence_refs = evaluation
-        .get("criteria")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .flat_map(|result| {
-            result
-                .get("evidenceRefs")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+    let acceptance = mission_criteria
+        .iter()
+        .filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+        .filter_map(|key| {
+            evaluation_results
+                .iter()
+                .find(|result| {
+                    result.get("criterionKey").and_then(Value::as_str) == Some(key)
+                })
+                .map(|result| {
+                    json!({
+                        "criterionKey":key,
+                        "status":if result.get("passed").and_then(Value::as_bool) == Some(true){"met"}else{"not-met"},
+                        "evidenceRefs":result.get("evidenceRefs").and_then(Value::as_array).cloned().unwrap_or_default(),
+                        "summary":result.get("summary")
+                    })
+                })
         })
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect::<BTreeSet<_>>();
-    let acceptance = mission_criteria.iter().filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
-        .map(|key| json!({"criterionKey":key,"status":"met","evidenceRefs":evidence_refs.iter().cloned().collect::<Vec<_>>(),
-            "summary":"The native policy evaluator accepted the attested cited output."})).collect::<Vec<_>>();
+        .collect::<Vec<_>>();
     let output = json!({"key":output_key,"summary":"Native worker text output","valueReference":output_reference});
     let costs = exact_model_costs(requested_model, input_tokens, output_tokens);
     let usage_value = json!({"usageKey":format!("native-usage:{}",binding.usage_event_id),"runId":binding.run_id,
         "workerId":binding.worker_id,"providerRouteId":provider_route_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
         "toolCalls":1,"costs":costs,"measuredAt":at});
-    let result = json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
-        "outputs":[output],"acceptance":acceptance,"evaluations":[evaluation],"usage":[usage_value],"completedAt":at});
-    let mission_result = json!({"outcome":"succeeded","summary":result.get("summary"),"producingRunIds":[binding.run_id],
-        "outputs":result.get("outputs"),"acceptance":result.get("acceptance"),"completedAt":at});
+    let passed = evaluation.get("verdict").and_then(Value::as_str) == Some("pass");
+    let failed_criteria = mission_criteria
+        .iter()
+        .filter(|criterion| {
+            let key = criterion.get("key").and_then(Value::as_str);
+            acceptance.iter().any(|result| {
+                result.get("criterionKey").and_then(Value::as_str) == key
+                    && result.get("status").and_then(Value::as_str) != Some("met")
+            })
+        })
+        .map(|criterion| {
+            format!(
+                "Meet acceptance criterion: {}",
+                criterion
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| {
+                        criterion
+                            .get("key")
+                            .and_then(Value::as_str)
+                            .unwrap_or("required policy")
+                    })
+            )
+        })
+        .collect::<Vec<_>>();
+    let partial = (!passed).then(|| json!({
+        "summary":"The cited draft was preserved, but it did not satisfy the required evidence policy.",
+        "completedOutputs":[output.clone()],
+        "remainingWork":failed_criteria,
+        "acceptance":acceptance.clone(),
+        "recoverable":true,
+        "recommendedNextAction":"stop"
+    }));
+    let result = passed.then(|| json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
+        "outputs":[output.clone()],"acceptance":acceptance.clone(),"evaluations":[evaluation],"usage":[usage_value],"completedAt":at}));
+    let mission_result = if let Some(result) = result.as_ref() {
+        json!({"outcome":"succeeded","summary":result.get("summary"),"producingRunIds":[binding.run_id],
+            "outputs":result.get("outputs"),"acceptance":result.get("acceptance"),"completedAt":at})
+    } else {
+        json!({"outcome":"partial","summary":"The cited draft was preserved without policy acceptance.","producingRunIds":[binding.run_id],
+            "outputs":[output],"acceptance":acceptance,"partial":partial,"completedAt":at})
+    };
     let idempotency_key = format!(
         "run-result:{}",
         bounded(&binding.idempotency_key, "Run result idempotency key", 200)
             .map_err(crate::store::StoreError::Invalid)?
     );
     let sequence = expected_sequence + 1;
+    let error = json!({"code":"policy-acceptance-failed","category":"validation",
+        "message":"The cited output did not satisfy its required evidence policy.","retryable":false,
+        "causedByEventId":binding.evaluation_event_id});
+    let (event_type, payload, next_status) = if let Some(result) = result.as_ref() {
+        ("run-completed", json!({"result":result}), "completed")
+    } else {
+        (
+            "run-failed",
+            json!({"error":error,"partial":partial}),
+            "partially-completed",
+        )
+    };
     let event = json!({"workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
         "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,"createdAt":at,"updatedAt":at,
-        "id":binding.result_event_id,"runId":binding.run_id,"type":"run-completed","sequence":sequence,
+        "id":binding.result_event_id,"runId":binding.run_id,"type":event_type,"sequence":sequence,
         "previousEventId":binding.evaluation_event_id,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
-        "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":idempotency_key,"payload":{"result":result}});
+        "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":idempotency_key,"payload":payload});
     let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
         crate::store::StoreError::Invalid("Mission run record is invalid.".into())
     })?;
-    projected.insert("status".into(), json!("completed"));
-    projected.insert("terminalResult".into(), result);
+    projected.insert("status".into(), json!(next_status));
+    if let Some(result) = result {
+        projected.insert("terminalResult".into(), result);
+    }
     projected.insert("revision".into(), json!(expected_revision + 1));
     projected.insert("updatedAt".into(), json!(at));
     projected.insert(
@@ -1373,21 +1422,33 @@ fn append_single_worker_run_result(
         expected_revision,
         expected_sequence,
         &binding.result_event_id,
-        "run-completed",
+        event_type,
         &idempotency_key,
         &event,
         &Value::Object(projected),
         at,
     )?;
-    mission_plan::mark_completed(
-        tx,
-        store,
-        scope,
-        owner_member_id,
-        lifecycle,
-        &mission_result,
-        at,
-    )?;
+    if passed {
+        mission_plan::mark_completed(
+            tx,
+            store,
+            scope,
+            owner_member_id,
+            lifecycle,
+            &mission_result,
+            at,
+        )?;
+    } else {
+        mission_plan::mark_partially_completed(
+            tx,
+            store,
+            scope,
+            owner_member_id,
+            lifecycle,
+            &mission_result,
+            at,
+        )?;
+    }
     Ok(())
 }
 
@@ -2127,6 +2188,131 @@ fn validate_output_receipt_replay(
         ));
     }
     Ok(())
+}
+
+fn validate_policy_result_replay(
+    journal: &mission_run::MissionRunJournalRow,
+    terminal: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> Result<(), String> {
+    let Some(output) = output.filter(|spec| spec.include_evidence) else {
+        return Ok(());
+    };
+    if terminal.get("type").and_then(Value::as_str) != Some("worker-completed") {
+        return Err("Policy-bearing worker replay is missing its completed output.".into());
+    }
+    let output_reference = terminal
+        .pointer("/payload/outputs/0/valueReference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Policy-bearing worker output reference is missing.".to_string())?;
+    let terminal_sequence = terminal
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Policy-bearing worker terminal sequence is invalid.".to_string())?;
+    let evaluation = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str) == Some(binding.evaluation_event_id.as_str())
+        })
+        .ok_or_else(|| "Policy evaluation replay fact is missing.".to_string())?;
+    let verdict = evaluation
+        .pointer("/payload/evaluation/verdict")
+        .and_then(Value::as_str);
+    let evaluation_key = format!("worker-evaluation:{}", binding.idempotency_key);
+    if evaluation.get("type").and_then(Value::as_str) != Some("evaluation-recorded")
+        || evaluation.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || evaluation.get("previousEventId").and_then(Value::as_str)
+            != Some(binding.completion_event_id.as_str())
+        || evaluation.get("sequence").and_then(Value::as_i64) != Some(terminal_sequence + 1)
+        || evaluation.get("idempotencyKey").and_then(Value::as_str) != Some(evaluation_key.as_str())
+        || evaluation
+            .pointer("/payload/evaluation/target/workerId")
+            .and_then(Value::as_str)
+            != Some(binding.worker_id.as_str())
+        || !matches!(verdict, Some("pass" | "fail"))
+        || evaluation
+            .pointer("/payload/evaluation/criteria")
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    {
+        return Err("Policy evaluation replay fact is invalid.".into());
+    }
+    let result = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str) == Some(binding.result_event_id.as_str())
+        })
+        .ok_or_else(|| "Policy result replay fact is missing.".to_string())?;
+    let result_key = format!("run-result:{}", binding.idempotency_key);
+    if result.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || result.get("previousEventId").and_then(Value::as_str)
+            != Some(binding.evaluation_event_id.as_str())
+        || result.get("sequence").and_then(Value::as_i64) != Some(terminal_sequence + 2)
+        || result.get("idempotencyKey").and_then(Value::as_str) != Some(result_key.as_str())
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(binding.result_event_id.as_str())
+    {
+        return Err("Policy result replay fact is invalid.".into());
+    }
+    let valid = match verdict {
+        Some("pass") => {
+            result.get("type").and_then(Value::as_str) == Some("run-completed")
+                && result
+                    .pointer("/payload/result/outcome")
+                    .and_then(Value::as_str)
+                    == Some("succeeded")
+                && result
+                    .pointer("/payload/result/outputs/0/key")
+                    .and_then(Value::as_str)
+                    == Some(output.key.as_str())
+                && result
+                    .pointer("/payload/result/outputs/0/valueReference")
+                    .and_then(Value::as_str)
+                    == Some(output_reference)
+                && journal.run.get("status").and_then(Value::as_str) == Some("completed")
+                && journal
+                    .run
+                    .pointer("/terminalResult/outcome")
+                    .and_then(Value::as_str)
+                    == Some("succeeded")
+        }
+        Some("fail") => {
+            result.get("type").and_then(Value::as_str) == Some("run-failed")
+                && result
+                    .pointer("/payload/error/code")
+                    .and_then(Value::as_str)
+                    == Some("policy-acceptance-failed")
+                && result
+                    .pointer("/payload/error/category")
+                    .and_then(Value::as_str)
+                    == Some("validation")
+                && result
+                    .pointer("/payload/error/retryable")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+                && result
+                    .pointer("/payload/partial/completedOutputs/0/key")
+                    .and_then(Value::as_str)
+                    == Some(output.key.as_str())
+                && result
+                    .pointer("/payload/partial/completedOutputs/0/valueReference")
+                    .and_then(Value::as_str)
+                    == Some(output_reference)
+                && journal.run.get("status").and_then(Value::as_str) == Some("partially-completed")
+        }
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err("Policy result replay fact does not match its evaluation.".into())
+    }
 }
 
 fn journal_provider_route_id<'a>(
@@ -3920,5 +4106,55 @@ mod tests {
         let mut colliding = binding.clone();
         colliding.evaluation_event_id = colliding.completion_event_id.clone();
         assert!(validate_native_completion_head(&live, &colliding).is_err());
+    }
+
+    #[test]
+    fn policy_result_replay_requires_exact_terminal_acceptance_outcome() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-start".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-complete".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-result".into(),
+            failure_event_id: "event-failure".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+            tool_evidence: Some(NativeWorkerToolEvidenceBinding {
+                tool_event_id: "event-tool".into(),
+                output_reference: "mission-tool:v1:evidence".into(),
+            }),
+        };
+        let output = NativeWorkerOutputSpec {
+            key: "brief".into(),
+            description: "Brief".into(),
+            include_uncertainty: true,
+            include_evidence: true,
+        };
+        let terminal = json!({"id":"event-complete","runId":"run-1","type":"worker-completed","sequence":5,
+            "payload":{"workerId":"worker-1","outputs":[{"key":"brief","summary":"Native worker text output","valueReference":"mission-output:v1:brief"}]}});
+        let evaluation = json!({"id":"event-evaluation","runId":"run-1","type":"evaluation-recorded","sequence":6,
+            "previousEventId":"event-complete","idempotencyKey":"worker-evaluation:terminal-1",
+            "payload":{"evaluation":{"target":{"kind":"worker","workerId":"worker-1"},"verdict":"fail",
+                "criteria":[{"criterionKey":"cited","passed":false}]}}});
+        let failed = json!({"id":"event-result","runId":"run-1","type":"run-failed","sequence":7,
+            "previousEventId":"event-evaluation","idempotencyKey":"run-result:terminal-1","payload":{
+                "error":{"code":"policy-acceptance-failed","category":"validation","retryable":false},
+                "partial":{"completedOutputs":[{"key":"brief","valueReference":"mission-output:v1:brief"}]}}});
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"status":"partially-completed","eventHead":{"lastEventId":"event-result"}}),
+            events: vec![terminal.clone(), evaluation.clone(), failed.clone()],
+        };
+        assert!(
+            validate_policy_result_replay(&journal, &terminal, &binding, Some(&output)).is_ok()
+        );
+        let mut mismatched = journal;
+        mismatched.events[2]["payload"]["error"]["category"] = json!("provider");
+        assert!(
+            validate_policy_result_replay(&mismatched, &terminal, &binding, Some(&output)).is_err()
+        );
     }
 }

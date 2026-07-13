@@ -79,6 +79,7 @@ export function RunContextSummary({ receipt }: { receipt: RunContextReceipt }) {
 }
 
 export function MissionRunReceipt({ receipt }: { receipt: {
+  acceptanceStatus: "accepted" | "not-accepted"; acceptanceSummary: string;
   provider: string; model: string; routeReason: string; inputTokens: number;
   outputTokens: number; toolCalls: number; sourceCount: number; trust: string;
   maxInputTokens: number; maxOutputTokens: number; maxToolCalls: number; maxDurationMs: number; maxAttempts: number;
@@ -94,6 +95,8 @@ export function MissionRunReceipt({ receipt }: { receipt: {
       <summary><strong>Run receipt</strong><span>{provider} · {receipt.inputTokens + receipt.outputTokens} tokens</span></summary>
       <p className="run-context-summary__audience"><strong>Route</strong><span>{receipt.routeReason}</span></p>
       <ul className="run-context-summary__reasons" aria-label="Run facts">
+        <li>{receipt.acceptanceStatus === "accepted" ? "Policy acceptance met" : "Policy acceptance not met"}</li>
+        <li>{receipt.acceptanceSummary}</li>
         <li>{receipt.model}</li>
         <li>{receipt.inputTokens} / {receipt.maxInputTokens} input tokens</li>
         <li>{receipt.outputTokens} / {receipt.maxOutputTokens} output tokens</li>

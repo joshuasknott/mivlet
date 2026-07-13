@@ -34,6 +34,7 @@ export interface CitedBriefMissionInput {
 export interface CitedBriefMissionResult {
   missionId: string;
   runId: string;
+  outcome: "accepted" | "partial";
   text: string;
   valueReference: string;
   journal: Record<string, unknown>;
@@ -41,6 +42,8 @@ export interface CitedBriefMissionResult {
 }
 
 export interface CitedBriefMissionReceipt {
+  acceptanceStatus: "accepted" | "not-accepted";
+  acceptanceSummary: string;
   provider: string;
   model: string;
   routeReason: string;
@@ -223,17 +226,33 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   });
   if (completion.status !== "completed") throw new Error(completion.reason ?? "The cited brief did not complete.");
   journal = requireJournal(await getRuntimeMissionRun(runId));
-  const valueReference = terminalOutputReference(journal);
+  const terminal = terminalCitedOutcome(journal);
+  const valueReference = terminal.valueReference;
   const output = await readRuntimeMissionWorkerOutput(valueReference);
   const outputReceipt = typeof output?.receipt === "object" && output.receipt
     ? output.receipt as Record<string, unknown>
     : undefined;
   const text = outputReceipt?.text;
   if (!outputReceipt || typeof text !== "string" || !text.trim()) throw new Error("The durable cited brief is unavailable.");
-  return { missionId, runId, text, valueReference, journal, receipt: citedBriefReceipt(journal, outputReceipt, plan) };
+  return {
+    missionId,
+    runId,
+    outcome: terminal.outcome,
+    text: terminal.outcome === "partial"
+      ? `Draft preserved, but not accepted: ${terminal.acceptanceSummary}\n\n${text}`
+      : text,
+    valueReference,
+    journal,
+    receipt: citedBriefReceipt(journal, outputReceipt, plan, terminal)
+  };
 }
 
-function citedBriefReceipt(journal: Record<string, unknown>, output: Record<string, unknown>, plan: Record<string, unknown>): CitedBriefMissionReceipt {
+function citedBriefReceipt(
+  journal: Record<string, unknown>,
+  output: Record<string, unknown>,
+  plan: Record<string, unknown>,
+  terminal: TerminalCitedOutcome
+): CitedBriefMissionReceipt {
   const events = journal.events as Array<Record<string, unknown>>;
   const route = events.find((event) => event.type === "route-selected")?.payload as Record<string, unknown> | undefined;
   const selection = route?.selection as Record<string, unknown> | undefined;
@@ -258,6 +277,8 @@ function citedBriefReceipt(journal: Record<string, unknown>, output: Record<stri
     return value as number;
   };
   return {
+    acceptanceStatus: terminal.outcome === "accepted" ? "accepted" : "not-accepted",
+    acceptanceSummary: terminal.acceptanceSummary,
     provider: requiredText(output.observedProvider, "The durable mission provider receipt is invalid."),
     model: requiredText(output.requestedModel, "The durable mission model receipt is invalid."),
     routeReason: requiredText(selection?.reason, "The durable mission route receipt is invalid."),
@@ -310,13 +331,42 @@ function toolOutputReference(journal: Record<string, unknown>, toolEventId: stri
   return value;
 }
 
-function terminalOutputReference(journal: Record<string, unknown>): string {
+type TerminalCitedOutcome = {
+  outcome: "accepted" | "partial";
+  valueReference: string;
+  acceptanceSummary: string;
+};
+
+function terminalCitedOutcome(journal: Record<string, unknown>): TerminalCitedOutcome {
   const run = journal.run as Record<string, unknown>;
-  const result = run.terminalResult as Record<string, unknown> | undefined;
-  const outputs = result?.outputs;
-  const value = Array.isArray(outputs) ? (outputs[0] as Record<string, unknown> | undefined)?.valueReference : undefined;
-  if (run.status !== "completed" || typeof value !== "string") throw new Error("The mission did not produce a durable accepted output.");
-  return value;
+  const eventHead = run.eventHead as Record<string, unknown> | undefined;
+  const terminalEvent = (journal.events as Array<Record<string, unknown>>).find((candidate) => candidate.id === eventHead?.lastEventId);
+  if (run.status === "completed") {
+    const result = run.terminalResult as Record<string, unknown> | undefined;
+    const outputs = result?.outputs;
+    const value = Array.isArray(outputs) ? (outputs[0] as Record<string, unknown> | undefined)?.valueReference : undefined;
+    const summary = result?.summary;
+    const eventResult = (terminalEvent?.payload as Record<string, unknown> | undefined)?.result as Record<string, unknown> | undefined;
+    if (terminalEvent?.type !== "run-completed" || eventResult?.outcome !== "succeeded"
+      || result?.outcome !== "succeeded" || typeof value !== "string" || typeof summary !== "string") {
+      throw new Error("The mission did not produce a durable accepted output.");
+    }
+    return { outcome: "accepted", valueReference: value, acceptanceSummary: summary };
+  }
+  if (run.status === "partially-completed") {
+    const payload = terminalEvent?.payload as Record<string, unknown> | undefined;
+    const error = payload?.error as Record<string, unknown> | undefined;
+    const partial = payload?.partial as Record<string, unknown> | undefined;
+    const outputs = partial?.completedOutputs;
+    const value = Array.isArray(outputs) ? (outputs[0] as Record<string, unknown> | undefined)?.valueReference : undefined;
+    const summary = partial?.summary;
+    if (terminalEvent?.type !== "run-failed" || error?.code !== "policy-acceptance-failed"
+      || typeof value !== "string" || typeof summary !== "string") {
+      throw new Error("The mission partial outcome is invalid.");
+    }
+    return { outcome: "partial", valueReference: value, acceptanceSummary: summary };
+  }
+  throw new Error("The mission did not reach a durable terminal outcome.");
 }
 
 function journalSelectedRouteId(journal: Record<string, unknown>): string | undefined {
