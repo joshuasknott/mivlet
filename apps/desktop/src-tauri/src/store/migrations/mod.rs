@@ -132,6 +132,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 29 -> 30: persist bounded encrypted route-quality observations
             // derived only from native policy evaluation. No quality is inferred.
             29 => apply_v29_to_v30(conn)?,
+            // 30 -> 31: bind only policy-accepted mission output to its exact
+            // canonical artifact/version. Migration infers no artifacts.
+            30 => apply_v30_to_v31(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -141,6 +144,40 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v30_to_v31(conn: &Connection) -> super::Result<()> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS mission_artifact_source (
+          workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+          owner_member_id TEXT NOT NULL, mission_run_id TEXT NOT NULL,
+          output_key TEXT NOT NULL, owner_subject TEXT NOT NULL,
+          artifact_id TEXT NOT NULL, artifact_version_id TEXT NOT NULL,
+          completion_event_id TEXT NOT NULL, evaluation_event_id TEXT NOT NULL,
+          result_event_id TEXT NOT NULL, value_reference TEXT NOT NULL,
+          content_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+          PRIMARY KEY(workspace_id,owner_member_id,mission_run_id,output_key),
+          UNIQUE(workspace_id,owner_subject,artifact_id),
+          UNIQUE(workspace_id,owner_subject,artifact_id,artifact_version_id),
+          FOREIGN KEY(workspace_id,owner_member_id,mission_run_id)
+            REFERENCES mission_run_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id,owner_member_id,completion_event_id)
+            REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id,owner_member_id,evaluation_event_id)
+            REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id,owner_member_id,result_event_id)
+            REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+            REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
+          FOREIGN KEY(workspace_id,owner_subject,artifact_id,artifact_version_id)
+            REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_mission_artifact_artifact
+          ON mission_artifact_source(workspace_id,owner_subject,artifact_id);
+        "#,
+    )?;
     Ok(())
 }
 
@@ -1463,9 +1500,21 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v30 is current; v30 -> v31 has no registered migration.
-        let err = apply(&conn, 30, 31).unwrap_err();
+        // v31 is current; v31 -> v32 has no registered migration.
+        let err = apply(&conn, 31, 32).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v30_to_v31_adds_empty_mission_artifact_provenance_without_inferred_rows() {
+        let conn = conn();
+        apply(&conn, 30, 31).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM mission_artifact_source", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

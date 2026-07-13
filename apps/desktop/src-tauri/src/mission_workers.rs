@@ -553,6 +553,9 @@ pub(crate) fn preflight_native_worker_completion(
                     )?;
                     validate_native_result_replay(&journal, existing, binding, output.as_ref())
                         .map_err(crate::store::StoreError::Invalid)?;
+                    validate_accepted_mission_artifact_replay(
+                        tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
+                    )?;
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
             }
@@ -773,6 +776,16 @@ pub(crate) fn settle_native_worker_completion(
                     authority.output.as_ref(),
                 )
                 .map_err(crate::store::StoreError::Invalid)?;
+                validate_accepted_mission_artifact_replay(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &journal,
+                    existing,
+                    &authority.binding,
+                    authority.output.as_ref(),
+                )?;
                 return Ok(());
             }
             validate_native_completion_head(&journal, &authority.binding)
@@ -1377,12 +1390,36 @@ fn append_single_worker_run_result(
                 })
         })
         .collect::<Vec<_>>();
-    let output = json!({"key":output_key,"summary":"Native worker text output","valueReference":output_reference});
     let costs = exact_model_costs(requested_model, input_tokens, output_tokens);
     let usage_value = json!({"usageKey":format!("native-usage:{}",binding.usage_event_id),"runId":binding.run_id,
         "workerId":binding.worker_id,"providerRouteId":provider_route_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
         "toolCalls":1,"costs":costs,"measuredAt":at});
     let passed = evaluation.get("verdict").and_then(Value::as_str) == Some("pass");
+    let artifact_binding = passed.then(|| {
+        crate::store::repos::artifact::accepted_mission_output_binding(
+            scope.workspace_id(),
+            owner_member_id,
+            &binding.run_id,
+            &binding.worker_id,
+            &binding.completion_event_id,
+            output_key,
+            receipt
+                .get("contentHash")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+        )
+    });
+    let mut output = json!({"key":output_key,"summary":"Native worker text output","valueReference":output_reference});
+    if let Some(artifact) = artifact_binding.as_ref() {
+        let object = output.as_object_mut().ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission output is invalid.".into())
+        })?;
+        object.insert("artifactId".into(), json!(artifact.artifact_id));
+        object.insert(
+            "artifactVersionId".into(),
+            json!(artifact.artifact_version_id),
+        );
+    }
     let failed_criteria = mission_criteria
         .iter()
         .filter(|criterion| {
@@ -1475,6 +1512,27 @@ fn append_single_worker_run_result(
         &Value::Object(projected),
         at,
     )?;
+    if let Some(artifact) = artifact_binding.as_ref() {
+        let private = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            scope.clone(),
+            internal_user_id,
+            Some(owner_member_id),
+        )?;
+        crate::store::repos::artifact::create_accepted_mission_output(
+            tx,
+            store,
+            &private,
+            owner_member_id,
+            &binding.run_id,
+            &binding.worker_id,
+            &binding.completion_event_id,
+            &binding.evaluation_event_id,
+            &binding.result_event_id,
+            output_key,
+            output_reference,
+            artifact,
+        )?;
+    }
     if passed {
         mission_plan::mark_completed(
             tx,
@@ -2808,6 +2866,121 @@ fn validate_native_result_replay(
     } else {
         Err("Policy result replay fact does not match its evaluation.".into())
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_accepted_mission_artifact_replay(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    terminal: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> crate::store::Result<()> {
+    if terminal.get("type").and_then(Value::as_str) != Some("worker-completed") {
+        return Ok(());
+    }
+    let Some(spec) = output.filter(|value| value.include_evidence) else {
+        return Ok(());
+    };
+    let evaluation = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(binding.evaluation_event_id.as_str())
+    });
+    let verdict = evaluation
+        .and_then(|event| event.pointer("/payload/evaluation/verdict"))
+        .and_then(Value::as_str);
+    let actor = journal
+        .run
+        .get("createdByInternalUserId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission artifact replay creator is missing.".into())
+        })?;
+    let private = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+        scope.clone(),
+        actor,
+        Some(owner_member_id),
+    )?;
+    if verdict != Some("pass") {
+        if crate::store::repos::artifact::mission_source_exists(
+            tx,
+            &private,
+            owner_member_id,
+            &binding.run_id,
+            &spec.key,
+        )? {
+            return Err(crate::store::StoreError::Invalid(
+                "A non-accepted mission output cannot have a canonical artifact.".into(),
+            ));
+        }
+        return Ok(());
+    }
+    let output_reference = terminal
+        .pointer("/payload/outputs/0/valueReference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Accepted mission output reference is missing.".into(),
+            )
+        })?;
+    let receipt = crate::store::repos::mission_worker_output::get_by_reference(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        output_reference,
+    )?
+    .ok_or_else(|| {
+        crate::store::StoreError::Invalid("Accepted mission output receipt is missing.".into())
+    })?;
+    let expected = crate::store::repos::artifact::accepted_mission_output_binding(
+        scope.workspace_id(),
+        owner_member_id,
+        &binding.run_id,
+        &binding.worker_id,
+        &binding.completion_event_id,
+        &spec.key,
+        &receipt.content_hash,
+    );
+    let result = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(binding.result_event_id.as_str())
+    });
+    let result_matches = result.is_some_and(|event| {
+        event
+            .pointer("/payload/result/outputs/0/artifactId")
+            .and_then(Value::as_str)
+            == Some(expected.artifact_id.as_str())
+            && event
+                .pointer("/payload/result/outputs/0/artifactVersionId")
+                .and_then(Value::as_str)
+                == Some(expected.artifact_version_id.as_str())
+    });
+    let source = crate::store::repos::artifact::get_mission_source_binding(
+        tx,
+        &private,
+        owner_member_id,
+        &binding.run_id,
+        &spec.key,
+        &binding.completion_event_id,
+        &binding.evaluation_event_id,
+        &binding.result_event_id,
+        output_reference,
+        &receipt.content_hash,
+    )?;
+    if !result_matches || source.as_ref() != Some(&expected) {
+        return Err(crate::store::StoreError::Invalid(
+            "Accepted mission artifact replay does not match its terminal result.".into(),
+        ));
+    }
+    crate::store::repos::artifact::validate_mission_artifact_bundle(
+        tx,
+        store,
+        &private,
+        &expected,
+        &receipt.content_hash,
+    )
 }
 
 fn journal_provider_route_id<'a>(

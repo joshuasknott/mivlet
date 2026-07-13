@@ -1451,6 +1451,7 @@ describe("Fable home", () => {
     expect(runtimeMocks.citedBriefCalls[0]).toMatchObject({
       workspaceId: "preview-default",
       missionScopeWorkspaceId: "preview-workspace",
+      sourceThreadId: expect.any(String),
       model: "gpt-5"
     });
   });

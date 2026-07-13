@@ -80,7 +80,7 @@ describe("cited brief mission composition", () => {
     mocks.resolveMcpRoute.mockResolvedValue({ connectionId: "mcp-connection-1" });
     const gate = { register: vi.fn().mockReturnValue(true), waitForDecision: vi.fn() } as never;
     const result = await executeCitedBriefMission({
-      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
       backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: gate,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
       onCancellationReady: (cancel) => { cancelMission = cancel; }
@@ -89,6 +89,9 @@ describe("cited brief mission composition", () => {
     expect(result.text).toBe("Trustworthy brief [source-1].");
     expect(result.outcome).toBe("accepted");
     expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD" });
+    expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      missionScope: expect.objectContaining({ workspaceId: "hosted-workspace", sourceThreadId: "thread-1" })
+    }));
     expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(1);
     expect(mocks.executeLocalWorker.mock.calls[0][0]).toMatchObject({
       toolSpecs: [], missionToolEvidence: { result: { citations: [{ citationId: "source-1" }] } },
@@ -132,7 +135,7 @@ describe("cited brief mission composition", () => {
         } }
       ], { status: "partially-completed" }));
     const result = await executeCitedBriefMission({
-      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
       backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     });
@@ -158,7 +161,7 @@ describe("cited brief mission composition", () => {
       }], { status: "failed" }));
 
     await expect(executeCitedBriefMission({
-      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
       backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     })).rejects.toThrow("The native provider rejected the request.");
@@ -190,7 +193,7 @@ describe("cited brief mission composition", () => {
     });
 
     await expect(executeCitedBriefMission({
-      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
       backend: { providerId: "openai", cancel: backendCancel } as never, model: "gpt-5",
       approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
@@ -227,7 +230,7 @@ describe("cited brief mission composition", () => {
     });
 
     await expect(executeCitedBriefMission({
-      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace",
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
       backend: { providerId: "openai", cancel: backendCancel } as never, model: "gpt-5",
       approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,

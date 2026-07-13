@@ -44,7 +44,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       throw new Error("Wait for the current work to finish before starting connected-source research.");
     }
     const workspace = runtime.accountWorkspaceStatus.activeWorkspace;
-    if (!agent.backend || !workspace?.localWorkspaceId) {
+    if (!agent.backend || !workspace?.localWorkspaceId || !threadId) {
       throw new Error("Connected-source research requires the desktop runtime and a connected OpenAI API provider.");
     }
     citedMissionRunningRef.current = true;
@@ -53,6 +53,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
         query,
         workspaceId: workspace.localWorkspaceId,
         missionScopeWorkspaceId: workspace.fableWorkspaceId ?? workspace.localWorkspaceId,
+        sourceThreadId: threadId,
         projectId,
         backend: agent.backend,
         model,

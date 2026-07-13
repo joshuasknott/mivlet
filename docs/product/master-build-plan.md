@@ -358,11 +358,12 @@ tool receipt and before provider egress. The final provider request carries its
 exact checkpoint event identity, and Rust accepts it only when that event is the
 current head and immediately binds the same tool event, sequence, and attempt;
 neither an arbitrary later checkpoint nor renderer-declared state can authorize
-egress. The narrow OpenAI
-path described above persists truthful production `worker-completed` and
-`worker-failed` events plus one atomic encrypted Markdown receipt, but general
-worker execution events, cited/artifact output provenance, and automatic checkpoint
-resume are still open, so the durable-run box remains unchecked.
+egress. The narrow OpenAI path described above persists truthful production
+`worker-completed` and `worker-failed` events plus one atomic encrypted Markdown
+receipt. Accepted cited output now has the exact artifact provenance described
+below, but general worker execution events, other mission artifact shapes, and
+automatic checkpoint resume are still open, so the durable-run box remains
+unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.
@@ -406,6 +407,21 @@ transitions roll back. An eligible only-worker provider or budget failure instea
 advances both run and mission to failed with the exact worker error retained on
 the terminal run event. General multi-run failure aggregation remains open.
 
+Policy-accepted output for that exact cited shape now becomes a canonical
+member-private artifact and immutable version in the same settlement transaction.
+The mission scope carries the real source conversation; Rust derives stable
+artifact/version identities from the workspace, member, run, worker, completion
+event, output key, and immutable content hash, and derives content, citations,
+external-untrusted source provenance, creator, owner, status, and time only from
+the durable journal and v2 output receipt. Schema v31 adds an exact owner-qualified
+link from the mission run, completion/evaluation/result events, and output receipt
+to the shared artifact read model without pretending the mission is an ordinary
+chat run or inferring historical artifacts. `run-completed` and `MissionResult`
+name the exact artifact/version; exact replay requires that linked accepted bundle
+and never duplicates it. Premature, partial, failed, cancelled, and interrupted
+outcomes create no artifact. General mission artifact types, explicit downstream
+handoffs, and multi-worker artifact aggregation remain open.
+
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes
 the explicit natural-language benchmark request, obtains the separately confirmed
@@ -414,7 +430,8 @@ already-planned semantic search through its own exact-action approval, and sends
 only the attested evidence into the final provider turn. It preserves an explicit
 MCP route when one is configured, otherwise uses the native resolver, then reloads
 the terminal journal and encrypted output receipt before showing the Markdown in
-the conversation. An accepted output carries an accepted receipt; a policy-failed
+the conversation. An accepted output carries an accepted receipt and is also
+searchable as the linked accepted artifact; a policy-failed
 draft remains readable but is prefixed as not accepted and its receipt exposes the
 failed acceptance summary. A provider or budget failure is surfaced only after the
 desktop reloads and validates the matching durable terminal run failure. Browser
