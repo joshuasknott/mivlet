@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { getRuntimeConversationThread, listRuntimeConnectorStatuses } from "./runtime";
+import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses } from "./runtime";
 import type { ThreadSummary } from "@fable/protocol";
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -80,7 +80,7 @@ vi.mock("./lib/cited-brief-mission", () => ({
   isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
   executeCitedBriefMission: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.citedBriefCalls.push(input);
-    return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", text: "Durable cited brief [source-1].", journal: {}, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
+    return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
   })
 }));
 
@@ -1435,6 +1435,19 @@ describe("Fable home", () => {
 
   it("routes an explicit connected-source cited brief through the mission journey", async () => {
     const user = userEvent.setup();
+    vi.mocked(getRuntimeArtifact).mockResolvedValueOnce({
+      artifact: {
+        id: "mission-artifact-ui", title: "Connected work brief", status: "accepted", revision: 1,
+        currentVersionId: "mission-artifact-version-ui", producingRunId: "mission-run-ui",
+        context: { threadId: "thread-preview" }, reviews: []
+      },
+      currentVersion: {
+        id: "mission-artifact-version-ui", artifactId: "mission-artifact-ui", version: 1,
+        status: "available", content: { kind: "inline", text: "Durable cited brief [source-1]." },
+        citations: [{ id: "source-1" }]
+      },
+      versions: [], sourceMessageId: null
+    } as never);
     runtimeMocks.backends = [{
       id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
       authState: "connected", capabilities: ["authentication", "threads", "streaming", "tool-requests"],
@@ -1447,6 +1460,8 @@ describe("Fable home", () => {
 
     expect(await screen.findByText("Durable cited brief [source-1].")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
+    expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
     expect(runtimeMocks.citedBriefCalls).toHaveLength(1);
     expect(runtimeMocks.citedBriefCalls[0]).toMatchObject({
       workspaceId: "preview-default",

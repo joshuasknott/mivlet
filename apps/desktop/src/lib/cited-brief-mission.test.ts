@@ -63,8 +63,12 @@ describe("cited brief mission composition", () => {
       .mockResolvedValueOnce(journal(11, 10, [
         { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
         { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } },
-        { id: "head-10", type: "run-completed", payload: { result: { outcome: "succeeded" } } }
-      ], { status: "completed", terminalResult: { outcome: "succeeded", summary: "The cited brief and its required policy acceptance are complete.", outputs: [{ valueReference: "mission-output:v1:brief" }] } }));
+        { id: "head-10", type: "run-completed", payload: { result: { outcome: "succeeded", outputs: [{
+          valueReference: "mission-output:v1:brief", artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1"
+        }] } } }
+      ], { status: "completed", terminalResult: { outcome: "succeeded", summary: "The cited brief and its required policy acceptance are complete.", outputs: [{
+        valueReference: "mission-output:v1:brief", artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1"
+      }] } }));
     mocks.readOutput.mockResolvedValue({ receipt: { text: "Trustworthy brief [source-1].", observedProvider: "openai", requestedModel: "gpt-5", trust: "provider-generated-with-external-evidence", citations: [{ citationId: "source-1" }] } });
   });
 
@@ -88,6 +92,7 @@ describe("cited brief mission composition", () => {
 
     expect(result.text).toBe("Trustworthy brief [source-1].");
     expect(result.outcome).toBe("accepted");
+    expect(result).toMatchObject({ artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1" });
     expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1, costAmount: "0.00095", costCurrency: "USD" });
     expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
       missionScope: expect.objectContaining({ workspaceId: "hosted-workspace", sourceThreadId: "thread-1" })

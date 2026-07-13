@@ -422,6 +422,15 @@ and never duplicates it. Premature, partial, failed, cancelled, and interrupted
 outcomes create no artifact. General mission artifact types, explicit downstream
 handoffs, and multi-worker artifact aggregation remain open.
 
+The desktop now reads those artifact identities from the accepted terminal
+result, reloads the exact native bundle, and exposes the existing `View artifact`
+control beside the cited response. It suppresses the ordinary `Save as artifact`
+path for mission results, so neither an accepted output nor a policy-failed draft
+can be duplicated or misrepresented as a completed chat-run artifact. Once in the
+canonical Knowledge surface, the accepted version reuses the existing explicit
+two-step exact-version project handoff; no mission-specific transfer authority is
+invented. A handoff planned and journaled as part of a future mission remains open.
+
 The desktop runtime exposes the authenticated plan, run, worker, and output
 commands needed to compose that journey through Tauri. The shell now recognizes
 the explicit natural-language benchmark request, obtains the separately confirmed
@@ -430,8 +439,8 @@ already-planned semantic search through its own exact-action approval, and sends
 only the attested evidence into the final provider turn. It preserves an explicit
 MCP route when one is configured, otherwise uses the native resolver, then reloads
 the terminal journal and encrypted output receipt before showing the Markdown in
-the conversation. An accepted output carries an accepted receipt and is also
-searchable as the linked accepted artifact; a policy-failed
+the conversation. An accepted output carries an accepted receipt, reloads its
+linked artifact beside the response, and remains searchable through Knowledge; a policy-failed
 draft remains readable but is prefixed as not accepted and its receipt exposes the
 failed acceptance summary. A provider or budget failure is surfaced only after the
 desktop reloads and validates the matching durable terminal run failure. Browser

@@ -40,6 +40,8 @@ export interface CitedBriefMissionResult {
   outcome: "accepted" | "partial";
   text: string;
   valueReference: string;
+  artifactId?: string;
+  artifactVersionId?: string;
   journal: Record<string, unknown>;
   receipt: CitedBriefMissionReceipt;
 }
@@ -294,6 +296,10 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
       ? `Draft preserved, but not accepted: ${terminal.acceptanceSummary}\n\n${text}`
       : text,
     valueReference,
+    ...(terminal.artifactId ? {
+      artifactId: terminal.artifactId,
+      artifactVersionId: terminal.artifactVersionId
+    } : {}),
     journal,
     receipt: citedBriefReceipt(journal, outputReceipt, plan, terminal)
   };
@@ -391,6 +397,8 @@ type TerminalCitedOutcome = {
   outcome: "accepted" | "partial";
   valueReference: string;
   acceptanceSummary: string;
+  artifactId?: string;
+  artifactVersionId?: string;
 };
 
 function terminalCitedOutcome(journal: Record<string, unknown>): TerminalCitedOutcome {
@@ -400,24 +408,35 @@ function terminalCitedOutcome(journal: Record<string, unknown>): TerminalCitedOu
   if (run.status === "completed") {
     const result = run.terminalResult as Record<string, unknown> | undefined;
     const outputs = result?.outputs;
-    const value = Array.isArray(outputs) ? (outputs[0] as Record<string, unknown> | undefined)?.valueReference : undefined;
+    const output = Array.isArray(outputs) ? outputs[0] as Record<string, unknown> | undefined : undefined;
+    const value = output?.valueReference;
+    const artifactId = output?.artifactId;
+    const artifactVersionId = output?.artifactVersionId;
     const summary = result?.summary;
     const eventResult = (terminalEvent?.payload as Record<string, unknown> | undefined)?.result as Record<string, unknown> | undefined;
+    const eventOutputs = eventResult?.outputs;
+    const eventOutput = Array.isArray(eventOutputs) ? eventOutputs[0] as Record<string, unknown> | undefined : undefined;
     if (terminalEvent?.type !== "run-completed" || eventResult?.outcome !== "succeeded"
-      || result?.outcome !== "succeeded" || typeof value !== "string" || typeof summary !== "string") {
+      || result?.outcome !== "succeeded" || typeof value !== "string" || typeof summary !== "string"
+      || typeof artifactId !== "string" || !artifactId.trim()
+      || typeof artifactVersionId !== "string" || !artifactVersionId.trim()
+      || eventOutput?.valueReference !== value || eventOutput.artifactId !== artifactId
+      || eventOutput.artifactVersionId !== artifactVersionId) {
       throw new Error("The mission did not produce a durable accepted output.");
     }
-    return { outcome: "accepted", valueReference: value, acceptanceSummary: summary };
+    return { outcome: "accepted", valueReference: value, acceptanceSummary: summary, artifactId, artifactVersionId };
   }
   if (run.status === "partially-completed") {
     const payload = terminalEvent?.payload as Record<string, unknown> | undefined;
     const error = payload?.error as Record<string, unknown> | undefined;
     const partial = payload?.partial as Record<string, unknown> | undefined;
     const outputs = partial?.completedOutputs;
-    const value = Array.isArray(outputs) ? (outputs[0] as Record<string, unknown> | undefined)?.valueReference : undefined;
+    const output = Array.isArray(outputs) ? outputs[0] as Record<string, unknown> | undefined : undefined;
+    const value = output?.valueReference;
     const summary = partial?.summary;
     if (terminalEvent?.type !== "run-failed" || error?.code !== "policy-acceptance-failed"
-      || typeof value !== "string" || typeof summary !== "string") {
+      || typeof value !== "string" || typeof summary !== "string"
+      || (output !== undefined && ("artifactId" in output || "artifactVersionId" in output))) {
       throw new Error("The mission partial outcome is invalid.");
     }
     return { outcome: "partial", valueReference: value, acceptanceSummary: summary };

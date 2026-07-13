@@ -15,7 +15,7 @@ import { isCitedBriefMissionPrompt, type CitedBriefMissionReceipt } from "../lib
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
+import { getRuntimeArtifact, listRuntimeThreadArtifacts, type RuntimeArtifactBundle } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, DirectiveCards, MissionRunReceipt, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -35,6 +35,7 @@ type ConversationMessage = {
   content: string;
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
+  missionArtifactId?: string;
 };
 
 function messageId(prefix: string) {
@@ -488,32 +489,40 @@ export function ChatWorkspace() {
     if (conversationMessages.length === 0) return null;
     return (
       <section className="conversation-feed" aria-label="Conversation">
-        {conversationMessages.map((message) => (
-          <article
-            key={message.id}
-            className={`conversation-message conversation-message--${message.role}`}
-          >
-            <p>{message.content}</p>
-            {message.role === "assistant" && message.missionReceipt ? <MissionRunReceipt receipt={message.missionReceipt} /> : null}
-            {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
-              <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
-            ) : null}
-            {message.role === "assistant" && message.runId && agent.state.contextReceipts[message.runId] ? (
-              <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
-            ) : null}
-            {message.role === "assistant" && message.runId && message.content ? (
-              <ResponseArtifactAction
-                threadId={selectedConversationThreadId ?? ""}
-                messageId={message.id}
-                runId={message.runId}
-                content={message.content}
-                citations={citationsForRun(message.runId, agent.state.contextReceipts)}
-                existing={threadArtifacts.find((entry) => entry.sourceMessageId === message.id)}
-                onSaved={(saved) => setThreadArtifacts((current) => [...current.filter((entry) => entry.artifact.id !== saved.artifact.id), saved])}
-              />
-            ) : null}
-          </article>
-        ))}
+        {conversationMessages.map((message) => {
+          const existingArtifact = threadArtifacts.find((entry) =>
+            entry.sourceMessageId === message.id
+            || entry.artifact.id === message.missionArtifactId
+            || (message.missionReceipt !== undefined && entry.artifact.producingRunId === message.runId)
+          );
+          return (
+            <article
+              key={message.id}
+              className={`conversation-message conversation-message--${message.role}`}
+            >
+              <p>{message.content}</p>
+              {message.role === "assistant" && message.missionReceipt ? <MissionRunReceipt receipt={message.missionReceipt} /> : null}
+              {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
+                <ProviderRouteSummary route={agent.state.providerRoutes[message.runId]} />
+              ) : null}
+              {message.role === "assistant" && message.runId && agent.state.contextReceipts[message.runId] ? (
+                <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
+              ) : null}
+              {message.role === "assistant" && message.runId && message.content
+                && (!message.missionReceipt || existingArtifact) ? (
+                <ResponseArtifactAction
+                  threadId={selectedConversationThreadId ?? ""}
+                  messageId={message.id}
+                  runId={message.runId}
+                  content={message.content}
+                  citations={citationsForRun(message.runId, agent.state.contextReceipts)}
+                  existing={existingArtifact}
+                  onSaved={(saved) => setThreadArtifacts((current) => [...current.filter((entry) => entry.artifact.id !== saved.artifact.id), saved])}
+                />
+              ) : null}
+            </article>
+          );
+        })}
       </section>
     );
   };
@@ -756,8 +765,25 @@ export function ChatWorkspace() {
       void runCitedBrief(prompt, resolvedComposerModelId, runProjectId ?? undefined)
         .then((result) => {
           setConversationMessages((current) => current.map((entry) =>
-            entry.id === assistantMessageId ? { ...entry, content: result.text, runId: result.runId, missionReceipt: result.receipt } : entry
+            entry.id === assistantMessageId ? {
+              ...entry,
+              content: result.text,
+              runId: result.runId,
+              missionReceipt: result.receipt,
+              ...(result.artifactId ? { missionArtifactId: result.artifactId } : {})
+            } : entry
           ));
+          if (result.artifactId) {
+            void getRuntimeArtifact(result.artifactId)
+              .then((artifact) => {
+                if (!artifact) return;
+                setThreadArtifacts((current) => [
+                  ...current.filter((entry) => entry.artifact.id !== artifact.artifact.id),
+                  artifact
+                ]);
+              })
+              .catch(() => undefined);
+          }
         })
         .catch((cause) => {
           const message = cause instanceof Error ? cause.message : "Fable could not complete the connected-source brief.";
