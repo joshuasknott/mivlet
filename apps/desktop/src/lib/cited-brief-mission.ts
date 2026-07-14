@@ -76,6 +76,8 @@ export interface CitedBriefMissionReceipt {
   inputTokens: number;
   outputTokens: number;
   toolCalls: number;
+  durationMs: number;
+  attemptNumber: number;
   sourceCount: number;
   trust: string;
   maxInputTokens: number;
@@ -104,7 +106,7 @@ export function isCitedBriefMissionReceipt(value: unknown): value is CitedBriefM
   const receipt = value as Record<string, unknown>;
   const required = [
     "acceptanceStatus", "acceptanceSummary", "provider", "model", "routeReason",
-    "inputTokens", "outputTokens", "toolCalls", "sourceCount", "trust",
+    "inputTokens", "outputTokens", "toolCalls", "durationMs", "attemptNumber", "sourceCount", "trust",
     "maxInputTokens", "maxOutputTokens", "maxToolCalls", "maxDurationMs", "maxAttempts"
   ];
   const optional = ["costAmount", "costCurrency", "pricingReference"];
@@ -112,14 +114,17 @@ export function isCitedBriefMissionReceipt(value: unknown): value is CitedBriefM
     && required.every((key) => key in receipt);
   const strings = ["acceptanceSummary", "provider", "model", "routeReason", "trust"]
     .every((key) => typeof receipt[key] === "string" && (receipt[key] as string).trim().length > 0);
-  const counts = ["inputTokens", "outputTokens", "toolCalls", "sourceCount"]
+  const counts = ["inputTokens", "outputTokens", "toolCalls", "durationMs", "sourceCount"]
     .every((key) => Number.isInteger(receipt[key]) && (receipt[key] as number) >= 0);
   const limits = ["maxInputTokens", "maxOutputTokens", "maxToolCalls", "maxDurationMs", "maxAttempts"]
     .every((key) => Number.isInteger(receipt[key]) && (receipt[key] as number) > 0);
   const presentCost = optional.filter((key) => key in receipt);
   const cost = presentCost.length === 0 || presentCost.length === optional.length
     && optional.every((key) => typeof receipt[key] === "string" && (receipt[key] as string).trim().length > 0);
-  return exactKeys && strings && counts && limits && cost
+  const utilization = Number.isInteger(receipt.attemptNumber) && (receipt.attemptNumber as number) > 0
+    && (receipt.attemptNumber as number) <= (receipt.maxAttempts as number)
+    && (receipt.durationMs as number) <= (receipt.maxDurationMs as number);
+  return exactKeys && strings && counts && limits && utilization && cost
     && (receipt.acceptanceStatus === "accepted" || receipt.acceptanceStatus === "not-accepted");
 }
 
@@ -549,6 +554,8 @@ function citedBriefReceipt(
     inputTokens: count(usage?.inputTokens),
     outputTokens: count(usage?.outputTokens),
     toolCalls: count(usage?.toolCalls),
+    durationMs: count(usage?.durationMs),
+    attemptNumber: limit(usage?.attemptNumber),
     sourceCount: citations.length,
     trust: requiredText(output.trust, "The durable mission trust receipt is invalid."),
     maxInputTokens: limit(budget?.maxInputTokens),

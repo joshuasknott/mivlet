@@ -14,6 +14,7 @@
 //!   - No socket is opened in tests; only the pure helpers are unit-tested.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -692,6 +693,53 @@ fn retry_after(response: &reqwest::Response, attempt: usize) -> Duration {
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum MissionBoundary<T> {
+    Ready(T),
+    Cancelled,
+    DeadlineExceeded,
+}
+
+async fn wait_for_cancel(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            futures_util::future::pending::<()>().await;
+        }
+    }
+}
+
+async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(deadline).await,
+        None => futures_util::future::pending::<()>().await,
+    }
+}
+
+async fn await_mission_boundary<T>(
+    future: impl Future<Output = T>,
+    rx: &mut tokio::sync::watch::Receiver<bool>,
+    deadline: Option<tokio::time::Instant>,
+) -> MissionBoundary<T> {
+    tokio::select! {
+        biased;
+        _ = wait_for_cancel(rx) => MissionBoundary::Cancelled,
+        _ = wait_for_deadline(deadline) => MissionBoundary::DeadlineExceeded,
+        result = future => MissionBoundary::Ready(result),
+    }
+}
+
+fn observed_mission_duration_ms(started: Instant, maximum_ms: i64, deadline_exceeded: bool) -> i64 {
+    if deadline_exceeded {
+        return maximum_ms;
+    }
+    i64::try_from(started.elapsed().as_millis())
+        .unwrap_or(i64::MAX)
+        .clamp(0, maximum_ms)
+}
+
 fn status_error_code(status: reqwest::StatusCode) -> &'static str {
     match status {
         reqwest::StatusCode::UNAUTHORIZED => "authentication",
@@ -791,6 +839,20 @@ pub async fn stream_backend_completion(
         None => None,
     };
     let observation_started = Instant::now();
+    let mission_duration_limit_ms = mission_authority
+        .as_ref()
+        .map(|authority| authority.max_duration_ms());
+    let mission_deadline = mission_duration_limit_ms
+        .map(|maximum| {
+            u64::try_from(maximum)
+                .ok()
+                .and_then(|milliseconds| {
+                    tokio::time::Instant::from_std(observation_started)
+                        .checked_add(Duration::from_millis(milliseconds))
+                })
+                .ok_or_else(|| "Mission worker duration budget is invalid.".to_string())
+        })
+        .transpose()?;
     let credential = require_key(&request.provider_id)?;
     let connection =
         resolve_provider_connection(&request.provider_id, &credential, &request.model)?;
@@ -812,6 +874,7 @@ pub async fn stream_backend_completion(
     let mut cancelled = false;
     let mut completed = false;
     let mut transport_failed = false;
+    let mut duration_budget_exceeded = false;
     let mut terminal_observation = OpenAiTerminalObservation::new(
         mission_authority
             .as_ref()
@@ -828,15 +891,34 @@ pub async fn stream_backend_completion(
             req = req.header(name, value);
         }
 
-        let response = tokio::select! {
-            changed = rx.changed() => {
-                if changed.is_ok() && *rx.borrow() {
-                    cancelled = true;
-                    break;
-                }
-                continue;
+        let response = match await_mission_boundary(req.send(), &mut rx, mission_deadline).await {
+            MissionBoundary::Ready(response) => response,
+            MissionBoundary::Cancelled => {
+                cancelled = true;
+                break;
             }
-            response = req.send() => response
+            MissionBoundary::DeadlineExceeded => {
+                duration_budget_exceeded = true;
+                completed = true;
+                mission_failure = Some(MissionProviderFailure {
+                    code: "native-worker-duration-budget-exceeded",
+                    message: "The native provider exceeded the worker duration budget.",
+                    retryable: false,
+                });
+                emit_control(
+                    &app,
+                    &channel,
+                    TransportControlEvent {
+                        kind: "error",
+                        code: "duration-budget-exceeded",
+                        message: "The mission reached its provider-time limit.".to_string(),
+                        retryable: false,
+                        attempt: attempt + 1,
+                        retry_after_ms: None,
+                    },
+                );
+                break;
+            }
         };
 
         let response = match response {
@@ -861,13 +943,35 @@ pub async fn stream_backend_completion(
                         retry_after_ms: Some(delay.as_millis() as u64),
                     },
                 );
-                tokio::select! {
-                    _ = tokio::time::sleep(delay) => {}
-                    changed = rx.changed() => {
-                        if changed.is_ok() && *rx.borrow() {
-                            cancelled = true;
-                            break;
-                        }
+                match await_mission_boundary(tokio::time::sleep(delay), &mut rx, mission_deadline)
+                    .await
+                {
+                    MissionBoundary::Ready(()) => {}
+                    MissionBoundary::Cancelled => {
+                        cancelled = true;
+                        break;
+                    }
+                    MissionBoundary::DeadlineExceeded => {
+                        duration_budget_exceeded = true;
+                        completed = true;
+                        mission_failure = Some(MissionProviderFailure {
+                            code: "native-worker-duration-budget-exceeded",
+                            message: "The native provider exceeded the worker duration budget.",
+                            retryable: false,
+                        });
+                        emit_control(
+                            &app,
+                            &channel,
+                            TransportControlEvent {
+                                kind: "error",
+                                code: "duration-budget-exceeded",
+                                message: "The mission reached its provider-time limit.".to_string(),
+                                retryable: false,
+                                attempt: attempt + 1,
+                                retry_after_ms: None,
+                            },
+                        );
+                        break;
                     }
                 }
                 if cancelled {
@@ -921,13 +1025,35 @@ pub async fn stream_backend_completion(
                         retry_after_ms: Some(delay.as_millis() as u64),
                     },
                 );
-                tokio::select! {
-                    _ = tokio::time::sleep(delay) => {}
-                    changed = rx.changed() => {
-                        if changed.is_ok() && *rx.borrow() {
-                            cancelled = true;
-                            break;
-                        }
+                match await_mission_boundary(tokio::time::sleep(delay), &mut rx, mission_deadline)
+                    .await
+                {
+                    MissionBoundary::Ready(()) => {}
+                    MissionBoundary::Cancelled => {
+                        cancelled = true;
+                        break;
+                    }
+                    MissionBoundary::DeadlineExceeded => {
+                        duration_budget_exceeded = true;
+                        completed = true;
+                        mission_failure = Some(MissionProviderFailure {
+                            code: "native-worker-duration-budget-exceeded",
+                            message: "The native provider exceeded the worker duration budget.",
+                            retryable: false,
+                        });
+                        emit_control(
+                            &app,
+                            &channel,
+                            TransportControlEvent {
+                                kind: "error",
+                                code: "duration-budget-exceeded",
+                                message: "The mission reached its provider-time limit.".to_string(),
+                                retryable: false,
+                                attempt: attempt + 1,
+                                retry_after_ms: None,
+                            },
+                        );
+                        break;
                     }
                 }
                 if cancelled {
@@ -970,11 +1096,25 @@ pub async fn stream_backend_completion(
         let mut response_bytes = 0usize;
         loop {
             tokio::select! {
-                changed = rx.changed() => {
-                    if changed.is_ok() && *rx.borrow() {
-                        cancelled = true;
-                        break;
-                    }
+                biased;
+                _ = wait_for_cancel(&mut rx) => {
+                    cancelled = true;
+                    break;
+                }
+                _ = wait_for_deadline(mission_deadline) => {
+                    duration_budget_exceeded = true;
+                    completed = true;
+                    mission_failure = Some(MissionProviderFailure {
+                        code: "native-worker-duration-budget-exceeded",
+                        message: "The native provider exceeded the worker duration budget.",
+                        retryable: false,
+                    });
+                    emit_control(&app, &channel, TransportControlEvent {
+                        kind: "error", code: "duration-budget-exceeded",
+                        message: "The mission reached its provider-time limit.".to_string(),
+                        retryable: false, attempt: attempt + 1, retry_after_ms: None,
+                    });
+                    break;
                 }
                 chunk = stream.next() => {
                     match chunk {
@@ -1052,7 +1192,7 @@ pub async fn stream_backend_completion(
                 }
             }
         }
-        if !buffer.is_empty() && !cancelled && !transport_failed {
+        if !buffer.is_empty() && !cancelled && !transport_failed && !duration_budget_exceeded {
             match drain_strict_sse_lines(&mut buffer, true) {
                 Ok(lines) => {
                     for line in lines {
@@ -1124,7 +1264,7 @@ pub async fn stream_backend_completion(
             None
         };
     }
-    if !cancelled {
+    if !cancelled && mission_failure.is_none() {
         if let (Some(authority), Some((input_tokens, output_tokens))) =
             (mission_authority.as_ref(), terminal_observation.usage)
         {
@@ -1138,6 +1278,12 @@ pub async fn stream_backend_completion(
         }
     }
     let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
+        let duration_ms = observed_mission_duration_ms(
+            observation_started,
+            authority.max_duration_ms(),
+            duration_budget_exceeded,
+        );
+        let attempt_number = authority.attempt_number();
         let outcome = if cancelled {
             Some(crate::mission_workers::NativeWorkerTerminalOutcome::Cancelled)
         } else if completed && mission_failure.is_none() {
@@ -1154,6 +1300,8 @@ pub async fn stream_backend_completion(
                         .usage
                         .map(|usage| usage.1)
                         .unwrap_or_default(),
+                    duration_ms,
+                    attempt_number,
                 },
             )
         } else {
@@ -1163,6 +1311,8 @@ pub async fn stream_backend_completion(
                     message: failure.message,
                     retryable: failure.retryable,
                     usage: terminal_observation.usage,
+                    duration_ms,
+                    attempt_number,
                 }
             })
         };
@@ -1746,6 +1896,58 @@ mod transport_policy_tests {
         assert!(acquire_mission_execution(&binding).is_err());
         drop(lease);
         assert!(acquire_mission_execution(&binding).is_ok());
+    }
+
+    #[tokio::test]
+    async fn mission_boundary_enforces_one_deadline_across_work_and_backoff() {
+        let (_tx, mut rx) = tokio::sync::watch::channel(false);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(5);
+        let delayed = await_mission_boundary(
+            tokio::time::sleep(Duration::from_millis(50)),
+            &mut rx,
+            Some(deadline),
+        )
+        .await;
+        assert_eq!(delayed, MissionBoundary::DeadlineExceeded);
+
+        let (_tx, mut rx) = tokio::sync::watch::channel(false);
+        let ready = await_mission_boundary(
+            async { "ready" },
+            &mut rx,
+            Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+        )
+        .await;
+        assert_eq!(ready, MissionBoundary::Ready("ready"));
+
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        drop(tx);
+        let ready_after_sender_close = await_mission_boundary(
+            async { "ready-after-close" },
+            &mut rx,
+            Some(tokio::time::Instant::now() + Duration::from_secs(1)),
+        )
+        .await;
+        assert_eq!(
+            ready_after_sender_close,
+            MissionBoundary::Ready("ready-after-close")
+        );
+    }
+
+    #[tokio::test]
+    async fn mission_boundary_gives_an_observed_cancellation_priority() {
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        tx.send(true).unwrap();
+        let outcome = await_mission_boundary(
+            async { "provider-finished" },
+            &mut rx,
+            Some(tokio::time::Instant::now()),
+        )
+        .await;
+        assert_eq!(outcome, MissionBoundary::Cancelled);
+        assert_eq!(
+            observed_mission_duration_ms(Instant::now(), 120_000, true),
+            120_000
+        );
     }
 
     #[test]

@@ -72,7 +72,7 @@ describe("cited brief mission composition", () => {
       .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(11, 10, [
         { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
-        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } },
+        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, durationMs: 1250, attemptNumber: 1, costs: [{ amount: { amount: "0.00095", currencyCode: "USD" }, provenance: "fable-calculated", pricingReference: "official-price|reviewed=2026-07-12" }] } } },
         { id: "head-10", type: "run-completed", payload: { result: { outcome: "succeeded", outputs: [{
           valueReference: "mission-output:v1:brief", artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1"
         }] } } }
@@ -104,7 +104,7 @@ describe("cited brief mission composition", () => {
     expect(result.outcome).toBe("accepted");
     expect(result.plan).toEqual(planSummary);
     expect(result).toMatchObject({ artifactId: "mission-artifact-1", artifactVersionId: "mission-artifact-version-1" });
-    expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD" });
+    expect(result.receipt).toMatchObject({ acceptanceStatus: "accepted", provider: "openai", model: "gpt-5", inputTokens: 120, outputTokens: 80, toolCalls: 1, durationMs: 1250, attemptNumber: 1, sourceCount: 1, maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD" });
     expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
       missionScope: expect.objectContaining({ workspaceId: "hosted-workspace", sourceThreadId: "thread-1" }),
       budget: expect.objectContaining({ maxAttempts: 2 }),
@@ -260,7 +260,7 @@ describe("cited brief mission composition", () => {
   it("accepts only the closed secret-safe cited receipt projection", () => {
     const receipt = {
       acceptanceStatus: "accepted", acceptanceSummary: "Accepted", provider: "openai", model: "gpt-5",
-      routeReason: "Selected route.", inputTokens: 12, outputTokens: 3, toolCalls: 1, sourceCount: 1,
+      routeReason: "Selected route.", inputTokens: 12, outputTokens: 3, toolCalls: 1, durationMs: 900, attemptNumber: 1, sourceCount: 1,
       trust: "provider-generated-with-external-evidence", maxInputTokens: 100, maxOutputTokens: 50,
       maxToolCalls: 1, maxDurationMs: 1000, maxAttempts: 1,
       costAmount: "0.01", costCurrency: "USD", pricingReference: "official"
@@ -269,6 +269,8 @@ describe("cited brief mission composition", () => {
     expect(isCitedBriefMissionReceipt({ ...receipt, credentialBinding: "secret" })).toBe(false);
     expect(isCitedBriefMissionReceipt({ ...receipt, costCurrency: undefined })).toBe(false);
     expect(isCitedBriefMissionReceipt({ ...receipt, inputTokens: -1 })).toBe(false);
+    expect(isCitedBriefMissionReceipt({ ...receipt, durationMs: 1001 })).toBe(false);
+    expect(isCitedBriefMissionReceipt({ ...receipt, attemptNumber: 2 })).toBe(false);
   });
 
   it("returns preserved output as an explicit unaccepted partial outcome", async () => {
@@ -278,7 +280,7 @@ describe("cited brief mission composition", () => {
       .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(11, 10, [
         { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
-        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, costs: [] } } },
+        { type: "usage-recorded", payload: { usage: { inputTokens: 120, outputTokens: 80, toolCalls: 1, durationMs: 1250, attemptNumber: 2, costs: [] } } },
         { id: "head-10", type: "run-failed", payload: {
           error: { code: "policy-acceptance-failed", category: "validation", message: "Not accepted", retryable: false },
           partial: {
@@ -297,7 +299,7 @@ describe("cited brief mission composition", () => {
     expect(result.outcome).toBe("partial");
     expect(result.text).toContain("Draft preserved, but not accepted");
     expect(result.text).toContain("Trustworthy brief [source-1].");
-    expect(result.receipt).toMatchObject({ acceptanceStatus: "not-accepted" });
+    expect(result.receipt).toMatchObject({ acceptanceStatus: "not-accepted", durationMs: 1250, attemptNumber: 2 });
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
   });
 

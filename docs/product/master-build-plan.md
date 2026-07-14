@@ -267,6 +267,18 @@ category; provider failures remain provider failures. This does not claim semant
 durable output receipts and provenance, other providers and runtimes, live grant
 consumption at tool use, handoffs, and the desktop experience remain open.
 
+The cited OpenAI worker boundary now also derives its duration ceiling and current
+attempt from the authenticated selected worker before egress. One monotonic native
+deadline spans request send, internal transport retries, retry backoff, and stream
+consumption; renderer state cannot reset it. Cancellation retains priority. Reaching
+the deadline discards any unaccepted buffered output and durably terminalizes the
+attempt as a static non-retryable `budget-exceeded` failure. Every non-cancelled
+provider attempt records its bounded native-observed duration and exact journal
+attempt before completion or failure, even when a failed provider turn has no final
+token pair. Replay requires the same attempt and, for a duration failure, the exact
+authenticated ceiling. General runtimes and multi-worker duration aggregation remain
+open, so the Wave 4A boxes stay unchecked.
+
 The same OpenAI-only boundary now has one deliberately constrained semantic
 output path. A worker with exactly one required, evidence-free Markdown
 run-result slot receives a native-reconstructed prompt containing its persisted
@@ -282,19 +294,20 @@ restart. This is durable provider-generated text, not an artifact, cited brief,
 accepted mission result, canonical provider-route observation, or evidence for
 tool/context-bearing workers, so the Wave 4A boxes remain unchecked.
 
-Native OpenAI mission termination now also requires exactly one nonnegative
-usage observation after the provider finish reason. Rust rejects early,
-duplicate, stale, or post-usage choice frames and atomically appends a
-route-optional `usage-recorded` event before either `worker-completed` or
-`worker-failed`. The event names the worker and requested model, records token
-counts and zero tool calls, leaves costs empty rather than estimating them, and
-does not invent a provider route. Token-budget excess is retained as usage then
-closed as a non-retryable budget failure instead of disappearing into a
-retryable started worker. Definitive failed terminals retain trustworthy final
-usage; cooperative cancellation records none because provider finality is not
-established. Older direct terminal events remain readable as legacy exact
-replays. Canonical route selection and price/cost provenance remain open until
-API providers are represented by canonical workspace Connections.
+Native OpenAI mission settlement now atomically appends one `usage-recorded`
+event before every non-cancelled completion or failure. A completed turn requires
+exactly one nonnegative final token pair after its finish reason; Rust rejects
+early, duplicate, stale, or post-usage choice frames. A failed turn retains that
+pair only when provider finality was actually observed. The event binds the
+worker, requested model, immutable selected route, exact prior tool count,
+native-observed provider duration, and journal attempt. Exact `gpt-5` token pairs
+carry the reviewed source-attributed standard API cost; other models and failures
+without final tokens invent no cost. Token- or duration-budget excess is retained
+then closed as a non-retryable budget failure instead of disappearing into a
+retryable started worker. Cooperative cancellation records no usage because
+provider finality is not established. Older direct terminal events remain
+readable as legacy exact replays, and legacy usage without durable timing is not
+projected as a modern cited receipt.
 
 Mission-owned `knowledge.content.search` can now cross the same exact-action
 approval and scoped standing-grant boundary through either the native Connection
@@ -577,8 +590,11 @@ receipts for other mission shapes remain open. The
 cited-brief result now shows a
 compact expandable receipt derived only from the reloaded durable journal and
 encrypted output receipt: provider/model route explanation, token and tool usage,
-cited-source count, external-evidence trust classification, and the persisted
-input/output token, tool-call, time, and attempt ceilings. It also names the
+cited-source count, external-evidence trust classification, native-observed provider
+time and attempt ordinal, and the persisted input/output token, tool-call, time, and
+attempt ceilings. The timing is scoped to that exact provider attempt rather than
+total mission wall time. Legacy receipts without durable timing remain unavailable
+instead of being inferred. It also names the
 accepted or not-accepted policy state and its durable summary. Exact `gpt-5` usage
 also carries a Fable-calculated USD observation from the reviewed official
 standard API list rate; the durable pricing reference records the source, review

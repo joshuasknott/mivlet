@@ -95,6 +95,8 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     output: Option<NativeWorkerOutputSpec>,
     max_input_tokens: Option<i64>,
     max_output_tokens: i64,
+    max_duration_ms: i64,
+    attempt_number: i64,
     evidence: Option<Value>,
 }
 
@@ -127,6 +129,14 @@ impl NativeWorkerCompletionAuthority {
     pub(crate) fn provider_route_id(&self) -> &str {
         &self.provider_route_id
     }
+
+    pub(crate) fn max_duration_ms(&self) -> i64 {
+        self.max_duration_ms
+    }
+
+    pub(crate) fn attempt_number(&self) -> i64 {
+        self.attempt_number
+    }
 }
 
 pub(crate) enum NativeWorkerCompletionPreflight {
@@ -139,14 +149,56 @@ pub(crate) enum NativeWorkerTerminalOutcome {
         text: Option<String>,
         input_tokens: i64,
         output_tokens: i64,
+        duration_ms: i64,
+        attempt_number: i64,
     },
     Failed {
         code: &'static str,
         message: &'static str,
         retryable: bool,
         usage: Option<(i64, i64)>,
+        duration_ms: i64,
+        attempt_number: i64,
     },
     Cancelled,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ObservedNativeUsage {
+    input_tokens: Option<i64>,
+    output_tokens: Option<i64>,
+    duration_ms: i64,
+    attempt_number: i64,
+}
+
+impl ObservedNativeUsage {
+    fn tokens(self) -> Option<(i64, i64)> {
+        self.input_tokens.zip(self.output_tokens)
+    }
+}
+
+fn validate_native_usage_timing(
+    max_duration_ms: i64,
+    expected_attempt_number: i64,
+    duration_ms: i64,
+    attempt_number: i64,
+    duration_budget_exceeded: bool,
+) -> Result<(), String> {
+    if duration_ms < 0
+        || duration_ms > max_duration_ms
+        || attempt_number != expected_attempt_number
+        || (duration_budget_exceeded && duration_ms != max_duration_ms)
+    {
+        return Err("Native provider duration or attempt usage is invalid.".into());
+    }
+    Ok(())
+}
+
+fn validate_native_attempt_budget(max_attempts: i64, attempt_number: i64) -> Result<(), String> {
+    if max_attempts < 1 || attempt_number < 1 || attempt_number > max_attempts {
+        return Err("Mission run attempt is outside its persisted budget.".into());
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -556,6 +608,8 @@ fn project_cited_mission_receipt(
         "inputTokens":usage.get("inputTokens"),
         "outputTokens":usage.get("outputTokens"),
         "toolCalls":usage.get("toolCalls"),
+        "durationMs":usage.get("durationMs"),
+        "attemptNumber":usage.get("attemptNumber"),
         "sourceCount":output.receipt.get("citations").and_then(Value::as_array).map(Vec::len),
         "trust":output.receipt.get("trust"),
         "maxInputTokens":budget.get("maxInputTokens"),
@@ -694,7 +748,7 @@ fn validate_cited_receipt_projection(receipt: &Value) -> crate::store::Result<()
     let object = receipt.as_object().ok_or_else(|| {
         crate::store::StoreError::Invalid("Cited mission receipt is invalid.".into())
     })?;
-    const REQUIRED: [&str; 15] = [
+    const REQUIRED: [&str; 17] = [
         "acceptanceStatus",
         "acceptanceSummary",
         "provider",
@@ -703,6 +757,8 @@ fn validate_cited_receipt_projection(receipt: &Value) -> crate::store::Result<()
         "inputTokens",
         "outputTokens",
         "toolCalls",
+        "durationMs",
+        "attemptNumber",
         "sourceCount",
         "trust",
         "maxInputTokens",
@@ -726,14 +782,38 @@ fn validate_cited_receipt_projection(receipt: &Value) -> crate::store::Result<()
             .and_then(Value::as_str)
             .is_some_and(|value| !value.trim().is_empty() && value.len() <= 2_000)
     });
-    let counts_valid = ["inputTokens", "outputTokens", "toolCalls", "sourceCount"]
-        .iter()
-        .all(|key| {
-            object
-                .get(*key)
-                .and_then(Value::as_i64)
-                .is_some_and(|value| value >= 0)
-        });
+    let counts_valid = [
+        "inputTokens",
+        "outputTokens",
+        "toolCalls",
+        "sourceCount",
+        "durationMs",
+    ]
+    .iter()
+    .all(|key| {
+        object
+            .get(*key)
+            .and_then(Value::as_i64)
+            .is_some_and(|value| value >= 0)
+    });
+    let utilization_valid = object
+        .get("attemptNumber")
+        .and_then(Value::as_i64)
+        .is_some_and(|value| value > 0)
+        && object
+            .get("maxAttempts")
+            .and_then(Value::as_i64)
+            .is_some_and(|maximum| {
+                object
+                    .get("attemptNumber")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|attempt| attempt <= maximum)
+            })
+        && object
+            .get("durationMs")
+            .and_then(Value::as_i64)
+            .zip(object.get("maxDurationMs").and_then(Value::as_i64))
+            .is_some_and(|(duration, maximum)| duration <= maximum);
     let limits_valid = [
         "maxInputTokens",
         "maxOutputTokens",
@@ -764,6 +844,7 @@ fn validate_cited_receipt_projection(receipt: &Value) -> crate::store::Result<()
     if exact_keys
         && strings_valid
         && counts_valid
+        && utilization_valid
         && limits_valid
         && cost_valid
         && matches!(
@@ -1096,6 +1177,48 @@ pub(crate) fn preflight_native_worker_completion(
                     crate::store::StoreError::Invalid("Mission worker output budget is invalid.".into())
                 })?;
             let max_input_tokens = worker.pointer("/budget/maxInputTokens").and_then(Value::as_i64);
+            let max_duration_ms = worker
+                .pointer("/budget/maxDurationMs")
+                .and_then(Value::as_i64)
+                .filter(|value| (1..=600_000).contains(value))
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission worker duration budget is invalid.".into(),
+                    )
+                })?;
+            let attempt_number = journal
+                .run
+                .get("currentAttemptNumber")
+                .and_then(Value::as_i64)
+                .unwrap_or(1);
+            // A checkpoint restore advances the run attempt while retaining the
+            // same worker assignment. The mission owns that retry budget; the
+            // worker's per-assignment attempt clamp must not invalidate attempt 2.
+            let mission_id = journal
+                .run
+                .get("missionId")
+                .or_else(|| journal.run.pointer("/initiator/missionId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run has no selected mission.".into(),
+                    )
+                })?;
+            let lifecycle = mission_plan::get(tx, store, &scope, &member, mission_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
+                })?;
+            let max_attempts = lifecycle
+                .mission
+                .pointer("/budget/maxAttempts")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission attempt budget is unavailable.".into(),
+                    )
+                })?;
+            validate_native_attempt_budget(max_attempts, attempt_number)
+                .map_err(crate::store::StoreError::Invalid)?;
             let prompt = native_worker_prompt(objective, output.as_ref(), evidence.as_ref());
             validate_openai_worker_body(body, model, &prompt, max_tokens)
                 .map_err(crate::store::StoreError::Invalid)?;
@@ -1113,7 +1236,14 @@ pub(crate) fn preflight_native_worker_completion(
                         exact_native_terminal_replay(existing, binding, output.as_ref())
                             .map_err(crate::store::StoreError::Invalid)?;
                     }
-                    validate_usage_replay(&journal, existing, binding, model)
+                    validate_usage_replay(
+                        &journal,
+                        existing,
+                        binding,
+                        model,
+                        max_duration_ms,
+                        attempt_number,
+                    )
                         .map_err(crate::store::StoreError::Invalid)?;
                     validate_output_receipt_replay(
                         tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
@@ -1143,6 +1273,8 @@ pub(crate) fn preflight_native_worker_completion(
                 output,
                 max_input_tokens,
                 max_output_tokens: max_tokens,
+                max_duration_ms,
+                attempt_number,
                 evidence,
             }))
         })
@@ -1352,6 +1484,8 @@ pub(crate) fn settle_native_worker_completion(
                     existing,
                     &authority.binding,
                     &authority.requested_model,
+                    authority.max_duration_ms,
+                    authority.attempt_number,
                 )
                 .map_err(crate::store::StoreError::Invalid)?;
                 validate_output_receipt_replay(
@@ -1402,14 +1536,16 @@ pub(crate) fn settle_native_worker_completion(
                 .and_then(Value::as_str)
                 .ok_or_else(|| {
                     crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
-                })?;
+            })?;
             let mut receipt = None;
-            let mut usage = None;
+            let usage: Option<ObservedNativeUsage>;
             let payload = match outcome {
                 NativeWorkerTerminalOutcome::Completed {
                     text,
                     input_tokens,
                     output_tokens,
+                    duration_ms,
+                    attempt_number,
                 } => {
                     if input_tokens < 0
                         || output_tokens < 0
@@ -1422,7 +1558,20 @@ pub(crate) fn settle_native_worker_completion(
                             "Native provider usage exceeded the worker budget.".into(),
                         ));
                     }
-                    usage = Some((input_tokens, output_tokens));
+                    validate_native_usage_timing(
+                        authority.max_duration_ms,
+                        authority.attempt_number,
+                        duration_ms,
+                        attempt_number,
+                        false,
+                    )
+                    .map_err(crate::store::StoreError::Invalid)?;
+                    usage = Some(ObservedNativeUsage {
+                        input_tokens: Some(input_tokens),
+                        output_tokens: Some(output_tokens),
+                        duration_ms,
+                        attempt_number,
+                    });
                     let outputs = match (&authority.output, text) {
                         (None, None) => Vec::new(),
                         (Some(spec), Some(text))
@@ -1480,6 +1629,8 @@ pub(crate) fn settle_native_worker_completion(
                     message,
                     retryable,
                     usage: observed_usage,
+                    duration_ms,
+                    attempt_number,
                 } => {
                     if let Some((input, output)) = observed_usage {
                         if input < 0 || output < 0 {
@@ -1487,9 +1638,26 @@ pub(crate) fn settle_native_worker_completion(
                                 "Native provider usage is invalid.".into(),
                             ));
                         }
-                        usage = Some((input, output));
                     }
-                    let category = if code == "native-worker-token-budget-exceeded" {
+                    validate_native_usage_timing(
+                        authority.max_duration_ms,
+                        authority.attempt_number,
+                        duration_ms,
+                        attempt_number,
+                        code == "native-worker-duration-budget-exceeded",
+                    )
+                    .map_err(crate::store::StoreError::Invalid)?;
+                    usage = Some(ObservedNativeUsage {
+                        input_tokens: observed_usage.map(|value| value.0),
+                        output_tokens: observed_usage.map(|value| value.1),
+                        duration_ms,
+                        attempt_number,
+                    });
+                    let category = if matches!(
+                        code,
+                        "native-worker-token-budget-exceeded"
+                            | "native-worker-duration-budget-exceeded"
+                    ) {
                         "budget-exceeded"
                     } else {
                         "provider"
@@ -1503,23 +1671,41 @@ pub(crate) fn settle_native_worker_completion(
             let mut terminal_expected_revision = authority.binding.expected_run_revision;
             let mut terminal_expected_sequence = authority.binding.expected_last_sequence;
             let mut terminal_previous_event = native_completion_base_event(&authority.binding);
-            if let Some((input_tokens, output_tokens)) = usage {
-                let costs = exact_model_costs(&authority.requested_model, input_tokens, output_tokens);
+            if let Some(observed_usage) = usage {
+                let costs = observed_usage
+                    .tokens()
+                    .map(|(input, output)| {
+                        exact_model_costs(&authority.requested_model, input, output)
+                    })
+                    .unwrap_or_default();
                 let usage_sequence = authority.binding.expected_last_sequence + 1;
                 let usage_key = native_usage_event_key(&authority.binding)
                     .map_err(crate::store::StoreError::Invalid)?;
+                let mut usage_payload = json!({
+                    "usageKey":format!("native-usage:{}",authority.binding.usage_event_id),
+                    "runId":authority.binding.run_id,"attemptNumber":observed_usage.attempt_number,
+                    "workerId":authority.binding.worker_id,"providerRouteId":authority.provider_route_id,
+                    "modelReference":authority.requested_model,
+                    "toolCalls":if authority.evidence.is_some(){1}else{0},
+                    "durationMs":observed_usage.duration_ms,"costs":costs,"measuredAt":at
+                });
+                if let Some(object) = usage_payload.as_object_mut() {
+                    if let Some(input_tokens) = observed_usage.input_tokens {
+                        object.insert("inputTokens".into(), json!(input_tokens));
+                    }
+                    if let Some(output_tokens) = observed_usage.output_tokens {
+                        object.insert("outputTokens".into(), json!(output_tokens));
+                    }
+                }
                 let usage_event = json!({
                     "workspaceId":workspace,"visibility":"member-private","ownerMemberId":authority.member_id,
                     "authority":"local","schemaVersion":1,"revision":1,
                     "createdByInternalUserId":authority.internal_user_id,"createdAt":at,"updatedAt":at,
                     "id":authority.binding.usage_event_id,"runId":authority.binding.run_id,
                     "type":"usage-recorded","sequence":usage_sequence,"previousEventId":native_completion_base_event(&authority.binding),
-                    "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+                    "attemptNumber":observed_usage.attempt_number,
                     "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":usage_key,
-                    "payload":{"usage":{"usageKey":format!("native-usage:{}",authority.binding.usage_event_id),
-                        "runId":authority.binding.run_id,"workerId":authority.binding.worker_id,
-                        "providerRouteId":authority.provider_route_id,"modelReference":authority.requested_model,"inputTokens":input_tokens,
-                        "outputTokens":output_tokens,"toolCalls":if authority.evidence.is_some(){1}else{0},"costs":costs,"measuredAt":at}}
+                    "payload":{"usage":usage_payload}
                 });
                 let mut usage_projection = journal.run.as_object().cloned().ok_or_else(|| {
                     crate::store::StoreError::Invalid("Mission run record is invalid.".into())
@@ -1615,7 +1801,7 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.binding,
                     reference,
                     receipt_value,
-                    usage,
+                    usage.and_then(ObservedNativeUsage::tokens),
                     &authority.provider_id,
                     &authority.requested_model,
                     &authority.provider_route_id,
@@ -4513,6 +4699,8 @@ fn validate_usage_replay(
     terminal: &Value,
     binding: &NativeWorkerExecutionBinding,
     model: &str,
+    max_duration_ms: i64,
+    expected_attempt_number: i64,
 ) -> Result<(), String> {
     if terminal.get("type").and_then(Value::as_str) == Some("run-cancelled") {
         return Ok(());
@@ -4541,6 +4729,34 @@ fn validate_usage_replay(
     let output_tokens = usage
         .pointer("/payload/usage/outputTokens")
         .and_then(Value::as_i64);
+    let duration_ms = usage
+        .pointer("/payload/usage/durationMs")
+        .and_then(Value::as_i64);
+    let attempt_number = usage
+        .pointer("/payload/usage/attemptNumber")
+        .and_then(Value::as_i64);
+    let tokens_valid = match (input_tokens, output_tokens) {
+        (Some(input), Some(output)) => input >= 0 && output >= 0,
+        (None, None) => true,
+        _ => false,
+    };
+    // Stored events written before native duration ownership remain replayable,
+    // but any event carrying the new timing fields must carry the exact pair.
+    let timing_valid = match (duration_ms, attempt_number) {
+        (None, None) => true,
+        (Some(duration), Some(attempt)) => {
+            duration >= 0
+                && duration <= max_duration_ms
+                && attempt == expected_attempt_number
+                && usage.get("attemptNumber").and_then(Value::as_i64) == Some(attempt)
+        }
+        _ => false,
+    };
+    let duration_failure_valid = terminal
+        .pointer("/payload/error/code")
+        .and_then(Value::as_str)
+        != Some("native-worker-duration-budget-exceeded")
+        || duration_ms == Some(max_duration_ms);
     let expected_costs = Value::Array(
         input_tokens
             .zip(output_tokens)
@@ -4579,8 +4795,9 @@ fn validate_usage_replay(
             .pointer("/payload/usage/modelReference")
             .and_then(Value::as_str)
             != Some(model)
-        || input_tokens.is_none_or(|v| v < 0)
-        || output_tokens.is_none_or(|v| v < 0)
+        || !tokens_valid
+        || !timing_valid
+        || !duration_failure_valid
         || usage
             .pointer("/payload/usage/toolCalls")
             .and_then(Value::as_i64)
@@ -4659,6 +4876,12 @@ fn native_failure_payload_valid(event: &Value) -> bool {
         return error.get("category").and_then(Value::as_str) == Some("budget-exceeded")
             && error.get("message").and_then(Value::as_str)
                 == Some("The native provider usage exceeded the worker token budget.")
+            && error.get("retryable").and_then(Value::as_bool) == Some(false);
+    }
+    if error.get("code").and_then(Value::as_str) == Some("native-worker-duration-budget-exceeded") {
+        return error.get("category").and_then(Value::as_str) == Some("budget-exceeded")
+            && error.get("message").and_then(Value::as_str)
+                == Some("The native provider exceeded the worker duration budget.")
             && error.get("retryable").and_then(Value::as_bool) == Some(false);
     }
     if error.get("category").and_then(Value::as_str) != Some("provider")
@@ -6180,6 +6403,17 @@ mod tests {
     }
 
     #[test]
+    fn native_usage_timing_is_bounded_and_attempt_fenced() {
+        assert!(validate_native_attempt_budget(2, 2).is_ok());
+        assert!(validate_native_attempt_budget(1, 2).is_err());
+        assert!(validate_native_usage_timing(120_000, 2, 1_250, 2, false).is_ok());
+        assert!(validate_native_usage_timing(120_000, 2, 120_000, 2, true).is_ok());
+        assert!(validate_native_usage_timing(120_000, 2, 119_999, 2, true).is_err());
+        assert!(validate_native_usage_timing(120_000, 2, 120_001, 2, false).is_err());
+        assert!(validate_native_usage_timing(120_000, 2, 1_250, 1, false).is_err());
+    }
+
+    #[test]
     fn cited_brief_accepts_only_exact_mapped_external_evidence() {
         let evidence = json!({"result":{"degraded":false,"citations":[{
             "citationId":"source-1","sourceId":"doc-1","title":"Launch plan",
@@ -6238,10 +6472,10 @@ mod tests {
         assert!(exact_native_terminal_replay(&failed, &binding, None).is_ok());
         let usage = json!({
             "id":"event-usage","runId":"run-1","type":"usage-recorded","sequence":4,
-            "previousEventId":"event-route","idempotencyKey":"worker-usage:terminal-1",
+            "previousEventId":"event-route","attemptNumber":1,"idempotencyKey":"worker-usage:terminal-1",
             "payload":{"usage":{"usageKey":"native-usage:event-usage","runId":"run-1",
                 "workerId":"worker-1","providerRouteId":"provider-route-1","modelReference":"gpt-5","inputTokens":12,
-                "outputTokens":3,"toolCalls":0,"costs":[{"amount":{"amount":"0.000045","currencyCode":"USD"},
+                "outputTokens":3,"toolCalls":0,"durationMs":1500,"attemptNumber":1,"costs":[{"amount":{"amount":"0.000045","currencyCode":"USD"},
                 "provenance":"fable-calculated","pricingReference":"https://developers.openai.com/api/docs/models/gpt-5|reviewed=2026-07-13|standard-input-usd-per-1m=1.25|standard-output-usd-per-1m=10"}],"measuredAt":"t"}}
         });
         let terminal = json!({
@@ -6259,7 +6493,26 @@ mod tests {
             ],
         };
         assert!(exact_native_terminal_replay(&terminal, &binding, None).is_ok());
-        assert!(validate_usage_replay(&journal, &terminal, &binding, "gpt-5").is_ok());
+        assert!(validate_usage_replay(&journal, &terminal, &binding, "gpt-5", 120_000, 1).is_ok());
+        let mut wrong_timing = usage.clone();
+        wrong_timing["payload"]["usage"]["attemptNumber"] = json!(2);
+        let wrong_timing_journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                wrong_timing,
+                terminal.clone(),
+            ],
+        };
+        assert!(validate_usage_replay(
+            &wrong_timing_journal,
+            &terminal,
+            &binding,
+            "gpt-5",
+            120_000,
+            1,
+        )
+        .is_err());
         assert_eq!(
             exact_model_costs("gpt-5", 12, 3)[0]["amount"]["amount"],
             "0.000045"
@@ -6279,12 +6532,65 @@ mod tests {
             run: json!({}),
             events: vec![
                 json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
-                usage,
+                usage.clone(),
                 budget_failure.clone(),
             ],
         };
         assert!(exact_native_terminal_replay(&budget_failure, &binding, None).is_ok());
-        assert!(validate_usage_replay(&failed_journal, &budget_failure, &binding, "gpt-5").is_ok());
+        assert!(validate_usage_replay(
+            &failed_journal,
+            &budget_failure,
+            &binding,
+            "gpt-5",
+            120_000,
+            1,
+        )
+        .is_ok());
+        let mut duration_usage = usage.clone();
+        duration_usage["payload"]["usage"]["durationMs"] = json!(120_000);
+        let mut duration_failure = budget_failure.clone();
+        duration_failure["payload"]["error"] = json!({
+            "code":"native-worker-duration-budget-exceeded",
+            "category":"budget-exceeded",
+            "message":"The native provider exceeded the worker duration budget.",
+            "retryable":false
+        });
+        let duration_failed_journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                duration_usage.clone(),
+                duration_failure.clone(),
+            ],
+        };
+        assert!(exact_native_terminal_replay(&duration_failure, &binding, None).is_ok());
+        assert!(validate_usage_replay(
+            &duration_failed_journal,
+            &duration_failure,
+            &binding,
+            "gpt-5",
+            120_000,
+            1,
+        )
+        .is_ok());
+        duration_usage["payload"]["usage"]["durationMs"] = json!(119_999);
+        let early_duration_failure_journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                duration_usage,
+                duration_failure.clone(),
+            ],
+        };
+        assert!(validate_usage_replay(
+            &early_duration_failure_journal,
+            &duration_failure,
+            &binding,
+            "gpt-5",
+            120_000,
+            1,
+        )
+        .is_err());
         let run_failure = json!({
             "id":"event-result","runId":"run-1","type":"run-failed","sequence":6,
             "previousEventId":"event-5","idempotencyKey":"run-result:terminal-1",
@@ -6792,10 +7098,10 @@ mod tests {
                 )?;
                 let usage = json!({
                     "id":"event-usage","runId":"run-1","type":"usage-recorded","sequence":3,
-                    "previousEventId":"event-route","idempotencyKey":"usage-1","payload":{"usage":{
+                    "previousEventId":"event-route","attemptNumber":1,"idempotencyKey":"usage-1","payload":{"usage":{
                         "runId":"run-1","workerId":"worker-1","providerRouteId":"route-openai",
                         "modelReference":"gpt-5","inputTokens":90,"outputTokens":40,"toolCalls":1,
-                        "costs":[]}}
+                        "durationMs":1500,"attemptNumber":1,"costs":[]}}
                 });
                 run["revision"] = json!(3);
                 run["eventHead"] = json!({"lastSequence":3,"lastEventId":"event-usage"});
@@ -6882,6 +7188,8 @@ mod tests {
         assert_eq!(receipt["acceptanceStatus"], "not-accepted");
         assert_eq!(receipt["provider"], "openai");
         assert_eq!(receipt["inputTokens"], 90);
+        assert_eq!(receipt["durationMs"], 1500);
+        assert_eq!(receipt["attemptNumber"], 1);
         assert_eq!(receipt["sourceCount"], 1);
         assert_eq!(receipt["maxOutputTokens"], 2048);
         assert!(receipt.get("costAmount").is_none());

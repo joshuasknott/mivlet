@@ -82,7 +82,7 @@ export function RunContextSummary({ receipt }: { receipt: RunContextReceipt }) {
 export function MissionRunReceipt({ receipt }: { receipt: {
   acceptanceStatus: "accepted" | "not-accepted"; acceptanceSummary: string;
   provider: string; model: string; routeReason: string; inputTokens: number;
-  outputTokens: number; toolCalls: number; sourceCount: number; trust: string;
+  outputTokens: number; toolCalls: number; durationMs: number; attemptNumber: number; sourceCount: number; trust: string;
   maxInputTokens: number; maxOutputTokens: number; maxToolCalls: number; maxDurationMs: number; maxAttempts: number;
   costAmount?: string; costCurrency?: string; pricingReference?: string;
 } }) {
@@ -91,6 +91,7 @@ export function MissionRunReceipt({ receipt }: { receipt: {
   const pricingLabel = reviewed
     ? `Standard API list price · reviewed ${Number(reviewed[3])} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(reviewed[2]) - 1]} ${reviewed[1]}`
     : "Source-attributed API price";
+  const providerSeconds = (receipt.durationMs / 1000).toFixed(receipt.durationMs % 1000 === 0 ? 0 : 1);
   return (
     <details className="run-context-summary" aria-label="Run receipt">
       <summary><strong>Run receipt</strong><span>{provider} · {receipt.inputTokens + receipt.outputTokens} tokens</span></summary>
@@ -102,8 +103,8 @@ export function MissionRunReceipt({ receipt }: { receipt: {
         <li>{receipt.inputTokens} / {receipt.maxInputTokens} input tokens</li>
         <li>{receipt.outputTokens} / {receipt.maxOutputTokens} output tokens</li>
         <li>{receipt.toolCalls} / {receipt.maxToolCalls} read {receipt.maxToolCalls === 1 ? "action" : "actions"}</li>
-        <li>Up to {Math.round(receipt.maxDurationMs / 1000)} seconds</li>
-        <li>{receipt.maxAttempts} {receipt.maxAttempts === 1 ? "attempt" : "attempts"} · {receipt.costAmount && receipt.costCurrency ? `${receipt.costCurrency} ${receipt.costAmount}` : "cost unavailable"}</li>
+        <li>Provider time {providerSeconds}s / {Math.round(receipt.maxDurationMs / 1000)}s · attempt {receipt.attemptNumber} / {receipt.maxAttempts}</li>
+        <li>{receipt.costAmount && receipt.costCurrency ? `${receipt.costCurrency} ${receipt.costAmount}` : "Cost unavailable"}</li>
         {receipt.pricingReference ? <li>{pricingLabel}</li> : null}
         <li>{receipt.sourceCount} cited {receipt.sourceCount === 1 ? "source" : "sources"}</li>
         <li>{receipt.trust === "provider-generated-with-external-evidence" ? "External evidence kept untrusted" : receipt.trust}</li>

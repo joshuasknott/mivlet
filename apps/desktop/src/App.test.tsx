@@ -89,7 +89,7 @@ vi.mock("./lib/cited-brief-mission", () => ({
     const plan = { title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step", step: { title: "Research and write", objective: "Search and write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." }, acceptance: ["Use only attested citations."], budget: { maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2 } };
     (input.onPlanReady as ((plan: unknown) => void) | undefined)?.(plan);
     if (runtimeMocks.citedBriefGate) await runtimeMocks.citedBriefGate;
-    return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, plan, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
+    return { missionId: "mission-ui", runId: "mission-run-ui", outcome: "accepted", valueReference: "mission-output:v1:ui", artifactId: "mission-artifact-ui", artifactVersionId: "mission-artifact-version-ui", text: "Durable cited brief [source-1].", journal: {}, plan, receipt: { acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.", provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", inputTokens: 120, outputTokens: 80, toolCalls: 1, durationMs: 1250, attemptNumber: 1, sourceCount: 1, trust: "provider-generated-with-external-evidence", maxInputTokens: 32000, maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2, costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price|reviewed=2026-07-12" } };
   })
 }));
 
@@ -1491,6 +1491,7 @@ describe("Fable home", () => {
     expect(await screen.findByText("Durable cited brief [source-1].")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Mission plan" })).toHaveTextContent("One focused research step");
     expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
+    expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("Provider time 1.3s / 120s · attempt 1 / 2");
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
     expect(runtimeMocks.citedBriefCalls).toHaveLength(1);
@@ -1515,7 +1516,7 @@ describe("Fable home", () => {
         receipt: {
           acceptanceStatus: "not-accepted", acceptanceSummary: "evidence missing",
           provider: "openai", model: "gpt-5", routeReason: "Selected exact route.",
-          inputTokens: 90, outputTokens: 40, toolCalls: 1, sourceCount: 0,
+          inputTokens: 90, outputTokens: 40, toolCalls: 1, durationMs: 1500, attemptNumber: 1, sourceCount: 0,
           trust: "provider-generated-with-external-evidence", maxInputTokens: 32000,
           maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2
         }
@@ -1584,7 +1585,7 @@ describe("Fable home", () => {
       messageId: "message-cited-assistant", status: "available", receipt: {
         acceptanceStatus: "accepted", acceptanceSummary: "The cited brief and its required policy acceptance are complete.",
         provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate.",
-        inputTokens: 120, outputTokens: 80, toolCalls: 1, sourceCount: 1,
+        inputTokens: 120, outputTokens: 80, toolCalls: 1, durationMs: 1250, attemptNumber: 1, sourceCount: 1,
         trust: "provider-generated-with-external-evidence", maxInputTokens: 32000,
         maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1,
         costAmount: "0.00095", costCurrency: "USD", pricingReference: "official-price"
@@ -1606,7 +1607,9 @@ describe("Fable home", () => {
       "thread-cited-restart", ["message-cited-assistant"]
     ));
     expect(screen.getByRole("group", { name: "Mission plan" })).toHaveTextContent("Use only attested citations");
-    expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
+    const acceptedReceipt = await screen.findByRole("group", { name: "Run receipt" });
+    expect(acceptedReceipt).toHaveTextContent("OpenAI · 200 tokens");
+    expect(acceptedReceipt).toHaveTextContent("Provider time 1.3s / 120s · attempt 1 / 1");
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
@@ -1645,9 +1648,9 @@ describe("Fable home", () => {
       messageId: "message-partial-assistant", status: "available", receipt: {
         acceptanceStatus: "not-accepted", acceptanceSummary: "evidence missing",
         provider: "openai", model: "gpt-5", routeReason: "Selected OpenAI GPT-5 for model.generate.",
-        inputTokens: 90, outputTokens: 40, toolCalls: 1, sourceCount: 0,
+        inputTokens: 90, outputTokens: 40, toolCalls: 1, durationMs: 1500, attemptNumber: 2, sourceCount: 0,
         trust: "provider-generated-with-external-evidence", maxInputTokens: 32000,
-        maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 1
+        maxOutputTokens: 2048, maxToolCalls: 1, maxDurationMs: 120000, maxAttempts: 2
       }
     }]);
     vi.mocked(readRuntimeCitedMissionPlanSummaries).mockResolvedValue([{
@@ -1662,7 +1665,9 @@ describe("Fable home", () => {
     await waitFor(() => expect(readRuntimeCitedMissionReceipts).toHaveBeenCalledWith(
       "thread-partial-restart", ["message-partial-assistant"]
     ));
-    expect(await screen.findByRole("group", { name: "Run receipt" })).toHaveTextContent("Policy acceptance not met");
+    const partialReceipt = await screen.findByRole("group", { name: "Run receipt" });
+    expect(partialReceipt).toHaveTextContent("Policy acceptance not met");
+    expect(partialReceipt).toHaveTextContent("Provider time 1.5s / 120s · attempt 2 / 2");
     const newMission = await screen.findByRole("button", { name: "Run again as a new mission" });
     expect(screen.getByLabelText("New mission option")).toHaveTextContent("Starts fresh with the current scope");
     await user.click(newMission);
