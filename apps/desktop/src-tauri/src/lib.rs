@@ -163,6 +163,7 @@ pub fn run() {
             mission_runs::mission_run_request_cancellation,
             mission_runs::mission_run_finalize_cancellation,
             mission_runs::mission_run_recover_interrupted_cited,
+            mission_runs::mission_run_prepare_cited_retry,
             mission_runs::mission_run_create_checkpoint,
             mission_runs::mission_run_restore_checkpoint,
             mission_workers::mission_worker_create,

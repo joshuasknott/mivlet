@@ -77,6 +77,12 @@ pub struct MissionCheckpointRestoreInput {
     new_attempt_number: i64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CitedMissionRetryPrepareInput {
+    run_id: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MissionCheckpointRestoreResult {
@@ -454,6 +460,75 @@ pub fn mission_run_recover_interrupted_cited() -> Result<Vec<CitedMissionRestart
     result
 }
 
+#[tauri::command]
+pub fn mission_run_prepare_cited_retry(
+    input: CitedMissionRetryPrepareInput,
+) -> Result<CitedMissionRestartRecovery, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let (scope, _, member) = authorized(tx)?;
+            mission_run::get(tx, store, &scope, &member, &input.run_id)?.ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Mission run is unavailable in this workspace.".into(),
+                )
+            })?;
+            Ok(())
+        })
+        .map_err(|error| error.to_string())?;
+    if crate::native_api::mission_run_has_active_native_execution(&input.run_id)? {
+        return Err("The cited mission still has an active provider execution.".into());
+    }
+    store
+        .transaction(|tx| {
+            let (scope, context, member) = authorized(tx)?;
+            let journal =
+                mission_run::get(tx, store, &scope, &member, &input.run_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run is unavailable in this workspace.".into(),
+                    )
+                })?;
+            if journal.run.get("status").and_then(Value::as_str) != Some("retrying") {
+                return Err(crate::store::StoreError::Invalid(
+                    "The cited mission is not waiting for a retry.".into(),
+                ));
+            }
+            let mission_id = journal
+                .run
+                .get("missionId")
+                .or_else(|| journal.run.pointer("/initiator/missionId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+                })?;
+            let lifecycle =
+                mission_plan::get(tx, store, &scope, &member, mission_id)?.ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
+                })?;
+            if !is_cited_recovery_shape(&journal.run, &lifecycle) {
+                return Err(crate::store::StoreError::Invalid(
+                    "The mission is not eligible for cited retry recovery.".into(),
+                ));
+            }
+            cited_resume_descriptor(
+                tx,
+                store,
+                &scope,
+                &member,
+                &context.internal_user_id,
+                &journal,
+                &lifecycle,
+            )?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "The cited retry does not match its durable checkpoint.".into(),
+                )
+            })
+        })
+        .map_err(|error| error.to_string())
+}
+
 fn recover_interrupted_cited_run(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -484,8 +559,11 @@ fn recover_interrupted_cited_run(
     if !is_cited_recovery_shape(&journal.run, &lifecycle) {
         return Ok(None);
     }
-    if journal.run.get("status").and_then(Value::as_str) == Some("running") {
-        match cited_restart_resume_descriptor(
+    if matches!(
+        journal.run.get("status").and_then(Value::as_str),
+        Some("running" | "retrying")
+    ) {
+        match cited_resume_descriptor(
             tx,
             store,
             scope,
@@ -645,7 +723,7 @@ fn recover_interrupted_cited_run(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn cited_restart_resume_descriptor(
+fn cited_resume_descriptor(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
     scope: &DataScope,
@@ -687,34 +765,30 @@ fn cited_restart_resume_descriptor(
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
         })?;
-    let checkpoint_event_id = journal
+    let head_event_id = journal
         .run
         .pointer("/eventHead/lastEventId")
         .and_then(Value::as_str)
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
         })?;
-    let checkpoint_event = journal
-        .events
-        .iter()
-        .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id));
-    if checkpoint_event
-        .and_then(|event| event.get("type"))
-        .and_then(Value::as_str)
-        != Some("checkpoint-created")
-    {
-        return Ok(None);
-    }
     let checkpoint =
         mission_checkpoint::latest(tx, store, scope, member, run_id)?.ok_or_else(|| {
             crate::store::StoreError::Invalid("Cited recovery checkpoint is missing.".into())
         })?;
-    if checkpoint.checkpoint_event_id != checkpoint_event_id {
+    let checkpoint_event_id = checkpoint.checkpoint_event_id.as_str();
+    let checkpoint_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited recovery checkpoint event is missing.".into())
+        })?;
+    if checkpoint_event.get("type").and_then(Value::as_str) != Some("checkpoint-created") {
         return Err(crate::store::StoreError::Invalid(
-            "Cited recovery checkpoint is not the current run head.".into(),
+            "Cited recovery checkpoint event is invalid.".into(),
         ));
     }
-    let checkpoint_event = checkpoint_event.expect("checked checkpoint event");
     verify_checkpoint_state(&checkpoint, checkpoint_event)
         .map_err(crate::store::StoreError::Invalid)?;
     let worker_events = journal
@@ -831,6 +905,26 @@ fn cited_restart_resume_descriptor(
     .map_err(crate::store::StoreError::Invalid)?;
     let route_sequence = route_events[0].get("sequence").and_then(Value::as_i64);
     let tool_sequence = tool_events[0].get("sequence").and_then(Value::as_i64);
+    let checkpoint_sequence = checkpoint_event.get("sequence").and_then(Value::as_i64);
+    let status = journal
+        .run
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let resumable_head = match status {
+        "running" => {
+            head_event_id == checkpoint_event_id && checkpoint_sequence == Some(last_sequence)
+        }
+        "retrying" => exact_cited_retry_chain(
+            journal,
+            checkpoint_event_id,
+            worker_id,
+            model_reference,
+            last_sequence,
+            head_event_id,
+        ),
+        _ => false,
+    };
     let exact = worker.get("runId").and_then(Value::as_str) == Some(run_id)
         && worker.get("planRevisionId") == lifecycle.current_revision.get("id")
         && worker.get("planStepKey").and_then(Value::as_str) == Some(step_key)
@@ -870,7 +964,10 @@ fn cited_restart_resume_descriptor(
         && route_sequence
             .zip(tool_sequence)
             .is_some_and(|(route, tool)| tool == route + 1)
-        && tool_sequence.is_some_and(|tool| last_sequence == tool + 1)
+        && tool_sequence
+            .zip(checkpoint_sequence)
+            .is_some_and(|(tool, checkpoint)| checkpoint == tool + 1)
+        && resumable_head
         && checkpoint_event
             .get("previousEventId")
             .and_then(Value::as_str)
@@ -922,11 +1019,13 @@ fn cited_restart_resume_descriptor(
             crate::store::StoreError::Invalid("Cited recovery thread is unavailable.".into())
         })?;
     let identity = format!(
-        "fable.cited-restart-resume.v1\0{}\0{}\0{}\0{}",
+        "fable.cited-resume.v2\0{}\0{}\0{}\0{}\0{}\0{}",
         scope.workspace_id(),
         member,
         run_id,
-        checkpoint_event_id
+        checkpoint_event_id,
+        head_event_id,
+        revision
     );
     let digest = format!("{:x}", Sha256::digest(identity.as_bytes()));
     let event_id = |role: &str| format!("mission-resume-{role}-{}", &digest[..32]);
@@ -943,8 +1042,8 @@ fn cited_restart_resume_descriptor(
         tool_event_id: tool_event_id.to_string(),
         output_reference: output_reference.to_string(),
         evidence,
-        restore_idempotency_key: format!("cited-restart-restore:v1:{}", &digest[..32]),
-        terminal_idempotency_key: format!("cited-restart-terminal:v1:{}", &digest[..32]),
+        restore_idempotency_key: format!("cited-resume-restore:v2:{}", &digest[..32]),
+        terminal_idempotency_key: format!("cited-resume-terminal:v2:{}", &digest[..32]),
         usage_event_id: event_id("usage"),
         completion_event_id: event_id("completion"),
         evaluation_event_id: event_id("evaluation"),
@@ -954,6 +1053,189 @@ fn cited_restart_resume_descriptor(
         expected_last_sequence: last_sequence,
         new_attempt_number: current_attempt + 1,
     }))
+}
+
+fn exact_cited_retry_chain(
+    journal: &mission_run::MissionRunJournalRow,
+    checkpoint_event_id: &str,
+    worker_id: &str,
+    model_reference: &str,
+    last_sequence: i64,
+    head_event_id: &str,
+) -> bool {
+    let Some(checkpoint_sequence) = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id))
+        .and_then(|event| event.get("sequence"))
+        .and_then(Value::as_i64)
+    else {
+        return false;
+    };
+    if last_sequence != checkpoint_sequence + 3 {
+        return false;
+    }
+    let at_sequence = |sequence: i64| {
+        journal
+            .events
+            .iter()
+            .find(|event| event.get("sequence").and_then(Value::as_i64) == Some(sequence))
+    };
+    let (Some(usage), Some(attempt), Some(retry)) = (
+        at_sequence(checkpoint_sequence + 1),
+        at_sequence(checkpoint_sequence + 2),
+        at_sequence(checkpoint_sequence + 3),
+    ) else {
+        return false;
+    };
+    let Some(usage_id) = usage.get("id").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(attempt_id) = attempt.get("id").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(retry_id) = retry.get("id").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(error) = retry.pointer("/payload/error") else {
+        return false;
+    };
+    let Some(error_object) = error.as_object() else {
+        return false;
+    };
+    let worker_started_at = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("type").and_then(Value::as_str) == Some("worker-started")
+                && event.pointer("/payload/workerId").and_then(Value::as_str) == Some(worker_id)
+        })
+        .and_then(|event| event.get("occurredAt"));
+    let usage_key = usage
+        .get("idempotencyKey")
+        .and_then(Value::as_str)
+        .and_then(|key| key.strip_prefix("worker-usage:"));
+    let attempt_key = attempt
+        .get("idempotencyKey")
+        .and_then(Value::as_str)
+        .and_then(|key| key.strip_prefix("worker-attempt-finished:"));
+    let retry_key = retry
+        .get("idempotencyKey")
+        .and_then(Value::as_str)
+        .and_then(|key| key.strip_prefix("worker-retry:"));
+    let error_valid = error_object.len() == 4
+        && error.get("category").and_then(Value::as_str) == Some("provider")
+        && error.get("retryable").and_then(Value::as_bool) == Some(true)
+        && matches!(
+            (
+                error.get("code").and_then(Value::as_str),
+                error.get("message").and_then(Value::as_str)
+            ),
+            (
+                Some("native-provider-transport-failed"),
+                Some("The native provider connection failed after retrying.")
+            ) | (
+                Some("native-provider-temporarily-unavailable"),
+                Some("The native provider remained unavailable after retrying.")
+            ) | (
+                Some("native-provider-stream-interrupted"),
+                Some("The native provider stream ended unexpectedly.")
+            )
+        );
+    let usage_attempt = usage
+        .pointer("/payload/usage/attemptNumber")
+        .and_then(Value::as_i64);
+    let input_tokens = usage
+        .pointer("/payload/usage/inputTokens")
+        .and_then(Value::as_i64);
+    let output_tokens = usage
+        .pointer("/payload/usage/outputTokens")
+        .and_then(Value::as_i64);
+    let tokens_valid = match (input_tokens, output_tokens) {
+        (Some(input), Some(output)) => input >= 0 && output >= 0,
+        (None, None) => true,
+        _ => false,
+    };
+    let selected_route = journal.run.get("selectedRoute");
+    error_valid
+        && retry_id == head_event_id
+        && retry.get("type").and_then(Value::as_str) == Some("retry-scheduled")
+        && retry.get("previousEventId").and_then(Value::as_str) == Some(attempt_id)
+        && retry.get("attemptNumber").and_then(Value::as_i64) == Some(1)
+        && retry
+            .pointer("/payload/nextAttemptNumber")
+            .and_then(Value::as_i64)
+            == Some(2)
+        && retry
+            .get("payload")
+            .and_then(Value::as_object)
+            .is_some_and(|payload| payload.len() == 2)
+        && attempt.get("type").and_then(Value::as_str) == Some("attempt-finished")
+        && attempt.get("previousEventId").and_then(Value::as_str) == Some(usage_id)
+        && attempt.get("attemptNumber").and_then(Value::as_i64) == Some(1)
+        && attempt.pointer("/payload/attempt/runId") == journal.run.get("id")
+        && attempt
+            .pointer("/payload/attempt/attemptNumber")
+            .and_then(Value::as_i64)
+            == Some(1)
+        && attempt
+            .pointer("/payload/attempt/status")
+            .and_then(Value::as_str)
+            == Some("failed")
+        && attempt.pointer("/payload/attempt/retryReason") == Some(error)
+        && attempt.pointer("/payload/attempt/selectedRoute") == selected_route
+        && attempt.pointer("/payload/attempt/startedAt") == worker_started_at
+        && attempt
+            .pointer("/payload/attempt/selectedPlacement/executionNodeId")
+            .and_then(Value::as_str)
+            == Some("execution-node-local-desktop")
+        && attempt.pointer("/payload/attempt/finishedAt") == attempt.get("occurredAt")
+        && attempt.get("occurredAt") == retry.get("occurredAt")
+        && usage.get("type").and_then(Value::as_str) == Some("usage-recorded")
+        && usage.get("previousEventId").and_then(Value::as_str) == Some(checkpoint_event_id)
+        && usage.get("attemptNumber").and_then(Value::as_i64) == Some(1)
+        && usage.pointer("/payload/usage/runId") == journal.run.get("id")
+        && usage
+            .pointer("/payload/usage/workerId")
+            .and_then(Value::as_str)
+            == Some(worker_id)
+        && usage_attempt == Some(1)
+        && usage
+            .pointer("/payload/usage/modelReference")
+            .and_then(Value::as_str)
+            == Some(model_reference)
+        && usage.pointer("/payload/usage/providerRouteId")
+            == selected_route.and_then(|route| route.get("providerRouteId"))
+        && usage
+            .pointer("/payload/usage/toolCalls")
+            .and_then(Value::as_i64)
+            == Some(1)
+        && usage
+            .pointer("/payload/usage/durationMs")
+            .and_then(Value::as_i64)
+            .is_some_and(|duration| duration >= 0)
+        && tokens_valid
+        && usage_key.is_some_and(|key| !key.is_empty())
+        && usage_key == attempt_key
+        && usage_key == retry_key
+        && attempt
+            .get("correlationKey")
+            .and_then(Value::as_str)
+            .is_some_and(|key| key.starts_with("native-worker-retry:v1:run-revision:"))
+        && attempt.get("correlationKey") == retry.get("correlationKey")
+        && !journal.events.iter().any(|event| {
+            matches!(
+                event.get("type").and_then(Value::as_str),
+                Some(
+                    "worker-completed"
+                        | "worker-failed"
+                        | "evaluation-recorded"
+                        | "run-completed"
+                        | "run-failed"
+                        | "run-cancelled"
+                )
+            )
+        })
 }
 
 fn is_cited_recovery_shape(run: &Value, lifecycle: &mission_plan::MissionPlanLifecycleRow) -> bool {
@@ -1454,6 +1736,9 @@ fn build_checkpoint_restore(
         "idempotencyKey":format!("restore:{}",input.idempotency_key.trim()),
         "payload":{"checkpointEventId":checkpoint.checkpoint_event_id,"newAttemptNumber":input.new_attempt_number}}))?);
     let mut projected = object(current.clone())?;
+    if current.get("status").and_then(Value::as_str) == Some("retrying") {
+        projected.insert("status".into(), json!("running"));
+    }
     projected.insert("revision".into(), json!(input.expected_run_revision + 1));
     projected.insert("updatedAt".into(), json!(at));
     projected.insert(
@@ -1887,6 +2172,63 @@ mod tests {
     }
 
     #[test]
+    fn cited_retry_resume_requires_the_exact_checkpoint_backed_provider_chain() {
+        let error = json!({
+            "code":"native-provider-stream-interrupted","category":"provider",
+            "message":"The native provider stream ended unexpectedly.","retryable":true
+        });
+        let run = json!({
+            "id":"run-1","status":"retrying","currentAttemptNumber":1,
+            "selectedRoute":{"providerRouteId":"route-1"},
+            "eventHead":{"lastSequence":10,"lastEventId":"event-retry"}
+        });
+        let events = vec![
+            json!({"id":"event-start","type":"worker-started","sequence":2,
+                "occurredAt":"t1","payload":{"workerId":"worker-1"}}),
+            json!({"id":"event-checkpoint","type":"checkpoint-created","sequence":7}),
+            json!({"id":"event-usage","type":"usage-recorded","sequence":8,
+                "previousEventId":"event-checkpoint","attemptNumber":1,
+                "idempotencyKey":"worker-usage:terminal-1",
+                "payload":{"usage":{"runId":"run-1","workerId":"worker-1",
+                    "providerRouteId":"route-1","modelReference":"gpt-5",
+                    "inputTokens":null,"outputTokens":null,"toolCalls":1,
+                    "durationMs":1200,"attemptNumber":1}}}),
+            json!({"id":"event-attempt","type":"attempt-finished","sequence":9,
+                "previousEventId":"event-usage","attemptNumber":1,"occurredAt":"t2",
+                "idempotencyKey":"worker-attempt-finished:terminal-1",
+                "correlationKey":"native-worker-retry:v1:run-revision:7",
+                "payload":{"attempt":{"runId":"run-1","attemptNumber":1,"status":"failed",
+                    "retryReason":error,"selectedRoute":{"providerRouteId":"route-1"},
+                    "selectedPlacement":{"executionNodeId":"execution-node-local-desktop"},
+                    "startedAt":"t1","finishedAt":"t2"}}}),
+            json!({"id":"event-retry","type":"retry-scheduled","sequence":10,
+                "previousEventId":"event-attempt","attemptNumber":1,"occurredAt":"t2",
+                "idempotencyKey":"worker-retry:terminal-1",
+                "correlationKey":"native-worker-retry:v1:run-revision:7",
+                "payload":{"nextAttemptNumber":2,"error":error}}),
+        ];
+        let mut journal = mission_run::MissionRunJournalRow { run, events };
+        assert!(exact_cited_retry_chain(
+            &journal,
+            "event-checkpoint",
+            "worker-1",
+            "gpt-5",
+            10,
+            "event-retry"
+        ));
+
+        journal.events[4]["payload"]["error"]["code"] = json!("native-provider-request-rejected");
+        assert!(!exact_cited_retry_chain(
+            &journal,
+            "event-checkpoint",
+            "worker-1",
+            "gpt-5",
+            10,
+            "event-retry"
+        ));
+    }
+
+    #[test]
     fn stale_cited_run_recovery_atomically_fails_run_and_mission() {
         let store = crate::store::Store::open_in_memory(
             Vault::new(&MasterKey::generate().unwrap()).unwrap(),
@@ -2112,8 +2454,10 @@ mod tests {
             expected_last_sequence: 6,
             new_attempt_number: 2,
         };
+        let mut retrying = projected.clone();
+        retrying["status"] = json!("retrying");
         let (restored, restore_event) = build_checkpoint_restore(
-            &projected,
+            &retrying,
             &restore,
             &checkpoint,
             "user-real",
@@ -2121,6 +2465,7 @@ mod tests {
             "t7",
         )
         .unwrap();
+        assert_eq!(restored["status"], "running");
         assert_eq!(restored["currentAttemptNumber"], 2);
         assert_eq!(restore_event["payload"]["checkpointEventId"], "event-6");
     }

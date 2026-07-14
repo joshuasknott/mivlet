@@ -4,7 +4,7 @@ import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissio
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), getPlanSummary: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), restoreCheckpoint: vi.fn(), recoverCited: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), restoreCheckpoint: vi.fn(), recoverCited: vi.fn(), prepareRetry: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({
   executeLocalWorker: mocks.executeLocalWorker,
@@ -22,6 +22,7 @@ vi.mock("../runtime", () => ({
   createRuntimeMissionCheckpoint: mocks.createCheckpoint,
   restoreRuntimeMissionCheckpoint: mocks.restoreCheckpoint,
   recoverRuntimeInterruptedCitedMissions: mocks.recoverCited,
+  prepareRuntimeCitedMissionRetry: mocks.prepareRetry,
   createRuntimeMissionWorker: mocks.createWorker,
   startRuntimeMissionWorker: mocks.startWorker,
   getRuntimeMissionRun: mocks.getRun,
@@ -134,6 +135,67 @@ describe("cited brief mission composition", () => {
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
     expect(cancelMission).toBeTypeOf("function");
+  });
+
+  it("retries one transient final-provider failure from the durable checkpoint", async () => {
+    let counter = 0;
+    const recovery = {
+      status: "resumable" as const, runId: "mission-run-4", sourceThreadId: "thread-1", worker,
+      providerId: "openai", modelReference: "gpt-5", workerStartedEventId: "event-11",
+      routeSelectedEventId: "event-12", checkpointEventId: "event-17",
+      checkpointRestoreEventId: "event-restore", toolEventId: "event-14",
+      outputReference: "mission-tool:v1:evidence", evidence: { result: { citations: [{ citationId: "source-1" }] } },
+      restoreIdempotencyKey: "retry-restore-1", terminalIdempotencyKey: "retry-terminal-1",
+      usageEventId: "event-usage-2", completionEventId: "event-completion-2",
+      evaluationEventId: "event-evaluation-2", resultEventId: "event-result-2",
+      failureEventId: "event-failure-2", expectedRunRevision: 11, expectedLastSequence: 10,
+      newAttemptNumber: 2
+    };
+    const restored = journal(12, 11, [{ id: "event-restore", type: "checkpoint-restored", sequence: 11 }], {
+      status: "running", currentAttemptNumber: 2,
+      eventHead: { lastSequence: 11, lastEventId: "event-restore" }
+    });
+    const retrying = journal(11, 10, [
+      { type: "usage-recorded", payload: { usage: { toolCalls: 1, durationMs: 900, attemptNumber: 1, costs: [] } } },
+      { type: "retry-scheduled", payload: { nextAttemptNumber: 2, error: { retryable: true } } }
+    ], { status: "retrying", currentAttemptNumber: 1 });
+    const terminal = journal(15, 14, [
+      { type: "route-selected", payload: { selection: { reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route." } } },
+      { type: "usage-recorded", payload: { usage: { toolCalls: 1, durationMs: 900, attemptNumber: 1, costs: [] } } },
+      { type: "retry-scheduled", payload: { nextAttemptNumber: 2, error: { retryable: true } } },
+      { type: "usage-recorded", payload: { usage: { inputTokens: 125, outputTokens: 84, toolCalls: 1, durationMs: 800, attemptNumber: 2, costs: [] } } },
+      { id: "head-14", type: "run-completed", payload: { result: { outcome: "succeeded", outputs: [{ valueReference: "mission-output:v1:brief", artifactId: "artifact-2", artifactVersionId: "version-2" }] } } }
+    ], {
+      status: "completed", currentAttemptNumber: 2,
+      terminalResult: { outcome: "succeeded", summary: "Accepted.", outputs: [{ valueReference: "mission-output:v1:brief", artifactId: "artifact-2", artifactVersionId: "version-2" }] }
+    });
+    mocks.executeLocalWorker
+      .mockReset()
+      .mockResolvedValueOnce({ status: "failed", events: [], text: "", usage: {}, retryable: true })
+      .mockResolvedValueOnce({ status: "completed", events: [], text: "Brief", usage: {}, retryable: false });
+    mocks.prepareRetry.mockResolvedValue(recovery);
+    mocks.restoreCheckpoint.mockResolvedValue({ journal: restored, checkpoint: {} });
+    mocks.getRun
+      .mockReset()
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(retrying)
+      .mockResolvedValue(terminal);
+
+    const result = await executeCitedBriefMission({
+      query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
+      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
+    });
+
+    expect(result.receipt).toMatchObject({ inputTokens: 125, outputTokens: 84, durationMs: 800, attemptNumber: 2 });
+    expect(mocks.prepareRetry).toHaveBeenCalledWith("mission-run-4");
+    expect(mocks.restoreCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "mission-run-4", newAttemptNumber: 2, expectedRunRevision: 11, expectedLastSequence: 10
+    }));
+    expect(mocks.executeLocalWorker).toHaveBeenCalledTimes(2);
+    expect(mocks.desktopExecutor).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareGrant).toHaveBeenCalledTimes(1);
+    expect(mocks.createWorker).toHaveBeenCalledTimes(1);
   });
 
   it("resumes only the checkpointed final writing turn without repeating search authority", async () => {
@@ -289,7 +351,7 @@ describe("cited brief mission composition", () => {
             remainingWork: ["Meet acceptance criterion: Cite evidence"], acceptance: [], recoverable: true, recommendedNextAction: "stop"
           }
         } }
-      ], { status: "partially-completed" }));
+      ], { status: "partially-completed", currentAttemptNumber: 2 }));
     const result = await executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
       backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,

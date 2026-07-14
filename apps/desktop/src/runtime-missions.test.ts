@@ -8,6 +8,7 @@ import {
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
+  prepareRuntimeCitedMissionRetry,
   readRuntimeCitedMissionReceipts,
   readRuntimeCitedMissionPlanSummaries,
   readRuntimeMissionWorkerOutput,
@@ -43,6 +44,7 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
+    await expect(prepareRuntimeCitedMissionRetry("run-1")).resolves.toBeNull();
     await expect(restoreRuntimeMissionCheckpoint({
       runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
       expectedRunRevision: 5, expectedLastSequence: 4, newAttemptNumber: 2
@@ -85,6 +87,7 @@ describe("mission runtime boundary", () => {
     await readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"]);
     await listRuntimeNativeProviderRoutes();
     await recoverRuntimeInterruptedCitedMissions();
+    await prepareRuntimeCitedMissionRetry("run-1");
     const restore = {
       runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
       expectedRunRevision: 5, expectedLastSequence: 4, newAttemptNumber: 2
@@ -111,6 +114,7 @@ describe("mission runtime boundary", () => {
       ["mission_plan_cited_summaries_read", { input: { threadId: "thread-1", messageIds: ["message-1"] } }],
       ["list_native_provider_routes"],
       ["mission_run_recover_interrupted_cited"],
+      ["mission_run_prepare_cited_retry", { input: { runId: "run-1" } }],
       ["mission_run_restore_checkpoint", { input: restore }],
       ["mission_run_create_checkpoint", { input: checkpoint }]
     ]);

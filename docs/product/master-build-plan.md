@@ -355,8 +355,8 @@ with an explicit `MissionResult`, and the desktop refuses to surface cancellatio
 until it reloads that terminal fact. On the first authenticated hydration for an
 account/workspace/member in each process, a process-start epoch now finds only
 older nonterminal cited journals. Rust reconciles an older stored cancellation to
-cancelled. For the exact one-step cited shape whose attested search result is the
-current checkpoint head, whose persisted route is still authorized, and whose
+cancelled. For the exact one-step cited shape whose attested search result remains
+bound to the latest checkpoint, whose persisted route is still authorized, and whose
 mission has its single restart attempt available, Rust returns a closed resume
 descriptor containing the reloaded encrypted evidence and deterministic restore
 and terminal identities. The desktop restores exactly attempt two and runs only
@@ -365,7 +365,18 @@ exact restore head and original checkpoint/tool chain, so search execution, gran
 consumption, and approval cannot repeat. Invalid, legacy, pre-checkpoint, changed,
 or attempt-exhausted journals retain the conservative deterministic
 `mission-interrupted` terminal path. Current-process runs and active native leases
-are excluded. General checkpoint-driven resume and multi-worker recovery remain open. Schema v26 adds
+are excluded. The same descriptor path now handles one current-process same-run
+retry after attempt one's exact final-provider transport failure, temporary
+unavailability, or interrupted stream. Native settlement first records bounded
+attempt-one usage, `attempt-finished`, and `retry-scheduled`, projects the run to
+`retrying`, and emits no worker/run result, transcript, or artifact. An
+authenticated preparation command revalidates that exact three-event chain,
+restores the checkpoint as attempt two, and returns the run to `running`; an app
+restart discovers and validates the same chain. Policy, budget, cancellation,
+request-rejection, invalid-output, pre-checkpoint, and attempt-two failures never
+enter this retry. Terminal receipts select attempt-two usage and cannot mistake a
+duration-only attempt-one record for final token usage. General checkpoint-driven
+resume and multi-worker recovery remain open. Schema v26 adds
 owner-qualified encrypted checkpoint state linked by composite foreign key to
 the exact immutable checkpoint event. Authenticated create/restore commands
 derive completed workers, plan steps, committed effects, active work, and waits
@@ -626,7 +637,8 @@ composer creates fresh mission, plan, revision, run, worker, event, checkpoint,
 and idempotency identities; it never reopens the terminal journal or reuses its
 checkpoint, consumed grant, route selection, or approval. Accepted results and
 unavailable plans offer no action. This is a narrow new-mission recovery path,
-not same-mission retry, general resume, escalation, or multi-worker recovery, so
+distinct from the automatic one-attempt cited provider retry above; general resume,
+escalation, and multi-worker recovery remain open, so
 the Wave 4A and 4C retry boxes remain unchecked. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent

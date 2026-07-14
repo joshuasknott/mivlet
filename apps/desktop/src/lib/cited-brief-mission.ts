@@ -11,6 +11,7 @@ import {
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
+  prepareRuntimeCitedMissionRetry,
   prepareRuntimeCapabilityGrant,
   readRuntimeMissionWorkerOutput,
   recoverRuntimeInterruptedCitedMissions,
@@ -361,7 +362,16 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   }
   if (completion.status !== "completed") {
     journal = requireJournal(await getRuntimeMissionRun(runId));
-    throw new Error(terminalCitedFailure(journal));
+    if ((journal.run as Record<string, unknown>).status === "retrying") {
+      const recovery = await prepareRuntimeCitedMissionRetry(runId);
+      if (!recovery || recovery.status !== "resumable") {
+        throw new Error("The durable cited retry is unavailable.");
+      }
+      await resumeCitedBriefMission(recovery, input);
+      journal = requireJournal(await getRuntimeMissionRun(runId));
+    } else {
+      throw new Error(terminalCitedFailure(journal));
+    }
   }
   journal = requireJournal(await getRuntimeMissionRun(runId));
   if ((journal.run as Record<string, unknown>).status === "cancelled") {
@@ -434,7 +444,10 @@ export async function resumeInterruptedCitedBriefMissions(
 
 async function resumeCitedBriefMission(
   recovery: Extract<RuntimeCitedMissionRestartRecovery, { status: "resumable" }>,
-  input: CitedBriefMissionRecoveryInput
+  input: {
+    backend: AgentBackend;
+    onCancellationReady?: (cancel: () => Promise<void>) => void;
+  }
 ): Promise<void> {
   const restored = await restoreRuntimeMissionCheckpoint({
     runId: recovery.runId,
@@ -525,7 +538,16 @@ function citedBriefReceipt(
   const events = journal.events as Array<Record<string, unknown>>;
   const route = events.find((event) => event.type === "route-selected")?.payload as Record<string, unknown> | undefined;
   const selection = route?.selection as Record<string, unknown> | undefined;
-  const usageEvent = events.find((event) => event.type === "usage-recorded")?.payload as Record<string, unknown> | undefined;
+  const terminalAttempt = (journal.run as Record<string, unknown>).currentAttemptNumber ?? 1;
+  const matchingUsage = events.filter((event) => {
+    const payload = event.payload as Record<string, unknown> | undefined;
+    const candidate = payload?.usage as Record<string, unknown> | undefined;
+    return event.type === "usage-recorded" && candidate?.attemptNumber === terminalAttempt;
+  });
+  if (!Number.isInteger(terminalAttempt) || matchingUsage.length !== 1) {
+    throw new Error("The durable mission attempt receipt is invalid.");
+  }
+  const usageEvent = matchingUsage[0].payload as Record<string, unknown> | undefined;
   const usage = usageEvent?.usage as Record<string, unknown> | undefined;
   const costs = Array.isArray(usage?.costs) ? usage.costs : [];
   const cost = costs.length === 1 ? costs[0] as Record<string, unknown> : undefined;

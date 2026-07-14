@@ -3121,6 +3121,12 @@ export async function recoverRuntimeInterruptedCitedMissions(): Promise<RuntimeC
   catch (error) { throw toRuntimeError(error); }
 }
 
+export async function prepareRuntimeCitedMissionRetry(runId: string): Promise<RuntimeCitedMissionRestartRecovery | null> {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<RuntimeCitedMissionRestartRecovery>("mission_run_prepare_cited_retry", { input: { runId } }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
 export async function createRuntimeMissionCheckpoint(input: RuntimeMissionCheckpointCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_run_create_checkpoint", { input }); }

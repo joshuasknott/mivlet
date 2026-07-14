@@ -97,6 +97,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     max_output_tokens: i64,
     max_duration_ms: i64,
     attempt_number: i64,
+    max_attempts: i64,
     evidence: Option<Value>,
 }
 
@@ -199,6 +200,29 @@ fn validate_native_attempt_budget(max_attempts: i64, attempt_number: i64) -> Res
         return Err("Mission run attempt is outside its persisted budget.".into());
     }
     Ok(())
+}
+
+fn retryable_cited_provider_failure(
+    authority: &NativeWorkerCompletionAuthority,
+    code: &str,
+    retryable: bool,
+) -> bool {
+    retryable
+        && authority.attempt_number == 1
+        && authority.max_attempts == 2
+        && authority
+            .output
+            .as_ref()
+            .is_some_and(|output| output.include_evidence)
+        && authority.evidence.is_some()
+        && authority.binding.checkpoint_event_id.is_some()
+        && authority.binding.checkpoint_restore_event_id.is_none()
+        && matches!(
+            code,
+            "native-provider-transport-failed"
+                | "native-provider-temporarily-unavailable"
+                | "native-provider-stream-interrupted"
+        )
 }
 
 #[derive(Deserialize)]
@@ -571,21 +595,7 @@ fn project_cited_mission_receipt(
             "Cited mission route is ambiguous.".into(),
         ));
     }
-    let mut usages = journal
-        .events
-        .iter()
-        .filter(|event| event.get("type").and_then(Value::as_str) == Some("usage-recorded"));
-    let usage = usages
-        .next()
-        .and_then(|event| event.pointer("/payload/usage"))
-        .ok_or_else(|| {
-            crate::store::StoreError::Invalid("Cited mission usage is unavailable.".into())
-        })?;
-    if usages.next().is_some() {
-        return Err(crate::store::StoreError::Invalid(
-            "Cited mission usage is ambiguous.".into(),
-        ));
-    }
+    let usage = select_cited_terminal_usage(&journal)?;
     if route.get("providerRouteId") != output.receipt.get("providerRouteId")
         || usage.get("providerRouteId") != route.get("providerRouteId")
         || usage.get("modelReference") != output.receipt.get("requestedModel")
@@ -645,6 +655,70 @@ fn project_cited_mission_receipt(
     }
     validate_cited_receipt_projection(&receipt)?;
     Ok(receipt)
+}
+
+fn select_cited_terminal_usage(
+    journal: &mission_run::MissionRunJournalRow,
+) -> crate::store::Result<&Value> {
+    let current_attempt = journal
+        .run
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    let usages = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("usage-recorded"))
+        .collect::<Vec<_>>();
+    let matching = usages
+        .iter()
+        .filter(|event| {
+            event
+                .pointer("/payload/usage/attemptNumber")
+                .and_then(Value::as_i64)
+                == Some(current_attempt)
+        })
+        .collect::<Vec<_>>();
+    let usage = matching
+        .first()
+        .and_then(|event| event.pointer("/payload/usage"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited mission usage is unavailable.".into())
+        })?;
+    let prior_usage_valid = if usages.len() == 1 {
+        true
+    } else {
+        current_attempt == 2
+            && usages.len() == 2
+            && usages
+                .iter()
+                .filter(|event| {
+                    event
+                        .pointer("/payload/usage/attemptNumber")
+                        .and_then(Value::as_i64)
+                        == Some(1)
+                })
+                .count()
+                == 1
+            && journal.events.iter().any(|event| {
+                event.get("type").and_then(Value::as_str) == Some("retry-scheduled")
+                    && event.get("attemptNumber").and_then(Value::as_i64) == Some(1)
+                    && event
+                        .pointer("/payload/nextAttemptNumber")
+                        .and_then(Value::as_i64)
+                        == Some(2)
+                    && event
+                        .pointer("/payload/error/retryable")
+                        .and_then(Value::as_bool)
+                        == Some(true)
+            })
+    };
+    if matching.len() != 1 || !prior_usage_valid {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission usage is ambiguous.".into(),
+        ));
+    }
+    Ok(usage)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1259,6 +1333,24 @@ pub(crate) fn preflight_native_worker_completion(
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
             }
+            let retry_key = native_retry_event_key(binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str)
+                    == Some(retry_key.as_str())
+            }) {
+                validate_native_retry_replay(
+                    &journal,
+                    existing,
+                    binding,
+                    model,
+                    max_duration_ms,
+                    attempt_number,
+                    max_attempts,
+                )
+                .map_err(crate::store::StoreError::Invalid)?;
+                return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
+            }
             validate_native_completion_head(&journal, binding)
                 .map_err(crate::store::StoreError::Invalid)?;
             Ok(NativeWorkerCompletionPreflight::Execute(NativeWorkerCompletionAuthority {
@@ -1275,6 +1367,7 @@ pub(crate) fn preflight_native_worker_completion(
                 max_output_tokens: max_tokens,
                 max_duration_ms,
                 attempt_number,
+                max_attempts,
                 evidence,
             }))
         })
@@ -1453,6 +1546,24 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.binding,
                 );
             }
+            let retry_key = native_retry_event_key(&authority.binding)
+                .map_err(crate::store::StoreError::Invalid)?;
+            if let Some(existing) = journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str)
+                    == Some(retry_key.as_str())
+            }) {
+                validate_native_retry_replay(
+                    &journal,
+                    existing,
+                    &authority.binding,
+                    &authority.requested_model,
+                    authority.max_duration_ms,
+                    authority.attempt_number,
+                    authority.max_attempts,
+                )
+                .map_err(crate::store::StoreError::Invalid)?;
+                return Ok(());
+            }
             let (event_key, event_id, event_type) = match &outcome {
                 NativeWorkerTerminalOutcome::Completed { .. } => (
                     native_terminal_event_keys(&authority.binding)
@@ -1538,6 +1649,7 @@ pub(crate) fn settle_native_worker_completion(
                     crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
             })?;
             let mut receipt = None;
+            let mut retry_error = None;
             let usage: Option<ObservedNativeUsage>;
             let payload = match outcome {
                 NativeWorkerTerminalOutcome::Completed {
@@ -1662,9 +1774,13 @@ pub(crate) fn settle_native_worker_completion(
                     } else {
                         "provider"
                     };
-                    json!({"workerId":authority.binding.worker_id,"error":{
+                    let error = json!({
                         "code":code,"category":category,"message":message,"retryable":retryable
-                    }})
+                    });
+                    if retryable_cited_provider_failure(authority, code, retryable) {
+                        retry_error = Some(error.clone());
+                    }
+                    json!({"workerId":authority.binding.worker_id,"error":error})
                 },
                 NativeWorkerTerminalOutcome::Cancelled => unreachable!(),
             };
@@ -1733,6 +1849,23 @@ pub(crate) fn settle_native_worker_completion(
                 terminal_expected_revision += 1;
                 terminal_expected_sequence += 1;
                 terminal_previous_event = authority.binding.usage_event_id.as_str();
+            }
+            if let Some(error) = retry_error.as_ref() {
+                append_native_cited_retry(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &authority.internal_user_id,
+                    &journal,
+                    &authority.binding,
+                    error,
+                    terminal_expected_revision,
+                    terminal_expected_sequence,
+                    terminal_previous_event,
+                    &at,
+                )?;
+                return Ok(());
             }
             let sequence = terminal_expected_sequence + 1;
             let event = json!({
@@ -1834,6 +1967,118 @@ pub(crate) fn settle_native_worker_completion(
             Ok(())
         })
         .map_err(|error| error.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_native_cited_retry(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+    error: &Value,
+    expected_revision: i64,
+    expected_sequence: i64,
+    previous_event_id: &str,
+    at: &str,
+) -> crate::store::Result<()> {
+    let selected_route = journal.run.get("selectedRoute").cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited retry route is unavailable.".into())
+    })?;
+    let started_at = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("type").and_then(Value::as_str) == Some("worker-started")
+                && event.pointer("/payload/workerId").and_then(Value::as_str)
+                    == Some(binding.worker_id.as_str())
+        })
+        .and_then(|event| event.get("occurredAt"))
+        .cloned()
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited retry worker start is unavailable.".into())
+        })?;
+    let attempt_key =
+        native_attempt_finished_event_key(binding).map_err(crate::store::StoreError::Invalid)?;
+    let attempt_sequence = expected_sequence + 1;
+    let attempt_event = json!({
+        "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
+        "createdAt":at,"updatedAt":at,"id":binding.failure_event_id,"runId":binding.run_id,
+        "type":"attempt-finished","sequence":attempt_sequence,"previousEventId":previous_event_id,
+        "attemptNumber":1,"occurredAt":at,"actor":{"kind":"system"},
+        "correlationKey":format!("native-worker-retry:v1:run-revision:{}",binding.expected_run_revision),
+        "idempotencyKey":attempt_key,
+        "payload":{"attempt":{"runId":binding.run_id,"attemptNumber":1,"status":"failed",
+            "retryReason":error,"selectedRoute":selected_route,
+            "selectedPlacement":{"executionNodeId":"execution-node-local-desktop","selectedAt":at,
+                "reason":"Selected the authenticated local desktop runtime."},
+            "startedAt":started_at,"finishedAt":at}}
+    });
+    let mut attempt_projection = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    attempt_projection.insert("revision".into(), json!(expected_revision + 1));
+    attempt_projection.insert("updatedAt".into(), json!(at));
+    attempt_projection.insert(
+        "eventHead".into(),
+        json!({"lastSequence":attempt_sequence,"lastEventId":binding.failure_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        expected_revision,
+        expected_sequence,
+        &binding.failure_event_id,
+        "attempt-finished",
+        &attempt_key,
+        &attempt_event,
+        &Value::Object(attempt_projection),
+        at,
+    )?;
+
+    let retry_key = native_retry_event_key(binding).map_err(crate::store::StoreError::Invalid)?;
+    let retry_sequence = attempt_sequence + 1;
+    let retry_event = json!({
+        "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
+        "createdAt":at,"updatedAt":at,"id":binding.result_event_id,"runId":binding.run_id,
+        "type":"retry-scheduled","sequence":retry_sequence,"previousEventId":binding.failure_event_id,
+        "attemptNumber":1,"occurredAt":at,"actor":{"kind":"system"},
+        "correlationKey":format!("native-worker-retry:v1:run-revision:{}",binding.expected_run_revision),
+        "idempotencyKey":retry_key,"payload":{"nextAttemptNumber":2,"error":error}
+    });
+    let mut retry_projection = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    retry_projection.insert("status".into(), json!("retrying"));
+    retry_projection.insert("revision".into(), json!(expected_revision + 2));
+    retry_projection.insert("updatedAt".into(), json!(at));
+    retry_projection.insert(
+        "eventHead".into(),
+        json!({"lastSequence":retry_sequence,"lastEventId":binding.result_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        expected_revision + 1,
+        attempt_sequence,
+        &binding.result_event_id,
+        "retry-scheduled",
+        &retry_key,
+        &retry_event,
+        &Value::Object(retry_projection),
+        at,
+    )?;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3303,6 +3548,30 @@ fn native_usage_event_key(binding: &NativeWorkerExecutionBinding) -> Result<Stri
     ))
 }
 
+fn native_attempt_finished_event_key(
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<String, String> {
+    Ok(format!(
+        "worker-attempt-finished:{}",
+        bounded(
+            &binding.idempotency_key,
+            "Worker attempt-finished idempotency key",
+            200,
+        )?
+    ))
+}
+
+fn native_retry_event_key(binding: &NativeWorkerExecutionBinding) -> Result<String, String> {
+    Ok(format!(
+        "worker-retry:{}",
+        bounded(
+            &binding.idempotency_key,
+            "Worker retry idempotency key",
+            200,
+        )?
+    ))
+}
+
 fn native_completion_base_event(binding: &NativeWorkerExecutionBinding) -> &str {
     binding
         .checkpoint_restore_event_id
@@ -4712,7 +4981,7 @@ fn validate_usage_replay(
     }
     if !matches!(
         terminal.get("type").and_then(Value::as_str),
-        Some("worker-completed" | "worker-failed")
+        Some("worker-completed" | "worker-failed" | "retry-scheduled")
     ) {
         return Err("Worker terminal usage chain is invalid.".into());
     }
@@ -4813,6 +5082,110 @@ fn validate_usage_replay(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn validate_native_retry_replay(
+    journal: &mission_run::MissionRunJournalRow,
+    retry: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    model: &str,
+    max_duration_ms: i64,
+    expected_attempt_number: i64,
+    max_attempts: i64,
+) -> Result<(), String> {
+    if expected_attempt_number != 1 || max_attempts != 2 {
+        return Err("Cited retry is outside its persisted attempt budget.".into());
+    }
+    validate_usage_replay(
+        journal,
+        retry,
+        binding,
+        model,
+        max_duration_ms,
+        expected_attempt_number,
+    )?;
+    let attempt = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str) == Some(binding.failure_event_id.as_str())
+        })
+        .ok_or_else(|| "Cited retry attempt event is missing.".to_string())?;
+    let error = retry
+        .pointer("/payload/error")
+        .ok_or_else(|| "Cited retry error is missing.".to_string())?;
+    let code = error
+        .get("code")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let attempt_key = native_attempt_finished_event_key(binding)?;
+    let retry_key = native_retry_event_key(binding)?;
+    let occurred_at = retry.get("occurredAt");
+    let selected_route = journal.run.get("selectedRoute");
+    if retry.get("id").and_then(Value::as_str) != Some(binding.result_event_id.as_str())
+        || retry.get("type").and_then(Value::as_str) != Some("retry-scheduled")
+        || retry.get("sequence").and_then(Value::as_i64) != Some(binding.expected_last_sequence + 3)
+        || retry.get("previousEventId").and_then(Value::as_str)
+            != Some(binding.failure_event_id.as_str())
+        || retry.get("attemptNumber").and_then(Value::as_i64) != Some(1)
+        || retry.get("idempotencyKey").and_then(Value::as_str) != Some(retry_key.as_str())
+        || retry
+            .pointer("/payload/nextAttemptNumber")
+            .and_then(Value::as_i64)
+            != Some(2)
+        || error.get("retryable").and_then(Value::as_bool) != Some(true)
+        || !matches!(
+            code,
+            "native-provider-transport-failed"
+                | "native-provider-temporarily-unavailable"
+                | "native-provider-stream-interrupted"
+        )
+        || !native_contract_error_valid(error)
+        || attempt.get("type").and_then(Value::as_str) != Some("attempt-finished")
+        || attempt.get("sequence").and_then(Value::as_i64)
+            != Some(binding.expected_last_sequence + 2)
+        || attempt.get("previousEventId").and_then(Value::as_str)
+            != Some(binding.usage_event_id.as_str())
+        || attempt.get("attemptNumber").and_then(Value::as_i64) != Some(1)
+        || attempt.get("idempotencyKey").and_then(Value::as_str) != Some(attempt_key.as_str())
+        || attempt
+            .pointer("/payload/attempt/runId")
+            .and_then(Value::as_str)
+            != Some(binding.run_id.as_str())
+        || attempt
+            .pointer("/payload/attempt/attemptNumber")
+            .and_then(Value::as_i64)
+            != Some(1)
+        || attempt
+            .pointer("/payload/attempt/status")
+            .and_then(Value::as_str)
+            != Some("failed")
+        || attempt.pointer("/payload/attempt/retryReason") != Some(error)
+        || attempt.pointer("/payload/attempt/selectedRoute") != selected_route
+        || attempt
+            .pointer("/payload/attempt/selectedPlacement/executionNodeId")
+            .and_then(Value::as_str)
+            != Some("execution-node-local-desktop")
+        || attempt.pointer("/payload/attempt/finishedAt") != attempt.get("occurredAt")
+        || attempt.get("occurredAt") != occurred_at
+        || journal.run.get("status").and_then(Value::as_str) != Some("retrying")
+        || journal.run.get("revision").and_then(Value::as_i64)
+            != Some(binding.expected_run_revision + 3)
+        || journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(binding.expected_last_sequence + 3)
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(binding.result_event_id.as_str())
+    {
+        return Err("Cited retry replay represents another provider attempt.".into());
+    }
+    Ok(())
+}
+
 fn exact_model_costs(model: &str, input_tokens: i64, output_tokens: i64) -> Vec<Value> {
     let Some(pricing) = crate::backends::exact_model_pricing_evidence("openai", model) else {
         return Vec::new();
@@ -4866,7 +5239,17 @@ fn native_failure_payload_valid(event: &Value) -> bool {
     if exact_keys(payload, &["workerId", "error"]).is_err() {
         return false;
     }
-    let Some(error) = payload.get("error").and_then(Value::as_object) else {
+    payload
+        .get("workerId")
+        .and_then(Value::as_str)
+        .is_some_and(|worker_id| !worker_id.is_empty())
+        && payload
+            .get("error")
+            .is_some_and(native_contract_error_valid)
+}
+
+fn native_contract_error_valid(error: &Value) -> bool {
+    let Some(error) = error.as_object() else {
         return false;
     };
     if exact_keys(error, &["code", "category", "message", "retryable"]).is_err() {
@@ -6414,6 +6797,41 @@ mod tests {
     }
 
     #[test]
+    fn native_error_contract_requires_closed_static_facts() {
+        for (code, message) in [
+            (
+                "native-provider-transport-failed",
+                "The native provider connection failed after retrying.",
+            ),
+            (
+                "native-provider-temporarily-unavailable",
+                "The native provider remained unavailable after retrying.",
+            ),
+            (
+                "native-provider-stream-interrupted",
+                "The native provider stream ended unexpectedly.",
+            ),
+        ] {
+            assert!(native_contract_error_valid(&json!({
+                "code":code,"category":"provider","message":message,"retryable":true
+            })));
+        }
+        assert!(native_contract_error_valid(&json!({
+            "code":"native-provider-request-rejected","category":"provider",
+            "message":"The native provider rejected the request.","retryable":false
+        })));
+        assert!(!native_contract_error_valid(&json!({
+            "code":"native-provider-request-rejected","category":"provider",
+            "message":"The native provider rejected the request.","retryable":true
+        })));
+        assert!(!native_contract_error_valid(&json!({
+            "code":"native-provider-stream-interrupted","category":"provider",
+            "message":"The native provider stream ended unexpectedly.","retryable":true,
+            "unexpected":"field"
+        })));
+    }
+
+    #[test]
     fn cited_brief_accepts_only_exact_mapped_external_evidence() {
         let evidence = json!({"result":{"degraded":false,"citations":[{
             "citationId":"source-1","sourceId":"doc-1","title":"Launch plan",
@@ -6618,6 +7036,88 @@ mod tests {
         let mut colliding = binding.clone();
         colliding.evaluation_event_id = colliding.completion_event_id.clone();
         assert!(validate_native_completion_head(&live, &colliding).is_err());
+    }
+
+    #[test]
+    fn native_retry_replay_is_bound_to_one_exact_failed_attempt() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "event-start".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-completion".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-retry".into(),
+            failure_event_id: "event-attempt".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 8,
+            expected_last_sequence: 7,
+            checkpoint_event_id: Some("event-checkpoint".into()),
+            checkpoint_restore_event_id: None,
+            tool_evidence: Some(NativeWorkerToolEvidenceBinding {
+                tool_event_id: "event-tool".into(),
+                output_reference: "mission-tool:v1:evidence".into(),
+            }),
+        };
+        let error = json!({"code":"native-provider-stream-interrupted","category":"provider",
+            "message":"The native provider stream ended unexpectedly.","retryable":true});
+        let retry = json!({
+            "id":"event-retry","type":"retry-scheduled","sequence":10,
+            "previousEventId":"event-attempt","attemptNumber":1,"occurredAt":"t2",
+            "idempotencyKey":"worker-retry:terminal-1",
+            "payload":{"nextAttemptNumber":2,"error":error}
+        });
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"id":"run-1","status":"retrying","revision":11,
+                "selectedRoute":{"providerRouteId":"route-1"},
+                "eventHead":{"lastSequence":10,"lastEventId":"event-retry"}}),
+            events: vec![
+                json!({"id":"event-route","type":"route-selected",
+                    "payload":{"selection":{"providerRouteId":"route-1"}}}),
+                json!({"id":"event-usage","type":"usage-recorded","sequence":8,
+                    "previousEventId":"event-checkpoint","attemptNumber":1,
+                    "idempotencyKey":"worker-usage:terminal-1","payload":{"usage":{
+                        "runId":"run-1","workerId":"worker-1","providerRouteId":"route-1",
+                        "modelReference":"gpt-5","toolCalls":1,"durationMs":900,
+                        "attemptNumber":1,"costs":[]}}}),
+                json!({"id":"event-attempt","type":"attempt-finished","sequence":9,
+                    "previousEventId":"event-usage","attemptNumber":1,"occurredAt":"t2",
+                    "idempotencyKey":"worker-attempt-finished:terminal-1","payload":{"attempt":{
+                        "runId":"run-1","attemptNumber":1,"status":"failed","retryReason":error,
+                        "selectedRoute":{"providerRouteId":"route-1"},
+                        "selectedPlacement":{"executionNodeId":"execution-node-local-desktop"},
+                        "startedAt":"t1","finishedAt":"t2"}}}),
+                retry.clone(),
+            ],
+        };
+        validate_native_retry_replay(&journal, &retry, &binding, "gpt-5", 120_000, 1, 2).unwrap();
+        let mut changed = retry;
+        changed["payload"]["error"]["message"] = json!("Changed");
+        assert!(
+            validate_native_retry_replay(&journal, &changed, &binding, "gpt-5", 120_000, 1, 2)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn cited_receipt_selects_only_the_terminal_retry_attempt_usage() {
+        let mut journal = mission_run::MissionRunJournalRow {
+            run: json!({"currentAttemptNumber":2}),
+            events: vec![
+                json!({"type":"usage-recorded","payload":{"usage":{
+                    "attemptNumber":1,"durationMs":900}}}),
+                json!({"type":"retry-scheduled","attemptNumber":1,"payload":{
+                    "nextAttemptNumber":2,"error":{"retryable":true}}}),
+                json!({"type":"usage-recorded","payload":{"usage":{
+                    "attemptNumber":2,"inputTokens":125,"outputTokens":84,"durationMs":800}}}),
+            ],
+        };
+        let usage = select_cited_terminal_usage(&journal).unwrap();
+        assert_eq!(usage["attemptNumber"], 2);
+        assert_eq!(usage["inputTokens"], 125);
+        journal.events.remove(1);
+        assert!(select_cited_terminal_usage(&journal).is_err());
     }
 
     #[test]

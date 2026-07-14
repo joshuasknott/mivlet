@@ -75,6 +75,47 @@ describe("durable run journal projection", () => {
     expect(restored.latestCheckpointEvent?.id).toBe("event-2");
   });
 
+  it("schedules one bounded same-run retry only from the exact retryable failed attempt", () => {
+    const running = appendRunEvent(
+      appendRunEvent(undefined, created()),
+      event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1"))
+    );
+    const checkpoint = event("checkpoint-created", 3, {
+      checkpoint: {
+        kind: "automatic", attemptNumber: 1, createdAt: "t3",
+        replayBoundary: { durableThroughSequence: 2, resumeAfterEventId: id<"run-event">("event-2"), completedPlanStepKeys: [], completedWorkerIds: [], committedEffectKeys: [] },
+        stateStorage: "portable-redacted", stateReference: "checkpoint:retry", stateHash: "hash-retry",
+        executionNodeId: id<"execution-node">("local")
+      }
+    }, id<"run-event">("event-2"));
+    const saved = appendRunEvent(running, checkpoint);
+    const error: Spine.Missions.ContractError = {
+      code: "provider-temporarily-unavailable", category: "provider",
+      message: "Provider temporarily unavailable.", retryable: true
+    };
+    const attempt: Spine.Missions.RunAttempt = {
+      runId: id<"run">("run-1"), attemptNumber: 1, status: "failed", retryReason: error,
+      selectedPlacement: { executionNodeId: id<"execution-node">("local"), selectedAt: "t2", reason: "Local desktop" },
+      finishedAt: "t4"
+    };
+    const finished = { ...event("attempt-finished", 4, { attempt }, id<"run-event">("event-3")), attemptNumber: 1 } as Spine.Missions.RunEvent;
+    const failedAttempt = appendRunEvent(saved, finished);
+    const scheduledEvent = { ...event("retry-scheduled", 5, { nextAttemptNumber: 2, error }, id<"run-event">("event-4")), attemptNumber: 1 } as Spine.Missions.RunEvent;
+    const scheduled = appendRunEvent(failedAttempt, scheduledEvent);
+    expect(scheduled.run.status).toBe("retrying");
+    expect(scheduled.run.currentAttemptNumber).toBeUndefined();
+    const restored = appendRunEvent(scheduled, event("checkpoint-restored", 6, {
+      checkpointEventId: id<"run-event">("event-3"), newAttemptNumber: 2
+    }, id<"run-event">("event-5")));
+    expect(restored.run).toMatchObject({ status: "running", currentAttemptNumber: 2 });
+
+    const changedError = { ...error, code: "another-error" };
+    const changedRetry = { ...event("retry-scheduled", 5, { nextAttemptNumber: 2, error: changedError }, id<"run-event">("event-4")), attemptNumber: 1 } as Spine.Missions.RunEvent;
+    expect(() => appendRunEvent(failedAttempt, changedRetry)).toThrow("exact retryable failed attempt");
+    const overBudget = { ...event("retry-scheduled", 5, { nextAttemptNumber: 3, error }, id<"run-event">("event-4")), attemptNumber: 1 } as Spine.Missions.RunEvent;
+    expect(() => appendRunEvent(failedAttempt, overBudget)).toThrow("within budget");
+  });
+
   it("makes terminal cancellation immutable and preserves the exact request", () => {
     const initial = appendRunEvent(undefined, created());
     const running = appendRunEvent(initial, event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1")));

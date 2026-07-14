@@ -96,6 +96,34 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
       throw new RunJournalError("Worker cancellation requires an exact worker id.");
     }
   }
+  if (event.type === "attempt-finished") {
+    const attempt = event.payload.attempt;
+    const currentAttempt = run.currentAttemptNumber ?? 1;
+    if (attempt.runId !== run.id || attempt.attemptNumber !== currentAttempt
+      || event.attemptNumber !== currentAttempt
+      || !["succeeded", "failed", "cancelled", "interrupted", "superseded"].includes(attempt.status)) {
+      throw new RunJournalError("Finished attempt must match the current run attempt and terminal attempt state.");
+    }
+    if (attempt.status === "failed" && (!attempt.retryReason || !attempt.finishedAt)) {
+      throw new RunJournalError("Failed attempt must retain its retry reason and finish time.");
+    }
+  }
+  if (event.type === "retry-scheduled") {
+    const currentAttempt = run.currentAttemptNumber ?? 1;
+    const maximumAttempts = run.budget.maxAttempts;
+    const previous = current.events.at(-1);
+    const finished = previous?.type === "attempt-finished" ? previous.payload.attempt : undefined;
+    if (run.status !== "running" || event.attemptNumber !== currentAttempt
+      || !Number.isInteger(maximumAttempts) || maximumAttempts! < 1
+      || event.payload.nextAttemptNumber !== currentAttempt + 1
+      || event.payload.nextAttemptNumber > maximumAttempts!
+      || event.payload.childRunId !== undefined
+      || event.payload.error.retryable !== true
+      || !finished || finished.attemptNumber !== currentAttempt || finished.status !== "failed"
+      || JSON.stringify(finished.retryReason) !== JSON.stringify(event.payload.error)) {
+      throw new RunJournalError("Same-run retry must follow the exact retryable failed attempt within budget.");
+    }
+  }
   if (event.type === "checkpoint-created") {
     const boundary = event.payload.checkpoint.replayBoundary;
     const durable = current.events.find((candidate) => candidate.id === boundary.resumeAfterEventId);
@@ -110,8 +138,10 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
     if (!current.latestCheckpointEvent || event.payload.checkpointEventId !== current.latestCheckpointEvent.id) {
       throw new RunJournalError("Only the latest durable checkpoint can be restored.");
     }
-    if (event.payload.newAttemptNumber <= (run.currentAttemptNumber ?? 0)) {
-      throw new RunJournalError("Checkpoint restore must advance the attempt number.");
+    const currentAttempt = run.currentAttemptNumber ?? current.latestCheckpointEvent.payload.checkpoint.attemptNumber;
+    if (event.payload.newAttemptNumber !== currentAttempt + 1
+      || (run.budget.maxAttempts !== undefined && event.payload.newAttemptNumber > run.budget.maxAttempts)) {
+      throw new RunJournalError("Checkpoint restore must advance exactly one bounded attempt.");
     }
   }
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
@@ -133,7 +163,8 @@ function projectRun(run: Run, event: RunEvent): Run {
   switch (event.type) {
     case "status-transitioned": return { ...run, status: event.payload.to };
     case "attempt-started": return { ...run, currentAttemptNumber: event.payload.attempt.attemptNumber };
-    case "checkpoint-restored": return { ...run, currentAttemptNumber: event.payload.newAttemptNumber };
+    case "checkpoint-restored": return { ...run, status: run.status === "retrying" ? "running" : run.status, currentAttemptNumber: event.payload.newAttemptNumber };
+    case "retry-scheduled": return { ...run, status: "retrying" };
     case "cancellation-requested": return { ...run, status: "cancelling", cancellation: event.payload.cancellation };
     case "run-completed": return { ...run, status: "completed", terminalResult: event.payload.result };
     case "run-failed": return { ...run, status: event.payload.partial ? "partially-completed" : "failed" };
