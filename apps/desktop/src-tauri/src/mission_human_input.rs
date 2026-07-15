@@ -23,26 +23,26 @@ fn now() -> String {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HumanInputField {
-    key: String,
-    label: String,
+    pub(crate) key: String,
+    pub(crate) label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    help: Option<String>,
-    kind: String,
-    required: bool,
-    sensitive: bool,
+    pub(crate) help: Option<String>,
+    pub(crate) kind: String,
+    pub(crate) required: bool,
+    pub(crate) sensitive: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    choices: Option<Vec<String>>,
+    pub(crate) choices: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HumanInputRequestInput {
-    run_id: String,
-    request_key: String,
-    expected_run_revision: i64,
-    expected_last_sequence: i64,
-    prompt: String,
-    fields: Vec<HumanInputField>,
+    pub(crate) run_id: String,
+    pub(crate) request_key: String,
+    pub(crate) expected_run_revision: i64,
+    pub(crate) expected_last_sequence: i64,
+    pub(crate) prompt: String,
+    pub(crate) fields: Vec<HumanInputField>,
 }
 
 #[derive(Deserialize)]
@@ -55,33 +55,33 @@ pub struct HumanInputPendingListInput {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HumanInputValue {
-    field_key: String,
-    value: Value,
+    pub(crate) field_key: String,
+    pub(crate) value: Value,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HumanInputReceiveInput {
-    run_id: String,
-    wait_key: String,
-    expected_run_revision: i64,
-    expected_last_sequence: i64,
-    values: Vec<HumanInputValue>,
+    pub(crate) run_id: String,
+    pub(crate) wait_key: String,
+    pub(crate) expected_run_revision: i64,
+    pub(crate) expected_last_sequence: i64,
+    pub(crate) values: Vec<HumanInputValue>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingHumanInput {
-    run_id: String,
-    mission_id: String,
-    source_thread_id: String,
-    wait_key: String,
-    request_key: String,
-    prompt: String,
-    fields: Vec<HumanInputField>,
-    requested_at: String,
-    run_revision: i64,
-    last_sequence: i64,
+    pub(crate) run_id: String,
+    pub(crate) mission_id: String,
+    pub(crate) source_thread_id: String,
+    pub(crate) wait_key: String,
+    pub(crate) request_key: String,
+    pub(crate) prompt: String,
+    pub(crate) fields: Vec<HumanInputField>,
+    pub(crate) requested_at: String,
+    pub(crate) run_revision: i64,
+    pub(crate) last_sequence: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -95,12 +95,12 @@ pub struct PendingHumanInputEnvelope {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct HumanInputReceiveReceipt {
-    run_id: String,
-    wait_key: String,
-    status: &'static str,
-    received_at: String,
-    run_revision: i64,
-    last_sequence: i64,
+    pub(crate) run_id: String,
+    pub(crate) wait_key: String,
+    pub(crate) status: &'static str,
+    pub(crate) received_at: String,
+    pub(crate) run_revision: i64,
+    pub(crate) last_sequence: i64,
 }
 
 struct Authorized {
@@ -164,67 +164,100 @@ fn request_with_store(
     validate_request(&input).map_err(crate::store::StoreError::Invalid)?;
     store.transaction(|tx| {
         let auth = authorized(tx)?;
-        let journal = mission_run::get(tx, store, &auth.scope, &auth.member_id, &input.run_id)?
-            .ok_or_else(|| {
-                crate::store::StoreError::Invalid(
-                    "Mission run is unavailable in this workspace.".into(),
-                )
-            })?;
-        let mission_id = mission_id(&journal.run)?;
-        let lifecycle = mission_plan::get(tx, store, &auth.scope, &auth.member_id, mission_id)?
-            .ok_or_else(|| {
-                crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
-            })?;
-        let base_event_id = event_id_at(&journal, input.expected_last_sequence)?;
-        let schema_hash = schema_hash(&input.fields)?;
-        let suffix = request_suffix(
-            auth.scope.workspace_id(),
-            &auth.member_id,
-            &journal.run,
-            &input,
-            &schema_hash,
-            base_event_id,
-        )?;
-        let request_event_id = format!("mission-human-input-requested-{suffix}");
-        if journal
-            .events
-            .iter()
-            .any(|event| event.get("id").and_then(Value::as_str) == Some(request_event_id.as_str()))
-        {
-            let facts = validate_pending_wait(
-                tx,
-                store,
-                &auth.scope,
-                &auth.member_id,
-                &journal,
-                Some(&lifecycle),
-            )?;
-            if facts.request_suffix != suffix
-                || facts.pending.request_key != input.request_key.trim()
-                || facts.pending.prompt != input.prompt.trim()
-                || facts.pending.fields != input.fields
-            {
-                return Err(crate::store::StoreError::Invalid(
-                    "The human-input request key represents different facts.".into(),
-                ));
-            }
-            return Ok(facts.pending);
-        }
-        validate_request_boundary(&journal.run, &lifecycle, &input)?;
-        let at = now();
-        append_wait(
+        request_in_tx(
             tx,
             store,
-            &auth,
-            &journal,
-            &lifecycle,
+            &auth.scope,
+            &auth.internal_user_id,
+            &auth.member_id,
             &input,
-            &schema_hash,
-            &suffix,
-            base_event_id,
-            &at,
         )
     })
+}
+
+pub(crate) fn request_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    internal_user_id: &str,
+    member_id: &str,
+    input: &HumanInputRequestInput,
+) -> crate::store::Result<PendingHumanInput> {
+    validate_request(input).map_err(crate::store::StoreError::Invalid)?;
+    let auth = Authorized {
+        scope: scope.clone(),
+        internal_user_id: internal_user_id.to_string(),
+        member_id: member_id.to_string(),
+    };
+    let journal =
+        mission_run::get(tx, store, scope, member_id, &input.run_id)?.ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Mission run is unavailable in this workspace.".into(),
+            )
+        })?;
+    let mission_id = mission_id(&journal.run)?;
+    let lifecycle = mission_plan::get(tx, store, &auth.scope, &auth.member_id, mission_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    let base_event_id = event_id_at(&journal, input.expected_last_sequence)?;
+    let schema_hash = schema_hash(&input.fields)?;
+    let suffix = request_suffix(
+        auth.scope.workspace_id(),
+        &auth.member_id,
+        &journal.run,
+        input,
+        &schema_hash,
+        base_event_id,
+    )?;
+    let request_event_id = format!("mission-human-input-requested-{suffix}");
+    if journal
+        .events
+        .iter()
+        .any(|event| event.get("id").and_then(Value::as_str) == Some(request_event_id.as_str()))
+    {
+        let facts = validate_pending_wait(
+            tx,
+            store,
+            &auth.scope,
+            &auth.member_id,
+            &journal,
+            Some(&lifecycle),
+        )?;
+        if facts.request_suffix != suffix
+            || facts.pending.request_key != input.request_key.trim()
+            || facts.pending.prompt != input.prompt.trim()
+            || facts.pending.fields != input.fields
+        {
+            return Err(crate::store::StoreError::Invalid(
+                "The human-input request key represents different facts.".into(),
+            ));
+        }
+        return Ok(facts.pending);
+    }
+    validate_request_boundary(&journal.run, &lifecycle, input)?;
+    let at = now();
+    append_wait(
+        tx,
+        store,
+        &auth,
+        &journal,
+        &lifecycle,
+        input,
+        &schema_hash,
+        &suffix,
+        base_event_id,
+        &at,
+    )
+}
+
+pub(crate) fn pending_for_run_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+) -> crate::store::Result<PendingHumanInput> {
+    validate_pending_wait(tx, store, scope, owner_member_id, journal, None)
+        .map(|facts| facts.pending)
 }
 
 fn pending_with_store(
@@ -279,7 +312,7 @@ fn pending_with_store(
     })
 }
 
-fn receive_with_store(
+pub(crate) fn receive_with_store(
     store: &crate::store::Store,
     input: HumanInputReceiveInput,
 ) -> crate::store::Result<HumanInputReceiveReceipt> {
@@ -301,7 +334,7 @@ fn receive_with_store(
                     .and_then(Value::as_str)
                     == Some(input.wait_key.as_str())
         }) {
-            return exact_receive_replay(
+            let receipt = exact_receive_replay(
                 tx,
                 store,
                 &auth.scope,
@@ -311,7 +344,17 @@ fn receive_with_store(
                 &input,
                 &auth.internal_user_id,
             )
-                .map_err(crate::store::StoreError::Invalid);
+            .map_err(crate::store::StoreError::Invalid)?;
+            crate::mission_structured_intake::validate_terminal_replay_in_tx(
+                tx,
+                store,
+                &auth.scope,
+                &auth.internal_user_id,
+                &auth.member_id,
+                &journal,
+                received,
+            )?;
+            return Ok(receipt);
         }
         let facts = validate_pending_wait(
             tx,
@@ -366,7 +409,7 @@ fn receive_with_store(
             "eventHead".into(),
             json!({"lastSequence":sequence,"lastEventId":event_id}),
         );
-        mission_run::append(
+        let received_journal = mission_run::append(
             tx,
             store,
             &auth.scope,
@@ -395,6 +438,17 @@ fn receive_with_store(
             &auth.scope,
             &auth.member_id,
             &lifecycle,
+            &at,
+        )?;
+        crate::mission_structured_intake::settle_if_structured_in_tx(
+            tx,
+            store,
+            &auth.scope,
+            &auth.internal_user_id,
+            &auth.member_id,
+            &received_journal,
+            &lifecycle,
+            &event_id,
             &at,
         )?;
         Ok(HumanInputReceiveReceipt {

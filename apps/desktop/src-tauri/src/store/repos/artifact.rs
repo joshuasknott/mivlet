@@ -16,6 +16,12 @@ pub struct AcceptedMissionArtifactBinding {
     pub artifact_version_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DirectMissionArtifactBinding {
+    pub artifact_id: String,
+    pub artifact_version_id: String,
+}
+
 fn artifact_aad(scope: &PrivateDataScope, id: &str) -> String {
     format!(
         "artifact:{}:{}:{id}",
@@ -139,6 +145,312 @@ pub fn accepted_mission_output_binding(
     AcceptedMissionArtifactBinding {
         artifact_id: format!("mission-artifact-{}", &digest[..40]),
         artifact_version_id: format!("mission-artifact-version-{}", &digest[..40]),
+    }
+}
+
+pub fn direct_mission_output_binding(
+    workspace_id: &str,
+    owner_member_id: &str,
+    run_id: &str,
+    source_event_id: &str,
+    output_key: &str,
+    content_hash: &str,
+) -> DirectMissionArtifactBinding {
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(
+            format!(
+                "direct-mission-artifact:v1|{workspace_id}|{owner_member_id}|{run_id}|{source_event_id}|{output_key}|{content_hash}"
+            )
+            .as_bytes()
+        )
+    );
+    DirectMissionArtifactBinding {
+        artifact_id: format!("mission-direct-artifact-{}", &digest[..40]),
+        artifact_version_id: format!("mission-direct-artifact-version-{}", &digest[..40]),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_direct_mission_output(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    source_event_id: &str,
+    result_event_id: &str,
+    output_key: &str,
+    title: &str,
+    text: &str,
+    expected: &DirectMissionArtifactBinding,
+) -> Result<DirectMissionArtifactBinding> {
+    scope.ensure_exists(tx)?;
+    if scope.owner_member_id() != Some(owner_member_id)
+        || title.trim().is_empty()
+        || title.chars().count() > 400
+        || text.trim().is_empty()
+        || text.len() > 131_072
+    {
+        return Err(StoreError::Invalid(
+            "Direct mission artifact input is invalid.".into(),
+        ));
+    }
+    let content_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+    let derived = direct_mission_output_binding(
+        scope.workspace_id(),
+        owner_member_id,
+        run_id,
+        source_event_id,
+        output_key,
+        &content_hash,
+    );
+    if &derived != expected {
+        return Err(StoreError::Invalid(
+            "Direct mission artifact identity does not match its content.".into(),
+        ));
+    }
+    let journal = super::mission_run::get(tx, store, scope.data(), owner_member_id, run_id)?
+        .ok_or_else(|| StoreError::Invalid("Direct mission artifact run is unavailable.".into()))?;
+    let source = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(source_event_id));
+    let result = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id));
+    let output_matches = |value: &Value| {
+        value.get("key").and_then(Value::as_str) == Some(output_key)
+            && value.get("artifactId").and_then(Value::as_str)
+                == Some(expected.artifact_id.as_str())
+            && value.get("artifactVersionId").and_then(Value::as_str)
+                == Some(expected.artifact_version_id.as_str())
+            && value.get("valueReference").and_then(Value::as_str)
+                == Some(format!("sha256:{content_hash}").as_str())
+    };
+    if journal.run.get("status").and_then(Value::as_str) != Some("completed")
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(result_event_id)
+        || !source.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("human-input-received")
+                && event.get("runId").and_then(Value::as_str) == Some(run_id)
+        })
+        || !result.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("run-completed")
+                && event.get("previousEventId").and_then(Value::as_str) == Some(source_event_id)
+                && event
+                    .pointer("/payload/result/outcome")
+                    .and_then(Value::as_str)
+                    == Some("succeeded")
+                && event
+                    .pointer("/payload/result/outputs/0")
+                    .is_some_and(output_matches)
+        })
+    {
+        return Err(StoreError::Invalid(
+            "Direct mission artifact is not linked to an exact completed local input result."
+                .into(),
+        ));
+    }
+    if let Some(existing) = get_direct_mission_source_binding(
+        tx,
+        scope,
+        owner_member_id,
+        run_id,
+        output_key,
+        source_event_id,
+        result_event_id,
+        &content_hash,
+    )? {
+        validate_direct_mission_artifact_bundle(tx, store, scope, &existing, &content_hash)?;
+        return if existing == *expected {
+            Ok(existing)
+        } else {
+            Err(StoreError::Invalid(
+                "Direct mission source represents another artifact.".into(),
+            ))
+        };
+    }
+    let source_thread_id = journal
+        .run
+        .get("sourceThreadId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            StoreError::Invalid("Direct mission source conversation is missing.".into())
+        })?;
+    let mission_id = journal
+        .run
+        .pointer("/initiator/missionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Invalid("Direct mission identity is missing.".into()))?;
+    let actor = journal
+        .run
+        .get("createdByInternalUserId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Invalid("Direct mission creator is missing.".into()))?;
+    let owns_thread: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND workspace_id=?2 AND authority='local'
+          AND visibility='member-private' AND deleted_at IS NULL AND owner_member_id=?3)",
+        rusqlite::params![source_thread_id, scope.workspace_id(), owner_member_id],
+        |row| row.get(0),
+    )?;
+    if !owns_thread {
+        return Err(StoreError::Invalid(
+            "Direct mission source conversation is unavailable for this owner.".into(),
+        ));
+    }
+    let at = source
+        .and_then(|event| event.pointer("/payload/resolution/receivedAt"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Invalid("Direct mission source time is missing.".into()))?;
+    let provenance = json!({
+        "kind":"run","runId":run_id,"externalReference":source_event_id,"observedAt":at
+    });
+    let media = json!({"mediaType":"text/markdown","byteLength":text.len(),"encoding":"utf-8"});
+    let hash = json!({"algorithm":"sha-256","value":content_hash});
+    let artifact_value = json!({
+        "id":expected.artifact_id,"workspaceId":scope.workspace_id(),"authority":"local",
+        "visibility":"member-private","ownerMemberId":owner_member_id,"schemaVersion":1,"revision":1,
+        "createdByInternalUserId":actor,"createdAt":at,"updatedAt":at,"kind":"document","status":"draft",
+        "title":title.trim(),"currentVersionId":expected.artifact_version_id,"producingRunId":run_id,
+        "sourceProvenance":[provenance.clone()],"context":{"threadId":source_thread_id,"missionId":mission_id,
+            "projectId":journal.run.get("projectId")},"reviews":[],"retention":{"status":"active"}
+    });
+    let version_value = json!({
+        "id":expected.artifact_version_id,"artifactId":expected.artifact_id,"version":1,"status":"available",
+        "createdAt":at,"createdByInternalUserId":actor,
+        "content":{"kind":"inline","text":text,"media":media,"contentHash":hash},
+        "media":media,"contentHash":hash,"provenance":provenance,"citations":[],
+        "inputs":[{"kind":"source","referenceId":source_event_id,
+            "label":"Authenticated structured intake response","recordedAt":at}],
+        "decisions":[],"lineage":[]
+    });
+    let sealed_artifact = seal_json(
+        store,
+        &artifact_value,
+        &artifact_aad(scope, &expected.artifact_id),
+    )?;
+    let sealed_version = seal_json(
+        store,
+        &version_value,
+        &version_aad(scope, &expected.artifact_id, &expected.artifact_version_id),
+    )?;
+    let title_fingerprint = format!("{:x}", Sha256::digest(title.trim().as_bytes()));
+    tx.execute(
+        "INSERT INTO artifact
+         (workspace_id,owner_subject,authority,visibility,owner_member_id,owner_internal_user_id,
+          id,run_id,thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,
+          content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce)
+         VALUES (?1,?2,'local','member-private',?3,?4,?5,NULL,?6,NULL,'document','draft',1,?7,?8,?9,?10,?11,?11,?12,?13)",
+        rusqlite::params![scope.workspace_id(),scope.owner_subject(),owner_member_id,scope.owner_internal_user_id(),
+            expected.artifact_id,source_thread_id,expected.artifact_version_id,title_fingerprint,
+            content_hash,text.len() as i64,at,sealed_artifact.ciphertext,sealed_artifact.nonce],
+    )?;
+    tx.execute(
+        "INSERT INTO artifact_version
+         (workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce)
+         VALUES (?1,?2,?3,?4,1,'available',?5,?6,?7,?8,?9)",
+        rusqlite::params![scope.workspace_id(),scope.owner_subject(),expected.artifact_id,
+            expected.artifact_version_id,content_hash,text.len() as i64,at,
+            sealed_version.ciphertext,sealed_version.nonce],
+    )?;
+    tx.execute(
+        "INSERT INTO mission_direct_artifact_source
+         (workspace_id,owner_member_id,mission_run_id,output_key,owner_subject,artifact_id,
+          artifact_version_id,source_event_id,result_event_id,content_hash,created_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        rusqlite::params![
+            scope.workspace_id(),
+            owner_member_id,
+            run_id,
+            output_key,
+            scope.owner_subject(),
+            expected.artifact_id,
+            expected.artifact_version_id,
+            source_event_id,
+            result_event_id,
+            content_hash,
+            at
+        ],
+    )?;
+    validate_direct_mission_artifact_bundle(tx, store, scope, expected, &content_hash)?;
+    Ok(expected.clone())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn get_direct_mission_source_binding(
+    tx: &Connection,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    output_key: &str,
+    source_event_id: &str,
+    result_event_id: &str,
+    content_hash: &str,
+) -> Result<Option<DirectMissionArtifactBinding>> {
+    scope.ensure_exists(tx)?;
+    tx.query_row(
+        "SELECT artifact_id,artifact_version_id FROM mission_direct_artifact_source
+         WHERE workspace_id=?1 AND owner_member_id=?2 AND mission_run_id=?3 AND output_key=?4
+           AND owner_subject=?5 AND source_event_id=?6 AND result_event_id=?7 AND content_hash=?8",
+        rusqlite::params![
+            scope.workspace_id(),
+            owner_member_id,
+            run_id,
+            output_key,
+            scope.owner_subject(),
+            source_event_id,
+            result_event_id,
+            content_hash
+        ],
+        |row| {
+            Ok(DirectMissionArtifactBinding {
+                artifact_id: row.get(0)?,
+                artifact_version_id: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(Into::into)
+}
+
+pub fn validate_direct_mission_artifact_bundle(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    binding: &DirectMissionArtifactBinding,
+    content_hash: &str,
+) -> Result<()> {
+    let bundle = get_bundle(tx, store, scope, &binding.artifact_id)?
+        .ok_or_else(|| StoreError::Invalid("Direct mission artifact is missing.".into()))?;
+    let source_version = bundle
+        .get("versions")
+        .and_then(Value::as_array)
+        .and_then(|versions| {
+            versions.iter().find(|version| {
+                version.get("id").and_then(Value::as_str)
+                    == Some(binding.artifact_version_id.as_str())
+            })
+        });
+    if bundle.pointer("/artifact/id").and_then(Value::as_str) == Some(binding.artifact_id.as_str())
+        && source_version.is_some_and(|version| {
+            version.get("artifactId").and_then(Value::as_str) == Some(binding.artifact_id.as_str())
+                && version.get("version").and_then(Value::as_i64) == Some(1)
+                && version
+                    .pointer("/contentHash/value")
+                    .and_then(Value::as_str)
+                    == Some(content_hash)
+        })
+    {
+        Ok(())
+    } else {
+        Err(StoreError::Invalid(
+            "Direct mission artifact no longer matches its source output.".into(),
+        ))
     }
 }
 

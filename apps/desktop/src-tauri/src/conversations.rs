@@ -80,10 +80,12 @@ pub struct DraftInput {
 pub fn conversation_create_thread(input: CreateThread) -> Result<thread::ThreadRow, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let scope = scope()?;
     store
         .transaction(|tx| {
-            thread::create(
+            let context = workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member_id = context.member_id;
+            let scope = DataScope::workspace(context.active_workspace.local_workspace_id)?;
+            let created = thread::create(
                 tx,
                 store,
                 &scope,
@@ -92,7 +94,19 @@ pub fn conversation_create_thread(input: CreateThread) -> Result<thread::ThreadR
                 &input.title,
                 &now(),
                 &input.payload,
-            )
+            )?;
+            if let Some(member_id) = member_id {
+                let changed = tx.execute(
+                    "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3 AND owner_member_id IS NULL",
+                    rusqlite::params![member_id, scope.workspace_id(), created.id],
+                )?;
+                if changed != 1 {
+                    return Err(crate::store::StoreError::Invalid(
+                        "Conversation ownership could not be established.".into(),
+                    ));
+                }
+            }
+            Ok(created)
         })
         .map_err(|e| e.to_string())
 }

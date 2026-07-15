@@ -688,10 +688,24 @@ wait untouched. Human-input cancellation atomically settles both Run and Mission
 lifecycles so a restart cannot strand the intermediate request. Repository evidence
 covers portable reduction, real encrypted-store reopen and tamper paths, strict
 runtime projections, form submission, and active-work cancellation priority.
-There is not yet a general mission producer that invokes this coordinator, and
-secure reference-valued or artifact-valued input plus post-response provider
-continuation remain open. The Wave 4C human-input-and-approval checkbox therefore
-stays unchecked.
+One fixed, provider-free producer now invokes that coordinator end to end. An
+explicit structured-project-brief request atomically creates its native-owned
+Mission, one-step Plan, Run, wait-boundary checkpoint, and six-field intake
+schema without requiring a model or connector. Submitting the authenticated
+response resumes and completes that exact Run and Mission in the same encrypted
+transaction, renders deterministic Markdown, creates one draft artifact with
+direct human-input-event provenance (and no worker, provider, evaluation,
+citation, or acceptance claim), and appends a restart-safe terminal transcript.
+Exact start and receive replay are duplicate-free across database reopen;
+changed start facts, stale or altered wait schemas, invalid settlement,
+cross-member access, and detached terminal facts fail closed or roll back to the
+pending form. The conversation starts this narrow journey ahead of provider
+routing, rehydrates its form after restart, and exposes the resulting draft
+without mislabelling it as a cited mission. This is one fixed local producer,
+not general producer selection or provider continuation; secure
+reference-valued or artifact-valued input, arbitrary post-response
+continuations, and multi-worker coordination remain open. The Wave 4C
+human-input-and-approval checkbox therefore stays unchecked.
 Conservative, explicit
 natural-language forms for goal, plan, schedule,
 and memory now reach the same structured durable command handlers; conversational

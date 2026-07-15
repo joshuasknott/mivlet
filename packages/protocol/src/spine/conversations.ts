@@ -145,24 +145,32 @@ export type MessageExecutionLink =
   | { runId: RunId; runEventId?: RunEventId }
   | { runId?: never; runEventId?: never };
 
-/** Native-owned linkage for a terminal cited mission response. */
-export type MissionResultMessageDetail =
+/** Native-owned linkage for a terminal mission response. */
+export type MissionResultMessageDetail = {
+  type: "mission-result";
+  missionId: MissionId;
+  resultEventId: RunEventId;
+} & (
   | {
-      type: "mission-result";
-      missionId: MissionId;
-      resultEventId: RunEventId;
+      /** Legacy cited results omit this discriminator. */
+      missionKind?: "cited-brief";
       outcome: "accepted";
       artifactId: ArtifactId;
       artifactVersionId: ArtifactVersionId;
     }
   | {
-      type: "mission-result";
-      missionId: MissionId;
-      resultEventId: RunEventId;
+      missionKind: "structured-intake";
+      outcome: "completed";
+      artifactId: ArtifactId;
+      artifactVersionId: ArtifactVersionId;
+    }
+  | {
+      missionKind?: "cited-brief";
       outcome: "partial" | "failed" | "cancelled";
       artifactId?: never;
       artifactVersionId?: never;
-    };
+    }
+);
 
 export type MessageKindDetail =
   | { kind: "user"; detail?: never }

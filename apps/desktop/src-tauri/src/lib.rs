@@ -36,6 +36,7 @@ mod memory;
 mod mission_human_input;
 mod mission_plans;
 mod mission_runs;
+mod mission_structured_intake;
 mod mission_workers;
 mod models;
 mod native_api;
@@ -170,6 +171,7 @@ pub fn run() {
             mission_human_input::mission_human_input_request,
             mission_human_input::mission_human_input_pending_list,
             mission_human_input::mission_human_input_receive,
+            mission_structured_intake::mission_structured_intake_start,
             mission_workers::mission_worker_create,
             mission_workers::mission_worker_start,
             mission_workers::mission_worker_output_read,

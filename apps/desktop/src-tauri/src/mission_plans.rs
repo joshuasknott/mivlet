@@ -22,21 +22,21 @@ fn now() -> String {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MissionPlanCreateInput {
-    mission_id: String,
-    plan_id: String,
-    plan_revision_id: String,
-    execution_depth: String,
-    outcome: Value,
-    mission_scope: Value,
+    pub(crate) mission_id: String,
+    pub(crate) plan_id: String,
+    pub(crate) plan_revision_id: String,
+    pub(crate) execution_depth: String,
+    pub(crate) outcome: Value,
+    pub(crate) mission_scope: Value,
     #[serde(default)]
-    constraints: Value,
-    time_constraint: Option<Value>,
-    data_boundary: Option<Value>,
-    acceptance: Value,
-    budget: Option<Value>,
-    summary: String,
-    bounds: Value,
-    steps: Value,
+    pub(crate) constraints: Value,
+    pub(crate) time_constraint: Option<Value>,
+    pub(crate) data_boundary: Option<Value>,
+    pub(crate) acceptance: Value,
+    pub(crate) budget: Option<Value>,
+    pub(crate) summary: String,
+    pub(crate) bounds: Value,
+    pub(crate) steps: Value,
 }
 
 #[derive(Deserialize)]
@@ -504,13 +504,13 @@ pub(crate) fn project_cited_plan_summary(
 }
 
 #[derive(Debug)]
-struct Records {
-    mission: Value,
-    plan: Value,
-    revision: Value,
+pub(crate) struct Records {
+    pub(crate) mission: Value,
+    pub(crate) plan: Value,
+    pub(crate) revision: Value,
 }
 
-fn build_initial_records(
+pub(crate) fn build_initial_records(
     input: &MissionPlanCreateInput,
     workspace_id: &str,
     member: &str,

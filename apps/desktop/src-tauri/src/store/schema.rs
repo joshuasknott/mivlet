@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 31;
+pub const CURRENT_SCHEMA_VERSION: u32 = 32;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -1675,6 +1675,56 @@ CREATE TABLE IF NOT EXISTS mission_artifact_source (
 );
 CREATE INDEX IF NOT EXISTS idx_mission_artifact_artifact
   ON mission_artifact_source(workspace_id,owner_subject,artifact_id);
+
+-- Exact provenance for a canonical draft materialized directly from a local
+-- mission event. Unlike `mission_artifact_source`, this makes no worker,
+-- provider, evaluation, or acceptance claim.
+CREATE TABLE IF NOT EXISTS mission_direct_artifact_source (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL, mission_run_id TEXT NOT NULL,
+  output_key TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  artifact_id TEXT NOT NULL, artifact_version_id TEXT NOT NULL,
+  source_event_id TEXT NOT NULL, result_event_id TEXT NOT NULL,
+  content_hash TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,mission_run_id,output_key),
+  UNIQUE(workspace_id,owner_subject,artifact_id),
+  UNIQUE(workspace_id,owner_subject,artifact_id,artifact_version_id),
+  FOREIGN KEY(workspace_id,owner_member_id,mission_run_id)
+    REFERENCES mission_run_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,source_event_id)
+    REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,result_event_id)
+    REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_subject,artifact_id,artifact_version_id)
+    REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mission_direct_artifact_artifact
+  ON mission_direct_artifact_source(workspace_id,owner_subject,artifact_id);
+
+-- Native-only producer binding for the fixed structured-intake mission. The
+-- renderer cannot create this row through the generic mission-plan commands.
+CREATE TABLE IF NOT EXISTS mission_structured_intake_binding (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL, run_id TEXT NOT NULL, mission_id TEXT NOT NULL,
+  plan_id TEXT NOT NULL, plan_revision_id TEXT NOT NULL,
+  source_thread_id TEXT NOT NULL, project_id TEXT, start_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,run_id),
+  UNIQUE(workspace_id,owner_member_id,mission_id),
+  UNIQUE(workspace_id,owner_member_id,source_thread_id,start_hash),
+  FOREIGN KEY(workspace_id,owner_member_id,run_id)
+    REFERENCES mission_run_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,mission_id)
+    REFERENCES mission_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,plan_id)
+    REFERENCES mission_plan_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,plan_revision_id)
+    REFERENCES mission_plan_revision(workspace_id,owner_member_id,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mission_structured_intake_thread
+  ON mission_structured_intake_binding(workspace_id,owner_member_id,source_thread_id,created_at);
 
 CREATE TABLE IF NOT EXISTS mission_worker_tool_receipt (
   workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,

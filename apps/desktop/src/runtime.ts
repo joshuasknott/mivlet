@@ -3397,6 +3397,22 @@ function isRuntimeMissionHumanInputRequest(value: unknown): value is RuntimeMiss
     && Number.isInteger(value.lastSequence) && (value.lastSequence as number) > 0;
 }
 
+export async function startRuntimeStructuredIntake(input: {
+  sourceThreadId: string;
+  projectId?: string;
+  subject: string;
+  startKey: string;
+}): Promise<RuntimeMissionHumanInputRequest | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const result = await invoke<unknown>("mission_structured_intake_start", { input });
+    if (!isRuntimeMissionHumanInputRequest(result)) {
+      throw new Error("Malformed structured-intake wait projection.");
+    }
+    return result;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
 export async function requestRuntimeMissionHumanInput(input: {
   runId: string;
   requestKey: string;

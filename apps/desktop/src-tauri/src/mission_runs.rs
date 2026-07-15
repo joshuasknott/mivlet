@@ -26,10 +26,10 @@ pub(crate) fn initialize_recovery_epoch() {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MissionRunCreateInput {
-    mission_id: String,
-    run_id: String,
-    event_id: String,
-    idempotency_key: String,
+    pub(crate) mission_id: String,
+    pub(crate) run_id: String,
+    pub(crate) event_id: String,
+    pub(crate) idempotency_key: String,
 }
 
 #[derive(Deserialize)]
@@ -1752,7 +1752,7 @@ pub fn mission_run_restore_checkpoint(
         .map_err(|error| error.to_string())
 }
 
-fn build_run_created(
+pub(crate) fn build_run_created(
     lifecycle: &mission_plan::MissionPlanLifecycleRow,
     input: &MissionRunCreateInput,
     actor: &str,

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -26,6 +26,7 @@ const runtimeMocks = vi.hoisted(() => ({
   conversationMessages: [] as Array<Record<string, unknown>>,
   projectRecords: [] as Array<Record<string, unknown>>,
   citedBriefCalls: [] as Array<Record<string, unknown>>,
+  structuredIntakeCalls: [] as Array<Record<string, unknown>>,
   citedBriefGate: null as Promise<void> | null,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
@@ -205,6 +206,21 @@ vi.mock("./runtime", () => ({
   resolveRuntimeCitedApproval: vi.fn(async () => null),
   cancelRuntimeCitedApproval: vi.fn(async () => null),
   receiveRuntimeMissionHumanInput: vi.fn(async () => null),
+  startRuntimeStructuredIntake: vi.fn(async (input: Record<string, unknown>) => {
+    runtimeMocks.structuredIntakeCalls.push(input);
+    return {
+      runId: "structured-run-ui", missionId: "structured-mission-ui",
+      sourceThreadId: input.sourceThreadId, waitKey: "human-input-wait:v1:structured-ui",
+      requestKey: "structured-intake:v1", prompt: "Tell Fable what belongs in this project brief.",
+      fields: [
+        { key: "title", label: "Title", kind: "text", required: true, sensitive: false },
+        { key: "objective", label: "Objective", kind: "text", required: true, sensitive: false },
+        { key: "audience", label: "Audience", kind: "choice", required: true, sensitive: false, choices: ["Team", "Leadership", "Customers", "Personal"] },
+        { key: "success", label: "Success criteria", kind: "text", required: true, sensitive: false }
+      ],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+  }),
   cancelRuntimeMissionHumanInput: vi.fn(async () => null),
   getRuntimeArtifact: vi.fn(async () => null),
   readRuntimeCitedMissionReceipts: vi.fn(async (_threadId: string, messageIds: string[]) =>
@@ -432,6 +448,7 @@ describe("Fable home", () => {
     runtimeMocks.conversationMessages = [];
     runtimeMocks.projectRecords = [];
     runtimeMocks.citedBriefCalls = [];
+    runtimeMocks.structuredIntakeCalls = [];
     runtimeMocks.citedBriefGate = null;
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
@@ -446,6 +463,22 @@ describe("Fable home", () => {
     vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValue({ requests: [], unavailableCount: 0, truncated: false });
     vi.mocked(receiveRuntimeMissionHumanInput).mockReset();
     vi.mocked(receiveRuntimeMissionHumanInput).mockResolvedValue(null);
+    vi.mocked(startRuntimeStructuredIntake).mockReset();
+    vi.mocked(startRuntimeStructuredIntake).mockImplementation(async (input) => {
+      runtimeMocks.structuredIntakeCalls.push(input as unknown as Record<string, unknown>);
+      return {
+        runId: "structured-run-ui", missionId: "structured-mission-ui",
+        sourceThreadId: input.sourceThreadId, waitKey: "human-input-wait:v1:structured-ui",
+        requestKey: "structured-intake:v1", prompt: "Tell Fable what belongs in this project brief.",
+        fields: [
+          { key: "title", label: "Title", kind: "text", required: true, sensitive: false },
+          { key: "objective", label: "Objective", kind: "text", required: true, sensitive: false },
+          { key: "audience", label: "Audience", kind: "choice", required: true, sensitive: false, choices: ["Team", "Leadership", "Customers", "Personal"] },
+          { key: "success", label: "Success criteria", kind: "text", required: true, sensitive: false }
+        ],
+        requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+      };
+    });
     vi.mocked(cancelRuntimeMissionHumanInput).mockReset();
     vi.mocked(cancelRuntimeMissionHumanInput).mockResolvedValue(null);
     vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
@@ -1477,6 +1510,77 @@ describe("Fable home", () => {
     expect(await within(conversation).findByText(/plan saved/i)).toBeInTheDocument();
   });
 
+  it("starts and submits the structured brief intake without provider execution", async () => {
+    const user = await renderWorkspace();
+    const composer = screen.getByLabelText(/universal composer/i);
+    await user.type(composer, "Create a structured project brief for the autumn launch");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(runtimeMocks.structuredIntakeCalls).toHaveLength(1));
+    expect(await screen.findByText("Tell Fable what belongs in this project brief.")).toBeInTheDocument();
+    expect(runtimeMocks.citedBriefCalls).toHaveLength(0);
+    expect(runtimeMocks.structuredIntakeCalls[0]).toMatchObject({
+      sourceThreadId: expect.any(String), subject: "the autumn launch", startKey: expect.any(String)
+    });
+
+    await user.type(screen.getByLabelText(/Title/), "Autumn launch");
+    await user.type(screen.getByLabelText(/Objective/), "Ship a calm, reliable launch.");
+    await user.selectOptions(screen.getByLabelText(/Audience/), "Leadership");
+    await user.type(screen.getByLabelText(/Success criteria/), "The team ships on time.");
+    await user.click(screen.getByRole("button", { name: "Continue mission" }));
+
+    await waitFor(() => expect(receiveRuntimeMissionHumanInput).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "structured-run-ui" }),
+      [
+        { fieldKey: "title", value: "Autumn launch" },
+        { fieldKey: "objective", value: "Ship a calm, reliable launch." },
+        { fieldKey: "audience", value: "Leadership" },
+        { fieldKey: "success", value: "The team ships on time." }
+      ]
+    ));
+  });
+
+  it("keeps a delayed structured-intake card bound to its source conversation", async () => {
+    runtimeMocks.conversationThreads = [
+      {
+        id: "thread-intake-a", projectId: null, title: "Intake A", lifecycle: "active",
+        updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+      },
+      {
+        id: "thread-intake-b", projectId: null, title: "Intake B", lifecycle: "active",
+        updatedAt: "2026-07-13T12:01:00Z", messageHead: { lastSequence: 0 }
+      }
+    ];
+    let resolveStart: ((value: any) => void) | undefined;
+    vi.mocked(startRuntimeStructuredIntake).mockImplementationOnce((input) => {
+      runtimeMocks.structuredIntakeCalls.push(input as unknown as Record<string, unknown>);
+      return new Promise<any>((resolve) => { resolveStart = resolve; });
+    });
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Intake A" }));
+    await user.type(screen.getByLabelText(/universal composer/i), "/brief delayed card");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(runtimeMocks.structuredIntakeCalls).toHaveLength(1));
+    await user.type(screen.getByLabelText(/universal composer/i), "/brief second request");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(/structured brief is already starting/i)).toBeInTheDocument();
+    expect(runtimeMocks.structuredIntakeCalls).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Intake B" }));
+    resolveStart?.({
+      runId: "structured-run-delayed", missionId: "structured-mission-delayed",
+      sourceThreadId: "thread-intake-a", waitKey: "human-input-wait:v1:delayed",
+      requestKey: "structured-intake:v1", prompt: "Details for A",
+      fields: [{ key: "title", label: "Title for A", kind: "text", required: true, sensitive: false }],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    });
+    await waitFor(() => expect(startRuntimeStructuredIntake).toHaveBeenCalledOnce());
+    expect(screen.queryByText("Details for A")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Title for A")).not.toBeInTheDocument();
+  });
+
   it("routes an explicit connected-source cited brief through the mission journey", async () => {
     const user = userEvent.setup();
     vi.mocked(getRuntimeArtifact).mockResolvedValueOnce({
@@ -1672,6 +1776,56 @@ describe("Fable home", () => {
     expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
+  });
+
+  it("rehydrates a completed structured intake without cited-only UI", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-structured-restart", title: "Structured restart", lifecycle: "active",
+      updatedAt: "2026-07-13T12:00:00Z",
+      messageHead: { lastSequence: 1, lastMessageId: "message-structured-assistant" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-structured-assistant", threadId: "thread-structured-restart", kind: "assistant",
+        sequence: 1, runId: "structured-run-restart", currentRevisionId: "revision-structured-assistant",
+        currentRevisionNumber: 1, currentRevisionState: "terminal",
+        detail: {
+          type: "mission-result", missionKind: "structured-intake",
+          missionId: "structured-mission-restart", resultEventId: "structured-result-restart",
+          outcome: "completed", artifactId: "structured-artifact-restart",
+          artifactVersionId: "structured-artifact-version-restart"
+        }
+      },
+      currentRevision: {
+        id: "revision-structured-assistant", threadId: "thread-structured-restart",
+        messageId: "message-structured-assistant", messageRevisionNumber: 1,
+        state: "terminal", content: "# Autumn launch\n\n## Objective\nShip calmly."
+      }
+    }];
+    vi.mocked(listRuntimeThreadArtifacts).mockResolvedValueOnce([{
+      artifact: {
+        id: "structured-artifact-restart", title: "Autumn launch", status: "draft", revision: 1,
+        currentVersionId: "structured-artifact-version-restart", producingRunId: "structured-run-restart",
+        context: { threadId: "thread-structured-restart" }, reviews: []
+      },
+      currentVersion: {
+        id: "structured-artifact-version-restart", artifactId: "structured-artifact-restart",
+        version: 1, status: "available",
+        content: { kind: "inline", text: "# Autumn launch\n\n## Objective\nShip calmly." }, citations: []
+      },
+      versions: [], sourceMessageId: null
+    }] as never);
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: /^chats$/i }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Structured restart" }));
+
+    expect(await screen.findByText(/# Autumn launch/)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View artifact Autumn launch" })).toBeInTheDocument();
+    expect(screen.queryByText("Plan unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Run receipt" })).not.toBeInTheDocument();
+    expect(readRuntimeCitedMissionReceipts).not.toHaveBeenCalled();
+    expect(readRuntimeCitedMissionPlanSummaries).not.toHaveBeenCalled();
   });
 
   it("rehydrates a partial cited mission response without offering artifact creation", async () => {

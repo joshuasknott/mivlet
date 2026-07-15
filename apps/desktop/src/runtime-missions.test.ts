@@ -24,6 +24,7 @@ import {
   requestRuntimeMissionRunCancellation,
   requestRuntimeMissionHumanInput,
   restoreRuntimeMissionCheckpoint,
+  startRuntimeStructuredIntake,
   startRuntimeMissionWorker
 } from "./runtime";
 
@@ -64,6 +65,9 @@ describe("mission runtime boundary", () => {
       runId: "run-1", requestKey: "input-1", expectedRunRevision: 4, expectedLastSequence: 3,
       prompt: "Choose a region.",
       fields: [{ key: "region", label: "Region", kind: "choice", required: true, sensitive: false, choices: ["UK", "EU"] }]
+    })).resolves.toBeNull();
+    await expect(startRuntimeStructuredIntake({
+      sourceThreadId: "thread-1", subject: "Launch", startKey: "start-1"
     })).resolves.toBeNull();
     await expect(restoreRuntimeMissionCheckpoint({
       runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
@@ -198,6 +202,29 @@ describe("mission runtime boundary", () => {
     });
     await expect(listRuntimePendingMissionHumanInputs("thread-1"))
       .rejects.toThrow("Malformed human-input wait list");
+  });
+
+  it("composes and strictly validates native structured-intake start", async () => {
+    setNative(true);
+    const request = {
+      runId: "run-intake", missionId: "mission-intake", sourceThreadId: "thread-1",
+      waitKey: "human-input-wait:v1:intake", requestKey: "structured-intake:v1",
+      prompt: "Tell Fable what belongs in this project brief.",
+      fields: [{ key: "title", label: "Title", kind: "text" as const, required: true, sensitive: false as const }],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+    mocks.invoke.mockResolvedValueOnce(request);
+    await expect(startRuntimeStructuredIntake({
+      sourceThreadId: "thread-1", projectId: "project-1", subject: "Launch", startKey: "start-1"
+    })).resolves.toEqual(request);
+    expect(mocks.invoke).toHaveBeenCalledWith("mission_structured_intake_start", { input: {
+      sourceThreadId: "thread-1", projectId: "project-1", subject: "Launch", startKey: "start-1"
+    } });
+
+    mocks.invoke.mockResolvedValueOnce({ ...request, fields: [{ ...request.fields[0], sensitive: true }] });
+    await expect(startRuntimeStructuredIntake({
+      sourceThreadId: "thread-1", subject: "Launch", startKey: "start-2"
+    })).rejects.toThrow("Malformed structured-intake wait projection");
   });
 
   it("accepts the native atomic terminal result when stopping dormant human input", async () => {

@@ -12,6 +12,7 @@ import {
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
 import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
+import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/structured-intake-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
@@ -36,7 +37,8 @@ type ConversationMessage = {
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
   missionPlan?: CitedBriefMissionPlanSummary;
-  missionOutcome?: "accepted" | "partial" | "failed" | "cancelled" | "awaiting-approval";
+  missionKind?: "cited-brief" | "structured-intake";
+  missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval";
   missionArtifactId?: string;
   approvalRunId?: string;
 };
@@ -80,6 +82,8 @@ export function ChatWorkspace() {
   // it) share the same instance - a grant in the approval UI drives the tool call
   // the loop is currently blocked on.
   const [selectedConversationThreadId, setSelectedConversationThreadId] = useState<string>();
+  const selectedConversationThreadIdRef = useRef<string | undefined>(undefined);
+  selectedConversationThreadIdRef.current = selectedConversationThreadId;
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
@@ -111,6 +115,8 @@ export function ChatWorkspace() {
   const missionPlanHydrationKey = useRef<string | null>(null);
   const missionPlanHydrationRequestKey = useRef<string | null>(null);
   const newMissionLaunchRef = useRef<string | null>(null);
+  const structuredIntakeStartingRef = useRef(false);
+  const optimisticMissionInputRunIds = useRef(new Set<string>());
   const activeAssistantMessageId = useRef<string | null>(null);
   const hydratedConversation = durableConversation.state.conversation;
   const boundWorkspaceId =
@@ -407,11 +413,13 @@ export function ChatWorkspace() {
   const citedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
     message.kind === "assistant"
       && message.detail?.type === "mission-result"
+      && message.detail.missionKind !== "structured-intake"
       && (message.detail.outcome === "accepted" || message.detail.outcome === "partial")
   ) ?? [];
   const terminalCitedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
     message.kind === "assistant"
       && message.detail?.type === "mission-result"
+      && message.detail.missionKind !== "structured-intake"
       && (message.detail.outcome === "accepted" || message.detail.outcome === "partial"
         || message.detail.outcome === "failed" || message.detail.outcome === "cancelled")
   ) ?? [];
@@ -455,7 +463,10 @@ export function ChatWorkspace() {
         runId: message.kind === "assistant" ? message.runId : undefined,
         ...(missionResult ? {
           missionOutcome: missionResult.outcome,
-          ...(missionResult.outcome === "accepted" ? { missionArtifactId: missionResult.artifactId } : {})
+          ...(missionResult.missionKind ? { missionKind: missionResult.missionKind } : {}),
+          ...(missionResult.outcome === "accepted" || missionResult.outcome === "completed"
+            ? { missionArtifactId: missionResult.artifactId }
+            : {})
         } : {})
       };
     }));
@@ -575,20 +586,35 @@ export function ChatWorkspace() {
 
   useEffect(() => {
     let active = true;
-    setPendingMissionInputs([]);
+    setPendingMissionInputs((current) => current.filter((request) =>
+      optimisticMissionInputRunIds.current.has(request.runId)
+        && request.sourceThreadId === selectedConversationThreadId
+    ));
     setMissionInputListWarning(null);
     if (!selectedConversationThreadId) return () => { active = false; };
     void listRuntimePendingMissionHumanInputs(selectedConversationThreadId)
       .then((result) => {
         if (!active) return;
-        setPendingMissionInputs(result.requests);
+        const listed = new Set(result.requests.map((request) => request.runId));
+        for (const runId of listed) optimisticMissionInputRunIds.current.delete(runId);
+        setPendingMissionInputs((current) => {
+          const optimistic = current.filter((request) =>
+            optimisticMissionInputRunIds.current.has(request.runId)
+              && request.sourceThreadId === selectedConversationThreadId
+              && !listed.has(request.runId)
+          );
+          return [...result.requests, ...optimistic];
+        });
         setMissionInputListWarning(result.unavailableCount > 0 || result.truncated
           ? "Some mission input requests could not be shown. Fable left them untouched."
           : null);
       })
       .catch(() => {
         if (!active) return;
-        setPendingMissionInputs([]);
+        setPendingMissionInputs((current) => current.filter((request) =>
+          optimisticMissionInputRunIds.current.has(request.runId)
+            && request.sourceThreadId === selectedConversationThreadId
+        ));
         setMissionInputListWarning("Mission input requests are temporarily unavailable. Fable left them untouched.");
       });
     return () => { active = false; };
@@ -710,8 +736,13 @@ export function ChatWorkspace() {
     });
     try {
       await receiveRuntimeMissionHumanInput(request, values);
+      optimisticMissionInputRunIds.current.delete(request.runId);
       setPendingMissionInputs((current) => current.filter((entry) => entry.runId !== request.runId));
-      await durableConversation.refresh();
+      if (selectedConversationThreadIdRef.current === request.sourceThreadId) {
+        await durableConversation.refresh();
+        const artifacts = await listRuntimeThreadArtifacts(request.sourceThreadId);
+        setThreadArtifacts(artifacts);
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Fable could not continue this mission.";
       setMissionInputErrors((current) => ({ ...current, [request.runId]: message }));
@@ -737,7 +768,8 @@ export function ChatWorkspace() {
             ?? (hydratedMissionPlans.key === activeMissionPlanHydrationKey
               ? hydratedMissionPlans.plans[message.id]
               : undefined);
-          const missionPlanUnavailable = !missionPlan && Boolean(message.missionOutcome)
+          const missionPlanUnavailable = message.missionKind !== "structured-intake"
+            && !missionPlan && Boolean(message.missionOutcome)
             && hydratedMissionPlans.key === activeMissionPlanHydrationKey;
           const canStartNewMission = message.role === "assistant" && Boolean(missionPlan)
             && (message.missionOutcome === "partial" || message.missionOutcome === "failed"
@@ -1010,6 +1042,12 @@ export function ChatWorkspace() {
   }
 
   async function continueComposerSubmission(submitted: string) {
+    // The explicit local intake journey owns this narrow phrase before the
+    // broader natural-language /plan parser can interpret "project brief".
+    if (structuredIntakeSubject(submitted)) {
+      runPrompt(submitted, { appendUserMessage: false });
+      return;
+    }
     const outcome = parseComposerText(submitted);
     if (outcome.status === "command") {
       const result = await runtime.runFableCommand(outcome.request, { stopCurrentWork });
@@ -1070,6 +1108,38 @@ export function ChatWorkspace() {
       appendConversationMessage("user", prompt);
     }
     runtime.setComposerValue("");
+    const intakeSubject = structuredIntakeSubject(prompt);
+    if (intakeSubject) {
+      if (!selectedConversationThreadId) return;
+      if (structuredIntakeStartingRef.current) {
+        appendConversationMessage(
+          "assistant",
+          "A structured brief is already starting. Try again when its form appears."
+        );
+        return;
+      }
+      const sourceThreadId = selectedConversationThreadId;
+      structuredIntakeStartingRef.current = true;
+      void startStructuredIntakeMission({
+        sourceThreadId,
+        ...(runProjectId ? { projectId: runProjectId } : {}),
+        subject: intakeSubject
+      }).then((request) => {
+        if (selectedConversationThreadIdRef.current !== request.sourceThreadId) return;
+        optimisticMissionInputRunIds.current.add(request.runId);
+        setPendingMissionInputs((current) => [
+          ...current.filter((entry) => entry.runId !== request.runId),
+          request
+        ]);
+      }).catch((cause) => {
+        const message = cause instanceof Error ? cause.message : "Fable could not start the structured brief.";
+        appendConversationMessage("assistant", message);
+      }).finally(() => {
+        structuredIntakeStartingRef.current = false;
+      });
+      finishNewMissionLaunch();
+      return;
+    }
     const nativeConnected = runtime.connectedAgentBackend;
     if (!nativeConnected) {
       if (options.forceCitedMission) {
