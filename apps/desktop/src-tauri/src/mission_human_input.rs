@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::store::repos::{
-    mission_checkpoint, mission_plan, mission_run, scope::DataScope, workspace_directory,
+    artifact, mission_checkpoint, mission_plan, mission_run,
+    scope::{DataScope, PrivateDataScope},
+    workspace_directory,
 };
 
 const MAX_PENDING_SCAN: i64 = 1_001;
@@ -75,6 +77,8 @@ pub struct PendingHumanInput {
     pub(crate) run_id: String,
     pub(crate) mission_id: String,
     pub(crate) source_thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) project_id: Option<String>,
     pub(crate) wait_key: String,
     pub(crate) request_key: String,
     pub(crate) prompt: String,
@@ -170,6 +174,7 @@ fn request_with_store(
             &auth.scope,
             &auth.internal_user_id,
             &auth.member_id,
+            None,
             &input,
         )
     })
@@ -181,6 +186,7 @@ pub(crate) fn request_in_tx(
     scope: &DataScope,
     internal_user_id: &str,
     member_id: &str,
+    continuation_id: Option<&str>,
     input: &HumanInputRequestInput,
 ) -> crate::store::Result<PendingHumanInput> {
     validate_request(input).map_err(crate::store::StoreError::Invalid)?;
@@ -207,6 +213,7 @@ pub(crate) fn request_in_tx(
         input,
         &schema_hash,
         base_event_id,
+        continuation_id,
     )?;
     let request_event_id = format!("mission-human-input-requested-{suffix}");
     if journal
@@ -245,6 +252,7 @@ pub(crate) fn request_in_tx(
         &schema_hash,
         &suffix,
         base_event_id,
+        continuation_id,
         &at,
     )
 }
@@ -345,7 +353,7 @@ pub(crate) fn receive_with_store(
                 &auth.internal_user_id,
             )
             .map_err(crate::store::StoreError::Invalid)?;
-            crate::mission_structured_intake::validate_terminal_replay_in_tx(
+            crate::mission_continuations::validate_terminal_replay_in_tx(
                 tx,
                 store,
                 &auth.scope,
@@ -376,8 +384,27 @@ pub(crate) fn receive_with_store(
                 "The mission run changed before human input was received.".into(),
             ));
         }
+        let lifecycle = mission_plan::get(
+            tx,
+            store,
+            &auth.scope,
+            &auth.member_id,
+            &facts.pending.mission_id,
+        )?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
         let values = validate_values(&facts.pending.fields, &input.values)
             .map_err(crate::store::StoreError::Invalid)?;
+        let values = attest_artifact_values(
+            tx,
+            store,
+            &auth.scope,
+            &auth.internal_user_id,
+            &auth.member_id,
+            &lifecycle,
+            &facts.pending.fields,
+            &values,
+            true,
+        )?;
         let at = now();
         let sequence = input.expected_last_sequence + 1;
         let event_id = format!("mission-human-input-received-{}", facts.request_suffix);
@@ -424,14 +451,6 @@ pub(crate) fn receive_with_store(
             &Value::Object(projected),
             &at,
         )?;
-        let lifecycle = mission_plan::get(
-            tx,
-            store,
-            &auth.scope,
-            &auth.member_id,
-            &facts.pending.mission_id,
-        )?
-        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
         mission_plan::resume_waiting(
             tx,
             store,
@@ -440,7 +459,7 @@ pub(crate) fn receive_with_store(
             &lifecycle,
             &at,
         )?;
-        crate::mission_structured_intake::settle_if_structured_in_tx(
+        crate::mission_continuations::settle_in_tx(
             tx,
             store,
             &auth.scope,
@@ -473,6 +492,7 @@ fn append_wait(
     schema_hash: &str,
     suffix: &str,
     base_event_id: &str,
+    continuation_id: Option<&str>,
     at: &str,
 ) -> crate::store::Result<PendingHumanInput> {
     let plan_revision_id = journal
@@ -507,15 +527,19 @@ fn append_wait(
         .get("currentAttemptNumber")
         .and_then(Value::as_i64)
         .unwrap_or(1);
+    let mut human_input_wait = json!({
+        "planRevisionId":plan_revision_id,"requestKey":input.request_key.trim(),
+        "schemaHash":schema_hash,"waitKey":wait_key,"prompt":input.prompt.trim(),
+        "fields":input.fields,
+        "runHead":{"revision":input.expected_run_revision,"lastSequence":input.expected_last_sequence,
+            "lastEventId":base_event_id}
+    });
+    if let Some(continuation_id) = continuation_id {
+        human_input_wait["continuationId"] = json!(continuation_id);
+    }
     let checkpoint_state = json!({
         "activeWorkerIds":[],"activePlanStepKeys":[],"pendingWaitKeys":[wait_key],
-        "humanInputWait":{
-            "planRevisionId":plan_revision_id,"requestKey":input.request_key.trim(),
-            "schemaHash":schema_hash,"waitKey":wait_key,"prompt":input.prompt.trim(),
-            "fields":input.fields,
-            "runHead":{"revision":input.expected_run_revision,"lastSequence":input.expected_last_sequence,
-                "lastEventId":base_event_id}
-        }
+        "humanInputWait":human_input_wait
     });
     let state_hash = sha256_json(&checkpoint_state)?;
     let checkpoint_sequence = input.expected_last_sequence + 1;
@@ -611,6 +635,11 @@ fn append_wait(
         run_id: input.run_id.clone(),
         mission_id,
         source_thread_id,
+        project_id: lifecycle
+            .mission
+            .pointer("/scope/projectId")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         wait_key,
         request_key: input.request_key.trim().to_string(),
         prompt: input.prompt.trim().to_string(),
@@ -795,6 +824,19 @@ fn validate_pending_wait(
         prompt: prompt.into(),
         fields: fields.clone(),
     };
+    let continuation_id = state
+        .get("continuationId")
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Human-input continuation identity is invalid.".into(),
+                    )
+                })
+        })
+        .transpose()?;
     let request_suffix = request_suffix(
         scope.workspace_id(),
         owner_member_id,
@@ -802,12 +844,14 @@ fn validate_pending_wait(
         &request_input,
         &schema_hash,
         base_event_id,
+        continuation_id,
     )?;
     if state.get("planRevisionId").and_then(Value::as_str) != Some(plan_revision_id)
         || state.get("schemaHash").and_then(Value::as_str) != Some(schema_hash.as_str())
         || state.get("waitKey").and_then(Value::as_str) != Some(wait_key)
         || state.get("prompt").and_then(Value::as_str) != Some(prompt)
         || state.get("fields") != wait.get("fields")
+        || wait.get("continuationId").is_some()
         || checkpoint
             .state
             .get("pendingWaitKeys")
@@ -858,11 +902,22 @@ fn validate_pending_wait(
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission run source thread is invalid.".into())
         })?;
+    let project_id = lifecycle
+        .mission
+        .pointer("/scope/projectId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    if journal.run.get("projectId").and_then(Value::as_str) != project_id.as_deref() {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission project scope does not match its human-input wait.".into(),
+        ));
+    }
     Ok(WaitFacts {
         pending: PendingHumanInput {
             run_id: request_input.run_id,
             mission_id: mission_id.into(),
             source_thread_id: source_thread_id.into(),
+            project_id,
             wait_key: wait_key.into(),
             request_key: request_key.into(),
             prompt: prompt.into(),
@@ -911,13 +966,9 @@ fn validate_fields(fields: &[HumanInputField]) -> Result<(), String> {
         }
         if !matches!(
             field.kind.as_str(),
-            "text" | "number" | "boolean" | "choice" | "date-time"
+            "text" | "number" | "boolean" | "choice" | "date-time" | "artifact"
         ) {
-            return Err(if field.kind == "artifact" {
-                "Artifact human-input fields are not supported by this native wait boundary.".into()
-            } else {
-                "Human-input field kind is invalid.".into()
-            });
+            return Err("Human-input field kind is invalid.".into());
         }
         match (field.kind.as_str(), field.choices.as_ref()) {
             ("choice", Some(choices)) if (2..=20).contains(&choices.len()) => {
@@ -1030,6 +1081,17 @@ fn validate_value(field: &HumanInputField, value: &Value) -> Result<(), String> 
                 .is_some_and(|choices| choices.iter().any(|item| item == choice))
         }),
         "date-time" => value.as_str().is_some_and(valid_date_time),
+        "artifact" => value.as_object().is_some_and(|reference| {
+            reference.len() == 2
+                && reference
+                    .get("artifactId")
+                    .and_then(Value::as_str)
+                    .is_some_and(valid_reference_id)
+                && reference
+                    .get("artifactVersionId")
+                    .and_then(Value::as_str)
+                    .is_some_and(valid_reference_id)
+        }),
         _ => false,
     };
     if valid {
@@ -1056,6 +1118,87 @@ fn valid_date_time(value: &str) -> bool {
         && bytes.get(16) == Some(&b':')
         && bytes.last() == Some(&b'Z')
         && DateTime::parse_from_rfc3339(value).is_ok()
+}
+
+fn valid_reference_id(value: &str) -> bool {
+    !value.trim().is_empty() && value.len() <= 200 && !value.chars().any(char::is_control)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn attest_artifact_values(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    internal_user_id: &str,
+    owner_member_id: &str,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    fields: &[HumanInputField],
+    values: &[HumanInputValue],
+    require_current_visibility: bool,
+) -> crate::store::Result<Vec<HumanInputValue>> {
+    let private = PrivateDataScope::for_authenticated_user(
+        scope.clone(),
+        internal_user_id,
+        Some(owner_member_id),
+    )?;
+    let project_id = lifecycle
+        .mission
+        .pointer("/scope/projectId")
+        .and_then(Value::as_str);
+    let field_kinds: BTreeMap<&str, &str> = fields
+        .iter()
+        .map(|field| (field.key.as_str(), field.kind.as_str()))
+        .collect();
+    let mut attested = Vec::with_capacity(values.len());
+    for value in values {
+        if field_kinds.get(value.field_key.as_str()) != Some(&"artifact") {
+            attested.push(value.clone());
+            continue;
+        }
+        let artifact_id = value
+            .value
+            .get("artifactId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Artifact human-input reference is invalid.".into(),
+                )
+            })?;
+        let artifact_version_id = value
+            .value
+            .get("artifactVersionId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Artifact human-input version is invalid.".into())
+            })?;
+        let reference = if require_current_visibility {
+            artifact::attest_available_artifact_version(
+                tx,
+                store,
+                &private,
+                project_id,
+                artifact_id,
+                artifact_version_id,
+            )?
+        } else {
+            artifact::attest_existing_artifact_version(
+                tx,
+                store,
+                &private,
+                artifact_id,
+                artifact_version_id,
+            )?
+        };
+        attested.push(HumanInputValue {
+            field_key: value.field_key.clone(),
+            value: json!({
+                "artifactId":reference.artifact_id,
+                "artifactVersionId":reference.artifact_version_id,
+                "contentHash":{"algorithm":"sha-256","value":reference.content_hash}
+            }),
+        });
+    }
+    Ok(attested)
 }
 
 fn exact_receive_replay(
@@ -1140,6 +1283,35 @@ fn exact_receive_replay(
             .ok_or_else(|| "Replayed human-input response is invalid.".to_string())?,
     )
     .map_err(|_| "Replayed human-input response is invalid.".to_string())?;
+    let fields: Vec<HumanInputField> = serde_json::from_value(
+        request_event
+            .pointer("/payload/wait/fields")
+            .cloned()
+            .ok_or_else(|| "Replayed human-input schema is invalid.".to_string())?,
+    )
+    .map_err(|_| "Replayed human-input schema is invalid.".to_string())?;
+    validate_fields(&fields).map_err(|_| "Replayed human-input schema is invalid.".to_string())?;
+    let normalized = validate_values(&fields, &input.values)?;
+    let mission_id = journal
+        .run
+        .pointer("/initiator/missionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Replayed human-input mission is invalid.".to_string())?;
+    let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)
+        .map_err(|_| "Replayed human-input mission is unavailable.".to_string())?
+        .ok_or_else(|| "Replayed human-input mission is unavailable.".to_string())?;
+    let normalized = attest_artifact_values(
+        tx,
+        store,
+        scope,
+        internal_user_id,
+        owner_member_id,
+        &lifecycle,
+        &fields,
+        &normalized,
+        false,
+    )
+    .map_err(|_| "Replayed artifact input is unavailable.".to_string())?;
     let supplied_by = event
         .pointer("/payload/resolution/suppliedByInternalUserId")
         .and_then(Value::as_str);
@@ -1149,7 +1321,7 @@ fn exact_receive_replay(
             .and_then(Value::as_str)
             != Some(input.wait_key.as_str())
         || supplied_by != Some(internal_user_id)
-        || !equivalent_values(&stored, &input.values)
+        || !equivalent_values(&stored, &normalized)
         || event.get("sequence").and_then(Value::as_i64) != Some(input.expected_last_sequence + 1)
     {
         return Err("The human-input response replay represents different facts.".into());
@@ -1194,6 +1366,7 @@ fn request_suffix(
     input: &HumanInputRequestInput,
     schema_hash: &str,
     base_event_id: &str,
+    continuation_id: Option<&str>,
 ) -> crate::store::Result<String> {
     let run_id = run
         .get("id")
@@ -1211,11 +1384,12 @@ fn request_suffix(
         ));
     }
     let material = format!(
-        "fable.mission-human-input.v1\0{workspace_id}\0{owner_member_id}\0{run_id}\0{plan_revision_id}\0{}\0{}\0{}\0{}\0{schema_hash}",
+        "fable.mission-human-input.v1\0{workspace_id}\0{owner_member_id}\0{run_id}\0{plan_revision_id}\0{}\0{}\0{}\0{}\0{schema_hash}\0{}",
         input.expected_run_revision,
         input.expected_last_sequence,
         base_event_id,
         input.request_key.trim(),
+        continuation_id.unwrap_or(""),
     );
     Ok(format!("{:x}", Sha256::digest(material.as_bytes())))
 }
@@ -1765,7 +1939,9 @@ mod tests {
         assert!(error.contains("secure value boundary"));
         let mut artifact = fields();
         artifact[0].kind = "artifact".into();
-        assert!(validate_fields(&artifact).unwrap_err().contains("Artifact"));
+        assert!(validate_fields(&artifact).is_ok());
+        artifact[0].choices = Some(vec!["renderer-choice".into()]);
+        assert!(validate_fields(&artifact).is_err());
         let mut duplicate = fields();
         duplicate[1].key = duplicate[0].key.clone();
         assert!(validate_fields(&duplicate).is_err());
@@ -1800,6 +1976,29 @@ mod tests {
             }],
         ] {
             assert!(validate_values(&schema, &changed).is_err());
+        }
+        let artifact_schema = vec![field("source", "artifact", true, None)];
+        assert!(validate_values(
+            &artifact_schema,
+            &[HumanInputValue {
+                field_key: "source".into(),
+                value: json!({"artifactId":"artifact-1","artifactVersionId":"version-1"}),
+            }],
+        )
+        .is_ok());
+        for malformed in [
+            json!({"artifactId":"artifact-1"}),
+            json!({"artifactId":"artifact-1","artifactVersionId":"version-1","contentHash":"renderer-controlled"}),
+            json!({"artifactId":" ","artifactVersionId":"version-1"}),
+        ] {
+            assert!(validate_values(
+                &artifact_schema,
+                &[HumanInputValue {
+                    field_key: "source".into(),
+                    value: malformed,
+                }],
+            )
+            .is_err());
         }
         let fixture = seed();
         let store = reopen(&fixture);

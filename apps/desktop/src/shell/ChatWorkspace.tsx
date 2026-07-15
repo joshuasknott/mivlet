@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { parseComposerText } from "@fable/connectors";
-import type { KnowledgeCitation } from "@fable/protocol";
+import type { KnowledgeCitation, Spine } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { connectors } from "../data/workspace";
@@ -13,12 +13,13 @@ import {
 import { insertDictation } from "../lib/insert-dictation";
 import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
 import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/structured-intake-mission";
+import { artifactRevisionBriefFocus, startArtifactRevisionBriefMission } from "../lib/artifact-revision-brief-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeCitedApproval, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue } from "../runtime";
+import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeCitedApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -37,7 +38,7 @@ type ConversationMessage = {
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
   missionPlan?: CitedBriefMissionPlanSummary;
-  missionKind?: "cited-brief" | "structured-intake";
+  missionKind?: "cited-brief" | "structured-intake" | "artifact-revision-brief";
   missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval";
   missionArtifactId?: string;
   approvalRunId?: string;
@@ -105,6 +106,11 @@ export function ChatWorkspace() {
   const [missionInputListWarning, setMissionInputListWarning] = useState<string | null>(null);
   const [missionInputBusyRunId, setMissionInputBusyRunId] = useState<string | null>(null);
   const [missionInputErrors, setMissionInputErrors] = useState<Record<string, string>>({});
+  const [missionInputArtifactOptions, setMissionInputArtifactOptions] = useState<Record<string, {
+    loading: boolean;
+    options: MissionHumanInputArtifactOption[];
+    error?: string;
+  }>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
@@ -115,7 +121,7 @@ export function ChatWorkspace() {
   const missionPlanHydrationKey = useRef<string | null>(null);
   const missionPlanHydrationRequestKey = useRef<string | null>(null);
   const newMissionLaunchRef = useRef<string | null>(null);
-  const structuredIntakeStartingRef = useRef(false);
+  const nativeInputMissionStartingRef = useRef(false);
   const optimisticMissionInputRunIds = useRef(new Set<string>());
   const activeAssistantMessageId = useRef<string | null>(null);
   const hydratedConversation = durableConversation.state.conversation;
@@ -125,6 +131,11 @@ export function ChatWorkspace() {
       runtime.accountWorkspaceStatus.state === "offline")
       ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
       : null;
+  const artifactInputHydrationKey = `${boundWorkspaceId ?? "unbound"}|${pendingMissionInputs
+    .filter((request) => request.fields.some((field) => field.kind === "artifact"))
+    .map((request) => `${request.runId}:${request.projectId ?? "workspace"}:${request.runRevision}`)
+    .sort()
+    .join("|")}`;
   const projectStore = useProjects(boundWorkspaceId);
   const conversationWorkspaceId = useRef<string | null>(boundWorkspaceId);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
@@ -413,13 +424,13 @@ export function ChatWorkspace() {
   const citedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
     message.kind === "assistant"
       && message.detail?.type === "mission-result"
-      && message.detail.missionKind !== "structured-intake"
+      && (message.detail.missionKind === undefined || message.detail.missionKind === "cited-brief")
       && (message.detail.outcome === "accepted" || message.detail.outcome === "partial")
   ) ?? [];
   const terminalCitedMissionMessages = hydratedConversation?.messages.filter(({ message }) =>
     message.kind === "assistant"
       && message.detail?.type === "mission-result"
-      && message.detail.missionKind !== "structured-intake"
+      && (message.detail.missionKind === undefined || message.detail.missionKind === "cited-brief")
       && (message.detail.outcome === "accepted" || message.detail.outcome === "partial"
         || message.detail.outcome === "failed" || message.detail.outcome === "cancelled")
   ) ?? [];
@@ -586,6 +597,47 @@ export function ChatWorkspace() {
 
   useEffect(() => {
     let active = true;
+    const requests = pendingMissionInputs.filter((request) =>
+      request.sourceThreadId === selectedConversationThreadId
+        && request.fields.some((field) => field.kind === "artifact")
+    );
+    setMissionInputArtifactOptions(Object.fromEntries(requests.map((request) => [request.runId, {
+      loading: true,
+      options: []
+    }])));
+    for (const request of requests) {
+      void searchRuntimeArtifacts({
+        ...(request.projectId ? { projectId: request.projectId as Spine.Primitives.ProjectId } : {}),
+        limit: 100
+      }).then((results) => {
+        if (!active || selectedConversationThreadIdRef.current !== request.sourceThreadId) return;
+        const options = results.map(({ artifact, currentVersion }) => ({
+          artifactId: artifact.id,
+          artifactVersionId: currentVersion.id,
+          label: artifact.title,
+          versionLabel: `Version ${currentVersion.version}`
+        }));
+        setMissionInputArtifactOptions((current) => ({
+          ...current,
+          [request.runId]: { loading: false, options }
+        }));
+      }).catch(() => {
+        if (!active || selectedConversationThreadIdRef.current !== request.sourceThreadId) return;
+        setMissionInputArtifactOptions((current) => ({
+          ...current,
+          [request.runId]: {
+            loading: false,
+            options: [],
+            error: "Artifacts are temporarily unavailable. Fable left this mission waiting."
+          }
+        }));
+      });
+    }
+    return () => { active = false; };
+  }, [artifactInputHydrationKey, selectedConversationThreadId]);
+
+  useEffect(() => {
+    let active = true;
     setPendingMissionInputs((current) => current.filter((request) =>
       optimisticMissionInputRunIds.current.has(request.runId)
         && request.sourceThreadId === selectedConversationThreadId
@@ -740,7 +792,9 @@ export function ChatWorkspace() {
       setPendingMissionInputs((current) => current.filter((entry) => entry.runId !== request.runId));
       if (selectedConversationThreadIdRef.current === request.sourceThreadId) {
         await durableConversation.refresh();
+        if (selectedConversationThreadIdRef.current !== request.sourceThreadId) return;
         const artifacts = await listRuntimeThreadArtifacts(request.sourceThreadId);
+        if (selectedConversationThreadIdRef.current !== request.sourceThreadId) return;
         setThreadArtifacts(artifacts);
       }
     } catch (cause) {
@@ -768,7 +822,7 @@ export function ChatWorkspace() {
             ?? (hydratedMissionPlans.key === activeMissionPlanHydrationKey
               ? hydratedMissionPlans.plans[message.id]
               : undefined);
-          const missionPlanUnavailable = message.missionKind !== "structured-intake"
+          const missionPlanUnavailable = (message.missionKind === undefined || message.missionKind === "cited-brief")
             && !missionPlan && Boolean(message.missionOutcome)
             && hydratedMissionPlans.key === activeMissionPlanHydrationKey;
           const canStartNewMission = message.role === "assistant" && Boolean(missionPlan)
@@ -856,6 +910,9 @@ export function ChatWorkspace() {
               requestedAt={request.requestedAt}
               busy={missionInputBusyRunId === request.runId}
               error={missionInputErrors[request.runId]}
+              artifactOptions={missionInputArtifactOptions[request.runId]?.options}
+              artifactOptionsLoading={missionInputArtifactOptions[request.runId]?.loading}
+              artifactOptionsError={missionInputArtifactOptions[request.runId]?.error}
               onSubmit={(values) => void submitMissionInput(request, values)}
             />
           </article>
@@ -1108,10 +1165,43 @@ export function ChatWorkspace() {
       appendConversationMessage("user", prompt);
     }
     runtime.setComposerValue("");
+    const revisionBriefFocus = artifactRevisionBriefFocus(prompt);
+    if (revisionBriefFocus) {
+      if (!selectedConversationThreadId) return;
+      if (nativeInputMissionStartingRef.current) {
+        appendConversationMessage(
+          "assistant",
+          "A provider-free mission is already starting. Try again when its form appears."
+        );
+        return;
+      }
+      const sourceThreadId = selectedConversationThreadId;
+      nativeInputMissionStartingRef.current = true;
+      void startArtifactRevisionBriefMission({
+        sourceThreadId,
+        ...(runProjectId ? { projectId: runProjectId } : {}),
+        focus: revisionBriefFocus
+      }).then((request) => {
+        if (selectedConversationThreadIdRef.current !== request.sourceThreadId) return;
+        optimisticMissionInputRunIds.current.add(request.runId);
+        setPendingMissionInputs((current) => [
+          ...current.filter((entry) => entry.runId !== request.runId),
+          request
+        ]);
+      }).catch((cause) => {
+        if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+        const message = cause instanceof Error ? cause.message : "Fable could not start the artifact revision brief.";
+        appendConversationMessage("assistant", message);
+      }).finally(() => {
+        nativeInputMissionStartingRef.current = false;
+      });
+      finishNewMissionLaunch();
+      return;
+    }
     const intakeSubject = structuredIntakeSubject(prompt);
     if (intakeSubject) {
       if (!selectedConversationThreadId) return;
-      if (structuredIntakeStartingRef.current) {
+      if (nativeInputMissionStartingRef.current) {
         appendConversationMessage(
           "assistant",
           "A structured brief is already starting. Try again when its form appears."
@@ -1119,7 +1209,7 @@ export function ChatWorkspace() {
         return;
       }
       const sourceThreadId = selectedConversationThreadId;
-      structuredIntakeStartingRef.current = true;
+      nativeInputMissionStartingRef.current = true;
       void startStructuredIntakeMission({
         sourceThreadId,
         ...(runProjectId ? { projectId: runProjectId } : {}),
@@ -1132,10 +1222,11 @@ export function ChatWorkspace() {
           request
         ]);
       }).catch((cause) => {
+        if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
         const message = cause instanceof Error ? cause.message : "Fable could not start the structured brief.";
         appendConversationMessage("assistant", message);
       }).finally(() => {
-        structuredIntakeStartingRef.current = false;
+        nativeInputMissionStartingRef.current = false;
       });
       finishNewMissionLaunch();
       return;

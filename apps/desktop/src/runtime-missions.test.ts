@@ -24,6 +24,7 @@ import {
   requestRuntimeMissionRunCancellation,
   requestRuntimeMissionHumanInput,
   restoreRuntimeMissionCheckpoint,
+  startRuntimeArtifactRevisionBrief,
   startRuntimeStructuredIntake,
   startRuntimeMissionWorker
 } from "./runtime";
@@ -68,6 +69,9 @@ describe("mission runtime boundary", () => {
     })).resolves.toBeNull();
     await expect(startRuntimeStructuredIntake({
       sourceThreadId: "thread-1", subject: "Launch", startKey: "start-1"
+    })).resolves.toBeNull();
+    await expect(startRuntimeArtifactRevisionBrief({
+      sourceThreadId: "thread-1", focus: "Launch memo", startKey: "start-2"
     })).resolves.toBeNull();
     await expect(restoreRuntimeMissionCheckpoint({
       runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
@@ -225,6 +229,52 @@ describe("mission runtime boundary", () => {
     await expect(startRuntimeStructuredIntake({
       sourceThreadId: "thread-1", subject: "Launch", startKey: "start-2"
     })).rejects.toThrow("Malformed structured-intake wait projection");
+  });
+
+  it("composes an artifact revision-brief start and validates exact artifact identities before invoke", async () => {
+    setNative(true);
+    const fields = [
+      { key: "sourceArtifact", label: "Source artifact", kind: "artifact" as const, required: true, sensitive: false as const },
+      { key: "objective", label: "Objective", kind: "text" as const, required: true, sensitive: false as const }
+    ];
+    const request = {
+      runId: "run-revision", missionId: "mission-revision", sourceThreadId: "thread-1", projectId: "project-1",
+      waitKey: "human-input-wait:v1:revision", requestKey: "artifact-revision-brief:v1",
+      prompt: "Choose an artifact.", fields, requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+    mocks.invoke.mockResolvedValueOnce(request).mockResolvedValueOnce({
+      runId: "run-revision", waitKey: "human-input-wait:v1:revision", status: "received",
+      receivedAt: "2026-07-13T12:01:00Z", runRevision: 6, lastSequence: 5
+    });
+    const start = { sourceThreadId: "thread-1", projectId: "project-1", focus: "Launch", startKey: "start-1" };
+    await expect(startRuntimeArtifactRevisionBrief(start)).resolves.toEqual(request);
+    await expect(receiveRuntimeMissionHumanInput(request, [
+      { fieldKey: "sourceArtifact", value: { artifactId: "artifact-1", artifactVersionId: "version-2" } },
+      { fieldKey: "objective", value: "Clarify the decision." }
+    ])).resolves.toMatchObject({ status: "received" });
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["mission_artifact_revision_brief_start", { input: start }],
+      ["mission_human_input_receive", { input: {
+        runId: "run-revision", waitKey: "human-input-wait:v1:revision",
+        expectedRunRevision: 5, expectedLastSequence: 4,
+        values: [
+          { fieldKey: "sourceArtifact", value: { artifactId: "artifact-1", artifactVersionId: "version-2" } },
+          { fieldKey: "objective", value: "Clarify the decision." }
+        ]
+      } }]
+    ]);
+
+    await expect(receiveRuntimeMissionHumanInput(request, [
+      { fieldKey: "sourceArtifact", value: {
+        artifactId: "artifact-1", artifactVersionId: "version-2", contentHash: "renderer-controlled"
+      } as never },
+      { fieldKey: "objective", value: "Clarify the decision." }
+    ])).rejects.toThrow("do not match");
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
+
+    mocks.invoke.mockResolvedValueOnce({ ...request, projectId: "" });
+    await expect(startRuntimeArtifactRevisionBrief({ ...start, startKey: "start-2" }))
+      .rejects.toThrow("Malformed artifact revision-brief wait projection");
   });
 
   it("accepts the native atomic terminal result when stopping dormant human input", async () => {

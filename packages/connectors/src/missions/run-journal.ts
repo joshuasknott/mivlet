@@ -5,7 +5,7 @@ type RunEvent = Spine.Missions.RunEvent;
 type RunStatus = Spine.Missions.RunStatus;
 
 const TERMINAL = new Set<RunStatus>(["completed", "partially-completed", "failed", "cancelled"]);
-const HUMAN_INPUT_KINDS = new Set<string>(["text", "number", "boolean", "choice", "date-time"]);
+const HUMAN_INPUT_KINDS = new Set<string>(["text", "number", "boolean", "choice", "date-time", "artifact"]);
 const HUMAN_INPUT_LIMITS = {
   waitKey: 200,
   prompt: 2_000,
@@ -345,6 +345,16 @@ function validHumanInputValue(field: Spine.Missions.HumanInputField, value: unkn
       return typeof value === "string" && value.length <= HUMAN_INPUT_LIMITS.timestamp
         && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
         && Number.isFinite(Date.parse(value));
+    case "artifact":
+      return isRecord(value)
+        && hasExactKeys(value, ["artifactId", "artifactVersionId", "contentHash"])
+        && boundedString(value.artifactId, HUMAN_INPUT_LIMITS.identity)
+        && boundedString(value.artifactVersionId, HUMAN_INPUT_LIMITS.identity)
+        && isRecord(value.contentHash)
+        && hasExactKeys(value.contentHash, ["algorithm", "value"])
+        && value.contentHash.algorithm === "sha-256"
+        && typeof value.contentHash.value === "string"
+        && /^[0-9a-f]{64}$/.test(value.contentHash.value);
     default:
       return false;
   }
@@ -357,6 +367,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
   const allowedKeys = new Set(allowed);
   return Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return Object.keys(value).length === expected.length
+    && expected.every((key) => Object.hasOwn(value, key));
 }
 
 function boundedString(value: unknown, maximumLength: number): value is string {

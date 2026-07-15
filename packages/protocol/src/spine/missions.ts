@@ -28,6 +28,7 @@ import type {
   WorkerId,
   WorkspaceId
 } from "./primitives.js";
+import type { ContentHash } from "./artifacts-routines.js";
 
 /** Fable chooses this depth; it is never a required user-facing mode. */
 export const EXECUTION_DEPTHS = ["direct", "delegated", "multi-worker"] as const;
@@ -610,7 +611,14 @@ export interface HumanInputWait {
 
 export interface HumanInputValue {
   fieldKey: string;
-  value: string | number | boolean | ArtifactId | null;
+  value: string | number | boolean | HumanInputArtifactVersionReference | null;
+}
+
+/** An immutable artifact version attested by its exact content hash. */
+export interface HumanInputArtifactVersionReference {
+  artifactId: ArtifactId;
+  artifactVersionId: ArtifactVersionId;
+  contentHash: ContentHash & { algorithm: "sha-256" };
 }
 
 export interface HumanInputResolution {

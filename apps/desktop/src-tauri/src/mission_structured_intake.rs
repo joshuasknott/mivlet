@@ -18,7 +18,8 @@ use crate::store::repos::{
     thread, workspace_directory,
 };
 
-const MARKER: &str = "native:structured-intake:v1";
+pub(crate) const CONTINUATION_ID: &str = "native:structured-intake:v1";
+const MARKER: &str = CONTINUATION_ID;
 const OUTPUT_KEY: &str = "brief";
 const REQUEST_KEY: &str = "structured-project-brief:v1";
 const PROMPT: &str = "Add the details needed to create a structured project brief.";
@@ -263,6 +264,7 @@ fn start_with_store(
             &auth.scope,
             &auth.internal_user_id,
             &auth.member_id,
+            Some(CONTINUATION_ID),
             &HumanInputRequestInput {
                 run_id: binding.run_id,
                 request_key: REQUEST_KEY.into(),
@@ -1259,6 +1261,7 @@ fn required_i64(value: &Value, key: &str) -> crate::store::Result<i64> {
 mod tests {
     use super::*;
     use crate::mission_human_input::{receive_with_store, HumanInputReceiveInput, HumanInputValue};
+    use crate::mission_runs::{request_cancellation_with_store, MissionRunCancelInput};
     use crate::store::repos::{artifact, message, workspace_directory};
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
@@ -1670,5 +1673,105 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("provenance"));
+    }
+
+    #[test]
+    fn substituted_native_continuation_plan_fails_before_settlement() {
+        let fixture = seed();
+        let store = reopen(&fixture);
+        let pending = start_with_store(&store, start("Dispatcher integrity")).unwrap();
+        let scope = DataScope::workspace(fixture.workspace_id.clone()).unwrap();
+        store
+            .transaction(|tx| {
+                let mut lifecycle =
+                    mission_plan::get(tx, &store, &scope, "member-1", &pending.mission_id)?
+                        .unwrap();
+                lifecycle.mission["constraints"][0]["key"] = json!("native:unknown:v9");
+                let sealed = crate::store::repos::seal_json(
+                    &store,
+                    &lifecycle.mission,
+                    &format!(
+                        "mission:{}:member-1:{}",
+                        fixture.workspace_id, pending.mission_id
+                    ),
+                )?;
+                tx.execute(
+                    "UPDATE mission_record SET payload=?1,payload_nonce=?2 WHERE id=?3",
+                    rusqlite::params![sealed.ciphertext, sealed.nonce, pending.mission_id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let error = receive_with_store(
+            &store,
+            HumanInputReceiveInput {
+                run_id: pending.run_id.clone(),
+                wait_key: pending.wait_key.clone(),
+                expected_run_revision: pending.run_revision,
+                expected_last_sequence: pending.last_sequence,
+                values: values("Must not settle"),
+            },
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("continuation plan and wait facts disagree"));
+        let journal = store
+            .with_conn(|tx| mission_run::get(tx, &store, &scope, "member-1", &pending.run_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(journal.run["status"], "waiting-human-input");
+        assert_eq!(journal.events.len(), 4);
+        let downstream: i64 = store
+            .with_conn(|tx| {
+                Ok(tx.query_row(
+                    "SELECT COUNT(*) FROM mission_direct_artifact_source WHERE mission_run_id=?1",
+                    [&pending.run_id],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(downstream, 0);
+    }
+
+    #[test]
+    fn cancelling_native_wait_creates_no_continuation_output() {
+        let fixture = seed();
+        let store = reopen(&fixture);
+        let pending = start_with_store(&store, start("Cancel dispatcher")).unwrap();
+        let cancelled = request_cancellation_with_store(
+            &store,
+            MissionRunCancelInput {
+                run_id: pending.run_id.clone(),
+                event_id: "structured-intake-cancel-requested".into(),
+                request_key: "structured-intake-cancel:v1".into(),
+                expected_run_revision: pending.run_revision,
+                expected_last_sequence: pending.last_sequence,
+                mode: "cooperative".into(),
+                reason: Some("No brief is needed.".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(cancelled.run["status"], "cancelled");
+        assert!(cancelled
+            .events
+            .iter()
+            .all(|event| event["type"] != "run-completed"));
+        let (sources, messages): (i64, i64) = store
+            .with_conn(|tx| {
+                Ok((
+                    tx.query_row(
+                        "SELECT COUNT(*) FROM mission_direct_artifact_source WHERE mission_run_id=?1",
+                        [&pending.run_id],
+                        |row| row.get(0),
+                    )?,
+                    tx.query_row(
+                        "SELECT COUNT(*) FROM message WHERE run_id=?1",
+                        [&pending.run_id],
+                        |row| row.get(0),
+                    )?,
+                ))
+            })
+            .unwrap();
+        assert_eq!((sources, messages), (0, 0));
     }
 }

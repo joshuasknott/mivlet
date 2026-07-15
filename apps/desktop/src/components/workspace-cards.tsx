@@ -190,7 +190,7 @@ export type MissionHumanInputField = {
   key: string;
   label: string;
   help?: string;
-  kind: "text" | "number" | "boolean" | "choice" | "date-time";
+  kind: "text" | "number" | "boolean" | "choice" | "date-time" | "artifact";
   required: boolean;
   sensitive: false;
   choices?: string[];
@@ -198,7 +198,14 @@ export type MissionHumanInputField = {
 
 export type MissionHumanInputValue = {
   fieldKey: string;
-  value: string | number | boolean | null;
+  value: string | number | boolean | { artifactId: string; artifactVersionId: string } | null;
+};
+
+export type MissionHumanInputArtifactOption = {
+  artifactId: string;
+  artifactVersionId: string;
+  label: string;
+  versionLabel: string;
 };
 
 export function MissionHumanInputCard({
@@ -207,6 +214,9 @@ export function MissionHumanInputCard({
   requestedAt,
   busy,
   error,
+  artifactOptions = [],
+  artifactOptionsLoading = false,
+  artifactOptionsError,
   onSubmit
 }: {
   prompt: string;
@@ -214,6 +224,9 @@ export function MissionHumanInputCard({
   requestedAt: string;
   busy: boolean;
   error?: string;
+  artifactOptions?: MissionHumanInputArtifactOption[];
+  artifactOptionsLoading?: boolean;
+  artifactOptionsError?: string;
   onSubmit: (values: MissionHumanInputValue[]) => void;
 }) {
   const [values, setValues] = useState<Record<string, string | boolean>>(() =>
@@ -230,6 +243,13 @@ export function MissionHumanInputCard({
       }
       const text = typeof raw === "string" ? raw : "";
       if (!field.required && text.length === 0) return [];
+      if (field.kind === "artifact") {
+        const selected = artifactOptions[Number(text)];
+        return selected ? [{ fieldKey: field.key, value: {
+          artifactId: selected.artifactId,
+          artifactVersionId: selected.artifactVersionId
+        } }] : [];
+      }
       if (field.kind === "number") return [{ fieldKey: field.key, value: Number(text) }];
       if (field.kind === "date-time") return [{ fieldKey: field.key, value: new Date(text).toISOString() }];
       return [{ fieldKey: field.key, value: text }];
@@ -265,16 +285,24 @@ export function MissionHumanInputCard({
           return (
             <label key={field.key}>
               <span>{field.label}{field.required ? " *" : ""}</span>
-              {field.kind === "choice" ? (
+              {field.kind === "choice" || field.kind === "artifact" ? (
                 <select
                   value={String(values[field.key] ?? "")}
                   required={field.required}
-                  disabled={busy}
+                  disabled={busy || (field.kind === "artifact" && (artifactOptionsLoading || artifactOptions.length === 0))}
                   aria-describedby={helpId}
                   onChange={(event) => update(field.key, event.target.value)}
                 >
-                  <option value="">Select an option</option>
-                  {field.choices?.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+                  <option value="">{field.kind === "artifact"
+                    ? artifactOptionsLoading ? "Loading artifacts..." : artifactOptions.length === 0 ? "No artifacts available" : "Select an artifact"
+                    : "Select an option"}</option>
+                  {field.kind === "artifact"
+                    ? artifactOptions.map((option, index) => (
+                      <option key={`${option.artifactId}:${option.artifactVersionId}`} value={String(index)}>
+                        {option.label} · {option.versionLabel}
+                      </option>
+                    ))
+                    : field.choices?.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
                 </select>
               ) : (
                 <input
@@ -294,10 +322,11 @@ export function MissionHumanInputCard({
       </div>
       <div className="mission-human-input-card__footer">
         <small>Requested {new Date(requestedAt).toLocaleString()}</small>
-        <button type="submit" className="button button--primary" disabled={busy} aria-busy={busy || undefined}>
+        <button type="submit" className="button button--primary" disabled={busy || fields.some((field) => field.kind === "artifact" && field.required && artifactOptions.length === 0)} aria-busy={busy || undefined}>
           {busy ? "Continuing..." : "Continue mission"}
         </button>
       </div>
+      {artifactOptionsError ? <p role="alert" className="mission-human-input-card__error">{artifactOptionsError}</p> : null}
       {error ? <p role="alert" className="mission-human-input-card__error">{error}</p> : null}
     </form>
   );

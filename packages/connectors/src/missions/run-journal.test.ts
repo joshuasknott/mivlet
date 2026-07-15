@@ -45,7 +45,8 @@ function humanInputWait(): Spine.Missions.HumanInputWait {
       { key: "count", label: "Count", kind: "number", required: true, sensitive: false },
       { key: "confirmed", label: "Confirmed", kind: "boolean", required: true, sensitive: false },
       { key: "format", label: "Format", kind: "choice", choices: ["brief", "report"], required: true, sensitive: false },
-      { key: "due-at", label: "Due at", kind: "date-time", required: true, sensitive: false }
+      { key: "due-at", label: "Due at", kind: "date-time", required: true, sensitive: false },
+      { key: "source", label: "Source artifact", kind: "artifact", required: true, sensitive: false }
     ]
   };
 }
@@ -66,12 +67,21 @@ function savedHumanInputBoundary(waitKey = "collect-brief-1") {
   }, id<"run-event">("event-2")));
 }
 
+function humanInputArtifactReference(): Spine.Missions.HumanInputArtifactVersionReference {
+  return {
+    artifactId: id<"artifact">("artifact-1"),
+    artifactVersionId: id<"artifact-version">("artifact-version-1"),
+    contentHash: { algorithm: "sha-256", value: "a".repeat(64) }
+  };
+}
+
 function humanInputResolution(values: readonly Spine.Missions.HumanInputValue[] = [
   { fieldKey: "title", value: "Quarterly research brief" },
   { fieldKey: "count", value: 3 },
   { fieldKey: "confirmed", value: true },
   { fieldKey: "format", value: "brief" },
-  { fieldKey: "due-at", value: "2026-07-31T16:30:00Z" }
+  { fieldKey: "due-at", value: "2026-07-31T16:30:00Z" },
+  { fieldKey: "source", value: humanInputArtifactReference() }
 ]): Spine.Missions.HumanInputResolution {
   return {
     waitKey: "collect-brief-1", receivedAt: "2026-07-15T10:01:00Z",
@@ -240,6 +250,17 @@ describe("durable run journal projection", () => {
       ])
     }, id<"run-event">("event-4"));
     expect(() => appendRunEvent(resumed, alternative)).toThrow("different facts");
+
+    const changedArtifact = event("human-input-received", 5, {
+      resolution: humanInputResolution(resolution.values.map((input) => input.fieldKey === "source"
+        ? { ...input, value: {
+            artifactId: id<"artifact">("artifact-1"),
+            artifactVersionId: id<"artifact-version">("artifact-version-2"),
+            contentHash: { algorithm: "sha-256" as const, value: "b".repeat(64) }
+          } }
+        : input))
+    }, id<"run-event">("event-4"));
+    expect(() => appendRunEvent(resumed, changedArtifact)).toThrow("different facts");
   });
 
   it("rejects unbounded, ambiguous, or unsupported human-input schemas", () => {
@@ -251,7 +272,6 @@ describe("durable run journal projection", () => {
       { ...wait, fields: [] },
       { ...wait, fields: Array.from({ length: 9 }, (_, index) => ({ ...first, key: `field-${index}` })) },
       { ...wait, fields: [...wait.fields, { ...first }] },
-      { ...wait, fields: [{ ...first, kind: "artifact" }] },
       { ...wait, fields: [{ ...first, sensitive: true }] },
       { ...wait, fields: [{ key: "format", label: "Format", kind: "choice", choices: ["only"], required: true, sensitive: false }] },
       { ...wait, fields: [{ key: "format", label: "Format", kind: "choice", choices: ["same", "same"], required: true, sensitive: false }] },
@@ -269,6 +289,7 @@ describe("durable run journal projection", () => {
     const wait = humanInputWait();
     const waiting = appendRunEvent(saved, event("human-input-requested", 4, { wait }, id<"run-event">("event-3")));
     const valid = humanInputResolution().values;
+    const artifact = humanInputArtifactReference();
     const invalidResolutions: readonly Spine.Missions.HumanInputResolution[] = [
       { ...humanInputResolution(), waitKey: "wrong-wait" },
       humanInputResolution(valid.filter((input) => input.fieldKey !== "title")),
@@ -277,8 +298,33 @@ describe("durable run journal projection", () => {
       humanInputResolution([{ fieldKey: "title", value: "x".repeat(4_001) }, ...valid.slice(1)]),
       humanInputResolution([valid[0]!, { fieldKey: "count", value: Number.POSITIVE_INFINITY }, ...valid.slice(2)]),
       humanInputResolution([valid[0]!, valid[1]!, { fieldKey: "confirmed", value: "true" }, ...valid.slice(3)] as readonly Spine.Missions.HumanInputValue[]),
-      humanInputResolution([...valid.slice(0, 3), { fieldKey: "format", value: "memo" }, valid[4]!]),
-      humanInputResolution([...valid.slice(0, 4), { fieldKey: "due-at", value: "tomorrow" }]),
+      humanInputResolution([...valid.slice(0, 3), { fieldKey: "format", value: "memo" }, ...valid.slice(4)]),
+      humanInputResolution([...valid.slice(0, 4), { fieldKey: "due-at", value: "tomorrow" }, ...valid.slice(5)]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: "artifact-1" }]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        artifactId: artifact.artifactId,
+        artifactVersionId: artifact.artifactVersionId
+      } } as unknown as Spine.Missions.HumanInputValue]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        ...artifact, artifactId: id<"artifact">("")
+      } }]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        ...artifact, artifactVersionId: id<"artifact-version">("v".repeat(201))
+      } }]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        ...artifact, contentHash: { algorithm: "sha-256", value: "A".repeat(64) }
+      } }]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        ...artifact, contentHash: { algorithm: "sha-256", value: "a".repeat(63) }
+      } }]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        ...artifact,
+        contentHash: { algorithm: "sha-512", value: "a".repeat(64) }
+      } } as unknown as Spine.Missions.HumanInputValue]),
+      humanInputResolution([...valid.slice(0, 5), { fieldKey: "source", value: {
+        ...artifact,
+        extra: true
+      } } as unknown as Spine.Missions.HumanInputValue]),
       humanInputResolution([{ fieldKey: "title", value: null }, ...valid.slice(1)])
     ];
     for (const invalid of invalidResolutions) {

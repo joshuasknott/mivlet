@@ -260,4 +260,27 @@ describe("RunContextSummary", () => {
     expect(screen.getByRole("combobox", { name: /Region/ })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("Fable could not continue this mission.");
   });
+
+  it("submits only the selected immutable artifact-version identifiers", () => {
+    const onSubmit = vi.fn();
+    render(<MissionHumanInputCard
+      prompt="Choose the artifact to plan a revision for."
+      requestedAt="2026-07-13T10:00:00Z"
+      busy={false}
+      fields={[{ key: "sourceArtifact", label: "Source artifact", kind: "artifact", required: true, sensitive: false }]}
+      artifactOptions={[{
+        artifactId: "artifact-1",
+        artifactVersionId: "artifact-version-2",
+        label: "Launch brief",
+        versionLabel: "Version 2"
+      }]}
+      onSubmit={onSubmit}
+    />);
+    fireEvent.change(screen.getByRole("combobox", { name: /Source artifact/ }), { target: { value: "0" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Mission needs input" }));
+    expect(onSubmit).toHaveBeenCalledWith([{
+      fieldKey: "sourceArtifact",
+      value: { artifactId: "artifact-1", artifactVersionId: "artifact-version-2" }
+    }]);
+  });
 });

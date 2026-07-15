@@ -22,6 +22,20 @@ pub struct DirectMissionArtifactBinding {
     pub artifact_version_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttestedArtifactVersionReference {
+    pub artifact_id: String,
+    pub artifact_version_id: String,
+    pub title: String,
+    pub content_hash: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DirectMissionArtifactReference<'a> {
+    pub field_key: &'a str,
+    pub reference: &'a AttestedArtifactVersionReference,
+}
+
 fn artifact_aad(scope: &PrivateDataScope, id: &str) -> String {
     format!(
         "artifact:{}:{}:{id}",
@@ -36,6 +50,206 @@ fn version_aad(scope: &PrivateDataScope, artifact_id: &str, id: &str) -> String 
         scope.workspace_id(),
         scope.owner_subject()
     )
+}
+
+pub fn attest_available_artifact_version(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    project_id: Option<&str>,
+    artifact_id: &str,
+    artifact_version_id: &str,
+) -> Result<AttestedArtifactVersionReference> {
+    let reference =
+        attest_existing_artifact_version(tx, store, scope, artifact_id, artifact_version_id)?;
+    let bundle = get_bundle(tx, store, scope, artifact_id)?
+        .ok_or_else(|| StoreError::Invalid("The selected artifact is unavailable.".into()))?;
+    if bundle.pointer("/artifact/status").and_then(Value::as_str) == Some("deleted") {
+        return Err(StoreError::Invalid(
+            "The selected artifact is no longer available.".into(),
+        ));
+    }
+    if let Some(project_id) = project_id {
+        if !exact_owner_project(tx, scope, project_id)? {
+            return Err(StoreError::Invalid(
+                "The selected artifact project is unavailable for this owner.".into(),
+            ));
+        }
+        let direct_payload = bundle
+            .pointer("/artifact/context/projectId")
+            .and_then(Value::as_str)
+            == Some(project_id);
+        let direct_thread: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM artifact a JOIN thread t
+               ON t.id=a.thread_id AND t.workspace_id=a.workspace_id
+             WHERE a.workspace_id=?1 AND a.owner_subject=?2 AND a.id=?3
+               AND t.project_id=?4 AND t.authority='local' AND t.visibility='member-private'
+               AND t.deleted_at IS NULL AND t.owner_member_id=?5)",
+            rusqlite::params![
+                scope.workspace_id(),
+                scope.owner_subject(),
+                artifact_id,
+                project_id,
+                scope.owner_member_id()
+            ],
+            |row| row.get(0),
+        )?;
+        let handed_off = latest_accepted_handoff_matches(
+            tx,
+            scope,
+            artifact_id,
+            artifact_version_id,
+            project_id,
+        )?;
+        let current_matches = bundle
+            .pointer("/artifact/currentVersionId")
+            .and_then(Value::as_str)
+            == Some(artifact_version_id);
+        if !handed_off && (!(direct_payload || direct_thread) || !current_matches) {
+            return Err(StoreError::Invalid(
+                "The selected artifact version is outside this project.".into(),
+            ));
+        }
+    } else if bundle
+        .pointer("/artifact/currentVersionId")
+        .and_then(Value::as_str)
+        != Some(artifact_version_id)
+    {
+        return Err(StoreError::Invalid(
+            "Select the artifact's current version for this mission.".into(),
+        ));
+    }
+    Ok(reference)
+}
+
+fn latest_accepted_handoff_matches(
+    tx: &Connection,
+    scope: &PrivateDataScope,
+    artifact_id: &str,
+    artifact_version_id: &str,
+    project_id: &str,
+) -> Result<bool> {
+    tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM artifact_handoff h
+         WHERE h.workspace_id=?1 AND h.owner_subject=?2 AND h.artifact_id=?3
+           AND h.version_id=?4 AND h.target_project_id=?5 AND h.status='accepted'
+           AND h.id=(SELECT latest.id FROM artifact_handoff latest
+             WHERE latest.workspace_id=h.workspace_id AND latest.owner_subject=h.owner_subject
+               AND latest.artifact_id=h.artifact_id AND latest.target_project_id=h.target_project_id
+               AND latest.status='accepted'
+             ORDER BY latest.resolved_at DESC,latest.id DESC LIMIT 1))",
+        rusqlite::params![
+            scope.workspace_id(),
+            scope.owner_subject(),
+            artifact_id,
+            artifact_version_id,
+            project_id
+        ],
+        |row| row.get(0),
+    )
+    .map_err(Into::into)
+}
+
+pub fn attest_existing_artifact_version(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    artifact_id: &str,
+    artifact_version_id: &str,
+) -> Result<AttestedArtifactVersionReference> {
+    scope.ensure_exists(tx)?;
+    if artifact_id.trim().is_empty()
+        || artifact_id.len() > 200
+        || artifact_version_id.trim().is_empty()
+        || artifact_version_id.len() > 200
+    {
+        return Err(StoreError::Invalid(
+            "Artifact input reference is invalid.".into(),
+        ));
+    }
+    let bundle = get_bundle(tx, store, scope, artifact_id)?
+        .ok_or_else(|| StoreError::Invalid("The selected artifact is unavailable.".into()))?;
+    let artifact = bundle
+        .get("artifact")
+        .ok_or_else(|| StoreError::Invalid("The selected artifact is invalid.".into()))?;
+    let version = bundle
+        .get("versions")
+        .and_then(Value::as_array)
+        .and_then(|versions| {
+            versions.iter().find(|version| {
+                version.get("id").and_then(Value::as_str) == Some(artifact_version_id)
+            })
+        })
+        .ok_or_else(|| {
+            StoreError::Invalid("The selected artifact version is unavailable.".into())
+        })?;
+    let title = artifact
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|title| !title.trim().is_empty() && title.chars().count() <= 400)
+        .ok_or_else(|| StoreError::Invalid("The selected artifact title is invalid.".into()))?;
+    let content_hash = version
+        .pointer("/contentHash/value")
+        .and_then(Value::as_str)
+        .filter(|hash| {
+            hash.len() == 64
+                && hash
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
+        .ok_or_else(|| StoreError::Invalid("The selected artifact hash is invalid.".into()))?;
+    let inline_text = version
+        .pointer("/content/text")
+        .and_then(Value::as_str)
+        .filter(|_| version.pointer("/content/kind").and_then(Value::as_str) == Some("inline"))
+        .ok_or_else(|| {
+            StoreError::Invalid(
+                "Only an inline immutable artifact version can be used as mission input.".into(),
+            )
+        })?;
+    let computed_hash = format!("{:x}", Sha256::digest(inline_text.as_bytes()));
+    let stored_record: Option<(String, i64)> = tx
+        .query_row(
+            "SELECT content_fingerprint,size_bytes FROM artifact_version
+             WHERE workspace_id=?1 AND owner_subject=?2 AND artifact_id=?3 AND id=?4
+               AND status='available'",
+            rusqlite::params![
+                scope.workspace_id(),
+                scope.owner_subject(),
+                artifact_id,
+                artifact_version_id
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if artifact.get("id").and_then(Value::as_str) != Some(artifact_id)
+        || artifact.get("workspaceId").and_then(Value::as_str) != Some(scope.workspace_id())
+        || artifact.get("visibility").and_then(Value::as_str) != Some("member-private")
+        || artifact.get("authority").and_then(Value::as_str) != Some("local")
+        || version.get("artifactId").and_then(Value::as_str) != Some(artifact_id)
+        || version.get("status").and_then(Value::as_str) != Some("available")
+        || version
+            .pointer("/contentHash/algorithm")
+            .and_then(Value::as_str)
+            != Some("sha-256")
+        || version.pointer("/content/contentHash") != version.get("contentHash")
+        || version.pointer("/content/media") != version.get("media")
+        || version.pointer("/media/byteLength").and_then(Value::as_i64)
+            != Some(inline_text.len() as i64)
+        || computed_hash != content_hash
+        || stored_record.as_ref().map(|record| record.0.as_str()) != Some(content_hash)
+        || stored_record.as_ref().map(|record| record.1) != Some(inline_text.len() as i64)
+    {
+        return Err(StoreError::Invalid(
+            "The selected artifact version no longer matches its immutable record.".into(),
+        ));
+    }
+    Ok(AttestedArtifactVersionReference {
+        artifact_id: artifact_id.into(),
+        artifact_version_id: artifact_version_id.into(),
+        title: title.trim().into(),
+        content_hash: content_hash.into(),
+    })
 }
 
 fn review_aad(scope: &PrivateDataScope, artifact_id: &str, id: &str) -> String {
@@ -185,8 +399,80 @@ pub fn create_direct_mission_output(
     text: &str,
     expected: &DirectMissionArtifactBinding,
 ) -> Result<DirectMissionArtifactBinding> {
+    create_direct_mission_output_inner(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        run_id,
+        source_event_id,
+        result_event_id,
+        output_key,
+        title,
+        text,
+        expected,
+        "source",
+        "Authenticated structured intake response",
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_direct_mission_output_with_artifact_reference(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    source_event_id: &str,
+    result_event_id: &str,
+    output_key: &str,
+    title: &str,
+    text: &str,
+    expected: &DirectMissionArtifactBinding,
+    input_label: &str,
+    source_reference: DirectMissionArtifactReference<'_>,
+) -> Result<DirectMissionArtifactBinding> {
+    create_direct_mission_output_inner(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        run_id,
+        source_event_id,
+        result_event_id,
+        output_key,
+        title,
+        text,
+        expected,
+        "user-input",
+        input_label,
+        Some(source_reference),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_direct_mission_output_inner(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    source_event_id: &str,
+    result_event_id: &str,
+    output_key: &str,
+    title: &str,
+    text: &str,
+    expected: &DirectMissionArtifactBinding,
+    input_kind: &str,
+    input_label: &str,
+    source_reference: Option<DirectMissionArtifactReference<'_>>,
+) -> Result<DirectMissionArtifactBinding> {
     scope.ensure_exists(tx)?;
     if scope.owner_member_id() != Some(owner_member_id)
+        || !matches!(input_kind, "source" | "user-input")
+        || input_label.trim().is_empty()
+        || input_label.chars().count() > 200
         || title.trim().is_empty()
         || title.chars().count() > 400
         || text.trim().is_empty()
@@ -220,6 +506,9 @@ pub fn create_direct_mission_output(
         .events
         .iter()
         .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id));
+    if let Some(reference) = source_reference {
+        validate_direct_source_reference(tx, store, scope, source, reference)?;
+    }
     let output_matches = |value: &Value| {
         value.get("key").and_then(Value::as_str) == Some(output_key)
             && value.get("artifactId").and_then(Value::as_str)
@@ -267,6 +556,18 @@ pub fn create_direct_mission_output(
         &content_hash,
     )? {
         validate_direct_mission_artifact_bundle(tx, store, scope, &existing, &content_hash)?;
+        if let Some(reference) = source_reference {
+            validate_direct_artifact_reference_bundle(
+                tx,
+                store,
+                scope,
+                &existing,
+                source_event_id,
+                input_kind,
+                input_label,
+                reference,
+            )?;
+        }
         return if existing == *expected {
             Ok(existing)
         } else {
@@ -312,6 +613,20 @@ pub fn create_direct_mission_output(
     });
     let media = json!({"mediaType":"text/markdown","byteLength":text.len(),"encoding":"utf-8"});
     let hash = json!({"algorithm":"sha-256","value":content_hash});
+    let mut inputs = vec![json!({"kind":input_kind,"referenceId":source_event_id,
+        "label":input_label.trim(),"recordedAt":at})];
+    let mut lineage = Vec::new();
+    if let Some(source) = source_reference {
+        inputs.push(json!({
+            "kind":"artifact-version","referenceId":source.reference.artifact_version_id,
+            "label":source.reference.title,"recordedAt":at,
+            "contentHash":{"algorithm":"sha-256","value":source.reference.content_hash}
+        }));
+        lineage.push(json!({
+            "relation":"references","artifactId":source.reference.artifact_id,
+            "artifactVersionId":source.reference.artifact_version_id,"recordedAt":at
+        }));
+    }
     let artifact_value = json!({
         "id":expected.artifact_id,"workspaceId":scope.workspace_id(),"authority":"local",
         "visibility":"member-private","ownerMemberId":owner_member_id,"schemaVersion":1,"revision":1,
@@ -325,9 +640,7 @@ pub fn create_direct_mission_output(
         "createdAt":at,"createdByInternalUserId":actor,
         "content":{"kind":"inline","text":text,"media":media,"contentHash":hash},
         "media":media,"contentHash":hash,"provenance":provenance,"citations":[],
-        "inputs":[{"kind":"source","referenceId":source_event_id,
-            "label":"Authenticated structured intake response","recordedAt":at}],
-        "decisions":[],"lineage":[]
+        "inputs":inputs,"decisions":[],"lineage":lineage
     });
     let sealed_artifact = seal_json(
         store,
@@ -378,7 +691,126 @@ pub fn create_direct_mission_output(
         ],
     )?;
     validate_direct_mission_artifact_bundle(tx, store, scope, expected, &content_hash)?;
+    if let Some(reference) = source_reference {
+        validate_direct_artifact_reference_bundle(
+            tx,
+            store,
+            scope,
+            expected,
+            source_event_id,
+            input_kind,
+            input_label,
+            reference,
+        )?;
+    }
     Ok(expected.clone())
+}
+
+fn validate_direct_source_reference(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    source_event: Option<&Value>,
+    source: DirectMissionArtifactReference<'_>,
+) -> Result<()> {
+    let event = source_event.ok_or_else(|| {
+        StoreError::Invalid("Direct mission artifact input event is unavailable.".into())
+    })?;
+    let matching = event
+        .pointer("/payload/resolution/values")
+        .and_then(Value::as_array)
+        .and_then(|values| {
+            values.iter().find(|value| {
+                value.get("fieldKey").and_then(Value::as_str) == Some(source.field_key)
+            })
+        })
+        .and_then(|value| value.get("value"));
+    let expected_hash = json!({
+        "algorithm":"sha-256","value":source.reference.content_hash
+    });
+    if event.get("type").and_then(Value::as_str) != Some("human-input-received")
+        || matching
+            .and_then(|value| value.get("artifactId"))
+            .and_then(Value::as_str)
+            != Some(source.reference.artifact_id.as_str())
+        || matching
+            .and_then(|value| value.get("artifactVersionId"))
+            .and_then(Value::as_str)
+            != Some(source.reference.artifact_version_id.as_str())
+        || matching.and_then(|value| value.get("contentHash")) != Some(&expected_hash)
+        || matching
+            .and_then(Value::as_object)
+            .is_none_or(|value| value.len() != 3)
+    {
+        return Err(StoreError::Invalid(
+            "Direct mission artifact input is not bound to its attested source version.".into(),
+        ));
+    }
+    let existing = attest_existing_artifact_version(
+        tx,
+        store,
+        scope,
+        &source.reference.artifact_id,
+        &source.reference.artifact_version_id,
+    )?;
+    if existing.artifact_id != source.reference.artifact_id
+        || existing.artifact_version_id != source.reference.artifact_version_id
+        || existing.content_hash != source.reference.content_hash
+    {
+        return Err(StoreError::Invalid(
+            "Direct mission artifact source version changed after attestation.".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_direct_artifact_reference_bundle(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    binding: &DirectMissionArtifactBinding,
+    source_event_id: &str,
+    input_kind: &str,
+    input_label: &str,
+    source: DirectMissionArtifactReference<'_>,
+) -> Result<()> {
+    let bundle = get_bundle(tx, store, scope, &binding.artifact_id)?
+        .ok_or_else(|| StoreError::Invalid("Direct mission artifact is unavailable.".into()))?;
+    let version = bundle
+        .get("versions")
+        .and_then(Value::as_array)
+        .and_then(|versions| {
+            versions.iter().find(|version| {
+                version.get("id").and_then(Value::as_str)
+                    == Some(binding.artifact_version_id.as_str())
+            })
+        })
+        .ok_or_else(|| {
+            StoreError::Invalid("Direct mission artifact version is unavailable.".into())
+        })?;
+    let at = version
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Invalid("Direct mission artifact time is invalid.".into()))?;
+    let expected_inputs = json!([
+        {"kind":input_kind,"referenceId":source_event_id,"label":input_label.trim(),"recordedAt":at},
+        {"kind":"artifact-version","referenceId":source.reference.artifact_version_id,
+         "label":source.reference.title,"recordedAt":at,
+         "contentHash":{"algorithm":"sha-256","value":source.reference.content_hash}}
+    ]);
+    let expected_lineage = json!([{
+        "relation":"references","artifactId":source.reference.artifact_id,
+        "artifactVersionId":source.reference.artifact_version_id,"recordedAt":at
+    }]);
+    if version.get("inputs") != Some(&expected_inputs)
+        || version.get("lineage") != Some(&expected_lineage)
+    {
+        return Err(StoreError::Invalid(
+            "Direct mission artifact no longer retains its exact source version.".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3184,6 +3616,15 @@ mod tests {
             assert_eq!(target.len(), 1);
             assert_eq!(target[0]["currentVersion"]["id"], "version-1");
             assert_eq!(target[0]["artifact"]["currentVersionId"], "version-1");
+            assert!(store
+                .with_conn(|tx| latest_accepted_handoff_matches(
+                    tx,
+                    &scope,
+                    "artifact-1",
+                    "version-1",
+                    "project-2"
+                ))
+                .unwrap());
             let serialized_target = serde_json::to_value(&target[0]).unwrap();
             assert_eq!(
                 serialized_target["artifact"]["currentVersionId"],
@@ -3198,6 +3639,59 @@ mod tests {
                 .unwrap()
                 .find("Share the approved snapshot")
                 .is_none());
+
+            // A later accepted handoff replaces the project's canonical visible
+            // version. Native attestation must reject the older hidden version
+            // even though its accepted audit row remains immutable.
+            let latest = store
+                .transaction(|tx| {
+                    propose_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        "artifact-1",
+                        "artifact-1:v2",
+                        "project-2",
+                        "user-member-a",
+                        None,
+                        "2026-07-11T01:03:30Z",
+                    )
+                })
+                .unwrap();
+            let latest_id = latest["id"].as_str().unwrap();
+            store
+                .transaction(|tx| {
+                    accept_handoff(
+                        tx,
+                        &store,
+                        &scope,
+                        latest_id,
+                        1,
+                        "user-member-a",
+                        "2026-07-11T01:03:45Z",
+                    )
+                })
+                .unwrap();
+            assert!(!store
+                .with_conn(|tx| latest_accepted_handoff_matches(
+                    tx,
+                    &scope,
+                    "artifact-1",
+                    "version-1",
+                    "project-2"
+                ))
+                .unwrap());
+            assert!(store
+                .with_conn(|tx| latest_accepted_handoff_matches(
+                    tx,
+                    &scope,
+                    "artifact-1",
+                    "artifact-1:v2",
+                    "project-2"
+                ))
+                .unwrap());
+            let latest_target = search_project("project-2");
+            assert_eq!(latest_target[0]["currentVersion"]["id"], "artifact-1:v2");
 
             let corrupt = store
                 .transaction(|tx| {
@@ -3268,8 +3762,8 @@ mod tests {
                 )
             })
             .unwrap();
-        assert_eq!(target[0]["currentVersion"]["id"], "version-1");
-        assert_eq!(target[0]["artifact"]["currentVersionId"], "version-1");
+        assert_eq!(target[0]["currentVersion"]["id"], "artifact-1:v2");
+        assert_eq!(target[0]["artifact"]["currentVersionId"], "artifact-1:v2");
         assert!(store
             .transaction(|tx| propose_handoff(
                 tx,

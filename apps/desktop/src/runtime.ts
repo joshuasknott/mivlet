@@ -3283,7 +3283,7 @@ export async function cancelRuntimeCitedApproval(approval: RuntimeCitedApproval)
   });
 }
 
-export type RuntimeMissionHumanInputFieldKind = "text" | "number" | "boolean" | "choice" | "date-time";
+export type RuntimeMissionHumanInputFieldKind = "text" | "number" | "boolean" | "choice" | "date-time" | "artifact";
 
 export interface RuntimeMissionHumanInputField {
   key: string;
@@ -3299,6 +3299,7 @@ export interface RuntimeMissionHumanInputRequest {
   runId: string;
   missionId: string;
   sourceThreadId: string;
+  projectId?: string;
   waitKey: string;
   requestKey: string;
   prompt: string;
@@ -3361,7 +3362,12 @@ export interface RuntimeMissionHumanInputList {
 
 export interface RuntimeMissionHumanInputValue {
   fieldKey: string;
-  value: string | number | boolean | null;
+  value: string | number | boolean | RuntimeMissionHumanInputArtifactReference | null;
+}
+
+export interface RuntimeMissionHumanInputArtifactReference {
+  artifactId: string;
+  artifactVersionId: string;
 }
 
 function isRuntimeMissionHumanInputField(value: unknown): value is RuntimeMissionHumanInputField {
@@ -3375,7 +3381,7 @@ function isRuntimeMissionHumanInputField(value: unknown): value is RuntimeMissio
     && typeof value.key === "string" && value.key.length > 0
     && typeof value.label === "string" && value.label.length > 0
     && (value.help === undefined || (typeof value.help === "string" && value.help.length > 0))
-    && ["text", "number", "boolean", "choice", "date-time"].includes(String(kind))
+    && ["text", "number", "boolean", "choice", "date-time", "artifact"].includes(String(kind))
     && typeof value.required === "boolean"
     && value.sensitive === false
     && (kind === "choice"
@@ -3385,11 +3391,13 @@ function isRuntimeMissionHumanInputField(value: unknown): value is RuntimeMissio
 
 function isRuntimeMissionHumanInputRequest(value: unknown): value is RuntimeMissionHumanInputRequest {
   if (!isRecord(value)) return false;
-  const keys = ["runId", "missionId", "sourceThreadId", "waitKey", "requestKey", "prompt", "fields", "requestedAt", "runRevision", "lastSequence"];
-  return Object.keys(value).length === keys.length
-    && Object.keys(value).every((key) => keys.includes(key))
+  const requiredKeys = ["runId", "missionId", "sourceThreadId", "waitKey", "requestKey", "prompt", "fields", "requestedAt", "runRevision", "lastSequence"];
+  const allowedKeys = [...requiredKeys, "projectId"];
+  return requiredKeys.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => allowedKeys.includes(key))
     && ["runId", "missionId", "sourceThreadId", "waitKey", "requestKey", "prompt", "requestedAt"]
       .every((key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0)
+    && (value.projectId === undefined || (typeof value.projectId === "string" && value.projectId.trim().length > 0))
     && Array.isArray(value.fields) && value.fields.length >= 1 && value.fields.length <= 8
     && value.fields.every(isRuntimeMissionHumanInputField)
     && new Set(value.fields.map((field) => field.key)).size === value.fields.length
@@ -3408,6 +3416,22 @@ export async function startRuntimeStructuredIntake(input: {
     const result = await invoke<unknown>("mission_structured_intake_start", { input });
     if (!isRuntimeMissionHumanInputRequest(result)) {
       throw new Error("Malformed structured-intake wait projection.");
+    }
+    return result;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function startRuntimeArtifactRevisionBrief(input: {
+  sourceThreadId: string;
+  projectId?: string;
+  focus?: string;
+  startKey: string;
+}): Promise<RuntimeMissionHumanInputRequest | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const result = await invoke<unknown>("mission_artifact_revision_brief_start", { input });
+    if (!isRuntimeMissionHumanInputRequest(result)) {
+      throw new Error("Malformed artifact revision-brief wait projection.");
     }
     return result;
   } catch (error) { throw toRuntimeError(error); }
@@ -3456,6 +3480,9 @@ export async function receiveRuntimeMissionHumanInput(
   values: RuntimeMissionHumanInputValue[]
 ) {
   if (!hasTauriRuntime()) return null;
+  if (!validRuntimeMissionHumanInputSubmission(request, values)) {
+    throw new Error("Mission human-input values do not match the requested fields.");
+  }
   try {
     const result = await invoke<unknown>("mission_human_input_receive", {
       input: {
@@ -3478,6 +3505,37 @@ export async function receiveRuntimeMissionHumanInput(
     }
     return result;
   } catch (error) { throw toRuntimeError(error); }
+}
+
+function validRuntimeMissionHumanInputSubmission(
+  request: RuntimeMissionHumanInputRequest,
+  values: RuntimeMissionHumanInputValue[]
+): boolean {
+  if (values.length > request.fields.length) return false;
+  const fields = new Map(request.fields.map((field) => [field.key, field] as const));
+  const supplied = new Set<string>();
+  for (const input of values) {
+    if (!isRecord(input) || Object.keys(input).length !== 2
+      || typeof input.fieldKey !== "string" || supplied.has(input.fieldKey)) return false;
+    const field = fields.get(input.fieldKey);
+    if (!field) return false;
+    supplied.add(input.fieldKey);
+    const value = input.value;
+    if (value === null) {
+      if (field.required) return false;
+      continue;
+    }
+    if (field.kind === "text" && !(typeof value === "string" && value.length <= 4_000 && (!field.required || value.trim()))) return false;
+    if (field.kind === "number" && !(typeof value === "number" && Number.isFinite(value))) return false;
+    if (field.kind === "boolean" && typeof value !== "boolean") return false;
+    if (field.kind === "choice" && !(typeof value === "string" && field.choices?.includes(value))) return false;
+    if (field.kind === "date-time" && !(typeof value === "string" && Number.isFinite(Date.parse(value)))) return false;
+    if (field.kind === "artifact" && !(isRecord(value)
+      && Object.keys(value).length === 2
+      && typeof value.artifactId === "string" && value.artifactId.trim().length > 0 && value.artifactId.length <= 200
+      && typeof value.artifactVersionId === "string" && value.artifactVersionId.trim().length > 0 && value.artifactVersionId.length <= 200)) return false;
+  }
+  return request.fields.every((field) => !field.required || supplied.has(field.key));
 }
 
 export async function cancelRuntimeMissionHumanInput(request: RuntimeMissionHumanInputRequest) {

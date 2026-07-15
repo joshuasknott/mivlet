@@ -1,11 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { AccountWorkspaceStatus, BackendProvider, ConnectorManifest, IdentityStatus, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, startRuntimeStructuredIntake } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -27,6 +27,7 @@ const runtimeMocks = vi.hoisted(() => ({
   projectRecords: [] as Array<Record<string, unknown>>,
   citedBriefCalls: [] as Array<Record<string, unknown>>,
   structuredIntakeCalls: [] as Array<Record<string, unknown>>,
+  artifactRevisionBriefCalls: [] as Array<Record<string, unknown>>,
   citedBriefGate: null as Promise<void> | null,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
@@ -221,6 +222,25 @@ vi.mock("./runtime", () => ({
       requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
     };
   }),
+  startRuntimeArtifactRevisionBrief: vi.fn(async (input: Record<string, unknown>) => {
+    runtimeMocks.artifactRevisionBriefCalls.push(input);
+    return {
+      runId: "revision-brief-run-ui", missionId: "revision-brief-mission-ui",
+      sourceThreadId: input.sourceThreadId, projectId: input.projectId,
+      waitKey: "human-input-wait:v1:revision-ui", requestKey: "artifact-revision-brief:v1",
+      prompt: "Choose an exact artifact version and describe the revision.",
+      fields: [
+        { key: "sourceArtifact", label: "Source artifact", kind: "artifact", required: true, sensitive: false },
+        { key: "objective", label: "Revision objective", kind: "text", required: true, sensitive: false },
+        { key: "changes", label: "Requested changes", kind: "text", required: true, sensitive: false },
+        { key: "preserve", label: "Preserve", kind: "text", required: false, sensitive: false },
+        { key: "reviewBeforeUse", label: "Review before use", kind: "boolean", required: true, sensitive: false },
+        { key: "targetAt", label: "Target date", kind: "date-time", required: false, sensitive: false }
+      ],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+  }),
+  searchRuntimeArtifacts: vi.fn(async () => []),
   cancelRuntimeMissionHumanInput: vi.fn(async () => null),
   getRuntimeArtifact: vi.fn(async () => null),
   readRuntimeCitedMissionReceipts: vi.fn(async (_threadId: string, messageIds: string[]) =>
@@ -449,6 +469,7 @@ describe("Fable home", () => {
     runtimeMocks.projectRecords = [];
     runtimeMocks.citedBriefCalls = [];
     runtimeMocks.structuredIntakeCalls = [];
+    runtimeMocks.artifactRevisionBriefCalls = [];
     runtimeMocks.citedBriefGate = null;
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
@@ -479,6 +500,27 @@ describe("Fable home", () => {
         requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
       };
     });
+    vi.mocked(startRuntimeArtifactRevisionBrief).mockReset();
+    vi.mocked(startRuntimeArtifactRevisionBrief).mockImplementation(async (input) => {
+      runtimeMocks.artifactRevisionBriefCalls.push(input as unknown as Record<string, unknown>);
+      return {
+        runId: "revision-brief-run-ui", missionId: "revision-brief-mission-ui",
+        sourceThreadId: input.sourceThreadId, projectId: input.projectId,
+        waitKey: "human-input-wait:v1:revision-ui", requestKey: "artifact-revision-brief:v1",
+        prompt: "Choose an exact artifact version and describe the revision.",
+        fields: [
+          { key: "sourceArtifact", label: "Source artifact", kind: "artifact" as const, required: true, sensitive: false },
+          { key: "objective", label: "Revision objective", kind: "text" as const, required: true, sensitive: false },
+          { key: "changes", label: "Requested changes", kind: "text" as const, required: true, sensitive: false },
+          { key: "preserve", label: "Preserve", kind: "text" as const, required: false, sensitive: false },
+          { key: "reviewBeforeUse", label: "Review before use", kind: "boolean" as const, required: true, sensitive: false },
+          { key: "targetAt", label: "Target date", kind: "date-time" as const, required: false, sensitive: false }
+        ],
+        requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+      };
+    });
+    vi.mocked(searchRuntimeArtifacts).mockReset();
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
     vi.mocked(cancelRuntimeMissionHumanInput).mockReset();
     vi.mocked(cancelRuntimeMissionHumanInput).mockResolvedValue(null);
     vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
@@ -1540,6 +1582,180 @@ describe("Fable home", () => {
     ));
   });
 
+  it("starts an artifact revision brief, scopes candidates, and submits only the selected immutable identity", async () => {
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValueOnce([{
+      artifact: {
+        id: "artifact-source", title: "Launch memo", status: "draft", revision: 3,
+        currentVersionId: "artifact-source-version-3", producingRunId: "source-run",
+        context: { threadId: "source-thread" }, reviews: []
+      },
+      currentVersion: {
+        id: "artifact-source-version-3", artifactId: "artifact-source", version: 3,
+        status: "available", content: { kind: "inline", text: "Private source content" }, citations: []
+      },
+      matchedOn: ["title"]
+    }] as never);
+
+    const user = await renderWorkspace();
+    const composer = screen.getByLabelText(/universal composer/i);
+    await user.type(composer, "/revision-brief launch memo");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(runtimeMocks.artifactRevisionBriefCalls).toHaveLength(1));
+    expect(runtimeMocks.citedBriefCalls).toHaveLength(0);
+    expect(runtimeMocks.artifactRevisionBriefCalls[0]).toMatchObject({
+      sourceThreadId: expect.any(String), focus: "launch memo", startKey: expect.any(String)
+    });
+    expect(await screen.findByText("Choose an exact artifact version and describe the revision.")).toBeInTheDocument();
+    await waitFor(() => expect(searchRuntimeArtifacts).toHaveBeenCalledWith({ limit: 100 }));
+
+    await user.selectOptions(screen.getByLabelText(/Source artifact/), "0");
+    await user.type(screen.getByLabelText(/Revision objective/), "Make the launch decision clear.");
+    await user.type(screen.getByLabelText(/Requested changes/), "Lead with the recommendation.");
+    await user.type(screen.getByLabelText(/Preserve/), "Keep the risk table.");
+    await user.click(screen.getByLabelText(/Review before use/));
+    await user.click(screen.getByRole("button", { name: "Continue mission" }));
+
+    await waitFor(() => expect(receiveRuntimeMissionHumanInput).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "revision-brief-run-ui" }),
+      [
+        { fieldKey: "sourceArtifact", value: { artifactId: "artifact-source", artifactVersionId: "artifact-source-version-3" } },
+        { fieldKey: "objective", value: "Make the launch decision clear." },
+        { fieldKey: "changes", value: "Lead with the recommendation." },
+        { fieldKey: "preserve", value: "Keep the risk table." },
+        { fieldKey: "reviewBeforeUse", value: true }
+      ]
+    ));
+  });
+
+  it("keeps an artifact mission waiting when candidate discovery fails", async () => {
+    vi.mocked(searchRuntimeArtifacts).mockRejectedValueOnce(new Error("offline"));
+    const user = await renderWorkspace();
+    await user.type(screen.getByLabelText(/universal composer/i), "/revision-brief launch memo");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Artifacts are temporarily unavailable. Fable left this mission waiting."
+    );
+    expect(screen.getByRole("button", { name: "Continue mission" })).toBeDisabled();
+    expect(receiveRuntimeMissionHumanInput).not.toHaveBeenCalled();
+  });
+
+  it("keeps a delayed artifact revision card bound to its source conversation", async () => {
+    runtimeMocks.conversationThreads = [
+      { id: "thread-revision-a", projectId: null, title: "Revision A", lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 } },
+      { id: "thread-revision-b", projectId: null, title: "Revision B", lifecycle: "active", updatedAt: "2026-07-13T12:01:00Z", messageHead: { lastSequence: 0 } }
+    ];
+    let resolveStart: ((value: any) => void) | undefined;
+    vi.mocked(startRuntimeArtifactRevisionBrief).mockImplementationOnce((input) => {
+      runtimeMocks.artifactRevisionBriefCalls.push(input as unknown as Record<string, unknown>);
+      return new Promise<any>((resolve) => { resolveStart = resolve; });
+    });
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Revision A" }));
+    await user.type(screen.getByLabelText(/universal composer/i), "/revision-brief delayed");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(startRuntimeArtifactRevisionBrief).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Revision B" }));
+    resolveStart?.({
+      runId: "revision-run-delayed", missionId: "revision-mission-delayed",
+      sourceThreadId: "thread-revision-a", waitKey: "human-input-wait:v1:revision-delayed",
+      requestKey: "artifact-revision-brief:v1", prompt: "Revision details for A",
+      fields: [{ key: "sourceArtifact", label: "Source artifact for A", kind: "artifact", required: true, sensitive: false }],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    });
+    await waitFor(() => expect(runtimeMocks.artifactRevisionBriefCalls).toHaveLength(1));
+    expect(screen.queryByText("Revision details for A")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Source artifact for A")).not.toBeInTheDocument();
+  });
+
+  it("does not append a delayed artifact-revision start failure to another conversation", async () => {
+    runtimeMocks.conversationThreads = [
+      { id: "thread-revision-error-a", projectId: null, title: "Revision error A", lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 } },
+      { id: "thread-revision-error-b", projectId: null, title: "Revision error B", lifecycle: "active", updatedAt: "2026-07-13T12:01:00Z", messageHead: { lastSequence: 0 } }
+    ];
+    let rejectStart: ((reason: Error) => void) | undefined;
+    vi.mocked(startRuntimeArtifactRevisionBrief).mockImplementationOnce(() =>
+      new Promise<any>((_resolve, reject) => { rejectStart = reject; }));
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Revision error A" }));
+    await user.type(screen.getByLabelText(/universal composer/i), "/revision-brief delayed error");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(startRuntimeArtifactRevisionBrief).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Revision error B" }));
+    await act(async () => {
+      rejectStart?.(new Error("Source-specific start failed."));
+      await Promise.resolve();
+    });
+    expect(screen.queryByText("Source-specific start failed.")).not.toBeInTheDocument();
+  });
+
+  it("does not install source-thread artifacts after submission switches conversations", async () => {
+    runtimeMocks.conversationThreads = [
+      { id: "thread-submit-a", projectId: null, title: "Submit A", lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 } },
+      { id: "thread-submit-b", projectId: null, title: "Submit B", lifecycle: "active", updatedAt: "2026-07-13T12:01:00Z", messageHead: { lastSequence: 0 } }
+    ];
+    const request = {
+      runId: "run-submit-a", missionId: "mission-submit-a", sourceThreadId: "thread-submit-a",
+      waitKey: "human-input-wait:v1:submit-a", requestKey: "artifact-revision-brief:v1",
+      prompt: "Choose source A.",
+      fields: [{ key: "sourceArtifact", label: "Source artifact", kind: "artifact" as const, required: true, sensitive: false as const }],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+    vi.mocked(listRuntimePendingMissionHumanInputs).mockImplementation(async (threadId) => ({
+      requests: threadId === "thread-submit-a" ? [request] : [], unavailableCount: 0, truncated: false
+    }));
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([{
+      artifact: { id: "source-a", title: "Source A", status: "draft", revision: 1, currentVersionId: "source-a-v1", context: {}, reviews: [] },
+      currentVersion: { id: "source-a-v1", artifactId: "source-a", version: 1, status: "available", content: { kind: "inline", text: "Source" }, citations: [] },
+      matchedOn: ["title"]
+    }] as never);
+    let submissionArtifactListStarted!: () => void;
+    const listStarted = new Promise<void>((resolve) => { submissionArtifactListStarted = resolve; });
+    let releaseArtifacts: ((value: any[]) => void) | undefined;
+    let markArtifactListCompleted!: () => void;
+    const artifactListCompleted = new Promise<void>((resolve) => { markArtifactListCompleted = resolve; });
+    let delaySourceList = false;
+    vi.mocked(listRuntimeThreadArtifacts).mockImplementation(async (threadId) => {
+      if (threadId === "thread-submit-a" && delaySourceList) {
+        submissionArtifactListStarted();
+        return new Promise<any[]>((resolve) => {
+          releaseArtifacts = (value) => {
+            resolve(value);
+            window.queueMicrotask(markArtifactListCompleted);
+          };
+        });
+      }
+      return [];
+    });
+
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Submit A" }));
+    await screen.findByRole("option", { name: /Source A/ });
+    await user.selectOptions(await screen.findByLabelText(/Source artifact/), "0");
+    delaySourceList = true;
+    await user.click(screen.getByRole("button", { name: "Continue mission" }));
+    await listStarted;
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Submit B" }));
+    await act(async () => {
+      releaseArtifacts?.([{
+        artifact: { id: "output-a", title: "Output A", status: "draft", revision: 1, currentVersionId: "output-a-v1", producingRunId: "run-submit-a", context: { threadId: "thread-submit-a" }, reviews: [] },
+        currentVersion: { id: "output-a-v1", artifactId: "output-a", version: 1, status: "available", content: { kind: "inline", text: "Output" }, citations: [] },
+        versions: [], sourceMessageId: null
+      }]);
+      await artifactListCompleted;
+    });
+    expect(screen.queryByRole("button", { name: "View artifact Output A" })).not.toBeInTheDocument();
+  });
+
   it("keeps a delayed structured-intake card bound to its source conversation", async () => {
     runtimeMocks.conversationThreads = [
       {
@@ -1665,6 +1881,34 @@ describe("Fable home", () => {
       request, [{ fieldKey: "owner", value: "Alex" }]
     ));
     expect(receiveRuntimeMissionHumanInput).toHaveBeenCalledOnce();
+  });
+
+  it("discovers rehydrated artifact choices only inside the mission project", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-project-revision", projectId: null, title: "Roadmap revision",
+      lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValue({
+      requests: [{
+        runId: "run-project-revision", missionId: "mission-project-revision",
+        sourceThreadId: "thread-project-revision", projectId: "project-roadmap",
+        waitKey: "human-input-wait:v1:project-revision", requestKey: "artifact-revision-brief:v1",
+        prompt: "Choose the project artifact.",
+        fields: [{ key: "sourceArtifact", label: "Source artifact", kind: "artifact", required: true, sensitive: false }],
+        requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+      }], unavailableCount: 0, truncated: false
+    });
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Roadmap revision" }));
+
+    expect(await screen.findByText("Choose the project artifact.")).toBeInTheDocument();
+    await waitFor(() => expect(searchRuntimeArtifacts).toHaveBeenCalledWith({
+      projectId: "project-roadmap", limit: 100
+    }));
+    expect(screen.getByRole("button", { name: "Continue mission" })).toBeDisabled();
   });
 
   it("offers a fresh mission after a live cited result is not accepted", async () => {

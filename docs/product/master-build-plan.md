@@ -672,9 +672,15 @@ single-worker cited benchmark rather than general human-input
 coordination, so the Wave 4C checkbox remains unchecked.
 A provider-free human-input wait kernel is now available beneath that cited
 benchmark. Its portable journal contract accepts one checkpoint-bound schema of
-bounded text, number, boolean, choice, or date-time fields, enforces the exact
-required field set and typed response, and rejects alternative replay, concurrent
-waits, artifact fields, and secret-valued fields. The authenticated native
+bounded text, number, boolean, choice, date-time, or exact artifact-version fields,
+enforces the exact required field set and typed response, and rejects alternative
+replay, concurrent waits, malformed references, and secret-valued fields. The
+renderer can submit only an artifact id and immutable version id selected from a
+bounded authorized candidate list. Native code revalidates current owner and
+workspace/project visibility, recomputes the stored version's SHA-256 hash, and
+requires exact inline bytes and size to match the immutable owner-qualified
+record before writing only that attested three-part identity to the portable journal; neither
+artifact content nor renderer-supplied hashes enter the wait event. The authenticated native
 coordinator atomically stores the wait-boundary checkpoint and request in the
 encrypted mission journal, moves the Run and Mission to their waiting states,
 rehydrates only owner/workspace/thread-matching pending requests after restart,
@@ -688,7 +694,15 @@ wait untouched. Human-input cancellation atomically settles both Run and Mission
 lifecycles so a restart cannot strand the intermediate request. Repository evidence
 covers portable reduction, real encrypted-store reopen and tamper paths, strict
 runtime projections, form submission, and active-work cancellation priority.
-One fixed, provider-free producer now invokes that coordinator end to end. An
+
+A native continuation dispatcher now selects the only permitted post-response
+behavior from the authenticated checkpoint and immutable Plan constraint. Its
+identity is included in the request suffix but never accepted from a renderer or
+portable wait payload. Unknown, duplicated, substituted, or mismatched selectors
+fail closed; the generic form command cannot opt into a producer. Exact terminal
+replay routes through the same dispatcher without repeating settlement.
+
+Two fixed, provider-free producers now invoke that coordinator end to end. An
 explicit structured-project-brief request atomically creates its native-owned
 Mission, one-step Plan, Run, wait-boundary checkpoint, and six-field intake
 schema without requiring a model or connector. Submitting the authenticated
@@ -701,10 +715,23 @@ changed start facts, stale or altered wait schemas, invalid settlement,
 cross-member access, and detached terminal facts fail closed or roll back to the
 pending form. The conversation starts this narrow journey ahead of provider
 routing, rehydrates its form after restart, and exposes the resulting draft
-without mislabelling it as a cited mission. This is one fixed local producer,
-not general producer selection or provider continuation; secure
-reference-valued or artifact-valued input, arbitrary post-response
-continuations, and multi-worker coordination remain open. The Wave 4C
+without mislabelling it as a cited mission.
+
+An explicit artifact-revision-brief request creates the same fixed native
+lifecycle with an exact artifact-version selector plus bounded objective, changes,
+preservation, review, and target-date fields. Settlement uses the native-attested
+immutable source hash to create deterministic content-free Markdown, one draft
+artifact, exact `artifact-version` input and lineage references, and a terminal
+transcript in one transaction. Replay remains valid when the source is renamed,
+reviewed, or advanced to a later current version, while changed source identities,
+tampered hashes, foreign members/projects, stale waits, and cancellation create no
+substitute output. The desktop loads only project/workspace-authorized candidates,
+keeps failed discovery safely waiting, binds delayed starts to their source thread,
+and hydrates completed drafts without cited-plan or provider-receipt UI.
+
+These are two fixed local producers, not general producer selection, arbitrary
+provider/tool continuations, general reference kinds, or multi-worker
+coordination. The Wave 4C
 human-input-and-approval checkbox therefore stays unchecked.
 Conservative, explicit
 natural-language forms for goal, plan, schedule,

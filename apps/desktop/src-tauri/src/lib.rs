@@ -33,6 +33,8 @@ mod knowledge;
 mod local_model;
 mod mcp_process;
 mod memory;
+mod mission_artifact_revision_brief;
+mod mission_continuations;
 mod mission_human_input;
 mod mission_plans;
 mod mission_runs;
@@ -172,6 +174,7 @@ pub fn run() {
             mission_human_input::mission_human_input_pending_list,
             mission_human_input::mission_human_input_receive,
             mission_structured_intake::mission_structured_intake_start,
+            mission_artifact_revision_brief::mission_artifact_revision_brief_start,
             mission_workers::mission_worker_create,
             mission_workers::mission_worker_start,
             mission_workers::mission_worker_output_read,

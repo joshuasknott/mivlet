@@ -159,7 +159,7 @@ export type MissionResultMessageDetail = {
       artifactVersionId: ArtifactVersionId;
     }
   | {
-      missionKind: "structured-intake";
+      missionKind: "structured-intake" | "artifact-revision-brief";
       outcome: "completed";
       artifactId: ArtifactId;
       artifactVersionId: ArtifactVersionId;
