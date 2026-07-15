@@ -591,6 +591,7 @@ export type HumanInputFieldKind = (typeof HUMAN_INPUT_FIELD_KINDS)[number];
 export interface HumanInputField {
   key: string;
   label: string;
+  help?: string;
   kind: HumanInputFieldKind;
   required: boolean;
   choices?: readonly string[];

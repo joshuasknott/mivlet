@@ -33,6 +33,52 @@ function event<Type extends Spine.Missions.RunEventType>(
 
 const created = () => event("run-created", 1, { run: run() });
 
+function humanInputWait(): Spine.Missions.HumanInputWait {
+  return {
+    waitKey: "collect-brief-1",
+    status: "pending",
+    prompt: "Provide the bounded details needed to continue.",
+    requestedAt: "2026-07-15T10:00:00Z",
+    fields: [
+      { key: "title", label: "Title", help: "Use a short working title.", kind: "text", required: true, sensitive: false } as Spine.Missions.HumanInputField,
+      { key: "note", label: "Optional note", kind: "text", required: false, sensitive: false },
+      { key: "count", label: "Count", kind: "number", required: true, sensitive: false },
+      { key: "confirmed", label: "Confirmed", kind: "boolean", required: true, sensitive: false },
+      { key: "format", label: "Format", kind: "choice", choices: ["brief", "report"], required: true, sensitive: false },
+      { key: "due-at", label: "Due at", kind: "date-time", required: true, sensitive: false }
+    ]
+  };
+}
+
+function savedHumanInputBoundary(waitKey = "collect-brief-1") {
+  const running = appendRunEvent(
+    appendRunEvent(undefined, created()),
+    event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1"))
+  );
+  return appendRunEvent(running, event("checkpoint-created", 3, {
+    checkpoint: {
+      kind: "wait-boundary", attemptNumber: 1, createdAt: "t3",
+      replayBoundary: { durableThroughSequence: 2, resumeAfterEventId: id<"run-event">("event-2"), completedPlanStepKeys: [], completedWorkerIds: [], committedEffectKeys: [] },
+      stateStorage: "portable-redacted", stateReference: "checkpoint:human-input", stateHash: "hash-human-input",
+      pendingWaitKey: waitKey,
+      executionNodeId: id<"execution-node">("local")
+    }
+  }, id<"run-event">("event-2")));
+}
+
+function humanInputResolution(values: readonly Spine.Missions.HumanInputValue[] = [
+  { fieldKey: "title", value: "Quarterly research brief" },
+  { fieldKey: "count", value: 3 },
+  { fieldKey: "confirmed", value: true },
+  { fieldKey: "format", value: "brief" },
+  { fieldKey: "due-at", value: "2026-07-31T16:30:00Z" }
+]): Spine.Missions.HumanInputResolution {
+  return {
+    waitKey: "collect-brief-1", receivedAt: "2026-07-15T10:01:00Z",
+    suppliedByInternalUserId: id<"internal-user">("user-1"), values
+  };
+}
+
 describe("durable run journal projection", () => {
   it("replays contiguous events into one deterministic run projection", () => {
     const started = event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1"));
@@ -166,5 +212,93 @@ describe("durable run journal projection", () => {
       waitKey: wait.waitKey, decision: "approved", decidedAt: "t5", acceptedProposalHash: wait.proposalHash
     } }, id<"run-event">("event-4")));
     expect(resolved.run.status).toBe("running");
+  });
+
+  it("waits for one checkpoint-bound human-input schema and resumes from its exact response", () => {
+    const saved = savedHumanInputBoundary();
+    const wait = humanInputWait();
+    const requestedEvent = event("human-input-requested", 4, { wait }, id<"run-event">("event-3"));
+    const waiting = appendRunEvent(saved, requestedEvent);
+    expect(waiting.run.status).toBe("waiting-human-input");
+    expect(appendRunEvent(waiting, requestedEvent)).toBe(waiting);
+
+    const changedRequest = { ...requestedEvent, occurredAt: "changed" } as Spine.Missions.RunEvent;
+    expect(() => appendRunEvent(waiting, changedRequest)).toThrow("different facts");
+    expect(() => appendRunEvent(waiting, event("human-input-requested", 5, { wait }, id<"run-event">("event-4"))))
+      .toThrow("one valid pending schema");
+
+    const resolution = humanInputResolution();
+    const receivedEvent = event("human-input-received", 5, { resolution }, id<"run-event">("event-4"));
+    const resumed = appendRunEvent(waiting, receivedEvent);
+    expect(resumed.run.status).toBe("running");
+    expect(appendRunEvent(resumed, receivedEvent)).toBe(resumed);
+
+    const alternative = event("human-input-received", 5, {
+      resolution: humanInputResolution([
+        { fieldKey: "title", value: "Changed answer" },
+        ...resolution.values.slice(1)
+      ])
+    }, id<"run-event">("event-4"));
+    expect(() => appendRunEvent(resumed, alternative)).toThrow("different facts");
+  });
+
+  it("rejects unbounded, ambiguous, or unsupported human-input schemas", () => {
+    const saved = savedHumanInputBoundary();
+    const wait = humanInputWait();
+    const first = wait.fields[0]!;
+    const invalidWaits: readonly Spine.Missions.HumanInputWait[] = [
+      { ...wait, waitKey: "another-wait" },
+      { ...wait, fields: [] },
+      { ...wait, fields: Array.from({ length: 9 }, (_, index) => ({ ...first, key: `field-${index}` })) },
+      { ...wait, fields: [...wait.fields, { ...first }] },
+      { ...wait, fields: [{ ...first, kind: "artifact" }] },
+      { ...wait, fields: [{ ...first, sensitive: true }] },
+      { ...wait, fields: [{ key: "format", label: "Format", kind: "choice", choices: ["only"], required: true, sensitive: false }] },
+      { ...wait, fields: [{ key: "format", label: "Format", kind: "choice", choices: ["same", "same"], required: true, sensitive: false }] },
+      { ...wait, fields: [{ ...first, choices: ["not-allowed"] }] },
+      { ...wait, fields: [{ ...first, help: "h".repeat(501) } as Spine.Missions.HumanInputField] }
+    ];
+    for (const invalid of invalidWaits) {
+      expect(() => appendRunEvent(saved, event("human-input-requested", 4, { wait: invalid }, id<"run-event">("event-3"))))
+        .toThrow("one valid pending schema");
+    }
+  });
+
+  it("requires the exact human-input field set and bounded values", () => {
+    const saved = savedHumanInputBoundary();
+    const wait = humanInputWait();
+    const waiting = appendRunEvent(saved, event("human-input-requested", 4, { wait }, id<"run-event">("event-3")));
+    const valid = humanInputResolution().values;
+    const invalidResolutions: readonly Spine.Missions.HumanInputResolution[] = [
+      { ...humanInputResolution(), waitKey: "wrong-wait" },
+      humanInputResolution(valid.filter((input) => input.fieldKey !== "title")),
+      humanInputResolution([...valid, { fieldKey: "unknown", value: "extra" }]),
+      humanInputResolution([{ fieldKey: "title", value: "one" }, { fieldKey: "title", value: "two" }, ...valid.slice(1)]),
+      humanInputResolution([{ fieldKey: "title", value: "x".repeat(4_001) }, ...valid.slice(1)]),
+      humanInputResolution([valid[0]!, { fieldKey: "count", value: Number.POSITIVE_INFINITY }, ...valid.slice(2)]),
+      humanInputResolution([valid[0]!, valid[1]!, { fieldKey: "confirmed", value: "true" }, ...valid.slice(3)] as readonly Spine.Missions.HumanInputValue[]),
+      humanInputResolution([...valid.slice(0, 3), { fieldKey: "format", value: "memo" }, valid[4]!]),
+      humanInputResolution([...valid.slice(0, 4), { fieldKey: "due-at", value: "tomorrow" }]),
+      humanInputResolution([{ fieldKey: "title", value: null }, ...valid.slice(1)])
+    ];
+    for (const invalid of invalidResolutions) {
+      expect(() => appendRunEvent(waiting, event("human-input-received", 5, { resolution: invalid }, id<"run-event">("event-4"))))
+        .toThrow("matching its schema");
+    }
+  });
+
+  it("allows cancellation while waiting for human input and keeps the terminal journal immutable", () => {
+    const saved = savedHumanInputBoundary();
+    const waiting = appendRunEvent(saved, event("human-input-requested", 4, { wait: humanInputWait() }, id<"run-event">("event-3")));
+    const cancellation: Spine.Missions.CancellationRequest = {
+      requestKey: "stop-human-wait", requestedAt: "t5", requestedByInternalUserId: id<"internal-user">("user-1"),
+      scope: "run", mode: "cooperative"
+    };
+    const cancelling = appendRunEvent(waiting, event("cancellation-requested", 5, { cancellation }, id<"run-event">("event-4")));
+    const cancelled = appendRunEvent(cancelling, event("run-cancelled", 6, { cancellation }, id<"run-event">("event-5")));
+    expect(cancelled.run.status).toBe("cancelled");
+    expect(() => appendRunEvent(cancelled, event("human-input-received", 7, {
+      resolution: humanInputResolution()
+    }, id<"run-event">("event-6")))).toThrow("terminal run journal is immutable");
   });
 });

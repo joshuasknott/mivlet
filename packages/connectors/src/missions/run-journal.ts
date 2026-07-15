@@ -5,6 +5,20 @@ type RunEvent = Spine.Missions.RunEvent;
 type RunStatus = Spine.Missions.RunStatus;
 
 const TERMINAL = new Set<RunStatus>(["completed", "partially-completed", "failed", "cancelled"]);
+const HUMAN_INPUT_KINDS = new Set<string>(["text", "number", "boolean", "choice", "date-time"]);
+const HUMAN_INPUT_LIMITS = {
+  waitKey: 200,
+  prompt: 2_000,
+  fieldKey: 80,
+  label: 200,
+  help: 500,
+  choices: 20,
+  choice: 200,
+  textValue: 4_000,
+  identity: 200,
+  timestamp: 64,
+  absoluteNumber: 1_000_000_000_000_000
+} as const;
 const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   created: ["planning", "queued", "running", "cancelling", "cancelled", "failed"],
   planning: ["queued", "running", "waiting-human-input", "cancelling", "cancelled", "failed"],
@@ -170,6 +184,27 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
       throw new RunJournalError("Approval resolution must resolve the exact active proposal.");
     }
   }
+  if (event.type === "human-input-requested") {
+    const wait = event.payload.wait;
+    const active = activeHumanInputWait(current.events);
+    const previous = current.events.at(-1);
+    if (!TRANSITIONS[run.status].includes("waiting-human-input") || active
+      || previous?.type !== "checkpoint-created"
+      || previous.payload.checkpoint.kind !== "wait-boundary"
+      || previous.payload.checkpoint.pendingWaitKey !== wait.waitKey
+      || !validHumanInputWait(wait)) {
+      throw new RunJournalError("Human input wait must be one valid pending schema after its exact wait-boundary checkpoint.");
+    }
+  }
+  if (event.type === "human-input-received") {
+    const wait = activeHumanInputWait(current.events);
+    const resolution = event.payload.resolution;
+    if (run.status !== "waiting-human-input" || !wait
+      || resolution.waitKey !== wait.waitKey
+      || !validHumanInputResolution(wait, resolution)) {
+      throw new RunJournalError("Human input must resolve the exact active wait with values matching its schema.");
+    }
+  }
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
     throw new RunJournalError("run-completed requires a succeeded result.");
   }
@@ -194,6 +229,8 @@ function projectRun(run: Run, event: RunEvent): Run {
     case "cancellation-requested": return { ...run, status: "cancelling", cancellation: event.payload.cancellation };
     case "approval-requested": return { ...run, status: "waiting-approval" };
     case "approval-resolved": return { ...run, status: "running" };
+    case "human-input-requested": return { ...run, status: "waiting-human-input" };
+    case "human-input-received": return { ...run, status: "running" };
     case "run-completed": return { ...run, status: "completed", terminalResult: event.payload.result };
     case "run-failed": return { ...run, status: event.payload.partial ? "partially-completed" : "failed" };
     case "run-cancelled": return { ...run, status: event.payload.partial ? "partially-completed" : "cancelled" };
@@ -208,6 +245,122 @@ function activeApprovalWait(events: readonly RunEvent[]): Spine.Missions.Approva
     if (event.type === "approval-resolved" && active?.waitKey === event.payload.resolution.waitKey) active = undefined;
   }
   return active;
+}
+
+function activeHumanInputWait(events: readonly RunEvent[]): Spine.Missions.HumanInputWait | undefined {
+  let active: Spine.Missions.HumanInputWait | undefined;
+  for (const event of events) {
+    if (event.type === "human-input-requested") active = event.payload.wait;
+    if (event.type === "human-input-received" && active?.waitKey === event.payload.resolution.waitKey) active = undefined;
+  }
+  return active;
+}
+
+function validHumanInputWait(wait: Spine.Missions.HumanInputWait): boolean {
+  if (!isRecord(wait)
+    || !hasOnlyKeys(wait, ["waitKey", "status", "prompt", "fields", "requestedAt", "expiresAt", "workerId"])
+    || wait.status !== "pending"
+    || !boundedString(wait.waitKey, HUMAN_INPUT_LIMITS.waitKey)
+    || !boundedString(wait.prompt, HUMAN_INPUT_LIMITS.prompt)
+    || !boundedString(wait.requestedAt, HUMAN_INPUT_LIMITS.timestamp)
+    || (wait.expiresAt !== undefined && !boundedString(wait.expiresAt, HUMAN_INPUT_LIMITS.timestamp))
+    || (wait.workerId !== undefined && !boundedString(wait.workerId, HUMAN_INPUT_LIMITS.identity))
+    || !Array.isArray(wait.fields) || wait.fields.length < 1 || wait.fields.length > 8) {
+    return false;
+  }
+
+  const keys = new Set<string>();
+  for (const field of wait.fields) {
+    if (!isRecord(field)
+      || !hasOnlyKeys(field, ["key", "label", "help", "kind", "required", "choices", "sensitive"])
+      || !boundedString(field.key, HUMAN_INPUT_LIMITS.fieldKey)
+      || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(field.key)
+      || keys.has(field.key)
+      || !boundedString(field.label, HUMAN_INPUT_LIMITS.label)
+      || (field.help !== undefined && !boundedString(field.help, HUMAN_INPUT_LIMITS.help))
+      || typeof field.kind !== "string"
+      || !HUMAN_INPUT_KINDS.has(field.kind)
+      || typeof field.required !== "boolean"
+      || field.sensitive !== false) {
+      return false;
+    }
+    keys.add(field.key);
+
+    if (field.kind === "choice") {
+      if (!Array.isArray(field.choices) || field.choices.length < 2 || field.choices.length > HUMAN_INPUT_LIMITS.choices) return false;
+      const choices = new Set<string>();
+      for (const choice of field.choices) {
+        if (!boundedString(choice, HUMAN_INPUT_LIMITS.choice) || choices.has(choice)) return false;
+        choices.add(choice);
+      }
+    } else if (field.choices !== undefined) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function validHumanInputResolution(
+  wait: Spine.Missions.HumanInputWait,
+  resolution: Spine.Missions.HumanInputResolution
+): boolean {
+  if (!isRecord(resolution)
+    || !hasOnlyKeys(resolution, ["waitKey", "receivedAt", "suppliedByInternalUserId", "values"])
+    || !boundedString(resolution.waitKey, HUMAN_INPUT_LIMITS.waitKey)
+    || !boundedString(resolution.receivedAt, HUMAN_INPUT_LIMITS.timestamp)
+    || !boundedString(resolution.suppliedByInternalUserId, HUMAN_INPUT_LIMITS.identity)
+    || !Array.isArray(resolution.values)
+    || resolution.values.length > wait.fields.length) {
+    return false;
+  }
+
+  const fields = new Map(wait.fields.map((field) => [field.key, field] as const));
+  const supplied = new Set<string>();
+  for (const input of resolution.values) {
+    if (!isRecord(input)
+      || !hasOnlyKeys(input, ["fieldKey", "value"])
+      || !boundedString(input.fieldKey, HUMAN_INPUT_LIMITS.fieldKey)
+      || supplied.has(input.fieldKey)) {
+      return false;
+    }
+    const field = fields.get(input.fieldKey);
+    if (!field || !validHumanInputValue(field, input.value)) return false;
+    supplied.add(input.fieldKey);
+  }
+  return wait.fields.every((field) => !field.required || supplied.has(field.key));
+}
+
+function validHumanInputValue(field: Spine.Missions.HumanInputField, value: unknown): boolean {
+  if (value === null) return !field.required;
+  switch (field.kind) {
+    case "text":
+      return typeof value === "string" && value.length <= HUMAN_INPUT_LIMITS.textValue && (!field.required || value.trim().length > 0);
+    case "number":
+      return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= HUMAN_INPUT_LIMITS.absoluteNumber;
+    case "boolean":
+      return typeof value === "boolean";
+    case "choice":
+      return typeof value === "string" && field.choices?.includes(value) === true;
+    case "date-time":
+      return typeof value === "string" && value.length <= HUMAN_INPUT_LIMITS.timestamp
+        && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+        && Number.isFinite(Date.parse(value));
+    default:
+      return false;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function boundedString(value: unknown, maximumLength: number): value is string {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maximumLength;
 }
 
 function sameScope(run: Run, event: RunEvent): boolean {

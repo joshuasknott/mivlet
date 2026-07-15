@@ -321,6 +321,108 @@ kbd {
   color: var(--danger, #a33b32);
 }
 
+.mission-human-input-card {
+  display: grid;
+  gap: 14px;
+  width: min(720px, 100%);
+  margin-top: 12px;
+  padding: 14px;
+  color: var(--ink-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+}
+
+.mission-human-input-card__header p,
+.mission-human-input-card .mission-human-input-card__error {
+  max-width: none;
+  margin: 4px 0 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.mission-human-input-card__header p {
+  color: var(--ink-muted);
+}
+
+.mission-human-input-card__fields {
+  display: grid;
+  gap: 12px;
+}
+
+.mission-human-input-card__fields > label:not(.mission-human-input-card__check) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-13);
+  font-weight: 600;
+}
+
+.mission-human-input-card__fields input:not([type="checkbox"]),
+.mission-human-input-card__fields select {
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 11px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-weight: 400;
+}
+
+.mission-human-input-card__fields input:focus-visible,
+.mission-human-input-card__fields select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.mission-human-input-card__fields small,
+.mission-human-input-card__footer > small {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  font-weight: 400;
+}
+
+.mission-human-input-card__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 11px;
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+
+.mission-human-input-card__check input {
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+}
+
+.mission-human-input-card__check span {
+  display: grid;
+  gap: 2px;
+}
+
+.mission-human-input-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mission-human-input-card__footer .button {
+  min-height: 44px;
+}
+
+.mission-human-input-card .mission-human-input-card__error {
+  color: var(--danger, #a33b32);
+}
+
 .conversation-message--assistant .run-context-summary__sources p {
   max-width: none;
   margin: 0;

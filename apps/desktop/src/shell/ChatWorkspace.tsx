@@ -15,9 +15,9 @@ import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBrief
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, resolveRuntimeCitedApproval, type RuntimeArtifactBundle, type RuntimeCitedApproval } from "../runtime";
+import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeCitedApproval, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -97,6 +97,10 @@ export function ChatWorkspace() {
   const [approvalListWarning, setApprovalListWarning] = useState<string | null>(null);
   const [approvalBusyRunId, setApprovalBusyRunId] = useState<string | null>(null);
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
+  const [pendingMissionInputs, setPendingMissionInputs] = useState<RuntimeMissionHumanInputRequest[]>([]);
+  const [missionInputListWarning, setMissionInputListWarning] = useState<string | null>(null);
+  const [missionInputBusyRunId, setMissionInputBusyRunId] = useState<string | null>(null);
+  const [missionInputErrors, setMissionInputErrors] = useState<Record<string, string>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
@@ -570,6 +574,27 @@ export function ChatWorkspace() {
   }, [boundWorkspaceId, hydratedConversation?.messages.length, selectedConversationThreadId]);
 
   useEffect(() => {
+    let active = true;
+    setPendingMissionInputs([]);
+    setMissionInputListWarning(null);
+    if (!selectedConversationThreadId) return () => { active = false; };
+    void listRuntimePendingMissionHumanInputs(selectedConversationThreadId)
+      .then((result) => {
+        if (!active) return;
+        setPendingMissionInputs(result.requests);
+        setMissionInputListWarning(result.unavailableCount > 0 || result.truncated
+          ? "Some mission input requests could not be shown. Fable left them untouched."
+          : null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPendingMissionInputs([]);
+        setMissionInputListWarning("Mission input requests are temporarily unavailable. Fable left them untouched.");
+      });
+    return () => { active = false; };
+  }, [boundWorkspaceId, hydratedConversation?.messages.length, selectedConversationThreadId]);
+
+  useEffect(() => {
     if (durableConversation.state.loading || submissionInFlight) return;
     if (draftHydrationKey.current === durableConversation.draftKey) return;
     draftHydrationKey.current = durableConversation.draftKey;
@@ -672,8 +697,32 @@ export function ChatWorkspace() {
     }
   };
 
+  const submitMissionInput = async (
+    request: RuntimeMissionHumanInputRequest,
+    values: RuntimeMissionHumanInputValue[]
+  ) => {
+    if (missionInputBusyRunId) return;
+    setMissionInputBusyRunId(request.runId);
+    setMissionInputErrors((current) => {
+      const next = { ...current };
+      delete next[request.runId];
+      return next;
+    });
+    try {
+      await receiveRuntimeMissionHumanInput(request, values);
+      setPendingMissionInputs((current) => current.filter((entry) => entry.runId !== request.runId));
+      await durableConversation.refresh();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Fable could not continue this mission.";
+      setMissionInputErrors((current) => ({ ...current, [request.runId]: message }));
+    } finally {
+      setMissionInputBusyRunId(null);
+    }
+  };
+
   const renderConversation = () => {
-    if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0 && !approvalListWarning) return null;
+    if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0
+      && pendingMissionInputs.length === 0 && !approvalListWarning && !missionInputListWarning) return null;
     return (
       <section className="conversation-feed" aria-label="Conversation">
         {conversationMessages.map((message) => {
@@ -767,8 +816,23 @@ export function ChatWorkspace() {
               />
             </article>
           ))}
+        {pendingMissionInputs.map((request) => (
+          <article key={request.runId} className="conversation-message conversation-message--assistant">
+            <MissionHumanInputCard
+              prompt={request.prompt}
+              fields={request.fields}
+              requestedAt={request.requestedAt}
+              busy={missionInputBusyRunId === request.runId}
+              error={missionInputErrors[request.runId]}
+              onSubmit={(values) => void submitMissionInput(request, values)}
+            />
+          </article>
+        ))}
         {approvalListWarning ? (
           <p className="conversation-feed__notice" role="status">{approvalListWarning}</p>
+        ) : null}
+        {missionInputListWarning ? (
+          <p className="conversation-feed__notice" role="status">{missionInputListWarning}</p>
         ) : null}
       </section>
     );

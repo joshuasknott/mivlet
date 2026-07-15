@@ -670,6 +670,28 @@ runtime action composition, and approval-card behavior; responsive styles includ
 the desktop and mobile overflow protections. This is still one opt-in,
 single-worker cited benchmark rather than general human-input
 coordination, so the Wave 4C checkbox remains unchecked.
+A provider-free human-input wait kernel is now available beneath that cited
+benchmark. Its portable journal contract accepts one checkpoint-bound schema of
+bounded text, number, boolean, choice, or date-time fields, enforces the exact
+required field set and typed response, and rejects alternative replay, concurrent
+waits, artifact fields, and secret-valued fields. The authenticated native
+coordinator atomically stores the wait-boundary checkpoint and request in the
+encrypted mission journal, moves the Run and Mission to their waiting states,
+rehydrates only owner/workspace/thread-matching pending requests after restart,
+isolates unreadable records, and resumes the exact wait once. Changed values,
+stale heads, detached or altered checkpoints, cross-owner access, and replay with
+different facts fail closed. The conversation now renders a generic accessible
+form with typed controls and restart-safe busy/error handling; `/stop` selects one
+deterministic newest dormant approval or input wait after prioritising active work
+only when both bounded discovery results are complete, otherwise it leaves every
+wait untouched. Human-input cancellation atomically settles both Run and Mission
+lifecycles so a restart cannot strand the intermediate request. Repository evidence
+covers portable reduction, real encrypted-store reopen and tamper paths, strict
+runtime projections, form submission, and active-work cancellation priority.
+There is not yet a general mission producer that invokes this coordinator, and
+secure reference-valued or artifact-valued input plus post-response provider
+continuation remain open. The Wave 4C human-input-and-approval checkbox therefore
+stays unchecked.
 Conservative, explicit
 natural-language forms for goal, plan, schedule,
 and memory now reach the same structured durable command handlers; conversational

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   ConnectorManifest,
   KnowledgeCitation,
@@ -182,6 +183,123 @@ export function CitedApprovalCard({
       <small>Requested {new Date(requestedAt).toLocaleString()}</small>
       {error ? <p role="alert" className="mission-approval-card__error">{error}</p> : null}
     </section>
+  );
+}
+
+export type MissionHumanInputField = {
+  key: string;
+  label: string;
+  help?: string;
+  kind: "text" | "number" | "boolean" | "choice" | "date-time";
+  required: boolean;
+  sensitive: false;
+  choices?: string[];
+};
+
+export type MissionHumanInputValue = {
+  fieldKey: string;
+  value: string | number | boolean | null;
+};
+
+export function MissionHumanInputCard({
+  prompt,
+  fields,
+  requestedAt,
+  busy,
+  error,
+  onSubmit
+}: {
+  prompt: string;
+  fields: MissionHumanInputField[];
+  requestedAt: string;
+  busy: boolean;
+  error?: string;
+  onSubmit: (values: MissionHumanInputValue[]) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string | boolean>>(() =>
+    Object.fromEntries(fields.map((field) => [field.key, field.kind === "boolean" ? false : ""])) as Record<string, string | boolean>);
+  const update = (key: string, value: string | boolean) => {
+    setValues((current) => ({ ...current, [key]: value }));
+  };
+  const submit = () => {
+    const supplied = fields.flatMap<MissionHumanInputValue>((field) => {
+      const raw = values[field.key];
+      if (field.kind === "boolean") {
+        if (!field.required && raw !== true) return [];
+        return [{ fieldKey: field.key, value: raw === true }];
+      }
+      const text = typeof raw === "string" ? raw : "";
+      if (!field.required && text.length === 0) return [];
+      if (field.kind === "number") return [{ fieldKey: field.key, value: Number(text) }];
+      if (field.kind === "date-time") return [{ fieldKey: field.key, value: new Date(text).toISOString() }];
+      return [{ fieldKey: field.key, value: text }];
+    });
+    onSubmit(supplied);
+  };
+
+  return (
+    <form className="mission-human-input-card" aria-label="Mission needs input" onSubmit={(event) => {
+      event.preventDefault();
+      submit();
+    }}>
+      <div className="mission-human-input-card__header">
+        <strong>Mission needs your input</strong>
+        <p>{prompt}</p>
+      </div>
+      <div className="mission-human-input-card__fields">
+        {fields.map((field) => {
+          const helpId = field.help ? `mission-input-${field.key}-help` : undefined;
+          if (field.kind === "boolean") {
+            return (
+              <label key={field.key} className="mission-human-input-card__check">
+                <input
+                  type="checkbox"
+                  checked={values[field.key] === true}
+                  disabled={busy}
+                  onChange={(event) => update(field.key, event.target.checked)}
+                />
+                <span><strong>{field.label}</strong>{field.help ? <small>{field.help}</small> : null}</span>
+              </label>
+            );
+          }
+          return (
+            <label key={field.key}>
+              <span>{field.label}{field.required ? " *" : ""}</span>
+              {field.kind === "choice" ? (
+                <select
+                  value={String(values[field.key] ?? "")}
+                  required={field.required}
+                  disabled={busy}
+                  aria-describedby={helpId}
+                  onChange={(event) => update(field.key, event.target.value)}
+                >
+                  <option value="">Select an option</option>
+                  {field.choices?.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+                </select>
+              ) : (
+                <input
+                  type={field.kind === "number" ? "number" : field.kind === "date-time" ? "datetime-local" : "text"}
+                  value={String(values[field.key] ?? "")}
+                  required={field.required}
+                  disabled={busy}
+                  step={field.kind === "number" ? "any" : field.kind === "date-time" ? "1" : undefined}
+                  aria-describedby={helpId}
+                  onChange={(event) => update(field.key, event.target.value)}
+                />
+              )}
+              {field.help ? <small id={helpId}>{field.help}</small> : null}
+            </label>
+          );
+        })}
+      </div>
+      <div className="mission-human-input-card__footer">
+        <small>Requested {new Date(requestedAt).toLocaleString()}</small>
+        <button type="submit" className="button button--primary" disabled={busy} aria-busy={busy || undefined}>
+          {busy ? "Continuing..." : "Continue mission"}
+        </button>
+      </div>
+      {error ? <p role="alert" className="mission-human-input-card__error">{error}</p> : null}
+    </form>
   );
 }
 

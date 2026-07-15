@@ -7,7 +7,7 @@ import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
-import { cancelRuntimeCitedApproval, latestRuntimeCitedApproval, listRuntimePendingCitedApprovals } from "../runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, verifiedLatestRuntimePendingMissionWait } from "../runtime";
 
 export function useShellAgentController({ onDictation, onVoiceCancel, threadId }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void; threadId?: string }) {
   const approvalGate = useMemo(() => createApprovalGate(), []);
@@ -98,10 +98,18 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       return true;
     }
     if (threadId) {
-      const pending = await listRuntimePendingCitedApprovals(threadId);
-      const latest = latestRuntimeCitedApproval(pending.approvals);
-      if (latest) {
-        await cancelRuntimeCitedApproval(latest);
+      const [approvalResult, inputResult] = await Promise.allSettled([
+        listRuntimePendingCitedApprovals(threadId),
+        listRuntimePendingMissionHumanInputs(threadId)
+      ]);
+      const latestWait = verifiedLatestRuntimePendingMissionWait(approvalResult, inputResult);
+      if (latestWait?.kind === "human-input") {
+        await cancelRuntimeMissionHumanInput(latestWait.request);
+        await durableConversation.refresh();
+        return true;
+      }
+      if (latestWait?.kind === "approval") {
+        await cancelRuntimeCitedApproval(latestWait.request);
         await durableConversation.refresh();
         return true;
       }

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { CitedApprovalCard, MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { CitedApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -210,5 +210,54 @@ describe("RunContextSummary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
     expect(onApprove).toHaveBeenCalledOnce();
     expect(onKeepDraft).toHaveBeenCalledOnce();
+  });
+
+  it("collects bounded typed mission input in one accessible form", () => {
+    const onSubmit = vi.fn();
+    render(<MissionHumanInputCard
+      prompt="Confirm the launch details before the mission continues."
+      requestedAt="2026-07-13T10:00:00Z"
+      busy={false}
+      fields={[
+        { key: "owner", label: "Launch owner", help: "Use the accountable person's name.", kind: "text", required: true, sensitive: false },
+        { key: "seats", label: "Seat count", kind: "number", required: true, sensitive: false },
+        { key: "region", label: "Region", kind: "choice", required: true, sensitive: false, choices: ["UK", "EU"] },
+        { key: "confirmed", label: "Details confirmed", kind: "boolean", required: true, sensitive: false },
+        { key: "launch_at", label: "Launch time", kind: "date-time", required: true, sensitive: false }
+      ]}
+      onSubmit={onSubmit}
+    />);
+
+    expect(screen.getByRole("form", { name: "Mission needs input" })).toHaveTextContent(
+      "Confirm the launch details before the mission continues."
+    );
+    fireEvent.change(screen.getByLabelText(/Launch owner/), { target: { value: "Alex" } });
+    fireEvent.change(screen.getByLabelText(/Seat count/), { target: { value: "25" } });
+    fireEvent.change(screen.getByLabelText(/Region/), { target: { value: "UK" } });
+    fireEvent.click(screen.getByLabelText("Details confirmed"));
+    fireEvent.change(screen.getByLabelText(/Launch time/), { target: { value: "2026-07-20T09:30" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Mission needs input" }));
+
+    expect(onSubmit).toHaveBeenCalledWith([
+      { fieldKey: "owner", value: "Alex" },
+      { fieldKey: "seats", value: 25 },
+      { fieldKey: "region", value: "UK" },
+      { fieldKey: "confirmed", value: true },
+      { fieldKey: "launch_at", value: new Date("2026-07-20T09:30").toISOString() }
+    ]);
+  });
+
+  it("locks the human-input form while submitting and surfaces a safe error", () => {
+    render(<MissionHumanInputCard
+      prompt="Choose a region."
+      requestedAt="2026-07-13T10:00:00Z"
+      busy
+      error="Fable could not continue this mission."
+      fields={[{ key: "region", label: "Region", kind: "choice", required: true, sensitive: false, choices: ["UK", "EU"] }]}
+      onSubmit={vi.fn()}
+    />);
+    expect(screen.getByRole("button", { name: "Continuing..." })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: /Region/ })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Fable could not continue this mission.");
   });
 });

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  cancelRuntimeMissionHumanInput,
   createRuntimeMissionCheckpoint,
   createRuntimeMissionPlan,
   createRuntimeMissionRun,
@@ -8,14 +9,20 @@ import {
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   latestRuntimeCitedApproval,
+  latestRuntimeMissionHumanInput,
+  latestRuntimePendingMissionWait,
   listRuntimePendingCitedApprovals,
+  listRuntimePendingMissionHumanInputs,
   listRuntimeNativeProviderRoutes,
   prepareRuntimeCitedMissionRetry,
+  receiveRuntimeMissionHumanInput,
+  verifiedLatestRuntimePendingMissionWait,
   readRuntimeCitedMissionReceipts,
   readRuntimeCitedMissionPlanSummaries,
   readRuntimeMissionWorkerOutput,
   recoverRuntimeInterruptedCitedMissions,
   requestRuntimeMissionRunCancellation,
+  requestRuntimeMissionHumanInput,
   restoreRuntimeMissionCheckpoint,
   startRuntimeMissionWorker
 } from "./runtime";
@@ -50,6 +57,14 @@ describe("mission runtime boundary", () => {
     await expect(listRuntimePendingCitedApprovals("thread-1")).resolves.toEqual({
       approvals: [], unavailableCount: 0, truncated: false
     });
+    await expect(listRuntimePendingMissionHumanInputs("thread-1")).resolves.toEqual({
+      requests: [], unavailableCount: 0, truncated: false
+    });
+    await expect(requestRuntimeMissionHumanInput({
+      runId: "run-1", requestKey: "input-1", expectedRunRevision: 4, expectedLastSequence: 3,
+      prompt: "Choose a region.",
+      fields: [{ key: "region", label: "Region", kind: "choice", required: true, sensitive: false, choices: ["UK", "EU"] }]
+    })).resolves.toBeNull();
     await expect(restoreRuntimeMissionCheckpoint({
       runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
       expectedRunRevision: 5, expectedLastSequence: 4, newAttemptNumber: 2
@@ -76,6 +91,51 @@ describe("mission runtime boundary", () => {
     expect(latestRuntimeCitedApproval([])).toBeUndefined();
   });
 
+  it("selects one deterministic newest dormant human-input wait", () => {
+    const request = (runId: string, requestedAt: string) => ({
+      runId, missionId: `mission-${runId}`, sourceThreadId: "thread-1", waitKey: `wait-${runId}`,
+      requestKey: `request-${runId}`, prompt: "Choose.", fields: [{
+        key: "choice", label: "Choice", kind: "choice" as const, required: true,
+        sensitive: false as const, choices: ["A", "B"]
+      }], requestedAt, runRevision: 4, lastSequence: 8
+    });
+    expect(latestRuntimeMissionHumanInput([
+      request("run-b", "2026-07-13T12:00:00.000Z"),
+      request("run-old", "2026-07-12T12:00:00.000Z"),
+      request("run-a", "2026-07-13T12:00:00.000Z")
+    ])?.runId).toBe("run-b");
+    expect(latestRuntimeMissionHumanInput([])).toBeUndefined();
+
+    const approval = {
+      runId: "approval-run", missionId: "approval-mission", waitKey: "approval-wait",
+      requestedAt: "2026-07-13T12:00:00.000Z", expectedRunRevision: 4,
+      expectedLastSequence: 8, valueReference: "mission-output:v1:approval", draft: "Draft", plan: {}
+    };
+    const newest = request("input-run", "2026-07-13T13:00:00.000Z");
+    const approvalList = { approvals: [approval], unavailableCount: 0, truncated: false };
+    const inputList = { requests: [newest], unavailableCount: 0, truncated: false };
+    expect(latestRuntimePendingMissionWait(approvalList, inputList)).toEqual({
+      kind: "human-input", request: newest
+    });
+    expect(latestRuntimePendingMissionWait(approvalList, { ...inputList, requests: [] })).toEqual({
+      kind: "approval", request: approval
+    });
+    expect(latestRuntimePendingMissionWait(
+      { ...approvalList, truncated: true }, inputList
+    )).toBeUndefined();
+    expect(latestRuntimePendingMissionWait(
+      approvalList, { ...inputList, unavailableCount: 1 }
+    )).toBeUndefined();
+    expect(() => verifiedLatestRuntimePendingMissionWait(
+      { status: "fulfilled", value: approvalList },
+      { status: "fulfilled", value: { ...inputList, truncated: true } }
+    )).toThrow("nothing was stopped");
+    expect(() => verifiedLatestRuntimePendingMissionWait(
+      { status: "rejected", reason: new Error("offline") },
+      { status: "fulfilled", value: inputList }
+    )).toThrow("nothing was stopped");
+  });
+
   it("accepts only the bounded native pending-approval projection", async () => {
     setNative(true);
     const approval = {
@@ -94,6 +154,70 @@ describe("mission runtime boundary", () => {
       ["mission_cited_approval_pending_list", { threadId: "thread-1" }],
       ["mission_cited_approval_pending_list", { threadId: "thread-1" }]
     ]);
+  });
+
+  it("composes and strictly validates the native human-input wait commands", async () => {
+    setNative(true);
+    const field = {
+      key: "region", label: "Region", help: "Choose the accountable region.", kind: "choice" as const,
+      required: true, sensitive: false as const, choices: ["UK", "EU"]
+    };
+    const request = {
+      runId: "run-1", missionId: "mission-1", sourceThreadId: "thread-1", waitKey: "human-input-wait:v1:test",
+      requestKey: "request-1", prompt: "Choose a region.", fields: [field],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+    const create = {
+      runId: "run-1", requestKey: "request-1", expectedRunRevision: 3, expectedLastSequence: 2,
+      prompt: "Choose a region.", fields: [field]
+    };
+    mocks.invoke
+      .mockResolvedValueOnce(request)
+      .mockResolvedValueOnce({ requests: [request], unavailableCount: 0, truncated: false })
+      .mockResolvedValueOnce({
+        runId: "run-1", waitKey: "human-input-wait:v1:test", status: "received",
+        receivedAt: "2026-07-13T12:01:00Z", runRevision: 6, lastSequence: 5
+      });
+    await expect(requestRuntimeMissionHumanInput(create)).resolves.toEqual(request);
+    await expect(listRuntimePendingMissionHumanInputs("thread-1", 20)).resolves.toEqual({
+      requests: [request], unavailableCount: 0, truncated: false
+    });
+    await expect(receiveRuntimeMissionHumanInput(request, [{ fieldKey: "region", value: "UK" }]))
+      .resolves.toMatchObject({ status: "received", runRevision: 6 });
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["mission_human_input_request", { input: create }],
+      ["mission_human_input_pending_list", { input: { sourceThreadId: "thread-1", limit: 20 } }],
+      ["mission_human_input_receive", { input: {
+        runId: "run-1", waitKey: "human-input-wait:v1:test", expectedRunRevision: 5,
+        expectedLastSequence: 4, values: [{ fieldKey: "region", value: "UK" }]
+      } }]
+    ]);
+
+    mocks.invoke.mockResolvedValueOnce({
+      requests: [{ ...request, fields: [{ ...field, sensitive: true }] }], unavailableCount: 0, truncated: false
+    });
+    await expect(listRuntimePendingMissionHumanInputs("thread-1"))
+      .rejects.toThrow("Malformed human-input wait list");
+  });
+
+  it("accepts the native atomic terminal result when stopping dormant human input", async () => {
+    setNative(true);
+    const request = {
+      runId: "run-1", missionId: "mission-1", sourceThreadId: "thread-1",
+      waitKey: "human-input-wait:v1:test", requestKey: "request-1", prompt: "Choose.",
+      fields: [{ key: "region", label: "Region", kind: "choice" as const, required: true,
+        sensitive: false as const, choices: ["UK", "EU"] }],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+    const settled = { run: { status: "cancelled", revision: 7, eventHead: { lastSequence: 6 } }, events: [] };
+    mocks.invoke.mockResolvedValueOnce(settled);
+    await expect(cancelRuntimeMissionHumanInput(request)).resolves.toEqual(settled);
+    expect(mocks.invoke).toHaveBeenCalledOnce();
+    expect(mocks.invoke).toHaveBeenCalledWith("mission_run_request_cancellation", { input: {
+      runId: "run-1", eventId: "mission-human-input-cancel-requested-test",
+      requestKey: "human-input-stop:v1:test", expectedRunRevision: 5, expectedLastSequence: 4,
+      mode: "cooperative", reason: "User requested stop while mission input was pending."
+    } });
   });
 
   it("composes only the authenticated native mission commands", async () => {

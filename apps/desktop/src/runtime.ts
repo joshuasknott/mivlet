@@ -3283,6 +3283,212 @@ export async function cancelRuntimeCitedApproval(approval: RuntimeCitedApproval)
   });
 }
 
+export type RuntimeMissionHumanInputFieldKind = "text" | "number" | "boolean" | "choice" | "date-time";
+
+export interface RuntimeMissionHumanInputField {
+  key: string;
+  label: string;
+  help?: string;
+  kind: RuntimeMissionHumanInputFieldKind;
+  required: boolean;
+  sensitive: false;
+  choices?: string[];
+}
+
+export interface RuntimeMissionHumanInputRequest {
+  runId: string;
+  missionId: string;
+  sourceThreadId: string;
+  waitKey: string;
+  requestKey: string;
+  prompt: string;
+  fields: RuntimeMissionHumanInputField[];
+  requestedAt: string;
+  runRevision: number;
+  lastSequence: number;
+}
+
+export function latestRuntimeMissionHumanInput(
+  requests: readonly RuntimeMissionHumanInputRequest[]
+): RuntimeMissionHumanInputRequest | undefined {
+  return requests.reduce<RuntimeMissionHumanInputRequest | undefined>((latest, candidate) => {
+    if (!latest) return candidate;
+    const byRequestedAt = candidate.requestedAt.localeCompare(latest.requestedAt);
+    return byRequestedAt > 0 || (byRequestedAt === 0 && candidate.runId.localeCompare(latest.runId) > 0)
+      ? candidate
+      : latest;
+  }, undefined);
+}
+
+export type RuntimePendingMissionWait =
+  | { kind: "approval"; request: RuntimeCitedApproval }
+  | { kind: "human-input"; request: RuntimeMissionHumanInputRequest };
+
+export function latestRuntimePendingMissionWait(
+  approvals: RuntimeCitedApprovalList,
+  inputs: RuntimeMissionHumanInputList
+): RuntimePendingMissionWait | undefined {
+  if (approvals.unavailableCount > 0 || approvals.truncated
+    || inputs.unavailableCount > 0 || inputs.truncated) return undefined;
+  const approval = latestRuntimeCitedApproval(approvals.approvals);
+  const input = latestRuntimeMissionHumanInput(inputs.requests);
+  if (!approval) return input ? { kind: "human-input", request: input } : undefined;
+  if (!input) return { kind: "approval", request: approval };
+  const approvalKey = `${approval.requestedAt}\0${approval.runId}\0approval`;
+  const inputKey = `${input.requestedAt}\0${input.runId}\0human-input`;
+  return inputKey > approvalKey
+    ? { kind: "human-input", request: input }
+    : { kind: "approval", request: approval };
+}
+
+export function verifiedLatestRuntimePendingMissionWait(
+  approvals: PromiseSettledResult<RuntimeCitedApprovalList>,
+  inputs: PromiseSettledResult<RuntimeMissionHumanInputList>
+): RuntimePendingMissionWait | undefined {
+  if (approvals.status === "rejected" || inputs.status === "rejected"
+    || approvals.value.unavailableCount > 0 || approvals.value.truncated
+    || inputs.value.unavailableCount > 0 || inputs.value.truncated) {
+    throw new Error("Fable could not verify every pending mission wait, so nothing was stopped.");
+  }
+  return latestRuntimePendingMissionWait(approvals.value, inputs.value);
+}
+
+export interface RuntimeMissionHumanInputList {
+  requests: RuntimeMissionHumanInputRequest[];
+  unavailableCount: number;
+  truncated: boolean;
+}
+
+export interface RuntimeMissionHumanInputValue {
+  fieldKey: string;
+  value: string | number | boolean | null;
+}
+
+function isRuntimeMissionHumanInputField(value: unknown): value is RuntimeMissionHumanInputField {
+  if (!isRecord(value)) return false;
+  const requiredKeys = ["key", "label", "kind", "required", "sensitive"];
+  const allowedKeys = [...requiredKeys, "help", "choices"];
+  const kind = value.kind;
+  const choices = value.choices;
+  return requiredKeys.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => allowedKeys.includes(key))
+    && typeof value.key === "string" && value.key.length > 0
+    && typeof value.label === "string" && value.label.length > 0
+    && (value.help === undefined || (typeof value.help === "string" && value.help.length > 0))
+    && ["text", "number", "boolean", "choice", "date-time"].includes(String(kind))
+    && typeof value.required === "boolean"
+    && value.sensitive === false
+    && (kind === "choice"
+      ? Array.isArray(choices) && choices.length >= 2 && choices.every((choice) => typeof choice === "string" && choice.length > 0)
+      : choices === undefined);
+}
+
+function isRuntimeMissionHumanInputRequest(value: unknown): value is RuntimeMissionHumanInputRequest {
+  if (!isRecord(value)) return false;
+  const keys = ["runId", "missionId", "sourceThreadId", "waitKey", "requestKey", "prompt", "fields", "requestedAt", "runRevision", "lastSequence"];
+  return Object.keys(value).length === keys.length
+    && Object.keys(value).every((key) => keys.includes(key))
+    && ["runId", "missionId", "sourceThreadId", "waitKey", "requestKey", "prompt", "requestedAt"]
+      .every((key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0)
+    && Array.isArray(value.fields) && value.fields.length >= 1 && value.fields.length <= 8
+    && value.fields.every(isRuntimeMissionHumanInputField)
+    && new Set(value.fields.map((field) => field.key)).size === value.fields.length
+    && Number.isInteger(value.runRevision) && (value.runRevision as number) > 0
+    && Number.isInteger(value.lastSequence) && (value.lastSequence as number) > 0;
+}
+
+export async function requestRuntimeMissionHumanInput(input: {
+  runId: string;
+  requestKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  prompt: string;
+  fields: RuntimeMissionHumanInputField[];
+}): Promise<RuntimeMissionHumanInputRequest | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const result = await invoke<unknown>("mission_human_input_request", { input });
+    if (!isRuntimeMissionHumanInputRequest(result)) throw new Error("Malformed human-input wait projection.");
+    return result;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function listRuntimePendingMissionHumanInputs(
+  sourceThreadId: string,
+  limit?: number
+): Promise<RuntimeMissionHumanInputList> {
+  if (!hasTauriRuntime()) return { requests: [], unavailableCount: 0, truncated: false };
+  try {
+    const result = await invoke<unknown>("mission_human_input_pending_list", {
+      input: { sourceThreadId, ...(limit === undefined ? {} : { limit }) }
+    });
+    if (!isRecord(result)
+      || Object.keys(result).length !== 3
+      || !Array.isArray(result.requests)
+      || !result.requests.every(isRuntimeMissionHumanInputRequest)
+      || !Number.isInteger(result.unavailableCount)
+      || (result.unavailableCount as number) < 0
+      || typeof result.truncated !== "boolean") {
+      throw new Error("Malformed human-input wait list.");
+    }
+    return result as unknown as RuntimeMissionHumanInputList;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function receiveRuntimeMissionHumanInput(
+  request: RuntimeMissionHumanInputRequest,
+  values: RuntimeMissionHumanInputValue[]
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const result = await invoke<unknown>("mission_human_input_receive", {
+      input: {
+        runId: request.runId,
+        waitKey: request.waitKey,
+        expectedRunRevision: request.runRevision,
+        expectedLastSequence: request.lastSequence,
+        values
+      }
+    });
+    if (!isRecord(result)
+      || Object.keys(result).length !== 6
+      || result.runId !== request.runId
+      || result.waitKey !== request.waitKey
+      || result.status !== "received"
+      || typeof result.receivedAt !== "string"
+      || !Number.isInteger(result.runRevision)
+      || !Number.isInteger(result.lastSequence)) {
+      throw new Error("Malformed human-input receipt.");
+    }
+    return result;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function cancelRuntimeMissionHumanInput(request: RuntimeMissionHumanInputRequest) {
+  const identity = request.waitKey.replace(/^human-input-wait:v1:/, "");
+  const requested = await requestRuntimeMissionRunCancellation({
+    runId: request.runId,
+    eventId: `mission-human-input-cancel-requested-${identity}`,
+    requestKey: `human-input-stop:v1:${identity}`,
+    expectedRunRevision: request.runRevision,
+    expectedLastSequence: request.lastSequence,
+    mode: "cooperative",
+    reason: "User requested stop while mission input was pending."
+  });
+  if (!requested || !isRecord(requested.run) || !isRecord(requested.run.eventHead)
+    || !Number.isInteger(requested.run.revision)
+    || !Number.isInteger(requested.run.eventHead.lastSequence)) {
+    throw new Error("The human-input cancellation did not reach a durable request.");
+  }
+  if (requested.run.status === "cancelled") return requested;
+  return finalizeRuntimeMissionRunCancellation({
+    runId: request.runId,
+    eventId: `mission-human-input-cancelled-${identity}`,
+    expectedRunRevision: requested.run.revision as number,
+    expectedLastSequence: requested.run.eventHead.lastSequence as number
+  });
+}
+
 // ---------------------------------------------------------------------------
 // MCP local STDIO process bridge. Rust resolves an opaque encrypted launch
 // reference, owns the child and validates every frame; TypeScript sees only

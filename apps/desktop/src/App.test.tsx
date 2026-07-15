@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -201,8 +201,11 @@ vi.mock("./runtime", () => ({
   createRuntimeResponseArtifact: vi.fn(async () => null),
   listRuntimeThreadArtifacts: vi.fn(async () => []),
   listRuntimePendingCitedApprovals: vi.fn(async () => ({ approvals: [], unavailableCount: 0, truncated: false })),
+  listRuntimePendingMissionHumanInputs: vi.fn(async () => ({ requests: [], unavailableCount: 0, truncated: false })),
   resolveRuntimeCitedApproval: vi.fn(async () => null),
   cancelRuntimeCitedApproval: vi.fn(async () => null),
+  receiveRuntimeMissionHumanInput: vi.fn(async () => null),
+  cancelRuntimeMissionHumanInput: vi.fn(async () => null),
   getRuntimeArtifact: vi.fn(async () => null),
   readRuntimeCitedMissionReceipts: vi.fn(async (_threadId: string, messageIds: string[]) =>
     messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
@@ -439,6 +442,12 @@ describe("Fable home", () => {
     vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
     vi.mocked(listRuntimePendingCitedApprovals).mockReset();
     vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValue({ approvals: [], unavailableCount: 0, truncated: false });
+    vi.mocked(listRuntimePendingMissionHumanInputs).mockReset();
+    vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValue({ requests: [], unavailableCount: 0, truncated: false });
+    vi.mocked(receiveRuntimeMissionHumanInput).mockReset();
+    vi.mocked(receiveRuntimeMissionHumanInput).mockResolvedValue(null);
+    vi.mocked(cancelRuntimeMissionHumanInput).mockReset();
+    vi.mocked(cancelRuntimeMissionHumanInput).mockResolvedValue(null);
     vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
     vi.mocked(readRuntimeCitedMissionReceipts).mockImplementation(async (_threadId, messageIds) =>
       messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));
@@ -1527,6 +1536,33 @@ describe("Fable home", () => {
     );
   });
 
+  it("rehydrates one native mission-input request and submits typed values once", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-human-input", projectId: null, title: "Launch details",
+      lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    const request = {
+      runId: "run-human-input", missionId: "mission-human-input", sourceThreadId: "thread-human-input",
+      waitKey: "human-input-wait:v1:test", requestKey: "request-human-input", prompt: "Who owns the launch?",
+      fields: [{ key: "owner", label: "Launch owner", kind: "text" as const, required: true, sensitive: false as const }],
+      requestedAt: "2026-07-13T12:00:00Z", runRevision: 5, lastSequence: 4
+    };
+    vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValue({
+      requests: [request], unavailableCount: 0, truncated: false
+    });
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Launch details" }));
+    fireEvent.change(await screen.findByLabelText(/Launch owner/), { target: { value: "Alex" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue mission" }));
+
+    await waitFor(() => expect(receiveRuntimeMissionHumanInput).toHaveBeenCalledWith(
+      request, [{ fieldKey: "owner", value: "Alex" }]
+    ));
+    expect(receiveRuntimeMissionHumanInput).toHaveBeenCalledOnce();
+  });
+
   it("offers a fresh mission after a live cited result is not accepted", async () => {
     vi.mocked(executeCitedBriefMission).mockImplementationOnce(async (input) => {
       runtimeMocks.citedBriefCalls.push(input as unknown as Record<string, unknown>);
@@ -1987,6 +2023,16 @@ describe("Fable home", () => {
       unavailableCount: 0,
       truncated: false
     });
+    vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValueOnce({
+      requests: [{
+        runId: "newer-input-run", missionId: "newer-input-mission", sourceThreadId: "thread-active",
+        waitKey: "human-input-wait:v1:newer", requestKey: "request-newer", prompt: "Choose a region.",
+        fields: [{ key: "region", label: "Region", kind: "choice", required: true, sensitive: false, choices: ["UK", "EU"] }],
+        requestedAt: "2026-07-13T13:00:00.000Z", runRevision: 4, lastSequence: 8
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
 
     const user = userEvent.setup();
     render(<App />);
@@ -2009,6 +2055,7 @@ describe("Fable home", () => {
     // Stop button disappears as running drops.
     await waitFor(() => expect(runtimeMocks.cancelCalls.length).toBeGreaterThanOrEqual(1));
     expect(cancelRuntimeCitedApproval).not.toHaveBeenCalled();
+    expect(cancelRuntimeMissionHumanInput).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument()
     );

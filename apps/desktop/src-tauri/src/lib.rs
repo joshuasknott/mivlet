@@ -33,6 +33,7 @@ mod knowledge;
 mod local_model;
 mod mcp_process;
 mod memory;
+mod mission_human_input;
 mod mission_plans;
 mod mission_runs;
 mod mission_workers;
@@ -166,6 +167,9 @@ pub fn run() {
             mission_runs::mission_run_prepare_cited_retry,
             mission_runs::mission_run_create_checkpoint,
             mission_runs::mission_run_restore_checkpoint,
+            mission_human_input::mission_human_input_request,
+            mission_human_input::mission_human_input_pending_list,
+            mission_human_input::mission_human_input_receive,
             mission_workers::mission_worker_create,
             mission_workers::mission_worker_start,
             mission_workers::mission_worker_output_read,
