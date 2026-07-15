@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts } from "./runtime";
+import { cancelRuntimeCitedApproval, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -200,6 +200,9 @@ vi.mock("./runtime", () => ({
   deleteRuntimeConversationDraft: vi.fn(async () => undefined),
   createRuntimeResponseArtifact: vi.fn(async () => null),
   listRuntimeThreadArtifacts: vi.fn(async () => []),
+  listRuntimePendingCitedApprovals: vi.fn(async () => []),
+  resolveRuntimeCitedApproval: vi.fn(async () => null),
+  cancelRuntimeCitedApproval: vi.fn(async () => null),
   getRuntimeArtifact: vi.fn(async () => null),
   readRuntimeCitedMissionReceipts: vi.fn(async (_threadId: string, messageIds: string[]) =>
     messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
@@ -1954,6 +1957,12 @@ describe("Fable home", () => {
     // genuinely in flight when Stop is clicked.
     runtimeMocks.lines = ['data: {"choices":[{"delta":{"content":"partial"}}]}'];
     runtimeMocks.emitDone = false;
+    vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValueOnce([{
+      runId: "older-run", missionId: "older-mission", waitKey: "older-wait",
+      requestedAt: "2026-07-13T12:00:00.000Z", expectedRunRevision: 4,
+      expectedLastSequence: 8, valueReference: "mission-output:v1:older",
+      draft: "Older draft", plan: testCitedPlan
+    }]);
 
     const user = userEvent.setup();
     render(<App />);
@@ -1975,6 +1984,7 @@ describe("Fable home", () => {
     // The Rust boundary cancel fired (the real-Rust drop stays intact) and the
     // Stop button disappears as running drops.
     await waitFor(() => expect(runtimeMocks.cancelCalls.length).toBeGreaterThanOrEqual(1));
+    expect(cancelRuntimeCitedApproval).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument()
     );

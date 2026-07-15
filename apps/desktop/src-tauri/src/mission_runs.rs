@@ -229,9 +229,103 @@ pub fn mission_run_request_cancellation(
                     .map_err(crate::store::StoreError::Invalid);
             }
             let at = now();
+            let (journal, effective_revision, effective_sequence) = if journal
+                .run
+                .get("status")
+                .and_then(Value::as_str)
+                == Some("waiting-approval")
+            {
+                if journal.run.get("revision").and_then(Value::as_i64)
+                    != Some(input.expected_run_revision)
+                    || journal
+                        .run
+                        .pointer("/eventHead/lastSequence")
+                        .and_then(Value::as_i64)
+                        != Some(input.expected_last_sequence)
+                {
+                    return Err(crate::store::StoreError::Invalid(
+                        "The mission approval changed before cancellation could be requested.".into(),
+                    ));
+                }
+                let approval = journal.events.last().ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission approval wait is unavailable.".into())
+                })?;
+                let wait_key = approval
+                    .pointer("/payload/wait/waitKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| crate::store::StoreError::Invalid("Mission approval wait is invalid.".into()))?;
+                let proposal_hash = approval
+                    .pointer("/payload/wait/proposalHash")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| crate::store::StoreError::Invalid("Mission approval proposal is invalid.".into()))?;
+                if approval.get("type").and_then(Value::as_str) != Some("approval-requested") {
+                    return Err(crate::store::StoreError::Invalid(
+                        "Mission approval head is invalid.".into(),
+                    ));
+                }
+                let digest = format!("{:x}", Sha256::digest(wait_key.as_bytes()));
+                let resolution_id = format!("mission-approval-cancelled-{digest}");
+                let resolution_key = format!("approval-cancelled:v1:{digest}");
+                let sequence = input.expected_last_sequence + 1;
+                let resolution = json!({
+                    "waitKey":wait_key,"decision":"cancelled","decidedAt":at,
+                    "decidedByInternalUserId":context.internal_user_id,
+                    "acceptedProposalHash":proposal_hash
+                });
+                let event = json!({
+                    "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":member,
+                    "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":context.internal_user_id,
+                    "createdAt":at,"updatedAt":at,"id":resolution_id,"runId":input.run_id,
+                    "type":"approval-resolved","sequence":sequence,
+                    "previousEventId":journal.run.pointer("/eventHead/lastEventId"),
+                    "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+                    "occurredAt":at,"actor":{"kind":"internal-user","internalUserId":context.internal_user_id,"memberId":member},
+                    "idempotencyKey":resolution_key,"payload":{"resolution":resolution}
+                });
+                let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+                })?;
+                projected.insert("status".into(), json!("running"));
+                projected.insert("revision".into(), json!(input.expected_run_revision + 1));
+                projected.insert("updatedAt".into(), json!(at));
+                projected.insert(
+                    "eventHead".into(),
+                    json!({"lastSequence":sequence,"lastEventId":resolution_id}),
+                );
+                let resolved = mission_run::append(
+                    tx, store, &scope, &member, &input.run_id,
+                    input.expected_run_revision, input.expected_last_sequence,
+                    &resolution_id, "approval-resolved", &resolution_key, &event,
+                    &Value::Object(projected), &at,
+                )?;
+                if let Some(mission_id) = journal
+                    .run
+                    .get("missionId")
+                    .or_else(|| journal.run.pointer("/initiator/missionId"))
+                    .and_then(Value::as_str)
+                {
+                    if let Some(lifecycle) = mission_plan::get(tx, store, &scope, &member, mission_id)? {
+                        if lifecycle.mission.get("status").and_then(Value::as_str) == Some("waiting") {
+                            mission_plan::resume_waiting(tx, store, &scope, &member, &lifecycle, &at)?;
+                        }
+                    }
+                }
+                (resolved, input.expected_run_revision + 1, sequence)
+            } else {
+                (journal, input.expected_run_revision, input.expected_last_sequence)
+            };
+            let effective_input = MissionRunCancelInput {
+                run_id: input.run_id.clone(),
+                event_id: input.event_id.clone(),
+                request_key: input.request_key.clone(),
+                expected_run_revision: effective_revision,
+                expected_last_sequence: effective_sequence,
+                mode: input.mode.clone(),
+                reason: input.reason.clone(),
+            };
             let (projected, event) = build_cancellation(
                 &journal.run,
-                &input,
+                &effective_input,
                 &context.internal_user_id,
                 &member,
                 &at,
@@ -243,8 +337,8 @@ pub fn mission_run_request_cancellation(
                 &scope,
                 &member,
                 &input.run_id,
-                input.expected_run_revision,
-                input.expected_last_sequence,
+                effective_revision,
+                effective_sequence,
                 &input.event_id,
                 "cancellation-requested",
                 &cancel_key,
@@ -556,6 +650,17 @@ fn recover_interrupted_cited_run(
         })?;
     let lifecycle = mission_plan::get(tx, store, scope, member, mission_id)?
         .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    if journal.run.get("status").and_then(Value::as_str) == Some("waiting-approval") {
+        if lifecycle.mission.get("status").and_then(Value::as_str) != Some("waiting") {
+            return Err(crate::store::StoreError::Invalid(
+                "Pending cited approval mission status is invalid.".into(),
+            ));
+        }
+        crate::mission_workers::validate_pending_cited_approval(
+            tx, store, scope, member, &journal,
+        )?;
+        return Ok(None);
+    }
     if !is_cited_recovery_shape(&journal.run, &lifecycle) {
         return Ok(None);
     }
@@ -1260,7 +1365,7 @@ fn is_cited_transcript_shape(
             .mission
             .pointer("/acceptance/requiresHumanAcceptance")
             .and_then(Value::as_bool)
-            == Some(false)
+            .is_some()
         && steps.is_some_and(|steps| {
             steps.len() == 1
                 && steps[0]
@@ -2168,6 +2273,11 @@ mod tests {
         cited.current_revision["steps"][0]["requiredCapabilities"] =
             json!(["knowledge.content.search"]);
         cited.mission["acceptance"]["requiresHumanAcceptance"] = json!(true);
+        assert!(is_cited_recovery_shape(&run, &cited));
+        cited.mission["acceptance"]
+            .as_object_mut()
+            .unwrap()
+            .remove("requiresHumanAcceptance");
         assert!(!is_cited_recovery_shape(&run, &cited));
     }
 

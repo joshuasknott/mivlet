@@ -3183,6 +3183,94 @@ export async function readRuntimeCitedMissionPlanSummaries(threadId: string, mes
   } catch (error) { throw toRuntimeError(error); }
 }
 
+export interface RuntimeCitedApproval {
+  runId: string;
+  missionId: string;
+  waitKey: string;
+  requestedAt: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  valueReference: string;
+  draft: string;
+  plan: Record<string, unknown>;
+}
+
+export function latestRuntimeCitedApproval(
+  approvals: readonly RuntimeCitedApproval[]
+): RuntimeCitedApproval | undefined {
+  return approvals.reduce<RuntimeCitedApproval | undefined>((latest, candidate) => {
+    if (!latest) return candidate;
+    const byRequestedAt = candidate.requestedAt.localeCompare(latest.requestedAt);
+    return byRequestedAt > 0 || (byRequestedAt === 0 && candidate.runId.localeCompare(latest.runId) > 0)
+      ? candidate
+      : latest;
+  }, undefined);
+}
+
+function isRuntimeCitedApproval(value: unknown): value is RuntimeCitedApproval {
+  if (!isRecord(value)) return false;
+  const keys = ["runId", "missionId", "waitKey", "requestedAt", "expectedRunRevision", "expectedLastSequence", "valueReference", "draft", "plan"];
+  return Object.keys(value).length === keys.length
+    && Object.keys(value).every((key) => keys.includes(key))
+    && ["runId", "missionId", "waitKey", "requestedAt", "valueReference", "draft"]
+      .every((key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0)
+    && Number.isInteger(value.expectedRunRevision) && (value.expectedRunRevision as number) > 0
+    && Number.isInteger(value.expectedLastSequence) && (value.expectedLastSequence as number) > 0
+    && isRecord(value.plan);
+}
+
+export async function listRuntimePendingCitedApprovals(threadId: string): Promise<RuntimeCitedApproval[]> {
+  if (!hasTauriRuntime()) return [];
+  try {
+    const result = await invoke<unknown>("mission_cited_approval_pending_list", { threadId });
+    if (!Array.isArray(result) || !result.every(isRuntimeCitedApproval)) {
+      throw new Error("Malformed cited approval projection.");
+    }
+    return result;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function resolveRuntimeCitedApproval(
+  approval: RuntimeCitedApproval,
+  decision: "approved" | "denied"
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<Record<string, unknown>>("mission_cited_approval_resolve", {
+      input: {
+        runId: approval.runId,
+        decision,
+        expectedRunRevision: approval.expectedRunRevision,
+        expectedLastSequence: approval.expectedLastSequence
+      }
+    });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function cancelRuntimeCitedApproval(approval: RuntimeCitedApproval) {
+  const id = (prefix: string) => `${prefix}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`;
+  const requested = await requestRuntimeMissionRunCancellation({
+    runId: approval.runId,
+    eventId: id("event"),
+    requestKey: id("stop"),
+    expectedRunRevision: approval.expectedRunRevision,
+    expectedLastSequence: approval.expectedLastSequence,
+    mode: "cooperative",
+    reason: "User requested stop while cited artifact acceptance was pending."
+  });
+  if (!requested || !isRecord(requested.run) || !isRecord(requested.run.eventHead)
+    || !Number.isInteger(requested.run.revision)
+    || !Number.isInteger(requested.run.eventHead.lastSequence)) {
+    throw new Error("The cited approval cancellation did not reach a durable request.");
+  }
+  return finalizeRuntimeMissionRunCancellation({
+    runId: approval.runId,
+    eventId: id("event"),
+    expectedRunRevision: requested.run.revision as number,
+    expectedLastSequence: requested.run.eventHead.lastSequence as number
+  });
+}
+
 // ---------------------------------------------------------------------------
 // MCP local STDIO process bridge. Rust resolves an opaque encrypted launch
 // reference, owns the child and validates every frame; TypeScript sees only

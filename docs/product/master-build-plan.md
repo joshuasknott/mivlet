@@ -643,7 +643,29 @@ the Wave 4A and 4C retry boxes remain unchecked. `/stop`
 is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
 cancel path, and persists the durable cancellation request plus terminal cancelled
-run and mission state for the active cited journey. Conservative, explicit
+run and mission state for the active cited journey.
+The same narrow cited journey now supports a durable human-acceptance wait when
+the user explicitly asks to approve before saving. Rust persists a wait-boundary
+checkpoint whose encrypted state binds the exact plan revision, worker start,
+route, terminal attempt usage, completed output, policy evaluation, content hash,
+and proposal hash before projecting the Run as `waiting-approval` and the Mission
+as `waiting`. No artifact or terminal conversation is created at that boundary.
+The pending approval is recovered from authenticated native facts after restart;
+approve creates the one replay-safe accepted artifact and terminal transcript,
+while keep-as-draft and cancellation preserve the cited output without creating
+an artifact. Stale revisions, concurrent or changed decisions, detached event
+chains, cross-thread reads, non-owner decisions, proposal substitution, and
+replayed alternative decisions fail closed. `/stop` prioritizes active work and,
+when only dormant approvals remain, cancels one deterministic newest approval.
+The conversation renders the recovered draft with explicit `Approve and save`
+and `Keep as draft` actions, busy/error states, keyboard focus, 44-pixel controls,
+and no desktop or mobile overflow. Repository evidence covers the portable journal
+contract, encrypted wait/reopen and tamper rejection, exact artifact ancestry,
+runtime action composition, and approval-card behavior; responsive styles include
+the desktop and mobile overflow protections. This is still one opt-in,
+single-worker cited benchmark rather than general human-input
+coordination, so the Wave 4C checkbox remains unchecked.
+Conservative, explicit
 natural-language forms for goal, plan, schedule,
 and memory now reach the same structured durable command handlers; conversational
 uses of those words remain ordinary prompts.

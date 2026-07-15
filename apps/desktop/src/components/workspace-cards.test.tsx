@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { CitedApprovalCard, MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -193,5 +193,22 @@ describe("RunContextSummary", () => {
     rerender(<NewCitedMissionAction disabled starting onStart={onStart} />);
     expect(screen.getByRole("button", { name: "Starting new mission..." })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Starting new mission..." })).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("keeps artifact creation explicit after policy checks pass", () => {
+    const onApprove = vi.fn();
+    const onKeepDraft = vi.fn();
+    render(<CitedApprovalCard
+      requestedAt="2026-07-13T10:00:00Z"
+      busy={false}
+      onApprove={onApprove}
+      onKeepDraft={onKeepDraft}
+    />);
+    const card = screen.getByLabelText("Cited brief approval");
+    expect(card).toHaveTextContent("No artifact has been created yet.");
+    fireEvent.click(screen.getByRole("button", { name: "Approve and save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
+    expect(onApprove).toHaveBeenCalledOnce();
+    expect(onKeepDraft).toHaveBeenCalledOnce();
   });
 });

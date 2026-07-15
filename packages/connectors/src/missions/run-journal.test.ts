@@ -85,7 +85,7 @@ describe("durable run journal projection", () => {
         kind: "automatic", attemptNumber: 1, createdAt: "t3",
         replayBoundary: { durableThroughSequence: 2, resumeAfterEventId: id<"run-event">("event-2"), completedPlanStepKeys: [], completedWorkerIds: [], committedEffectKeys: [] },
         stateStorage: "portable-redacted", stateReference: "checkpoint:retry", stateHash: "hash-retry",
-        executionNodeId: id<"execution-node">("local")
+        executionNodeId: id<"execution-node">("local"), pendingWaitKey: "accept-draft-1"
       }
     }, id<"run-event">("event-2"));
     const saved = appendRunEvent(running, checkpoint);
@@ -131,5 +131,40 @@ describe("durable run journal projection", () => {
     expect(cancelled.run.cancellation?.requestKey).toBe("stop-1");
     expect(() => appendRunEvent(cancelled, event("worker-progressed", 5, { workerId: id<"worker">("worker-1"), summary: "late" }, id<"run-event">("event-4"))))
       .toThrow("terminal run journal is immutable");
+  });
+
+  it("waits on one checkpoint-bound approval and resolves only the exact proposal", () => {
+    const running = appendRunEvent(
+      appendRunEvent(undefined, created()),
+      event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1"))
+    );
+    const checkpoint = event("checkpoint-created", 3, {
+      checkpoint: {
+        kind: "wait-boundary", attemptNumber: 1, createdAt: "t3",
+        replayBoundary: { durableThroughSequence: 2, resumeAfterEventId: id<"run-event">("event-2"), completedPlanStepKeys: [], completedWorkerIds: [], committedEffectKeys: [] },
+        stateStorage: "portable-redacted", stateReference: "checkpoint:approval", stateHash: "hash-approval",
+        pendingWaitKey: "accept-draft-1",
+        executionNodeId: id<"execution-node">("local")
+      }
+    }, id<"run-event">("event-2"));
+    const saved = appendRunEvent(running, checkpoint);
+    const wait: Spine.Missions.ApprovalWait = {
+      waitKey: "accept-draft-1", status: "pending", approvalRequestRef: "mission-approval:1",
+      proposalHash: "proposal-hash-1", actionSummary: "Save this cited brief as an accepted artifact.",
+      requestedAt: "t4", workerId: id<"worker">("worker-1")
+    };
+    const waiting = appendRunEvent(saved, event("approval-requested", 4, { wait }, id<"run-event">("event-3")));
+    expect(waiting.run.status).toBe("waiting-approval");
+    expect(() => appendRunEvent(waiting, event("approval-requested", 5, { wait: { ...wait, waitKey: "another" } }, id<"run-event">("event-4"))))
+      .toThrow("one exact pending proposal");
+
+    const wrongHash = event("approval-resolved", 5, { resolution: {
+      waitKey: wait.waitKey, decision: "approved", decidedAt: "t5", acceptedProposalHash: "changed"
+    } }, id<"run-event">("event-4"));
+    expect(() => appendRunEvent(waiting, wrongHash)).toThrow("exact active proposal");
+    const resolved = appendRunEvent(waiting, event("approval-resolved", 5, { resolution: {
+      waitKey: wait.waitKey, decision: "approved", decidedAt: "t5", acceptedProposalHash: wait.proposalHash
+    } }, id<"run-event">("event-4")));
+    expect(resolved.run.status).toBe("running");
   });
 });

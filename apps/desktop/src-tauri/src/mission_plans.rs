@@ -330,7 +330,9 @@ fn project_cited_plan_summary_for_message(
                 && result_event
                     .and_then(|event| event.pointer("/payload/error/code"))
                     .and_then(Value::as_str)
-                    == Some("policy-acceptance-failed")
+                    .is_some_and(|code| {
+                        matches!(code, "policy-acceptance-failed" | "human-acceptance-denied")
+                    })
         }
         "failed" => {
             journal.run.get("status").and_then(Value::as_str) == Some("failed")
@@ -452,6 +454,11 @@ pub(crate) fn project_cited_plan_summary(
             criterion.get("required").and_then(Value::as_bool) == Some(true)
                 && criterion.get("evaluator").and_then(Value::as_str) == Some("policy")
         })
+        && mission
+            .get("acceptance")
+            .and_then(|value| value.get("requiresHumanAcceptance"))
+            .and_then(Value::as_bool)
+            .is_some()
         && step_criteria.is_some_and(|keys| {
             keys.len() == criteria.len()
                 && criteria
@@ -485,6 +492,7 @@ pub(crate) fn project_cited_plan_summary(
             "output":required_text(output.get("description"), "output description", 1_000)?
         },
         "acceptance":acceptance,
+        "requiresHumanAcceptance":mission.get("acceptance").and_then(|value|value.get("requiresHumanAcceptance")).and_then(Value::as_bool).unwrap_or(false),
         "budget":{
             "maxInputTokens":positive("maxInputTokens")?,
             "maxOutputTokens":positive("maxOutputTokens")?,

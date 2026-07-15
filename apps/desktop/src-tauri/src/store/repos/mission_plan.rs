@@ -247,6 +247,48 @@ pub fn mark_running(
     )
 }
 
+pub fn mark_waiting(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    at: &str,
+) -> Result<()> {
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "running",
+        "waiting",
+        None,
+        at,
+    )
+}
+
+pub fn resume_waiting(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    lifecycle: &MissionPlanLifecycleRow,
+    at: &str,
+) -> Result<()> {
+    transition_status(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        lifecycle,
+        "waiting",
+        "running",
+        None,
+        at,
+    )
+}
+
 pub fn mark_completed(
     tx: &Connection,
     store: &Store,

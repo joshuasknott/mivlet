@@ -7,6 +7,7 @@ import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
+import { cancelRuntimeCitedApproval, latestRuntimeCitedApproval, listRuntimePendingCitedApprovals } from "../runtime";
 
 export function useShellAgentController({ onDictation, onVoiceCancel, threadId }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void; threadId?: string }) {
   const approvalGate = useMemo(() => createApprovalGate(), []);
@@ -92,9 +93,20 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       await citedMissionCancelRef.current();
       return true;
     }
-    if (!agent.state.running) return false;
-    await agent.cancel();
-    return true;
+    if (agent.state.running) {
+      await agent.cancel();
+      return true;
+    }
+    if (threadId) {
+      const pending = await listRuntimePendingCitedApprovals(threadId);
+      const latest = latestRuntimeCitedApproval(pending);
+      if (latest) {
+        await cancelRuntimeCitedApproval(latest);
+        await durableConversation.refresh();
+        return true;
+      }
+    }
+    return false;
   };
   return { runtime, agent, durableConversation, voice, scheduledActive: scheduledAgent.active, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation: () => { cancelRequestedRef.current = false; } };
 }

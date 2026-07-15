@@ -142,6 +142,106 @@ pub fn accepted_mission_output_binding(
     }
 }
 
+fn exact_human_approval_chain(
+    journal: &super::mission_run::MissionRunJournalRow,
+    lifecycle: &super::mission_plan::MissionPlanLifecycleRow,
+    result_event: &Value,
+    evaluation_event_id: &str,
+    actor: &str,
+) -> bool {
+    let Some(resolution_id) = result_event.get("previousEventId").and_then(Value::as_str) else {
+        return false;
+    };
+    let Some(resolution) = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(resolution_id)
+            && event.get("type").and_then(Value::as_str) == Some("approval-resolved")
+    }) else {
+        return false;
+    };
+    let wait_key = resolution
+        .pointer("/payload/resolution/waitKey")
+        .and_then(Value::as_str);
+    let proposal_hash = resolution
+        .pointer("/payload/resolution/acceptedProposalHash")
+        .and_then(Value::as_str);
+    let Some(request) = journal.events.iter().find(|event| {
+        event.get("type").and_then(Value::as_str) == Some("approval-requested")
+            && event
+                .pointer("/payload/wait/waitKey")
+                .and_then(Value::as_str)
+                == wait_key
+    }) else {
+        return false;
+    };
+    let checkpoint_id = request.get("previousEventId").and_then(Value::as_str);
+    let checkpoint = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == checkpoint_id
+            && event.get("type").and_then(Value::as_str) == Some("checkpoint-created")
+    });
+    lifecycle
+        .mission
+        .pointer("/acceptance/requiresHumanAcceptance")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && lifecycle.current_revision.get("id") == journal.run.get("planRevisionId")
+        && resolution
+            .pointer("/payload/resolution/decision")
+            .and_then(Value::as_str)
+            == Some("approved")
+        && resolution.get("previousEventId") == request.get("id")
+        && resolution
+            .pointer("/payload/resolution/decidedByInternalUserId")
+            .and_then(Value::as_str)
+            == Some(actor)
+        && proposal_hash.is_some()
+        && request
+            .pointer("/payload/wait/proposalHash")
+            .and_then(Value::as_str)
+            == proposal_hash
+        && request
+            .pointer("/payload/wait/status")
+            .and_then(Value::as_str)
+            == Some("pending")
+        && checkpoint.is_some_and(|event| {
+            event
+                .pointer("/payload/checkpoint/kind")
+                .and_then(Value::as_str)
+                == Some("wait-boundary")
+                && event
+                    .pointer("/payload/checkpoint/pendingWaitKey")
+                    .and_then(Value::as_str)
+                    == wait_key
+                && event.get("previousEventId").and_then(Value::as_str) == Some(evaluation_event_id)
+        })
+}
+
+fn result_chain_matches_acceptance(
+    requires_human: bool,
+    ordinary_result_chain: bool,
+    human_approval_chain: bool,
+) -> bool {
+    if requires_human {
+        human_approval_chain
+    } else {
+        ordinary_result_chain
+    }
+}
+
+fn linked_human_resolution<'a>(
+    journal: &'a super::mission_run::MissionRunJournalRow,
+    result: &Value,
+) -> Option<&'a Value> {
+    let resolution_id = result.get("previousEventId").and_then(Value::as_str)?;
+    journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(resolution_id)
+            && event.get("type").and_then(Value::as_str) == Some("approval-resolved")
+            && event
+                .pointer("/payload/resolution/decision")
+                .and_then(Value::as_str)
+                == Some("approved")
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn create_accepted_mission_output(
     tx: &Connection,
@@ -237,6 +337,31 @@ pub fn create_accepted_mission_output(
         .events
         .iter()
         .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id));
+    let ordinary_result_chain = result.is_some_and(|event| {
+        event.get("previousEventId").and_then(Value::as_str) == Some(evaluation_event_id)
+    });
+    let lifecycle =
+        super::mission_plan::get(tx, store, data_scope, owner_member_id, mission_id)?
+            .ok_or_else(|| StoreError::Invalid("Mission artifact plan is unavailable.".into()))?;
+    let requires_human = lifecycle
+        .mission
+        .pointer("/acceptance/requiresHumanAcceptance")
+        .and_then(Value::as_bool)
+        == Some(true);
+    if lifecycle.current_revision.get("id") != journal.run.get("planRevisionId") {
+        return Err(StoreError::Invalid(
+            "Mission artifact plan does not match the selected run revision.".into(),
+        ));
+    }
+    let human_approval_chain = result.is_some_and(|result_event| {
+        exact_human_approval_chain(
+            &journal,
+            &lifecycle,
+            result_event,
+            evaluation_event_id,
+            actor,
+        )
+    });
     let output_matches = |value: &Value| {
         value.pointer("/key").and_then(Value::as_str) == Some(output_key)
             && value.pointer("/valueReference").and_then(Value::as_str) == Some(value_reference)
@@ -265,7 +390,11 @@ pub fn create_accepted_mission_output(
                 == Some(worker_id)
     }) && result.is_some_and(|event| {
         event.get("type").and_then(Value::as_str) == Some("run-completed")
-            && event.get("previousEventId").and_then(Value::as_str) == Some(evaluation_event_id)
+            && result_chain_matches_acceptance(
+                requires_human,
+                ordinary_result_chain,
+                human_approval_chain,
+            )
             && event
                 .pointer("/payload/result/outcome")
                 .and_then(Value::as_str)
@@ -328,7 +457,13 @@ pub fn create_accepted_mission_output(
             "Mission artifact content does not match its immutable receipt.".into(),
         ));
     }
-    let at = receipt.created_at.as_str();
+    let human_resolution = requires_human
+        .then(|| result.and_then(|event| linked_human_resolution(&journal, event)))
+        .flatten();
+    let at = human_resolution
+        .and_then(|event| event.pointer("/payload/resolution/decidedAt"))
+        .and_then(Value::as_str)
+        .unwrap_or(receipt.created_at.as_str());
     let provenance = json!({
         "kind":"run","runId":run_id,"externalReference":value_reference,"observedAt":at
     });
@@ -365,13 +500,26 @@ pub fn create_accepted_mission_output(
         "producingRunId":run_id,"sourceProvenance":[provenance.clone()],"context":context,
         "reviews":[],"retention":{"status":"active"}
     });
+    let mut decisions = vec![json!({
+        "id":evaluation_event_id,"kind":"policy",
+        "summary":"Native cited-output policy accepted this exact version.","decidedAt":receipt.created_at
+    })];
+    if let Some(resolution) = human_resolution {
+        decisions.push(json!({
+            "id":resolution.get("id"),"kind":"user",
+            "summary":"The authenticated owner approved this exact cited draft for artifact creation.",
+            "decidedAt":resolution.pointer("/payload/resolution/decidedAt"),
+            "decidedByInternalUserId":resolution.pointer("/payload/resolution/decidedByInternalUserId"),
+            "approvalId":resolution.pointer("/payload/resolution/waitKey")
+        }));
+    }
     let version_value = json!({
         "id":expected.artifact_version_id,"artifactId":expected.artifact_id,"version":1,"status":"available",
         "createdAt":at,"createdByInternalUserId":actor,
         "content":{"kind":"inline","text":text,"media":media,"contentHash":content_hash},
         "media":media,"contentHash":content_hash,"provenance":provenance,"citations":citations,
         "inputs":[{"kind":"source","referenceId":value_reference,"label":"Attested cited mission output","recordedAt":at,"contentHash":content_hash}],
-        "decisions":[{"id":evaluation_event_id,"kind":"policy","summary":"Native cited-output policy accepted this exact version.","decidedAt":at}],
+        "decisions":decisions,
         "lineage":[]
     });
     let sealed_artifact = seal_json(
@@ -1800,9 +1948,26 @@ mod tests {
         );
         store
             .transaction(|tx| {
+                let mission = json!({
+                    "id":"mission-1","currentPlanId":"plan-1","currentPlanRevisionId":"plan-revision-1",
+                    "acceptance":{"requiresHumanAcceptance":false}
+                });
+                let plan = json!({
+                    "id":"plan-1","missionId":"mission-1","currentRevisionId":"plan-revision-1",
+                    "currentRevisionNumber":1
+                });
+                let plan_revision = json!({
+                    "id":"plan-revision-1","planId":"plan-1","missionId":"mission-1",
+                    "planRevisionNumber":1
+                });
+                super::super::mission_plan::create(
+                    tx, &store, &scope, "member-a", "user-member-a", "mission-1", "plan-1",
+                    "plan-revision-1", "delegated", &mission, &plan, &plan_revision, at,
+                )?;
                 let run = json!({
                     "id":"mission-run-1","workspaceId":"shared","status":"running","revision":1,
                     "sourceThreadId":"thread-1","initiator":{"kind":"mission","missionId":"mission-1"},
+                    "planRevisionId":"plan-revision-1",
                     "createdByInternalUserId":"user-member-a","eventHead":{"lastSequence":1,"lastEventId":"created-1"}
                 });
                 let created = json!({"id":"created-1","runId":"mission-run-1","type":"run-created","sequence":1,"idempotencyKey":"create-1"});
@@ -1919,6 +2084,77 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn human_acceptance_requires_the_exact_checkpoint_bound_owner_decision() {
+        let lifecycle = super::super::mission_plan::MissionPlanLifecycleRow {
+            mission: json!({"acceptance":{"requiresHumanAcceptance":true}}),
+            plan: json!({}),
+            current_revision: json!({"id":"revision-1"}),
+        };
+        let mut journal = super::super::mission_run::MissionRunJournalRow {
+            run: json!({"planRevisionId":"revision-1"}),
+            events: vec![
+                json!({"id":"checkpoint-1","type":"checkpoint-created","previousEventId":"evaluation-1","payload":{"checkpoint":{"kind":"wait-boundary","pendingWaitKey":"wait-1"}}}),
+                json!({"id":"request-1","type":"approval-requested","previousEventId":"checkpoint-1","payload":{"wait":{"waitKey":"wait-1","status":"pending","proposalHash":"sha256:proposal"}}}),
+                json!({"id":"resolution-1","type":"approval-resolved","previousEventId":"request-1","payload":{"resolution":{"waitKey":"wait-1","decision":"approved","acceptedProposalHash":"sha256:proposal","decidedByInternalUserId":"user-1"}}}),
+            ],
+        };
+        let result = json!({"previousEventId":"resolution-1"});
+        assert!(exact_human_approval_chain(
+            &journal,
+            &lifecycle,
+            &result,
+            "evaluation-1",
+            "user-1"
+        ));
+        journal.events[2]["payload"]["resolution"]["acceptedProposalHash"] =
+            json!("sha256:changed");
+        assert!(!exact_human_approval_chain(
+            &journal,
+            &lifecycle,
+            &result,
+            "evaluation-1",
+            "user-1"
+        ));
+        journal.events[2]["payload"]["resolution"]["acceptedProposalHash"] =
+            json!("sha256:proposal");
+        journal.events[2]["payload"]["resolution"]["decision"] = json!("denied");
+        assert!(!exact_human_approval_chain(
+            &journal,
+            &lifecycle,
+            &result,
+            "evaluation-1",
+            "user-1"
+        ));
+    }
+
+    #[test]
+    fn human_required_artifacts_cannot_use_the_ordinary_result_chain() {
+        assert!(result_chain_matches_acceptance(false, true, false));
+        assert!(!result_chain_matches_acceptance(true, true, false));
+        assert!(result_chain_matches_acceptance(true, true, true));
+        assert!(!result_chain_matches_acceptance(false, false, true));
+    }
+
+    #[test]
+    fn human_artifact_metadata_uses_only_the_resolution_linked_by_the_result() {
+        let journal = super::super::mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"id":"resolution-old","type":"approval-resolved","payload":{"resolution":{"decision":"approved","decidedAt":"old"}}}),
+                json!({"id":"resolution-linked","type":"approval-resolved","payload":{"resolution":{"decision":"approved","decidedAt":"linked"}}}),
+            ],
+        };
+        let result = json!({"previousEventId":"resolution-linked"});
+        let linked = linked_human_resolution(&journal, &result).unwrap();
+        assert_eq!(
+            linked
+                .pointer("/payload/resolution/decidedAt")
+                .and_then(Value::as_str),
+            Some("linked")
+        );
     }
 
     #[test]

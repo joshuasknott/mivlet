@@ -152,6 +152,39 @@ export function MissionPlanUnavailable() {
   );
 }
 
+export function CitedApprovalCard({
+  requestedAt,
+  busy,
+  error,
+  onApprove,
+  onKeepDraft
+}: {
+  requestedAt: string;
+  busy: boolean;
+  error?: string;
+  onApprove: () => void;
+  onKeepDraft: () => void;
+}) {
+  return (
+    <section className="mission-approval-card" aria-label="Cited brief approval">
+      <div>
+        <strong>Ready for your approval</strong>
+        <p>Policy checks passed. No artifact has been created yet.</p>
+      </div>
+      <div className="mission-approval-card__actions">
+        <button type="button" className="button button--primary" disabled={busy} onClick={onApprove}>
+          {busy ? "Saving…" : "Approve and save"}
+        </button>
+        <button type="button" className="button button--secondary" disabled={busy} onClick={onKeepDraft}>
+          Keep as draft
+        </button>
+      </div>
+      <small>Requested {new Date(requestedAt).toLocaleString()}</small>
+      {error ? <p role="alert" className="mission-approval-card__error">{error}</p> : null}
+    </section>
+  );
+}
+
 export function NewCitedMissionAction({
   disabled,
   starting,

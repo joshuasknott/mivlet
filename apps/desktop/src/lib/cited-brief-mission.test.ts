@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, resumeInterruptedCitedBriefMissions } from "./cited-brief-mission";
+import { executeCitedBriefMission, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, requiresCitedBriefHumanAcceptance, resumeInterruptedCitedBriefMissions } from "./cited-brief-mission";
 
 const mocks = vi.hoisted(() => ({
   executeLocalWorker: vi.fn(), buildToolApproval: vi.fn(), desktopExecutor: vi.fn(),
   prepareGrant: vi.fn(), commitGrant: vi.fn(), createPlan: vi.fn(), getPlanSummary: vi.fn(), createRun: vi.fn(),
-  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), restoreCheckpoint: vi.fn(), recoverCited: vi.fn(), prepareRetry: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn()
+  createWorker: vi.fn(), startWorker: vi.fn(), createCheckpoint: vi.fn(), restoreCheckpoint: vi.fn(), recoverCited: vi.fn(), prepareRetry: vi.fn(), getRun: vi.fn(), readOutput: vi.fn(), resolveMcpRoute: vi.fn(), cancelRun: vi.fn(), finalizeCancellation: vi.fn(), listRoutes: vi.fn(), listPendingApprovals: vi.fn()
 }));
 vi.mock("@fable/connectors", () => ({
   executeLocalWorker: mocks.executeLocalWorker,
@@ -30,7 +30,8 @@ vi.mock("../runtime", () => ({
   requestRuntimeMissionRunCancellation: mocks.cancelRun,
   finalizeRuntimeMissionRunCancellation: mocks.finalizeCancellation,
   listRuntimeNativeProviderRoutes: mocks.listRoutes,
-  resolveRuntimeMcpCapabilityRoute: mocks.resolveMcpRoute
+  resolveRuntimeMcpCapabilityRoute: mocks.resolveMcpRoute,
+  listRuntimePendingCitedApprovals: mocks.listPendingApprovals
 }));
 
 const worker = {
@@ -135,6 +136,42 @@ describe("cited brief mission composition", () => {
     expect(mocks.prepareGrant).toHaveBeenCalledWith(expect.objectContaining({ connectionId: "mcp-connection-1" }));
     expect(mocks.readOutput).toHaveBeenCalledWith("mission-output:v1:brief");
     expect(cancelMission).toBeTypeOf("function");
+  });
+
+  it("requires durable human acceptance only when the prompt says so explicitly", () => {
+    expect(requiresCitedBriefHumanAcceptance("Search my connected work sources for a cited brief and ask me to approve before saving.")).toBe(true);
+    expect(requiresCitedBriefHumanAcceptance("Search my connected work sources and produce a trustworthy cited brief.")).toBe(false);
+  });
+
+  it("returns the native-owned draft wait without pretending an artifact was accepted", async () => {
+    let counter = 0;
+    const approvalPlan = { ...planSummary, requiresHumanAcceptance: true };
+    mocks.getPlanSummary.mockResolvedValue(approvalPlan);
+    mocks.getRun
+      .mockReset()
+      .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
+      .mockResolvedValueOnce(journal(12, 11, [], { status: "waiting-approval" }));
+    mocks.listPendingApprovals.mockResolvedValue([{
+      runId: "mission-run-4", missionId: "mission-1", waitKey: "wait-1", requestedAt: "2026-07-13T00:00:00Z",
+      expectedRunRevision: 12, expectedLastSequence: 11, valueReference: "mission-output:v1:brief",
+      draft: "Policy-passed draft [source-1].", plan: approvalPlan
+    }]);
+    const result = await executeCitedBriefMission({
+      query: "Search my connected work sources for a cited brief and ask me to approve before saving.",
+      workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
+      backend: { providerId: "openai" } as never, model: "gpt-5",
+      approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
+    });
+    expect(result).toMatchObject({
+      outcome: "awaiting-approval", text: "Policy-passed draft [source-1].",
+      valueReference: "mission-output:v1:brief", approval: { waitKey: "wait-1" }
+    });
+    expect(result.receipt).toBeUndefined();
+    expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      acceptance: expect.objectContaining({ requiresHumanAcceptance: true })
+    }));
+    expect(mocks.readOutput).not.toHaveBeenCalled();
   });
 
   it("retries one transient final-provider failure from the durable checkpoint", async () => {

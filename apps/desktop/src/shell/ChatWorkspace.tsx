@@ -15,9 +15,9 @@ import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBrief
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, type RuntimeArtifactBundle } from "../runtime";
+import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, resolveRuntimeCitedApproval, type RuntimeArtifactBundle, type RuntimeCitedApproval } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, DirectiveCards, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -36,8 +36,9 @@ type ConversationMessage = {
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
   missionPlan?: CitedBriefMissionPlanSummary;
-  missionOutcome?: "accepted" | "partial" | "failed" | "cancelled";
+  missionOutcome?: "accepted" | "partial" | "failed" | "cancelled" | "awaiting-approval";
   missionArtifactId?: string;
+  approvalRunId?: string;
 };
 
 function messageId(prefix: string) {
@@ -92,6 +93,9 @@ export function ChatWorkspace() {
     plans: Record<string, CitedBriefMissionPlanSummary>;
   }>({ key: "", plans: {} });
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
+  const [pendingCitedApprovals, setPendingCitedApprovals] = useState<RuntimeCitedApproval[]>([]);
+  const [approvalBusyRunId, setApprovalBusyRunId] = useState<string | null>(null);
+  const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
@@ -544,6 +548,16 @@ export function ChatWorkspace() {
   }, [boundWorkspaceId, selectedConversationThreadId]);
 
   useEffect(() => {
+    let active = true;
+    setPendingCitedApprovals([]);
+    if (!selectedConversationThreadId) return () => { active = false; };
+    void listRuntimePendingCitedApprovals(selectedConversationThreadId)
+      .then((approvals) => { if (active) setPendingCitedApprovals(approvals); })
+      .catch(() => { if (active) setPendingCitedApprovals([]); });
+    return () => { active = false; };
+  }, [boundWorkspaceId, hydratedConversation?.messages.length, selectedConversationThreadId]);
+
+  useEffect(() => {
     if (durableConversation.state.loading || submissionInFlight) return;
     if (draftHydrationKey.current === durableConversation.draftKey) return;
     draftHydrationKey.current = durableConversation.draftKey;
@@ -622,11 +636,38 @@ export function ChatWorkspace() {
     [agent.state.running, runtime.activeItem]
   );
 
+  const resolveCitedApproval = async (approval: RuntimeCitedApproval, decision: "approved" | "denied") => {
+    if (approvalBusyRunId) return;
+    setApprovalBusyRunId(approval.runId);
+    setApprovalErrors((current) => {
+      const next = { ...current };
+      delete next[approval.runId];
+      return next;
+    });
+    try {
+      await resolveRuntimeCitedApproval(approval, decision);
+      setPendingCitedApprovals((current) => current.filter((entry) => entry.runId !== approval.runId));
+      await durableConversation.refresh();
+      if (selectedConversationThreadId) {
+        const artifacts = await listRuntimeThreadArtifacts(selectedConversationThreadId);
+        setThreadArtifacts(artifacts);
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Fable could not resolve this cited draft.";
+      setApprovalErrors((current) => ({ ...current, [approval.runId]: message }));
+    } finally {
+      setApprovalBusyRunId(null);
+    }
+  };
+
   const renderConversation = () => {
-    if (conversationMessages.length === 0) return null;
+    if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0) return null;
     return (
       <section className="conversation-feed" aria-label="Conversation">
         {conversationMessages.map((message) => {
+          const citedApproval = message.approvalRunId
+            ? pendingCitedApprovals.find((approval) => approval.runId === message.approvalRunId)
+            : undefined;
           const missionReceipt = message.missionReceipt
             ?? (hydratedMissionReceipts.key === activeMissionReceiptHydrationKey
               ? hydratedMissionReceipts.receipts[message.id]
@@ -656,6 +697,15 @@ export function ChatWorkspace() {
               {message.role === "assistant" && missionPlan ? <MissionPlanSummary plan={missionPlan} /> : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
+              {message.role === "assistant" && citedApproval ? (
+                <CitedApprovalCard
+                  requestedAt={citedApproval.requestedAt}
+                  busy={approvalBusyRunId === citedApproval.runId}
+                  error={approvalErrors[citedApproval.runId]}
+                  onApprove={() => void resolveCitedApproval(citedApproval, "approved")}
+                  onKeepDraft={() => void resolveCitedApproval(citedApproval, "denied")}
+                />
+              ) : null}
               {canStartNewMission && missionPlan ? (
                 <NewCitedMissionAction
                   disabled={newMissionBusy}
@@ -690,6 +740,21 @@ export function ChatWorkspace() {
             </article>
           );
         })}
+        {pendingCitedApprovals
+          .filter((approval) => !conversationMessages.some((message) => message.approvalRunId === approval.runId))
+          .map((approval) => (
+            <article key={approval.runId} className="conversation-message conversation-message--assistant">
+              <p>{approval.draft}</p>
+              {isCitedBriefMissionPlanSummary(approval.plan) ? <MissionPlanSummary plan={approval.plan} /> : <MissionPlanUnavailable />}
+              <CitedApprovalCard
+                requestedAt={approval.requestedAt}
+                busy={approvalBusyRunId === approval.runId}
+                error={approvalErrors[approval.runId]}
+                onApprove={() => void resolveCitedApproval(approval, "approved")}
+                onKeepDraft={() => void resolveCitedApproval(approval, "denied")}
+              />
+            </article>
+          ))}
       </section>
     );
   };
@@ -961,6 +1026,13 @@ export function ChatWorkspace() {
         ));
       })
         .then((result) => {
+          const citedApproval = result.approval;
+          if (citedApproval) {
+            setPendingCitedApprovals((current) => [
+              ...current.filter((entry) => entry.runId !== citedApproval.runId),
+              citedApproval
+            ]);
+          }
           setConversationMessages((current) => current.map((entry) =>
             entry.id === assistantMessageId ? {
               ...entry,
@@ -969,6 +1041,7 @@ export function ChatWorkspace() {
               missionPlan: result.plan,
               missionReceipt: result.receipt,
               missionOutcome: result.outcome,
+              ...(result.approval ? { approvalRunId: result.approval.runId } : {}),
               ...(result.artifactId ? { missionArtifactId: result.artifactId } : {})
             } : entry
           ));

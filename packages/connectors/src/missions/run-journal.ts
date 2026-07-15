@@ -144,6 +144,32 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
       throw new RunJournalError("Checkpoint restore must advance exactly one bounded attempt.");
     }
   }
+  if (event.type === "approval-requested") {
+    const wait = event.payload.wait;
+    const active = activeApprovalWait(current.events);
+    const previous = current.events.at(-1);
+    if (run.status !== "running" || active
+      || previous?.type !== "checkpoint-created"
+      || previous.payload.checkpoint.kind !== "wait-boundary"
+      || previous.payload.checkpoint.pendingWaitKey !== wait.waitKey
+      || wait.status !== "pending"
+      || !wait.waitKey.trim() || !wait.approvalRequestRef.trim()
+      || !wait.proposalHash.trim() || !wait.actionSummary.trim()
+      || (wait.workerId !== undefined && !wait.workerId.trim())) {
+      throw new RunJournalError("Approval wait must be one exact pending proposal after a wait-boundary checkpoint.");
+    }
+  }
+  if (event.type === "approval-resolved") {
+    const wait = activeApprovalWait(current.events);
+    const resolution = event.payload.resolution;
+    if (run.status !== "waiting-approval" || !wait
+      || resolution.waitKey !== wait.waitKey
+      || resolution.acceptedProposalHash !== wait.proposalHash
+      || !["approved", "denied", "cancelled"].includes(resolution.decision)
+      || (resolution.decision !== "approved" && resolution.replacementApprovalRequestRef !== undefined)) {
+      throw new RunJournalError("Approval resolution must resolve the exact active proposal.");
+    }
+  }
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
     throw new RunJournalError("run-completed requires a succeeded result.");
   }
@@ -166,11 +192,22 @@ function projectRun(run: Run, event: RunEvent): Run {
     case "checkpoint-restored": return { ...run, status: run.status === "retrying" ? "running" : run.status, currentAttemptNumber: event.payload.newAttemptNumber };
     case "retry-scheduled": return { ...run, status: "retrying" };
     case "cancellation-requested": return { ...run, status: "cancelling", cancellation: event.payload.cancellation };
+    case "approval-requested": return { ...run, status: "waiting-approval" };
+    case "approval-resolved": return { ...run, status: "running" };
     case "run-completed": return { ...run, status: "completed", terminalResult: event.payload.result };
     case "run-failed": return { ...run, status: event.payload.partial ? "partially-completed" : "failed" };
     case "run-cancelled": return { ...run, status: event.payload.partial ? "partially-completed" : "cancelled" };
     default: return run;
   }
+}
+
+function activeApprovalWait(events: readonly RunEvent[]): Spine.Missions.ApprovalWait | undefined {
+  let active: Spine.Missions.ApprovalWait | undefined;
+  for (const event of events) {
+    if (event.type === "approval-requested") active = event.payload.wait;
+    if (event.type === "approval-resolved" && active?.waitKey === event.payload.resolution.waitKey) active = undefined;
+  }
+  return active;
 }
 
 function sameScope(run: Run, event: RunEvent): boolean {

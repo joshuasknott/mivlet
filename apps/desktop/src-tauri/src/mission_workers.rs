@@ -7,13 +7,16 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::store::repos::{
-    capability_grant, message, mission_plan, mission_run, thread, workspace_directory,
+    capability_grant, message, mission_checkpoint, mission_plan, mission_run, thread,
+    workspace_directory,
 };
 
 const MAX_CONTEXT: usize = 32;
 const MAX_TOOLS: usize = 32;
 const CITED_PARTIAL_ACCEPTANCE_SUMMARY: &str =
     "The cited draft was preserved, but it did not satisfy the required evidence policy.";
+const CITED_HUMAN_DENIAL_SUMMARY: &str =
+    "The policy-passed cited draft was preserved without being accepted as an artifact.";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -271,6 +274,15 @@ pub struct CitedReceiptReadInput {
     message_ids: Vec<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CitedApprovalResolveInput {
+    run_id: String,
+    decision: String,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+}
+
 #[tauri::command]
 pub fn mission_worker_output_read(
     value_reference: String,
@@ -299,6 +311,584 @@ pub fn mission_worker_output_read(
                 &member,
                 &value_reference,
             )
+        })
+        .map_err(|error| error.to_string())
+}
+
+struct CitedApprovalFacts {
+    lifecycle: mission_plan::MissionPlanLifecycleRow,
+    output: crate::store::repos::mission_worker_output::MissionWorkerOutputRow,
+    wait_key: String,
+    proposal_hash: String,
+    suffix: String,
+    requested_at: String,
+    worker_id: String,
+    worker_started_event_id: String,
+    route_selected_event_id: String,
+    usage_event_id: String,
+    completion_event_id: String,
+    evaluation_event_id: String,
+    requested_model: String,
+    provider_route_id: String,
+    token_usage: (i64, i64),
+    evaluation: Value,
+    plan_summary: Value,
+}
+
+fn cited_approval_facts(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    expected_thread_id: Option<&str>,
+) -> crate::store::Result<CitedApprovalFacts> {
+    if journal.run.get("status").and_then(Value::as_str) != Some("waiting-approval") {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited mission is not waiting for human acceptance.".into(),
+        ));
+    }
+    let run_id = journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval run is invalid.".into())
+        })?;
+    if expected_thread_id.is_some_and(|thread_id| {
+        journal.run.get("sourceThreadId").and_then(Value::as_str) != Some(thread_id)
+    }) {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited approval belongs to another conversation.".into(),
+        ));
+    }
+    let mission_id = journal
+        .run
+        .pointer("/initiator/missionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval mission is invalid.".into())
+        })?;
+    let lifecycle =
+        mission_plan::get(tx, store, scope, owner_member_id, mission_id)?.ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval plan is unavailable.".into())
+        })?;
+    validate_lifecycle(&journal.run, &lifecycle).map_err(crate::store::StoreError::Invalid)?;
+    if lifecycle
+        .mission
+        .pointer("/acceptance/requiresHumanAcceptance")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited approval is not required by the selected plan.".into(),
+        ));
+    }
+    let plan_summary =
+        crate::mission_plans::project_cited_plan_summary(&lifecycle, expected_thread_id)
+            .map_err(crate::store::StoreError::Invalid)?;
+    let approval_event = journal.events.last().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited approval event is unavailable.".into())
+    })?;
+    let checkpoint_event_id = approval_event
+        .get("previousEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval checkpoint is invalid.".into())
+        })?;
+    let wait = approval_event.pointer("/payload/wait").ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited approval proposal is unavailable.".into())
+    })?;
+    let wait_key = wait.get("waitKey").and_then(Value::as_str).unwrap_or("");
+    let proposal_hash = wait
+        .get("proposalHash")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let approval_request_ref = wait
+        .get("approvalRequestRef")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let requested_at = wait
+        .get("requestedAt")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let suffix = approval_request_ref
+        .strip_prefix("cited-artifact-proposal:v1:")
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval identity is invalid.".into())
+        })?;
+    let checkpoint_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(checkpoint_event_id))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval checkpoint is unavailable.".into())
+        })?;
+    if approval_event.get("type").and_then(Value::as_str) != Some("approval-requested")
+        || checkpoint_event.get("type").and_then(Value::as_str) != Some("checkpoint-created")
+        || checkpoint_event
+            .pointer("/payload/checkpoint/kind")
+            .and_then(Value::as_str)
+            != Some("wait-boundary")
+        || checkpoint_event
+            .pointer("/payload/checkpoint/pendingWaitKey")
+            .and_then(Value::as_str)
+            != Some(wait_key)
+        || wait.get("status").and_then(Value::as_str) != Some("pending")
+        || wait.get("actionSummary").and_then(Value::as_str)
+            != Some("Save this policy-passed cited brief as an accepted artifact.")
+        || requested_at.is_empty()
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited approval event chain is invalid.".into(),
+        ));
+    }
+    let checkpoint =
+        mission_checkpoint::get_by_event(tx, store, scope, owner_member_id, checkpoint_event_id)?
+            .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval state is unavailable.".into())
+        })?;
+    let proposal = checkpoint.state.get("approvalProposal").ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited approval state is invalid.".into())
+    })?;
+    let worker_id = proposal
+        .get("workerId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let worker_started_event_id = proposal
+        .get("workerStartedEventId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let route_selected_event_id = proposal
+        .get("routeSelectedEventId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let usage_event_id = proposal
+        .get("usageEventId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let completion_base_event_id = proposal
+        .get("completionBaseEventId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let completion_event_id = proposal
+        .get("completionEventId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let evaluation_event_id = proposal
+        .get("evaluationEventId")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let output_reference = proposal
+        .get("outputReference")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let output = crate::store::repos::mission_worker_output::get_by_reference(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        output_reference,
+    )?
+    .ok_or_else(|| {
+        crate::store::StoreError::Invalid("Cited approval draft is unavailable.".into())
+    })?;
+    let plan_revision_id = lifecycle
+        .current_revision
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let material = format!(
+        "fable.cited-artifact-approval.v1\0{}\0{owner_member_id}\0{plan_revision_id}\0{run_id}\0{worker_id}\0{output_reference}\0{}",
+        scope.workspace_id(), output.content_hash
+    );
+    let expected_suffix = format!("{:x}", Sha256::digest(material.as_bytes()));
+    let evaluation = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(evaluation_event_id))
+        .and_then(|event| event.pointer("/payload/evaluation"))
+        .cloned()
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval evaluation is unavailable.".into())
+        })?;
+    let completion_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(completion_event_id));
+    let evaluation_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(evaluation_event_id));
+    let worker_started_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(worker_started_event_id));
+    let route_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(route_selected_event_id));
+    let usage_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(usage_event_id));
+    let completion_base_event = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(completion_base_event_id));
+    let requested_model = usage_event
+        .and_then(|event| event.pointer("/payload/usage/modelReference"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let provider_route_id = usage_event
+        .and_then(|event| event.pointer("/payload/usage/providerRouteId"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let token_usage = (
+        usage_event
+            .and_then(|event| event.pointer("/payload/usage/inputTokens"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1),
+        usage_event
+            .and_then(|event| event.pointer("/payload/usage/outputTokens"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1),
+    );
+    let current_attempt = journal
+        .run
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    let expected_criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array);
+    let evaluated_criteria = evaluation.get("criteria").and_then(Value::as_array);
+    let criteria_match =
+        expected_criteria
+            .zip(evaluated_criteria)
+            .is_some_and(|(expected, evaluated)| {
+                !expected.is_empty()
+                    && expected.len() == evaluated.len()
+                    && expected.iter().all(|criterion| {
+                        let key = criterion.get("key").and_then(Value::as_str);
+                        evaluated.iter().any(|result| {
+                            result.get("criterionKey").and_then(Value::as_str) == key
+                                && result.get("passed").and_then(Value::as_bool) == Some(true)
+                                && result
+                                    .get("evidenceRefs")
+                                    .and_then(Value::as_array)
+                                    .is_some_and(|refs| !refs.is_empty())
+                        })
+                    })
+            });
+    let expected_evaluation_key = format!("native-policy:{evaluation_event_id}");
+    let exact = suffix == expected_suffix
+        && wait_key == format!("cited-artifact-wait:v1:{suffix}")
+        && proposal_hash == format!("sha256:{suffix}")
+        && wait.get("workerId").and_then(Value::as_str) == Some(worker_id)
+        && proposal.get("approvalRequestRef").and_then(Value::as_str) == Some(approval_request_ref)
+        && proposal.get("proposalHash").and_then(Value::as_str) == Some(proposal_hash)
+        && proposal.get("planRevisionId").and_then(Value::as_str) == Some(plan_revision_id)
+        && proposal.get("contentHash").and_then(Value::as_str)
+            == Some(output.content_hash.as_str())
+        && checkpoint_event
+            .get("previousEventId")
+            .and_then(Value::as_str)
+            == Some(evaluation_event_id)
+        && worker_started_event.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("worker-started")
+                && event.pointer("/payload/workerId").and_then(Value::as_str) == Some(worker_id)
+        })
+        && route_event.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("route-selected")
+                && event.get("previousEventId").and_then(Value::as_str)
+                    == Some(worker_started_event_id)
+                && event.pointer("/payload/workerId").and_then(Value::as_str) == Some(worker_id)
+                && event
+                    .pointer("/payload/selection/providerRouteId")
+                    .and_then(Value::as_str)
+                    == Some(provider_route_id)
+        })
+        && usage_event.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("usage-recorded")
+                && event.get("previousEventId").and_then(Value::as_str)
+                    == Some(completion_base_event_id)
+                && event
+                    .pointer("/payload/usage/runId")
+                    .and_then(Value::as_str)
+                    == Some(run_id)
+                && event
+                    .pointer("/payload/usage/workerId")
+                    .and_then(Value::as_str)
+                    == Some(worker_id)
+                && event
+                    .pointer("/payload/usage/attemptNumber")
+                    .and_then(Value::as_i64)
+                    == Some(current_attempt)
+        })
+        && completion_base_event.is_some_and(|event| {
+            event.get("runId").and_then(Value::as_str) == Some(run_id)
+                && matches!(
+                    event.get("type").and_then(Value::as_str),
+                    Some(
+                        "route-selected"
+                            | "tool-call-completed"
+                            | "checkpoint-created"
+                            | "checkpoint-restored"
+                    )
+                )
+        })
+        && completion_event.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("worker-completed")
+                && event.get("previousEventId").and_then(Value::as_str) == Some(usage_event_id)
+                && event.pointer("/payload/workerId").and_then(Value::as_str) == Some(worker_id)
+        })
+        && evaluation_event.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("evaluation-recorded")
+                && event.get("runId").and_then(Value::as_str) == Some(run_id)
+                && event.get("previousEventId").and_then(Value::as_str) == Some(completion_event_id)
+                && event
+                    .pointer("/payload/evaluation/target/workerId")
+                    .and_then(Value::as_str)
+                    == Some(worker_id)
+        })
+        && output.run_id == run_id
+        && output.worker_id == worker_id
+        && output.completion_event_id == completion_event_id
+        && output.value_reference == output_reference
+        && evaluation.get("evaluationKey").and_then(Value::as_str)
+            == Some(expected_evaluation_key.as_str())
+        && evaluation.get("verdict").and_then(Value::as_str) == Some("pass")
+        && evaluation.get("recommendedAction").and_then(Value::as_str) == Some("accept")
+        && criteria_match
+        && !requested_model.is_empty()
+        && !provider_route_id.is_empty()
+        && token_usage.0 >= 0
+        && token_usage.1 >= 0
+        && output.receipt.get("requestedModel").and_then(Value::as_str) == Some(requested_model)
+        && output
+            .receipt
+            .get("providerRouteId")
+            .and_then(Value::as_str)
+            == Some(provider_route_id);
+    if !exact {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited approval proposal no longer matches its durable facts.".into(),
+        ));
+    }
+    Ok(CitedApprovalFacts {
+        lifecycle,
+        output,
+        wait_key: wait_key.to_string(),
+        proposal_hash: proposal_hash.to_string(),
+        suffix: suffix.to_string(),
+        requested_at: requested_at.to_string(),
+        worker_id: worker_id.to_string(),
+        worker_started_event_id: worker_started_event_id.to_string(),
+        route_selected_event_id: route_selected_event_id.to_string(),
+        usage_event_id: usage_event_id.to_string(),
+        completion_event_id: completion_event_id.to_string(),
+        evaluation_event_id: evaluation_event_id.to_string(),
+        requested_model: requested_model.to_string(),
+        provider_route_id: provider_route_id.to_string(),
+        token_usage,
+        evaluation,
+        plan_summary,
+    })
+}
+
+pub(crate) fn validate_pending_cited_approval(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+) -> crate::store::Result<()> {
+    cited_approval_facts(tx, store, scope, owner_member_id, journal, None).map(|_| ())
+}
+
+#[tauri::command]
+pub fn mission_cited_approval_pending_list(thread_id: String) -> Result<Vec<Value>, String> {
+    if thread_id.trim().is_empty() || thread_id.len() > 160 {
+        return Err("Cited approval conversation is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required.".into(),
+                )
+            })?;
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                context.active_workspace.local_workspace_id,
+            )?;
+            let mut pending = Vec::new();
+            for run_id in mission_run::list_nonterminal_ids(tx, &scope, &member)? {
+                let Some(journal) = mission_run::get(tx, store, &scope, &member, &run_id)? else {
+                    continue;
+                };
+                if journal.run.get("status").and_then(Value::as_str) != Some("waiting-approval")
+                    || journal.run.get("sourceThreadId").and_then(Value::as_str)
+                        != Some(thread_id.as_str())
+                {
+                    continue;
+                }
+                let facts =
+                    cited_approval_facts(tx, store, &scope, &member, &journal, Some(&thread_id))?;
+                pending.push(json!({
+                    "runId":run_id,
+                    "missionId":journal.run.pointer("/initiator/missionId"),
+                    "waitKey":facts.wait_key,
+                    "requestedAt":facts.requested_at,
+                    "expectedRunRevision":journal.run.get("revision"),
+                    "expectedLastSequence":journal.run.pointer("/eventHead/lastSequence"),
+                    "valueReference":facts.output.value_reference,
+                    "draft":facts.output.receipt.get("text"),
+                    "plan":facts.plan_summary
+                }));
+            }
+            Ok(pending)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_cited_approval_resolve(
+    input: CitedApprovalResolveInput,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    if input.run_id.trim().is_empty()
+        || input.run_id.len() > 160
+        || !matches!(input.decision.as_str(), "approved" | "denied")
+        || input.expected_run_revision < 1
+        || input.expected_last_sequence < 1
+    {
+        return Err("Cited approval resolution is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let context = workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.ok_or_else(|| {
+                crate::store::StoreError::Invalid("An active workspace membership is required.".into())
+            })?;
+            let scope = crate::store::repos::scope::DataScope::workspace(
+                context.active_workspace.local_workspace_id,
+            )?;
+            let journal = mission_run::get(tx, store, &scope, &member, &input.run_id)?
+                .ok_or_else(|| crate::store::StoreError::Invalid("Cited approval run is unavailable.".into()))?;
+            if matches!(
+                journal.run.get("status").and_then(Value::as_str),
+                Some("completed" | "partially-completed")
+            ) {
+                let exact = journal.events.iter().any(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("approval-resolved")
+                        && event.pointer("/payload/resolution/decision").and_then(Value::as_str)
+                            == Some(input.decision.as_str())
+                });
+                return if exact {
+                    Ok(journal)
+                } else {
+                    Err(crate::store::StoreError::Invalid(
+                        "Cited approval was already resolved differently.".into(),
+                    ))
+                };
+            }
+            if journal.run.get("revision").and_then(Value::as_i64)
+                != Some(input.expected_run_revision)
+                || journal
+                    .run
+                    .pointer("/eventHead/lastSequence")
+                    .and_then(Value::as_i64)
+                    != Some(input.expected_last_sequence)
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "The cited approval changed before it could be resolved.".into(),
+                ));
+            }
+            let facts = cited_approval_facts(tx, store, &scope, &member, &journal, None)?;
+            let at = now();
+            let resolved_event_id = format!("mission-approval-resolved-{}", facts.suffix);
+            let resolution_key = format!("cited-acceptance-resolution:v1:{}", facts.suffix);
+            let sequence = input.expected_last_sequence + 1;
+            let resolution = json!({
+                "waitKey":facts.wait_key,"decision":input.decision,"decidedAt":at,
+                "decidedByInternalUserId":context.internal_user_id,
+                "acceptedProposalHash":facts.proposal_hash
+            });
+            let event = json!({
+                "workspaceId":scope.workspace_id(),"visibility":"member-private","ownerMemberId":member,
+                "authority":"local","schemaVersion":1,"revision":1,
+                "createdByInternalUserId":context.internal_user_id,"createdAt":at,"updatedAt":at,
+                "id":resolved_event_id,"runId":input.run_id,"type":"approval-resolved",
+                "sequence":sequence,"previousEventId":journal.run.pointer("/eventHead/lastEventId"),
+                "attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+                "occurredAt":at,"actor":{"kind":"internal-user","internalUserId":context.internal_user_id,"memberId":member},
+                "idempotencyKey":resolution_key,"payload":{"resolution":resolution}
+            });
+            let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
+                crate::store::StoreError::Invalid("Cited approval run is invalid.".into())
+            })?;
+            projected.insert("status".into(), json!("running"));
+            projected.insert("revision".into(), json!(input.expected_run_revision + 1));
+            projected.insert("updatedAt".into(), json!(at));
+            projected.insert(
+                "eventHead".into(),
+                json!({"lastSequence":sequence,"lastEventId":resolved_event_id}),
+            );
+            let resolved = mission_run::append(
+                tx, store, &scope, &member, &input.run_id,
+                input.expected_run_revision, input.expected_last_sequence,
+                &resolved_event_id, "approval-resolved", &resolution_key, &event,
+                &Value::Object(projected), &at,
+            )?;
+            mission_plan::resume_waiting(
+                tx, store, &scope, &member, &facts.lifecycle, &at,
+            )?;
+            let mission_id = facts.lifecycle.mission.get("id").and_then(Value::as_str).ok_or_else(|| {
+                crate::store::StoreError::Invalid("Cited approval mission is invalid.".into())
+            })?;
+            let settlement_lifecycle = mission_plan::get(tx, store, &scope, &member, mission_id)?
+                .ok_or_else(|| crate::store::StoreError::Invalid("Cited approval plan is unavailable.".into()))?;
+            let binding = NativeWorkerExecutionBinding {
+                run_id: input.run_id.clone(),
+                worker_id: facts.worker_id.clone(),
+                worker_started_event_id: facts.worker_started_event_id.clone(),
+                route_selected_event_id: facts.route_selected_event_id.clone(),
+                usage_event_id: facts.usage_event_id.clone(),
+                completion_event_id: facts.completion_event_id.clone(),
+                evaluation_event_id: facts.evaluation_event_id.clone(),
+                result_event_id: format!("mission-approval-result-{}", facts.suffix),
+                failure_event_id: format!("mission-approval-failure-{}", facts.suffix),
+                idempotency_key: format!("cited-human-settlement:v1:{}", facts.suffix),
+                expected_run_revision: input.expected_run_revision + 1,
+                expected_last_sequence: sequence,
+                checkpoint_event_id: None,
+                checkpoint_restore_event_id: None,
+                tool_evidence: None,
+            };
+            let worker = journal.events.iter().find_map(|event| {
+                (event.get("type").and_then(Value::as_str) == Some("worker-created")
+                    && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                        == Some(facts.worker_id.as_str()))
+                    .then(|| event.pointer("/payload/worker"))
+                    .flatten()
+            }).ok_or_else(|| crate::store::StoreError::Invalid("Cited approval worker is unavailable.".into()))?;
+            append_single_worker_run_result(
+                tx, store, &scope, &member, &context.internal_user_id, &resolved,
+                &binding, &settlement_lifecycle, worker, &facts.output.receipt,
+                &facts.output.value_reference, &facts.evaluation, Some(facts.token_usage),
+                &facts.requested_model, &facts.provider_route_id, input.expected_run_revision + 1,
+                sequence, &at, Some(input.decision == "approved"), Some(&resolved_event_id),
+            )?;
+            mission_run::get(tx, store, &scope, &member, &input.run_id)?
+                .ok_or_else(|| crate::store::StoreError::Invalid("Cited approval settlement is unavailable.".into()))
         })
         .map_err(|error| error.to_string())
 }
@@ -482,7 +1072,9 @@ fn project_cited_mission_receipt(
                 && result_event
                     .pointer("/payload/error/code")
                     .and_then(Value::as_str)
-                    == Some("policy-acceptance-failed") =>
+                    .is_some_and(|code| {
+                        matches!(code, "policy-acceptance-failed" | "human-acceptance-denied")
+                    }) =>
         {
             (
                 result_event
@@ -529,7 +1121,11 @@ fn project_cited_mission_receipt(
             "Cited mission evaluation is ambiguous.".into(),
         ));
     }
-    let expected_verdict = if outcome == "accepted" {
+    let human_denied = result_event
+        .pointer("/payload/error/code")
+        .and_then(Value::as_str)
+        == Some("human-acceptance-denied");
+    let expected_verdict = if outcome == "accepted" || human_denied {
         "pass"
     } else {
         "fail"
@@ -2318,6 +2914,8 @@ fn append_native_policy_evaluation(
         expected_revision + 1,
         sequence,
         at,
+        None,
+        None,
     )?;
     Ok(())
 }
@@ -2418,17 +3016,22 @@ fn cited_mission_transcript(
             }),
         )
     } else {
+        let error_code = result_event
+            .pointer("/payload/error/code")
+            .and_then(Value::as_str);
+        let partial_summary = result_event
+            .pointer("/payload/partial/summary")
+            .and_then(Value::as_str);
+        let expected_summary = match error_code {
+            Some("policy-acceptance-failed") => Some(CITED_PARTIAL_ACCEPTANCE_SUMMARY),
+            Some("human-acceptance-denied") => Some(CITED_HUMAN_DENIAL_SUMMARY),
+            _ => None,
+        };
         let exact = result_event.get("id").and_then(Value::as_str)
             == Some(binding.result_event_id.as_str())
             && result_event.get("type").and_then(Value::as_str) == Some("run-failed")
-            && result_event
-                .pointer("/payload/error/code")
-                .and_then(Value::as_str)
-                == Some("policy-acceptance-failed")
-            && result_event
-                .pointer("/payload/partial/summary")
-                .and_then(Value::as_str)
-                == Some(CITED_PARTIAL_ACCEPTANCE_SUMMARY);
+            && expected_summary.is_some()
+            && partial_summary == expected_summary;
         if !exact {
             return Err(crate::store::StoreError::Invalid(
                 "Partial cited mission transcript does not match its terminal result.".into(),
@@ -2436,7 +3039,8 @@ fn cited_mission_transcript(
         }
         (
             format!(
-                "Draft preserved, but not accepted: {CITED_PARTIAL_ACCEPTANCE_SUMMARY}\n\n{text}"
+                "Draft preserved, but not accepted: {}\n\n{text}",
+                expected_summary.unwrap_or(CITED_PARTIAL_ACCEPTANCE_SUMMARY)
             ),
             json!({
                 "type":"mission-result",
@@ -2912,6 +3516,8 @@ fn append_single_worker_run_result(
     expected_revision: i64,
     expected_sequence: i64,
     at: &str,
+    human_decision: Option<bool>,
+    result_previous_event_id: Option<&str>,
 ) -> crate::store::Result<()> {
     let Some((input_tokens, output_tokens)) = usage else {
         return Ok(());
@@ -2956,17 +3562,17 @@ fn append_single_worker_run_result(
         .get("outputKey")
         .and_then(Value::as_str)
         .unwrap_or("");
+    let human_acceptance = lifecycle
+        .mission
+        .pointer("/acceptance/requiresHumanAcceptance")
+        .and_then(Value::as_bool);
     let eligible = steps.len() == 1
         && created_workers == 1
         && worker.get("id").and_then(Value::as_str) == Some(binding.worker_id.as_str())
         && deliverables.len() == 1
         && deliverables[0].get("key").and_then(Value::as_str) == Some(output_key)
         && deliverables[0].get("required").and_then(Value::as_bool) == Some(true)
-        && lifecycle
-            .mission
-            .pointer("/acceptance/requiresHumanAcceptance")
-            .and_then(Value::as_bool)
-            == Some(false)
+        && human_acceptance.is_some()
         && mission_criteria.iter().all(|criterion| {
             criterion.get("evaluator").and_then(Value::as_str) == Some("policy")
                 && criterion
@@ -3000,7 +3606,26 @@ fn append_single_worker_run_result(
     let usage_value = json!({"usageKey":format!("native-usage:{}",binding.usage_event_id),"runId":binding.run_id,
         "workerId":binding.worker_id,"providerRouteId":provider_route_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
         "toolCalls":1,"costs":costs,"measuredAt":at});
-    let passed = evaluation.get("verdict").and_then(Value::as_str) == Some("pass");
+    let policy_passed = evaluation.get("verdict").and_then(Value::as_str) == Some("pass");
+    if policy_passed && human_acceptance == Some(true) && human_decision.is_none() {
+        append_cited_acceptance_wait(
+            tx,
+            store,
+            scope,
+            owner_member_id,
+            internal_user_id,
+            journal,
+            lifecycle,
+            binding,
+            receipt,
+            output_reference,
+            expected_revision,
+            expected_sequence,
+            at,
+        )?;
+        return Ok(());
+    }
+    let passed = policy_passed && human_decision != Some(false);
     let artifact_binding = passed.then(|| {
         crate::store::repos::artifact::accepted_mission_output_binding(
             scope.workspace_id(),
@@ -3026,7 +3651,7 @@ fn append_single_worker_run_result(
             json!(artifact.artifact_version_id),
         );
     }
-    let failed_criteria = mission_criteria
+    let mut failed_criteria = mission_criteria
         .iter()
         .filter(|criterion| {
             let key = criterion.get("key").and_then(Value::as_str);
@@ -3050,9 +3675,18 @@ fn append_single_worker_run_result(
             )
         })
         .collect::<Vec<_>>();
+    if policy_passed && human_decision == Some(false) {
+        failed_criteria =
+            vec!["Approve the preserved cited draft before creating an accepted artifact.".into()];
+    }
+    let partial_summary = if policy_passed && human_decision == Some(false) {
+        CITED_HUMAN_DENIAL_SUMMARY
+    } else {
+        CITED_PARTIAL_ACCEPTANCE_SUMMARY
+    };
     let partial = (!passed).then(|| {
         json!({
-            "summary":CITED_PARTIAL_ACCEPTANCE_SUMMARY,
+            "summary":partial_summary,
             "completedOutputs":[output.clone()],
             "remainingWork":failed_criteria,
             "acceptance":acceptance.clone(),
@@ -3060,13 +3694,18 @@ fn append_single_worker_run_result(
             "recommendedNextAction":"stop"
         })
     });
-    let result = passed.then(|| json!({"outcome":"succeeded","summary":"The cited brief and its required policy acceptance are complete.",
+    let accepted_summary = if human_decision == Some(true) {
+        "The cited brief passed policy and was accepted by its owner."
+    } else {
+        "The cited brief and its required policy acceptance are complete."
+    };
+    let result = passed.then(|| json!({"outcome":"succeeded","summary":accepted_summary,
         "outputs":[output.clone()],"acceptance":acceptance.clone(),"evaluations":[evaluation],"usage":[usage_value],"completedAt":at}));
     let mission_result = if let Some(result) = result.as_ref() {
         json!({"outcome":"succeeded","summary":result.get("summary"),"producingRunIds":[binding.run_id],
             "outputs":result.get("outputs"),"acceptance":result.get("acceptance"),"completedAt":at})
     } else {
-        json!({"outcome":"partial","summary":"The cited draft was preserved without policy acceptance.","producingRunIds":[binding.run_id],
+        json!({"outcome":"partial","summary":partial_summary,"producingRunIds":[binding.run_id],
             "outputs":[output],"acceptance":acceptance,"partial":partial,"completedAt":at})
     };
     let idempotency_key = format!(
@@ -3075,8 +3714,9 @@ fn append_single_worker_run_result(
             .map_err(crate::store::StoreError::Invalid)?
     );
     let sequence = expected_sequence + 1;
-    let error = json!({"code":"policy-acceptance-failed","category":"validation",
-        "message":"The cited output did not satisfy its required evidence policy.","retryable":false,
+    let denied = policy_passed && human_decision == Some(false);
+    let error = json!({"code":if denied{"human-acceptance-denied"}else{"policy-acceptance-failed"},"category":"validation",
+        "message":if denied{"The owner kept the cited output as a draft."}else{"The cited output did not satisfy its required evidence policy."},"retryable":false,
         "causedByEventId":binding.evaluation_event_id});
     let (event_type, payload, next_status) = if let Some(result) = result.as_ref() {
         ("run-completed", json!({"result":result}), "completed")
@@ -3090,7 +3730,7 @@ fn append_single_worker_run_result(
     let event = json!({"workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
         "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,"createdAt":at,"updatedAt":at,
         "id":binding.result_event_id,"runId":binding.run_id,"type":event_type,"sequence":sequence,
-        "previousEventId":binding.evaluation_event_id,"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
+        "previousEventId":result_previous_event_id.unwrap_or(binding.evaluation_event_id.as_str()),"attemptNumber":journal.run.get("currentAttemptNumber").and_then(Value::as_i64).unwrap_or(1),
         "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":idempotency_key,"payload":payload});
     let mut projected = journal.run.as_object().cloned().ok_or_else(|| {
         crate::store::StoreError::Invalid("Mission run record is invalid.".into())
@@ -3174,6 +3814,200 @@ fn append_single_worker_run_result(
             at,
         )?;
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_cited_acceptance_wait(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    internal_user_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    binding: &NativeWorkerExecutionBinding,
+    receipt: &Value,
+    output_reference: &str,
+    expected_revision: i64,
+    expected_sequence: i64,
+    at: &str,
+) -> crate::store::Result<()> {
+    let workspace_id = journal
+        .run
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+        })?;
+    let plan_revision_id = lifecycle
+        .current_revision
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission plan revision is invalid.".into())
+        })?;
+    let content_hash = receipt
+        .get("contentHash")
+        .and_then(Value::as_str)
+        .filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited draft content binding is invalid.".into())
+        })?;
+    if receipt.get("valueReference").and_then(Value::as_str) != Some(output_reference)
+        || receipt.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || receipt.get("workerId").and_then(Value::as_str) != Some(binding.worker_id.as_str())
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited draft does not match its approval proposal.".into(),
+        ));
+    }
+    let proposal_material = format!(
+        "fable.cited-artifact-approval.v1\0{workspace_id}\0{owner_member_id}\0{plan_revision_id}\0{}\0{}\0{output_reference}\0{content_hash}",
+        binding.run_id, binding.worker_id
+    );
+    let suffix = format!("{:x}", Sha256::digest(proposal_material.as_bytes()));
+    let proposal_hash = format!("sha256:{suffix}");
+    let wait_key = format!("cited-artifact-wait:v1:{suffix}");
+    let approval_request_ref = format!("cited-artifact-proposal:v1:{suffix}");
+    let checkpoint_event_id = format!("mission-wait-checkpoint-{suffix}");
+    let approval_event_id = format!("mission-approval-requested-{suffix}");
+    let checkpoint_reference = format!("checkpoint:{checkpoint_event_id}");
+    let attempt_number = journal
+        .run
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
+    let checkpoint_state = json!({
+        "activeWorkerIds":[],
+        "activePlanStepKeys":[],
+        "pendingWaitKeys":[wait_key],
+        "approvalProposal":{
+            "approvalRequestRef":approval_request_ref,
+            "proposalHash":proposal_hash,
+            "planRevisionId":plan_revision_id,
+            "workerId":binding.worker_id,
+            "workerStartedEventId":binding.worker_started_event_id,
+            "routeSelectedEventId":binding.route_selected_event_id,
+            "usageEventId":binding.usage_event_id,
+            "completionBaseEventId":native_completion_base_event(binding),
+            "completionEventId":binding.completion_event_id,
+            "evaluationEventId":binding.evaluation_event_id,
+            "outputReference":output_reference,
+            "contentHash":content_hash
+        }
+    });
+    let checkpoint_bytes = serde_json::to_vec(&checkpoint_state).map_err(|_| {
+        crate::store::StoreError::Invalid("Cited approval checkpoint could not be encoded.".into())
+    })?;
+    let state_hash = format!("{:x}", Sha256::digest(&checkpoint_bytes));
+    let checkpoint_sequence = expected_sequence + 1;
+    let checkpoint = json!({
+        "kind":"wait-boundary","attemptNumber":attempt_number,"createdAt":at,
+        "replayBoundary":{
+            "durableThroughSequence":expected_sequence,
+            "resumeAfterEventId":binding.evaluation_event_id,
+            "completedPlanStepKeys":["research"],
+            "completedWorkerIds":[binding.worker_id],
+            "committedEffectKeys":[]
+        },
+        "stateStorage":"portable-redacted","stateReference":checkpoint_reference,
+        "stateHash":state_hash,"executionNodeId":"local-desktop","pendingWaitKey":wait_key
+    });
+    let checkpoint_event = json!({
+        "workspaceId":workspace_id,"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
+        "createdAt":at,"updatedAt":at,"id":checkpoint_event_id,"runId":binding.run_id,
+        "type":"checkpoint-created","sequence":checkpoint_sequence,"previousEventId":binding.evaluation_event_id,
+        "attemptNumber":attempt_number,"occurredAt":at,"actor":{"kind":"system"},
+        "idempotencyKey":format!("cited-acceptance-checkpoint:v1:{suffix}"),
+        "payload":{"checkpoint":checkpoint}
+    });
+    let mut checkpoint_projection = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    checkpoint_projection.insert("revision".into(), json!(expected_revision + 1));
+    checkpoint_projection.insert("updatedAt".into(), json!(at));
+    checkpoint_projection.insert(
+        "eventHead".into(),
+        json!({"lastSequence":checkpoint_sequence,"lastEventId":checkpoint_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        expected_revision,
+        expected_sequence,
+        &checkpoint_event_id,
+        "checkpoint-created",
+        &format!("cited-acceptance-checkpoint:v1:{suffix}"),
+        &checkpoint_event,
+        &Value::Object(checkpoint_projection),
+        at,
+    )?;
+    mission_checkpoint::put(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        &checkpoint_event_id,
+        attempt_number,
+        &checkpoint_reference,
+        &state_hash,
+        &checkpoint_state,
+        at,
+    )?;
+
+    let approval_sequence = checkpoint_sequence + 1;
+    let wait = json!({
+        "waitKey":wait_key,"status":"pending","approvalRequestRef":approval_request_ref,
+        "proposalHash":proposal_hash,
+        "actionSummary":"Save this policy-passed cited brief as an accepted artifact.",
+        "requestedAt":at,"workerId":binding.worker_id,
+        "sideEffect":{
+            "effectKey":format!("cited-artifact-create:v1:{suffix}"),
+            "idempotencyKey":format!("cited-artifact-create:v1:{suffix}"),
+            "replayPolicy":"deduplicate","proposalHash":proposal_hash,
+            "targetSummary":"One private accepted cited-brief artifact"
+        }
+    });
+    let approval_event = json!({
+        "workspaceId":workspace_id,"visibility":"member-private","ownerMemberId":owner_member_id,
+        "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,
+        "createdAt":at,"updatedAt":at,"id":approval_event_id,"runId":binding.run_id,
+        "type":"approval-requested","sequence":approval_sequence,"previousEventId":checkpoint_event_id,
+        "attemptNumber":attempt_number,"occurredAt":at,"actor":{"kind":"system"},
+        "idempotencyKey":format!("cited-acceptance-request:v1:{suffix}"),"payload":{"wait":wait}
+    });
+    let mut approval_projection = journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    approval_projection.insert("status".into(), json!("waiting-approval"));
+    approval_projection.insert("revision".into(), json!(expected_revision + 2));
+    approval_projection.insert("updatedAt".into(), json!(at));
+    approval_projection.insert(
+        "eventHead".into(),
+        json!({"lastSequence":approval_sequence,"lastEventId":approval_event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        &binding.run_id,
+        expected_revision + 1,
+        checkpoint_sequence,
+        &approval_event_id,
+        "approval-requested",
+        &format!("cited-acceptance-request:v1:{suffix}"),
+        &approval_event,
+        &Value::Object(approval_projection),
+        at,
+    )?;
+    mission_plan::mark_waiting(tx, store, scope, owner_member_id, lifecycle, at)?;
     Ok(())
 }
 
@@ -3491,7 +4325,7 @@ fn is_cited_terminal_status_shape(
             .mission
             .pointer("/acceptance/requiresHumanAcceptance")
             .and_then(Value::as_bool)
-            == Some(false)
+            .is_some()
         && steps.is_some_and(|steps| {
             steps.len() == 1
                 && steps[0]
@@ -6041,7 +6875,7 @@ fn validate_lifecycle(
     let revision = object(&lifecycle.current_revision, "Plan revision")?;
     if !matches!(
         mission.get("status").and_then(Value::as_str),
-        Some("ready" | "running")
+        Some("ready" | "running" | "waiting")
     ) || mission.get("currentPlanRevisionId").and_then(Value::as_str)
         != revision.get("id").and_then(Value::as_str)
         || run.get("planRevisionId").and_then(Value::as_str)
@@ -6612,6 +7446,118 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn append_approval_fixture_event(
+        tx: &rusqlite::Connection,
+        store: &crate::store::Store,
+        scope: &crate::store::repos::scope::DataScope,
+        run: &mut Value,
+        event_id: &str,
+        event_type: &str,
+        idempotency_key: &str,
+        payload: Value,
+        at: &str,
+    ) -> crate::store::Result<()> {
+        let expected_revision = run.get("revision").and_then(Value::as_i64).unwrap();
+        let expected_sequence = run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            .unwrap();
+        let previous_event_id = run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            .unwrap();
+        let sequence = expected_sequence + 1;
+        let event = json!({
+            "id":event_id,"runId":"run-approval","type":event_type,
+            "sequence":sequence,"previousEventId":previous_event_id,
+            "attemptNumber":1,"idempotencyKey":idempotency_key,"payload":payload
+        });
+        run["revision"] = json!(expected_revision + 1);
+        run["eventHead"] = json!({"lastSequence":sequence,"lastEventId":event_id});
+        mission_run::append(
+            tx,
+            store,
+            scope,
+            "member-1",
+            "run-approval",
+            expected_revision,
+            expected_sequence,
+            event_id,
+            event_type,
+            idempotency_key,
+            &event,
+            run,
+            at,
+        )?;
+        Ok(())
+    }
+
+    fn replace_approval_fixture_event(
+        tx: &rusqlite::Connection,
+        store: &crate::store::Store,
+        event: &Value,
+    ) -> crate::store::Result<()> {
+        let event_id = event.get("id").and_then(Value::as_str).unwrap();
+        let sealed = crate::store::repos::seal_json(
+            store,
+            event,
+            &format!("mission-run-event:workspace-1:member-1:{event_id}"),
+        )?;
+        let changed = tx.execute(
+            "UPDATE mission_run_event SET payload=?1,payload_nonce=?2 WHERE workspace_id='workspace-1' AND owner_member_id='member-1' AND run_id='run-approval' AND id=?3",
+            rusqlite::params![sealed.ciphertext, sealed.nonce, event_id],
+        )?;
+        assert_eq!(changed, 1);
+        Ok(())
+    }
+
+    fn assert_approval_event_tamper_rejected(
+        store: &crate::store::Store,
+        scope: &crate::store::repos::scope::DataScope,
+        event_id: &str,
+        mutate: impl FnOnce(&mut Value),
+    ) {
+        store
+            .transaction(|tx| {
+                let journal =
+                    mission_run::get(tx, store, scope, "member-1", "run-approval")?.unwrap();
+                let original = journal
+                    .events
+                    .iter()
+                    .find(|event| event.get("id").and_then(Value::as_str) == Some(event_id))
+                    .unwrap()
+                    .clone();
+                let mut changed = original.clone();
+                mutate(&mut changed);
+                replace_approval_fixture_event(tx, store, &changed)?;
+                let tampered =
+                    mission_run::get(tx, store, scope, "member-1", "run-approval")?.unwrap();
+                assert!(cited_approval_facts(
+                    tx,
+                    store,
+                    scope,
+                    "member-1",
+                    &tampered,
+                    Some("thread-approval"),
+                )
+                .is_err());
+                replace_approval_fixture_event(tx, store, &original)?;
+                let restored =
+                    mission_run::get(tx, store, scope, "member-1", "run-approval")?.unwrap();
+                assert!(cited_approval_facts(
+                    tx,
+                    store,
+                    scope,
+                    "member-1",
+                    &restored,
+                    Some("thread-approval"),
+                )
+                .is_ok());
+                Ok(())
+            })
+            .unwrap();
+    }
 
     #[test]
     fn worker_builder_clamps_budget_and_rejects_undeclared_context() {
@@ -7507,6 +8453,372 @@ mod tests {
             cancelled_messages[1].content,
             json!("Mission cancelled: The mission stopped after its cancellation request was observed.")
         );
+    }
+
+    #[test]
+    fn cited_acceptance_wait_survives_reopen_and_rejects_detached_evidence() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cited-approval-wait.db");
+        let vault =
+            crate::store::vault::Vault::new(&crate::store::vault::MasterKey::generate().unwrap())
+                .unwrap();
+        let at = "2026-07-15T12:00:00Z";
+        let text = "The connected launch record confirms Q3 [source-1].";
+        let content_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
+        let output_reference = crate::store::repos::mission_worker_output::binding_reference(
+            "workspace-1",
+            "member-1",
+            "run-approval",
+            "worker-approval",
+            "event-complete",
+            "brief",
+            &content_hash,
+        );
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-approval".into(),
+            worker_id: "worker-approval".into(),
+            worker_started_event_id: "event-worker-started".into(),
+            route_selected_event_id: "event-route".into(),
+            usage_event_id: "event-usage".into(),
+            completion_event_id: "event-complete".into(),
+            evaluation_event_id: "event-evaluation".into(),
+            result_event_id: "event-result".into(),
+            failure_event_id: "event-failure".into(),
+            idempotency_key: "approval-terminal-1".into(),
+            expected_run_revision: 7,
+            expected_last_sequence: 7,
+            checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
+            tool_evidence: None,
+        };
+        let output_receipt = json!({
+            "version":2,"workspaceId":"workspace-1","ownerMemberId":"member-1",
+            "runId":"run-approval","workerId":"worker-approval",
+            "completionEventId":"event-complete","outputKey":"brief",
+            "valueReference":output_reference,"contentHash":content_hash,
+            "sizeBytes":text.len(),"text":text,"mediaType":"text/markdown","encoding":"utf-8",
+            "observedProvider":"openai","providerRouteId":"route-openai",
+            "requestedModel":"gpt-5","trust":"provider-generated-with-external-evidence",
+            "citations":[{"citationId":"source-1","sourceId":"doc-1","title":"Launch record",
+                "snippet":"Q3 launch","uri":"https://example.com/launch",
+                "provenance":"connection:doc-1","freshness":"current","trust":"external-untrusted"}],
+            "createdAt":at
+        });
+        {
+            let store = crate::store::Store::open(&path, vault.clone()).unwrap();
+            let scope = crate::store::repos::scope::DataScope::workspace("workspace-1").unwrap();
+            store
+                .transaction(|tx| {
+                    tx.execute(
+                        "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('workspace-1','W',?1,?1)",
+                        [at],
+                    )?;
+                    thread::create(
+                        tx,
+                        &store,
+                        &scope,
+                        "thread-approval",
+                        None,
+                        "Approval-gated cited brief",
+                        at,
+                        &json!({}),
+                    )?;
+                    let mission = json!({
+                        "id":"mission-approval","workspaceId":"workspace-1","ownerMemberId":"member-1",
+                        "status":"ready","executionDepth":"delegated","revision":1,
+                        "currentPlanId":"plan-approval","currentPlanRevisionId":"revision-approval",
+                        "createdByInternalUserId":"user-1","createdAt":at,"updatedAt":at,
+                        "scope":{"sourceThreadId":"thread-approval","context":[]},
+                        "outcome":{"title":"Connected-source cited brief","summary":"Produce one cited brief.",
+                            "deliverables":[{"key":"brief","description":"One cited Markdown brief.",
+                                "required":true,"format":"text/markdown"}]},
+                        "acceptance":{"requiresHumanAcceptance":true,"minimumRequiredCriteria":1,
+                            "criteria":[{"key":"cited","description":"Use only attested citations.",
+                                "required":true,"evaluator":"policy"}]},
+                        "budget":{"maxWorkers":1,"maxDurationMs":120000,"maxInputTokens":32000,
+                            "maxOutputTokens":2048,"maxToolCalls":1,"maxAttempts":2}
+                    });
+                    let plan = json!({
+                        "id":"plan-approval","missionId":"mission-approval","status":"current","revision":1,
+                        "currentRevisionId":"revision-approval","currentRevisionNumber":1,
+                        "createdAt":at,"updatedAt":at
+                    });
+                    let plan_revision = json!({
+                        "id":"revision-approval","planId":"plan-approval","missionId":"mission-approval",
+                        "planRevisionNumber":1,"reason":"initial","summary":"Research the connected launch record.",
+                        "steps":[{"key":"research","kind":"investigate","title":"Research launch evidence",
+                            "objective":"Find the exact connected launch evidence.","dependsOnStepKeys":[],
+                            "requiredCapabilities":["knowledge.content.search"],
+                            "expectedOutputs":[{"key":"brief","description":"One cited Markdown brief.",
+                                "required":true,"format":"text/markdown"}],
+                            "acceptanceCriterionKeys":["cited"]}]
+                    });
+                    let ready = mission_plan::create(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "user-1",
+                        "mission-approval",
+                        "plan-approval",
+                        "revision-approval",
+                        "delegated",
+                        &mission,
+                        &plan,
+                        &plan_revision,
+                        at,
+                    )?;
+                    mission_plan::mark_running(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        &ready,
+                        at,
+                    )?;
+                    let lifecycle = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-approval",
+                    )?
+                    .unwrap();
+                    let mut run = json!({
+                        "id":"run-approval","workspaceId":"workspace-1","ownerMemberId":"member-1",
+                        "visibility":"member-private","authority":"local","schemaVersion":1,
+                        "status":"running","revision":1,"currentAttemptNumber":1,
+                        "missionId":"mission-approval","planRevisionId":"revision-approval",
+                        "sourceThreadId":"thread-approval","initiator":{"kind":"mission","missionId":"mission-approval"},
+                        "createdByInternalUserId":"user-1","createdAt":at,"updatedAt":at,
+                        "eventHead":{"lastSequence":1,"lastEventId":"event-created"}
+                    });
+                    let created = json!({
+                        "id":"event-created","runId":"run-approval","type":"run-created",
+                        "sequence":1,"attemptNumber":1,"idempotencyKey":"created-approval"
+                    });
+                    mission_run::create(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "user-1",
+                        "run-approval",
+                        "event-created",
+                        "created-approval",
+                        &run,
+                        &created,
+                        at,
+                    )?;
+                    append_approval_fixture_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-worker-created",
+                        "worker-created",
+                        "worker-created-approval",
+                        json!({"worker":{"id":"worker-approval","runId":"run-approval","planStepKey":"research"}}),
+                        at,
+                    )?;
+                    append_approval_fixture_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-worker-started",
+                        "worker-started",
+                        "worker-started-approval",
+                        json!({"workerId":"worker-approval"}),
+                        at,
+                    )?;
+                    append_approval_fixture_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-route",
+                        "route-selected",
+                        "route-approval",
+                        json!({"workerId":"worker-approval","selection":{
+                            "providerRouteId":"route-openai","reason":"Selected OpenAI GPT-5 for model.generate."}}),
+                        at,
+                    )?;
+                    append_approval_fixture_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-usage",
+                        "usage-recorded",
+                        "usage-approval",
+                        json!({"usage":{"runId":"run-approval","workerId":"worker-approval",
+                            "providerRouteId":"route-openai","modelReference":"gpt-5",
+                            "inputTokens":90,"outputTokens":40,"toolCalls":1,"durationMs":1500,
+                            "attemptNumber":1,"costs":[]}}),
+                        at,
+                    )?;
+                    append_approval_fixture_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-complete",
+                        "worker-completed",
+                        "complete-approval",
+                        json!({"workerId":"worker-approval","outputs":[{
+                            "key":"brief","summary":"Native worker text output","valueReference":output_reference}]}),
+                        at,
+                    )?;
+                    crate::store::repos::mission_worker_output::put(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-approval",
+                        "worker-approval",
+                        "event-complete",
+                        "brief",
+                        &output_reference,
+                        &content_hash,
+                        text.len() as i64,
+                        &output_receipt,
+                        at,
+                    )?;
+                    append_approval_fixture_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-evaluation",
+                        "evaluation-recorded",
+                        "evaluation-approval",
+                        json!({"evaluation":{"evaluationKey":"native-policy:event-evaluation",
+                            "target":{"kind":"worker","workerId":"worker-approval"},
+                            "verdict":"pass","recommendedAction":"accept",
+                            "criteria":[{"criterionKey":"cited","passed":true,
+                                "evidenceRefs":[output_reference],"summary":"All citations are attested."}]}}),
+                        at,
+                    )?;
+                    let journal = mission_run::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-approval",
+                    )?
+                    .unwrap();
+                    append_cited_acceptance_wait(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "user-1",
+                        &journal,
+                        &lifecycle,
+                        &binding,
+                        &output_receipt,
+                        &output_reference,
+                        7,
+                        7,
+                        at,
+                    )?;
+                    let waiting = mission_run::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-approval",
+                    )?
+                    .unwrap();
+                    let waiting_mission = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-approval",
+                    )?
+                    .unwrap();
+                    assert_eq!(waiting.run["status"], "waiting-approval");
+                    assert_eq!(waiting.run["revision"], 9);
+                    assert_eq!(waiting.run["eventHead"]["lastSequence"], 9);
+                    assert_eq!(waiting_mission.mission["status"], "waiting");
+                    assert!(cited_approval_facts(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        &waiting,
+                        Some("thread-approval"),
+                    )
+                    .is_ok());
+                    Ok(())
+                })
+                .unwrap();
+        }
+
+        let store = crate::store::Store::open(&path, vault).unwrap();
+        let scope = crate::store::repos::scope::DataScope::workspace("workspace-1").unwrap();
+        store
+            .with_conn(|tx| {
+                let journal =
+                    mission_run::get(tx, &store, &scope, "member-1", "run-approval")?.unwrap();
+                let lifecycle =
+                    mission_plan::get(tx, &store, &scope, "member-1", "mission-approval")?.unwrap();
+                let facts = cited_approval_facts(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    &journal,
+                    Some("thread-approval"),
+                )?;
+                assert_eq!(journal.run["status"], "waiting-approval");
+                assert_eq!(lifecycle.mission["status"], "waiting");
+                assert_eq!(facts.worker_started_event_id, "event-worker-started");
+                assert_eq!(facts.route_selected_event_id, "event-route");
+                assert_eq!(facts.usage_event_id, "event-usage");
+                assert_eq!(facts.completion_event_id, "event-complete");
+                assert_eq!(facts.evaluation_event_id, "event-evaluation");
+                assert_eq!(facts.requested_model, "gpt-5");
+                assert_eq!(facts.provider_route_id, "route-openai");
+                assert_eq!(facts.token_usage, (90, 40));
+                assert_eq!(facts.output.receipt["text"], text);
+                Ok(())
+            })
+            .unwrap();
+
+        assert_approval_event_tamper_rejected(&store, &scope, "event-route", |event| {
+            event["payload"]["selection"]["providerRouteId"] = json!("route-detached");
+        });
+        assert_approval_event_tamper_rejected(&store, &scope, "event-route", |event| {
+            event["previousEventId"] = json!("event-created");
+        });
+        assert_approval_event_tamper_rejected(&store, &scope, "event-usage", |event| {
+            event["payload"]["usage"]["attemptNumber"] = json!(2);
+        });
+        assert_approval_event_tamper_rejected(&store, &scope, "event-usage", |event| {
+            event["previousEventId"] = json!("event-worker-started");
+        });
+        assert_approval_event_tamper_rejected(&store, &scope, "event-complete", |event| {
+            event["previousEventId"] = json!("event-route");
+        });
+        assert_approval_event_tamper_rejected(&store, &scope, "event-evaluation", |event| {
+            event["previousEventId"] = json!("event-route");
+        });
+        let checkpoint_event_id = store
+            .with_conn(|tx| {
+                let journal =
+                    mission_run::get(tx, &store, &scope, "member-1", "run-approval")?.unwrap();
+                Ok(journal.events.last().unwrap()["previousEventId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string())
+            })
+            .unwrap();
+        assert_approval_event_tamper_rejected(&store, &scope, &checkpoint_event_id, |event| {
+            event["previousEventId"] = json!("event-route");
+        });
     }
 
     #[test]

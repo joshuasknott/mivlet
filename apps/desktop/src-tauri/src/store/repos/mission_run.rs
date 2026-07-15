@@ -223,6 +223,25 @@ pub fn list_nonterminal_ids_before(
     Ok(ids)
 }
 
+pub fn list_nonterminal_ids(
+    tx: &Connection,
+    scope: &DataScope,
+    owner_member_id: &str,
+) -> Result<Vec<String>> {
+    scope.ensure_exists(tx)?;
+    let owner = normalize_id(owner_member_id, "Member")?;
+    let mut statement = tx.prepare(
+        "SELECT id FROM mission_run_record WHERE workspace_id=?1 AND owner_member_id=?2 AND terminal=0 ORDER BY updated_at,id;",
+    )?;
+    let ids = statement
+        .query_map(rusqlite::params![scope.workspace_id(), owner], |row| {
+            row.get(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(StoreError::from)?;
+    Ok(ids)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_event(
     tx: &Connection,

@@ -7,6 +7,7 @@ import {
   getRuntimeMissionPlan,
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
+  latestRuntimeCitedApproval,
   listRuntimeNativeProviderRoutes,
   prepareRuntimeCitedMissionRetry,
   readRuntimeCitedMissionReceipts,
@@ -55,6 +56,20 @@ describe("mission runtime boundary", () => {
       durableThroughSequence: 3, resumeAfterEventId: "event-tool"
     })).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("selects one deterministic newest dormant cited approval", () => {
+    const approval = (runId: string, requestedAt: string) => ({
+      runId, missionId: `mission-${runId}`, waitKey: `wait-${runId}`, requestedAt,
+      expectedRunRevision: 4, expectedLastSequence: 8,
+      valueReference: `mission-output:v1:${runId}`, draft: "Draft", plan: {}
+    });
+    expect(latestRuntimeCitedApproval([
+      approval("run-b", "2026-07-13T12:00:00.000Z"),
+      approval("run-old", "2026-07-12T12:00:00.000Z"),
+      approval("run-a", "2026-07-13T12:00:00.000Z")
+    ])?.runId).toBe("run-b");
+    expect(latestRuntimeCitedApproval([])).toBeUndefined();
   });
 
   it("composes only the authenticated native mission commands", async () => {

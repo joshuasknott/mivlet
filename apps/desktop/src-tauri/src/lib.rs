@@ -170,6 +170,8 @@ pub fn run() {
             mission_workers::mission_worker_start,
             mission_workers::mission_worker_output_read,
             mission_workers::mission_worker_cited_receipts_read,
+            mission_workers::mission_cited_approval_pending_list,
+            mission_workers::mission_cited_approval_resolve,
             artifacts::artifact_create_from_response,
             artifacts::artifact_append_version,
             artifacts::artifact_review_action,
