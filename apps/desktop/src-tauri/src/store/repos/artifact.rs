@@ -36,6 +36,15 @@ pub struct DirectMissionArtifactReference<'a> {
     pub reference: &'a AttestedArtifactVersionReference,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct DirectMissionWorkerOutputReference<'a> {
+    pub worker_id: &'a str,
+    pub completion_event_id: &'a str,
+    pub output_key: &'a str,
+    pub value_reference: &'a str,
+    pub content_hash: &'a str,
+}
+
 fn artifact_aad(scope: &PrivateDataScope, id: &str) -> String {
     format!(
         "artifact:{}:{}:{id}",
@@ -414,6 +423,7 @@ pub fn create_direct_mission_output(
         "source",
         "Authenticated structured intake response",
         None,
+        &[],
     )
 }
 
@@ -448,6 +458,46 @@ pub fn create_direct_mission_output_with_artifact_reference(
         "user-input",
         input_label,
         Some(source_reference),
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_direct_mission_aggregate_output(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    join_event_id: &str,
+    result_event_id: &str,
+    output_key: &str,
+    title: &str,
+    text: &str,
+    expected: &DirectMissionArtifactBinding,
+    worker_outputs: &[DirectMissionWorkerOutputReference<'_>],
+) -> Result<DirectMissionArtifactBinding> {
+    if worker_outputs.len() < 2 || worker_outputs.len() > 8 {
+        return Err(StoreError::Invalid(
+            "A mission aggregate requires between two and eight exact worker outputs.".into(),
+        ));
+    }
+    create_direct_mission_output_inner(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        run_id,
+        join_event_id,
+        result_event_id,
+        output_key,
+        title,
+        text,
+        expected,
+        "source",
+        "Deterministic worker join",
+        None,
+        worker_outputs,
     )
 }
 
@@ -467,6 +517,7 @@ fn create_direct_mission_output_inner(
     input_kind: &str,
     input_label: &str,
     source_reference: Option<DirectMissionArtifactReference<'_>>,
+    worker_outputs: &[DirectMissionWorkerOutputReference<'_>],
 ) -> Result<DirectMissionArtifactBinding> {
     scope.ensure_exists(tx)?;
     if scope.owner_member_id() != Some(owner_member_id)
@@ -506,6 +557,15 @@ fn create_direct_mission_output_inner(
         .events
         .iter()
         .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id));
+    validate_direct_worker_outputs(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        run_id,
+        source,
+        worker_outputs,
+    )?;
     if let Some(reference) = source_reference {
         validate_direct_source_reference(tx, store, scope, source, reference)?;
     }
@@ -525,7 +585,12 @@ fn create_direct_mission_output_inner(
             .and_then(Value::as_str)
             != Some(result_event_id)
         || !source.is_some_and(|event| {
-            event.get("type").and_then(Value::as_str) == Some("human-input-received")
+            let expected_type = if worker_outputs.is_empty() {
+                "human-input-received"
+            } else {
+                "join-resolved"
+            };
+            event.get("type").and_then(Value::as_str) == Some(expected_type)
                 && event.get("runId").and_then(Value::as_str) == Some(run_id)
         })
         || !result.is_some_and(|event| {
@@ -605,7 +670,13 @@ fn create_direct_mission_output_inner(
         ));
     }
     let at = source
-        .and_then(|event| event.pointer("/payload/resolution/receivedAt"))
+        .and_then(|event| {
+            if worker_outputs.is_empty() {
+                event.pointer("/payload/resolution/receivedAt")
+            } else {
+                event.get("occurredAt")
+            }
+        })
         .and_then(Value::as_str)
         .ok_or_else(|| StoreError::Invalid("Direct mission source time is missing.".into()))?;
     let provenance = json!({
@@ -615,6 +686,14 @@ fn create_direct_mission_output_inner(
     let hash = json!({"algorithm":"sha-256","value":content_hash});
     let mut inputs = vec![json!({"kind":input_kind,"referenceId":source_event_id,
         "label":input_label.trim(),"recordedAt":at})];
+    for output in worker_outputs {
+        inputs.push(json!({
+            "kind":"source","referenceId":output.value_reference,
+            "label":format!("Worker {} output {}", output.worker_id, output.output_key),
+            "recordedAt":at,
+            "contentHash":{"algorithm":"sha-256","value":output.content_hash}
+        }));
+    }
     let mut lineage = Vec::new();
     if let Some(source) = source_reference {
         inputs.push(json!({
@@ -704,6 +783,99 @@ fn create_direct_mission_output_inner(
         )?;
     }
     Ok(expected.clone())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_direct_worker_outputs(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    join_event: Option<&Value>,
+    worker_outputs: &[DirectMissionWorkerOutputReference<'_>],
+) -> Result<()> {
+    if worker_outputs.is_empty() {
+        return Ok(());
+    }
+    let join = join_event.ok_or_else(|| {
+        StoreError::Invalid("Mission aggregate join event is unavailable.".into())
+    })?;
+    let satisfied = join
+        .pointer("/payload/join/satisfiedWorkerIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| StoreError::Invalid("Mission aggregate join is invalid.".into()))?;
+    if join.get("type").and_then(Value::as_str) != Some("join-resolved")
+        || join.pointer("/payload/join/status").and_then(Value::as_str) != Some("satisfied")
+        || satisfied.len() != worker_outputs.len()
+    {
+        return Err(StoreError::Invalid(
+            "Mission aggregate requires one satisfied durable join.".into(),
+        ));
+    }
+    let journal = super::mission_run::get(tx, store, scope.data(), owner_member_id, run_id)?
+        .ok_or_else(|| StoreError::Invalid("Mission aggregate run is unavailable.".into()))?;
+    let mut unique_workers = std::collections::BTreeSet::new();
+    let mut unique_references = std::collections::BTreeSet::new();
+    for output in worker_outputs {
+        if !unique_workers.insert(output.worker_id)
+            || !unique_references.insert(output.value_reference)
+            || !satisfied
+                .iter()
+                .any(|worker| worker.as_str() == Some(output.worker_id))
+        {
+            return Err(StoreError::Invalid(
+                "Mission aggregate worker outputs must be unique join members.".into(),
+            ));
+        }
+        let event = journal.events.iter().find(|event| {
+            event.get("id").and_then(Value::as_str) == Some(output.completion_event_id)
+        });
+        if !event.is_some_and(|event| {
+            event.get("type").and_then(Value::as_str) == Some("worker-completed")
+                && event.pointer("/payload/workerId").and_then(Value::as_str)
+                    == Some(output.worker_id)
+                && event
+                    .pointer("/payload/outputs/0/key")
+                    .and_then(Value::as_str)
+                    == Some(output.output_key)
+                && event
+                    .pointer("/payload/outputs/0/valueReference")
+                    .and_then(Value::as_str)
+                    == Some(output.value_reference)
+        }) {
+            return Err(StoreError::Invalid(
+                "Mission aggregate worker completion is invalid.".into(),
+            ));
+        }
+        let receipt = super::mission_worker_output::get_by_reference(
+            tx,
+            store,
+            scope.data(),
+            owner_member_id,
+            output.value_reference,
+        )?
+        .ok_or_else(|| {
+            StoreError::Invalid("Mission aggregate output receipt is unavailable.".into())
+        })?;
+        if receipt.run_id != run_id
+            || receipt.worker_id != output.worker_id
+            || receipt.completion_event_id != output.completion_event_id
+            || receipt.output_key != output.output_key
+            || receipt.value_reference != output.value_reference
+            || receipt.content_hash != output.content_hash
+            || receipt
+                .receipt
+                .pointer("/contentHash")
+                .and_then(Value::as_str)
+                != Some(output.content_hash)
+        {
+            return Err(StoreError::Invalid(
+                "Mission aggregate output receipt crosses its immutable worker boundary.".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_direct_source_reference(

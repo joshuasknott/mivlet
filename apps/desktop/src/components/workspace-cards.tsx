@@ -145,6 +145,37 @@ export function MissionPlanSummary({ plan }: { plan: {
   );
 }
 
+export function ParallelMissionPlanSummary({ plan }: { plan: {
+  title: string; summary: string; executionLabel: string;
+  steps: Array<{ title: string; objective: string; output: string }>;
+  acceptance: string[];
+  budget: { maxWorkers: number; maxDurationMs: number; maxOutputTokens: number; maxAttempts: number };
+} }) {
+  return (
+    <details className="run-context-summary run-context-summary--plan" aria-label="Parallel mission plan">
+      <summary><strong>Plan</strong><span>{plan.executionLabel}</span></summary>
+      <p className="run-context-summary__audience"><strong>Goal</strong><span>{plan.title}</span></p>
+      <p className="run-context-summary__audience"><strong>Request</strong><span>{plan.summary}</span></p>
+      <ol className="run-context-summary__sources" aria-label="Parallel plan steps">
+        {plan.steps.map((step) => (
+          <li key={step.title}>
+            <strong>{step.title}</strong>
+            <span>{step.objective}</span>
+            <p>Produces: {step.output}</p>
+          </li>
+        ))}
+      </ol>
+      <ul className="run-context-summary__reasons" aria-label="Parallel plan acceptance and limits">
+        {plan.acceptance.map((criterion) => <li key={criterion}>Accepted when: {criterion}</li>)}
+        <li>{plan.budget.maxWorkers} workers at once</li>
+        <li>{plan.budget.maxOutputTokens} output tokens per worker</li>
+        <li>Up to {Math.round(plan.budget.maxDurationMs / 1000)} seconds per worker</li>
+        <li>{plan.budget.maxAttempts} attempt per worker</li>
+      </ul>
+    </details>
+  );
+}
+
 export function MissionPlanUnavailable() {
   return (
     <p className="run-context-summary__audience" aria-label="Mission plan unavailable">

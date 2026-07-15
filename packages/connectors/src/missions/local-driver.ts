@@ -65,6 +65,9 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
     toolCalls += 1;
     return input.execute(approval, args);
   };
+  const executionRunId = input.missionWorkerExecution
+    ? `${worker.runId}:worker:${worker.id}`
+    : worker.runId;
   const stream = input.backend.run(
     {
       model: input.model,
@@ -75,7 +78,7 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
     },
     {
       execute,
-      runId: worker.runId,
+      runId: executionRunId,
       contextPrefix: input.contextPrefix,
       shouldCancel: () => input.signal?.aborted ?? false,
       maxTurns: worker.budget.maxAttempts ?? 1,
@@ -90,7 +93,7 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
   while (true) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      await input.backend.cancel(worker.runId);
+      await input.backend.cancel(executionRunId);
       return outcome(text ? "partially-completed" : "failed", "Worker duration budget was exceeded.", false);
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -100,7 +103,7 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
     ]);
     if (timer) clearTimeout(timer);
     if (next.kind === "timeout") {
-      await input.backend.cancel(worker.runId);
+      await input.backend.cancel(executionRunId);
       return outcome(text ? "partially-completed" : "failed", "Worker duration budget was exceeded.", false);
     }
     if (next.value.done) break;
@@ -118,7 +121,7 @@ export async function executeLocalWorker(input: LocalWorkerExecutionInput): Prom
     }
     if (event.type === "done" || event.type === "error" || event.type === "cancelled") terminal = event;
     if (budgetFailure) {
-      await input.backend.cancel(worker.runId);
+      await input.backend.cancel(executionRunId);
       break;
     }
   }

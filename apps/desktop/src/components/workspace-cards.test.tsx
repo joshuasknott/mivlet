@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { CitedApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { CitedApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -180,6 +180,28 @@ describe("RunContextSummary", () => {
     expect(plan).toHaveTextContent("2 attempts including restart recovery");
     expect(plan).not.toHaveTextContent("mission-");
     expect(plan).not.toHaveTextContent("knowledge.content.search");
+  });
+
+  it("shows the independent worker plan and deterministic join limits", () => {
+    render(<ParallelMissionPlanSummary plan={{
+      title: "Compare two approaches",
+      summary: "Generate two approaches for the onboarding flow.",
+      executionLabel: "Two workers · deterministic join",
+      steps: [
+        { title: "Practical approach", objective: "Prefer low complexity.", output: "Required Markdown approach" },
+        { title: "Alternative approach", objective: "Explore higher upside.", output: "Required Markdown approach" },
+        { title: "Compare", objective: "Join both exact outputs.", output: "Draft comparison artifact" }
+      ],
+      acceptance: ["Both independently generated outputs must reach the durable all-workers join."],
+      budget: { maxWorkers: 2, maxDurationMs: 90_000, maxOutputTokens: 2_048, maxAttempts: 1 }
+    }} />);
+    const plan = screen.getByLabelText("Parallel mission plan");
+    expect(plan).toHaveTextContent("Two workers · deterministic join");
+    expect(plan).toHaveTextContent("Practical approach");
+    expect(plan).toHaveTextContent("Alternative approach");
+    expect(plan).toHaveTextContent("Join both exact outputs.");
+    expect(plan).toHaveTextContent("2 workers at once");
+    expect(plan).not.toHaveTextContent("mission-");
   });
 
   it("makes the fresh-authority boundary explicit before starting another mission", () => {

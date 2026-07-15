@@ -219,7 +219,7 @@ selected plan, and immutable revision atomically and restores it after process
 restart. Authenticated native create/read/revise commands derive workspace,
 member, actor, authority, lifecycle, timestamps, and revisions; they repeat the
 bounded-plan validation before persistence rather than trusting the renderer.
-Production worker execution and the inspectable product journey remain open,
+General production worker execution and the inspectable product journey remain open,
 so the Wave 4A boxes stay unchecked.
 
 The next repository slice compiles one selected step into a scope-matched,
@@ -451,7 +451,7 @@ chat run or inferring historical artifacts. `run-completed` and `MissionResult`
 name the exact artifact/version; exact replay requires that linked accepted bundle
 and never duplicates it. Premature, partial, failed, cancelled, and interrupted
 outcomes create no artifact. General mission artifact types, explicit downstream
-handoffs, and multi-worker artifact aggregation remain open.
+handoffs, and general multi-worker artifact aggregation remain open.
 
 The desktop now reads those artifact identities from the accepted terminal
 result, reloads the exact native bundle, and exposes the existing `View artifact`
@@ -485,7 +485,7 @@ deterministic failed or cancelled user/assistant checkpoints atomically with pro
 failure, early or in-flight cancellation, and stale-run restart reconciliation. Those
 assistant markers contain only the durable terminal result identity and outcome, offer
 no receipt or artifact action, and exact terminal replays validate their encrypted
-content and adjacency. General and multi-worker mission transcript projection remains
+content and adjacency. General and other multi-worker mission transcript projection remains
 open.
 
 The desktop runtime exposes the authenticated plan, run, worker, and output
@@ -749,6 +749,28 @@ remains visible.
 - [ ] Add bounded iteration and explicit stop conditions.
 - [ ] Add durable human-input and approval waits.
 - [ ] Add retry, resume, escalation, and replay-safe artifact handoffs.
+
+Repository evidence now includes one deliberately narrow production parallel
+mission. An explicit request to generate two approaches and compare them creates
+one exact three-step Plan with two independent Markdown workers and one
+deterministic synthesis step. Both workers share the pinned OpenAI route and run
+concurrently through distinct native execution identities. The portable journal
+enforces bounded multi-worker state, exact worker membership, one replay-safe
+`all` join, canonical terminal sets, deadlines, cancellation, and failure
+semantics. Native settlement advances sibling heads without prematurely
+terminalising either worker, resolves the pre-opened join only after both outputs
+are durable, and derives the fixed A-then-B comparison from the two authenticated
+output receipts and hashes. The completed result creates one aggregate artifact
+whose immutable inputs name the join and both exact worker outputs; failure,
+cancellation, detached facts, altered receipts, and alternate replay create no
+artifact. Terminal transcripts, cancellation, restart reconciliation, and exact
+replay are durable, while the desktop exposes the compact plan, live stop path,
+recovered result, and artifact action without overflow at desktop or mobile sizes.
+Focused portable, native, runtime, provider-cancellation, renderer, and responsive
+evidence covers this fixed benchmark. It does not yet establish arbitrary worker
+counts, dynamic review, general joins, multiple providers, tool-bearing parallel
+steps, bounded iteration, escalation, or live packaged-app/provider validation, so
+the Wave 4C checkbox remains unchecked.
 
 **Phase 4 complete when:** a multi-provider mission plans, executes, pauses, recovers, and produces coherent artifacts within visible constraints while simple requests remain simple.
 

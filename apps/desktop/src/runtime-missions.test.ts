@@ -14,6 +14,9 @@ import {
   listRuntimePendingCitedApprovals,
   listRuntimePendingMissionHumanInputs,
   listRuntimeNativeProviderRoutes,
+  openRuntimeParallelApproachesJoin,
+  finalizeRuntimeParallelApproaches,
+  recoverRuntimeCompletedParallelApproaches,
   prepareRuntimeCitedMissionRetry,
   receiveRuntimeMissionHumanInput,
   verifiedLatestRuntimePendingMissionWait,
@@ -55,6 +58,11 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
+    await expect(openRuntimeParallelApproachesJoin({
+      runId: "run-1", expectedRunRevision: 4, expectedLastSequence: 3
+    })).resolves.toBeNull();
+    await expect(finalizeRuntimeParallelApproaches("run-1")).resolves.toBeNull();
+    await expect(recoverRuntimeCompletedParallelApproaches()).resolves.toBeNull();
     await expect(prepareRuntimeCitedMissionRetry("run-1")).resolves.toBeNull();
     await expect(listRuntimePendingCitedApprovals("thread-1")).resolves.toEqual({
       approvals: [], unavailableCount: 0, truncated: false
@@ -83,6 +91,37 @@ describe("mission runtime boundary", () => {
       durableThroughSequence: 3, resumeAfterEventId: "event-tool"
     })).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("validates and normalizes parallel mission settlement responses", async () => {
+    setNative(true);
+    const journal = { run: { id: "run-1", status: "completed" }, events: [] };
+    const completed = {
+      missionId: "mission-1", runId: "run-1", outcome: "completed", text: "Comparison",
+      artifactId: "artifact-1", artifactVersionId: "artifact-version-1", journal
+    };
+    mocks.invoke
+      .mockResolvedValueOnce(journal)
+      .mockResolvedValueOnce(completed)
+      .mockResolvedValueOnce([{ ...completed, artifactId: null, outcome: "partial", artifactVersionId: null }]);
+    await expect(openRuntimeParallelApproachesJoin({
+      runId: "run-1", expectedRunRevision: 4, expectedLastSequence: 3
+    })).resolves.toEqual(journal);
+    await expect(finalizeRuntimeParallelApproaches("run-1")).resolves.toEqual(completed);
+    await expect(recoverRuntimeCompletedParallelApproaches()).resolves.toEqual([{
+      missionId: "mission-1", runId: "run-1", outcome: "partial", text: "Comparison", journal
+    }]);
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["mission_parallel_approaches_join_open", { input: {
+        runId: "run-1", expectedRunRevision: 4, expectedLastSequence: 3
+      } }],
+      ["mission_parallel_approaches_finalize", { runId: "run-1" }],
+      ["mission_parallel_approaches_recover_completed"]
+    ]);
+
+    mocks.invoke.mockResolvedValueOnce({ ...completed, outcome: "partial" });
+    await expect(finalizeRuntimeParallelApproaches("run-1"))
+      .rejects.toThrow("Malformed parallel mission result response");
   });
 
   it("selects one deterministic newest dormant cited approval", () => {

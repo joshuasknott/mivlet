@@ -14,12 +14,13 @@ import { insertDictation } from "../lib/insert-dictation";
 import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
 import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/structured-intake-mission";
 import { artifactRevisionBriefFocus, startArtifactRevisionBriefMission } from "../lib/artifact-revision-brief-mission";
+import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeCitedApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue } from "../runtime";
+import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -38,7 +39,8 @@ type ConversationMessage = {
   runId?: string;
   missionReceipt?: CitedBriefMissionReceipt;
   missionPlan?: CitedBriefMissionPlanSummary;
-  missionKind?: "cited-brief" | "structured-intake" | "artifact-revision-brief";
+  parallelMissionPlan?: ParallelApproachesPlanSummary;
+  missionKind?: "cited-brief" | "structured-intake" | "artifact-revision-brief" | "parallel-approaches";
   missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval";
   missionArtifactId?: string;
   approvalRunId?: string;
@@ -113,6 +115,8 @@ export function ChatWorkspace() {
   }>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
+  const [parallelMissionRunning, setParallelMissionRunning] = useState(false);
+  const parallelMissionCancellationRef = useRef<(() => Promise<void>) | null>(null);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
   const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
   const draftHydrationKey = useRef<string | null>(null);
@@ -122,6 +126,7 @@ export function ChatWorkspace() {
   const missionPlanHydrationRequestKey = useRef<string | null>(null);
   const newMissionLaunchRef = useRef<string | null>(null);
   const nativeInputMissionStartingRef = useRef(false);
+  const parallelRecoveryWorkspaceRef = useRef<string | null>(null);
   const optimisticMissionInputRunIds = useRef(new Set<string>());
   const activeAssistantMessageId = useRef<string | null>(null);
   const hydratedConversation = durableConversation.state.conversation;
@@ -233,6 +238,41 @@ export function ChatWorkspace() {
       conversationWorkspaceId.current = boundWorkspaceId;
     }
   }, [agent.cancel, boundWorkspaceId, runtime.activeItem]);
+
+  useEffect(() => {
+    if (!boundWorkspaceId || parallelRecoveryWorkspaceRef.current === boundWorkspaceId
+      || parallelRecoveryWorkspaceRef.current === `pending:${boundWorkspaceId}`) return;
+    const pendingKey = `pending:${boundWorkspaceId}`;
+    parallelRecoveryWorkspaceRef.current = pendingKey;
+    const sourceThreadId = selectedConversationThreadIdRef.current;
+    let active = true;
+    const recover = async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          return await recoverRuntimeCompletedParallelApproaches();
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 100 * (attempt + 1)));
+        }
+      }
+      throw lastError;
+    };
+    void recover().then(async (results) => {
+      if (!active) return;
+      parallelRecoveryWorkspaceRef.current = boundWorkspaceId;
+      if (!results?.length || !sourceThreadId || selectedConversationThreadIdRef.current !== sourceThreadId) return;
+      await durableConversation.refresh();
+      if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+      const artifacts = await listRuntimeThreadArtifacts(sourceThreadId);
+      if (selectedConversationThreadIdRef.current === sourceThreadId) setThreadArtifacts(artifacts);
+    }).catch(() => {
+      if (active && parallelRecoveryWorkspaceRef.current === pendingKey) {
+        parallelRecoveryWorkspaceRef.current = null;
+      }
+    });
+    return () => { active = false; };
+  }, [boundWorkspaceId, durableConversation.refresh]);
 
   useEffect(() => {
     if (navigationTarget.current === runtime.activeItem) {
@@ -475,6 +515,9 @@ export function ChatWorkspace() {
         ...(missionResult ? {
           missionOutcome: missionResult.outcome,
           ...(missionResult.missionKind ? { missionKind: missionResult.missionKind } : {}),
+          ...(missionResult.missionKind === "parallel-approaches" && isParallelApproachesPlanSummary(missionResult.plan)
+            ? { parallelMissionPlan: missionResult.plan }
+            : {}),
           ...(missionResult.outcome === "accepted" || missionResult.outcome === "completed"
             ? { missionArtifactId: missionResult.artifactId }
             : {})
@@ -828,7 +871,7 @@ export function ChatWorkspace() {
           const canStartNewMission = message.role === "assistant" && Boolean(missionPlan)
             && (message.missionOutcome === "partial" || message.missionOutcome === "failed"
               || message.missionOutcome === "cancelled");
-          const newMissionBusy = citedMissionRunning || agent.state.running || Boolean(pendingPrompt)
+          const newMissionBusy = citedMissionRunning || parallelMissionRunning || agent.state.running || Boolean(pendingPrompt)
             || newMissionSourceMessageId !== null;
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
@@ -842,6 +885,9 @@ export function ChatWorkspace() {
             >
               <p>{message.content}</p>
               {message.role === "assistant" && missionPlan ? <MissionPlanSummary plan={missionPlan} /> : null}
+              {message.role === "assistant" && message.parallelMissionPlan
+                ? <ParallelMissionPlanSummary plan={message.parallelMissionPlan} />
+                : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
               {message.role === "assistant" && citedApproval ? (
@@ -1080,7 +1126,7 @@ export function ChatWorkspace() {
     const submitted = rawText.trim();
     const parsed = parseComposerText(submitted);
     const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-    if (!submitted || ((agent.state.running || pendingPrompt) && !stopRequested)) return;
+    if (!submitted || ((agent.state.running || parallelMissionRunning || pendingPrompt) && !stopRequested)) return;
     if (!selectedConversationThreadId) {
       setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
@@ -1107,7 +1153,7 @@ export function ChatWorkspace() {
     }
     const outcome = parseComposerText(submitted);
     if (outcome.status === "command") {
-      const result = await runtime.runFableCommand(outcome.request, { stopCurrentWork });
+      const result = await runtime.runFableCommand(outcome.request, { stopCurrentWork: stopActiveWork });
       // Clear the composer so the command token doesn't also reach the model
       // as ordinary prompt text. A follow-up prompt (if any) is submitted
       // through the same agent path as a normal prompt.
@@ -1119,6 +1165,15 @@ export function ChatWorkspace() {
       return;
     }
     runPrompt(submitted, { appendUserMessage: false });
+  }
+
+  async function stopActiveWork() {
+    const parallelCancel = parallelMissionCancellationRef.current;
+    if (parallelCancel) {
+      await parallelCancel();
+      return true;
+    }
+    return stopCurrentWork();
   }
 
   function focusComposerAfterVoice() {
@@ -1149,7 +1204,7 @@ export function ChatWorkspace() {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
     const sourceMessageId = options.newMissionSourceMessageId;
-    if (sourceMessageId && (newMissionLaunchRef.current || citedMissionRunning || agent.state.running || pendingPrompt)) {
+    if (sourceMessageId && (newMissionLaunchRef.current || citedMissionRunning || parallelMissionRunning || agent.state.running || pendingPrompt)) {
       return;
     }
     const finishNewMissionLaunch = () => {
@@ -1255,6 +1310,65 @@ export function ChatWorkspace() {
       agent.reportError(validation.error ?? "The selected model cannot run.");
       appendConversationMessage("assistant", validation.error ?? "The selected model cannot run.");
       finishNewMissionLaunch();
+      return;
+    }
+    if (isParallelApproachesMissionPrompt(prompt)) {
+      const parallelBackend = agent.backend;
+      if (!boundWorkspaceId || !selectedConversationThreadId || !parallelBackend) {
+        appendConversationMessage("assistant", "Parallel missions require an active Fable workspace and conversation.");
+        finishNewMissionLaunch();
+        return;
+      }
+      const sourceThreadId = selectedConversationThreadId;
+      const assistantMessageId = appendConversationMessage("assistant", "Developing two independent approaches...");
+      resetCancellation();
+      setParallelMissionRunning(true);
+      void executeParallelApproachesMission({
+        prompt,
+        workspaceId: boundWorkspaceId,
+        sourceThreadId,
+        ...(runProjectId ? { projectId: runProjectId } : {}),
+        backend: parallelBackend,
+        model: resolvedComposerModelId,
+        onCancellationReady: (cancel) => { parallelMissionCancellationRef.current = cancel; },
+        onPlanReady: (parallelMissionPlan) => {
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId ? { ...entry, parallelMissionPlan } : entry
+          ));
+        }
+      }).then((result) => {
+        if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId ? {
+            ...entry,
+            content: result.text,
+            runId: result.runId,
+            missionKind: "parallel-approaches",
+            missionOutcome: result.outcome,
+            parallelMissionPlan: result.plan,
+            ...(result.artifactId ? { missionArtifactId: result.artifactId } : {})
+          } : entry
+        ));
+        if (result.artifactId) {
+          void getRuntimeArtifact(result.artifactId).then((artifact) => {
+            if (!artifact || selectedConversationThreadIdRef.current !== sourceThreadId) return;
+            setThreadArtifacts((current) => [
+              ...current.filter((entry) => entry.artifact.id !== artifact.artifact.id),
+              artifact
+            ]);
+          }).catch(() => undefined);
+        }
+      }).catch((cause) => {
+        if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+        const message = cause instanceof Error ? cause.message : "Fable could not complete the parallel mission.";
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId ? { ...entry, content: message } : entry
+        ));
+      }).finally(() => {
+        parallelMissionCancellationRef.current = null;
+        setParallelMissionRunning(false);
+        finishNewMissionLaunch();
+      });
       return;
     }
     if (options.forceCitedMission || isCitedBriefMissionPrompt(prompt)) {
@@ -1616,7 +1730,7 @@ export function ChatWorkspace() {
                 const text = runtime.composerValue;
                 const parsed = parseComposerText(text);
                 const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-                if (!text.trim() || ((agent.state.running || pendingPrompt) && !stopRequested)) return;
+                if (!text.trim() || ((agent.state.running || parallelMissionRunning || pendingPrompt) && !stopRequested)) return;
                 void submitComposerText(text);
               }}
               voiceStatus={voice.state.status}

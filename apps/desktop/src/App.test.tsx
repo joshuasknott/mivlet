@@ -28,6 +28,7 @@ const runtimeMocks = vi.hoisted(() => ({
   citedBriefCalls: [] as Array<Record<string, unknown>>,
   structuredIntakeCalls: [] as Array<Record<string, unknown>>,
   artifactRevisionBriefCalls: [] as Array<Record<string, unknown>>,
+  parallelApproachCalls: [] as Array<Record<string, unknown>>,
   citedBriefGate: null as Promise<void> | null,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
@@ -95,6 +96,34 @@ vi.mock("./lib/cited-brief-mission", () => ({
   })
 }));
 
+vi.mock("./lib/parallel-approaches-mission", () => ({
+  isParallelApproachesMissionPrompt: (value: string) =>
+    /generate two approaches/i.test(value) && /compare/i.test(value),
+  isParallelApproachesPlanSummary: (value: unknown) => typeof value === "object" && value !== null,
+  executeParallelApproachesMission: vi.fn(async (input: Record<string, unknown>) => {
+    runtimeMocks.parallelApproachCalls.push(input);
+    const plan = {
+      title: "Compare two approaches",
+      summary: "Generate two approaches for onboarding and compare them.",
+      executionLabel: "Two workers · deterministic join",
+      steps: [
+        { title: "Practical approach", objective: "Prefer low complexity.", output: "Required Markdown approach" },
+        { title: "Alternative approach", objective: "Explore higher upside.", output: "Required Markdown approach" },
+        { title: "Compare", objective: "Join both exact outputs.", output: "Draft comparison artifact" }
+      ],
+      acceptance: ["Both independently generated outputs must reach the durable all-workers join."],
+      budget: { maxWorkers: 2, maxDurationMs: 90_000, maxOutputTokens: 2_048, maxAttempts: 1 }
+    };
+    (input.onPlanReady as ((plan: unknown) => void) | undefined)?.(plan);
+    return {
+      missionId: "parallel-mission-ui", runId: "parallel-run-ui", outcome: "completed",
+      text: "# Two approaches\n\n## Approach A\n\nPractical.\n\n## Approach B\n\nAlternative.",
+      artifactId: "parallel-artifact-ui", artifactVersionId: "parallel-version-ui",
+      journal: {}, plan
+    };
+  })
+}));
+
 const testCitedPlan = {
   title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step",
   step: { title: "Research and write", objective: "Search and write.", capability: "Search connected work sources", output: "A trustworthy Markdown brief." },
@@ -145,6 +174,7 @@ const connectedCodex: BackendProvider = {
 
 vi.mock("./runtime", () => ({
   recoverRuntimeInterruptedCitedMissions: vi.fn(async () => null),
+  recoverRuntimeCompletedParallelApproaches: vi.fn(async () => null),
   createRuntimeConversationThread: vi.fn(async (input: { title?: string }) => {
     const thread = {
       id: "test-durable-thread",
@@ -470,6 +500,7 @@ describe("Fable home", () => {
     runtimeMocks.citedBriefCalls = [];
     runtimeMocks.structuredIntakeCalls = [];
     runtimeMocks.artifactRevisionBriefCalls = [];
+    runtimeMocks.parallelApproachCalls = [];
     runtimeMocks.citedBriefGate = null;
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
@@ -1854,6 +1885,49 @@ describe("Fable home", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Some pending approvals could not be shown. Fable left them untouched."
     );
+  });
+
+  it("runs two independent approaches and presents their durable comparison artifact", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-parallel-ui", projectId: null, title: "Parallel comparison",
+      lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    vi.mocked(getRuntimeArtifact).mockResolvedValueOnce({
+      artifact: {
+        id: "parallel-artifact-ui", title: "Two approaches", status: "draft", revision: 1,
+        currentVersionId: "parallel-version-ui", producingRunId: "parallel-run-ui",
+        context: { threadId: "thread-preview" }, reviews: []
+      },
+      currentVersion: {
+        id: "parallel-version-ui", artifactId: "parallel-artifact-ui", version: 1,
+        status: "available", content: { kind: "inline", text: "# Two approaches" }, citations: []
+      },
+      versions: [], sourceMessageId: null
+    } as never);
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Parallel comparison" }));
+    await user.type(
+      screen.getByLabelText(/universal composer/i),
+      "Generate two approaches for onboarding and compare them."
+    );
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(runtimeMocks.parallelApproachCalls).toHaveLength(1));
+    expect(await screen.findByText(/Practical\./)).toBeInTheDocument();
+    const plan = screen.getByLabelText("Parallel mission plan");
+    expect(plan).toHaveTextContent("Two workers · deterministic join");
+    expect(plan).toHaveTextContent("Practical approach");
+    expect(plan).toHaveTextContent("Alternative approach");
+    expect(await screen.findByRole("button", { name: "View artifact Two approaches" })).toBeInTheDocument();
+    expect(runtimeMocks.parallelApproachCalls[0]).toMatchObject({
+      workspaceId: "preview-default", sourceThreadId: expect.any(String), model: "gpt-5"
+    });
   });
 
   it("rehydrates one native mission-input request and submits typed values once", async () => {

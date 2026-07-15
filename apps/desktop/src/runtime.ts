@@ -3151,6 +3151,88 @@ export async function startRuntimeMissionWorker(input: RuntimeMissionWorkerStart
   catch (error) { throw toRuntimeError(error); }
 }
 
+export interface RuntimeParallelApproachesResult {
+  missionId: string;
+  runId: string;
+  outcome: "completed" | "partial" | "failed" | "cancelled";
+  text: string;
+  artifactId?: string;
+  artifactVersionId?: string;
+  journal: Record<string, unknown>;
+}
+
+function parseRuntimeParallelJournal(value: unknown): Record<string, unknown> {
+  if (!isRecord(value) || !isRecord(value.run) || !Array.isArray(value.events)) {
+    throw new Error("Malformed parallel mission journal response.");
+  }
+  return value;
+}
+
+function parseRuntimeParallelApproachesResult(value: unknown): RuntimeParallelApproachesResult {
+  const allowed = new Set([
+    "missionId", "runId", "outcome", "text", "artifactId", "artifactVersionId", "journal"
+  ]);
+  if (!isRecord(value) || Object.keys(value).some((key) => !allowed.has(key))
+    || typeof value.missionId !== "string" || !value.missionId || value.missionId.length > 200
+    || typeof value.runId !== "string" || !value.runId || value.runId.length > 200
+    || !["completed", "partial", "failed", "cancelled"].includes(String(value.outcome))
+    || typeof value.text !== "string" || value.text.length > 131_072
+    || (value.artifactId !== undefined && value.artifactId !== null
+      && (typeof value.artifactId !== "string" || !value.artifactId || value.artifactId.length > 200))
+    || (value.artifactVersionId !== undefined && value.artifactVersionId !== null
+      && (typeof value.artifactVersionId !== "string" || !value.artifactVersionId || value.artifactVersionId.length > 200))) {
+    throw new Error("Malformed parallel mission result response.");
+  }
+  const completed = value.outcome === "completed";
+  const artifactId = typeof value.artifactId === "string" ? value.artifactId : undefined;
+  const artifactVersionId = typeof value.artifactVersionId === "string" ? value.artifactVersionId : undefined;
+  if (completed !== Boolean(artifactId && artifactVersionId)) {
+    throw new Error("Malformed parallel mission result response.");
+  }
+  return {
+    missionId: value.missionId,
+    runId: value.runId,
+    outcome: value.outcome as RuntimeParallelApproachesResult["outcome"],
+    text: value.text,
+    ...(artifactId ? { artifactId } : {}),
+    ...(artifactVersionId ? { artifactVersionId } : {}),
+    journal: parseRuntimeParallelJournal(value.journal)
+  };
+}
+
+export async function openRuntimeParallelApproachesJoin(input: {
+  runId: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return parseRuntimeParallelJournal(
+      await invoke<unknown>("mission_parallel_approaches_join_open", { input })
+    );
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function finalizeRuntimeParallelApproaches(runId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return parseRuntimeParallelApproachesResult(
+      await invoke<unknown>("mission_parallel_approaches_finalize", { runId })
+    );
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function recoverRuntimeCompletedParallelApproaches() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const value = await invoke<unknown>("mission_parallel_approaches_recover_completed");
+    if (!Array.isArray(value) || value.length > 50) {
+      throw new Error("Malformed parallel mission recovery response.");
+    }
+    return value.map(parseRuntimeParallelApproachesResult);
+  } catch (error) { throw toRuntimeError(error); }
+}
+
 export async function readRuntimeMissionWorkerOutput(valueReference: string) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown> | null>("mission_worker_output_read", { valueReference }); }

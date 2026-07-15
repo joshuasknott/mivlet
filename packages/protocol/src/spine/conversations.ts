@@ -146,6 +146,20 @@ export type MessageExecutionLink =
   | { runId?: never; runEventId?: never };
 
 /** Native-owned linkage for a terminal mission response. */
+export interface ParallelApproachesMessagePlan {
+  title: string;
+  summary: string;
+  executionLabel: string;
+  steps: readonly { title: string; objective: string; output: string }[];
+  acceptance: readonly string[];
+  budget: {
+    maxWorkers: number;
+    maxDurationMs: number;
+    maxOutputTokens: number;
+    maxAttempts: number;
+  };
+}
+
 export type MissionResultMessageDetail = {
   type: "mission-result";
   missionId: MissionId;
@@ -165,10 +179,24 @@ export type MissionResultMessageDetail = {
       artifactVersionId: ArtifactVersionId;
     }
   | {
+      missionKind: "parallel-approaches";
+      outcome: "completed";
+      artifactId: ArtifactId;
+      artifactVersionId: ArtifactVersionId;
+      plan: ParallelApproachesMessagePlan;
+    }
+  | {
       missionKind?: "cited-brief";
       outcome: "partial" | "failed" | "cancelled";
       artifactId?: never;
       artifactVersionId?: never;
+    }
+  | {
+      missionKind: "parallel-approaches";
+      outcome: "partial" | "failed" | "cancelled";
+      artifactId?: never;
+      artifactVersionId?: never;
+      plan: ParallelApproachesMessagePlan;
     }
 );
 

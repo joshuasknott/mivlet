@@ -102,6 +102,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     attempt_number: i64,
     max_attempts: i64,
     evidence: Option<Value>,
+    parallel_evidence_free: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -2032,6 +2033,13 @@ pub(crate) fn preflight_native_worker_completion(
                 .ok_or_else(|| {
                     crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
                 })?;
+            let parallel_evidence_free = is_parallel_evidence_free_markdown_run(
+                &journal,
+                &lifecycle,
+                binding,
+                worker,
+                output.as_ref(),
+            );
             let max_attempts = lifecycle
                 .mission
                 .pointer("/budget/maxAttempts")
@@ -2054,19 +2062,32 @@ pub(crate) fn preflight_native_worker_completion(
                         == Some(event_key.as_str())
                 }) {
                     if existing.get("type").and_then(Value::as_str) == Some("run-cancelled") {
-                        exact_native_cancellation_replay(&journal, existing, binding)
+                        exact_native_terminal_replay_with_mode(
+                            &journal,
+                            existing,
+                            binding,
+                            output.as_ref(),
+                            parallel_evidence_free,
+                        )
                             .map_err(crate::store::StoreError::Invalid)?;
                     } else {
-                        exact_native_terminal_replay(existing, binding, output.as_ref())
+                        exact_native_terminal_replay_with_mode(
+                            &journal,
+                            existing,
+                            binding,
+                            output.as_ref(),
+                            parallel_evidence_free,
+                        )
                             .map_err(crate::store::StoreError::Invalid)?;
                     }
-                    validate_usage_replay(
+                    validate_usage_replay_with_mode(
                         &journal,
                         existing,
                         binding,
                         model,
                         max_duration_ms,
                         attempt_number,
+                        parallel_evidence_free,
                     )
                         .map_err(crate::store::StoreError::Invalid)?;
                     validate_output_receipt_replay(
@@ -2101,7 +2122,7 @@ pub(crate) fn preflight_native_worker_completion(
                 .map_err(crate::store::StoreError::Invalid)?;
                 return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
             }
-            validate_native_completion_head(&journal, binding)
+            validate_native_completion_head(&journal, binding, parallel_evidence_free)
                 .map_err(crate::store::StoreError::Invalid)?;
             Ok(NativeWorkerCompletionPreflight::Execute(NativeWorkerCompletionAuthority {
                 binding: binding.clone(),
@@ -2119,6 +2140,7 @@ pub(crate) fn preflight_native_worker_completion(
                 attempt_number,
                 max_attempts,
                 evidence,
+                parallel_evidence_free,
             }))
         })
         .map_err(|error| error.to_string())
@@ -2283,6 +2305,16 @@ pub(crate) fn settle_native_worker_completion(
             .ok_or_else(|| {
                 crate::store::StoreError::Invalid("Mission run disappeared.".into())
             })?;
+            if authority.parallel_evidence_free {
+                validate_parallel_evidence_free_authority(
+                    tx,
+                    store,
+                    &scope,
+                    &authority.member_id,
+                    &journal,
+                    authority,
+                )?;
+            }
             if matches!(outcome, NativeWorkerTerminalOutcome::Cancelled)
                 || journal.run.get("status").and_then(Value::as_str) == Some("cancelling")
             {
@@ -2294,6 +2326,7 @@ pub(crate) fn settle_native_worker_completion(
                     &authority.internal_user_id,
                     &journal,
                     &authority.binding,
+                    authority.parallel_evidence_free,
                 );
             }
             let retry_key = native_retry_event_key(&authority.binding)
@@ -2334,19 +2367,22 @@ pub(crate) fn settle_native_worker_completion(
             if let Some(existing) = journal.events.iter().find(|event| {
                 event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
             }) {
-                exact_native_terminal_replay(
+                exact_native_terminal_replay_with_mode(
+                    &journal,
                     existing,
                     &authority.binding,
                     authority.output.as_ref(),
+                    authority.parallel_evidence_free,
                 )
                 .map_err(crate::store::StoreError::Invalid)?;
-                validate_usage_replay(
+                validate_usage_replay_with_mode(
                     &journal,
                     existing,
                     &authority.binding,
                     &authority.requested_model,
                     authority.max_duration_ms,
                     authority.attempt_number,
+                    authority.parallel_evidence_free,
                 )
                 .map_err(crate::store::StoreError::Invalid)?;
                 validate_output_receipt_replay(
@@ -2388,7 +2424,11 @@ pub(crate) fn settle_native_worker_completion(
                 )?;
                 return Ok(());
             }
-            validate_native_completion_head(&journal, &authority.binding)
+            validate_native_completion_head(
+                &journal,
+                &authority.binding,
+                authority.parallel_evidence_free,
+            )
                 .map_err(crate::store::StoreError::Invalid)?;
             let at = now();
             let workspace = journal
@@ -2534,9 +2574,25 @@ pub(crate) fn settle_native_worker_completion(
                 },
                 NativeWorkerTerminalOutcome::Cancelled => unreachable!(),
             };
-            let mut terminal_expected_revision = authority.binding.expected_run_revision;
-            let mut terminal_expected_sequence = authority.binding.expected_last_sequence;
-            let mut terminal_previous_event = native_completion_base_event(&authority.binding);
+            let (mut terminal_expected_revision, mut terminal_expected_sequence, mut terminal_previous_event) =
+                if authority.parallel_evidence_free {
+                    let revision = journal.run.get("revision").and_then(Value::as_i64).ok_or_else(|| {
+                        crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+                    })?;
+                    let sequence = journal.run.pointer("/eventHead/lastSequence").and_then(Value::as_i64).ok_or_else(|| {
+                        crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+                    })?;
+                    let previous = journal.run.pointer("/eventHead/lastEventId").and_then(Value::as_str).ok_or_else(|| {
+                        crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+                    })?;
+                    (revision, sequence, previous)
+                } else {
+                    (
+                        authority.binding.expected_run_revision,
+                        authority.binding.expected_last_sequence,
+                        native_completion_base_event(&authority.binding),
+                    )
+                };
             if let Some(observed_usage) = usage {
                 let costs = observed_usage
                     .tokens()
@@ -2544,7 +2600,7 @@ pub(crate) fn settle_native_worker_completion(
                         exact_model_costs(&authority.requested_model, input, output)
                     })
                     .unwrap_or_default();
-                let usage_sequence = authority.binding.expected_last_sequence + 1;
+                let usage_sequence = terminal_expected_sequence + 1;
                 let usage_key = native_usage_event_key(&authority.binding)
                     .map_err(crate::store::StoreError::Invalid)?;
                 let mut usage_payload = json!({
@@ -2568,7 +2624,7 @@ pub(crate) fn settle_native_worker_completion(
                     "authority":"local","schemaVersion":1,"revision":1,
                     "createdByInternalUserId":authority.internal_user_id,"createdAt":at,"updatedAt":at,
                     "id":authority.binding.usage_event_id,"runId":authority.binding.run_id,
-                    "type":"usage-recorded","sequence":usage_sequence,"previousEventId":native_completion_base_event(&authority.binding),
+                    "type":"usage-recorded","sequence":usage_sequence,"previousEventId":terminal_previous_event,
                     "attemptNumber":observed_usage.attempt_number,
                     "occurredAt":at,"actor":{"kind":"system"},"idempotencyKey":usage_key,
                     "payload":{"usage":usage_payload}
@@ -2578,7 +2634,7 @@ pub(crate) fn settle_native_worker_completion(
                 })?;
                 usage_projection.insert(
                     "revision".into(),
-                    json!(authority.binding.expected_run_revision + 1),
+                    json!(terminal_expected_revision + 1),
                 );
                 usage_projection.insert("updatedAt".into(), json!(at));
                 usage_projection.insert(
@@ -2587,8 +2643,8 @@ pub(crate) fn settle_native_worker_completion(
                 );
                 mission_run::append(
                     tx, store, &scope, &authority.member_id, &authority.binding.run_id,
-                    authority.binding.expected_run_revision,
-                    authority.binding.expected_last_sequence,
+                    terminal_expected_revision,
+                    terminal_expected_sequence,
                     &authority.binding.usage_event_id,
                     "usage-recorded",
                     &usage_key,
@@ -2693,7 +2749,7 @@ pub(crate) fn settle_native_worker_completion(
                     event_id,
                     &at,
                 )?;
-            } else if event_type == "worker-failed" {
+            } else if event_type == "worker-failed" && !authority.parallel_evidence_free {
                 let error = event.pointer("/payload/error").ok_or_else(|| {
                     crate::store::StoreError::Invalid(
                         "Mission worker failure error is unavailable.".into(),
@@ -4315,6 +4371,7 @@ fn append_native_run_cancellation(
     internal_user_id: &str,
     journal: &mission_run::MissionRunJournalRow,
     binding: &NativeWorkerExecutionBinding,
+    parallel_evidence_free: bool,
 ) -> crate::store::Result<()> {
     let key =
         native_terminal_event_keys(binding).map_err(crate::store::StoreError::Invalid)?[2].clone();
@@ -4323,8 +4380,14 @@ fn append_native_run_cancellation(
         .iter()
         .find(|event| event.get("idempotencyKey").and_then(Value::as_str) == Some(key.as_str()))
     {
-        exact_native_cancellation_replay(journal, existing, binding)
-            .map_err(crate::store::StoreError::Invalid)?;
+        exact_native_terminal_replay_with_mode(
+            journal,
+            existing,
+            binding,
+            None,
+            parallel_evidence_free,
+        )
+        .map_err(crate::store::StoreError::Invalid)?;
         let mission_id = journal
             .run
             .get("missionId")
@@ -4347,10 +4410,17 @@ fn append_native_run_cancellation(
                 &lifecycle,
             )?;
         }
+        if parallel_evidence_free {
+            crate::mission_parallel_approaches::append_cancelled_transcript(tx, store, journal)?;
+        }
         return Ok(());
     }
-    let cancellation_event = validate_native_cancellation_head(journal, binding)
-        .map_err(crate::store::StoreError::Invalid)?;
+    let cancellation_event = if parallel_evidence_free {
+        validate_parallel_native_cancellation_head(journal, binding)
+    } else {
+        validate_native_cancellation_head(journal, binding)
+    }
+    .map_err(crate::store::StoreError::Invalid)?;
     let cancellation = cancellation_event
         .pointer("/payload/cancellation")
         .cloned()
@@ -4358,7 +4428,21 @@ fn append_native_run_cancellation(
             crate::store::StoreError::Invalid("Mission cancellation fact is invalid.".into())
         })?;
     let at = now();
-    let sequence = binding.expected_last_sequence + 2;
+    let current_revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission cancellation revision is invalid.".into())
+        })?;
+    let current_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission cancellation event head is invalid.".into())
+        })?;
+    let sequence = current_sequence + 1;
     let event = json!({
         "workspaceId":journal.run.get("workspaceId"),"visibility":"member-private","ownerMemberId":owner_member_id,
         "authority":"local","schemaVersion":1,"revision":1,"createdByInternalUserId":internal_user_id,"createdAt":at,"updatedAt":at,
@@ -4372,7 +4456,7 @@ fn append_native_run_cancellation(
         crate::store::StoreError::Invalid("Mission run record is invalid.".into())
     })?;
     projected.insert("status".into(), json!("cancelled"));
-    projected.insert("revision".into(), json!(binding.expected_run_revision + 2));
+    projected.insert("revision".into(), json!(current_revision + 1));
     projected.insert("updatedAt".into(), json!(at));
     projected.insert(
         "eventHead".into(),
@@ -4384,8 +4468,8 @@ fn append_native_run_cancellation(
         scope,
         owner_member_id,
         &binding.run_id,
-        binding.expected_run_revision + 1,
-        binding.expected_last_sequence + 1,
+        current_revision,
+        current_sequence,
         &binding.result_event_id,
         "run-cancelled",
         &key,
@@ -4444,6 +4528,9 @@ fn append_native_run_cancellation(
             &event,
             &at,
         )?;
+    }
+    if parallel_evidence_free {
+        crate::mission_parallel_approaches::append_cancelled_transcript(tx, store, &settled)?;
     }
     Ok(())
 }
@@ -4802,9 +4889,505 @@ fn validate_connected_search_result(
     Ok(())
 }
 
+fn is_parallel_evidence_free_markdown_run(
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    binding: &NativeWorkerExecutionBinding,
+    worker: &Value,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> bool {
+    if binding.tool_evidence.is_some()
+        || binding.checkpoint_event_id.is_some()
+        || binding.checkpoint_restore_event_id.is_some()
+        || output.is_none_or(|spec| spec.include_evidence)
+        || !crate::mission_parallel_approaches::valid_parallel_plan_contract(lifecycle)
+        || lifecycle
+            .mission
+            .get("executionDepth")
+            .and_then(Value::as_str)
+            != Some("multi-worker")
+        || lifecycle
+            .mission
+            .get("constraints")
+            .and_then(Value::as_array)
+            .is_none_or(|constraints| {
+                !constraints.iter().any(|constraint| {
+                    constraint.get("key").and_then(Value::as_str)
+                        == Some("native:parallel-approaches:v1")
+                        && constraint.get("severity").and_then(Value::as_str) == Some("required")
+                        && constraint.get("source").and_then(Value::as_str) == Some("orchestrator")
+                })
+            })
+        || lifecycle
+            .mission
+            .pointer("/budget/maxWorkers")
+            .and_then(Value::as_i64)
+            != Some(2)
+        || lifecycle
+            .current_revision
+            .pointer("/bounds/maxParallelSteps")
+            .and_then(Value::as_i64)
+            != Some(2)
+    {
+        return false;
+    }
+    let Some(steps) = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| steps.len() == 3)
+    else {
+        return false;
+    };
+    let created = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .filter_map(|event| event.pointer("/payload/worker"))
+        .collect::<Vec<_>>();
+    if created.len() != 2
+        || !created.iter().any(|candidate| *candidate == worker)
+        || created.iter().any(|candidate| {
+            candidate
+                .get("id")
+                .and_then(Value::as_str)
+                .is_none_or(|id| id.is_empty())
+                || candidate
+                    .get("planStepKey")
+                    .and_then(Value::as_str)
+                    .is_none_or(|key| {
+                        !steps
+                            .iter()
+                            .any(|step| step.get("key").and_then(Value::as_str) == Some(key))
+                    })
+                || ["tools", "context", "capabilityIds", "capabilityGrantIds"]
+                    .iter()
+                    .any(|key| {
+                        candidate
+                            .get(*key)
+                            .and_then(Value::as_array)
+                            .is_none_or(|items| !items.is_empty())
+                    })
+                || native_output_spec(candidate)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|spec| spec.include_evidence)
+        })
+    {
+        return false;
+    }
+    let worker_ids = created
+        .iter()
+        .filter_map(|candidate| candidate.get("id").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>();
+    let step_keys = created
+        .iter()
+        .filter_map(|candidate| candidate.get("planStepKey").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>();
+    if worker_ids.len() != 2 || step_keys.len() != 2 {
+        return false;
+    }
+    let markdown_output = |step: &Value| {
+        step.get("expectedOutputs")
+            .and_then(Value::as_array)
+            .is_some_and(|outputs| {
+                outputs.len() == 1
+                    && outputs[0].get("required").and_then(Value::as_bool) == Some(true)
+                    && outputs[0].get("format").and_then(Value::as_str) == Some("text/markdown")
+            })
+    };
+    let worker_steps = steps
+        .iter()
+        .filter(|step| {
+            step.get("key")
+                .and_then(Value::as_str)
+                .is_some_and(|key| step_keys.contains(key))
+        })
+        .collect::<Vec<_>>();
+    if worker_steps.len() != 2
+        || worker_steps.iter().any(|step| {
+            step.get("dependsOnStepKeys")
+                .and_then(Value::as_array)
+                .is_none_or(|dependencies| !dependencies.is_empty())
+                || step
+                    .get("requiredCapabilities")
+                    .and_then(Value::as_array)
+                    .is_none_or(|capabilities| !capabilities.is_empty())
+                || step
+                    .get("acceptanceCriterionKeys")
+                    .and_then(Value::as_array)
+                    .is_none_or(|criteria| !criteria.is_empty())
+                || !markdown_output(step)
+        })
+    {
+        return false;
+    }
+    let aggregate = steps.iter().find(|step| {
+        step.get("key")
+            .and_then(Value::as_str)
+            .is_none_or(|key| !step_keys.contains(key))
+    });
+    let mission_criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+                .collect::<BTreeSet<_>>()
+        });
+    aggregate.is_some_and(|step| {
+        let dependencies = step
+            .get("dependsOnStepKeys")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<BTreeSet<_>>()
+            });
+        let criteria = step
+            .get("acceptanceCriterionKeys")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<BTreeSet<_>>()
+            });
+        step.get("kind").and_then(Value::as_str) == Some("synthesize")
+            && dependencies.as_ref() == Some(&step_keys)
+            && step
+                .get("requiredCapabilities")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+            && criteria
+                .is_some_and(|keys| !keys.is_empty() && mission_criteria.as_ref() == Some(&keys))
+            && markdown_output(step)
+    })
+}
+
+fn validate_parallel_evidence_free_authority(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::store::repos::scope::DataScope,
+    owner_member_id: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    authority: &NativeWorkerCompletionAuthority,
+) -> crate::store::Result<()> {
+    let mission_id = journal
+        .run
+        .get("missionId")
+        .or_else(|| journal.run.pointer("/initiator/missionId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run has no selected mission.".into())
+        })?;
+    let lifecycle = mission_plan::get(tx, store, scope, owner_member_id, mission_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission plan is unavailable.".into()))?;
+    validate_lifecycle(&journal.run, &lifecycle).map_err(crate::store::StoreError::Invalid)?;
+    let worker = journal
+        .events
+        .iter()
+        .find_map(|event| {
+            (event.get("type").and_then(Value::as_str) == Some("worker-created")
+                && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                    == Some(authority.binding.worker_id.as_str()))
+            .then(|| event.pointer("/payload/worker"))
+            .flatten()
+        })
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission worker assignment is unavailable.".into())
+        })?;
+    if !is_parallel_evidence_free_markdown_run(
+        journal,
+        &lifecycle,
+        &authority.binding,
+        worker,
+        authority.output.as_ref(),
+    ) {
+        return Err(crate::store::StoreError::Invalid(
+            "Parallel mission worker authority changed during provider execution.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn parallel_event_worker_id(event: &Value) -> Option<&str> {
+    match event.get("type").and_then(Value::as_str) {
+        Some("worker-created") => event.pointer("/payload/worker/id").and_then(Value::as_str),
+        Some("usage-recorded") => event
+            .pointer("/payload/usage/workerId")
+            .and_then(Value::as_str),
+        Some("worker-started" | "route-selected" | "worker-completed" | "worker-failed") => {
+            event.pointer("/payload/workerId").and_then(Value::as_str)
+        }
+        _ => None,
+    }
+}
+
+fn parallel_completion_base_event<'a>(
+    journal: &'a mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<&'a str, String> {
+    let mut matches = journal.events.iter().filter(|event| {
+        event.get("sequence").and_then(Value::as_i64) == Some(binding.expected_last_sequence)
+    });
+    let event = matches
+        .next()
+        .ok_or_else(|| "Parallel mission execution base is unavailable.".to_string())?;
+    if matches.next().is_some()
+        || event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+    {
+        return Err("Parallel mission execution base is invalid.".into());
+    }
+    let event_id = event
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 200)
+        .ok_or_else(|| "Parallel mission execution base identity is invalid.".to_string())?;
+    if event_id == native_completion_base_event(binding) {
+        return Ok(event_id);
+    }
+    let created_workers = journal
+        .events
+        .iter()
+        .filter(|candidate| candidate.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .filter_map(|candidate| {
+            candidate
+                .pointer("/payload/worker/id")
+                .and_then(Value::as_str)
+        })
+        .collect::<BTreeSet<_>>();
+    let joined_workers = event
+        .pointer("/payload/join/workerIds")
+        .and_then(Value::as_array)
+        .map(|workers| {
+            workers
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<BTreeSet<_>>()
+        });
+    if event.get("type").and_then(Value::as_str) != Some("join-opened")
+        || event
+            .pointer("/payload/join/status")
+            .and_then(Value::as_str)
+            != Some("open")
+        || event
+            .pointer("/payload/join/strategy")
+            .and_then(Value::as_str)
+            != Some("all")
+        || event
+            .pointer("/payload/join/allowFailedWorkers")
+            .and_then(Value::as_bool)
+            != Some(false)
+        || event
+            .pointer("/payload/join/satisfiedWorkerIds")
+            .and_then(Value::as_array)
+            .is_none_or(|workers| !workers.is_empty())
+        || event
+            .pointer("/payload/join/failedWorkerIds")
+            .and_then(Value::as_array)
+            .is_none_or(|workers| !workers.is_empty())
+        || created_workers.len() != 2
+        || joined_workers.as_ref() != Some(&created_workers)
+    {
+        return Err("Parallel mission execution join base is invalid.".into());
+    }
+    Ok(event_id)
+}
+
+fn validate_parallel_sibling_event(
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+    event: &Value,
+    expected_sequence: i64,
+    expected_previous: &str,
+) -> Result<(), String> {
+    let event_type = event.get("type").and_then(Value::as_str);
+    let worker_id = parallel_event_worker_id(event)
+        .filter(|worker_id| *worker_id != binding.worker_id)
+        .ok_or_else(|| "Parallel mission head contains a non-sibling worker fact.".to_string())?;
+    let event_id = event
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty() && value.len() <= 200)
+        .ok_or_else(|| "Parallel mission event identity is invalid.".to_string())?;
+    let reserved = [
+        binding.usage_event_id.as_str(),
+        binding.completion_event_id.as_str(),
+        binding.evaluation_event_id.as_str(),
+        binding.result_event_id.as_str(),
+        binding.failure_event_id.as_str(),
+    ];
+    if reserved.contains(&event_id)
+        || event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || event.get("sequence").and_then(Value::as_i64) != Some(expected_sequence)
+        || event.get("previousEventId").and_then(Value::as_str) != Some(expected_previous)
+        || journal
+            .events
+            .iter()
+            .filter(|candidate| candidate.get("id").and_then(Value::as_str) == Some(event_id))
+            .count()
+            != 1
+        || journal
+            .events
+            .iter()
+            .filter(|candidate| {
+                candidate.get("type").and_then(Value::as_str) == Some("worker-created")
+                    && candidate
+                        .pointer("/payload/worker/id")
+                        .and_then(Value::as_str)
+                        == Some(worker_id)
+            })
+            .count()
+            != 1
+    {
+        return Err("Parallel mission sibling event chain is invalid.".into());
+    }
+    let matching = |kind: &str| {
+        journal
+            .events
+            .iter()
+            .filter(|candidate| {
+                candidate.get("type").and_then(Value::as_str) == Some(kind)
+                    && parallel_event_worker_id(candidate) == Some(worker_id)
+            })
+            .collect::<Vec<_>>()
+    };
+    match event_type {
+        Some("worker-created") => {}
+        Some("worker-started") => {
+            if matching("worker-started").len() != 1 {
+                return Err("Parallel mission sibling start fact is invalid.".into());
+            }
+        }
+        Some("route-selected") => {
+            let starts = matching("worker-started");
+            if starts.len() != 1
+                || event.get("previousEventId").and_then(Value::as_str)
+                    != starts[0].get("id").and_then(Value::as_str)
+                || matching("route-selected").len() != 1
+                || event
+                    .pointer("/payload/providerId")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                || event
+                    .pointer("/payload/modelReference")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+                || event
+                    .pointer("/payload/selection/providerRouteId")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+            {
+                return Err("Parallel mission sibling route fact is invalid.".into());
+            }
+        }
+        Some("usage-recorded") => {
+            let routes = matching("route-selected");
+            if routes.len() != 1
+                || routes[0]
+                    .get("sequence")
+                    .and_then(Value::as_i64)
+                    .is_none_or(|sequence| sequence >= expected_sequence)
+                || matching("usage-recorded").len() != 1
+                || event
+                    .pointer("/payload/usage/runId")
+                    .and_then(Value::as_str)
+                    != Some(binding.run_id.as_str())
+            {
+                return Err("Parallel mission sibling usage fact is invalid.".into());
+            }
+        }
+        Some("worker-completed" | "worker-failed") => {
+            let terminals = matching("worker-completed")
+                .into_iter()
+                .chain(matching("worker-failed"))
+                .collect::<Vec<_>>();
+            let previous = journal.events.iter().find(|candidate| {
+                candidate.get("id").and_then(Value::as_str) == Some(expected_previous)
+            });
+            if terminals.len() != 1
+                || previous.is_none_or(|previous| {
+                    previous.get("type").and_then(Value::as_str) != Some("usage-recorded")
+                        || parallel_event_worker_id(previous) != Some(worker_id)
+                })
+            {
+                return Err("Parallel mission sibling terminal fact is invalid.".into());
+            }
+        }
+        _ => return Err("Parallel mission head contains an unsupported event.".into()),
+    }
+    Ok(())
+}
+
+fn validate_parallel_sibling_advancement(
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+    first_sequence: i64,
+    last_sequence: i64,
+    initial_previous: &str,
+) -> Result<(), String> {
+    let current_revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Mission run revision is invalid.".to_string())?;
+    let current_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Mission run event head is invalid.".to_string())?;
+    if current_sequence < binding.expected_last_sequence
+        || current_revision < binding.expected_run_revision
+        || current_revision - binding.expected_run_revision
+            != current_sequence - binding.expected_last_sequence
+        || last_sequence > current_sequence
+    {
+        return Err("Parallel mission run head is invalid.".into());
+    }
+    if parallel_completion_base_event(journal, binding)? != initial_previous
+        && first_sequence == binding.expected_last_sequence + 1
+    {
+        return Err("Parallel mission worker base fact is invalid.".into());
+    }
+    let mut previous = initial_previous.to_string();
+    for sequence in first_sequence..=last_sequence {
+        let mut matches = journal
+            .events
+            .iter()
+            .filter(|event| event.get("sequence").and_then(Value::as_i64) == Some(sequence));
+        let event = matches
+            .next()
+            .ok_or_else(|| "Parallel mission event chain has a gap.".to_string())?;
+        if matches.next().is_some() {
+            return Err("Parallel mission event sequence is duplicated.".into());
+        }
+        validate_parallel_sibling_event(journal, binding, event, sequence, &previous)?;
+        previous = event
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+    }
+    if last_sequence == current_sequence
+        && journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(previous.as_str())
+    {
+        return Err("Parallel mission event head does not match its journal.".into());
+    }
+    Ok(())
+}
+
 fn validate_native_completion_head(
     journal: &mission_run::MissionRunJournalRow,
     binding: &NativeWorkerExecutionBinding,
+    parallel_evidence_free: bool,
 ) -> Result<(), String> {
     for value in [
         &binding.run_id,
@@ -4983,7 +5566,35 @@ fn validate_native_completion_head(
         || binding.evaluation_event_id == binding.result_event_id
         || binding.evaluation_event_id == binding.failure_event_id
         || binding.result_event_id == binding.failure_event_id
-        || journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || !journal.events.iter().any(|event| {
+            event.get("id").and_then(Value::as_str)
+                == Some(binding.worker_started_event_id.as_str())
+                && event.get("type").and_then(Value::as_str) == Some("worker-started")
+                && event.pointer("/payload/workerId").and_then(Value::as_str)
+                    == Some(binding.worker_id.as_str())
+        })
+    {
+        return Err(
+            "Native worker execution is not bound to the current worker evidence head.".into(),
+        );
+    }
+    if parallel_evidence_free {
+        if journal.run.get("status").and_then(Value::as_str) != Some("running") {
+            return Err("Parallel mission run is not executing.".into());
+        }
+        let parallel_base = parallel_completion_base_event(journal, binding)?;
+        validate_parallel_sibling_advancement(
+            journal,
+            binding,
+            binding.expected_last_sequence + 1,
+            journal
+                .run
+                .pointer("/eventHead/lastSequence")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| "Mission run event head is invalid.".to_string())?,
+            parallel_base,
+        )?;
+    } else if journal.run.get("status").and_then(Value::as_str) != Some("running")
         || journal.run.get("revision").and_then(Value::as_i64)
             != Some(binding.expected_run_revision)
         || journal
@@ -4996,13 +5607,6 @@ fn validate_native_completion_head(
             .pointer("/eventHead/lastEventId")
             .and_then(Value::as_str)
             != Some(expected_head)
-        || !journal.events.iter().any(|event| {
-            event.get("id").and_then(Value::as_str)
-                == Some(binding.worker_started_event_id.as_str())
-                && event.get("type").and_then(Value::as_str) == Some("worker-started")
-                && event.pointer("/payload/workerId").and_then(Value::as_str)
-                    == Some(binding.worker_id.as_str())
-        })
     {
         return Err(
             "Native worker execution is not bound to the current worker evidence head.".into(),
@@ -5304,6 +5908,70 @@ fn validate_native_cancellation_head<'a>(
     Ok(event)
 }
 
+fn validate_parallel_native_cancellation_head<'a>(
+    journal: &'a mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<&'a Value, String> {
+    let parallel_base = parallel_completion_base_event(journal, binding)?;
+    let event = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str)
+                == journal
+                    .run
+                    .pointer("/eventHead/lastEventId")
+                    .and_then(Value::as_str)
+        })
+        .ok_or_else(|| "Parallel mission cancellation event is unavailable.".to_string())?;
+    let sequence = event
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Parallel mission cancellation sequence is invalid.".to_string())?;
+    let cancellation = event.pointer("/payload/cancellation");
+    let request_key = cancellation
+        .and_then(|value| value.get("requestKey"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Parallel mission cancellation request key is invalid.".to_string())?;
+    let previous = if sequence == binding.expected_last_sequence + 1 {
+        parallel_base
+    } else {
+        journal
+            .events
+            .iter()
+            .find(|candidate| {
+                candidate.get("sequence").and_then(Value::as_i64) == Some(sequence - 1)
+            })
+            .and_then(|candidate| candidate.get("id"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "Parallel mission cancellation predecessor is unavailable.".to_string()
+            })?
+    };
+    if journal.run.get("status").and_then(Value::as_str) != Some("cancelling")
+        || event.get("type").and_then(Value::as_str) != Some("cancellation-requested")
+        || event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || event.get("previousEventId").and_then(Value::as_str) != Some(previous)
+        || event.get("idempotencyKey").and_then(Value::as_str)
+            != Some(format!("cancel:{request_key}").as_str())
+        || cancellation != journal.run.get("cancellation")
+        || cancellation
+            .and_then(|value| value.get("scope"))
+            .and_then(Value::as_str)
+            != Some("run")
+    {
+        return Err("Parallel mission cancellation does not match the executing worker.".into());
+    }
+    validate_parallel_sibling_advancement(
+        journal,
+        binding,
+        binding.expected_last_sequence + 1,
+        sequence - 1,
+        parallel_base,
+    )?;
+    Ok(event)
+}
+
 fn exact_native_terminal_replay_with_journal(
     journal: &mission_run::MissionRunJournalRow,
     event: &Value,
@@ -5445,6 +6113,7 @@ fn exact_native_terminal_replay_with_journal(
     }
 }
 
+#[cfg(test)]
 fn exact_native_cancellation_replay(
     journal: &mission_run::MissionRunJournalRow,
     event: &Value,
@@ -5453,6 +6122,240 @@ fn exact_native_cancellation_replay(
     exact_native_terminal_replay_with_journal(journal, event, binding, None)
 }
 
+fn exact_parallel_native_terminal_replay(
+    journal: &mission_run::MissionRunJournalRow,
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> Result<(), String> {
+    let event_type = event.get("type").and_then(Value::as_str);
+    let (expected_id, expected_key, payload_valid) = match event_type {
+        Some("worker-completed") => (
+            binding.completion_event_id.as_str(),
+            format!("worker-complete:{}", binding.idempotency_key),
+            event
+                .pointer("/payload/outputs")
+                .and_then(Value::as_array)
+                .is_some_and(|outputs| match output {
+                    None => outputs.is_empty(),
+                    Some(spec) => {
+                        outputs.len() == 1
+                            && outputs[0].get("key").and_then(Value::as_str)
+                                == Some(spec.key.as_str())
+                            && outputs[0].get("summary").and_then(Value::as_str)
+                                == Some("Native worker text output")
+                            && outputs[0]
+                                .get("valueReference")
+                                .and_then(Value::as_str)
+                                .is_some_and(|reference| {
+                                    reference.starts_with("mission-output:v1:")
+                                })
+                    }
+                }),
+        ),
+        Some("worker-failed") => (
+            binding.failure_event_id.as_str(),
+            format!("worker-fail:{}", binding.idempotency_key),
+            native_failure_payload_valid(event),
+        ),
+        _ => return Err("Worker terminal idempotency key represents another result.".into()),
+    };
+    let terminal_sequence = event
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Parallel worker terminal sequence is invalid.".to_string())?;
+    let usage = journal
+        .events
+        .iter()
+        .find(|candidate| {
+            candidate.get("id").and_then(Value::as_str) == Some(binding.usage_event_id.as_str())
+        })
+        .ok_or_else(|| "Parallel worker terminal usage event is missing.".to_string())?;
+    let usage_sequence = usage
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Parallel worker usage sequence is invalid.".to_string())?;
+    let expected_correlation = format!(
+        "native-worker-completion:v1:run-revision:{}",
+        binding.expected_run_revision
+    );
+    let parallel_base = parallel_completion_base_event(journal, binding)?;
+    let prefix_previous = if usage_sequence == binding.expected_last_sequence + 1 {
+        parallel_base
+    } else {
+        journal
+            .events
+            .iter()
+            .find(|candidate| {
+                candidate.get("sequence").and_then(Value::as_i64) == Some(usage_sequence - 1)
+            })
+            .and_then(|candidate| candidate.get("id"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Parallel worker usage predecessor is missing.".to_string())?
+    };
+    if journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || event.get("id").and_then(Value::as_str) != Some(expected_id)
+        || event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || event.get("idempotencyKey").and_then(Value::as_str) != Some(expected_key.as_str())
+        || event.pointer("/payload/workerId").and_then(Value::as_str)
+            != Some(binding.worker_id.as_str())
+        || event.get("previousEventId").and_then(Value::as_str)
+            != Some(binding.usage_event_id.as_str())
+        || event.get("correlationKey").and_then(Value::as_str)
+            != Some(expected_correlation.as_str())
+        || terminal_sequence != usage_sequence + 1
+        || !payload_valid
+        || usage.get("type").and_then(Value::as_str) != Some("usage-recorded")
+        || usage.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || usage.get("idempotencyKey").and_then(Value::as_str)
+            != Some(format!("worker-usage:{}", binding.idempotency_key).as_str())
+        || usage.get("previousEventId").and_then(Value::as_str) != Some(prefix_previous)
+        || usage
+            .pointer("/payload/usage/workerId")
+            .and_then(Value::as_str)
+            != Some(binding.worker_id.as_str())
+        || usage_sequence <= binding.expected_last_sequence
+        || journal
+            .events
+            .iter()
+            .filter(|candidate| candidate.get("id").and_then(Value::as_str) == Some(expected_id))
+            .count()
+            != 1
+        || journal
+            .events
+            .iter()
+            .filter(|candidate| {
+                candidate.get("id").and_then(Value::as_str) == Some(binding.usage_event_id.as_str())
+            })
+            .count()
+            != 1
+    {
+        return Err("Parallel worker terminal replay fact is invalid.".into());
+    }
+    validate_parallel_sibling_advancement(
+        journal,
+        binding,
+        binding.expected_last_sequence + 1,
+        usage_sequence - 1,
+        parallel_base,
+    )?;
+    let current_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Mission run event head is invalid.".to_string())?;
+    validate_parallel_sibling_advancement(
+        journal,
+        binding,
+        terminal_sequence + 1,
+        current_sequence,
+        expected_id,
+    )?;
+    Ok(())
+}
+
+fn exact_parallel_native_cancellation_replay(
+    journal: &mission_run::MissionRunJournalRow,
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<(), String> {
+    let parallel_base = parallel_completion_base_event(journal, binding)?;
+    let cancellation_event = journal
+        .events
+        .iter()
+        .find(|candidate| {
+            candidate.get("id").and_then(Value::as_str)
+                == event.get("previousEventId").and_then(Value::as_str)
+        })
+        .ok_or_else(|| "Parallel mission cancellation replay fact is missing.".to_string())?;
+    let cancellation_sequence = cancellation_event
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Parallel mission cancellation replay sequence is invalid.".to_string())?;
+    let cancellation = cancellation_event.pointer("/payload/cancellation");
+    let request_key = cancellation
+        .and_then(|value| value.get("requestKey"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Parallel mission cancellation replay request is invalid.".to_string())?;
+    let previous = if cancellation_sequence == binding.expected_last_sequence + 1 {
+        parallel_base
+    } else {
+        journal
+            .events
+            .iter()
+            .find(|candidate| {
+                candidate.get("sequence").and_then(Value::as_i64) == Some(cancellation_sequence - 1)
+            })
+            .and_then(|candidate| candidate.get("id"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Parallel mission cancellation predecessor is missing.".to_string())?
+    };
+    let expected_correlation = format!(
+        "native-worker-completion:v1:run-revision:{}",
+        binding.expected_run_revision
+    );
+    if journal.run.get("status").and_then(Value::as_str) != Some("cancelled")
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(binding.result_event_id.as_str())
+        || event.get("id").and_then(Value::as_str) != Some(binding.result_event_id.as_str())
+        || event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || event.get("type").and_then(Value::as_str) != Some("run-cancelled")
+        || event.get("sequence").and_then(Value::as_i64) != Some(cancellation_sequence + 1)
+        || event.get("idempotencyKey").and_then(Value::as_str)
+            != Some(format!("worker-cancel:{}", binding.idempotency_key).as_str())
+        || event.get("correlationKey").and_then(Value::as_str)
+            != Some(expected_correlation.as_str())
+        || event.pointer("/payload/cancellation") != cancellation
+        || cancellation_event.get("type").and_then(Value::as_str) != Some("cancellation-requested")
+        || cancellation_event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+        || cancellation_event
+            .get("previousEventId")
+            .and_then(Value::as_str)
+            != Some(previous)
+        || cancellation_event
+            .get("idempotencyKey")
+            .and_then(Value::as_str)
+            != Some(format!("cancel:{request_key}").as_str())
+        || cancellation != journal.run.get("cancellation")
+        || cancellation
+            .and_then(|value| value.get("scope"))
+            .and_then(Value::as_str)
+            != Some("run")
+    {
+        return Err("Parallel mission cancellation replay fact is invalid.".into());
+    }
+    validate_parallel_sibling_advancement(
+        journal,
+        binding,
+        binding.expected_last_sequence + 1,
+        cancellation_sequence - 1,
+        parallel_base,
+    )?;
+    Ok(())
+}
+
+fn exact_native_terminal_replay_with_mode(
+    journal: &mission_run::MissionRunJournalRow,
+    event: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+    parallel_evidence_free: bool,
+) -> Result<(), String> {
+    if parallel_evidence_free {
+        if event.get("type").and_then(Value::as_str) == Some("run-cancelled") {
+            exact_parallel_native_cancellation_replay(journal, event, binding)
+        } else {
+            exact_parallel_native_terminal_replay(journal, event, binding, output)
+        }
+    } else {
+        exact_native_terminal_replay_with_journal(journal, event, binding, output)
+    }
+}
+
+#[cfg(test)]
 fn exact_native_terminal_replay(
     event: &Value,
     binding: &NativeWorkerExecutionBinding,
@@ -5951,19 +6854,21 @@ fn journal_provider_route_id<'a>(
         .and_then(Value::as_str)
 }
 
-fn validate_usage_replay(
+fn validate_usage_replay_with_mode(
     journal: &mission_run::MissionRunJournalRow,
     terminal: &Value,
     binding: &NativeWorkerExecutionBinding,
     model: &str,
     max_duration_ms: i64,
     expected_attempt_number: i64,
+    parallel_evidence_free: bool,
 ) -> Result<(), String> {
     if terminal.get("type").and_then(Value::as_str) == Some("run-cancelled") {
         return Ok(());
     }
-    if terminal.get("previousEventId").and_then(Value::as_str)
-        == Some(native_completion_base_event(binding))
+    if !parallel_evidence_free
+        && terminal.get("previousEventId").and_then(Value::as_str)
+            == Some(native_completion_base_event(binding))
     {
         return Ok(());
     }
@@ -6030,11 +6935,26 @@ fn validate_usage_replay(
         })
         .and_then(|event| event.pointer("/payload/selection/providerRouteId"))
         .and_then(Value::as_str);
+    let usage_sequence_valid = if parallel_evidence_free {
+        terminal.get("previousEventId").and_then(Value::as_str)
+            == Some(binding.usage_event_id.as_str())
+            && terminal.get("sequence").and_then(Value::as_i64)
+                == usage
+                    .get("sequence")
+                    .and_then(Value::as_i64)
+                    .map(|sequence| sequence + 1)
+            && usage
+                .get("sequence")
+                .and_then(Value::as_i64)
+                .is_some_and(|sequence| sequence > binding.expected_last_sequence)
+    } else {
+        usage.get("sequence").and_then(Value::as_i64) == Some(binding.expected_last_sequence + 1)
+            && usage.get("previousEventId").and_then(Value::as_str)
+                == Some(native_completion_base_event(binding))
+    };
     if selected_route.is_none()
         || usage.get("type").and_then(Value::as_str) != Some("usage-recorded")
-        || usage.get("sequence").and_then(Value::as_i64) != Some(binding.expected_last_sequence + 1)
-        || usage.get("previousEventId").and_then(Value::as_str)
-            != Some(native_completion_base_event(binding))
+        || !usage_sequence_valid
         || usage.get("idempotencyKey").and_then(Value::as_str) != Some(expected_key.as_str())
         || usage
             .pointer("/payload/usage/runId")
@@ -6068,6 +6988,25 @@ fn validate_usage_replay(
         return Err("Worker terminal usage event represents another result.".into());
     }
     Ok(())
+}
+
+fn validate_usage_replay(
+    journal: &mission_run::MissionRunJournalRow,
+    terminal: &Value,
+    binding: &NativeWorkerExecutionBinding,
+    model: &str,
+    max_duration_ms: i64,
+    expected_attempt_number: i64,
+) -> Result<(), String> {
+    validate_usage_replay_with_mode(
+        journal,
+        terminal,
+        binding,
+        model,
+        max_duration_ms,
+        expected_attempt_number,
+        false,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8132,10 +9071,304 @@ mod tests {
                 json!({"id":"event-route","type":"route-selected","previousEventId":"event-3","payload":{"workerId":"worker-1"}}),
             ],
         };
-        assert!(validate_native_completion_head(&live, &binding).is_ok());
+        assert!(validate_native_completion_head(&live, &binding, false).is_ok());
         let mut colliding = binding.clone();
         colliding.evaluation_event_id = colliding.completion_event_id.clone();
-        assert!(validate_native_completion_head(&live, &colliding).is_err());
+        assert!(validate_native_completion_head(&live, &colliding, false).is_err());
+    }
+
+    #[test]
+    fn parallel_native_settlement_is_limited_to_two_independent_evidence_free_markdown_steps() {
+        let worker = |id: &str, step: &str, key: &str| {
+            json!({
+                "id":id,"runId":"run-parallel","planRevisionId":"revision-parallel",
+                "planStepKey":step,"tools":[],"context":[],"capabilityIds":[],
+                "capabilityGrantIds":[],"outputContract":{"slots":[{"key":key,
+                    "description":"Bounded Markdown brief","required":true,"format":"text/markdown"}],
+                    "includeEvidence":false,"includeUncertainty":true,"delivery":"run-result"}
+            })
+        };
+        let worker_a = worker("worker-a", "approach-a", "approach-a");
+        let worker_b = worker("worker-b", "approach-b", "approach-b");
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"type":"worker-created","payload":{"worker":worker_a}}),
+                json!({"type":"worker-created","payload":{"worker":worker_b}}),
+            ],
+        };
+        let step = |key: &str, output_key: &str| {
+            json!({"key":key,"kind":"produce","title":key,"objective":format!("Create {key}"),
+            "dependsOnStepKeys":[],
+            "requiredCapabilities":[],"acceptanceCriterionKeys":[],"expectedOutputs":[{
+                "key":output_key,"description":"Bounded Markdown brief","required":true,
+                "format":"text/markdown"}],"optional":false,
+                "estimatedBudget":{"maxDurationMs":90000,"maxInputTokens":16000,
+                    "maxOutputTokens":2048,"maxToolCalls":1,"maxAttempts":1}})
+        };
+        let mut lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({"executionDepth":"multi-worker","budget":{"maxWorkers":2,"maxAttempts":1},
+                "constraints":[{"key":"native:parallel-approaches:v1","severity":"required",
+                    "source":"orchestrator"}],
+                "acceptance":{"requiresHumanAcceptance":false,"minimumRequiredCriteria":1,
+                    "criteria":[{"key":"both-approaches","required":true,"evaluator":"policy"}]}}),
+            plan: json!({}),
+            current_revision: json!({"id":"revision-parallel","bounds":{"maxSteps":3,
+                "maxDependenciesPerStep":2,"maxParallelSteps":2,"maxRevisions":1},"steps":[
+                step("approach-a", "approach-a"), step("approach-b", "approach-b"),
+                {"key":"compare","kind":"synthesize","title":"Compare approaches",
+                    "objective":"Join both outputs","dependsOnStepKeys":["approach-a","approach-b"],
+                    "requiredCapabilities":[],"acceptanceCriterionKeys":["both-approaches"],
+                    "expectedOutputs":[{"key":"comparison","description":"Comparison",
+                        "required":true,"format":"text/markdown"}],"optional":false,
+                    "estimatedBudget":{"maxDurationMs":5000,"maxInputTokens":1,
+                        "maxOutputTokens":1,"maxToolCalls":1,"maxAttempts":1}}
+            ]}),
+        };
+        let mut binding = NativeWorkerExecutionBinding {
+            run_id: "run-parallel".into(),
+            worker_id: "worker-a".into(),
+            worker_started_event_id: "start-a".into(),
+            route_selected_event_id: "route-a".into(),
+            usage_event_id: "usage-a".into(),
+            completion_event_id: "complete-a".into(),
+            evaluation_event_id: "evaluation-a".into(),
+            result_event_id: "result-a".into(),
+            failure_event_id: "failure-a".into(),
+            idempotency_key: "terminal-a".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+            checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
+            tool_evidence: None,
+        };
+        let target = journal.events[0].pointer("/payload/worker").unwrap();
+        let output = native_output_spec(target).unwrap().unwrap();
+        assert!(is_parallel_evidence_free_markdown_run(
+            &journal,
+            &lifecycle,
+            &binding,
+            target,
+            Some(&output)
+        ));
+        lifecycle.current_revision["steps"][1]["dependsOnStepKeys"] = json!(["approach-a"]);
+        assert!(!is_parallel_evidence_free_markdown_run(
+            &journal,
+            &lifecycle,
+            &binding,
+            target,
+            Some(&output)
+        ));
+        lifecycle.current_revision["steps"][1]["dependsOnStepKeys"] = json!([]);
+        binding.tool_evidence = Some(NativeWorkerToolEvidenceBinding {
+            tool_event_id: "tool-a".into(),
+            output_reference: "mission-tool:v1:a".into(),
+        });
+        assert!(!is_parallel_evidence_free_markdown_run(
+            &journal,
+            &lifecycle,
+            &binding,
+            target,
+            Some(&output)
+        ));
+    }
+
+    #[test]
+    fn parallel_evidence_free_workers_accept_only_exact_sibling_head_advancement() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-parallel".into(),
+            worker_id: "worker-a".into(),
+            worker_started_event_id: "start-a".into(),
+            route_selected_event_id: "route-a".into(),
+            usage_event_id: "usage-a".into(),
+            completion_event_id: "complete-a".into(),
+            evaluation_event_id: "evaluation-a".into(),
+            result_event_id: "result-a".into(),
+            failure_event_id: "failure-a".into(),
+            idempotency_key: "terminal-a".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+            checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
+            tool_evidence: None,
+        };
+        let output = NativeWorkerOutputSpec {
+            key: "brief-a".into(),
+            description: "First brief".into(),
+            include_uncertainty: true,
+            include_evidence: false,
+        };
+        let worker_b = json!({
+            "id":"worker-b","planStepKey":"step-b","tools":[],"context":[],
+            "capabilityIds":[],"capabilityGrantIds":[],
+            "outputContract":{"slots":[{"key":"brief-b","description":"Second brief",
+                "required":true,"format":"text/markdown"}],"includeEvidence":false,
+                "includeUncertainty":true,"delivery":"run-result"}
+        });
+        let prefix = vec![
+            json!({"id":"start-a","runId":"run-parallel","type":"worker-started","sequence":2,
+                "previousEventId":"created-a","payload":{"workerId":"worker-a"}}),
+            json!({"id":"route-a","runId":"run-parallel","type":"route-selected","sequence":3,
+                "previousEventId":"start-a","payload":{"workerId":"worker-a",
+                    "selection":{"providerRouteId":"provider-route-a"}}}),
+            json!({"id":"created-b","runId":"run-parallel","type":"worker-created","sequence":4,
+                "previousEventId":"route-a","payload":{"worker":worker_b}}),
+            json!({"id":"start-b","runId":"run-parallel","type":"worker-started","sequence":5,
+                "previousEventId":"created-b","payload":{"workerId":"worker-b"}}),
+            json!({"id":"route-b","runId":"run-parallel","type":"route-selected","sequence":6,
+                "previousEventId":"start-b","payload":{"workerId":"worker-b","providerId":"openai",
+                    "modelReference":"gpt-5","selection":{"providerRouteId":"provider-route-b"}}}),
+        ];
+        let live = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":7,
+                "eventHead":{"lastSequence":6,"lastEventId":"route-b"}}),
+            events: prefix.clone(),
+        };
+        assert!(validate_native_completion_head(&live, &binding, true).is_ok());
+        assert!(validate_native_completion_head(&live, &binding, false).is_err());
+        let mut join_binding = binding.clone();
+        join_binding.expected_run_revision = 8;
+        join_binding.expected_last_sequence = 7;
+        let mut join_events = vec![json!({"id":"created-a","runId":"run-parallel",
+            "type":"worker-created","sequence":1,"payload":{"worker":{"id":"worker-a"}}})];
+        join_events.extend(live.events.clone());
+        join_events.push(
+            json!({"id":"join-open","runId":"run-parallel","type":"join-opened",
+            "sequence":7,"previousEventId":"route-b","payload":{"join":{"joinKey":"join-1",
+                "status":"open","strategy":"all","workerIds":["worker-a","worker-b"],
+                "allowFailedWorkers":false,"satisfiedWorkerIds":[],"failedWorkerIds":[]}}}),
+        );
+        let joined = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":8,
+                "eventHead":{"lastSequence":7,"lastEventId":"join-open"}}),
+            events: join_events,
+        };
+        assert!(validate_native_completion_head(&joined, &join_binding, true).is_ok());
+        let joined_usage = json!({"id":"usage-a","runId":"run-parallel","type":"usage-recorded",
+            "sequence":8,"previousEventId":"join-open","idempotencyKey":"worker-usage:terminal-a",
+            "payload":{"usage":{"runId":"run-parallel","workerId":"worker-a"}}});
+        let joined_terminal = json!({"id":"complete-a","runId":"run-parallel","type":"worker-completed",
+            "sequence":9,"previousEventId":"usage-a","idempotencyKey":"worker-complete:terminal-a",
+            "correlationKey":"native-worker-completion:v1:run-revision:8",
+            "payload":{"workerId":"worker-a","outputs":[{"key":"brief-a",
+                "summary":"Native worker text output","valueReference":"mission-output:v1:brief-a"}]}});
+        let mut joined_events = joined.events;
+        joined_events.extend([joined_usage, joined_terminal.clone()]);
+        let joined_settled = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":10,
+                "eventHead":{"lastSequence":9,"lastEventId":"complete-a"}}),
+            events: joined_events,
+        };
+        assert!(exact_native_terminal_replay_with_mode(
+            &joined_settled,
+            &joined_terminal,
+            &join_binding,
+            Some(&output),
+            true,
+        )
+        .is_ok());
+
+        let usage_a = json!({"id":"usage-a","runId":"run-parallel","type":"usage-recorded",
+            "sequence":7,"previousEventId":"route-b","idempotencyKey":"worker-usage:terminal-a",
+            "payload":{"usage":{"runId":"run-parallel","workerId":"worker-a"}}});
+        let terminal_a = json!({"id":"complete-a","runId":"run-parallel","type":"worker-completed",
+            "sequence":8,"previousEventId":"usage-a","idempotencyKey":"worker-complete:terminal-a",
+            "correlationKey":"native-worker-completion:v1:run-revision:4",
+            "payload":{"workerId":"worker-a","outputs":[{"key":"brief-a",
+                "summary":"Native worker text output","valueReference":"mission-output:v1:brief-a"}]}});
+        let usage_b = json!({"id":"usage-b","runId":"run-parallel","type":"usage-recorded",
+            "sequence":9,"previousEventId":"complete-a","payload":{"usage":{
+                "runId":"run-parallel","workerId":"worker-b"}}});
+        let terminal_b = json!({"id":"complete-b","runId":"run-parallel","type":"worker-completed",
+            "sequence":10,"previousEventId":"usage-b","payload":{"workerId":"worker-b","outputs":[]}});
+        let mut events = prefix;
+        events.extend([usage_a, terminal_a.clone(), usage_b, terminal_b]);
+        let settled = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":11,
+                "eventHead":{"lastSequence":10,"lastEventId":"complete-b"}}),
+            events,
+        };
+        assert!(exact_native_terminal_replay_with_mode(
+            &settled,
+            &terminal_a,
+            &binding,
+            Some(&output),
+            true,
+        )
+        .is_ok());
+
+        let mut tampered = mission_run::MissionRunJournalRow {
+            run: settled.run.clone(),
+            events: settled.events.clone(),
+        };
+        tampered.events[4]["previousEventId"] = json!("created-b");
+        assert!(exact_native_terminal_replay_with_mode(
+            &tampered,
+            &terminal_a,
+            &binding,
+            Some(&output),
+            true,
+        )
+        .is_err());
+        let mut colliding = mission_run::MissionRunJournalRow {
+            run: live.run.clone(),
+            events: live.events.clone(),
+        };
+        colliding.events[4]["id"] = json!("failure-a");
+        colliding.run["eventHead"]["lastEventId"] = json!("failure-a");
+        assert!(validate_native_completion_head(&colliding, &binding, true).is_err());
+        let mut cancelled = settled;
+        cancelled.run["status"] = json!("cancelling");
+        assert!(exact_native_terminal_replay_with_mode(
+            &cancelled,
+            &terminal_a,
+            &binding,
+            Some(&output),
+            true,
+        )
+        .is_err());
+
+        let cancellation = json!({"requestKey":"stop-parallel","scope":"run",
+            "requestedAt":"t","requestedByInternalUserId":"user-1","mode":"cooperative"});
+        let cancellation_event = json!({"id":"cancel-parallel","runId":"run-parallel",
+            "type":"cancellation-requested","sequence":7,"previousEventId":"route-b",
+            "idempotencyKey":"cancel:stop-parallel","payload":{"cancellation":cancellation}});
+        let mut cancelling_events = live.events.clone();
+        cancelling_events.push(cancellation_event.clone());
+        let cancelling = mission_run::MissionRunJournalRow {
+            run: json!({"status":"cancelling","revision":8,"cancellation":cancellation,
+                "eventHead":{"lastSequence":7,"lastEventId":"cancel-parallel"}}),
+            events: cancelling_events,
+        };
+        assert!(validate_parallel_native_cancellation_head(&cancelling, &binding).is_ok());
+        let cancelled_event = json!({"id":"result-a","runId":"run-parallel","type":"run-cancelled",
+            "sequence":8,"previousEventId":"cancel-parallel","idempotencyKey":"worker-cancel:terminal-a",
+            "correlationKey":"native-worker-completion:v1:run-revision:4",
+            "payload":{"cancellation":cancellation}});
+        let mut cancelled_events = cancelling.events;
+        cancelled_events.push(cancelled_event.clone());
+        let mut cancelled = mission_run::MissionRunJournalRow {
+            run: json!({"status":"cancelled","revision":9,"cancellation":cancellation,
+                "eventHead":{"lastSequence":8,"lastEventId":"result-a"}}),
+            events: cancelled_events,
+        };
+        assert!(exact_native_terminal_replay_with_mode(
+            &cancelled,
+            &cancelled_event,
+            &binding,
+            Some(&output),
+            true,
+        )
+        .is_ok());
+        cancelled.events[5]["payload"]["cancellation"]["requestKey"] = json!("stop-other");
+        assert!(exact_native_terminal_replay_with_mode(
+            &cancelled,
+            &cancelled_event,
+            &binding,
+            Some(&output),
+            true,
+        )
+        .is_err());
     }
 
     #[test]
@@ -8308,7 +9541,7 @@ mod tests {
                     "replayBoundary":{"durableThroughSequence":4,"resumeAfterEventId":"event-tool"}}}}),
             ],
         };
-        assert!(validate_native_completion_head(&journal, &binding).is_ok());
+        assert!(validate_native_completion_head(&journal, &binding, false).is_ok());
         let mut restored_binding = binding.clone();
         restored_binding.expected_run_revision = 7;
         restored_binding.expected_last_sequence = 6;
@@ -8324,13 +9557,13 @@ mod tests {
             .push(json!({"id":"event-restore","type":"checkpoint-restored",
             "sequence":6,"previousEventId":"event-checkpoint","attemptNumber":2,
             "payload":{"checkpointEventId":"event-checkpoint","newAttemptNumber":2}}));
-        assert!(validate_native_completion_head(&restored, &restored_binding).is_ok());
+        assert!(validate_native_completion_head(&restored, &restored_binding, false).is_ok());
         restored.events[4]["payload"]["checkpointEventId"] = json!("event-other");
-        assert!(validate_native_completion_head(&restored, &restored_binding).is_err());
+        assert!(validate_native_completion_head(&restored, &restored_binding, false).is_err());
         let mut changed = journal;
         changed.events[3]["payload"]["checkpoint"]["replayBoundary"]["durableThroughSequence"] =
             json!(3);
-        assert!(validate_native_completion_head(&changed, &binding).is_err());
+        assert!(validate_native_completion_head(&changed, &binding, false).is_err());
     }
 
     #[test]

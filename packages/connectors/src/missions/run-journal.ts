@@ -19,6 +19,12 @@ const HUMAN_INPUT_LIMITS = {
   timestamp: 64,
   absoluteNumber: 1_000_000_000_000_000
 } as const;
+const JOIN_LIMITS = {
+  joinKey: 200,
+  workerId: 200,
+  maximumWorkers: 32,
+  timestamp: 64
+} as const;
 const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   created: ["planning", "queued", "running", "cancelling", "cancelled", "failed"],
   planning: ["queued", "running", "waiting-human-input", "cancelling", "cancelled", "failed"],
@@ -205,6 +211,8 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
       throw new RunJournalError("Human input must resolve the exact active wait with values matching its schema.");
     }
   }
+  if (event.type === "join-opened") validateJoinOpened(current, event.payload.join);
+  if (event.type === "join-resolved") validateJoinResolved(current, event.payload.join, event.occurredAt);
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
     throw new RunJournalError("run-completed requires a succeeded result.");
   }
@@ -236,6 +244,207 @@ function projectRun(run: Run, event: RunEvent): Run {
     case "run-cancelled": return { ...run, status: event.payload.partial ? "partially-completed" : "cancelled" };
     default: return run;
   }
+}
+
+function validateJoinOpened(current: RunJournalProjection, join: Spine.Missions.WorkerJoin): void {
+  const run = current.run;
+  const workerLimit = run.budget.maxWorkers;
+  if (run.status !== "running" || run.executionDepth !== "multi-worker"
+    || !Number.isInteger(workerLimit) || workerLimit! < 1
+    || !validOpenJoin(join, Math.min(workerLimit!, JOIN_LIMITS.maximumWorkers))) {
+    throw new RunJournalError("A join must open with one valid bounded multi-worker definition.");
+  }
+
+  const joins = current.events.filter((candidate) => candidate.type === "join-opened");
+  if (joins.some((candidate) => candidate.payload.join.joinKey === join.joinKey)
+    || activeWorkerJoin(current.events)) {
+    throw new RunJournalError("A join key is immutable and only one worker join can be open.");
+  }
+
+  validateJoinMembers(current, join.workerIds);
+}
+
+function validateJoinMembers(
+  current: RunJournalProjection,
+  memberIds: readonly Spine.Primitives.WorkerId[]
+): void {
+  const { run } = current;
+  const selectedPlanRevisionId = current.events.reduce<Spine.Primitives.PlanRevisionId | undefined>(
+    (selected, candidate) => candidate.type === "plan-revision-selected" ? candidate.payload.planRevisionId : selected,
+    run.planRevisionId
+  );
+  if (!selectedPlanRevisionId) {
+    throw new RunJournalError("Join members must belong to the run's exact selected plan revision.");
+  }
+
+  const members = new Set(memberIds);
+  const created = new Map<Spine.Primitives.WorkerId, { worker: Spine.Missions.Worker; sequence: number }>();
+  const started = new Map<Spine.Primitives.WorkerId, number>();
+  for (const candidate of current.events) {
+    if (candidate.type === "worker-created" && members.has(candidate.payload.worker.id)) {
+      const worker = candidate.payload.worker;
+      if (created.has(worker.id)) {
+        throw new RunJournalError("Each join member must have one unique worker-created fact.");
+      }
+      created.set(worker.id, { worker, sequence: candidate.sequence });
+    }
+    if (candidate.type === "worker-started" && members.has(candidate.payload.workerId)) {
+      if (started.has(candidate.payload.workerId)) {
+        throw new RunJournalError("Each join member must have one unique worker-started fact.");
+      }
+      started.set(candidate.payload.workerId, candidate.sequence);
+    }
+  }
+
+  for (const workerId of memberIds) {
+    const creation = created.get(workerId);
+    const startedAt = started.get(workerId);
+    if (!creation || startedAt === undefined || startedAt <= creation.sequence) {
+      throw new RunJournalError("Every join member must be derived from one started worker-created journal fact.");
+    }
+    const worker = creation.worker;
+    if (worker.runId !== run.id || !sameWorkerScope(run, worker)
+      || worker.planRevisionId !== selectedPlanRevisionId
+      || !boundedString(worker.planStepKey, JOIN_LIMITS.joinKey)) {
+      throw new RunJournalError("Join members must stay in the run scope and exact selected plan revision.");
+    }
+  }
+}
+
+function validateJoinResolved(
+  current: RunJournalProjection,
+  resolution: Spine.Missions.WorkerJoin,
+  occurredAt: string
+): void {
+  const opened = activeWorkerJoin(current.events);
+  const validShape = validResolvedJoinShape(resolution);
+  const validRunStatus = current.run.status === "running"
+    || (current.run.status === "cancelling" && validShape && resolution.status === "cancelled");
+  if (!validRunStatus || !opened || !validShape
+    || resolution.joinKey !== opened.joinKey
+    || !sameJoinDefinition(opened, resolution)
+  ) {
+    throw new RunJournalError("Join resolution must immutably resolve the exact active join.");
+  }
+  validateJoinMembers(current, opened.workerIds);
+
+  const memberIds = new Set(opened.workerIds);
+  const startedAt = new Map<Spine.Primitives.WorkerId, number>();
+  const completed = new Set<Spine.Primitives.WorkerId>();
+  const failed = new Set<Spine.Primitives.WorkerId>();
+  for (const candidate of current.events) {
+    if (candidate.type === "worker-started" && memberIds.has(candidate.payload.workerId)) {
+      startedAt.set(candidate.payload.workerId, candidate.sequence);
+    }
+  }
+  for (const candidate of current.events) {
+    if (candidate.type === "worker-completed" && memberIds.has(candidate.payload.workerId)) {
+      if (candidate.sequence <= startedAt.get(candidate.payload.workerId)!
+        || completed.has(candidate.payload.workerId) || failed.has(candidate.payload.workerId)) {
+        throw new RunJournalError("A join member can have only one terminal worker fact.");
+      }
+      completed.add(candidate.payload.workerId);
+    }
+    if (candidate.type === "worker-failed" && memberIds.has(candidate.payload.workerId)) {
+      if (candidate.sequence <= startedAt.get(candidate.payload.workerId)!
+        || completed.has(candidate.payload.workerId) || failed.has(candidate.payload.workerId)) {
+        throw new RunJournalError("A join member can have only one terminal worker fact.");
+      }
+      failed.add(candidate.payload.workerId);
+    }
+  }
+
+  const expectedSatisfied = opened.workerIds.filter((workerId) => completed.has(workerId));
+  const expectedFailed = opened.workerIds.filter((workerId) => failed.has(workerId));
+  if (!sameStrings(resolution.satisfiedWorkerIds, expectedSatisfied)
+    || !sameStrings(resolution.failedWorkerIds, expectedFailed)) {
+    throw new RunJournalError("Join outcome sets must be derived exactly from terminal member worker facts.");
+  }
+
+  if (resolution.status === "satisfied" && !joinIsSatisfied(opened, completed.size, failed.size)) {
+    throw new RunJournalError("A join cannot resolve satisfied before its exact strategy is satisfied.");
+  }
+  if (resolution.status === "timed-out") {
+    const deadline = opened.deadline === undefined ? Number.NaN : Date.parse(opened.deadline);
+    const resolvedAt = Date.parse(occurredAt);
+    if (!Number.isFinite(deadline) || !Number.isFinite(resolvedAt) || resolvedAt < deadline) {
+      throw new RunJournalError("A join can time out only at or after its declared deadline.");
+    }
+  }
+}
+
+function validResolvedJoinShape(join: Spine.Missions.WorkerJoin): boolean {
+  return isRecord(join)
+    && hasOnlyKeys(join, ["joinKey", "status", "strategy", "workerIds", "quorum", "allowFailedWorkers", "deadline", "satisfiedWorkerIds", "failedWorkerIds"])
+    && boundedString(join.joinKey, JOIN_LIMITS.joinKey)
+    && ["satisfied", "timed-out", "cancelled"].includes(join.status)
+    && ["all", "any", "quorum"].includes(join.strategy)
+    && Array.isArray(join.workerIds)
+    && join.workerIds.every((workerId) => boundedString(workerId, JOIN_LIMITS.workerId))
+    && Array.isArray(join.satisfiedWorkerIds)
+    && join.satisfiedWorkerIds.every((workerId) => boundedString(workerId, JOIN_LIMITS.workerId))
+    && Array.isArray(join.failedWorkerIds)
+    && join.failedWorkerIds.every((workerId) => boundedString(workerId, JOIN_LIMITS.workerId))
+    && typeof join.allowFailedWorkers === "boolean"
+    && (join.deadline === undefined || boundedString(join.deadline, JOIN_LIMITS.timestamp));
+}
+
+function validOpenJoin(join: Spine.Missions.WorkerJoin, workerLimit: number): boolean {
+  if (!isRecord(join)
+    || !hasOnlyKeys(join, ["joinKey", "status", "strategy", "workerIds", "quorum", "allowFailedWorkers", "deadline", "satisfiedWorkerIds", "failedWorkerIds"])
+    || !boundedString(join.joinKey, JOIN_LIMITS.joinKey)
+    || join.status !== "open"
+    || !["all", "any", "quorum"].includes(join.strategy)
+    || !Array.isArray(join.workerIds) || join.workerIds.length < 1
+    || join.workerIds.length > workerLimit || join.workerIds.length > JOIN_LIMITS.maximumWorkers
+    || new Set(join.workerIds).size !== join.workerIds.length
+    || join.workerIds.some((workerId) => !boundedString(workerId, JOIN_LIMITS.workerId))
+    || typeof join.allowFailedWorkers !== "boolean"
+    || (join.deadline !== undefined && (!boundedString(join.deadline, JOIN_LIMITS.timestamp) || !Number.isFinite(Date.parse(join.deadline))))
+    || !Array.isArray(join.satisfiedWorkerIds) || join.satisfiedWorkerIds.length !== 0
+    || !Array.isArray(join.failedWorkerIds) || join.failedWorkerIds.length !== 0) {
+    return false;
+  }
+  if (join.strategy === "quorum") {
+    return Number.isInteger(join.quorum) && join.quorum! >= 1 && join.quorum! <= join.workerIds.length;
+  }
+  return join.quorum === undefined;
+}
+
+function activeWorkerJoin(events: readonly RunEvent[]): Spine.Missions.WorkerJoin | undefined {
+  let active: Spine.Missions.WorkerJoin | undefined;
+  for (const event of events) {
+    if (event.type === "join-opened") active = event.payload.join;
+    if (event.type === "join-resolved" && active?.joinKey === event.payload.join.joinKey) active = undefined;
+  }
+  return active;
+}
+
+function sameJoinDefinition(opened: Spine.Missions.WorkerJoin, resolution: Spine.Missions.WorkerJoin): boolean {
+  return opened.strategy === resolution.strategy
+    && sameStrings(opened.workerIds, resolution.workerIds)
+    && opened.quorum === resolution.quorum
+    && opened.allowFailedWorkers === resolution.allowFailedWorkers
+    && opened.deadline === resolution.deadline;
+}
+
+function joinIsSatisfied(join: Spine.Missions.WorkerJoin, completed: number, failed: number): boolean {
+  if (!join.allowFailedWorkers && failed > 0) return false;
+  const accepted = completed + (join.allowFailedWorkers ? failed : 0);
+  if (join.strategy === "all") return accepted === join.workerIds.length;
+  if (join.strategy === "any") return accepted >= 1;
+  return accepted >= join.quorum!;
+}
+
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameWorkerScope(run: Run, worker: Spine.Missions.Worker): boolean {
+  return run.workspaceId === worker.workspaceId && run.authority === worker.authority
+    && run.schemaVersion === worker.schemaVersion && run.visibility === worker.visibility
+    && (run.visibility !== "member-private"
+      || (worker.visibility === "member-private" && run.ownerMemberId === worker.ownerMemberId));
 }
 
 function activeApprovalWait(events: readonly RunEvent[]): Spine.Missions.ApprovalWait | undefined {

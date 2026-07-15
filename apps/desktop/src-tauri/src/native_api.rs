@@ -1894,6 +1894,13 @@ mod transport_policy_tests {
         };
         let lease = acquire_mission_execution(&binding).expect("first lease");
         assert!(acquire_mission_execution(&binding).is_err());
+        let mut sibling = binding.clone();
+        sibling.worker_id = "lease-worker-sibling".into();
+        sibling.worker_started_event_id = "lease-start-sibling".into();
+        let sibling_lease = acquire_mission_execution(&sibling)
+            .expect("another worker in the same run owns an independent lease");
+        assert!(mission_run_has_active_native_execution("lease-run").unwrap());
+        drop(sibling_lease);
         drop(lease);
         assert!(acquire_mission_execution(&binding).is_ok());
     }

@@ -33,6 +33,58 @@ function event<Type extends Spine.Missions.RunEventType>(
 
 const created = () => event("run-created", 1, { run: run() });
 
+function multiWorkerRun(overrides: Partial<Spine.Missions.Run> = {}): Spine.Missions.Run {
+  return {
+    ...run(), executionDepth: "multi-worker", planRevisionId: id<"plan-revision">("revision-1"),
+    budget: { maxWorkers: 2, maxAttempts: 2 },
+    ...overrides
+  } as Spine.Missions.Run;
+}
+
+function worker(workerId: string, overrides: Partial<Spine.Missions.Worker> = {}): Spine.Missions.Worker {
+  return {
+    id: id<"worker">(workerId), runId: id<"run">("run-1"), workspaceId: id<"workspace">("workspace-1"),
+    visibility: "member-private", ownerMemberId: id<"member">("member-1"), authority: "local",
+    schemaVersion: 1, revision: 1, createdByInternalUserId: id<"internal-user">("user-1"),
+    createdAt: "t2", updatedAt: "t2", status: "proposed",
+    role: { kind: "specialist", title: `Worker ${workerId}`, objective: "Complete the bounded plan step.", responsibilities: [] },
+    planRevisionId: id<"plan-revision">("revision-1"), planStepKey: `step-${workerId}`,
+    context: [], capabilityIds: [], capabilityGrantIds: [], tools: [], budget: { maxAttempts: 1 },
+    stopConditions: [{ kind: "objective-met", description: "Stop when the assigned objective is complete." }],
+    outputContract: { slots: [], includeEvidence: false, includeUncertainty: true, delivery: "join" },
+    ...overrides
+  } as Spine.Missions.Worker;
+}
+
+function openJoin(overrides: Partial<Spine.Missions.WorkerJoin> = {}): Spine.Missions.WorkerJoin {
+  return {
+    joinKey: "join-research", status: "open", strategy: "all",
+    workerIds: [id<"worker">("worker-1"), id<"worker">("worker-2")],
+    allowFailedWorkers: false, satisfiedWorkerIds: [], failedWorkerIds: [],
+    ...overrides
+  };
+}
+
+function startedWorkers(
+  first: Spine.Missions.Worker = worker("worker-1"),
+  second: Spine.Missions.Worker = worker("worker-2"),
+  runRecord: Spine.Missions.Run = multiWorkerRun()
+) {
+  const events: Spine.Missions.RunEvent[] = [
+    event("run-created", 1, { run: runRecord }),
+    event("status-transitioned", 2, { from: "created", to: "running" }, id<"run-event">("event-1")),
+    event("worker-created", 3, { worker: first }, id<"run-event">("event-2")),
+    event("worker-started", 4, { workerId: first.id }, id<"run-event">("event-3")),
+    event("worker-created", 5, { worker: second }, id<"run-event">("event-4")),
+    event("worker-started", 6, { workerId: second.id }, id<"run-event">("event-5"))
+  ];
+  return replayRunJournal(events);
+}
+
+const workerError = (): Spine.Missions.ContractError => ({
+  code: "worker-failed", category: "internal", message: "The worker failed.", retryable: false
+});
+
 function humanInputWait(): Spine.Missions.HumanInputWait {
   return {
     waitKey: "collect-brief-1",
@@ -346,5 +398,167 @@ describe("durable run journal projection", () => {
     expect(() => appendRunEvent(cancelled, event("human-input-received", 7, {
       resolution: humanInputResolution()
     }, id<"run-event">("event-6")))).toThrow("terminal run journal is immutable");
+  });
+
+  it("opens one bounded join from exact started plan workers and resolves from terminal facts", () => {
+    const base = startedWorkers();
+    const join = openJoin();
+    const openedEvent = event("join-opened", 7, { join }, id<"run-event">("event-6"));
+    const opened = appendRunEvent(base, openedEvent);
+    expect(appendRunEvent(opened, openedEvent)).toBe(opened);
+
+    const first = appendRunEvent(opened, event("worker-completed", 8, {
+      workerId: id<"worker">("worker-1"), outputs: []
+    }, id<"run-event">("event-7")));
+    expect(() => appendRunEvent(first, event("join-resolved", 9, {
+      join: { ...join, status: "satisfied", satisfiedWorkerIds: [id<"worker">("worker-1")] }
+    }, id<"run-event">("event-8")))).toThrow("strategy is satisfied");
+
+    const both = appendRunEvent(first, event("worker-completed", 9, {
+      workerId: id<"worker">("worker-2"), outputs: []
+    }, id<"run-event">("event-8")));
+    expect(() => appendRunEvent(both, event("join-resolved", 10, {
+      join: { ...join, status: "satisfied", strategy: "any", satisfiedWorkerIds: join.workerIds }
+    }, id<"run-event">("event-9")))).toThrow("exact active join");
+    const resolvedEvent = event("join-resolved", 10, {
+      join: { ...join, status: "satisfied", satisfiedWorkerIds: join.workerIds }
+    }, id<"run-event">("event-9"));
+    const resolved = appendRunEvent(both, resolvedEvent);
+    expect(appendRunEvent(resolved, resolvedEvent)).toBe(resolved);
+    expect(() => appendRunEvent(resolved, {
+      ...resolvedEvent, payload: { join: { ...join, status: "satisfied", satisfiedWorkerIds: join.workerIds, strategy: "any" } }
+    } as Spine.Missions.RunEvent)).toThrow("different facts");
+    expect(replayRunJournal(resolved.events)).toEqual(resolved);
+  });
+
+  it("rejects invalid, duplicate, over-budget, or concurrently open join definitions", () => {
+    const base = startedWorkers();
+    const invalid: readonly Spine.Missions.WorkerJoin[] = [
+      openJoin({ status: "satisfied" }),
+      openJoin({ strategy: "quorum" }),
+      openJoin({ strategy: "quorum", quorum: 0 }),
+      openJoin({ strategy: "quorum", quorum: 3 }),
+      openJoin({ strategy: "all", quorum: 1 }),
+      openJoin({ workerIds: [id<"worker">("worker-1"), id<"worker">("worker-1")] }),
+      openJoin({ workerIds: [] }),
+      openJoin({ satisfiedWorkerIds: [id<"worker">("worker-1")] }),
+      openJoin({ failedWorkerIds: [id<"worker">("worker-2")] }),
+      openJoin({ deadline: "not-a-date" })
+    ];
+    for (const join of invalid) {
+      expect(() => appendRunEvent(base, event("join-opened", 7, { join }, id<"run-event">("event-6"))))
+        .toThrow("valid bounded multi-worker definition");
+    }
+
+    const overBudget = startedWorkers(worker("worker-1"), worker("worker-2"), multiWorkerRun({ budget: { maxWorkers: 1 } }));
+    expect(() => appendRunEvent(overBudget, event("join-opened", 7, { join: openJoin() }, id<"run-event">("event-6"))))
+      .toThrow("valid bounded multi-worker definition");
+
+    const opened = appendRunEvent(base, event("join-opened", 7, { join: openJoin() }, id<"run-event">("event-6")));
+    expect(() => appendRunEvent(opened, event("join-opened", 8, {
+      join: openJoin({ joinKey: "join-another" })
+    }, id<"run-event">("event-7")))).toThrow("only one worker join can be open");
+    const cancelled = appendRunEvent(opened, event("join-resolved", 8, {
+      join: { ...openJoin(), status: "cancelled" }
+    }, id<"run-event">("event-7")));
+    expect(() => appendRunEvent(cancelled, event("join-opened", 9, { join: openJoin() }, id<"run-event">("event-8"))))
+      .toThrow("join key is immutable");
+  });
+
+  it("rejects unstarted, foreign, out-of-plan, and multiply-created members", () => {
+    const complete = startedWorkers();
+    const unstarted = replayRunJournal(complete.events.slice(0, -1));
+    const variants: readonly [string, ReturnType<typeof startedWorkers>][] = [
+      ["started worker-created", unstarted],
+      ["run scope", startedWorkers(worker("worker-1"), worker("worker-2", { runId: id<"run">("foreign-run") }))],
+      ["run scope", startedWorkers(worker("worker-1"), worker("worker-2", { workspaceId: id<"workspace">("foreign-workspace") }))],
+      ["selected plan revision", startedWorkers(worker("worker-1"), worker("worker-2", { planRevisionId: id<"plan-revision">("old-revision") }))],
+      ["selected plan revision", startedWorkers(worker("worker-1"), worker("worker-2", { planStepKey: undefined }))],
+      ["started worker-created", complete]
+    ];
+    for (const [message, base] of variants) {
+      const sequence = base.run.eventHead.lastSequence + 1;
+      const join = base === complete
+        ? openJoin({ workerIds: [id<"worker">("worker-1"), id<"worker">("worker-3")] })
+        : openJoin();
+      expect(() => appendRunEvent(base, event("join-opened", sequence, { join }, base.run.eventHead.lastEventId)))
+        .toThrow(message);
+    }
+
+    const duplicate = appendRunEvent(complete, event("worker-created", 7, {
+      worker: worker("worker-2")
+    }, id<"run-event">("event-6")));
+    expect(() => appendRunEvent(duplicate, event("join-opened", 8, { join: openJoin() }, id<"run-event">("event-7"))))
+      .toThrow("one unique worker-created fact");
+
+    const startedTwice = appendRunEvent(complete, event("worker-started", 7, {
+      workerId: id<"worker">("worker-2")
+    }, id<"run-event">("event-6")));
+    expect(() => appendRunEvent(startedTwice, event("join-opened", 8, { join: openJoin() }, id<"run-event">("event-7"))))
+      .toThrow("one unique worker-started fact");
+  });
+
+  it("derives failure sets and applies tolerant and strict join strategies", () => {
+    const base = startedWorkers();
+    const join = openJoin({ strategy: "quorum", quorum: 1, allowFailedWorkers: true });
+    const opened = appendRunEvent(base, event("join-opened", 7, { join }, id<"run-event">("event-6")));
+    const failed = appendRunEvent(opened, event("worker-failed", 8, {
+      workerId: id<"worker">("worker-1"), error: workerError()
+    }, id<"run-event">("event-7")));
+    const mixed = appendRunEvent(failed, event("worker-completed", 9, {
+      workerId: id<"worker">("worker-2"), outputs: []
+    }, id<"run-event">("event-8")));
+    const exact = { ...join, status: "satisfied" as const,
+      satisfiedWorkerIds: [id<"worker">("worker-2")], failedWorkerIds: [id<"worker">("worker-1")] };
+    expect(() => appendRunEvent(mixed, event("join-resolved", 10, {
+      join: { ...exact, satisfiedWorkerIds: join.workerIds }
+    }, id<"run-event">("event-9")))).toThrow("derived exactly");
+    expect(appendRunEvent(mixed, event("join-resolved", 10, { join: exact }, id<"run-event">("event-9"))).events)
+      .toHaveLength(10);
+
+    const strictJoin = openJoin({ strategy: "any", allowFailedWorkers: false });
+    const strictOpened = appendRunEvent(base, event("join-opened", 7, { join: strictJoin }, id<"run-event">("event-6")));
+    const strictFailed = appendRunEvent(strictOpened, event("worker-failed", 8, {
+      workerId: id<"worker">("worker-1"), error: workerError()
+    }, id<"run-event">("event-7")));
+    const strictMixed = appendRunEvent(strictFailed, event("worker-completed", 9, {
+      workerId: id<"worker">("worker-2"), outputs: []
+    }, id<"run-event">("event-8")));
+    expect(() => appendRunEvent(strictMixed, event("join-resolved", 10, {
+      join: { ...strictJoin, status: "satisfied", satisfiedWorkerIds: [id<"worker">("worker-2")], failedWorkerIds: [id<"worker">("worker-1")] }
+    }, id<"run-event">("event-9")))).toThrow("strategy is satisfied");
+  });
+
+  it("allows timeout only at the immutable deadline", () => {
+    const base = startedWorkers();
+    const join = openJoin({ deadline: "2026-07-15T12:00:00Z" });
+    const opened = appendRunEvent(base, event("join-opened", 7, { join }, id<"run-event">("event-6")));
+    const resolution = { ...join, status: "timed-out" as const };
+    const early = { ...event("join-resolved", 8, { join: resolution }, id<"run-event">("event-7")),
+      occurredAt: "2026-07-15T11:59:59Z" } as Spine.Missions.RunEvent;
+    expect(() => appendRunEvent(opened, early)).toThrow("at or after its declared deadline");
+    const onTime = { ...event("join-resolved", 8, { join: resolution }, id<"run-event">("event-7")),
+      occurredAt: "2026-07-15T12:00:00Z" } as Spine.Missions.RunEvent;
+    expect(appendRunEvent(opened, onTime).events.at(-1)).toEqual(onTime);
+
+    const noDeadlineJoin = openJoin();
+    const noDeadlineOpen = appendRunEvent(base, event("join-opened", 7, { join: noDeadlineJoin }, id<"run-event">("event-6")));
+    expect(() => appendRunEvent(noDeadlineOpen, event("join-resolved", 8, {
+      join: { ...noDeadlineJoin, status: "timed-out" }
+    }, id<"run-event">("event-7")))).toThrow("declared deadline");
+  });
+
+  it("can cancel the exact active join while its run is cancelling", () => {
+    const join = openJoin();
+    const opened = appendRunEvent(startedWorkers(), event("join-opened", 7, { join }, id<"run-event">("event-6")));
+    const cancellation: Spine.Missions.CancellationRequest = {
+      requestKey: "cancel-parallel-run", requestedAt: "t8", scope: "run", mode: "cooperative"
+    };
+    const cancelling = appendRunEvent(opened, event("cancellation-requested", 8, {
+      cancellation
+    }, id<"run-event">("event-7")));
+    expect(appendRunEvent(cancelling, event("join-resolved", 9, {
+      join: { ...join, status: "cancelled" }
+    }, id<"run-event">("event-8"))).events).toHaveLength(9);
   });
 });

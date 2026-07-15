@@ -29,10 +29,11 @@ import { resolveModelCapabilities } from "../../native-api/model-catalogue";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 
-/** The bound cancel handle for the most recent run (one live run per backend). */
+/** One bound native request, keyed by the runtime execution id. */
 interface ActiveRun {
   requestId: string | null;
   cancel: (requestId: string) => Promise<void>;
+  cancelRequested: boolean;
 }
 
 /**
@@ -47,9 +48,11 @@ export function createNativeApiBackend(
 ): AgentBackend | null {
   const capabilities: readonly BackendCapability[] = provider.capabilities;
 
-  // The most recent run's cancel handle. One backend instance drives one live
-  // run at a time (the shell guards this); cancel() drops it at the boundary.
-  let active: ActiveRun | null = null;
+  // Ordinary shell work still uses one entry. Mission workers use distinct
+  // child execution ids so an authorized parallel plan can share one provider
+  // backend without one worker stealing another worker's cancellation handle.
+  const active = new Map<string, ActiveRun>();
+  let anonymousRunSequence = 0;
 
   function run(
     request: AgentRunRequest,
@@ -72,15 +75,28 @@ export function createNativeApiBackend(
         yield { type: "done", finishReason: "error" };
       })();
     }
+    const executionId = options.runId ?? `native-anonymous-run-${++anonymousRunSequence}`;
+    const activeRun: ActiveRun = {
+      requestId: null,
+      cancel: async () => undefined,
+      cancelRequested: false
+    };
     const handlers: TransportHandlers = {
       onRequestStarted: (requestId) => {
-        if (active) active.requestId = requestId;
+        activeRun.requestId = requestId;
+        if (activeRun.cancelRequested) {
+          void activeRun.cancel(requestId).catch(() => undefined);
+        }
       },
       onRetry: () => options.onRetry?.()
     };
     const handle = deps.createTransport(provider, handlers);
     if (handle === null) return null;
-    active = { requestId: null, cancel: handle.cancel };
+    activeRun.cancel = handle.cancel;
+    if (activeRun.cancelRequested && activeRun.requestId) {
+      void activeRun.cancel(activeRun.requestId).catch(() => undefined);
+    }
+    active.set(executionId, activeRun);
 
     // The contract's execute signature matches the loop's ToolExecutor exactly;
     // the cast is structural and safe (both are (approval, args) => Promise<string>).
@@ -127,27 +143,33 @@ export function createNativeApiBackend(
         yield backendErrorEvent(error, "Native-API run failed.");
         yield { type: "done", finishReason: "error" };
       } finally {
-        if (sawCancelled && capabilities.includes("cancellation") && active?.requestId) {
-          await active.cancel(active.requestId);
+        if (sawCancelled && capabilities.includes("cancellation") && activeRun.requestId) {
+          await activeRun.cancel(activeRun.requestId);
         }
-        active = null;
+        if (active.get(executionId) === activeRun) active.delete(executionId);
       }
     }
 
     return wrappedStream();
   }
 
-  async function cancel(_runId: string): Promise<void> {
+  async function cancel(runId: string): Promise<void> {
     if (!capabilities.includes("cancellation")) {
       return;
     }
-    // The adapter tracks its own active requestId internally (captured from the
-    // transport's onRequestStarted callback). The runId argument is accepted for
-    // contract conformance but the requestId is what the egress boundary keyed on.
-    if (active?.requestId) {
-      await active.cancel(active.requestId);
+    let matches = [...active.entries()].filter(([key]) =>
+      key === runId || key.startsWith(`${runId}:worker:`)
+    );
+    // Compatibility for callers created before run-scoped cancellation: a
+    // single live request remains unambiguous even if they pass a placeholder.
+    if (matches.length === 0 && active.size === 1) matches = [...active.entries()];
+    for (const [key, run] of matches) {
+      run.cancelRequested = true;
+      if (run.requestId) {
+        await run.cancel(run.requestId);
+        if (active.get(key) === run) active.delete(key);
+      }
     }
-    active = null;
   }
 
   async function listModels(): Promise<ModelDiscoveryResult> {

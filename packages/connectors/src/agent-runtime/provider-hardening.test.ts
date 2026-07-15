@@ -272,6 +272,74 @@ describe("Provider Hardening Tests", () => {
       expect(cancelSpy).toHaveBeenCalledWith("mock-request-id-123");
     });
 
+    it("keeps parallel child requests distinct and cancels both from the parent run", async () => {
+      const cancelA = vi.fn(async () => undefined);
+      const cancelB = vi.fn(async () => undefined);
+      const cancels = [cancelA, cancelB];
+      let transportIndex = 0;
+      const backend = createNativeApiBackend(mockNativeProvider(), {
+        createTransport: (_provider, handlers) => {
+          const index = transportIndex++;
+          return {
+            transport: {
+              async *stream(): AsyncIterable<string> {
+                handlers.onRequestStarted(`request-${index === 0 ? "a" : "b"}`);
+                yield 'data: {"choices":[{"delta":{"content":"working"}}]}';
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                yield 'data: {"choices":[{"finish_reason":"stop"}]}';
+              }
+            },
+            cancel: cancels[index]
+          };
+        }
+      });
+      const streamA = backend?.run(baseRequest, { runId: "mission-1:worker:a", execute: async () => "" });
+      const streamB = backend?.run(baseRequest, { runId: "mission-1:worker:b", execute: async () => "" });
+      const readerA = streamA?.[Symbol.asyncIterator]();
+      const readerB = streamB?.[Symbol.asyncIterator]();
+      await Promise.all([readerA?.next(), readerB?.next()]);
+
+      await backend?.cancel("mission-1");
+
+      expect(cancelA).toHaveBeenCalledOnce();
+      expect(cancelA).toHaveBeenCalledWith("request-a");
+      expect(cancelB).toHaveBeenCalledOnce();
+      expect(cancelB).toHaveBeenCalledWith("request-b");
+      await Promise.all([readerA?.return?.(), readerB?.return?.()]);
+    });
+
+    it("remembers cancellation requested before the provider assigns a request id", async () => {
+      const cancelSpy = vi.fn(async () => undefined);
+      let started: ((id: string) => void) | undefined;
+      const backend = createNativeApiBackend(mockNativeProvider(), {
+        createTransport: (_provider, handlers) => {
+          started = handlers.onRequestStarted;
+          return {
+            transport: {
+              async *stream(): AsyncIterable<string> {
+                started?.("late-request");
+                yield 'data: {"choices":[{"delta":{"content":"working"}}]}';
+                yield 'data: {"choices":[{"finish_reason":"stop"}]}';
+              }
+            },
+            cancel: cancelSpy
+          };
+        }
+      });
+      const stream = backend?.run(baseRequest, {
+        runId: "mission-early:worker:a", execute: async () => ""
+      });
+      const reader = stream?.[Symbol.asyncIterator]();
+
+      await backend?.cancel("mission-early");
+      await reader?.next();
+      await Promise.resolve();
+
+      expect(cancelSpy).toHaveBeenCalledOnce();
+      expect(cancelSpy).toHaveBeenCalledWith("late-request");
+      await reader?.return?.();
+    });
+
     it("safe no-op when cancel called with no active run", async () => {
       const backend = createNativeApiBackend(mockNativeProvider(), {
         createTransport: () => null
