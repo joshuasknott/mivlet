@@ -177,6 +177,8 @@ pub fn run() {
             mission_parallel_approaches::mission_parallel_approaches_join_open,
             mission_parallel_approaches::mission_parallel_approaches_finalize,
             mission_parallel_approaches::mission_parallel_approaches_recover_completed,
+            mission_parallel_approaches::mission_parallel_approaches_reviewer_prepare,
+            mission_parallel_approaches::mission_parallel_approaches_reviewer_recover,
             mission_structured_intake::mission_structured_intake_start,
             mission_artifact_revision_brief::mission_artifact_revision_brief_start,
             mission_workers::mission_worker_create,

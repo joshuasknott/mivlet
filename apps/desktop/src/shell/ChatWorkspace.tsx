@@ -14,7 +14,7 @@ import { insertDictation } from "../lib/insert-dictation";
 import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
 import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/structured-intake-mission";
 import { artifactRevisionBriefFocus, startArtifactRevisionBriefMission } from "../lib/artifact-revision-brief-mission";
-import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-mission";
+import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, resumeReviewedParallelApproachesMissions, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-mission";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
@@ -240,7 +240,9 @@ export function ChatWorkspace() {
   }, [agent.cancel, boundWorkspaceId, runtime.activeItem]);
 
   useEffect(() => {
-    if (!boundWorkspaceId || parallelRecoveryWorkspaceRef.current === boundWorkspaceId
+    const recoveryBackend = agent.backend;
+    if (!boundWorkspaceId || recoveryBackend?.providerId !== "openai"
+      || parallelRecoveryWorkspaceRef.current === boundWorkspaceId
       || parallelRecoveryWorkspaceRef.current === `pending:${boundWorkspaceId}`) return;
     const pendingKey = `pending:${boundWorkspaceId}`;
     parallelRecoveryWorkspaceRef.current = pendingKey;
@@ -250,7 +252,15 @@ export function ChatWorkspace() {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          return await recoverRuntimeCompletedParallelApproaches();
+          const reviewed = await resumeReviewedParallelApproachesMissions({
+            backend: recoveryBackend,
+            onCancellationReady: (cancel) => {
+              parallelMissionCancellationRef.current = cancel;
+              setParallelMissionRunning(Boolean(cancel));
+            }
+          });
+          const terminal = await recoverRuntimeCompletedParallelApproaches();
+          return { terminal, changed: reviewed.finalized > 0 || Boolean(terminal?.length) };
         } catch (error) {
           lastError = error;
           if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 100 * (attempt + 1)));
@@ -258,21 +268,25 @@ export function ChatWorkspace() {
       }
       throw lastError;
     };
-    void recover().then(async (results) => {
+    void recover().then(async ({ changed }) => {
       if (!active) return;
       parallelRecoveryWorkspaceRef.current = boundWorkspaceId;
-      if (!results?.length || !sourceThreadId || selectedConversationThreadIdRef.current !== sourceThreadId) return;
+      parallelMissionCancellationRef.current = null;
+      setParallelMissionRunning(false);
+      if (!changed || !sourceThreadId || selectedConversationThreadIdRef.current !== sourceThreadId) return;
       await durableConversation.refresh();
       if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
       const artifacts = await listRuntimeThreadArtifacts(sourceThreadId);
       if (selectedConversationThreadIdRef.current === sourceThreadId) setThreadArtifacts(artifacts);
     }).catch(() => {
+      parallelMissionCancellationRef.current = null;
+      setParallelMissionRunning(false);
       if (active && parallelRecoveryWorkspaceRef.current === pendingKey) {
         parallelRecoveryWorkspaceRef.current = null;
       }
     });
     return () => { active = false; };
-  }, [boundWorkspaceId, durableConversation.refresh]);
+  }, [agent.backend, boundWorkspaceId, durableConversation.refresh]);
 
   useEffect(() => {
     if (navigationTarget.current === runtime.activeItem) {

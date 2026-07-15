@@ -768,9 +768,27 @@ replay are durable, while the desktop exposes the compact plan, live stop path,
 recovered result, and artifact action without overflow at desktop or mobile sizes.
 Focused portable, native, runtime, provider-cancellation, renderer, and responsive
 evidence covers this fixed benchmark. It does not yet establish arbitrary worker
-counts, dynamic review, general joins, multiple providers, tool-bearing parallel
-steps, bounded iteration, escalation, or live packaged-app/provider validation, so
-the Wave 4C checkbox remains unchecked.
+counts, general joins, multiple providers, tool-bearing parallel steps, bounded
+iteration, escalation, or live packaged-app/provider validation, so the Wave 4C
+checkbox remains unchecked.
+
+An explicit opt-in variant now adds one independent reviewer after the same two
+producer outputs are durable. Rust alone resolves the producer join, reloads and
+hash-verifies both immutable receipts, derives the bounded reviewer prompt and
+pinned route, creates the third worker, and validates its exact advisory Markdown
+contract. The reviewer covers four declared criteria with an inconclusive
+worker-evaluation envelope; its recommendation cannot represent policy or human
+acceptance. A second replay-safe `all` join binds both approaches and the review
+before one deterministic aggregate artifact and terminal transcript are created.
+Restart recovery resumes only the prepared reviewer, malformed review output
+consumes the single attempt as a durable validation failure, and cancellation is
+persisted before provider abort with recovery for the producer-to-reviewer gap.
+Ordinary two-approach requests retain the v1 two-worker shape. Focused native,
+runtime, renderer, cancellation-race, restart, exact-replay, tamper, and responsive
+evidence covers this opt-in benchmark. General dynamic reviewer selection and
+justification, arbitrary criteria, reviewer providers, iteration, and live
+packaged-app/provider validation remain open, so the reviewer/judge checkbox also
+stays unchecked.
 
 **Phase 4 complete when:** a multi-provider mission plans, executes, pauses, recovers, and produces coherent artifacts within visible constraints while simple requests remain simple.
 

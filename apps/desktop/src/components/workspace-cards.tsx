@@ -167,7 +167,7 @@ export function ParallelMissionPlanSummary({ plan }: { plan: {
       </ol>
       <ul className="run-context-summary__reasons" aria-label="Parallel plan acceptance and limits">
         {plan.acceptance.map((criterion) => <li key={criterion}>Accepted when: {criterion}</li>)}
-        <li>{plan.budget.maxWorkers} workers at once</li>
+        <li>{plan.budget.maxWorkers} workers total</li>
         <li>{plan.budget.maxOutputTokens} output tokens per worker</li>
         <li>Up to {Math.round(plan.budget.maxDurationMs / 1000)} seconds per worker</li>
         <li>{plan.budget.maxAttempts} attempt per worker</li>

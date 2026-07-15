@@ -3161,6 +3161,19 @@ export interface RuntimeParallelApproachesResult {
   journal: Record<string, unknown>;
 }
 
+export interface RuntimeParallelReviewerPreparation {
+  missionId: string;
+  runId: string;
+  workerId: string;
+  providerId: "openai";
+  modelReference: string;
+  prompt: string;
+  maxOutputTokens: number;
+  alreadyCompleted: boolean;
+  execution: import("@fable/protocol").MissionWorkerExecutionBinding;
+  journal: Record<string, unknown>;
+}
+
 function parseRuntimeParallelJournal(value: unknown): Record<string, unknown> {
   if (!isRecord(value) || !isRecord(value.run) || !Array.isArray(value.events)) {
     throw new Error("Malformed parallel mission journal response.");
@@ -3200,6 +3213,52 @@ function parseRuntimeParallelApproachesResult(value: unknown): RuntimeParallelAp
   };
 }
 
+function parseRuntimeParallelReviewerPreparation(value: unknown): RuntimeParallelReviewerPreparation {
+  const allowed = new Set([
+    "missionId", "runId", "workerId", "providerId", "modelReference", "prompt",
+    "maxOutputTokens", "alreadyCompleted", "execution", "journal"
+  ]);
+  const executionKeys = new Set([
+    "runId", "workerId", "workerStartedEventId", "routeSelectedEventId", "usageEventId",
+    "completionEventId", "evaluationEventId", "resultEventId", "failureEventId",
+    "idempotencyKey", "expectedRunRevision", "expectedLastSequence"
+  ]);
+  if (!isRecord(value) || Object.keys(value).some((key) => !allowed.has(key))
+    || typeof value.missionId !== "string" || !value.missionId || value.missionId.length > 200
+    || typeof value.runId !== "string" || !value.runId || value.runId.length > 200
+    || typeof value.workerId !== "string" || !value.workerId || value.workerId.length > 200
+    || value.providerId !== "openai"
+    || typeof value.modelReference !== "string" || !value.modelReference || value.modelReference.length > 200
+    || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > 131_072
+    || value.maxOutputTokens !== 2_048 || typeof value.alreadyCompleted !== "boolean") {
+    throw new Error("Malformed parallel reviewer preparation response.");
+  }
+  const execution = value.execution;
+  if (!isRecord(execution)
+    || Object.keys(execution).some((key) => !executionKeys.has(key))
+    || !["runId", "workerId", "workerStartedEventId", "routeSelectedEventId", "usageEventId",
+      "completionEventId", "evaluationEventId", "resultEventId", "failureEventId", "idempotencyKey"]
+      .every((key) => typeof execution[key] === "string" && Boolean((execution[key] as string).trim())
+        && (execution[key] as string).length <= 200)
+    || execution.runId !== value.runId || execution.workerId !== value.workerId
+    || !Number.isInteger(execution.expectedRunRevision) || (execution.expectedRunRevision as number) < 1
+    || !Number.isInteger(execution.expectedLastSequence) || (execution.expectedLastSequence as number) < 1) {
+    throw new Error("Malformed parallel reviewer preparation response.");
+  }
+  return {
+    missionId: value.missionId,
+    runId: value.runId,
+    workerId: value.workerId,
+    providerId: "openai",
+    modelReference: value.modelReference,
+    prompt: value.prompt,
+    maxOutputTokens: value.maxOutputTokens,
+    alreadyCompleted: value.alreadyCompleted,
+    execution: execution as unknown as import("@fable/protocol").MissionWorkerExecutionBinding,
+    journal: parseRuntimeParallelJournal(value.journal)
+  };
+}
+
 export async function openRuntimeParallelApproachesJoin(input: {
   runId: string;
   expectedRunRevision: number;
@@ -3210,6 +3269,26 @@ export async function openRuntimeParallelApproachesJoin(input: {
     return parseRuntimeParallelJournal(
       await invoke<unknown>("mission_parallel_approaches_join_open", { input })
     );
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function prepareRuntimeParallelApproachesReviewer(runId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return parseRuntimeParallelReviewerPreparation(
+      await invoke<unknown>("mission_parallel_approaches_reviewer_prepare", { input: { runId } })
+    );
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function recoverRuntimeParallelApproachesReviewers() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const value = await invoke<unknown>("mission_parallel_approaches_reviewer_recover");
+    if (!Array.isArray(value) || value.length > 50) {
+      throw new Error("Malformed parallel reviewer recovery response.");
+    }
+    return value.map(parseRuntimeParallelReviewerPreparation);
   } catch (error) { throw toRuntimeError(error); }
 }
 

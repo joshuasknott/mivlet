@@ -1,7 +1,7 @@
 //! Authenticated native construction of bounded mission worker assignments.
 
 use chrono::{SecondsFormat, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -18,7 +18,7 @@ const CITED_PARTIAL_ACCEPTANCE_SUMMARY: &str =
 const CITED_HUMAN_DENIAL_SUMMARY: &str =
     "The policy-passed cited draft was preserved without being accepted as an artifact.";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeWorkerExecutionBinding {
     pub run_id: String,
@@ -33,15 +33,15 @@ pub struct NativeWorkerExecutionBinding {
     pub idempotency_key: String,
     pub expected_run_revision: i64,
     pub expected_last_sequence: i64,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_event_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_restore_event_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_evidence: Option<NativeWorkerToolEvidenceBinding>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NativeWorkerToolEvidenceBinding {
     pub tool_event_id: String,
@@ -103,6 +103,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     max_attempts: i64,
     evidence: Option<Value>,
     parallel_evidence_free: bool,
+    reviewed_parallel_context: Option<crate::mission_parallel_approaches::ReviewedWorkerContext>,
 }
 
 #[derive(Clone, Debug)]
@@ -166,6 +167,38 @@ pub(crate) enum NativeWorkerTerminalOutcome {
         attempt_number: i64,
     },
     Cancelled,
+}
+
+fn enforce_reviewed_parallel_output_contract(
+    reviewed_context: Option<&crate::mission_parallel_approaches::ReviewedWorkerContext>,
+    outcome: NativeWorkerTerminalOutcome,
+) -> NativeWorkerTerminalOutcome {
+    if !reviewed_context.is_some_and(|context| context.is_reviewer) {
+        return outcome;
+    }
+    match outcome {
+        NativeWorkerTerminalOutcome::Completed {
+            text,
+            input_tokens,
+            output_tokens,
+            duration_ms,
+            attempt_number,
+        } if text.as_deref().is_none_or(|text| {
+            crate::mission_parallel_approaches::validate_review_markdown(text).is_err()
+        }) =>
+        {
+            NativeWorkerTerminalOutcome::Failed {
+                code: "native-worker-output-contract-invalid",
+                message:
+                    "The reviewer output did not match its required bounded Markdown contract.",
+                retryable: false,
+                usage: Some((input_tokens, output_tokens)),
+                duration_ms,
+                attempt_number,
+            }
+        }
+        outcome => outcome,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1968,17 +2001,51 @@ pub(crate) fn preflight_native_worker_completion(
                 model,
             )
             .map_err(crate::store::StoreError::Invalid)?;
+            let mission_id = journal
+                .run
+                .get("missionId")
+                .or_else(|| journal.run.pointer("/initiator/missionId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Mission run has no selected mission.".into(),
+                    )
+                })?;
+            let lifecycle = mission_plan::get(tx, store, &scope, &member, mission_id)?
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
+                })?;
+            let reviewed_parallel_context =
+                crate::mission_parallel_approaches::reviewed_worker_context_in_tx(
+                    tx,
+                    store,
+                    &scope,
+                    &member,
+                    &journal,
+                    &lifecycle,
+                    &binding.worker_id,
+                )?;
             let evidence = match binding.tool_evidence.as_ref() {
                 Some(evidence) => Some(load_native_tool_evidence(
                     tx, store, &scope, &member, &journal, binding, worker, evidence,
                 )?),
                 None => {
-                    for path in ["/tools", "/context", "/capabilityIds", "/capabilityGrantIds"] {
+                    for path in ["/tools", "/capabilityIds", "/capabilityGrantIds"] {
                         if worker.pointer(path).and_then(Value::as_array).is_none_or(|items| !items.is_empty()) {
                             return Err(crate::store::StoreError::Invalid(
                                 "Native completion requires exact attested tool evidence for a tool-bearing worker.".into(),
                             ));
                         }
+                    }
+                    if reviewed_parallel_context.is_none()
+                        && worker
+                            .pointer("/context")
+                            .and_then(Value::as_array)
+                            .is_none_or(|items| !items.is_empty())
+                    {
+                        return Err(crate::store::StoreError::Invalid(
+                            "Native completion does not accept unattested worker context.".into(),
+                        ));
                     }
                     None
                 }
@@ -2019,27 +2086,13 @@ pub(crate) fn preflight_native_worker_completion(
             // A checkpoint restore advances the run attempt while retaining the
             // same worker assignment. The mission owns that retry budget; the
             // worker's per-assignment attempt clamp must not invalidate attempt 2.
-            let mission_id = journal
-                .run
-                .get("missionId")
-                .or_else(|| journal.run.pointer("/initiator/missionId"))
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    crate::store::StoreError::Invalid(
-                        "Mission run has no selected mission.".into(),
-                    )
-                })?;
-            let lifecycle = mission_plan::get(tx, store, &scope, &member, mission_id)?
-                .ok_or_else(|| {
-                    crate::store::StoreError::Invalid("Mission plan is unavailable.".into())
-                })?;
             let parallel_evidence_free = is_parallel_evidence_free_markdown_run(
                 &journal,
                 &lifecycle,
                 binding,
                 worker,
                 output.as_ref(),
-            );
+            ) || reviewed_parallel_context.is_some();
             let max_attempts = lifecycle
                 .mission
                 .pointer("/budget/maxAttempts")
@@ -2051,7 +2104,12 @@ pub(crate) fn preflight_native_worker_completion(
                 })?;
             validate_native_attempt_budget(max_attempts, attempt_number)
                 .map_err(crate::store::StoreError::Invalid)?;
-            let prompt = native_worker_prompt(objective, output.as_ref(), evidence.as_ref());
+            let prompt = native_attested_worker_prompt(
+                objective,
+                output.as_ref(),
+                evidence.as_ref(),
+                reviewed_parallel_context.as_ref(),
+            );
             validate_openai_worker_body(body, model, &prompt, max_tokens)
                 .map_err(crate::store::StoreError::Invalid)?;
             for event_key in native_terminal_event_keys(binding)
@@ -2141,6 +2199,7 @@ pub(crate) fn preflight_native_worker_completion(
                 max_attempts,
                 evidence,
                 parallel_evidence_free,
+                reviewed_parallel_context,
             }))
         })
         .map_err(|error| error.to_string())
@@ -2329,6 +2388,10 @@ pub(crate) fn settle_native_worker_completion(
                     authority.parallel_evidence_free,
                 );
             }
+            let outcome = enforce_reviewed_parallel_output_contract(
+                authority.reviewed_parallel_context.as_ref(),
+                outcome,
+            );
             let retry_key = native_retry_event_key(&authority.binding)
                 .map_err(crate::store::StoreError::Invalid)?;
             if let Some(existing) = journal.events.iter().find(|event| {
@@ -2561,6 +2624,8 @@ pub(crate) fn settle_native_worker_completion(
                             | "native-worker-duration-budget-exceeded"
                     ) {
                         "budget-exceeded"
+                    } else if code == "native-worker-output-contract-invalid" {
+                        "validation"
                     } else {
                         "provider"
                     };
@@ -5100,13 +5165,31 @@ fn validate_parallel_evidence_free_authority(
         .ok_or_else(|| {
             crate::store::StoreError::Invalid("Mission worker assignment is unavailable.".into())
         })?;
+    let reviewed = crate::mission_parallel_approaches::reviewed_worker_context_in_tx(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        journal,
+        &lifecycle,
+        &authority.binding.worker_id,
+    )?;
+    let reviewed_matches = reviewed.as_ref().is_some_and(|context| {
+        authority
+            .reviewed_parallel_context
+            .as_ref()
+            .is_some_and(|expected| {
+                expected.is_reviewer == context.is_reviewer && expected.prompt == context.prompt
+            })
+    });
     if !is_parallel_evidence_free_markdown_run(
         journal,
         &lifecycle,
         &authority.binding,
         worker,
         authority.output.as_ref(),
-    ) {
+    ) && !reviewed_matches
+    {
         return Err(crate::store::StoreError::Invalid(
             "Parallel mission worker authority changed during provider execution.".into(),
         ));
@@ -5740,6 +5823,19 @@ fn native_worker_prompt(
             prompt
         },
     )
+}
+
+fn native_attested_worker_prompt(
+    objective: &str,
+    output: Option<&NativeWorkerOutputSpec>,
+    evidence: Option<&Value>,
+    reviewed_context: Option<&crate::mission_parallel_approaches::ReviewedWorkerContext>,
+) -> String {
+    let objective = reviewed_context
+        .filter(|context| context.is_reviewer)
+        .map(|context| context.prompt.as_str())
+        .unwrap_or(objective);
+    native_worker_prompt(objective, output, evidence)
 }
 
 fn validate_cited_brief(text: &str, evidence: &Value) -> Result<Vec<Value>, String> {
@@ -7194,6 +7290,14 @@ fn native_contract_error_valid(error: &Value) -> bool {
                 == Some("The native provider exceeded the worker duration budget.")
             && error.get("retryable").and_then(Value::as_bool) == Some(false);
     }
+    if error.get("code").and_then(Value::as_str) == Some("native-worker-output-contract-invalid") {
+        return error.get("category").and_then(Value::as_str) == Some("validation")
+            && error.get("message").and_then(Value::as_str)
+                == Some(
+                    "The reviewer output did not match its required bounded Markdown contract.",
+                )
+            && error.get("retryable").and_then(Value::as_bool) == Some(false);
+    }
     if error.get("category").and_then(Value::as_str) != Some("provider")
         || error.get("retryable").and_then(Value::as_bool).is_none()
     {
@@ -8539,6 +8643,125 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const VALID_REVIEW_OUTPUT: &str = "Recommendation: Combine\n\n## Fit with the requested outcome\nUse the practical base with a bounded alternative trial.\n\n## Feasibility and material trade-offs\nThis preserves speed while adding measured exploration.\n\n## Reversibility and material risk\nStart with a reversible pilot before committing broadly.\n\n## Uncertainty and remaining human judgement\nA human still needs to choose the acceptable rollout risk.";
+
+    #[test]
+    fn reviewed_parallel_prompt_attests_the_exact_native_wrapper() {
+        let output = NativeWorkerOutputSpec {
+            key: "review".into(),
+            description: "Advisory Markdown review using the fixed recommendation vocabulary."
+                .into(),
+            include_uncertainty: true,
+            include_evidence: false,
+        };
+        let context = crate::mission_parallel_approaches::ReviewedWorkerContext {
+            prompt: "Review these exact immutable producer outputs.".into(),
+            is_reviewer: true,
+        };
+
+        let prompt = native_attested_worker_prompt(
+            "Persisted reviewer objective",
+            Some(&output),
+            None,
+            Some(&context),
+        );
+
+        assert_eq!(
+            prompt,
+            "Objective:\nReview these exact immutable producer outputs.\n\nRequired output (review; text/markdown):\nAdvisory Markdown review using the fixed recommendation vocabulary.\n\nReturn one Markdown result only.\nState material uncertainty explicitly in the Markdown result."
+        );
+        assert!(!prompt.contains("Persisted reviewer objective"));
+    }
+
+    #[test]
+    fn malformed_reviewed_parallel_output_consumes_the_attempt_as_failure() {
+        let context = crate::mission_parallel_approaches::ReviewedWorkerContext {
+            prompt: "Review the exact producer outputs.".into(),
+            is_reviewer: true,
+        };
+        let outcome = enforce_reviewed_parallel_output_contract(
+            Some(&context),
+            NativeWorkerTerminalOutcome::Completed {
+                text: Some("Recommendation: invent a fifth option".into()),
+                input_tokens: 41,
+                output_tokens: 7,
+                duration_ms: 900,
+                attempt_number: 1,
+            },
+        );
+
+        match outcome {
+            NativeWorkerTerminalOutcome::Failed {
+                code,
+                retryable,
+                usage,
+                duration_ms,
+                attempt_number,
+                ..
+            } => {
+                assert_eq!(code, "native-worker-output-contract-invalid");
+                assert!(!retryable);
+                assert_eq!(usage, Some((41, 7)));
+                assert_eq!(duration_ms, 900);
+                assert_eq!(attempt_number, 1);
+            }
+            _ => panic!("malformed reviewer output must become one durable failure"),
+        }
+        assert!(native_contract_error_valid(&json!({
+            "code":"native-worker-output-contract-invalid",
+            "category":"validation",
+            "message":"The reviewer output did not match its required bounded Markdown contract.",
+            "retryable":false
+        })));
+    }
+
+    #[test]
+    fn valid_reviewed_parallel_output_remains_completed() {
+        let context = crate::mission_parallel_approaches::ReviewedWorkerContext {
+            prompt: "Review the exact producer outputs.".into(),
+            is_reviewer: true,
+        };
+        let outcome = enforce_reviewed_parallel_output_contract(
+            Some(&context),
+            NativeWorkerTerminalOutcome::Completed {
+                text: Some(VALID_REVIEW_OUTPUT.into()),
+                input_tokens: 41,
+                output_tokens: 70,
+                duration_ms: 900,
+                attempt_number: 1,
+            },
+        );
+        assert!(matches!(
+            outcome,
+            NativeWorkerTerminalOutcome::Completed { .. }
+        ));
+    }
+
+    #[test]
+    fn execution_binding_serialization_omits_absent_optional_authority() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-1".into(),
+            worker_id: "worker-1".into(),
+            worker_started_event_id: "started-1".into(),
+            route_selected_event_id: "route-1".into(),
+            usage_event_id: "usage-1".into(),
+            completion_event_id: "complete-1".into(),
+            evaluation_event_id: "evaluation-1".into(),
+            result_event_id: "result-1".into(),
+            failure_event_id: "failure-1".into(),
+            idempotency_key: "terminal-1".into(),
+            expected_run_revision: 4,
+            expected_last_sequence: 3,
+            checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
+            tool_evidence: None,
+        };
+        let value = serde_json::to_value(binding).unwrap();
+        assert!(value.get("checkpointEventId").is_none());
+        assert!(value.get("checkpointRestoreEventId").is_none());
+        assert!(value.get("toolEvidence").is_none());
+    }
 
     fn append_approval_fixture_event(
         tx: &rusqlite::Connection,

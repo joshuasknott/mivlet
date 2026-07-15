@@ -15,6 +15,8 @@ import {
   listRuntimePendingMissionHumanInputs,
   listRuntimeNativeProviderRoutes,
   openRuntimeParallelApproachesJoin,
+  prepareRuntimeParallelApproachesReviewer,
+  recoverRuntimeParallelApproachesReviewers,
   finalizeRuntimeParallelApproaches,
   recoverRuntimeCompletedParallelApproaches,
   prepareRuntimeCitedMissionRetry,
@@ -61,6 +63,8 @@ describe("mission runtime boundary", () => {
     await expect(openRuntimeParallelApproachesJoin({
       runId: "run-1", expectedRunRevision: 4, expectedLastSequence: 3
     })).resolves.toBeNull();
+    await expect(prepareRuntimeParallelApproachesReviewer("run-1")).resolves.toBeNull();
+    await expect(recoverRuntimeParallelApproachesReviewers()).resolves.toBeNull();
     await expect(finalizeRuntimeParallelApproaches("run-1")).resolves.toBeNull();
     await expect(recoverRuntimeCompletedParallelApproaches()).resolves.toBeNull();
     await expect(prepareRuntimeCitedMissionRetry("run-1")).resolves.toBeNull();
@@ -122,6 +126,35 @@ describe("mission runtime boundary", () => {
     mocks.invoke.mockResolvedValueOnce({ ...completed, outcome: "partial" });
     await expect(finalizeRuntimeParallelApproaches("run-1"))
       .rejects.toThrow("Malformed parallel mission result response");
+  });
+
+  it("accepts only an exact native reviewer preparation", async () => {
+    setNative(true);
+    const journal = { run: { id: "run-1", status: "running" }, events: [] };
+    const preparation = {
+      missionId: "mission-1", runId: "run-1", workerId: "worker-review",
+      providerId: "openai", modelReference: "gpt-5", prompt: "Native review prompt",
+      maxOutputTokens: 2_048, alreadyCompleted: false,
+      execution: {
+        runId: "run-1", workerId: "worker-review", workerStartedEventId: "event-start",
+        routeSelectedEventId: "event-route", usageEventId: "event-usage",
+        completionEventId: "event-complete", evaluationEventId: "event-evaluation",
+        resultEventId: "event-result", failureEventId: "event-failure",
+        idempotencyKey: "review-terminal", expectedRunRevision: 12, expectedLastSequence: 11
+      },
+      journal
+    };
+    mocks.invoke.mockResolvedValueOnce(preparation).mockResolvedValueOnce([preparation]);
+    await expect(prepareRuntimeParallelApproachesReviewer("run-1")).resolves.toEqual(preparation);
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "mission_parallel_approaches_reviewer_prepare", { input: { runId: "run-1" } }
+    );
+    await expect(recoverRuntimeParallelApproachesReviewers()).resolves.toEqual([preparation]);
+    expect(mocks.invoke).toHaveBeenLastCalledWith("mission_parallel_approaches_reviewer_recover");
+
+    mocks.invoke.mockResolvedValueOnce({ ...preparation, providerId: "anthropic" });
+    await expect(prepareRuntimeParallelApproachesReviewer("run-1"))
+      .rejects.toThrow("Malformed parallel reviewer preparation response");
   });
 
   it("selects one deterministic newest dormant cited approval", () => {

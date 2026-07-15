@@ -100,24 +100,35 @@ vi.mock("./lib/parallel-approaches-mission", () => ({
   isParallelApproachesMissionPrompt: (value: string) =>
     /generate two approaches/i.test(value) && /compare/i.test(value),
   isParallelApproachesPlanSummary: (value: unknown) => typeof value === "object" && value !== null,
+  resumeReviewedParallelApproachesMissions: vi.fn(async () => ({ resumed: 0, finalized: 0 })),
   executeParallelApproachesMission: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.parallelApproachCalls.push(input);
+    const reviewed = /\b(?:reviewer|judge)\b/i.test(String(input.prompt ?? ""));
     const plan = {
       title: "Compare two approaches",
       summary: "Generate two approaches for onboarding and compare them.",
-      executionLabel: "Two workers · deterministic join",
+      executionLabel: reviewed ? "Two producers · one independent reviewer" : "Two workers · deterministic join",
       steps: [
         { title: "Practical approach", objective: "Prefer low complexity.", output: "Required Markdown approach" },
         { title: "Alternative approach", objective: "Explore higher upside.", output: "Required Markdown approach" },
+        ...(reviewed ? [{
+          title: "Independent review",
+          objective: "Assess only the two joined outputs against the declared criteria.",
+          output: "Bounded model-generated recommendation"
+        }] : []),
         { title: "Compare", objective: "Join both exact outputs.", output: "Draft comparison artifact" }
       ],
-      acceptance: ["Both independently generated outputs must reach the durable all-workers join."],
-      budget: { maxWorkers: 2, maxDurationMs: 90_000, maxOutputTokens: 2_048, maxAttempts: 1 }
+      acceptance: [reviewed
+        ? "Both outputs reach the durable join and the independent reviewer assesses only those exact outputs."
+        : "Both independently generated outputs must reach the durable all-workers join."],
+      budget: { maxWorkers: reviewed ? 3 : 2, maxDurationMs: 90_000, maxOutputTokens: 2_048, maxAttempts: 1 }
     };
     (input.onPlanReady as ((plan: unknown) => void) | undefined)?.(plan);
     return {
       missionId: "parallel-mission-ui", runId: "parallel-run-ui", outcome: "completed",
-      text: "# Two approaches\n\n## Approach A\n\nPractical.\n\n## Approach B\n\nAlternative.",
+      text: reviewed
+        ? "# Two approaches\n\n## Approach A\n\nPractical.\n\n## Approach B\n\nAlternative.\n\n## Independent model review\n\nRecommendation: Approach A."
+        : "# Two approaches\n\n## Approach A\n\nPractical.\n\n## Approach B\n\nAlternative.",
       artifactId: "parallel-artifact-ui", artifactVersionId: "parallel-version-ui",
       journal: {}, plan
     };
@@ -1928,6 +1939,33 @@ describe("Fable home", () => {
     expect(runtimeMocks.parallelApproachCalls[0]).toMatchObject({
       workspaceId: "preview-default", sourceThreadId: expect.any(String), model: "gpt-5"
     });
+  });
+
+  it("shows an independent reviewer only when the comparison request asks for one", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-reviewed-parallel-ui", projectId: null, title: "Reviewed comparison",
+      lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reviewed comparison" }));
+    await user.type(
+      screen.getByLabelText(/universal composer/i),
+      "Generate two approaches for onboarding and compare them, then have an independent reviewer assess them."
+    );
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(runtimeMocks.parallelApproachCalls).toHaveLength(1));
+    expect(await screen.findByText(/Recommendation: Approach A/)).toBeInTheDocument();
+    const plan = screen.getByLabelText("Parallel mission plan");
+    expect(plan).toHaveTextContent("Two producers · one independent reviewer");
+    expect(plan).toHaveTextContent("Independent review");
+    expect(plan).toHaveTextContent("3 workers total");
   });
 
   it("rehydrates one native mission-input request and submits typed values once", async () => {

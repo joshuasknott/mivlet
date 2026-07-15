@@ -200,7 +200,7 @@ describe("RunContextSummary", () => {
     expect(plan).toHaveTextContent("Practical approach");
     expect(plan).toHaveTextContent("Alternative approach");
     expect(plan).toHaveTextContent("Join both exact outputs.");
-    expect(plan).toHaveTextContent("2 workers at once");
+    expect(plan).toHaveTextContent("2 workers total");
     expect(plan).not.toHaveTextContent("mission-");
   });
 
