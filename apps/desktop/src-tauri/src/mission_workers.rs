@@ -709,8 +709,132 @@ pub(crate) fn validate_pending_cited_approval(
     cited_approval_facts(tx, store, scope, owner_member_id, journal, None).map(|_| ())
 }
 
+fn terminal_cited_approval_decision(
+    journal: &mission_run::MissionRunJournalRow,
+) -> crate::store::Result<&str> {
+    let head_id = journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval terminal head is unavailable.".into())
+        })?;
+    let head_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64);
+    let terminal = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(head_id))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited approval terminal result is unavailable.".into(),
+            )
+        })?;
+    let resolution_id = terminal
+        .get("previousEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited approval terminal resolution is unavailable.".into(),
+            )
+        })?;
+    let resolution = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(resolution_id))
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("approval-resolved"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Cited approval terminal resolution is invalid.".into(),
+            )
+        })?;
+    let request_id = resolution
+        .get("previousEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval request is unavailable.".into())
+        })?;
+    let request = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(request_id))
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("approval-requested"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval request is invalid.".into())
+        })?;
+    let decision = resolution
+        .pointer("/payload/resolution/decision")
+        .and_then(Value::as_str)
+        .filter(|decision| matches!(*decision, "approved" | "denied"))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Cited approval decision is invalid.".into())
+        })?;
+    let wait_key = request
+        .pointer("/payload/wait/waitKey")
+        .and_then(Value::as_str);
+    let proposal_hash = request
+        .pointer("/payload/wait/proposalHash")
+        .and_then(Value::as_str);
+    let exact_resolution = wait_key.is_some()
+        && proposal_hash.is_some()
+        && request.get("runId").and_then(Value::as_str)
+            == journal.run.get("id").and_then(Value::as_str)
+        && resolution.get("runId").and_then(Value::as_str)
+            == journal.run.get("id").and_then(Value::as_str)
+        && request
+            .get("sequence")
+            .and_then(Value::as_i64)
+            .is_some_and(|sequence| {
+                resolution.get("sequence").and_then(Value::as_i64) == Some(sequence + 1)
+            })
+        && resolution
+            .pointer("/payload/resolution/waitKey")
+            .and_then(Value::as_str)
+            == wait_key
+        && resolution
+            .pointer("/payload/resolution/acceptedProposalHash")
+            .and_then(Value::as_str)
+            == proposal_hash;
+    let exact_terminal = terminal.get("sequence").and_then(Value::as_i64) == head_sequence
+        && terminal.get("runId").and_then(Value::as_str)
+            == journal.run.get("id").and_then(Value::as_str)
+        && resolution
+            .get("sequence")
+            .and_then(Value::as_i64)
+            .is_some_and(|sequence| {
+                terminal.get("sequence").and_then(Value::as_i64) == Some(sequence + 1)
+            })
+        && match decision {
+            "approved" => {
+                journal.run.get("status").and_then(Value::as_str) == Some("completed")
+                    && terminal.get("type").and_then(Value::as_str) == Some("run-completed")
+                    && terminal
+                        .pointer("/payload/result/outcome")
+                        .and_then(Value::as_str)
+                        == Some("succeeded")
+            }
+            "denied" => {
+                journal.run.get("status").and_then(Value::as_str) == Some("partially-completed")
+                    && terminal.get("type").and_then(Value::as_str) == Some("run-failed")
+                    && terminal
+                        .pointer("/payload/error/code")
+                        .and_then(Value::as_str)
+                        == Some("human-acceptance-denied")
+            }
+            _ => false,
+        };
+    if !exact_resolution || !exact_terminal {
+        return Err(crate::store::StoreError::Invalid(
+            "Cited approval terminal chain is invalid.".into(),
+        ));
+    }
+    Ok(decision)
+}
+
 #[tauri::command]
-pub fn mission_cited_approval_pending_list(thread_id: String) -> Result<Vec<Value>, String> {
+pub fn mission_cited_approval_pending_list(thread_id: String) -> Result<Value, String> {
     if thread_id.trim().is_empty() || thread_id.len() > 160 {
         return Err("Cited approval conversation is invalid.".into());
     }
@@ -728,19 +852,48 @@ pub fn mission_cited_approval_pending_list(thread_id: String) -> Result<Vec<Valu
             let scope = crate::store::repos::scope::DataScope::workspace(
                 context.active_workspace.local_workspace_id,
             )?;
+            const MAX_PENDING_APPROVALS: usize = 100;
+            let candidates = mission_run::list_waiting_approval_ids(
+                tx,
+                &scope,
+                &member,
+                (MAX_PENDING_APPROVALS + 1) as i64,
+            )?;
+            let truncated = candidates.len() > MAX_PENDING_APPROVALS;
             let mut pending = Vec::new();
-            for run_id in mission_run::list_nonterminal_ids(tx, &scope, &member)? {
-                let Some(journal) = mission_run::get(tx, store, &scope, &member, &run_id)? else {
-                    continue;
+            let mut unavailable_count = 0_u64;
+            for run_id in candidates.into_iter().take(MAX_PENDING_APPROVALS) {
+                let journal = match mission_run::get(tx, store, &scope, &member, &run_id) {
+                    Ok(Some(journal)) => journal,
+                    Ok(None) => continue,
+                    Err(_) => {
+                        unavailable_count += 1;
+                        continue;
+                    }
                 };
-                if journal.run.get("status").and_then(Value::as_str) != Some("waiting-approval")
-                    || journal.run.get("sourceThreadId").and_then(Value::as_str)
-                        != Some(thread_id.as_str())
+                if journal.run.get("status").and_then(Value::as_str) != Some("waiting-approval") {
+                    unavailable_count += 1;
+                    continue;
+                }
+                if journal.run.get("sourceThreadId").and_then(Value::as_str)
+                    != Some(thread_id.as_str())
                 {
                     continue;
                 }
-                let facts =
-                    cited_approval_facts(tx, store, &scope, &member, &journal, Some(&thread_id))?;
+                let facts = match cited_approval_facts(
+                    tx,
+                    store,
+                    &scope,
+                    &member,
+                    &journal,
+                    Some(&thread_id),
+                ) {
+                    Ok(facts) => facts,
+                    Err(_) => {
+                        unavailable_count += 1;
+                        continue;
+                    }
+                };
                 pending.push(json!({
                     "runId":run_id,
                     "missionId":journal.run.pointer("/initiator/missionId"),
@@ -753,7 +906,11 @@ pub fn mission_cited_approval_pending_list(thread_id: String) -> Result<Vec<Valu
                     "plan":facts.plan_summary
                 }));
             }
-            Ok(pending)
+            Ok(json!({
+                "approvals":pending,
+                "unavailableCount":unavailable_count,
+                "truncated":truncated
+            }))
         })
         .map_err(|error| error.to_string())
 }
@@ -787,11 +944,8 @@ pub fn mission_cited_approval_resolve(
                 journal.run.get("status").and_then(Value::as_str),
                 Some("completed" | "partially-completed")
             ) {
-                let exact = journal.events.iter().any(|event| {
-                    event.get("type").and_then(Value::as_str) == Some("approval-resolved")
-                        && event.pointer("/payload/resolution/decision").and_then(Value::as_str)
-                            == Some(input.decision.as_str())
-                });
+                let exact = terminal_cited_approval_decision(&journal)
+                    .is_ok_and(|decision| decision == input.decision);
                 return if exact {
                     Ok(journal)
                 } else {
@@ -8453,6 +8607,67 @@ mod tests {
             cancelled_messages[1].content,
             json!("Mission cancelled: The mission stopped after its cancellation request was observed.")
         );
+    }
+
+    fn terminal_approval_journal(decision: &str) -> mission_run::MissionRunJournalRow {
+        let approved = decision == "approved";
+        mission_run::MissionRunJournalRow {
+            run: json!({
+                "id":"run-approval","status":if approved{"completed"}else{"partially-completed"},
+                "eventHead":{"lastSequence":11,"lastEventId":"event-result"}
+            }),
+            events: vec![
+                json!({
+                    "id":"event-request","runId":"run-approval","type":"approval-requested","sequence":9,
+                    "previousEventId":"event-checkpoint","payload":{"wait":{"waitKey":"wait-1","proposalHash":"sha256:proposal"}}
+                }),
+                json!({
+                    "id":"event-resolution","runId":"run-approval","type":"approval-resolved","sequence":10,
+                    "previousEventId":"event-request","payload":{"resolution":{
+                        "waitKey":"wait-1","decision":decision,"acceptedProposalHash":"sha256:proposal"
+                    }}
+                }),
+                if approved {
+                    json!({
+                        "id":"event-result","runId":"run-approval","type":"run-completed","sequence":11,
+                        "previousEventId":"event-resolution","payload":{"result":{"outcome":"succeeded"}}
+                    })
+                } else {
+                    json!({
+                        "id":"event-result","runId":"run-approval","type":"run-failed","sequence":11,
+                        "previousEventId":"event-resolution","payload":{"error":{"code":"human-acceptance-denied"}}
+                    })
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn terminal_approval_replay_requires_the_linked_resolution_chain() {
+        let approved = terminal_approval_journal("approved");
+        assert_eq!(
+            terminal_cited_approval_decision(&approved).unwrap(),
+            "approved"
+        );
+        let denied = terminal_approval_journal("denied");
+        assert_eq!(terminal_cited_approval_decision(&denied).unwrap(), "denied");
+
+        let mut detached = terminal_approval_journal("approved");
+        detached.events.insert(
+            1,
+            json!({
+                "id":"event-resolution-old","runId":"run-approval","type":"approval-resolved","sequence":8,
+                "previousEventId":"event-request","payload":{"resolution":{
+                    "waitKey":"wait-1","decision":"approved","acceptedProposalHash":"sha256:proposal"
+                }}
+            }),
+        );
+        detached.events.last_mut().unwrap()["previousEventId"] = json!("event-resolution-old");
+        assert!(terminal_cited_approval_decision(&detached).is_err());
+
+        let mut changed = terminal_approval_journal("approved");
+        changed.events[1]["payload"]["resolution"]["decision"] = json!("denied");
+        assert!(terminal_cited_approval_decision(&changed).is_err());
     }
 
     #[test]

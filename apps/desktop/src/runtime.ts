@@ -3195,6 +3195,12 @@ export interface RuntimeCitedApproval {
   plan: Record<string, unknown>;
 }
 
+export interface RuntimeCitedApprovalList {
+  approvals: RuntimeCitedApproval[];
+  unavailableCount: number;
+  truncated: boolean;
+}
+
 export function latestRuntimeCitedApproval(
   approvals: readonly RuntimeCitedApproval[]
 ): RuntimeCitedApproval | undefined {
@@ -3219,14 +3225,20 @@ function isRuntimeCitedApproval(value: unknown): value is RuntimeCitedApproval {
     && isRecord(value.plan);
 }
 
-export async function listRuntimePendingCitedApprovals(threadId: string): Promise<RuntimeCitedApproval[]> {
-  if (!hasTauriRuntime()) return [];
+export async function listRuntimePendingCitedApprovals(threadId: string): Promise<RuntimeCitedApprovalList> {
+  if (!hasTauriRuntime()) return { approvals: [], unavailableCount: 0, truncated: false };
   try {
     const result = await invoke<unknown>("mission_cited_approval_pending_list", { threadId });
-    if (!Array.isArray(result) || !result.every(isRuntimeCitedApproval)) {
+    if (!isRecord(result)
+      || Object.keys(result).length !== 3
+      || !Array.isArray(result.approvals)
+      || !result.approvals.every(isRuntimeCitedApproval)
+      || !Number.isInteger(result.unavailableCount)
+      || (result.unavailableCount as number) < 0
+      || typeof result.truncated !== "boolean") {
       throw new Error("Malformed cited approval projection.");
     }
-    return result;
+    return result as unknown as RuntimeCitedApprovalList;
   } catch (error) { throw toRuntimeError(error); }
 }
 

@@ -94,6 +94,7 @@ export function ChatWorkspace() {
   }>({ key: "", plans: {} });
   const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
   const [pendingCitedApprovals, setPendingCitedApprovals] = useState<RuntimeCitedApproval[]>([]);
+  const [approvalListWarning, setApprovalListWarning] = useState<string | null>(null);
   const [approvalBusyRunId, setApprovalBusyRunId] = useState<string | null>(null);
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -550,10 +551,21 @@ export function ChatWorkspace() {
   useEffect(() => {
     let active = true;
     setPendingCitedApprovals([]);
+    setApprovalListWarning(null);
     if (!selectedConversationThreadId) return () => { active = false; };
     void listRuntimePendingCitedApprovals(selectedConversationThreadId)
-      .then((approvals) => { if (active) setPendingCitedApprovals(approvals); })
-      .catch(() => { if (active) setPendingCitedApprovals([]); });
+      .then((result) => {
+        if (!active) return;
+        setPendingCitedApprovals(result.approvals);
+        setApprovalListWarning(result.unavailableCount > 0 || result.truncated
+          ? "Some pending approvals could not be shown. Fable left them untouched."
+          : null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPendingCitedApprovals([]);
+        setApprovalListWarning("Pending approvals are temporarily unavailable. Fable left them untouched.");
+      });
     return () => { active = false; };
   }, [boundWorkspaceId, hydratedConversation?.messages.length, selectedConversationThreadId]);
 
@@ -661,7 +673,7 @@ export function ChatWorkspace() {
   };
 
   const renderConversation = () => {
-    if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0) return null;
+    if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0 && !approvalListWarning) return null;
     return (
       <section className="conversation-feed" aria-label="Conversation">
         {conversationMessages.map((message) => {
@@ -755,6 +767,9 @@ export function ChatWorkspace() {
               />
             </article>
           ))}
+        {approvalListWarning ? (
+          <p className="conversation-feed__notice" role="status">{approvalListWarning}</p>
+        ) : null}
       </section>
     );
   };

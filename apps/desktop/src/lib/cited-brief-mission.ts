@@ -385,7 +385,7 @@ export async function executeCitedBriefMission(input: CitedBriefMissionInput): P
   }
   if ((journal.run as Record<string, unknown>).status === "waiting-approval") {
     const approval = (await listRuntimePendingCitedApprovals(input.sourceThreadId))
-      .find((candidate) => candidate.runId === runId);
+      .approvals.find((candidate) => candidate.runId === runId);
     if (!approval || !isCitedBriefMissionPlanSummary(approval.plan)) {
       throw new Error("The durable cited approval is unavailable.");
     }

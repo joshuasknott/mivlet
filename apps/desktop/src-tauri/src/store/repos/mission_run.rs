@@ -242,6 +242,32 @@ pub fn list_nonterminal_ids(
     Ok(ids)
 }
 
+pub fn list_waiting_approval_ids(
+    tx: &Connection,
+    scope: &DataScope,
+    owner_member_id: &str,
+    limit: i64,
+) -> Result<Vec<String>> {
+    scope.ensure_exists(tx)?;
+    let owner = normalize_id(owner_member_id, "Member")?;
+    if !(1..=1_001).contains(&limit) {
+        return Err(StoreError::Invalid(
+            "Mission approval query limit is invalid.".into(),
+        ));
+    }
+    let mut statement = tx.prepare(
+        "SELECT id FROM mission_run_record WHERE workspace_id=?1 AND owner_member_id=?2 AND terminal=0 AND status='waiting-approval' ORDER BY updated_at DESC,id DESC LIMIT ?3;",
+    )?;
+    let ids = statement
+        .query_map(
+            rusqlite::params![scope.workspace_id(), owner, limit],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(StoreError::from)?;
+    Ok(ids)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_event(
     tx: &Connection,
@@ -523,6 +549,45 @@ mod tests {
             })
             .unwrap();
         assert!(!String::from_utf8_lossy(&ciphertext).contains("status-transitioned"));
+    }
+
+    #[test]
+    fn waiting_approval_query_is_owner_scoped_status_filtered_and_bounded() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        store.transaction(|tx|{tx.execute("INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('w1','One','t','t');",[])?;Ok(())}).unwrap();
+        let scope = DataScope::workspace("w1").unwrap();
+        let first = event("event-1", 1, "run-created", "create", None);
+        store
+            .transaction(|tx| {
+                create(
+                    tx,
+                    &store,
+                    &scope,
+                    "member-1",
+                    "user-1",
+                    "run-1",
+                    "event-1",
+                    "create",
+                    &run(2, 1, "event-1", "waiting-approval"),
+                    &first,
+                    "t1",
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .with_conn(|tx| list_waiting_approval_ids(tx, &scope, "member-1", 100))
+                .unwrap(),
+            vec!["run-1"]
+        );
+        assert!(store
+            .with_conn(|tx| list_waiting_approval_ids(tx, &scope, "member-2", 100))
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .with_conn(|tx| list_waiting_approval_ids(tx, &scope, "member-1", 0))
+            .is_err());
     }
 
     #[test]

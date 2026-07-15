@@ -99,7 +99,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     }
     if (threadId) {
       const pending = await listRuntimePendingCitedApprovals(threadId);
-      const latest = latestRuntimeCitedApproval(pending);
+      const latest = latestRuntimeCitedApproval(pending.approvals);
       if (latest) {
         await cancelRuntimeCitedApproval(latest);
         await durableConversation.refresh();

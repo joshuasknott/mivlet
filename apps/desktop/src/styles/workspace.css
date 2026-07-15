@@ -123,6 +123,17 @@ kbd {
   margin: 0 auto 18px;
 }
 
+.conversation-feed__notice {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--ink-secondary);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-2);
+  font-size: var(--text-14);
+  line-height: 1.45;
+}
+
 .conversation-message {
   display: flex;
   width: 100%;

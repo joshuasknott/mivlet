@@ -151,11 +151,15 @@ describe("cited brief mission composition", () => {
       .mockReset()
       .mockResolvedValueOnce(journal(7, 6, [{ id: "event-14", type: "tool-call-completed", sequence: 6, payload: { result: { outputReference: "mission-tool:v1:evidence" } } }]))
       .mockResolvedValueOnce(journal(12, 11, [], { status: "waiting-approval" }));
-    mocks.listPendingApprovals.mockResolvedValue([{
-      runId: "mission-run-4", missionId: "mission-1", waitKey: "wait-1", requestedAt: "2026-07-13T00:00:00Z",
-      expectedRunRevision: 12, expectedLastSequence: 11, valueReference: "mission-output:v1:brief",
-      draft: "Policy-passed draft [source-1].", plan: approvalPlan
-    }]);
+    mocks.listPendingApprovals.mockResolvedValue({
+      approvals: [{
+        runId: "mission-run-4", missionId: "mission-1", waitKey: "wait-1", requestedAt: "2026-07-13T00:00:00Z",
+        expectedRunRevision: 12, expectedLastSequence: 11, valueReference: "mission-output:v1:brief",
+        draft: "Policy-passed draft [source-1].", plan: approvalPlan
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
     const result = await executeCitedBriefMission({
       query: "Search my connected work sources for a cited brief and ask me to approve before saving.",
       workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",

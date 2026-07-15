@@ -8,6 +8,7 @@ import {
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   latestRuntimeCitedApproval,
+  listRuntimePendingCitedApprovals,
   listRuntimeNativeProviderRoutes,
   prepareRuntimeCitedMissionRetry,
   readRuntimeCitedMissionReceipts,
@@ -46,6 +47,9 @@ describe("mission runtime boundary", () => {
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
     await expect(prepareRuntimeCitedMissionRetry("run-1")).resolves.toBeNull();
+    await expect(listRuntimePendingCitedApprovals("thread-1")).resolves.toEqual({
+      approvals: [], unavailableCount: 0, truncated: false
+    });
     await expect(restoreRuntimeMissionCheckpoint({
       runId: "run-1", eventId: "event-restore", idempotencyKey: "restore-1",
       expectedRunRevision: 5, expectedLastSequence: 4, newAttemptNumber: 2
@@ -70,6 +74,26 @@ describe("mission runtime boundary", () => {
       approval("run-a", "2026-07-13T12:00:00.000Z")
     ])?.runId).toBe("run-b");
     expect(latestRuntimeCitedApproval([])).toBeUndefined();
+  });
+
+  it("accepts only the bounded native pending-approval projection", async () => {
+    setNative(true);
+    const approval = {
+      runId: "run-1", missionId: "mission-1", waitKey: "wait-1",
+      requestedAt: "2026-07-13T12:00:00.000Z", expectedRunRevision: 4,
+      expectedLastSequence: 8, valueReference: "mission-output:v1:run-1",
+      draft: "Draft", plan: {}
+    };
+    mocks.invoke.mockResolvedValueOnce({ approvals: [approval], unavailableCount: 1, truncated: true });
+    await expect(listRuntimePendingCitedApprovals("thread-1")).resolves.toEqual({
+      approvals: [approval], unavailableCount: 1, truncated: true
+    });
+    mocks.invoke.mockResolvedValueOnce({ approvals: [approval], unavailableCount: -1, truncated: false });
+    await expect(listRuntimePendingCitedApprovals("thread-1")).rejects.toThrow("Malformed cited approval projection");
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["mission_cited_approval_pending_list", { threadId: "thread-1" }],
+      ["mission_cited_approval_pending_list", { threadId: "thread-1" }]
+    ]);
   });
 
   it("composes only the authenticated native mission commands", async () => {

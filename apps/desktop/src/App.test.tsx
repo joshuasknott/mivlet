@@ -200,7 +200,7 @@ vi.mock("./runtime", () => ({
   deleteRuntimeConversationDraft: vi.fn(async () => undefined),
   createRuntimeResponseArtifact: vi.fn(async () => null),
   listRuntimeThreadArtifacts: vi.fn(async () => []),
-  listRuntimePendingCitedApprovals: vi.fn(async () => []),
+  listRuntimePendingCitedApprovals: vi.fn(async () => ({ approvals: [], unavailableCount: 0, truncated: false })),
   resolveRuntimeCitedApproval: vi.fn(async () => null),
   cancelRuntimeCitedApproval: vi.fn(async () => null),
   getRuntimeArtifact: vi.fn(async () => null),
@@ -437,6 +437,8 @@ describe("Fable home", () => {
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
     vi.mocked(listRuntimeThreadArtifacts).mockReset();
     vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
+    vi.mocked(listRuntimePendingCitedApprovals).mockReset();
+    vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValue({ approvals: [], unavailableCount: 0, truncated: false });
     vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
     vi.mocked(readRuntimeCitedMissionReceipts).mockImplementation(async (_threadId, messageIds) =>
       messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));
@@ -1507,6 +1509,24 @@ describe("Fable home", () => {
     expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
   });
 
+  it("keeps valid conversation content visible when pending approvals are unavailable", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-approval-warning", projectId: null, title: "Approval warning",
+      lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValue({
+      approvals: [], unavailableCount: 1, truncated: false
+    });
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Approval warning" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Some pending approvals could not be shown. Fable left them untouched."
+    );
+  });
+
   it("offers a fresh mission after a live cited result is not accepted", async () => {
     vi.mocked(executeCitedBriefMission).mockImplementationOnce(async (input) => {
       runtimeMocks.citedBriefCalls.push(input as unknown as Record<string, unknown>);
@@ -1957,12 +1977,16 @@ describe("Fable home", () => {
     // genuinely in flight when Stop is clicked.
     runtimeMocks.lines = ['data: {"choices":[{"delta":{"content":"partial"}}]}'];
     runtimeMocks.emitDone = false;
-    vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValueOnce([{
-      runId: "older-run", missionId: "older-mission", waitKey: "older-wait",
-      requestedAt: "2026-07-13T12:00:00.000Z", expectedRunRevision: 4,
-      expectedLastSequence: 8, valueReference: "mission-output:v1:older",
-      draft: "Older draft", plan: testCitedPlan
-    }]);
+    vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValueOnce({
+      approvals: [{
+        runId: "older-run", missionId: "older-mission", waitKey: "older-wait",
+        requestedAt: "2026-07-13T12:00:00.000Z", expectedRunRevision: 4,
+        expectedLastSequence: 8, valueReference: "mission-output:v1:older",
+        draft: "Older draft", plan: testCitedPlan
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
 
     const user = userEvent.setup();
     render(<App />);

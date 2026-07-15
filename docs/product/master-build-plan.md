@@ -657,6 +657,11 @@ an artifact. Stale revisions, concurrent or changed decisions, detached event
 chains, cross-thread reads, non-owner decisions, proposal substitution, and
 replayed alternative decisions fail closed. `/stop` prioritizes active work and,
 when only dormant approvals remain, cancels one deterministic newest approval.
+Terminal same-decision replay must follow the exact request, owner resolution,
+and result head rather than merely finding an older matching decision. Pending
+discovery queries a bounded newest set of waiting approvals, isolates unreadable
+records so valid cards remain usable, and reports that Fable left unavailable or
+truncated approvals untouched instead of silently hiding the condition.
 The conversation renders the recovered draft with explicit `Approve and save`
 and `Keep as draft` actions, busy/error states, keyboard focus, 44-pixel controls,
 and no desktop or mobile overflow. Repository evidence covers the portable journal
