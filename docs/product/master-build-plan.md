@@ -804,6 +804,26 @@ stays unchecked.
 - [ ] Resolve providers and models at run time within saved policy.
 - [ ] Move schedules out of mandatory primary navigation and into contextual activity.
 
+The first migration foundation is now repository-complete as a pure, deterministic
+planner. It accounts for legacy automation rules, schedule entries, scheduled jobs,
+workflow definitions/runs, and scheduler queue entries without mutating either
+store. Only an exact scheduled-job plus frozen workflow-definition bundle with
+source-checksum-bound ownership evidence can become a canonical Routine, immutable
+RoutineVersion, and time trigger. Missing ownership, ambiguous workflow versions,
+bare schedule timezones/actions, free-form automations, scope mismatches, and
+unproven legacy route pins are quarantined with closed reason codes. Current-default
+routes resolve at run time; deliberate pins require exact source-bound actor/time
+evidence. Migration creates no capability grants, copies no approvals, and keeps
+placement resolve-at-run. Terminal queue outcomes can project secret-free occurrence
+history while active leases remain driver-local and lease/fencing/workflow payloads
+never enter the portable plan. Determinism, every-source accounting, lifecycle
+preservation, source replay rejection, UTC compatibility semantics, reuse of one
+exact workflow version, and redaction have focused package evidence. Native
+authenticated evidence capture, encrypted migration/quarantine ledgers, canonical
+Routine persistence, scheduler fencing and one-writer cutover, rollback, UI, and
+restart/live execution evidence remain open, so the migration checkbox stays
+unchecked.
+
 ### Wave 5B - Triggers and reliability
 
 - [ ] Complete one-time and recurring time triggers.

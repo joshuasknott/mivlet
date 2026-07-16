@@ -257,6 +257,7 @@ export * from "./workflows";
 export * from "./departments";
 export * from "./notifications";
 export * from "./voice";
+export * from "./routines";
 
 // Fable-owned slash commands (provider-neutral parsing, redaction, dispatch).
 // Pure logic; the shell implements the CommandRuntime seam.
