@@ -7,6 +7,7 @@
 mod events;
 mod logic;
 mod persistence;
+mod routine_runtime;
 mod runtime;
 mod state;
 

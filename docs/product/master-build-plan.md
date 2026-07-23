@@ -15,7 +15,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 | 2. Work context | Workspaces, projects, context, memory, and artifacts | In progress |
 | 3. Connection fabric | Native connections and MCP satisfy portable capabilities | In progress |
 | 4. Dynamic missions | Fable sizes, plans, routes, and supervises work | In progress |
-| 5. Embedded routines | Successful work can run later or from events | Not started |
+| 5. Embedded routines | Successful work can run later or from events | In progress |
 | 6. Departments | Optional configurable operating contexts | Not started |
 | 7. Pipelines | Guided benchmark outcomes and useful connector breadth | Not started |
 | 8. Extended execution | Browser, computer use, mobile, and remote nodes | Not started |
@@ -801,32 +801,44 @@ stays unchecked.
 - [ ] Migrate schedules and workflows to routines and triggers without data loss.
 - [ ] Attach routines to workspaces, projects, departments, goals, threads, pipelines, and Connection events.
 - [ ] Create and edit routines conversationally, through `/schedule`, and from “run this again”.
-- [ ] Resolve providers and models at run time within saved policy.
+- [x] Resolve providers and models at run time within saved policy.
 - [ ] Move schedules out of mandatory primary navigation and into contextual activity.
 
-The migration foundation now crosses the native boundary but remains partial. The
-pure deterministic planner still accounts for every legacy source without mutating
-storage. Schema v33 adds owner-qualified encrypted Routine, immutable RoutineVersion,
-trigger, portable occurrence-history, node-local driver, migration evidence,
-quarantine, rollback-snapshot, and scheduler-authority stores without inferring a
-single row. Authenticated native capture reads the exact encrypted schedule,
-scheduled-job, workflow-definition/run, and scheduler-queue repositories, binds
-their SHA-256 snapshots to the active member/workspace/project, and supplies those
-facts to the planner. Native application rejects omitted, duplicated, changed, or
-cross-owner evidence, stores the exact input and plan encrypted, handles canonical
-identity collisions by quarantine, is idempotent by evidence hash, verifies exact
-replay, and can remove only unchanged batch-created records while the legacy writer
-is still fenced. Canonical records default to resolve-at-run placement and routing,
-copy no approvals, and add no capability grants. A monotonic workspace authority
-epoch and fresh fence tokens define legacy, shadow, Routine, and rollback
-transitions; legacy mutations and ticks fail closed once that writer is no longer
-selected, while legacy reads remain available for recovery. The Schedules page now
-adds an explicitly local Routine surface for create, edit, pause, resume, delete,
-history, run-in-chat, and compatible schedule import; browser preview labels Routine
-durability unavailable instead of using fixtures. Existing Schedules remain the
-active runner and primary rollback path. A proved shadow comparison, Routine-driver
-tick/execution completion, `/schedule` cutover, restart execution, and packaged-app
-validation remain open, so the migration and experience checkboxes stay unchecked.
+The migration and local time-driver foundation now crosses the native boundary but
+remains partial. The pure deterministic planner still accounts for every legacy
+source without mutating storage. Schema v34 adds owner-qualified encrypted Routine,
+immutable RoutineVersion, trigger, portable occurrence-history, node-local driver,
+trigger cursor, migration evidence, quarantine, and scheduler-authority stores
+without inferring a single row. Authenticated native capture reads exact encrypted
+legacy repositories and hashes them, but proves ownership only when the stored row
+itself contains the exact workspace/project/member-private creator identity.
+Current legacy schedules normally lack those fields and are therefore quarantined;
+Fable does not assign them to the currently signed-in member. Native application
+rejects omitted, duplicated, changed, or cross-owner evidence, stores the exact
+input and plan encrypted, handles canonical identity collisions by quarantine, is
+idempotent by semantic evidence hash, verifies exact replay, and can remove only
+unchanged batch-created records before driver execution.
+
+The five-second native scheduler now evaluates canonical one-time and legacy-lite
+daily, weekly, and monthly recurrence in the trigger timezone, including DST,
+bounded missed-occurrence policies, deduplication, restart cursors, epoch fencing,
+leases, crash recovery, three bounded attempts, and exact run/attempt/token
+settlement. A transactional authority transition keeps exactly one writer.
+Reconciliation proves current migrated job checksums and retained terminal history;
+future legacy queue work is retained as recovery input. The Schedules page exposes
+shadow checking, explicit cutover, and rollback before any canonical driver
+occurrence. `/schedule` writes canonical Routines only after that cutover. Legacy
+reads remain available, and legacy mutations fail closed when legacy is not the
+writer. Canonical execution resolves the current provider and model inside the
+saved policy at run time; a deliberate route pin without exact native binding fails
+closed instead of being guessed.
+
+The calm local Routine surface supports create, edit, pause, resume, delete,
+history, run-in-chat, and compatible migration; browser preview labels encrypted
+durability unavailable instead of using fixtures. Full legacy ownership
+attribution, rollback after canonical execution, event triggers, general recurrence,
+workspace-shared writes, packaged restart observation, and live provider validation
+remain open, so the broader migration and experience checkboxes stay unchecked.
 
 ### Wave 5B - Triggers and reliability
 
@@ -835,6 +847,12 @@ validation remain open, so the migration and experience checkboxes stay unchecke
 - [ ] Add threshold, monitoring, and follow-up triggers.
 - [ ] Complete pause, resume, retry, notifications, and run history.
 - [ ] Handle time zones, missed occurrences, deduplication, leases, and untrusted event payloads.
+
+Repo-local evidence: canonical time triggers now cover timezone/DST calculation,
+bounded missed-run policy, exact occurrence deduplication, fenced leases, crash
+recovery, retry, restart cursors, and immutable history. Signed webhooks,
+Connection events, thresholds, monitoring/follow-up inputs, and their untrusted
+payload normalization remain open; therefore the aggregate checkboxes stay open.
 
 ### Wave 5C - Always-on execution
 

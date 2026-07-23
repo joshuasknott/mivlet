@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
+  beginRuntimeRoutineSchedulerShadow,
   createRuntimeRoutine,
+  cutoverRuntimeRoutineScheduler,
   deleteRuntimeRoutine,
   editRuntimeRoutine,
+  getRuntimeRoutineSchedulerStatus,
   listRuntimeRoutineHistory,
   listRuntimeRoutines,
   migrateLegacyRoutines,
   pauseRuntimeRoutine,
+  rollbackRuntimeRoutineScheduler,
   resumeRuntimeRoutine,
   type RuntimeRoutineBundle,
   type RuntimeRoutineOccurrence,
+  type RuntimeRoutineSchedulerStatus,
   type RuntimeRoutineTriggerSpec
 } from "../runtime";
 
@@ -76,6 +81,8 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
   const [onceAt, setOnceAt] = useState("");
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [history, setHistory] = useState<RuntimeRoutineOccurrence[]>([]);
+  const [schedulerStatus, setSchedulerStatus] =
+    useState<RuntimeRoutineSchedulerStatus | null>(null);
 
   const active = useMemo(
     () => routines.filter((bundle) => bundle.routine.status !== "deleted"),
@@ -86,9 +93,13 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
     setLoading(true);
     setError(null);
     try {
-      const result = await listRuntimeRoutines();
+      const [result, status] = await Promise.all([
+        listRuntimeRoutines(),
+        getRuntimeRoutineSchedulerStatus()
+      ]);
       setNativeAvailable(result !== null);
       setRoutines(result ?? []);
+      setSchedulerStatus(status);
     } catch (reason) {
       setNativeAvailable(true);
       setError(reason instanceof Error ? reason.message : "Routines could not be loaded.");
@@ -195,6 +206,47 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
       await refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Existing schedules could not be imported.");
+    }
+  };
+
+  const changeScheduler = async (action: "shadow" | "cutover" | "rollback") => {
+    if (
+      action === "cutover" &&
+      !window.confirm(
+        "Use Routines for background work in this workspace? Existing schedules will become read-only but stay available for recovery."
+      )
+    ) {
+      return;
+    }
+    if (
+      action === "rollback" &&
+      !window.confirm(
+        "Restore the existing schedule runner? This is available only before a Routine has executed."
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setNotice(null);
+    try {
+      const status =
+        action === "shadow"
+          ? await beginRuntimeRoutineSchedulerShadow()
+          : action === "cutover"
+            ? await cutoverRuntimeRoutineScheduler()
+            : await rollbackRuntimeRoutineScheduler();
+      setSchedulerStatus(status);
+      setNotice(
+        action === "shadow"
+          ? "Fable checked the local migration while existing schedules kept running."
+          : action === "cutover"
+            ? "Routines now own background work in this workspace."
+            : "The existing schedule runner was restored."
+      );
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "The background runner could not be changed."
+      );
     }
   };
 
@@ -387,9 +439,73 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
           </li>
         ))}
       </ul>
+      {schedulerStatus ? (
+        <section className="routine-runner" aria-labelledby="routine-runner-title">
+          <div>
+            <h3 id="routine-runner-title">Background runner</h3>
+            <p>
+              {schedulerStatus.authority.writer === "routine"
+                ? "Routines are running background work."
+                : schedulerStatus.authority.phase === "shadow"
+                  ? schedulerStatus.readyForCutover
+                    ? "The local migration matches and is ready."
+                    : "Existing schedules are still running while Fable checks the migration."
+                  : "Existing schedules are still running."}
+            </p>
+          </div>
+          {schedulerStatus.blockers.length > 0 ? (
+            <ul className="routine-runner__blockers">
+              {schedulerStatus.blockers.slice(0, 4).map((blocker) => (
+                <li key={blocker}>{blocker}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="routine-runner__actions">
+            {schedulerStatus.authority.writer === "legacy" &&
+            schedulerStatus.authority.phase === "legacy" ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void changeScheduler("shadow")}
+              >
+                Check migration
+              </button>
+            ) : null}
+            {schedulerStatus.authority.phase === "shadow" ? (
+              <>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void refresh()}
+                >
+                  Check again
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={!schedulerStatus.readyForCutover}
+                  onClick={() => void changeScheduler("cutover")}
+                >
+                  Use Routines
+                </button>
+              </>
+            ) : null}
+            {schedulerStatus.authority.writer === "routine" ? (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={schedulerStatus.routineDriverOccurrences > 0}
+                onClick={() => void changeScheduler("rollback")}
+              >
+                Restore existing schedules
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       <p className="routine-cutover-note">
-        Existing schedules remain the active background runner until their local migration replay
-        is proven and cut over safely.
+        Existing schedules stay available for recovery. Fable never runs both local schedulers as
+        writers.
       </p>
     </section>
   );

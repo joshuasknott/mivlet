@@ -587,11 +587,28 @@ pub fn rollback(
 }
 
 fn same_candidate(existing: &RoutineBundleRow, candidate: &Value) -> bool {
-    candidate.get("routine") == Some(&existing.routine)
-        && candidate.get("version") == Some(&existing.current_version)
-        && candidate
-            .get("trigger")
-            .is_some_and(|trigger| existing.triggers == [trigger.clone()])
+    candidate.get("routine").is_some_and(|value| {
+        migration_semantic_value(value) == migration_semantic_value(&existing.routine)
+    }) && candidate.get("version").is_some_and(|value| {
+        migration_semantic_value(value) == migration_semantic_value(&existing.current_version)
+    }) && candidate.get("trigger").is_some_and(|trigger| {
+        existing.triggers.len() == 1
+            && migration_semantic_value(trigger) == migration_semantic_value(&existing.triggers[0])
+    })
+}
+
+fn migration_semantic_value(value: &Value) -> Value {
+    match value {
+        Value::Array(values) => Value::Array(values.iter().map(migration_semantic_value).collect()),
+        Value::Object(values) => Value::Object(
+            values
+                .iter()
+                .filter(|(key, _)| key.as_str() != "importedAt")
+                .map(|(key, value)| (key.clone(), migration_semantic_value(value)))
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
 }
 
 fn find_by_input_hash(
@@ -918,5 +935,34 @@ mod tests {
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn candidate_replay_ignores_only_capture_clock_metadata() {
+        let mut candidate = plan()["candidates"][0].clone();
+        candidate["routine"]["importedAt"] = Value::String("first".into());
+        candidate["version"]["nested"] = serde_json::json!({"importedAt":"first","kept":true});
+        candidate["trigger"]["importedAt"] = Value::String("first".into());
+        let existing = RoutineBundleRow {
+            routine: {
+                let mut value = candidate["routine"].clone();
+                value["importedAt"] = Value::String("later".into());
+                value
+            },
+            current_version: {
+                let mut value = candidate["version"].clone();
+                value["nested"]["importedAt"] = Value::String("later".into());
+                value
+            },
+            triggers: vec![{
+                let mut value = candidate["trigger"].clone();
+                value["importedAt"] = Value::String("later".into());
+                value
+            }],
+        };
+        assert!(same_candidate(&existing, &candidate));
+
+        candidate["routine"]["title"] = Value::String("Changed".into());
+        assert!(!same_candidate(&existing, &candidate));
     }
 }

@@ -60,9 +60,25 @@ pub struct SchedulerAuthorityRow {
 pub struct DriverLeaseRow {
     pub occurrence_id: String,
     pub writer_epoch: i64,
+    pub attempt_count: i64,
     pub lease_token: String,
     pub lease_expires_at: String,
     pub occurrence: Value,
+    pub driver_evidence: Value,
+}
+
+#[derive(Clone, Debug)]
+pub struct RoutineSchedulerInput {
+    pub scope: DataScope,
+    pub private: PrivateDataScope,
+    pub bundle: RoutineBundleRow,
+}
+
+#[derive(Clone, Debug)]
+pub struct TriggerCursorRow {
+    pub writer_epoch: i64,
+    pub last_evaluated_at: String,
+    pub next_run_at: Option<String>,
 }
 
 fn required_text<'a>(value: &'a Value, key: &str, label: &str) -> Result<&'a str> {
@@ -475,6 +491,172 @@ pub fn list(
         }
     }
     Ok(out)
+}
+
+pub fn scheduler_inputs(
+    tx: &Connection,
+    store: &Store,
+    workspace_id: &str,
+) -> Result<Vec<RoutineSchedulerInput>> {
+    let mut stmt = tx.prepare(
+        "SELECT owner_subject,id,project_id,payload,payload_nonce
+         FROM routine_record
+         WHERE workspace_id=?1 AND status='active'
+         ORDER BY owner_subject,id;",
+    )?;
+    let rows = stmt.query_map([workspace_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            Sealed {
+                ciphertext: row.get(3)?,
+                nonce: row.get(4)?,
+            },
+        ))
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (subject, routine_id, project_id, sealed) = row?;
+        let routine = open_json(
+            store,
+            &sealed,
+            &routine_aad(workspace_id, &subject, &routine_id),
+        )?;
+        let internal_user_id =
+            required_text(&routine, "createdByInternalUserId", "Routine creator")?;
+        let member_id = required_text(&routine, "ownerMemberId", "Routine owner")?;
+        let scope = DataScope::new(workspace_id, project_id)?;
+        let private = PrivateDataScope::for_authenticated_user(
+            scope.clone(),
+            internal_user_id,
+            Some(member_id),
+        )?;
+        if private.owner_subject() != subject {
+            return Err(StoreError::Invalid(
+                "Stored Routine owner does not match its encrypted row identity.".into(),
+            ));
+        }
+        let bundle = get(tx, store, &scope, &private, &routine_id)?
+            .ok_or_else(|| StoreError::Invalid("Stored Routine disappeared.".into()))?;
+        out.push(RoutineSchedulerInput {
+            scope,
+            private,
+            bundle,
+        });
+    }
+    Ok(out)
+}
+
+pub fn scheduler_workspaces(tx: &Connection) -> Result<Vec<String>> {
+    let mut stmt = tx.prepare(
+        "SELECT workspace_id FROM routine_record
+         UNION
+         SELECT workspace_id FROM routine_scheduler_authority
+         ORDER BY workspace_id;",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    rows.collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(StoreError::from)
+}
+
+pub fn latest_scheduled_for(
+    tx: &Connection,
+    scope: &DataScope,
+    private: &PrivateDataScope,
+    trigger_id: &str,
+) -> Result<Option<String>> {
+    let trigger_id = normalize_id(trigger_id, "Trigger")?;
+    tx.query_row(
+        "SELECT scheduled_for FROM routine_occurrence
+         WHERE workspace_id=?1 AND owner_subject=?2 AND trigger_id=?3
+           AND scheduled_for IS NOT NULL
+         ORDER BY scheduled_for DESC,id DESC LIMIT 1;",
+        rusqlite::params![scope.workspace_id(), private.owner_subject(), trigger_id],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(StoreError::from)
+}
+
+pub fn trigger_cursor(
+    tx: &Connection,
+    scope: &DataScope,
+    private: &PrivateDataScope,
+    trigger_id: &str,
+) -> Result<Option<TriggerCursorRow>> {
+    let trigger_id = normalize_id(trigger_id, "Trigger")?;
+    tx.query_row(
+        "SELECT writer_epoch,last_evaluated_at,next_run_at
+         FROM routine_trigger_cursor
+         WHERE workspace_id=?1 AND owner_subject=?2 AND trigger_id=?3;",
+        rusqlite::params![scope.workspace_id(), private.owner_subject(), trigger_id],
+        |row| {
+            Ok(TriggerCursorRow {
+                writer_epoch: row.get(0)?,
+                last_evaluated_at: row.get(1)?,
+                next_run_at: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(StoreError::from)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn upsert_trigger_cursor(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    private: &PrivateDataScope,
+    trigger_id: &str,
+    expected_epoch: i64,
+    last_evaluated_at: &str,
+    next_run_at: Option<&str>,
+    evidence: &Value,
+    updated_at: &str,
+) -> Result<()> {
+    let authority = read_scheduler_authority(tx, scope.workspace_id())?
+        .ok_or_else(|| StoreError::Invalid("Scheduler authority is unavailable.".into()))?;
+    if authority.writer != "routine"
+        || authority.phase != "routine"
+        || authority.epoch != expected_epoch
+    {
+        return Err(StoreError::Invalid(
+            "Routine trigger cursor fence is stale.".into(),
+        ));
+    }
+    let trigger_id = normalize_id(trigger_id, "Trigger")?;
+    let sealed = seal_json(
+        store,
+        evidence,
+        &cursor_aad(scope.workspace_id(), private.owner_subject(), &trigger_id),
+    )?;
+    tx.execute(
+        "INSERT INTO routine_trigger_cursor(
+           workspace_id,owner_subject,trigger_id,writer_epoch,last_evaluated_at,
+           next_run_at,updated_at,payload,payload_nonce
+         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
+         ON CONFLICT(workspace_id,owner_subject,trigger_id) DO UPDATE SET
+           writer_epoch=excluded.writer_epoch,
+           last_evaluated_at=excluded.last_evaluated_at,
+           next_run_at=excluded.next_run_at,
+           updated_at=excluded.updated_at,
+           payload=excluded.payload,
+           payload_nonce=excluded.payload_nonce;",
+        rusqlite::params![
+            scope.workspace_id(),
+            private.owner_subject(),
+            trigger_id,
+            expected_epoch,
+            last_evaluated_at,
+            next_run_at,
+            updated_at,
+            sealed.ciphertext,
+            sealed.nonce
+        ],
+    )?;
+    Ok(())
 }
 
 pub fn append_version(
@@ -971,32 +1153,238 @@ pub fn lease_due(
     if changed != 1 {
         return Ok(None);
     }
-    let sealed = tx.query_row(
-        "SELECT payload,payload_nonce FROM routine_occurrence
-         WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3;",
+    let (occurrence_sealed, driver_sealed, attempt_count) = tx.query_row(
+        "SELECT o.payload,o.payload_nonce,d.payload,d.payload_nonce,d.attempt_count
+         FROM routine_occurrence o
+         JOIN routine_driver_occurrence d
+           ON d.workspace_id=o.workspace_id
+          AND d.owner_subject=o.owner_subject
+          AND d.occurrence_id=o.id
+         WHERE o.workspace_id=?1 AND o.owner_subject=?2 AND o.id=?3;",
         rusqlite::params![scope.workspace_id(), subject, occurrence_id],
         |row| {
-            Ok(Sealed {
-                ciphertext: row.get(0)?,
-                nonce: row.get(1)?,
-            })
+            Ok((
+                Sealed {
+                    ciphertext: row.get(0)?,
+                    nonce: row.get(1)?,
+                },
+                Sealed {
+                    ciphertext: row.get(2)?,
+                    nonce: row.get(3)?,
+                },
+                row.get::<_, i64>(4)?,
+            ))
         },
     )?;
     Ok(Some(DriverLeaseRow {
         occurrence: open_json(
             store,
-            &sealed,
+            &occurrence_sealed,
             &occurrence_aad(scope.workspace_id(), &subject, &occurrence_id),
+        )?,
+        driver_evidence: open_json(
+            store,
+            &driver_sealed,
+            &driver_aad(scope.workspace_id(), &subject, &occurrence_id),
         )?,
         occurrence_id,
         writer_epoch: expected_epoch,
+        attempt_count,
         lease_token: token,
         lease_expires_at: lease_expires_at.to_string(),
     }))
 }
 
+pub fn renew_driver_lease(
+    tx: &Connection,
+    workspace_id: &str,
+    owner_subject: &str,
+    occurrence_id: &str,
+    expected_epoch: i64,
+    lease_token: &str,
+    now: &str,
+    lease_expires_at: &str,
+) -> Result<bool> {
+    let authority = read_scheduler_authority(tx, workspace_id)?
+        .ok_or_else(|| StoreError::Invalid("Scheduler authority is unavailable.".into()))?;
+    if authority.writer != "routine"
+        || authority.phase != "routine"
+        || authority.epoch != expected_epoch
+    {
+        return Err(StoreError::Invalid(
+            "Routine scheduler fence is stale.".into(),
+        ));
+    }
+    let occurrence_id = normalize_id(occurrence_id, "Occurrence")?;
+    let token = normalize_id(lease_token, "Lease token")?;
+    Ok(tx.execute(
+        "UPDATE routine_driver_occurrence
+         SET lease_expires_at=?1,updated_at=?2
+         WHERE workspace_id=?3 AND owner_subject=?4 AND occurrence_id=?5
+           AND writer_epoch=?6 AND lease_token=?7 AND state IN ('leased','running');",
+        rusqlite::params![
+            lease_expires_at,
+            now,
+            workspace_id,
+            owner_subject,
+            occurrence_id,
+            expected_epoch,
+            token
+        ],
+    )? == 1)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn report_driver_attempt(
+    tx: &Connection,
+    store: &Store,
+    workspace_id: &str,
+    owner_subject: &str,
+    occurrence_id: &str,
+    expected_epoch: i64,
+    lease_token: &str,
+    run_id: &str,
+    expected_attempt_number: i64,
+    status: &str,
+    at: &str,
+    lease_expires_at: Option<&str>,
+    retry_at: Option<&str>,
+) -> Result<String> {
+    let authority = read_scheduler_authority(tx, workspace_id)?
+        .ok_or_else(|| StoreError::Invalid("Scheduler authority is unavailable.".into()))?;
+    if authority.writer != "routine"
+        || authority.phase != "routine"
+        || authority.epoch != expected_epoch
+    {
+        return Err(StoreError::Invalid(
+            "Routine scheduler fence is stale.".into(),
+        ));
+    }
+    if !matches!(
+        status,
+        "running" | "completed" | "failed" | "cancelled" | "blocked"
+    ) {
+        return Err(StoreError::Invalid(
+            "Routine driver status is invalid.".into(),
+        ));
+    }
+    let occurrence_id = normalize_id(occurrence_id, "Occurrence")?;
+    let lease_token = normalize_id(lease_token, "Lease token")?;
+    let run_id = normalize_id(run_id, "Run")?;
+    let current = tx
+        .query_row(
+            "SELECT state,attempt_count,payload,payload_nonce
+             FROM routine_driver_occurrence
+             WHERE workspace_id=?1 AND owner_subject=?2 AND occurrence_id=?3
+               AND writer_epoch=?4 AND lease_token=?5;",
+            rusqlite::params![
+                workspace_id,
+                owner_subject,
+                occurrence_id,
+                expected_epoch,
+                lease_token
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    Sealed {
+                        ciphertext: row.get(2)?,
+                        nonce: row.get(3)?,
+                    },
+                ))
+            },
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::Invalid("Routine driver lease is stale.".into()))?;
+    if expected_attempt_number != current.1 + 1 {
+        return Err(StoreError::Invalid(
+            "Routine driver attempt number is stale.".into(),
+        ));
+    }
+    let driver_evidence = open_json(
+        store,
+        &current.2,
+        &driver_aad(workspace_id, owner_subject, &occurrence_id),
+    )?;
+    if driver_evidence.get("runId").and_then(Value::as_str) != Some(run_id.as_str()) {
+        return Err(StoreError::Invalid(
+            "Routine driver result does not match its leased run.".into(),
+        ));
+    }
+    if !matches!(current.0.as_str(), "leased" | "running") {
+        return Err(StoreError::Invalid(
+            "Routine occurrence is no longer leased.".into(),
+        ));
+    }
+
+    let next_attempt_count = current.1 + i64::from(status != "running");
+    let (driver_state, occurrence_status, available_at) = match status {
+        "running" => (
+            "running",
+            "running",
+            lease_expires_at.ok_or_else(|| {
+                StoreError::Invalid("Running Routine work requires a lease deadline.".into())
+            })?,
+        ),
+        "completed" => ("done", "completed", at),
+        "cancelled" => ("cancelled", "cancelled", at),
+        "blocked" => ("blocked", "blocked", at),
+        "failed" if next_attempt_count < 3 => (
+            "queued",
+            "scheduled",
+            retry_at.ok_or_else(|| {
+                StoreError::Invalid("Retryable Routine work requires a retry time.".into())
+            })?,
+        ),
+        "failed" => ("dead", "failed", at),
+        _ => unreachable!(),
+    };
+    let terminal = matches!(driver_state, "done" | "cancelled" | "blocked" | "dead");
+    let changed = tx.execute(
+        "UPDATE routine_driver_occurrence
+         SET state=?1,available_at=?2,attempt_count=?3,updated_at=?4,
+             lease_holder=CASE WHEN ?5 THEN '' ELSE lease_holder END,
+             lease_token=CASE WHEN ?5 THEN '' ELSE lease_token END,
+             lease_expires_at=CASE WHEN ?5 THEN NULL ELSE ?6 END
+         WHERE workspace_id=?7 AND owner_subject=?8 AND occurrence_id=?9
+           AND writer_epoch=?10 AND lease_token=?11 AND state IN ('leased','running');",
+        rusqlite::params![
+            driver_state,
+            available_at,
+            next_attempt_count,
+            at,
+            terminal || driver_state == "queued",
+            lease_expires_at,
+            workspace_id,
+            owner_subject,
+            occurrence_id,
+            expected_epoch,
+            lease_token
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "Routine driver lease changed before its result was saved.".into(),
+        ));
+    }
+    set_occurrence_state(
+        tx,
+        store,
+        workspace_id,
+        owner_subject,
+        &occurrence_id,
+        occurrence_status,
+        Some(&run_id),
+        next_attempt_count,
+        at,
+    )?;
+    Ok(driver_state.to_string())
+}
+
 pub fn recover_expired_leases(
     tx: &Connection,
+    store: &Store,
     workspace_id: &str,
     expected_epoch: i64,
     now: &str,
@@ -1008,14 +1396,108 @@ pub fn recover_expired_leases(
             "Routine scheduler fence is stale.".into(),
         ));
     }
-    Ok(tx.execute(
+    let mut stmt = tx.prepare(
+        "SELECT owner_subject,occurrence_id FROM routine_driver_occurrence
+         WHERE workspace_id=?1 AND writer_epoch=?2 AND state IN ('leased','running')
+           AND lease_expires_at IS NOT NULL AND lease_expires_at<=?3
+         ORDER BY owner_subject,occurrence_id;",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::params![workspace_id, expected_epoch, now],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )?;
+    let expired = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+    drop(stmt);
+    let changed = tx.execute(
         "UPDATE routine_driver_occurrence
          SET state='queued',lease_holder='',lease_token='',lease_expires_at=NULL,
              attempt_count=attempt_count+1,updated_at=?1
          WHERE workspace_id=?2 AND writer_epoch=?3 AND state IN ('leased','running')
            AND lease_expires_at IS NOT NULL AND lease_expires_at<=?1;",
         rusqlite::params![now, workspace_id, expected_epoch],
-    )?)
+    )?;
+    for (owner, occurrence_id) in &expired {
+        let attempt_count = tx.query_row(
+            "SELECT attempt_count FROM routine_driver_occurrence
+             WHERE workspace_id=?1 AND owner_subject=?2 AND occurrence_id=?3;",
+            rusqlite::params![workspace_id, owner, occurrence_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+        set_occurrence_state(
+            tx,
+            store,
+            workspace_id,
+            owner,
+            occurrence_id,
+            "scheduled",
+            None,
+            attempt_count,
+            now,
+        )?;
+    }
+    Ok(changed)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn set_occurrence_state(
+    tx: &Connection,
+    store: &Store,
+    workspace_id: &str,
+    owner_subject: &str,
+    occurrence_id: &str,
+    status: &str,
+    run_id: Option<&str>,
+    attempt_count: i64,
+    at: &str,
+) -> Result<()> {
+    let sealed = tx.query_row(
+        "SELECT payload,payload_nonce FROM routine_occurrence
+         WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3;",
+        rusqlite::params![workspace_id, owner_subject, occurrence_id],
+        |row| {
+            Ok(Sealed {
+                ciphertext: row.get(0)?,
+                nonce: row.get(1)?,
+            })
+        },
+    )?;
+    let mut occurrence = open_json(
+        store,
+        &sealed,
+        &occurrence_aad(workspace_id, owner_subject, occurrence_id),
+    )?;
+    occurrence["status"] = Value::String(status.to_string());
+    occurrence["observedAt"] = Value::String(at.to_string());
+    occurrence["attemptCount"] = Value::Number(attempt_count.into());
+    if let Some(run_id) = run_id {
+        occurrence["runId"] = Value::String(run_id.to_string());
+    }
+    let sealed = seal_json(
+        store,
+        &occurrence,
+        &occurrence_aad(workspace_id, owner_subject, occurrence_id),
+    )?;
+    let changed = tx.execute(
+        "UPDATE routine_occurrence
+         SET status=?1,observed_at=?2,run_id=COALESCE(?3,run_id),payload=?4,payload_nonce=?5
+         WHERE workspace_id=?6 AND owner_subject=?7 AND id=?8;",
+        rusqlite::params![
+            status,
+            at,
+            run_id,
+            sealed.ciphertext,
+            sealed.nonce,
+            workspace_id,
+            owner_subject,
+            occurrence_id
+        ],
+    )?;
+    if changed != 1 {
+        return Err(StoreError::Invalid(
+            "Routine occurrence disappeared during driver settlement.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn read_scheduler_authority(
@@ -1056,6 +1538,9 @@ fn occurrence_aad(workspace: &str, owner: &str, id: &str) -> String {
 }
 fn driver_aad(workspace: &str, owner: &str, id: &str) -> String {
     format!("routine_driver:{workspace}:{owner}:{id}")
+}
+fn cursor_aad(workspace: &str, owner: &str, id: &str) -> String {
+    format!("routine_cursor:{workspace}:{owner}:{id}")
 }
 fn authority_aad(workspace: &str) -> String {
     format!("routine_scheduler_authority:{workspace}")
@@ -1252,7 +1737,7 @@ mod tests {
                     "occ-1",
                     active.epoch,
                     "2026-01-02T09:00:00Z",
-                    &serde_json::json!({"deduplicated":true}),
+                    &serde_json::json!({"deduplicated":true,"runId":"run-1"}),
                 )
             })
             .unwrap();
@@ -1276,7 +1761,7 @@ mod tests {
         assert_eq!(
             store
                 .transaction(|tx| {
-                    recover_expired_leases(tx, "w1", active.epoch, "2026-01-02T09:02:00Z")
+                    recover_expired_leases(tx, &store, "w1", active.epoch, "2026-01-02T09:02:00Z")
                 })
                 .unwrap(),
             1
@@ -1296,6 +1781,90 @@ mod tests {
                 )
             })
             .is_err());
+        let recovered_lease = store
+            .transaction(|tx| {
+                lease_due(
+                    tx,
+                    &store,
+                    &scope,
+                    &private,
+                    active.epoch,
+                    "node-1",
+                    "lease-2",
+                    "2026-01-02T09:02:00Z",
+                    "2026-01-02T09:03:00Z",
+                )
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered_lease.attempt_count, 1);
+        assert!(store
+            .transaction(|tx| {
+                report_driver_attempt(
+                    tx,
+                    &store,
+                    "w1",
+                    private.owner_subject(),
+                    "occ-1",
+                    active.epoch,
+                    "lease-1",
+                    "run-1",
+                    2,
+                    "completed",
+                    "2026-01-02T09:02:01Z",
+                    None,
+                    None,
+                )
+            })
+            .is_err());
+        assert!(store
+            .transaction(|tx| {
+                report_driver_attempt(
+                    tx,
+                    &store,
+                    "w1",
+                    private.owner_subject(),
+                    "occ-1",
+                    active.epoch,
+                    "lease-2",
+                    "wrong-run",
+                    2,
+                    "completed",
+                    "2026-01-02T09:02:01Z",
+                    None,
+                    None,
+                )
+            })
+            .is_err());
+        assert_eq!(
+            store
+                .transaction(|tx| {
+                    report_driver_attempt(
+                        tx,
+                        &store,
+                        "w1",
+                        private.owner_subject(),
+                        "occ-1",
+                        active.epoch,
+                        "lease-2",
+                        "run-1",
+                        2,
+                        "completed",
+                        "2026-01-02T09:02:01Z",
+                        None,
+                        None,
+                    )
+                })
+                .unwrap(),
+            "done"
+        );
+        let occurrence = store
+            .with_conn(|tx| occurrence_history(tx, &store, &scope, &private, "routine-1"))
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(occurrence["status"], "completed");
+        assert_eq!(occurrence["runId"], "run-1");
     }
 
     #[test]

@@ -197,6 +197,11 @@ export interface ShellRuntime {
     leaseToken?: string;
     attemptNumber?: number;
     execution?: ScheduledExecutionRoute;
+    routineDriver?: {
+      projectId?: string;
+      occurrenceId: string;
+      writerEpoch: number;
+    };
   }>;
   runScheduleNow: (job: ScheduledJob) => void;
   completeWorkflowRun: (

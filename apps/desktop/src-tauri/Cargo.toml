@@ -24,6 +24,7 @@ tauri = { version = "2", features = [] }
 # Pinned to the Tauri 2 plugin line; bodies are shaped (privacy-safe) in TS.
 tauri-plugin-notification = "2"
 chrono = { version = "0.4.45", default-features = true }
+chrono-tz = "0.10"
 # Native-API egress: reqwest owns the HTTP/SSE call (Rust adds the API key as a
 # header here; TS never sees it). `rustls-no-provider` resolves offline against
 # the existing lockfile (verified during planning). `stream` enables SSE.

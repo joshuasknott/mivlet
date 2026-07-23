@@ -43,7 +43,7 @@ export interface ScheduleCommandInput {
  */
 export interface CommandRuntime {
   createMemory(input: { title: string; value: string; kind: MemoryKind }): Promise<MemoryRecord>;
-  createSchedule(input: ScheduleCommandInput): Promise<ScheduledJob>;
+  createSchedule(input: ScheduleCommandInput): Promise<Pick<ScheduledJob, "id">>;
   createGoal(input: { title: string; statement: string }): Promise<WorkspaceGoal>;
   createPlan(input: { title: string; steps: string[]; goalId?: string }): Promise<WorkspacePlan>;
   /** ISO timestamp; injectable so tests are deterministic. */

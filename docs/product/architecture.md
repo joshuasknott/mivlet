@@ -116,18 +116,30 @@ The composer parses `/remember`, `/goal`, `/plan`, and `/schedule` through the
 provider-neutral command layer in `@fable/connectors`. `/goal` and `/plan`
 create local structured state and, when a backend is connected, submit a
 follow-up prompt through the same `AgentBackend` run path as normal composer
-messages. `/schedule` creates a validated one-time or recurring schedule; the
-runtime pins the selected backend/model/permission route at creation time.
-Pinned scheduled routes fail closed when the captured backend, model, or
-permission profile no longer permits execution; they do not silently fall back
-to a different backend for a due run.
+messages. `/schedule` creates a validated one-time or recurring schedule while
+the legacy writer is selected. After an explicit proved cutover it creates a
+canonical Routine instead. Legacy schedules retain their captured
+backend/model/permission route and fail closed if it is no longer runnable.
+Canonical Routines resolve the current provider and model at execution time
+inside their saved no-expansion policy. A deliberate pin without exact native
+route evidence fails closed rather than silently changing provider, billing,
+privacy, credential, or placement boundaries.
 
-The Tauri scheduler leases due occurrences, writes queue records, and exposes
-pending workflow runs to a headless scheduled-agent hook. Jobs and queue records
-persist in the encrypted SQLite database under schema v5. Scheduled prompts use
-the same adapter contract as interactive prompts, so native API, Codex
-app-server, and ACP runs share cancellation, blocked-auth handling, and approval
-boundaries. Schedules do not require Convex or a hosted Fable account.
+The Tauri scheduler has a single workspace writer selected by a monotonic epoch
+and fresh fence. The legacy writer leases queue records. The canonical Routine
+writer evaluates durable trigger cursors, appends deduplicated occurrences, and
+leases exact driver records to the same headless scheduled-agent hook. Driver
+renewal and settlement require the occurrence, epoch, lease token, run id, and
+attempt number to match; expired work recovers with bounded retry. SQLite schema
+v34 stores both paths. Scheduled prompts use the same adapter contract as
+interactive prompts, so native API, Codex app-server, and ACP runs share
+cancellation, blocked-auth handling, and approval boundaries. Local schedules
+do not require Convex, but the target product still requires a Fable account.
+
+Reconciliation and a transactional authority transition prevent the legacy
+scheduler and Routine scheduler from both writing. Legacy records without exact
+persisted member ownership quarantine instead of inheriting the active session
+identity.
 
 ## Connector Runtime
 

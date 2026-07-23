@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 33;
+pub const CURRENT_SCHEMA_VERSION: u32 = 34;
 
 /// Forward schema step `v32 -> v33`: adds the canonical encrypted Routine
 /// repository, portable occurrence history, node-local driver state, reversible
@@ -201,6 +201,31 @@ CREATE TABLE IF NOT EXISTS routine_migration_snapshot (
   FOREIGN KEY(workspace_id, owner_subject, batch_id)
     REFERENCES routine_migration_batch(workspace_id, owner_subject, id) ON DELETE CASCADE
 );
+"#;
+
+/// Forward schema step `v33 -> v34`: adds the node-local trigger evaluation
+/// cursor used by the canonical Routine scheduler. No cursor is inferred; the
+/// fenced writer initializes it transactionally from retained occurrence and
+/// cutover evidence.
+pub const SCHEMA_V33_TO_V34: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS routine_trigger_cursor (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  trigger_id TEXT NOT NULL,
+  writer_epoch INTEGER NOT NULL CHECK(writer_epoch >= 1),
+  last_evaluated_at TEXT NOT NULL,
+  next_run_at TEXT,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, trigger_id),
+  FOREIGN KEY(workspace_id, owner_subject, trigger_id)
+    REFERENCES routine_trigger(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_trigger_cursor_epoch
+  ON routine_trigger_cursor(workspace_id, writer_epoch, last_evaluated_at);
 "#;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
@@ -1973,6 +1998,17 @@ CREATE TABLE IF NOT EXISTS routine_trigger (
 );
 CREATE INDEX IF NOT EXISTS idx_routine_trigger_due
   ON routine_trigger(workspace_id,owner_subject,status,kind,updated_at);
+CREATE TABLE IF NOT EXISTS routine_trigger_cursor (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  trigger_id TEXT NOT NULL, writer_epoch INTEGER NOT NULL CHECK(writer_epoch >= 1),
+  last_evaluated_at TEXT NOT NULL, next_run_at TEXT, updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,trigger_id),
+  FOREIGN KEY(workspace_id,owner_subject,trigger_id)
+    REFERENCES routine_trigger(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_trigger_cursor_epoch
+  ON routine_trigger_cursor(workspace_id,writer_epoch,last_evaluated_at);
 CREATE TABLE IF NOT EXISTS routine_occurrence (
   workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, id TEXT NOT NULL,
   routine_id TEXT NOT NULL, trigger_id TEXT NOT NULL,

@@ -4257,6 +4257,26 @@ export interface RuntimeRoutineMigrationSummary {
   quarantineCount: number;
 }
 
+export interface RuntimeRoutineSchedulerStatus {
+  authority: {
+    workspaceId: string;
+    writer: "legacy" | "routine";
+    phase: "legacy" | "shadow" | "routine" | "rollback";
+    epoch: number;
+    fenceToken: string;
+    proofHash?: string;
+    updatedAt: string;
+  };
+  readyForCutover: boolean;
+  blockers: string[];
+  activeLegacyJobs: number;
+  mappedLegacyJobs: number;
+  futureLegacyOccurrences: number;
+  terminalLegacyOccurrences: number;
+  routineDriverOccurrences: number;
+  reconciliationHash?: string;
+}
+
 export async function listRuntimeRoutines(projectId?: string) {
   if (!hasTauriRuntime()) return null;
   try {
@@ -4335,6 +4355,112 @@ export async function listRuntimeRoutineHistory(routineId: string, projectId?: s
     throw toRuntimeError(error);
   }
 }
+
+export interface RuntimeRoutineRunRequest {
+  workspaceId: string;
+  projectId?: string;
+  routineId: string;
+  routineVersion: number;
+  triggerId: string;
+  occurrenceId: string;
+  runId: string;
+  scheduledAt: string;
+  action: {
+    kind: "direct-request" | "workflow-compatibility";
+    title: string;
+    instruction: string;
+  };
+  routePolicy:
+    | { kind: "resolve-at-run" }
+    | {
+        kind: "deliberate-pin";
+        providerRouteId: string;
+        pinnedByInternalUserId: string;
+        pinnedAt: string;
+        reason: string;
+      };
+  writerEpoch: number;
+  leaseToken: string;
+  attemptNumber: number;
+}
+
+export async function listenRuntimeRoutineRunRequest(
+  onRun: (event: RuntimeRoutineRunRequest) => void
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await listen<RuntimeRoutineRunRequest>("fable://routine/run-request", (event) => {
+      const scope = activeDataScope();
+      if (
+        scope &&
+        event.payload.workspaceId === scope.workspaceId &&
+        (event.payload.projectId ?? null) === scope.projectId
+      ) {
+        onRun(event.payload);
+      }
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function renewRuntimeRoutineLease(input: {
+  projectId?: string;
+  occurrenceId: string;
+  writerEpoch: number;
+  leaseToken: string;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<boolean>("routine_driver_renew", { input });
+  } catch {
+    return null;
+  }
+}
+
+export async function reportRuntimeRoutineAttempt(input: {
+  projectId?: string;
+  occurrenceId: string;
+  writerEpoch: number;
+  leaseToken: string;
+  runId: string;
+  attemptNumber: number;
+  status: "running" | "completed" | "failed" | "cancelled" | "blocked";
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<string>("routine_driver_report", { input });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+async function invokeRuntimeRoutineScheduler(
+  command:
+    | "routine_scheduler_status"
+    | "routine_scheduler_begin_shadow"
+    | "routine_scheduler_cutover"
+    | "routine_scheduler_rollback",
+  projectId?: string
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineSchedulerStatus>(command, {
+      input: { projectId }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export const getRuntimeRoutineSchedulerStatus = (projectId?: string) =>
+  invokeRuntimeRoutineScheduler("routine_scheduler_status", projectId);
+export const beginRuntimeRoutineSchedulerShadow = (projectId?: string) =>
+  invokeRuntimeRoutineScheduler("routine_scheduler_begin_shadow", projectId);
+export const cutoverRuntimeRoutineScheduler = (projectId?: string) =>
+  invokeRuntimeRoutineScheduler("routine_scheduler_cutover", projectId);
+export const rollbackRuntimeRoutineScheduler = (projectId?: string) =>
+  invokeRuntimeRoutineScheduler("routine_scheduler_rollback", projectId);
 
 /**
  * Captures the authenticated encrypted legacy snapshot in Rust, runs the pure

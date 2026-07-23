@@ -667,7 +667,8 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     for entry in &newly_leased {
         emit_run_request(app, entry);
     }
-    Ok(newly_leased.len())
+    let routine_leases = super::routine_runtime::run_tick(app)?;
+    Ok(newly_leased.len() + routine_leases)
 }
 
 #[cfg(test)]

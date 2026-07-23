@@ -49,6 +49,7 @@ import {
   listenRuntimeSchedulerCancelRequest,
   listRuntimeBackendModels,
   renewRuntimeJobLease,
+  renewRuntimeRoutineLease,
   saveRuntimeWorkflowRun,
   searchRuntimeConnector
 } from "../runtime";
@@ -65,6 +66,12 @@ export interface PendingScheduledRun {
   attemptNumber?: number;
   /** Frozen execution route (backend/model/permission). */
   execution?: ScheduledExecutionRoute;
+  /** Canonical Routine driver lease; absent for legacy scheduled jobs. */
+  routineDriver?: {
+    projectId?: string;
+    occurrenceId: string;
+    writerEpoch: number;
+  };
 }
 
 export interface UseScheduledAgentOptions {
@@ -170,7 +177,14 @@ export function useScheduledAgent(
       let renewalTimer: ReturnType<typeof setInterval> | null = null;
       if (run.leaseToken) {
         renewalTimer = setInterval(() => {
-          void renewRuntimeJobLease(run.runId, run.leaseToken!);
+          if (run.routineDriver) {
+            void renewRuntimeRoutineLease({
+              ...run.routineDriver,
+              leaseToken: run.leaseToken!
+            });
+          } else {
+            void renewRuntimeJobLease(run.runId, run.leaseToken!);
+          }
         }, LEASE_RENEWAL_INTERVAL_MS);
       }
 

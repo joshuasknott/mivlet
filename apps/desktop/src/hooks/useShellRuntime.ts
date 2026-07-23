@@ -150,9 +150,13 @@ import {
   selectRuntimeAccountWorkspace,
   revokeRuntimeAccountDevice,
   clearRuntimeAccountWorkspaceSession,
+  createRuntimeRoutine,
+  getRuntimeRoutineSchedulerStatus,
+  listenRuntimeRoutineRunRequest,
   listenRuntimeSchedulerRunRequest,
   enqueueRuntimeJobRun,
   reportRuntimeJobAttempt,
+  reportRuntimeRoutineAttempt,
   renewRuntimeJobLease,
   requeueRuntimeBlockedJobRun,
   cancelRuntimeJobRun,
@@ -178,6 +182,7 @@ import {
   refreshRuntimeIdentity,
   signOutRuntimeIdentity,
   verifyRuntimeBackend,
+  type RuntimeRoutineRunRequest,
   wireToWorkflowRun
 } from "../runtime";
 import { buildLocalKnowledgeRefreshRequest } from "../lib/local-knowledge-refresh";
@@ -464,8 +469,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       leaseToken?: string;
       attemptNumber?: number;
       execution?: ScheduledExecutionRoute;
+      routineDriver?: {
+        projectId?: string;
+        occurrenceId: string;
+        writerEpoch: number;
+      };
     }>
   >([]);
+  const queueRoutineWorkflowRunRef = useRef<
+    (event: RuntimeRoutineRunRequest) => void
+  >(() => undefined);
   // Run ids awaiting a queue acknowledgement after a retry. Tracked separately
   // from workflowRuns so the detail view can show a pending control without
   // mutating the authoritative run record before the queue confirms.
@@ -762,6 +775,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       void unlisten?.();
     };
   }, [scheduledJobs, workflowDefinitions]);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void listenRuntimeRoutineRunRequest((event) => {
+      if (active) queueRoutineWorkflowRunRef.current(event);
+    }).then((dispose) => {
+      unlisten = dispose;
+    });
+    return () => {
+      active = false;
+      void unlisten?.();
+    };
+  }, []);
 
   // Auto-requeue blocked-auth entries when a backend reconnects. The Rust tick
   // parks runs whose backend was unavailable in `blocked-auth`; once a backend
@@ -3027,7 +3054,43 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
    */
   const commandRuntime: CommandRuntime = {
     createMemory: (input) => Promise.resolve(createMemoryFromCommand(input)),
-    createSchedule: (input) => Promise.resolve(createScheduleFromTrigger(input)),
+    createSchedule: async (input) => {
+      const schedulerStatus = await getRuntimeRoutineSchedulerStatus();
+      if (schedulerStatus?.authority.writer === "routine") {
+        const trigger =
+          input.trigger.kind === "once"
+            ? {
+                kind: "time-once" as const,
+                at: new Date(input.trigger.at).toISOString(),
+                timezone: "UTC"
+              }
+            : {
+                kind: "time-recurring" as const,
+                timezone: input.trigger.rule.timezone ?? "UTC",
+                recurrence: {
+                  frequency: input.trigger.rule.frequency,
+                  expression: `legacy-rrule-lite:v1:${JSON.stringify({
+                    frequency: input.trigger.rule.frequency,
+                    interval: input.trigger.rule.interval,
+                    byWeekday: input.trigger.rule.byWeekday ?? [],
+                    byMonthDay: input.trigger.rule.byMonthDay ?? null,
+                    hour: input.trigger.rule.hour,
+                    minute: input.trigger.rule.minute
+                  })}`,
+                  ...(input.trigger.rule.until ? { until: input.trigger.rule.until } : {})
+                },
+                missedRunPolicy: "run-once" as const
+              };
+        const routine = await createRuntimeRoutine({
+          title: input.name,
+          instruction: input.description,
+          trigger
+        });
+        if (!routine) throw new Error("Routines require the Fable desktop app.");
+        return { id: routine.routine.id };
+      }
+      return createScheduleFromTrigger(input);
+    },
     createGoal,
     createPlan: (input) => Promise.resolve(createPlan(input)),
     now: () => new Date().toISOString()
@@ -3286,6 +3349,142 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     });
   }
 
+  function queueRoutineWorkflowRun(event: {
+    projectId?: string;
+    routineId: string;
+    routineVersion: number;
+    occurrenceId: string;
+    runId: string;
+    scheduledAt: string;
+    action: { kind: string; title: string; instruction: string };
+    routePolicy: { kind: string };
+    writerEpoch: number;
+    leaseToken: string;
+    attemptNumber: number;
+  }) {
+    if (event.routePolicy.kind !== "resolve-at-run") {
+      void reportRuntimeRoutineAttempt({
+        projectId: event.projectId,
+        occurrenceId: event.occurrenceId,
+        writerEpoch: event.writerEpoch,
+        leaseToken: event.leaseToken,
+        runId: event.runId,
+        attemptNumber: event.attemptNumber,
+        status: "blocked"
+      });
+      return;
+    }
+    const now = new Date().toISOString();
+    const definition: WorkflowDefinition = {
+      schemaVersion: 1,
+      id: `routine-workflow-${event.routineId}`,
+      version: event.routineVersion,
+      name: event.action.title,
+      description: event.action.instruction,
+      status: "active",
+      steps: [
+        {
+          id: "prompt",
+          kind: "prompt",
+          prompt: event.action.instruction
+        }
+      ],
+      notificationPrefs: {
+        disableOs: false,
+        enabledKinds: ["run-completed", "run-failed", "approval-needed"]
+      },
+      createdAt: now,
+      updatedAt: now
+    };
+    const execution: ScheduledExecutionRoute = {
+      policy: "current-default",
+      backendId: "",
+      modelId: "",
+      permissionMode: "read-only",
+      permissionProfile: "trusted"
+    };
+    const previous = workflowRuns.find((candidate) => candidate.id === event.runId);
+    const run: WorkflowRun = previous
+      ? {
+          ...previous,
+          status: "running",
+          attemptNumber: event.attemptNumber,
+          updatedAt: now,
+          finishedAt: undefined,
+          nextRetryAt: undefined
+        }
+      : {
+          id: event.runId,
+          definitionId: definition.id,
+          definitionVersion: definition.version,
+          status: "running",
+          trigger: "schedule",
+          scheduledJobId: event.routineId,
+          permissionProfile: "trusted",
+          input: {},
+          steps: [
+            {
+              stepId: "prompt",
+              status: "running",
+              input: { prompt: event.action.instruction },
+              startedAt: now
+            }
+          ],
+          idempotencyKey: `routine:${event.routineId}:${event.occurrenceId}`,
+          attemptNumber: event.attemptNumber,
+          startedAt: now,
+          updatedAt: now
+        };
+    void (async () => {
+      await saveRuntimeWorkflowDefinition(definition);
+      await saveRuntimeWorkflowRun(run);
+      await reportRuntimeRoutineAttempt({
+        projectId: event.projectId,
+        occurrenceId: event.occurrenceId,
+        writerEpoch: event.writerEpoch,
+        leaseToken: event.leaseToken,
+        runId: event.runId,
+        attemptNumber: event.attemptNumber,
+        status: "running"
+      });
+      setWorkflowDefinitions((current) => [
+        definition,
+        ...current.filter(
+          (candidate) =>
+            candidate.id !== definition.id || candidate.version !== definition.version
+        )
+      ]);
+      setWorkflowRuns((current) => [run, ...current.filter((entry) => entry.id !== run.id)]);
+      setPendingWorkflowRuns((current) =>
+        current.some((entry) => entry.runId === run.id)
+          ? current
+          : [
+              ...current,
+              {
+                runId: run.id,
+                jobId: event.routineId,
+                prompt: event.action.instruction,
+                definition,
+                previous,
+                leaseToken: event.leaseToken,
+                attemptNumber: event.attemptNumber,
+                execution,
+                routineDriver: {
+                  projectId: event.projectId,
+                  occurrenceId: event.occurrenceId,
+                  writerEpoch: event.writerEpoch
+                }
+              }
+            ]
+      );
+    })().catch((error) => {
+      setLastAction(
+        error instanceof Error ? error.message : "Fable could not start this Routine."
+      );
+    });
+  }
+  queueRoutineWorkflowRunRef.current = queueRoutineWorkflowRun;
+
   const runScheduleNow = (job: ScheduledJob) => {
     const schedulePolicy = evaluatePermissionPolicy({
       mode: job.execution?.permissionMode ?? permissionMode,
@@ -3317,7 +3516,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const finishedAt = new Date().toISOString();
     const existing = workflowRuns.find((run) => run.id === runId);
     if (!existing) return;
-    const leaseToken = pendingWorkflowRuns.find((run) => run.runId === runId)?.leaseToken;
+    const pendingRun = pendingWorkflowRuns.find((run) => run.runId === runId);
+    const leaseToken = pendingRun?.leaseToken;
     const completed: WorkflowRun = authoritativeRun ?? {
       ...existing,
       status: ok ? "completed" : "failed",
@@ -3376,15 +3576,30 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           : completed.status === "cancelled"
             ? "cancelled"
             : "failed";
-    void reportRuntimeJobAttempt(runId, {
-      runId,
-      status: attemptStatus,
-      attemptNumber: existing.attemptNumber ?? 1,
-      startedAt: existing.startedAt,
-      finishedAt,
-      error: ok ? undefined : completed.failureReason,
-      leaseToken
-    });
+    if (pendingRun?.routineDriver && leaseToken) {
+      void reportRuntimeRoutineAttempt({
+        ...pendingRun.routineDriver,
+        leaseToken,
+        runId,
+        attemptNumber: existing.attemptNumber ?? 1,
+        status:
+          attemptStatus === "succeeded"
+            ? "completed"
+            : attemptStatus === "blocked-auth"
+              ? "blocked"
+              : attemptStatus
+      });
+    } else {
+      void reportRuntimeJobAttempt(runId, {
+        runId,
+        status: attemptStatus,
+        attemptNumber: existing.attemptNumber ?? 1,
+        startedAt: existing.startedAt,
+        finishedAt,
+        error: ok ? undefined : completed.failureReason,
+        leaseToken
+      });
+    }
     const definition = workflowDefinitions.find(
       (candidate) => candidate.id === completed.definitionId
     );

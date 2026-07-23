@@ -65,12 +65,15 @@ stored in React state, snapshots, logs, or JSON metadata.
 
 ## Known limits
 
-- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, migration evidence, Knowledge, Memory, Missions, artifacts, Connections, and grants persist in `fable-vault.db` under schema v33.
+- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, trigger cursors, migration evidence, Knowledge, Memory, Missions, artifacts, Connections, and grants persist in `fable-vault.db` under schema v34.
 - Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store.
-- Canonical Routines can be created, edited, paused, resumed, deleted, listed, and
-  migrated locally with encrypted evidence and rollback. The legacy scheduler
-  remains the selected writer; Routine recurrence execution and a proved
-  one-writer cutover are not release-ready.
+- Canonical Routines can be created, edited, paused, resumed, deleted, listed,
+  migrated, and executed locally with encrypted evidence, time-zone-aware
+  recurrence, restart cursors, leases, bounded retry, and exact settlement.
+  Reconciliation plus an explicit one-writer cutover is implemented, but legacy
+  rows without exact persisted member ownership quarantine. Rollback after a
+  canonical occurrence, packaged-app restart observation, and live provider
+  execution remain release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
 - Native API providers use bounded dynamic model discovery. Live availability

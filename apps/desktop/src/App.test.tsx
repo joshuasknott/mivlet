@@ -313,6 +313,7 @@ vi.mock("./runtime", () => ({
     runtimeMocks.savedWorkflowDefinitions.length ? [...runtimeMocks.savedWorkflowDefinitions] : null
   ),
   listRuntimeWorkflowRuns: vi.fn(async () => null),
+  listenRuntimeRoutineRunRequest: vi.fn(async () => null),
   listenRuntimeSchedulerRunRequest: vi.fn(async () => null),
   listenRuntimeSchedulerCancelRequest: vi.fn(async () => null),
   listRuntimeBackends: vi.fn(
@@ -335,6 +336,8 @@ vi.mock("./runtime", () => ({
   loadRuntimeAccountWorkspaceStatus: vi.fn(async () => runtimeMocks.accountStatus),
   reconcileRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
   createRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
+  createRuntimeRoutine: vi.fn(async () => null),
+  getRuntimeRoutineSchedulerStatus: vi.fn(async () => null),
   selectRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
   revokeRuntimeAccountDevice: vi.fn(async () => runtimeMocks.accountStatus),
   clearRuntimeAccountWorkspaceSession: vi.fn(async () => null),
@@ -375,7 +378,9 @@ vi.mock("./runtime", () => ({
   saveRuntimeWorkflowRun: vi.fn(async () => null),
   enqueueRuntimeJobRun: vi.fn(async () => null),
   reportRuntimeJobAttempt: vi.fn(async () => null),
+  reportRuntimeRoutineAttempt: vi.fn(async () => null),
   renewRuntimeJobLease: vi.fn(async () => null),
+  renewRuntimeRoutineLease: vi.fn(async () => null),
   requeueRuntimeBlockedJobRun: vi.fn(async () => null),
   cancelRuntimeJobRun: vi.fn(async () => null),
   setRuntimeJobStatus: vi.fn(async () => null),
@@ -954,6 +959,10 @@ describe("Fable home", () => {
   it("opens the interactive knowledge workspace", async () => {
     const user = await renderWorkspace();
 
+    // Warm the lazy route before measuring navigation. Vite's first transform
+    // can otherwise consume Testing Library's one-second query window on a
+    // cold Windows worker even though the route transition itself is complete.
+    await import("./components/pages/KnowledgePage");
     await user.click(screen.getByRole("button", { name: /^knowledge$/i }));
 
     // Knowledge is a lazily-loaded page; await its first paint before querying.
@@ -1078,11 +1087,16 @@ describe("Fable home", () => {
     await screen.findByText(/no schedules yet/i);
 
     await user.click(screen.getByRole("button", { name: /^new$/i }));
-    await user.type(screen.getByLabelText(/schedule task name/i), "Month-end review");
-    await user.type(screen.getByLabelText(/schedule description/i), "Close the month.");
+    fireEvent.change(screen.getByLabelText(/schedule task name/i), {
+      target: { value: "Month-end review" }
+    });
+    fireEvent.change(screen.getByLabelText(/schedule description/i), {
+      target: { value: "Close the month." }
+    });
     await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "monthly");
-    // The day-of-month defaults to 1; append "5" to make it the 15th.
-    await user.type(screen.getByLabelText(/day of month/i), "5");
+    fireEvent.change(screen.getByLabelText(/day of month/i), {
+      target: { value: "15" }
+    });
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Month-end review")).toBeInTheDocument();

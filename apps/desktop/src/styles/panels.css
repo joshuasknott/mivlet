@@ -2125,6 +2125,41 @@
   border-style: dashed;
 }
 
+.routine-runner {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-raised);
+}
+
+.routine-runner h3,
+.routine-runner p {
+  margin: 0;
+}
+
+.routine-runner p {
+  margin-top: 4px;
+  color: var(--ink-muted);
+}
+
+.routine-runner__blockers {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+}
+
+.routine-runner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 720px) {
   .routine-panel {
     margin: 14px;
