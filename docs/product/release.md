@@ -70,8 +70,12 @@ stored in React state, snapshots, logs, or JSON metadata.
 - Canonical Routines can be created, edited, paused, resumed, deleted, listed,
   migrated, and executed locally with encrypted evidence, time-zone-aware
   recurrence, restart cursors, leases, bounded retry, and exact settlement.
-  Reconciliation plus an explicit one-writer cutover is implemented, but legacy
-  rows without exact persisted member ownership quarantine. Rollback after a
+  New schedules, immutable workflow versions, queue occurrences, and workflow
+  runs carry native-authenticated owner evidence; renderer identity is ignored,
+  and production workflow writes require encrypted SQLite. Reconciliation plus
+  an explicit one-writer cutover is implemented, but legacy rows without exact
+  persisted member ownership still quarantine rather than being backfilled.
+  Rollback after a
   canonical occurrence, packaged-app restart observation, and live provider
   execution remain release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as

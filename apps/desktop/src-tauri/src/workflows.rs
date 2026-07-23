@@ -6,9 +6,12 @@
 
 use std::{fs, path::Path};
 
+use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
+#[cfg(test)]
+use crate::models::MAX_WORKFLOW_RUNS;
 use crate::models::{
-    WorkflowDefinitionRecord, WorkflowRunRecord, MAX_WORKFLOW_RUNS, MAX_WORKFLOW_STEPS,
-    WORKFLOW_RUN_STATUSES, WORKFLOW_RUN_STORE_VERSION,
+    WorkflowDefinitionRecord, WorkflowRunRecord, MAX_WORKFLOW_STEPS, WORKFLOW_RUN_STATUSES,
+    WORKFLOW_RUN_STORE_VERSION,
 };
 use crate::paths::{
     normalize_spaces, truncate_characters, workflow_definitions_path, workflow_runs_path,
@@ -68,6 +71,122 @@ fn normalize_definition(
     Ok(definition)
 }
 
+fn ownership_is_unresolved(
+    authority: &str,
+    visibility: &str,
+    owner_member_id: Option<&str>,
+    created_by_internal_user_id: Option<&str>,
+) -> bool {
+    authority.is_empty()
+        && visibility.is_empty()
+        && owner_member_id.is_none()
+        && created_by_internal_user_id.is_none()
+}
+
+fn apply_definition_ownership(
+    definition: &mut WorkflowDefinitionRecord,
+    existing: Option<&WorkflowDefinitionRecord>,
+    auth: &AuthorizedCommandScope,
+) -> Result<(), String> {
+    if let Some(existing) = existing {
+        if ownership_is_unresolved(
+            &existing.authority,
+            &existing.visibility,
+            existing.owner_member_id.as_deref(),
+            existing.created_by_internal_user_id.as_deref(),
+        ) {
+            definition.workspace_id = existing.workspace_id.clone();
+            definition.project_id = existing.project_id.clone();
+            definition.authority.clear();
+            definition.visibility.clear();
+            definition.owner_member_id = None;
+            definition.created_by_internal_user_id = None;
+            return Ok(());
+        }
+        if existing.workspace_id != auth.data.workspace_id()
+            || existing.project_id.as_deref() != auth.data.project_id()
+            || existing.authority != "local"
+            || existing.visibility != "member-private"
+            || existing.owner_member_id.as_deref() != auth.member_id.as_deref()
+            || existing.created_by_internal_user_id != Some(auth.internal_user_id.clone())
+        {
+            return Err(
+                "This workflow version is not owned by the active Fable member and cannot be changed."
+                    .into(),
+            );
+        }
+        definition.workspace_id = existing.workspace_id.clone();
+        definition.project_id = existing.project_id.clone();
+        definition.authority = existing.authority.clone();
+        definition.visibility = existing.visibility.clone();
+        definition.owner_member_id = existing.owner_member_id.clone();
+        definition.created_by_internal_user_id = existing.created_by_internal_user_id.clone();
+        return Ok(());
+    }
+    let member_id = auth.member_id.as_deref().ok_or_else(|| {
+        "An active Fable workspace membership is required to create a workflow version.".to_string()
+    })?;
+    definition.workspace_id = auth.data.workspace_id().to_string();
+    definition.project_id = auth.data.project_id().map(str::to_string);
+    definition.authority = "local".into();
+    definition.visibility = "member-private".into();
+    definition.owner_member_id = Some(member_id.to_string());
+    definition.created_by_internal_user_id = Some(auth.internal_user_id.clone());
+    Ok(())
+}
+
+fn apply_run_ownership(
+    run: &mut WorkflowRunRecord,
+    existing: Option<&WorkflowRunRecord>,
+    auth: &AuthorizedCommandScope,
+) -> Result<(), String> {
+    if let Some(existing) = existing {
+        if ownership_is_unresolved(
+            &existing.authority,
+            &existing.visibility,
+            existing.owner_member_id.as_deref(),
+            existing.created_by_internal_user_id.as_deref(),
+        ) {
+            run.workspace_id = existing.workspace_id.clone();
+            run.project_id = existing.project_id.clone();
+            run.authority.clear();
+            run.visibility.clear();
+            run.owner_member_id = None;
+            run.created_by_internal_user_id = None;
+            return Ok(());
+        }
+        if existing.workspace_id != auth.data.workspace_id()
+            || existing.project_id.as_deref() != auth.data.project_id()
+            || existing.authority != "local"
+            || existing.visibility != "member-private"
+            || existing.owner_member_id.as_deref() != auth.member_id.as_deref()
+            || existing.created_by_internal_user_id != Some(auth.internal_user_id.clone())
+        {
+            return Err(
+                "This workflow run is not owned by the active Fable member and cannot be changed."
+                    .into(),
+            );
+        }
+        run.workspace_id = existing.workspace_id.clone();
+        run.project_id = existing.project_id.clone();
+        run.authority = existing.authority.clone();
+        run.visibility = existing.visibility.clone();
+        run.owner_member_id = existing.owner_member_id.clone();
+        run.created_by_internal_user_id = existing.created_by_internal_user_id.clone();
+        return Ok(());
+    }
+    let member_id = auth.member_id.as_deref().ok_or_else(|| {
+        "An active Fable workspace membership is required to create a workflow run.".to_string()
+    })?;
+    run.workspace_id = auth.data.workspace_id().to_string();
+    run.project_id = auth.data.project_id().map(str::to_string);
+    run.authority = "local".into();
+    run.visibility = "member-private".into();
+    run.owner_member_id = Some(member_id.to_string());
+    run.created_by_internal_user_id = Some(auth.internal_user_id.clone());
+    Ok(())
+}
+
 fn read_definitions(path: &Path) -> Result<Vec<WorkflowDefinitionRecord>, String> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -81,6 +200,7 @@ fn read_definitions(path: &Path) -> Result<Vec<WorkflowDefinitionRecord>, String
         .map_err(|_| "Fable could not parse workflow definitions.".to_string())
 }
 
+#[cfg(test)]
 fn write_definitions(path: &Path, definitions: &[WorkflowDefinitionRecord]) -> Result<(), String> {
     let encoded = serde_json::to_vec_pretty(definitions)
         .map_err(|_| "Fable could not encode workflow definitions.".to_string())?;
@@ -92,21 +212,44 @@ fn write_definitions(path: &Path, definitions: &[WorkflowDefinitionRecord]) -> R
 
 #[tauri::command]
 pub fn save_workflow_definition(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     definition: WorkflowDefinitionRecord,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<WorkflowDefinitionRecord, String> {
-    let definition = normalize_definition(definition)?;
-    let scope = data_scope(workspace_id, project_id)?;
-    let value = serde_json::to_value(&definition)
-        .map_err(|_| "Fable could not encode workflow definition.".to_string())?;
-    if crate::store::with_store(|store| {
-        store.transaction(|tx| {
+    let mut definition = normalize_definition(definition)?;
+    let auth = authorized_scope::command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let existing = workflow::list_definitions(tx, store, &auth.data)?
+                .into_iter()
+                .find(|value| {
+                    value.get("id").and_then(serde_json::Value::as_str)
+                        == Some(definition.id.as_str())
+                        && value.get("version").and_then(serde_json::Value::as_u64)
+                            == Some(u64::from(definition.version))
+                })
+                .map(|value| {
+                    serde_json::from_value::<WorkflowDefinitionRecord>(value).map_err(|_| {
+                        crate::store::StoreError::Invalid(
+                            "Stored workflow definition is invalid.".into(),
+                        )
+                    })
+                })
+                .transpose()?;
+            apply_definition_ownership(&mut definition, existing.as_ref(), &auth)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let value = serde_json::to_value(&definition).map_err(|_| {
+                crate::store::StoreError::Invalid(
+                    "Fable could not encode workflow definition.".into(),
+                )
+            })?;
             workflow::upsert_definition(
                 tx,
                 store,
-                &scope,
+                &auth.data,
                 &definition.id,
                 definition.version,
                 &definition.created_at,
@@ -114,19 +257,7 @@ pub fn save_workflow_definition(
                 &value,
             )
         })
-    })?
-    .is_some()
-    {
-        record_definition_change(&definition);
-        return Ok(definition);
-    }
-    let path = workflow_definitions_path(&app)?;
-    let mut definitions = read_definitions(&path)?;
-    definitions
-        .retain(|existing| existing.id != definition.id || existing.version != definition.version);
-    definitions.insert(0, definition.clone());
-    definitions.truncate(500);
-    write_definitions(&path, &definitions)?;
+        .map_err(|error| error.to_string())?;
     record_definition_change(&definition);
     Ok(definition)
 }
@@ -241,6 +372,7 @@ pub fn read_runs(path: &Path) -> Result<Vec<WorkflowRunRecord>, String> {
         .map_err(|_| "Fable could not parse workflow runs.".to_string())
 }
 
+#[cfg(test)]
 fn write_runs(path: &Path, runs: &[WorkflowRunRecord]) -> Result<(), String> {
     let encoded = serde_json::to_vec_pretty(runs)
         .map_err(|_| "Fable could not encode workflow runs.".to_string())?;
@@ -251,7 +383,8 @@ fn write_runs(path: &Path, runs: &[WorkflowRunRecord]) -> Result<(), String> {
 
 /// Persist a run, replacing any existing record with the same id and capping
 /// history to the most recent MAX_WORKFLOW_RUNS records.
-pub fn persist_run(path: &Path, run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String> {
+#[cfg(test)]
+fn persist_run(path: &Path, run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String> {
     let run = normalize_run(run)?;
     let mut runs = read_runs(path)?;
     if let Some(existing) = runs.iter().find(|existing| existing.id == run.id) {
@@ -287,18 +420,18 @@ fn ensure_provider_route_transition(
 
 #[tauri::command]
 pub fn save_workflow_run(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     run: WorkflowRunRecord,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<WorkflowRunRecord, String> {
-    let run = normalize_run(run)?;
-    let scope = data_scope(workspace_id, project_id)?;
-    let value = serde_json::to_value(&run)
-        .map_err(|_| "Fable could not encode workflow run.".to_string())?;
-    if crate::store::with_store(|store| {
-        store.transaction(|tx| {
-            if let Some(existing) = workflow::list_runs(tx, store, &scope, None)?
+    let mut run = normalize_run(run)?;
+    let auth = authorized_scope::command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            if let Some(existing) = workflow::list_runs(tx, store, &auth.data, None)?
                 .into_iter()
                 .find(|value| {
                     value.get("id").and_then(serde_json::Value::as_str) == Some(run.id.as_str())
@@ -310,11 +443,19 @@ pub fn save_workflow_run(
                     })?;
                 ensure_provider_route_transition(&existing, &run)
                     .map_err(crate::store::StoreError::Invalid)?;
+                apply_run_ownership(&mut run, Some(&existing), &auth)
+                    .map_err(crate::store::StoreError::Invalid)?;
+            } else {
+                apply_run_ownership(&mut run, None, &auth)
+                    .map_err(crate::store::StoreError::Invalid)?;
             }
+            let value = serde_json::to_value(&run).map_err(|_| {
+                crate::store::StoreError::Invalid("Fable could not encode workflow run.".into())
+            })?;
             workflow::upsert_run(
                 tx,
                 store,
-                &scope,
+                &auth.data,
                 &run.id,
                 &run.definition_id,
                 run.definition_version,
@@ -324,15 +465,9 @@ pub fn save_workflow_run(
                 &value,
             )
         })
-    })?
-    .is_some()
-    {
-        record_run_change(&run);
-        return Ok(run);
-    }
-    let persisted = persist_run(&workflow_runs_path(&app)?, run)?;
-    record_run_change(&persisted);
-    Ok(persisted)
+        .map_err(|error| error.to_string())?;
+    record_run_change(&run);
+    Ok(run)
 }
 
 fn record_run_change(run: &WorkflowRunRecord) {
@@ -437,6 +572,7 @@ pub fn list_workflow_runs_for_definition(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::repos::scope::{DataScope, PrivateDataScope, DEFAULT_WORKSPACE_ID};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     fn tmp_path() -> std::path::PathBuf {
@@ -457,6 +593,12 @@ mod tests {
 
     fn sample_run(id: &str, status: &str) -> WorkflowRunRecord {
         WorkflowRunRecord {
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            project_id: None,
+            authority: String::new(),
+            visibility: String::new(),
+            owner_member_id: None,
+            created_by_internal_user_id: None,
             id: id.to_string(),
             definition_id: "wf".to_string(),
             definition_version: 1,
@@ -479,6 +621,12 @@ mod tests {
 
     fn sample_definition() -> WorkflowDefinitionRecord {
         WorkflowDefinitionRecord {
+            workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
+            project_id: None,
+            authority: String::new(),
+            visibility: String::new(),
+            owner_member_id: None,
+            created_by_internal_user_id: None,
             schema_version: WORKFLOW_RUN_STORE_VERSION,
             id: "wf".to_string(),
             version: 1,
@@ -507,6 +655,61 @@ mod tests {
                 cost: None,
             },
         }
+    }
+
+    fn auth() -> AuthorizedCommandScope {
+        let data = DataScope::new(DEFAULT_WORKSPACE_ID, Some("project-1".into())).unwrap();
+        AuthorizedCommandScope {
+            private: PrivateDataScope::for_authenticated_user(
+                data.clone(),
+                "user-1",
+                Some("member-1"),
+            )
+            .unwrap(),
+            data,
+            internal_user_id: "user-1".into(),
+            member_id: Some("member-1".into()),
+        }
+    }
+
+    #[test]
+    fn native_workflow_ownership_is_stamped_once_and_legacy_rows_stay_unresolved() {
+        let auth = auth();
+        let mut created = sample_definition();
+        created.authority = "forged".into();
+        created.owner_member_id = Some("member-2".into());
+        apply_definition_ownership(&mut created, None, &auth).unwrap();
+        assert_eq!(created.workspace_id, DEFAULT_WORKSPACE_ID);
+        assert_eq!(created.project_id.as_deref(), Some("project-1"));
+        assert_eq!(created.authority, "local");
+        assert_eq!(created.visibility, "member-private");
+        assert_eq!(created.owner_member_id.as_deref(), Some("member-1"));
+        assert_eq!(
+            created.created_by_internal_user_id.as_deref(),
+            Some("user-1")
+        );
+
+        let mut forged_update = sample_definition();
+        forged_update.owner_member_id = Some("member-2".into());
+        apply_definition_ownership(&mut forged_update, Some(&created), &auth).unwrap();
+        assert_eq!(forged_update.owner_member_id.as_deref(), Some("member-1"));
+
+        let unresolved = sample_definition();
+        let mut later_update = sample_definition();
+        apply_definition_ownership(&mut later_update, Some(&unresolved), &auth).unwrap();
+        assert!(later_update.authority.is_empty());
+        assert!(later_update.owner_member_id.is_none());
+        assert!(later_update.created_by_internal_user_id.is_none());
+
+        let mut run = sample_run("run-owned", "completed");
+        apply_run_ownership(&mut run, None, &auth).unwrap();
+        assert_eq!(run.owner_member_id.as_deref(), Some("member-1"));
+        assert_eq!(run.project_id.as_deref(), Some("project-1"));
+
+        let mut foreign = run.clone();
+        foreign.owner_member_id = Some("member-2".into());
+        foreign.created_by_internal_user_id = Some("user-2".into());
+        assert!(apply_run_ownership(&mut run, Some(&foreign), &auth).is_err());
     }
 
     #[test]

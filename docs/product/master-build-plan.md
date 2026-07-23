@@ -819,6 +819,17 @@ input and plan encrypted, handles canonical identity collisions by quarantine, i
 idempotent by semantic evidence hash, verifies exact replay, and can remove only
 unchanged batch-created records before driver execution.
 
+New legacy-compatible schedules now cross a forward-only native ownership
+boundary: Rust overwrites renderer identity and stamps the authenticated
+workspace, project, member, and creator onto the scheduled job and each newly
+created immutable workflow version, then carries the identical evidence into
+queue occurrences and workflow runs. Existing exact ownership is preserved on
+updates; missing legacy ownership is never backfilled from a later session.
+Scheduler commands also resolve the asserted workspace/project through the
+active native account before reading or mutating encrypted state. Production
+workflow writes no longer fall back to plaintext JSON when the encrypted store
+or authenticated scope is unavailable.
+
 The five-second native scheduler now evaluates canonical one-time and legacy-lite
 daily, weekly, and monthly recurrence in the trigger timezone, including DST,
 bounded missed-occurrence policies, deduplication, restart cursors, epoch fencing,
@@ -835,8 +846,9 @@ closed instead of being guessed.
 
 The calm local Routine surface supports create, edit, pause, resume, delete,
 history, run-in-chat, and compatible migration; browser preview labels encrypted
-durability unavailable instead of using fixtures. Full legacy ownership
-attribution, rollback after canonical execution, event triggers, general recurrence,
+durability unavailable instead of using fixtures. Forward ownership capture is
+implemented, while attribution of already-ambiguous legacy rows remains
+deliberately impossible. Rollback after canonical execution, event triggers, general recurrence,
 workspace-shared writes, packaged restart observation, and live provider validation
 remain open, so the broader migration and experience checkboxes stay unchecked.
 

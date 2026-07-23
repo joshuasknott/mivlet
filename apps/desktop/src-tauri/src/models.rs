@@ -1259,6 +1259,17 @@ pub struct ScheduledJob {
     pub workspace_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
+    /// Native-stamped ownership evidence for jobs created after the Routine
+    /// migration boundary. Empty legacy values remain unresolved and are never
+    /// filled from a later active session.
+    #[serde(default)]
+    pub authority: String,
+    #[serde(default)]
+    pub visibility: String,
+    #[serde(default)]
+    pub owner_member_id: Option<String>,
+    #[serde(default)]
+    pub created_by_internal_user_id: Option<String>,
     pub id: String,
     pub schema_version: u8,
     pub name: String,
@@ -1306,6 +1317,16 @@ pub struct SchedulerQueueEntry {
     pub workspace_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
+    /// Copied from the native-owned job when the occurrence is created.
+    /// Missing values on legacy entries remain unresolved migration evidence.
+    #[serde(default)]
+    pub authority: String,
+    #[serde(default)]
+    pub visibility: String,
+    #[serde(default)]
+    pub owner_member_id: Option<String>,
+    #[serde(default)]
+    pub created_by_internal_user_id: Option<String>,
     pub job_id: String,
     pub run_id: String,
     pub scheduled_at: String,
@@ -1368,6 +1389,19 @@ pub struct SchedulerStore {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunRecord {
+    #[serde(default = "default_workspace_id")]
+    pub workspace_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// Native-stamped identity for runs created after the migration boundary.
+    #[serde(default)]
+    pub authority: String,
+    #[serde(default)]
+    pub visibility: String,
+    #[serde(default)]
+    pub owner_member_id: Option<String>,
+    #[serde(default)]
+    pub created_by_internal_user_id: Option<String>,
     pub id: String,
     pub definition_id: String,
     pub definition_version: u32,
@@ -1395,6 +1429,20 @@ pub struct WorkflowRunRecord {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDefinitionRecord {
+    #[serde(default = "default_workspace_id")]
+    pub workspace_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    /// Native-stamped identity for immutable versions created after the
+    /// migration boundary. Old versions stay unresolved.
+    #[serde(default)]
+    pub authority: String,
+    #[serde(default)]
+    pub visibility: String,
+    #[serde(default)]
+    pub owner_member_id: Option<String>,
+    #[serde(default)]
+    pub created_by_internal_user_id: Option<String>,
     pub schema_version: u8,
     pub id: String,
     pub version: u32,

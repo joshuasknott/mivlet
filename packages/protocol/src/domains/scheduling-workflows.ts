@@ -127,10 +127,15 @@ export interface RetryPolicy {
  * ScheduleEntry remains for the legacy snapshot; this is the engine's record.
  */
 export interface ScheduledJob {
-  /** Durable local owner. Missing legacy values are read as "default". */
+  /** Durable local workspace scope. */
   workspaceId?: string;
   /** Optional project owner; absent means the record belongs to the workspace. */
   projectId?: string;
+  /** Native-only migration provenance; renderer input is never authoritative. */
+  authority?: "local";
+  visibility?: "member-private";
+  ownerMemberId?: string;
+  createdByInternalUserId?: string;
   /** Stable id. */
   id: string;
   /** Schema version of this job record. */
@@ -199,6 +204,11 @@ export type SchedulerJobStateLegacy = "queued" | "leased" | "done" | "dead";
 export interface SchedulerQueueEntry {
   workspaceId?: string;
   projectId?: string;
+  /** Native-only migration provenance; absent on unresolved legacy entries. */
+  authority?: "local";
+  visibility?: "member-private";
+  ownerMemberId?: string;
+  createdByInternalUserId?: string;
   /** Job id this entry is for. */
   jobId: string;
   /** Workflow run id to create/use. */
@@ -315,6 +325,13 @@ export type WorkflowStep =
  * historical runs keep the definition they executed against.
  */
 export interface WorkflowDefinition {
+  /** Native-only migration provenance; renderer input is never authoritative. */
+  workspaceId?: string;
+  projectId?: string;
+  authority?: "local";
+  visibility?: "member-private";
+  ownerMemberId?: string;
+  createdByInternalUserId?: string;
   /** Schema version of the definition shape. */
   schemaVersion: number;
   id: string;
@@ -434,6 +451,13 @@ export interface WorkflowStepRecord {
 export type WorkflowRunTrigger = "schedule" | "manual" | "voice";
 
 export interface WorkflowRun {
+  /** Native-only migration provenance; renderer input is never authoritative. */
+  workspaceId?: string;
+  projectId?: string;
+  authority?: "local";
+  visibility?: "member-private";
+  ownerMemberId?: string;
+  createdByInternalUserId?: string;
   id: string;
   /** The definition this run executes. */
   definitionId: string;

@@ -406,6 +406,10 @@ mod tests {
         SchedulerQueueEntry {
             workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
             project_id: None,
+            authority: String::new(),
+            visibility: String::new(),
+            owner_member_id: None,
+            created_by_internal_user_id: None,
             job_id: "job".to_string(),
             run_id: "run".to_string(),
             scheduled_at: "1970-01-01T00:00:00.000Z".to_string(),

@@ -20,6 +20,10 @@ fn sample_job(id: &str, status: &str) -> ScheduledJob {
     ScheduledJob {
         workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
         project_id: None,
+        authority: String::new(),
+        visibility: String::new(),
+        owner_member_id: None,
+        created_by_internal_user_id: None,
         id: id.to_string(),
         schema_version: SCHEDULER_STORE_VERSION,
         name: "Brief".to_string(),
@@ -42,6 +46,10 @@ fn sample_entry(id: &str, state: &str) -> SchedulerQueueEntry {
     SchedulerQueueEntry {
         workspace_id: DEFAULT_WORKSPACE_ID.to_string(),
         project_id: None,
+        authority: String::new(),
+        visibility: String::new(),
+        owner_member_id: None,
+        created_by_internal_user_id: None,
         job_id: id.to_string(),
         run_id: format!("run-{id}"),
         scheduled_at: "1970-01-01T00:00:00.000Z".to_string(),
@@ -445,6 +453,58 @@ fn blocked_runs_audit_mapping() {
     };
     assert_eq!(dead_status, "failed");
     assert_eq!(dead_category, "policy-block");
+}
+
+#[test]
+fn native_schedule_ownership_is_stamped_once_and_never_backfilled() {
+    let mut created = sample_job("owned", "active");
+    created.authority = "forged".into();
+    created.owner_member_id = Some("attacker".into());
+    apply_native_job_ownership(&mut created, None, "user-1", Some("member-1")).unwrap();
+    assert_eq!(created.authority, "local");
+    assert_eq!(created.visibility, "member-private");
+    assert_eq!(created.owner_member_id.as_deref(), Some("member-1"));
+    assert_eq!(
+        created.created_by_internal_user_id.as_deref(),
+        Some("user-1")
+    );
+
+    let existing = created.clone();
+    let mut forged_update = created.clone();
+    forged_update.owner_member_id = Some("member-2".into());
+    forged_update.created_by_internal_user_id = Some("user-2".into());
+    apply_native_job_ownership(
+        &mut forged_update,
+        Some(&existing),
+        "user-1",
+        Some("member-1"),
+    )
+    .unwrap();
+    assert_eq!(forged_update.owner_member_id.as_deref(), Some("member-1"));
+    assert_eq!(
+        forged_update.created_by_internal_user_id.as_deref(),
+        Some("user-1")
+    );
+    assert!(apply_native_job_ownership(
+        &mut forged_update,
+        Some(&existing),
+        "user-2",
+        Some("member-2")
+    )
+    .is_err());
+
+    let unresolved = sample_job("legacy", "active");
+    let mut later_update = unresolved.clone();
+    apply_native_job_ownership(
+        &mut later_update,
+        Some(&unresolved),
+        "user-1",
+        Some("member-1"),
+    )
+    .unwrap();
+    assert!(later_update.authority.is_empty());
+    assert!(later_update.owner_member_id.is_none());
+    assert!(later_update.created_by_internal_user_id.is_none());
 }
 
 // -----------------------------------------------------------------------

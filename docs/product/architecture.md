@@ -141,6 +141,14 @@ scheduler and Routine scheduler from both writing. Legacy records without exact
 persisted member ownership quarantine instead of inheriting the active session
 identity.
 
+For records created after this boundary, native commands overwrite renderer
+identity and stamp the authenticated workspace, project, member, and creator on
+the schedule and immutable workflow version. Queue occurrences and workflow runs
+carry the same evidence forward. Existing exact identity is immutable; missing
+legacy identity is not backfilled. Scheduler commands authenticate renderer
+workspace/project assertions, and production workflow writes require the
+encrypted store rather than degrading to JSON.
+
 ## Connector Runtime
 
 `@fable/connectors` now exposes a typed adapter/runtime contract for authentication, account identity, capabilities, reads, writes, pagination, rate-limit metadata, normalized errors, token refresh, retry, revocation, and disconnection. Adapters register a closed capability set; duplicate registrations and undeclared operations fail closed.

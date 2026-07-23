@@ -5,21 +5,15 @@ use std::{collections::BTreeMap, sync::Mutex};
 use tauri::{AppHandle, Manager};
 
 use crate::{
-    models::SchedulerStore,
-    store::repos::scope::{DataScope, DEFAULT_WORKSPACE_ID},
+    authorized_scope::ScopeAccess, models::SchedulerStore, store::repos::scope::DataScope,
 };
 
 pub(crate) fn command_scope(
     workspace_id: Option<String>,
     project_id: Option<String>,
+    access: ScopeAccess,
 ) -> Result<DataScope, String> {
-    let scope = DataScope::new(
-        workspace_id.unwrap_or_else(|| DEFAULT_WORKSPACE_ID.to_string()),
-        project_id,
-    )
-    .map_err(|error| error.to_string())?;
-    let _ = crate::store::with_store(|store| store.with_conn(|conn| scope.ensure_exists(conn)))?;
-    Ok(scope)
+    crate::authorized_scope::command_scope(workspace_id, project_id, access).map(|auth| auth.data)
 }
 
 /// Process-global scheduler state held behind Tauri's managed state.

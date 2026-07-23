@@ -26,6 +26,7 @@
 
 use std::path::Path;
 
+use crate::authorized_scope::ScopeAccess;
 use crate::models::{
     JobAttempt, ScheduledJob, SchedulerQueueEntry, SchedulerStore, MAX_JOB_ATTEMPTS,
     MAX_SCHEDULED_JOBS, MAX_SCHEDULER_QUEUE_ENTRIES, RUNNING_LEASE_MS, SCHEDULED_JOB_STATUSES,
@@ -97,13 +98,57 @@ fn require_legacy_writer(workspace_id: &str) -> Result<(), String> {
     }
 }
 
+pub(crate) fn apply_native_job_ownership(
+    job: &mut ScheduledJob,
+    existing: Option<&ScheduledJob>,
+    internal_user_id: &str,
+    member_id: Option<&str>,
+) -> Result<(), String> {
+    if let Some(existing) = existing {
+        let unresolved_legacy = existing.authority.is_empty()
+            && existing.visibility.is_empty()
+            && existing.owner_member_id.is_none()
+            && existing.created_by_internal_user_id.is_none();
+        if unresolved_legacy {
+            job.authority.clear();
+            job.visibility.clear();
+            job.owner_member_id = None;
+            job.created_by_internal_user_id = None;
+            return Ok(());
+        }
+        if existing.authority != "local"
+            || existing.visibility != "member-private"
+            || existing.owner_member_id.as_deref() != member_id
+            || existing.created_by_internal_user_id.as_deref() != Some(internal_user_id)
+        {
+            return Err(
+                "This schedule is not owned by the active Fable member and cannot be changed."
+                    .into(),
+            );
+        }
+        job.authority = existing.authority.clone();
+        job.visibility = existing.visibility.clone();
+        job.owner_member_id = existing.owner_member_id.clone();
+        job.created_by_internal_user_id = existing.created_by_internal_user_id.clone();
+        return Ok(());
+    }
+    let member_id = member_id.ok_or_else(|| {
+        "An active Fable workspace membership is required to create a schedule.".to_string()
+    })?;
+    job.authority = "local".into();
+    job.visibility = "member-private".into();
+    job.owner_member_id = Some(member_id.to_string());
+    job.created_by_internal_user_id = Some(internal_user_id.to_string());
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_scheduler_jobs(
     app: AppHandle,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<ScheduledJob>, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
     if let Some(store) = load_store_from_sqlite(scope.workspace_id())? {
         return Ok(store
             .jobs
@@ -128,7 +173,7 @@ pub fn list_scheduler_queue(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<SchedulerQueueEntry>, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Read)?;
     if let Some(store) = load_store_from_sqlite(scope.workspace_id())? {
         return Ok(store
             .queue
@@ -154,35 +199,57 @@ pub fn save_scheduled_job(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<ScheduledJob, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let auth =
+        crate::authorized_scope::command_scope(workspace_id, project_id, ScopeAccess::Write)?;
+    let scope = auth.data;
     require_legacy_writer(scope.workspace_id())?;
     job.workspace_id = scope.workspace_id().to_string();
     job.project_id = scope.project_id().map(str::to_string);
     let job = normalize_job(job)?;
+    let mut ownership_error = None;
+    let mut saved_job = job.clone();
     persist(&app, scope.workspace_id(), |store| {
+        let existing = store.jobs.iter().find(|candidate| {
+            candidate.id == job.id
+                && candidate.workspace_id == job.workspace_id
+                && candidate.project_id == job.project_id
+        });
+        if let Err(error) = apply_native_job_ownership(
+            &mut saved_job,
+            existing,
+            &auth.internal_user_id,
+            auth.member_id.as_deref(),
+        ) {
+            ownership_error = Some(error);
+            return false;
+        }
         store.jobs.retain(|j| {
             j.id != job.id || j.workspace_id != job.workspace_id || j.project_id != job.project_id
         });
-        store.jobs.insert(0, job.clone());
+        store.jobs.insert(0, saved_job.clone());
         store.jobs.truncate(MAX_SCHEDULED_JOBS);
         true
     })?;
+    if let Some(error) = ownership_error {
+        return Err(error);
+    }
     crate::action_history::Recorder::new(
         crate::action_history::categories::SCHEDULE,
         "scheduler",
-        &job.id,
+        &saved_job.id,
         "configured",
     )
     .actor("user")
     .mode(
-        job.execution
+        saved_job
+            .execution
             .as_ref()
             .map(|route| route.permission_mode.as_str())
             .unwrap_or(""),
     )
-    .summary(&format!("Scheduled job {} saved.", job.id))
+    .summary(&format!("Scheduled job {} saved.", saved_job.id))
     .record();
-    Ok(job)
+    Ok(saved_job)
 }
 
 #[tauri::command]
@@ -192,7 +259,7 @@ pub fn delete_scheduled_job(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<(), String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     require_legacy_writer(scope.workspace_id())?;
     let job_id = normalize_spaces(&job_id);
     let mut deleted = false;
@@ -223,7 +290,7 @@ pub fn set_job_status(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<(), String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     require_legacy_writer(scope.workspace_id())?;
     let status = normalize_spaces(&status);
     if !SCHEDULED_JOB_STATUSES.contains(&status.as_str()) {
@@ -291,7 +358,7 @@ pub fn enqueue_job_run(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<SchedulerQueueEntry, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     require_legacy_writer(scope.workspace_id())?;
     let job_id = normalize_spaces(&job_id);
     let run_id = truncate_characters(&normalize_spaces(&run_id), 160);
@@ -329,6 +396,10 @@ pub fn enqueue_job_run(
         let entry = SchedulerQueueEntry {
             workspace_id: scope.workspace_id().to_string(),
             project_id: scope.project_id().map(str::to_string),
+            authority: job.authority.clone(),
+            visibility: job.visibility.clone(),
+            owner_member_id: job.owner_member_id.clone(),
+            created_by_internal_user_id: job.created_by_internal_user_id.clone(),
             job_id: job_id.clone(),
             run_id: run_id.clone(),
             scheduled_at: scheduled_at.clone(),
@@ -378,7 +449,7 @@ pub fn report_job_attempt(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<(), String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     let attempt = normalize_attempt(attempt)?;
     let run_id = normalize_spaces(&run_id);
     let mut remembered: Option<String> = None;
@@ -470,7 +541,7 @@ pub fn renew_job_lease(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<bool, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     let run_id = normalize_spaces(&run_id);
     let lease_token = normalize_spaces(&lease_token);
     let mut renewed = false;
@@ -506,7 +577,7 @@ pub fn requeue_blocked_job_run(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<bool, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     let run_id = normalize_spaces(&run_id);
     let mut requeued = false;
     persist(&app, scope.workspace_id(), |store| {
@@ -536,7 +607,7 @@ pub fn cancel_job_run(
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<bool, String> {
-    let scope = command_scope(workspace_id, project_id)?;
+    let scope = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     let run_id = normalize_spaces(&run_id);
     let now = now_iso();
     let mut cancelled = false;
