@@ -2,7 +2,7 @@
 
 **Status:** Authoritative execution tracker
 
-**Last updated:** 13 July 2026
+**Last updated:** 23 July 2026
 
 The [Product Blueprint](vision.md) describes the Fable we are building. This document is the ordered checklist for building it. [Status](status.md) records what is factually implemented now.
 

@@ -175,22 +175,6 @@ pub(crate) fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFi
         .map_err(|_| "Fable could not parse imported knowledge sources.".to_string())
 }
 
-/// Read the authoritative imported-knowledge document for an already
-/// authorized scope. Project reads never fall back to workspace or legacy
-/// data when their scoped document is absent.
-pub(crate) fn read_imported_knowledge_sources_scoped(
-    path: &Path,
-    scope: &DataScope,
-) -> Result<Vec<LocalFileImport>, String> {
-    if let Some(sources) = crate::store::read_workspace_document(path, scope)? {
-        return Ok(sources);
-    }
-    if scope.project_id().is_some() {
-        return Ok(Vec::new());
-    }
-    read_imported_knowledge_sources(path)
-}
-
 pub(crate) fn read_imported_knowledge_sources_private(
     path: &Path,
     scope: &PrivateDataScope,
@@ -280,7 +264,7 @@ fn apply_local_knowledge_refresh(
     {
         return Err("File modification time is invalid.".to_string());
     }
-    let actual_size = request.file.content.as_bytes().len();
+    let actual_size = request.file.content.len();
     if actual_size != request.file.size_bytes {
         return Err(
             "The selected file changed while Fable was reading it. Choose it again.".to_string(),
@@ -806,6 +790,9 @@ pub(crate) fn normalize_runtime_snapshot(
     })
 }
 
+// Retained for legacy-file compatibility tests. Production restores through
+// the private owner-qualified snapshot repository.
+#[cfg(test)]
 pub(crate) fn read_runtime_snapshot(path: &Path) -> Result<Option<RuntimeSnapshot>, String> {
     if let Some(snapshot) = crate::store::read_document(path)? {
         return normalize_runtime_snapshot(snapshot).map(Some);

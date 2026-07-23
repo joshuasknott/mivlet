@@ -1341,7 +1341,7 @@ fn build_account_native_provider_routes(
             continue;
         };
         let credential_available = availability.get(&row.provider_id).copied().unwrap_or(false);
-        let connection_id = account_provider_connection_id(&internal_user_id, &row.provider_id);
+        let connection_id = account_provider_connection_id(internal_user_id, &row.provider_id);
         let binding_digest = Sha256::digest(
             format!("{}:{}:credential", internal_user_id, row.provider_id).as_bytes(),
         );

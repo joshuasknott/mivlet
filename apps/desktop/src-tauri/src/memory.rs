@@ -117,6 +117,9 @@ pub(crate) fn normalize_memory_state(
     })
 }
 
+// Retained for legacy-file compatibility tests. Production reads through the
+// owner-qualified encrypted repository command boundary.
+#[cfg(test)]
 pub(crate) fn read_memory_state(path: &Path) -> Result<MemoryControlState, String> {
     if let Some(state) = crate::store::read_document(path)? {
         return normalize_memory_state(state);

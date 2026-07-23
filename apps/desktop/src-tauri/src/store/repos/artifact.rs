@@ -1366,7 +1366,7 @@ pub fn create_accepted_mission_output(
         .get("text")
         .and_then(Value::as_str)
         .ok_or_else(|| StoreError::Invalid("Mission artifact content is missing.".into()))?;
-    if text.as_bytes().len() as i64 != receipt.size_bytes
+    if text.len() as i64 != receipt.size_bytes
         || format!("{:x}", Sha256::digest(text.as_bytes())) != receipt.content_hash
     {
         return Err(StoreError::Invalid(

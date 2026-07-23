@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-07-13.
+Last audited: 2026-07-23.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 

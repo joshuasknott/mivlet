@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useState, type PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ScheduledJob } from "@fable/protocol";
@@ -75,7 +75,7 @@ describe("useRuntimeSchedules", () => {
   });
 
   it("hydrates schedule jobs from the Rust-backed runtime query", async () => {
-    vi.mocked(runtime.listRuntimeSchedulerJobs).mockResolvedValue([makeJob()]);
+    vi.mocked(runtime.listRuntimeSchedulerJobs).mockResolvedValue([makeJob({ status: "paused" })]);
     const { result } = renderHook(
       () => useRuntimeSchedules({ workspaceId: "preview-default", projectId: null }),
       { wrapper }
@@ -92,7 +92,7 @@ describe("useRuntimeSchedules", () => {
     vi.mocked(runtime.listRuntimeSchedulerJobs)
       .mockRejectedValueOnce(new Error("store locked"))
       .mockRejectedValueOnce(new Error("store locked"))
-      .mockResolvedValueOnce([makeJob({ id: "job-2", name: "Recovered" })]);
+      .mockResolvedValueOnce([makeJob({ id: "job-2", name: "Recovered", status: "paused" })]);
 
     const { result } = renderHook(
       () => useRuntimeSchedules({ workspaceId: "preview-default", projectId: null }),
@@ -102,7 +102,9 @@ describe("useRuntimeSchedules", () => {
     await waitFor(() => expect(result.current.scheduleLoadError).toBe("store locked"), {
       timeout: 3_000
     });
-    await result.current.retryScheduleLoad();
+    await act(async () => {
+      await result.current.retryScheduleLoad();
+    });
 
     await waitFor(() => expect(result.current.scheduleLoadError).toBeNull());
     expect(result.current.scheduledJobs[0].name).toBe("Recovered");

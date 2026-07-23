@@ -1907,7 +1907,7 @@ fn build_checkpoint(
         return Err("Checkpoint attempt does not match the current run attempt.".into());
     }
     if input.durable_through_sequence < 1
-        || input.durable_through_sequence >= input.expected_last_sequence + 1
+        || input.durable_through_sequence > input.expected_last_sequence
     {
         return Err("Checkpoint durable sequence is invalid.".into());
     }

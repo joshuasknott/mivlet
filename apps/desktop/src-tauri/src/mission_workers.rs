@@ -2119,25 +2119,14 @@ pub(crate) fn preflight_native_worker_completion(
                     event.get("idempotencyKey").and_then(Value::as_str)
                         == Some(event_key.as_str())
                 }) {
-                    if existing.get("type").and_then(Value::as_str) == Some("run-cancelled") {
-                        exact_native_terminal_replay_with_mode(
-                            &journal,
-                            existing,
-                            binding,
-                            output.as_ref(),
-                            parallel_evidence_free,
-                        )
-                            .map_err(crate::store::StoreError::Invalid)?;
-                    } else {
-                        exact_native_terminal_replay_with_mode(
-                            &journal,
-                            existing,
-                            binding,
-                            output.as_ref(),
-                            parallel_evidence_free,
-                        )
-                            .map_err(crate::store::StoreError::Invalid)?;
-                    }
+                    exact_native_terminal_replay_with_mode(
+                        &journal,
+                        existing,
+                        binding,
+                        output.as_ref(),
+                        parallel_evidence_free,
+                    )
+                    .map_err(crate::store::StoreError::Invalid)?;
                     validate_usage_replay_with_mode(
                         &journal,
                         existing,
@@ -5011,7 +5000,7 @@ fn is_parallel_evidence_free_markdown_run(
         .filter_map(|event| event.pointer("/payload/worker"))
         .collect::<Vec<_>>();
     if created.len() != 2
-        || !created.iter().any(|candidate| *candidate == worker)
+        || !created.contains(&worker)
         || created.iter().any(|candidate| {
             candidate
                 .get("id")
@@ -7238,7 +7227,7 @@ fn decimal_usd_from_minor(minor_units: u64) -> String {
     let fractional = minor_units % 100;
     if fractional == 0 {
         whole.to_string()
-    } else if fractional % 10 == 0 {
+    } else if fractional.is_multiple_of(10) {
         format!("{whole}.{}", fractional / 10)
     } else {
         format!("{whole}.{fractional:02}")
@@ -8539,7 +8528,7 @@ fn exact_replay(event: &Value, input: &MissionWorkerCreateInput) -> Result<(), S
     let expected_grants = worker
         .get("capabilityIds")
         .and_then(Value::as_array)
-        .map(|capabilities| {
+        .and_then(|capabilities| {
             capabilities
                 .iter()
                 .map(|capability| {
@@ -8549,8 +8538,7 @@ fn exact_replay(event: &Value, input: &MissionWorkerCreateInput) -> Result<(), S
                         .map(|value| Value::String(value.to_string()))
                 })
                 .collect::<Option<Vec<_>>>()
-        })
-        .flatten();
+        });
     if event.get("id").and_then(Value::as_str) == Some(input.event_id.as_str())
         && event.get("type").and_then(Value::as_str) == Some("worker-created")
         && event.get("runId").and_then(Value::as_str) == Some(input.run_id.as_str())

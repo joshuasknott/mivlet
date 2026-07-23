@@ -1,6 +1,6 @@
 # Release Readiness
 
-Last updated: 2026-07-10.
+Last updated: 2026-07-23.
 
 > **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. The current Clerk/Convex implementation is still a config-gated foundation, so the repository must not be presented as having completed that account requirement.
 
@@ -41,8 +41,11 @@ stored in React state, snapshots, logs, or JSON metadata.
 
 - Confidential OAuth connectors (GitHub, Vercel, Notion, Slack, and Linear)
   require a deployed Fable auth broker plus provider-console callback
-  registration. The current in-memory handoff store is not production-ready;
-  durable atomic storage is a release blocker.
+  registration. The repository contains encrypted, atomic, one-time Durable
+  Object SQLite storage plus declared staging/production bindings and migration
+  metadata. Provisioning its encryption key, applying and reviewing the live
+  Durable Object migration, deploying the Worker, and validating registered
+  callbacks remain release blockers. Memory storage is local-development only.
 - Google connectors are independent desktop public clients. They require
   `FABLE_GOOGLE_OAUTH_CLIENT_ID`, enabled Google APIs, consent configuration,
   test users while unpublished, and any verification required by Google.

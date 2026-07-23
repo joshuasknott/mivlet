@@ -298,7 +298,7 @@ fn validate_receipt(
         || model.is_empty()
         || model.len() > 200
         || text.trim().is_empty()
-        || text.as_bytes().len() as i64 != size
+        || text.len() as i64 != size
         || computed_hash != hash
         || binding_reference(workspace, owner, run, worker, event, output_key, hash) != reference
         || receipt.get("createdAt").and_then(Value::as_str) != Some(created_at)

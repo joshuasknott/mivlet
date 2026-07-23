@@ -285,7 +285,9 @@ describe("legacy routine migration planner", () => {
         }
       }
     });
-    expect(plan.candidates[0]!.routine.legacySources[0]!.retainedFields).toMatchObject({
+    const candidateSource = plan.candidates[0]?.routine.legacySources?.[0];
+    expect(candidateSource).toBeDefined();
+    expect(candidateSource?.retainedFields).toMatchObject({
       sourceChecksum: job.checksum,
       legacyTimezoneDefault: "UTC"
     });

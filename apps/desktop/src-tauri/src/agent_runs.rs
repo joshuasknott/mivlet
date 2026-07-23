@@ -6,12 +6,15 @@
 //! explicit resume/retry.
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use std::{collections::HashSet, fs, path::Path};
+use std::collections::HashSet;
+#[cfg(test)]
+use std::{fs, path::Path};
 
+#[cfg(test)]
+use crate::models::MAX_AGENT_RUNS;
 use crate::models::{
     PersistedAgentRun, RunContextCitation, RunContextContribution, RunContextReceipt,
-    RunContextScope, MAX_AGENT_RUNS, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS,
-    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    RunContextScope, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS, MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
 };
 use crate::paths::{normalize_spaces, truncate_characters};
 use crate::store::repos::{run, scope::DataScope, workspace_directory};
@@ -391,6 +394,9 @@ pub(crate) fn normalize_provider_route_binding(
     Ok(())
 }
 
+// These helpers retain focused compatibility coverage for the pre-repository
+// run format. Production uses the owner-qualified run repository below.
+#[cfg(test)]
 pub(crate) fn read_agent_runs(path: &Path) -> Result<Vec<PersistedAgentRun>, String> {
     if let Some(runs) = crate::store::read_document::<Vec<PersistedAgentRun>>(path)? {
         return runs.into_iter().map(normalize_agent_run).collect();
@@ -408,6 +414,7 @@ pub(crate) fn read_agent_runs(path: &Path) -> Result<Vec<PersistedAgentRun>, Str
     runs.into_iter().map(normalize_agent_run).collect()
 }
 
+#[cfg(test)]
 fn write_agent_runs(path: &Path, runs: &[PersistedAgentRun]) -> Result<(), String> {
     if crate::store::write_document(path, &runs)? {
         return Ok(());
@@ -420,6 +427,7 @@ fn write_agent_runs(path: &Path, runs: &[PersistedAgentRun]) -> Result<(), Strin
     fs::rename(&temporary, path).map_err(|_| "Fable could not commit agent run state.".to_string())
 }
 
+#[cfg(test)]
 pub(crate) fn persist_agent_run(
     path: &Path,
     run: PersistedAgentRun,
@@ -458,10 +466,12 @@ fn ensure_run_evidence_immutable(
     Ok(())
 }
 
+#[cfg(test)]
 fn is_terminal_status(status: &str) -> bool {
     matches!(status, "completed" | "cancelled" | "failed" | "interrupted")
 }
 
+#[cfg(test)]
 pub(crate) fn recover_agent_runs_at(
     path: &Path,
     recovered_at: &str,

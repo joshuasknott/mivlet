@@ -2068,7 +2068,7 @@ fn validate_portable_artifact(
                     == Some("inline")
             })
             .ok_or_else(|| invalid_artifact("version content is not bounded inline text"))?;
-        if text.is_empty() || text.as_bytes().len() > 65_536 {
+        if text.is_empty() || text.len() > 65_536 {
             return Err(invalid_artifact("inline content is out of bounds"));
         }
         let hash = format!("{:x}", Sha256::digest(text.as_bytes()));

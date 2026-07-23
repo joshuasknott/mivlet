@@ -5,6 +5,17 @@
 //! This crate root only declares those modules, registers the Tauri command
 //! handlers, and starts the in-process scheduler tick.
 
+// Native transaction and execution-boundary functions intentionally keep
+// authority, scope, revision, and timing inputs explicit. Collapsing those
+// security-relevant facts into broad bags solely to satisfy shape lints would
+// make call-site review less precise. Large preflight enum variants likewise
+// stay inline because they are short-lived, single-owner boundary values.
+#![allow(
+    clippy::large_enum_variant,
+    clippy::too_many_arguments,
+    clippy::type_complexity
+)]
+
 mod account_workspace;
 mod acp_process;
 mod action_history;
