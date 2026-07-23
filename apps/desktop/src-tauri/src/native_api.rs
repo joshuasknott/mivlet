@@ -2313,11 +2313,11 @@ mod transport_policy_tests {
     fn retry_after_supports_variants_and_bounds() {
         // Directly exercises the shipped pure retry_after_ms (used by real retry_after)
         let d1 = retry_after_ms(Some("5"), 0);
-        assert!(d1 >= 5000 && d1 <= 30000);
+        assert!((5000..=30000).contains(&d1));
         let d2 = retry_after_ms(Some("120"), 1);
         assert!(d2 <= 30000);
         let d3 = retry_after_ms(Some("Fri, 31 Dec 1999 23:59:59 GMT"), 0);
-        assert!(d3 > 0 && d3 <= 30000);
+        assert!((1..=30000).contains(&d3));
         let d4 = retry_after_ms(Some("bad"), 2);
         assert!(d4 <= 30000);
     }

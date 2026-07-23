@@ -2665,8 +2665,10 @@ mod tests {
             current_member_id: "member_current".into(),
             allowed_roles: BTreeSet::from(["editor".into(), "viewer".into()]),
         };
-        let mut registry = MemberActionRegistry::default();
-        registry.invitation_grant = Some((reference.into(), grant));
+        let registry = MemberActionRegistry {
+            invitation_grant: Some((reference.into(), grant)),
+            ..MemberActionRegistry::default()
+        };
         Mutex::new(registry)
     }
 

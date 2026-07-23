@@ -18,6 +18,10 @@ import {
   looksLikePlaintextToken
 } from "./store-crypto.js";
 import type { BrokerProviderId } from "@fable/connectors";
+import { FableBroker } from "./broker.js";
+import { fixedClock } from "./clock.js";
+import { BrokerPending } from "./durable-stores.js";
+import { createSerialInMemoryEphemeralOps } from "./ephemeral-rpc.js";
 
 const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // 64 hex chars? Wait, base64url of 32B
 // 32 random bytes base64url (no pad)
@@ -110,7 +114,7 @@ describe("DO class direct drive + no-plaintext snapshot", () => {
         setAlarm() {}
       }
     };
-    const d = new (await import("./durable-stores.js")).BrokerPending(mockCtx, {});
+    const d = new BrokerPending(mockCtx, {});
     const state = "state-do-12345678901234567890";
     const verifier = "secret-verifier-do-not-appear-in-sql";
     const enc = await encryptVerifier(makeSecretForTest(), state, "github" as any, verifier);
@@ -130,9 +134,6 @@ describe("DO class direct drive + no-plaintext snapshot", () => {
   });
 
   it("handoff via serial in-mem ops + broker flow: no plaintext in storage rows", async () => {
-    const { createSerialInMemoryEphemeralOps } = await import("./ephemeral-rpc.js");
-    const { fixedClock } = await import("./clock.js");
-    const { FableBroker } = await import("./broker.js");
     const clock = fixedClock(1000);
     const secret = makeSecretForTest();
     const { ops, pendingInst, handoffInst } = await createSerialInMemoryEphemeralOps(clock, secret);

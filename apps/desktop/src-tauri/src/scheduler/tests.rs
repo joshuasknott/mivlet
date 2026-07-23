@@ -885,7 +885,7 @@ fn decode_store_from_sqlite_rows_rejects_malformed_and_seeds_ledger_on_good() {
 #[test]
 fn queue_ordering_by_scheduled_at_and_ledger_roundtrips() {
     // list orders by scheduled_at (from repo query)
-    let mut es = vec![
+    let mut es = [
         make_entry("j", "r2", "2026-07-03T10:00:00.000Z", "", "queued"),
         make_entry("j", "r1", "2026-07-03T09:00:00.000Z", "", "queued"),
     ];

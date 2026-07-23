@@ -1245,7 +1245,12 @@ mod tests {
             .transaction(|conn| {
                 upsert_authoritative_summary(conn, &alpha)?;
                 upsert_authoritative_summary(conn, &beta)?;
-                upsert_account_device_summaries(conn, "user-alpha", &[device.clone()], "now")
+                upsert_account_device_summaries(
+                    conn,
+                    "user-alpha",
+                    std::slice::from_ref(&device),
+                    "now",
+                )
             })
             .unwrap();
         assert!(store

@@ -2858,7 +2858,9 @@ fn web_fetch_supported_response_types() {
 
 #[test]
 fn web_fetch_max_constants_are_sane() {
-    assert!(WEB_FETCH_MAX_REDIRECTS > 0 && WEB_FETCH_MAX_REDIRECTS <= 10);
+    const {
+        assert!(WEB_FETCH_MAX_REDIRECTS > 0 && WEB_FETCH_MAX_REDIRECTS <= 10);
+    }
     assert_eq!(WEB_FETCH_MAX_BODY_BYTES, 1024 * 1024);
 }
 
@@ -3413,7 +3415,7 @@ fn integration_unified_action_history_categories_are_safe_and_persisted() {
 
 fn last_name(p: &std::path::Path) -> Option<String> {
     p.components()
-        .last()
+        .next_back()
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
 }
 
