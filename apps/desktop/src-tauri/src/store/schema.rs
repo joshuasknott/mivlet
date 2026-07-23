@@ -9,7 +9,199 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 32;
+pub const CURRENT_SCHEMA_VERSION: u32 = 33;
+
+/// Forward schema step `v32 -> v33`: adds the canonical encrypted Routine
+/// repository, portable occurrence history, node-local driver state, reversible
+/// legacy-migration evidence, and the one-writer scheduler authority marker.
+///
+/// The migration deliberately creates no Routine rows and does not change the
+/// legacy scheduler. Ownership, execution authority, grants, approvals, and
+/// provider placement can only arrive through authenticated native writes.
+pub const SCHEMA_V32_TO_V33: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS routine_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  project_id TEXT REFERENCES project(id) ON DELETE SET NULL,
+  visibility TEXT NOT NULL,
+  owner_member_id TEXT,
+  status TEXT NOT NULL,
+  current_version INTEGER NOT NULL CHECK(current_version >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_by_internal_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, id)
+);
+CREATE INDEX IF NOT EXISTS idx_routine_scope
+  ON routine_record(workspace_id, owner_subject, project_id, status, updated_at);
+
+CREATE TABLE IF NOT EXISTS routine_version (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  routine_id TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK(version >= 1),
+  created_by_internal_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, routine_id, version),
+  FOREIGN KEY(workspace_id, owner_subject, routine_id)
+    REFERENCES routine_record(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS routine_trigger (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  routine_id TEXT NOT NULL,
+  project_id TEXT,
+  status TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  deleted_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, id),
+  FOREIGN KEY(workspace_id, owner_subject, routine_id)
+    REFERENCES routine_record(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_trigger_due
+  ON routine_trigger(workspace_id, owner_subject, status, kind, updated_at);
+
+CREATE TABLE IF NOT EXISTS routine_occurrence (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  routine_id TEXT NOT NULL,
+  trigger_id TEXT NOT NULL,
+  routine_version INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  scheduled_for TEXT,
+  observed_at TEXT NOT NULL,
+  deduplication_key TEXT NOT NULL,
+  run_id TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, id),
+  UNIQUE(workspace_id, owner_subject, deduplication_key),
+  FOREIGN KEY(workspace_id, owner_subject, routine_id)
+    REFERENCES routine_record(workspace_id, owner_subject, id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id, owner_subject, trigger_id)
+    REFERENCES routine_trigger(workspace_id, owner_subject, id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id, owner_subject, routine_id, routine_version)
+    REFERENCES routine_version(workspace_id, owner_subject, routine_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_routine_occurrence_history
+  ON routine_occurrence(workspace_id, owner_subject, routine_id, observed_at);
+
+-- Lease, fencing, retry, and queue state are node-local execution authority and
+-- never enter the portable Routine occurrence contract.
+CREATE TABLE IF NOT EXISTS routine_driver_occurrence (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL,
+  writer_epoch INTEGER NOT NULL CHECK(writer_epoch >= 1),
+  state TEXT NOT NULL,
+  lease_holder TEXT NOT NULL DEFAULT '',
+  lease_token TEXT NOT NULL DEFAULT '',
+  lease_expires_at TEXT,
+  available_at TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, occurrence_id),
+  FOREIGN KEY(workspace_id, owner_subject, occurrence_id)
+    REFERENCES routine_occurrence(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_driver_due
+  ON routine_driver_occurrence(workspace_id, writer_epoch, state, available_at);
+
+CREATE TABLE IF NOT EXISTS routine_migration_batch (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  input_hash TEXT NOT NULL,
+  planned_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  applied_at TEXT,
+  rolled_back_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, id),
+  UNIQUE(workspace_id, owner_subject, input_hash)
+);
+
+CREATE TABLE IF NOT EXISTS routine_migration_source (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  disposition TEXT NOT NULL,
+  canonical_routine_id TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, batch_id, source_key),
+  FOREIGN KEY(workspace_id, owner_subject, batch_id)
+    REFERENCES routine_migration_batch(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_migration_source_identity
+  ON routine_migration_source(workspace_id, owner_subject, source_key, checksum);
+
+CREATE TABLE IF NOT EXISTS routine_migration_quarantine (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  decided_at TEXT NOT NULL,
+  resolution TEXT NOT NULL DEFAULT 'unresolved',
+  resolved_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, batch_id, source_key),
+  FOREIGN KEY(workspace_id, owner_subject, batch_id)
+    REFERENCES routine_migration_batch(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+
+-- A single row per workspace selects the only scheduler permitted to enqueue.
+-- Epoch is monotonically increased on every transition so stale writers fail
+-- closed even after a crash or rollback.
+CREATE TABLE IF NOT EXISTS routine_scheduler_authority (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspace(id) ON DELETE CASCADE,
+  writer TEXT NOT NULL CHECK(writer IN ('legacy','routine')),
+  phase TEXT NOT NULL CHECK(phase IN ('legacy','shadow','routine','rollback')),
+  epoch INTEGER NOT NULL CHECK(epoch >= 1),
+  fence_token TEXT NOT NULL,
+  proof_hash TEXT,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS routine_migration_snapshot (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  captured_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id, owner_subject, batch_id, source_key),
+  FOREIGN KEY(workspace_id, owner_subject, batch_id)
+    REFERENCES routine_migration_batch(workspace_id, owner_subject, id) ON DELETE CASCADE
+);
+"#;
 
 /// Forward schema step `v1 → v2`: adds the connector-cache tables to an
 /// *existing* v1 database inside the migration transaction. Fresh databases
@@ -1741,6 +1933,124 @@ CREATE TABLE IF NOT EXISTS mission_worker_tool_receipt (
 );
 CREATE INDEX IF NOT EXISTS idx_mission_worker_tool_run
   ON mission_worker_tool_receipt(workspace_id,owner_member_id,run_id,worker_id);
+
+-- Canonical encrypted Routines. Sensitive titles, instructions, policy
+-- reasons, trigger details, history results, and migration evidence are sealed
+-- in payloads bound to their owner-qualified row identities.
+CREATE TABLE IF NOT EXISTS routine_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL, id TEXT NOT NULL,
+  project_id TEXT REFERENCES project(id) ON DELETE SET NULL,
+  visibility TEXT NOT NULL, owner_member_id TEXT, status TEXT NOT NULL,
+  current_version INTEGER NOT NULL CHECK(current_version >= 1),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_by_internal_user_id TEXT NOT NULL,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id)
+);
+CREATE INDEX IF NOT EXISTS idx_routine_scope
+  ON routine_record(workspace_id,owner_subject,project_id,status,updated_at);
+CREATE TABLE IF NOT EXISTS routine_version (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  routine_id TEXT NOT NULL, version INTEGER NOT NULL CHECK(version >= 1),
+  created_by_internal_user_id TEXT NOT NULL, created_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,routine_id,version),
+  FOREIGN KEY(workspace_id,owner_subject,routine_id)
+    REFERENCES routine_record(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS routine_trigger (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL, routine_id TEXT NOT NULL, project_id TEXT,
+  status TEXT NOT NULL, kind TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  FOREIGN KEY(workspace_id,owner_subject,routine_id)
+    REFERENCES routine_record(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_trigger_due
+  ON routine_trigger(workspace_id,owner_subject,status,kind,updated_at);
+CREATE TABLE IF NOT EXISTS routine_occurrence (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL, id TEXT NOT NULL,
+  routine_id TEXT NOT NULL, trigger_id TEXT NOT NULL,
+  routine_version INTEGER NOT NULL, status TEXT NOT NULL,
+  scheduled_for TEXT, observed_at TEXT NOT NULL,
+  deduplication_key TEXT NOT NULL, run_id TEXT,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,deduplication_key),
+  FOREIGN KEY(workspace_id,owner_subject,routine_id)
+    REFERENCES routine_record(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_subject,trigger_id)
+    REFERENCES routine_trigger(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_subject,routine_id,routine_version)
+    REFERENCES routine_version(workspace_id,owner_subject,routine_id,version)
+);
+CREATE INDEX IF NOT EXISTS idx_routine_occurrence_history
+  ON routine_occurrence(workspace_id,owner_subject,routine_id,observed_at);
+CREATE TABLE IF NOT EXISTS routine_driver_occurrence (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  occurrence_id TEXT NOT NULL, writer_epoch INTEGER NOT NULL CHECK(writer_epoch >= 1),
+  state TEXT NOT NULL, lease_holder TEXT NOT NULL DEFAULT '',
+  lease_token TEXT NOT NULL DEFAULT '', lease_expires_at TEXT,
+  available_at TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),
+  updated_at TEXT NOT NULL, payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,occurrence_id),
+  FOREIGN KEY(workspace_id,owner_subject,occurrence_id)
+    REFERENCES routine_occurrence(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_driver_due
+  ON routine_driver_occurrence(workspace_id,writer_epoch,state,available_at);
+CREATE TABLE IF NOT EXISTS routine_migration_batch (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL, id TEXT NOT NULL, input_hash TEXT NOT NULL,
+  planned_at TEXT NOT NULL, status TEXT NOT NULL,
+  applied_at TEXT, rolled_back_at TEXT,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,input_hash)
+);
+CREATE TABLE IF NOT EXISTS routine_migration_source (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  batch_id TEXT NOT NULL, source_key TEXT NOT NULL, checksum TEXT NOT NULL,
+  disposition TEXT NOT NULL, canonical_routine_id TEXT,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,batch_id,source_key),
+  FOREIGN KEY(workspace_id,owner_subject,batch_id)
+    REFERENCES routine_migration_batch(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_routine_migration_source_identity
+  ON routine_migration_source(workspace_id,owner_subject,source_key,checksum);
+CREATE TABLE IF NOT EXISTS routine_migration_quarantine (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  batch_id TEXT NOT NULL, source_key TEXT NOT NULL,
+  reason TEXT NOT NULL, decided_at TEXT NOT NULL,
+  resolution TEXT NOT NULL DEFAULT 'unresolved', resolved_at TEXT,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,batch_id,source_key),
+  FOREIGN KEY(workspace_id,owner_subject,batch_id)
+    REFERENCES routine_migration_batch(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS routine_scheduler_authority (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspace(id) ON DELETE CASCADE,
+  writer TEXT NOT NULL CHECK(writer IN ('legacy','routine')),
+  phase TEXT NOT NULL CHECK(phase IN ('legacy','shadow','routine','rollback')),
+  epoch INTEGER NOT NULL CHECK(epoch >= 1), fence_token TEXT NOT NULL,
+  proof_hash TEXT, updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS routine_migration_snapshot (
+  workspace_id TEXT NOT NULL, owner_subject TEXT NOT NULL,
+  batch_id TEXT NOT NULL, source_key TEXT NOT NULL, captured_at TEXT NOT NULL,
+  payload BLOB NOT NULL, payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,batch_id,source_key),
+  FOREIGN KEY(workspace_id,owner_subject,batch_id)
+    REFERENCES routine_migration_batch(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (

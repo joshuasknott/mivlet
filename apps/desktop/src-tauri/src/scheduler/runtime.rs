@@ -72,6 +72,31 @@ fn persist<F: FnOnce(&mut SchedulerStore) -> bool>(
     })
 }
 
+fn legacy_writer_allowed(workspace_id: &str) -> Result<bool, String> {
+    Ok(crate::store::with_store(|store| {
+        store.transaction(|tx| {
+            crate::store::repos::routine::legacy_writer_permitted(
+                tx,
+                store,
+                workspace_id,
+                &now_iso(),
+            )
+        })
+    })?
+    .unwrap_or(true))
+}
+
+fn require_legacy_writer(workspace_id: &str) -> Result<(), String> {
+    if legacy_writer_allowed(workspace_id)? {
+        Ok(())
+    } else {
+        Err(
+            "This workspace has cut over to Routines; the legacy scheduler is read-only."
+                .to_string(),
+        )
+    }
+}
+
 #[tauri::command]
 pub fn list_scheduler_jobs(
     app: AppHandle,
@@ -130,6 +155,7 @@ pub fn save_scheduled_job(
     project_id: Option<String>,
 ) -> Result<ScheduledJob, String> {
     let scope = command_scope(workspace_id, project_id)?;
+    require_legacy_writer(scope.workspace_id())?;
     job.workspace_id = scope.workspace_id().to_string();
     job.project_id = scope.project_id().map(str::to_string);
     let job = normalize_job(job)?;
@@ -167,6 +193,7 @@ pub fn delete_scheduled_job(
     project_id: Option<String>,
 ) -> Result<(), String> {
     let scope = command_scope(workspace_id, project_id)?;
+    require_legacy_writer(scope.workspace_id())?;
     let job_id = normalize_spaces(&job_id);
     let mut deleted = false;
     persist(&app, scope.workspace_id(), |store| {
@@ -197,6 +224,7 @@ pub fn set_job_status(
     project_id: Option<String>,
 ) -> Result<(), String> {
     let scope = command_scope(workspace_id, project_id)?;
+    require_legacy_writer(scope.workspace_id())?;
     let status = normalize_spaces(&status);
     if !SCHEDULED_JOB_STATUSES.contains(&status.as_str()) {
         return Err("Unknown job status.".to_string());
@@ -264,6 +292,7 @@ pub fn enqueue_job_run(
     project_id: Option<String>,
 ) -> Result<SchedulerQueueEntry, String> {
     let scope = command_scope(workspace_id, project_id)?;
+    require_legacy_writer(scope.workspace_id())?;
     let job_id = normalize_spaces(&job_id);
     let run_id = truncate_characters(&normalize_spaces(&run_id), 160);
     let scheduled_at = canonical_timestamp(&scheduled_at)?;
@@ -598,23 +627,40 @@ pub fn run_tick_on_store(
 /// deadline; the next tick re-queues expired leases.
 pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
     let now_ms = now_epoch_ms();
-    let instance = with_state(app, |mutex| {
+    let workspaces = with_state(app, |mutex| {
         let guard = mutex
             .lock()
             .map_err(|_| "Scheduler lock poisoned.".to_string())?;
-        Ok::<String, String>(
-            guard
-                .get(DEFAULT_WORKSPACE_ID)
-                .map(|store| store.instance_id.clone())
-                .unwrap_or_else(|| "unset".to_string()),
-        )
+        let mut workspaces = guard.keys().cloned().collect::<Vec<_>>();
+        if workspaces.is_empty() {
+            workspaces.push(DEFAULT_WORKSPACE_ID.to_string());
+        }
+        Ok::<Vec<String>, String>(workspaces)
     })?;
 
     let mut newly_leased = Vec::new();
-    persist(app, DEFAULT_WORKSPACE_ID, |store| {
-        newly_leased = run_tick_on_store(store, now_ms, &instance);
-        !newly_leased.is_empty()
-    })?;
+    for workspace_id in workspaces {
+        if !legacy_writer_allowed(&workspace_id)? {
+            continue;
+        }
+        let instance = with_state(app, |mutex| {
+            let guard = mutex
+                .lock()
+                .map_err(|_| "Scheduler lock poisoned.".to_string())?;
+            Ok::<String, String>(
+                guard
+                    .get(&workspace_id)
+                    .map(|store| store.instance_id.clone())
+                    .unwrap_or_else(|| workspace_id.clone()),
+            )
+        })?;
+        let mut workspace_leases = Vec::new();
+        persist(app, &workspace_id, |store| {
+            workspace_leases = run_tick_on_store(store, now_ms, &instance);
+            !workspace_leases.is_empty()
+        })?;
+        newly_leased.extend(workspace_leases);
+    }
 
     // 3. Emit only entries leased by this tick. Previously every leased entry
     // was re-emitted every five seconds until acknowledgement.

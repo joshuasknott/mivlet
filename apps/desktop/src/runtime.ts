@@ -1,8 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getActiveRuntimeDataScope } from "./runtime-scope";
-import { importLocalTextFile, searchKnowledgeSources } from "@fable/connectors";
-import type { LocalTextFileCandidate } from "@fable/connectors";
+import {
+  importLocalTextFile,
+  searchKnowledgeSources
+} from "@fable/connectors";
+import type {
+  LegacyRoutineMigrationInput,
+  LegacyRoutineMigrationPlan,
+  LocalTextFileCandidate
+} from "@fable/connectors";
 import { applyLocalKnowledgeRefresh } from "./lib/local-knowledge-refresh";
 import { getRuntimeProject } from "./lib/project-runtime";
 import type {
@@ -4214,6 +4221,149 @@ export async function executeRuntimeToolCall(request: RuntimeToolRequest) {
   }
   try {
     return await invoke<RuntimeToolResult>("execute_tool_call", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Canonical Routines. The native boundary derives workspace/member ownership,
+// encrypts every payload, and retains immutable versions. Browser mode returns
+// null rather than pretending its synthetic schedules are durable Routines.
+// ---------------------------------------------------------------------------
+
+export type RuntimeRoutine = Spine.ArtifactsAndRoutines.Routine;
+export type RuntimeRoutineVersion = Spine.ArtifactsAndRoutines.RoutineVersion;
+export type RuntimeRoutineTrigger = Spine.ArtifactsAndRoutines.RoutineTrigger;
+export type RuntimeRoutineTriggerSpec = Spine.ArtifactsAndRoutines.RoutineTriggerSpec;
+export type RuntimeRoutineOccurrence = Spine.ArtifactsAndRoutines.RoutineOccurrenceReference;
+
+export interface RuntimeRoutineBundle {
+  routine: RuntimeRoutine;
+  currentVersion: RuntimeRoutineVersion;
+  triggers: RuntimeRoutineTrigger[];
+}
+
+export interface RuntimeRoutineMigrationSummary {
+  id: string;
+  inputHash: string;
+  planHash: string;
+  status: "applying" | "applied" | "rolled-back";
+  plannedAt: string;
+  appliedAt?: string;
+  rolledBackAt?: string;
+  candidateCount: number;
+  occurrenceCount: number;
+  quarantineCount: number;
+}
+
+export async function listRuntimeRoutines(projectId?: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineBundle[]>("routine_list", {
+      input: { projectId }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function createRuntimeRoutine(input: {
+  projectId?: string;
+  title: string;
+  instruction: string;
+  trigger: RuntimeRoutineTriggerSpec;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineBundle>("routine_create", { input });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function editRuntimeRoutine(input: {
+  projectId?: string;
+  routineId: string;
+  expectedRevision: number;
+  title: string;
+  instruction: string;
+  trigger?: RuntimeRoutineTriggerSpec;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineBundle>("routine_edit", { input });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+async function transitionRuntimeRoutine(
+  action: "pause" | "resume" | "delete",
+  input: {
+    projectId?: string;
+    routineId: string;
+    expectedRevision: number;
+    reason?: string;
+  }
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineBundle>(`routine_${action}`, { input });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export const pauseRuntimeRoutine = (
+  input: Parameters<typeof transitionRuntimeRoutine>[1]
+) => transitionRuntimeRoutine("pause", input);
+export const resumeRuntimeRoutine = (
+  input: Parameters<typeof transitionRuntimeRoutine>[1]
+) => transitionRuntimeRoutine("resume", input);
+export const deleteRuntimeRoutine = (
+  input: Parameters<typeof transitionRuntimeRoutine>[1]
+) => transitionRuntimeRoutine("delete", input);
+
+export async function listRuntimeRoutineHistory(routineId: string, projectId?: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineOccurrence[]>("routine_occurrence_history", {
+      input: { routineId, projectId }
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Captures the authenticated encrypted legacy snapshot in Rust, runs the pure
+ * deterministic planner, then atomically binds both exact values in Rust.
+ */
+export async function migrateLegacyRoutines(projectId?: string) {
+  if (!hasTauriRuntime()) return null;
+  const plannedAt = new Date().toISOString();
+  try {
+    const evidence = await invoke<LegacyRoutineMigrationInput>("routine_migration_capture", {
+      input: { projectId, plannedAt }
+    });
+    const { planLegacyRoutineMigration } = await import("@fable/connectors");
+    const plan: LegacyRoutineMigrationPlan = planLegacyRoutineMigration(evidence);
+    const summary = await invoke<RuntimeRoutineMigrationSummary>("routine_migration_apply", {
+      input: { projectId, evidence, plan }
+    });
+    return { evidence, plan, summary };
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function rollbackLegacyRoutineMigration(batchId: string, projectId?: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineMigrationSummary>("routine_migration_rollback", {
+      input: { projectId, batchId }
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }

@@ -140,6 +140,10 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // mission events. Migration infers neither owners nor artifacts when
             // their source facts are ambiguous.
             31 => apply_v31_to_v32(conn)?,
+            // 32 -> 33: add empty canonical Routine, migration-evidence, and
+            // scheduler-authority stores. No owner or execution authority is
+            // inferred from legacy records.
+            32 => conn.execute_batch(crate::store::schema::SCHEMA_V32_TO_V33)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -1587,9 +1591,29 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v32 is current; v32 -> v33 has no registered migration.
-        let err = apply(&conn, 32, 33).unwrap_err();
+        // v33 is current; v33 -> v34 has no registered migration.
+        let err = apply(&conn, 33, 34).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v32_to_v33_adds_empty_routine_stores_without_inferred_authority() {
+        let conn = conn();
+        apply(&conn, 32, 33).unwrap();
+        for table in [
+            "routine_record",
+            "routine_version",
+            "routine_trigger",
+            "routine_occurrence",
+            "routine_driver_occurrence",
+            "routine_migration_batch",
+            "routine_migration_quarantine",
+            "routine_scheduler_authority",
+        ] {
+            let sql = format!("SELECT COUNT(*) FROM {table}");
+            let count: i64 = conn.query_row(&sql, [], |row| row.get(0)).unwrap();
+            assert_eq!(count, 0, "{table} must start empty");
+        }
     }
 
     #[test]

@@ -804,25 +804,29 @@ stays unchecked.
 - [ ] Resolve providers and models at run time within saved policy.
 - [ ] Move schedules out of mandatory primary navigation and into contextual activity.
 
-The first migration foundation is now repository-complete as a pure, deterministic
-planner. It accounts for legacy automation rules, schedule entries, scheduled jobs,
-workflow definitions/runs, and scheduler queue entries without mutating either
-store. Only an exact scheduled-job plus frozen workflow-definition bundle with
-source-checksum-bound ownership evidence can become a canonical Routine, immutable
-RoutineVersion, and time trigger. Missing ownership, ambiguous workflow versions,
-bare schedule timezones/actions, free-form automations, scope mismatches, and
-unproven legacy route pins are quarantined with closed reason codes. Current-default
-routes resolve at run time; deliberate pins require exact source-bound actor/time
-evidence. Migration creates no capability grants, copies no approvals, and keeps
-placement resolve-at-run. Terminal queue outcomes can project secret-free occurrence
-history while active leases remain driver-local and lease/fencing/workflow payloads
-never enter the portable plan. Determinism, every-source accounting, lifecycle
-preservation, source replay rejection, UTC compatibility semantics, reuse of one
-exact workflow version, and redaction have focused package evidence. Native
-authenticated evidence capture, encrypted migration/quarantine ledgers, canonical
-Routine persistence, scheduler fencing and one-writer cutover, rollback, UI, and
-restart/live execution evidence remain open, so the migration checkbox stays
-unchecked.
+The migration foundation now crosses the native boundary but remains partial. The
+pure deterministic planner still accounts for every legacy source without mutating
+storage. Schema v33 adds owner-qualified encrypted Routine, immutable RoutineVersion,
+trigger, portable occurrence-history, node-local driver, migration evidence,
+quarantine, rollback-snapshot, and scheduler-authority stores without inferring a
+single row. Authenticated native capture reads the exact encrypted schedule,
+scheduled-job, workflow-definition/run, and scheduler-queue repositories, binds
+their SHA-256 snapshots to the active member/workspace/project, and supplies those
+facts to the planner. Native application rejects omitted, duplicated, changed, or
+cross-owner evidence, stores the exact input and plan encrypted, handles canonical
+identity collisions by quarantine, is idempotent by evidence hash, verifies exact
+replay, and can remove only unchanged batch-created records while the legacy writer
+is still fenced. Canonical records default to resolve-at-run placement and routing,
+copy no approvals, and add no capability grants. A monotonic workspace authority
+epoch and fresh fence tokens define legacy, shadow, Routine, and rollback
+transitions; legacy mutations and ticks fail closed once that writer is no longer
+selected, while legacy reads remain available for recovery. The Schedules page now
+adds an explicitly local Routine surface for create, edit, pause, resume, delete,
+history, run-in-chat, and compatible schedule import; browser preview labels Routine
+durability unavailable instead of using fixtures. Existing Schedules remain the
+active runner and primary rollback path. A proved shadow comparison, Routine-driver
+tick/execution completion, `/schedule` cutover, restart execution, and packaged-app
+validation remain open, so the migration and experience checkboxes stay unchecked.
 
 ### Wave 5B - Triggers and reliability
 

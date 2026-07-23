@@ -63,6 +63,7 @@ pub mod portable;
 mod product_spine_parity;
 mod projects;
 mod remote_control;
+mod routines;
 mod scheduler;
 mod snapshot;
 mod store;
@@ -169,6 +170,19 @@ pub fn run() {
             goals::goal_achieve,
             goals::goal_archive,
             goals::goal_restore,
+            routines::routine_create,
+            routines::routine_edit,
+            routines::routine_pause,
+            routines::routine_resume,
+            routines::routine_delete,
+            routines::routine_get,
+            routines::routine_list,
+            routines::routine_occurrence_append,
+            routines::routine_occurrence_history,
+            routines::routine_migration_capture,
+            routines::routine_migration_apply,
+            routines::routine_migration_verify_replay,
+            routines::routine_migration_rollback,
             mission_plans::mission_plan_create,
             mission_plans::mission_plan_get,
             mission_plans::mission_plan_cited_summary_get,

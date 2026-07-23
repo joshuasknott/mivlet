@@ -41,6 +41,8 @@ pub mod preferences;
 pub mod project;
 pub mod provider_route_observation;
 pub mod provider_route_quality_observation;
+pub mod routine;
+pub mod routine_migration;
 pub mod run;
 pub mod run_state;
 pub mod schedule;

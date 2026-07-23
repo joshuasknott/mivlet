@@ -2,6 +2,7 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { useRef, useState } from "react";
 import { PageHeader } from "../PageHeader";
 import { SchedulePanel } from "../SchedulePanel";
+import { RoutinePanel } from "../RoutinePanel";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
 /**
@@ -62,6 +63,7 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         isCreateModalOpen={isCreateModalOpen}
         onRequestCloseCreateModal={handleCloseCreateModal}
       />
+      <RoutinePanel onRun={(instruction) => runtime.submitPrompt(instruction)} />
       {runtime.notificationHistory.length > 0 ? (
         <details className="notification-history">
           <summary>Notification history</summary>
