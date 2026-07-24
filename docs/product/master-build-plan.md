@@ -1335,8 +1335,11 @@ validation remain open; therefore the aggregate checkboxes stay open.
 ### Wave 10D - Windows private distribution
 
 - [ ] Complete the dependable Windows build and signing decision.
+  - Repo-local progress: a manually dispatched Windows-only workflow now runs the complete repository/native gate and builds MSI plus NSIS with Tauri's explicit `--no-sign` boundary. It stages exactly one installer of each kind and generates a deterministic private/internal/preview manifest tied to the source commit and commit time with exact SHA-256, byte size, architecture, version, and explicit unsigned/unpublished state. The generator rejects a public channel. A signing certificate, custody model, reputation evidence, and signing decision remain manual.
 - [ ] Complete installer, update, rollback, and release-note paths.
+  - Repo-local progress: release-manifest and private release-note generation have deterministic unit coverage for missing/duplicate installers, hashes, metadata, public-channel rejection, and unchanged output. A disposable-Windows lifecycle script silently installs the NSIS bundle, verifies uninstall registration, rehearses repair or a supplied previous-version upgrade, proves the app-data sentinel survives, uninstalls, and proves data remains. CI runs the clean-install/repair/uninstall form; a true previous-version upgrade, rollback build, public updater manifest, publication, and packaged first-launch validation remain open.
 - [ ] Document configuration, secret provisioning, support, and incident recovery.
+  - Repo-local progress: the release guide now documents private channel semantics, build evidence, disposable-machine rehearsal, signing/publication boundaries, and the precise manual matrix. A local incident guide defines containment, secret-free diagnostics, least-destructive recovery order, evidence retention, and external escalation boundaries. Provider/host console runbooks and a chosen support contact remain external decisions.
 - [ ] Run a private release-candidate soak against Josh's real workflows.
 
 **Phase 10 complete when:** all agreed blueprint journeys pass on combined `main`, recovery and revocation are proven, serious security findings are resolved, and a dependable Windows build is ready for Josh and invited users.

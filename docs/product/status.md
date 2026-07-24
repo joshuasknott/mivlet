@@ -139,6 +139,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 
 Performance regression gates are repository-local and current as of 24 July 2026. Windows CI and `pnpm check` enforce measured byte ceilings for the desktop bundle, CSS, initial entry, and current lazy product routes, then run bounded connector, Knowledge, encrypted-store/cache, and scheduler-queue fixtures. React and its scheduler/query bridges no longer form a circular vendor split. The 681 KiB initial entry is recorded honestly and remains an optimization target. Packaged cold-start, comparable RSS, live-provider streaming, and long private soak performance are not validated.
 
+Unsigned Windows distribution has a repository-owned private artifact lane. Manual dispatch builds MSI and NSIS after the full gate, records exact checksums and explicit unsigned/unpublished state in a deterministic private/internal/preview manifest, generates matching release notes, and rehearses clean NSIS install, same-version repair, uninstall registration, and local-data preservation on a disposable runner. The manifest refuses `public`; no release, updater, signing, or download hosting is created. A real previous-version upgrade/rollback, packaged first launch, vault/keyring continuity, signing, and private soak remain manual gates.
+
 ## Partially Implemented Or Preview-Only
 
 - Browser preview uses an explicit synthetic identity/workspace fixture. The Tauri path requires a Fable account and then one provider; it no longer offers a local profile, password, or skip route.

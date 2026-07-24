@@ -14,6 +14,7 @@
     "perf:check": "node scripts/perf/budget-check.mjs",
     "perf:test": "node --test scripts/perf/budget.test.mjs",
     "perf:runtime": "pnpm --filter @fable/connectors exec vitest run src/performance-baseline.test.ts && pnpm --filter @fable/knowledge exec vitest run src/performance-baseline.test.ts && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml perf_",
+    "release:test": "node --test scripts/release/windows-manifest.test.mjs",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "pnpm --filter @fable/desktop tauri build",
     "tauri:dev": "pnpm --filter @fable/desktop tauri dev --config src-tauri/tauri.dev.conf.json",
@@ -26,7 +27,7 @@
     "waitlist:migrate": "pnpm --filter @fable/waitlist migrate",
     "waitlist:build": "pnpm --filter @fable/waitlist build",
     "waitlist:verify": "pnpm --filter @fable/waitlist verify:local",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm perf:check && pnpm perf:test && pnpm perf:runtime && pnpm tauri:check"
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm perf:check && pnpm perf:test && pnpm perf:runtime && pnpm release:test && pnpm tauri:check"
   },
   "engines": {
     "node": ">=22",

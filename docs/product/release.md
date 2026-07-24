@@ -24,6 +24,13 @@ Windows desktop bundles use:
 pnpm tauri:build
 ```
 
+The `Windows private artifacts` workflow is manual-dispatch only. It runs all
+repository and native checks, builds MSI and NSIS with `--no-sign`, exercises
+the NSIS clean-install/repair/uninstall lifecycle on its disposable runner, and
+uploads a 14-day validation artifact. It does not create a GitHub release,
+publish an updater, or use signing material. See
+[`docs/operations/windows-private-release.md`](../operations/windows-private-release.md).
+
 Expected local Windows build outputs:
 
 - `apps/desktop/src-tauri/target/release/fable-desktop.exe`
@@ -95,6 +102,13 @@ stored in React state, snapshots, logs, or JSON metadata.
   fixture tests.
 - Windows preview packaging is unsigned. macOS and Linux packaging are not
   ready.
+- Private Windows artifact generation now emits deterministic release notes and
+  a checksum manifest that accepts only private/internal/preview channels and
+  says unsigned/unpublished explicitly. The disposable-runner rehearsal proves
+  clean NSIS installation, same-version repair, uninstall registration, and
+  preservation of its local-data sentinel. A true previous-version upgrade,
+  rollback, packaged first launch, and keyring/vault continuity still require
+  packaged private evidence.
 
 ## Remaining ship blockers
 
