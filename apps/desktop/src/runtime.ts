@@ -248,6 +248,23 @@ export async function exportRuntimeWorkspaceArchive(
   }
 }
 
+export async function exportRuntimeProjectArchive(
+  destination: string,
+  workspaceId: string,
+  projectId: string
+): Promise<RuntimePortableExportReceipt | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimePortableExportReceipt>("export_project_archive_to_file", {
+      destination,
+      workspaceId,
+      projectId
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export async function importRuntimeWorkspaceArchive(
   source: string,
   workspaceId: string,

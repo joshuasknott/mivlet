@@ -20,7 +20,7 @@ import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { finalizeRuntimeMissionCoordination, getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
+import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -30,7 +30,7 @@ import { ShellPageBoundary } from "./ShellRoutes";
 import { useShellAgentController } from "./useShellAgentController";
 import { useProjects } from "../hooks/useProjects";
 import { invitationAccountContextKey } from "../lib/invitation-account-context";
-import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView, type ProjectMemoryView } from "../components/pages/ProjectPage";
+import type { ProjectKnowledgeSourceView, ProjectKnowledgeView, ProjectMemoryView } from "../components/pages/ProjectPage";
 import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
 import { useProjectMemory } from "../hooks/useProjectMemory";
 import { useProjectActivity } from "../hooks/useProjectActivity";
@@ -78,6 +78,9 @@ const WorkspaceSettingsView = lazy(() =>
 );
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((m) => ({ default: m.ApprovalPanel }))
+);
+const ProjectPage = lazy(() =>
+  import("../components/pages/ProjectPage").then((m) => ({ default: m.ProjectPage }))
 );
 
 /**
@@ -2266,23 +2269,33 @@ export function ChatWorkspace() {
           <ShellPageBoundary runtime={runtime} />
         ) : selectedProject && !isSettingsActive ? (
           <div className="workspace-center workspace-center--page">
-            <ProjectPage
-              project={selectedProject}
-              knowledge={projectKnowledgeView}
-              memory={projectMemoryView}
-              activity={projectActivity}
-              onNewChat={() => startNewChat(selectedProject.id)}
-              onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
-              onReload={async () => { await projectStore.refresh(); }}
-              onSaveGuidance={async ({ description, instructions }) => {
-                await projectStore.update({
-                  projectId: selectedProject.id as never,
-                  baseRevision: selectedProject.revision,
-                  description,
-                  instructions
-                });
-              }}
-            />
+            <Suspense fallback={<div className="og-frame" aria-busy="true" />}>
+              <ProjectPage
+                project={selectedProject}
+                knowledge={projectKnowledgeView}
+                memory={projectMemoryView}
+                activity={projectActivity}
+                onNewChat={() => startNewChat(selectedProject.id)}
+                onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
+                onExportCopy={async (destination) => Boolean(
+                  boundWorkspaceId
+                  && await exportRuntimeProjectArchive(
+                    destination,
+                    boundWorkspaceId,
+                    selectedProject.id
+                  )
+                )}
+                onReload={async () => { await projectStore.refresh(); }}
+                onSaveGuidance={async ({ description, instructions }) => {
+                  await projectStore.update({
+                    projectId: selectedProject.id as never,
+                    baseRevision: selectedProject.revision,
+                    description,
+                    instructions
+                  });
+                }}
+              />
+            </Suspense>
           </div>
         ) : (
           <div className="workspace-center workspace-center--composer">

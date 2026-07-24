@@ -115,8 +115,14 @@ stored in React state, snapshots, logs, or JSON metadata.
   project Artifacts, and workspace Connections referenced by those Routine
   triggers or Artifact evidence. Connection labels come only from the current
   native projection, and unavailable references are shown as needing attention.
-  Project-level Connection configuration, Activity mutation controls, archived
-  Mission history, and full Artifact detail remain open.
+  The same page can atomically write a new plaintext JSON copy of one exact
+  active-member private Project. Native code rejects foreign, shared, deleted,
+  and ambiguous legacy Projects, filters private documents before decryption,
+  and excludes credentials, workspace/account settings, machine state, audit
+  history, unrelated records, and external Artifact handoff authority.
+  Preserved-owner Project re-import, Project-level Connection configuration,
+  Activity mutation controls, archived Mission history, and full Artifact
+  detail remain open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

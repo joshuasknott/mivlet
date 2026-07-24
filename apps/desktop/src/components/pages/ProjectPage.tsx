@@ -97,6 +97,7 @@ export function ProjectPage({
   onReload,
   onNewChat,
   onSelectThread,
+  onExportCopy,
   knowledge,
   memory = EMPTY_PROJECT_MEMORY,
   activity = EMPTY_PROJECT_ACTIVITY
@@ -106,6 +107,7 @@ export function ProjectPage({
   onReload: () => void | Promise<void>;
   onNewChat: () => void;
   onSelectThread: (thread: ThreadSummary) => void;
+  onExportCopy?: (destination: string) => Promise<boolean>;
   knowledge: ProjectKnowledgeView;
   memory?: ProjectMemoryView;
   activity?: ProjectActivityView;
@@ -126,6 +128,9 @@ export function ProjectPage({
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
   const [memoryDraft, setMemoryDraft] = useState({ title: "", value: "" });
   const [memoryExport, setMemoryExport] = useState("");
+  const [projectExportPath, setProjectExportPath] = useState("");
+  const [projectExportBusy, setProjectExportBusy] = useState(false);
+  const [projectExportStatus, setProjectExportStatus] = useState("");
 
   useEffect(() => {
     setDescription(project.description);
@@ -142,6 +147,8 @@ export function ProjectPage({
     setMemoryActionError("");
     setEditingMemoryId(null);
     setMemoryExport("");
+    setProjectExportPath("");
+    setProjectExportStatus("");
   }, [project.id]);
 
   const runMemoryAction = async (id: string, action: () => Promise<unknown>) => {
@@ -618,6 +625,61 @@ export function ProjectPage({
         ) : null}
         {memoryExport ? <pre className="project-memory__export-text" aria-label="Project memory export">{memoryExport}</pre> : null}
       </section>
+
+      {onExportCopy ? (
+        <section className="project-page__section project-copy" aria-labelledby="project-copy-heading">
+          <div className="project-page__section-heading">
+            <div>
+              <h2 id="project-copy-heading">Project copy</h2>
+              <p>Save this project's conversations, runs, saved work, Knowledge, Memory, and Routines as readable JSON.</p>
+            </div>
+          </div>
+          <label className="settings-field">
+            <span>New project-copy file</span>
+            <input
+              value={projectExportPath}
+              onChange={(event) => {
+                setProjectExportPath(event.target.value);
+                setProjectExportStatus("");
+              }}
+              placeholder="Choose a new .json file path"
+              spellCheck={false}
+              autoComplete="off"
+            />
+          </label>
+          <p className="project-memory__read-only">
+            This copy contains no credentials, but its project content is readable without Fable. Existing files are never overwritten.
+          </p>
+          <button
+            type="button"
+            className="project-memory__export"
+            disabled={projectExportBusy || !projectExportPath.trim()}
+            onClick={() => {
+              const destination = projectExportPath.trim();
+              if (!destination) return;
+              setProjectExportBusy(true);
+              setProjectExportStatus("");
+              void onExportCopy(destination)
+                .then((exported) => {
+                  setProjectExportStatus(exported
+                    ? "Project copy created."
+                    : "Project copies are available only in the Fable desktop app.");
+                  if (exported) setProjectExportPath("");
+                })
+                .catch((cause) => {
+                  setProjectExportStatus(cause instanceof Error
+                    ? cause.message
+                    : "Fable could not export this project.");
+                })
+                .finally(() => setProjectExportBusy(false));
+            }}
+          >
+            <DownloadSimple size={15} aria-hidden="true" />
+            {projectExportBusy ? "Exporting..." : "Export project copy"}
+          </button>
+          {projectExportStatus ? <p className="project-memory__state" role="status">{projectExportStatus}</p> : null}
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -376,6 +376,7 @@ pub fn run() {
             execution_control::execution_control_pause,
             execution_control::execution_control_resume,
             portable::export_workspace_archive_to_file,
+            portable::export_project_archive_to_file,
             portable::import_workspace_archive_from_file,
             portable::portable_format_version,
             scheduler::list_scheduler_jobs,

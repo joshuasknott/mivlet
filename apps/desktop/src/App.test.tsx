@@ -408,6 +408,7 @@ vi.mock("./runtime", () => ({
   detectRuntimeLocalModel: vi.fn(async () => null),
   beginRuntimeIdentitySignIn: vi.fn(async () => null),
   exportRuntimeMemoryState: vi.fn(async () => null),
+  exportRuntimeProjectArchive: vi.fn(async () => null),
   getRuntimeRemoteControlStatus: vi.fn(async () => null),
   deleteRuntimeConnectorKnowledgeSource: vi.fn(async () => null),
   importRuntimeConnectorItem: vi.fn(async () => null),

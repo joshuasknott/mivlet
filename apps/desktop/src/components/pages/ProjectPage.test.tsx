@@ -525,4 +525,33 @@ describe("ProjectPage", () => {
     finishUpdate();
     await waitFor(() => expect(screen.queryByText("Updating...")).not.toBeInTheDocument());
   });
+
+  it("exports an exact project copy to a new local file", async () => {
+    const user = userEvent.setup();
+    const onExportCopy = vi.fn().mockResolvedValue(true);
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        memory={emptyMemory}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+        onExportCopy={onExportCopy}
+      />
+    );
+
+    await user.type(
+      screen.getByLabelText("New project-copy file"),
+      "C:\\Exports\\launch.json"
+    );
+    await user.click(screen.getByRole("button", { name: "Export project copy" }));
+
+    await waitFor(() => {
+      expect(onExportCopy).toHaveBeenCalledWith("C:\\Exports\\launch.json");
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Project copy created.");
+    expect(screen.getByLabelText("New project-copy file")).toHaveValue("");
+  });
 });

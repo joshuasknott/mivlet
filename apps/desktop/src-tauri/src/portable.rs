@@ -763,6 +763,225 @@ pub fn export_workspace_for(store: &Store, workspace_id: &str) -> Result<Manifes
     })
 }
 
+fn private_document_owner_prefix(owner: &crate::store::repos::scope::PrivateDataScope) -> String {
+    let digest = format!("{:x}", Sha256::digest(owner.owner_subject().as_bytes()));
+    format!("document:owner:{digest}:")
+}
+
+fn project_document_marker(project_id: &str) -> String {
+    let digest = format!("{:x}", Sha256::digest(project_id.as_bytes()));
+    format!("project:{digest}:")
+}
+
+fn routine_project_id(record: &PortableRoutineRecord) -> Option<&str> {
+    record
+        .routine
+        .get("projectId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            record
+                .routine
+                .pointer("/scope/projectId")
+                .and_then(Value::as_str)
+        })
+}
+
+fn project_sections(mut sections: Sections, project_id: &str) -> Result<Sections> {
+    if !sections
+        .projects
+        .iter()
+        .any(|project| project.id == project_id)
+    {
+        return Err(StoreError::Invalid(
+            "Project export requires an available project in the active workspace.".into(),
+        ));
+    }
+
+    sections.projects.retain(|project| project.id == project_id);
+    let thread_ids = sections
+        .threads
+        .iter()
+        .filter(|thread| thread.project_id.as_deref() == Some(project_id))
+        .map(|thread| thread.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    sections
+        .threads
+        .retain(|thread| thread_ids.contains(&thread.id));
+    sections
+        .messages
+        .retain(|message| thread_ids.contains(&message.thread_id));
+    sections.runs.retain(|run| {
+        run.thread_id
+            .as_ref()
+            .is_some_and(|thread_id| thread_ids.contains(thread_id))
+    });
+    let run_ids = sections
+        .runs
+        .iter()
+        .map(|run| run.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    sections
+        .tool_calls
+        .retain(|tool_call| run_ids.contains(&tool_call.run_id));
+    sections.approvals.retain(|approval| {
+        approval
+            .run_id
+            .as_ref()
+            .is_some_and(|run_id| run_ids.contains(run_id))
+    });
+    sections.artifacts.retain(|artifact| {
+        artifact
+            .thread_id
+            .as_ref()
+            .is_some_and(|thread_id| thread_ids.contains(thread_id))
+    });
+    sections
+        .connector_accounts
+        .retain(|record| record.project_id.as_deref() == Some(project_id));
+    sections
+        .knowledge_sources
+        .retain(|record| record.project_id.as_deref() == Some(project_id));
+    sections
+        .memory_records
+        .retain(|record| record.project_id.as_deref() == Some(project_id));
+    sections
+        .schedules
+        .retain(|record| record.project_id.as_deref() == Some(project_id));
+    sections
+        .routines
+        .retain(|record| routine_project_id(record) == Some(project_id));
+    sections
+        .scheduled_jobs
+        .retain(|record| record.project_id.as_deref() == Some(project_id));
+    sections
+        .workflow_definitions
+        .retain(|record| record.project_id.as_deref() == Some(project_id));
+    let definition_ids = sections
+        .workflow_definitions
+        .iter()
+        .map(|record| record.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    sections.workflow_runs.retain(|record| {
+        record.project_id.as_deref() == Some(project_id)
+            && definition_ids.contains(&record.definition_id)
+    });
+    sections
+        .run_states
+        .retain(|state| run_ids.contains(&state.id));
+
+    // A project copy carries no workspace/account configuration or general
+    // audit stream. Exact private project documents are retained separately by
+    // the caller after owner filtering.
+    sections.profile = None;
+    sections.audit_events.clear();
+    sections.backend_connections.clear();
+    sections.model_configs.clear();
+    sections.drafts.clear();
+
+    validate_integrity(&sections)?;
+    validate_no_secrets(&sections)?;
+    Ok(sections)
+}
+
+/// Build an importable subset of the portable workspace format for one exact
+/// private project. Workspace/account settings and unrelated private records
+/// are excluded; import keeps the normal skip-existing and disabled-authority
+/// behavior of a workspace copy.
+pub fn export_project_for(store: &Store, workspace_id: &str, project_id: &str) -> Result<Manifest> {
+    let mut manifest = export_workspace_for(store, workspace_id)?;
+    let (owner, thread_ids, message_ids) = store.with_conn(|conn| {
+        let context =
+            crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(
+                conn,
+            )?;
+        if context.active_workspace.local_workspace_id != workspace_id {
+            return Err(StoreError::Invalid(
+                "Project export requires the active workspace.".into(),
+            ));
+        }
+        let owner = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            crate::store::repos::scope::DataScope::workspace(workspace_id.to_string())?,
+            &context.internal_user_id,
+            context.member_id.as_deref(),
+        )?;
+        let member_id = owner.owner_member_id().ok_or_else(|| {
+            StoreError::Invalid("Project export requires an active workspace member.".into())
+        })?;
+        let authorized: bool = conn.query_row(
+            "SELECT EXISTS(
+               SELECT 1 FROM project
+               WHERE workspace_id=?1 AND id=?2 AND authority='local'
+                 AND visibility='member-private' AND owner_member_id=?3
+                 AND deleted_at IS NULL
+             );",
+            rusqlite::params![workspace_id, project_id, member_id],
+            |row| row.get(0),
+        )?;
+        if !authorized {
+            return Err(StoreError::Invalid(
+                "Project export requires an available project owned by the active member.".into(),
+            ));
+        }
+        let thread_ids = {
+            let mut statement = conn.prepare(
+                "SELECT id FROM thread
+                 WHERE workspace_id=?1 AND project_id=?2
+                   AND authority='local' AND visibility='member-private'
+                   AND owner_member_id=?3 AND deleted_at IS NULL
+                 ORDER BY id;",
+            )?;
+            let ids = statement
+                .query_map(
+                    rusqlite::params![workspace_id, project_id, member_id],
+                    |row| row.get::<_, String>(0),
+                )?
+                .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?;
+            ids
+        };
+        let message_ids = {
+            let mut statement = conn.prepare(
+                "SELECT m.id FROM message m
+                 JOIN thread t ON t.id=m.thread_id AND t.workspace_id=m.workspace_id
+                 WHERE m.workspace_id=?1 AND t.project_id=?2
+                   AND t.owner_member_id=?3 AND m.owner_member_id=?3
+                   AND t.deleted_at IS NULL AND m.deleted_at IS NULL
+                 ORDER BY m.id;",
+            )?;
+            let ids = statement
+                .query_map(
+                    rusqlite::params![workspace_id, project_id, member_id],
+                    |row| row.get::<_, String>(0),
+                )?
+                .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()?;
+            ids
+        };
+        Ok((owner, thread_ids, message_ids))
+    })?;
+    let owner_prefix = private_document_owner_prefix(&owner);
+    let project_marker = project_document_marker(project_id);
+    manifest.sections.preferences.retain(|record| {
+        record.key.starts_with(&owner_prefix) && record.key.contains(&project_marker)
+    });
+    manifest
+        .sections
+        .threads
+        .retain(|record| thread_ids.contains(&record.id));
+    manifest
+        .sections
+        .messages
+        .retain(|record| message_ids.contains(&record.id));
+    manifest.sections = project_sections(manifest.sections, project_id)?;
+    manifest.omitted = serde_json::json!({
+        "scope": "one private project",
+        "workspaceSettings": "excluded",
+        "accountConfiguration": "excluded",
+        "credentials": "excluded",
+        "machineState": "excluded",
+        "externalArtifactHandoffs": "remain linked to their source project and are not copied as project authority"
+    });
+    Ok(manifest)
+}
+
 fn read_sections(
     conn: &Connection,
     store: &Store,
@@ -797,6 +1016,13 @@ fn read_sections(
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut out = Vec::with_capacity(partials.len());
         for (key, updated_at, sealed) in partials {
+            if key.starts_with("document:owner:")
+                && artifact_owner
+                    .map(|owner| !key.starts_with(&private_document_owner_prefix(owner)))
+                    .unwrap_or(true)
+            {
+                continue;
+            }
             let value =
                 open_json_value(store, &sealed, &format!("preferences:{workspace_id}:{key}"))?;
             out.push(PreferenceRecord {
@@ -3635,39 +3861,62 @@ fn write_workspace_archive_file(
     workspace_id: &str,
     target: &Path,
 ) -> std::result::Result<PortableExportReceipt, String> {
+    let manifest = export_workspace_for(store, workspace_id).map_err(|error| error.to_string())?;
+    write_portable_archive_file(&manifest, target, "workspace")
+}
+
+fn write_project_archive_file(
+    store: &Store,
+    workspace_id: &str,
+    project_id: &str,
+    target: &Path,
+) -> std::result::Result<PortableExportReceipt, String> {
+    let manifest =
+        export_project_for(store, workspace_id, project_id).map_err(|error| error.to_string())?;
+    write_portable_archive_file(&manifest, target, "project")
+}
+
+fn write_portable_archive_file(
+    manifest: &Manifest,
+    target: &Path,
+    copy_kind: &str,
+) -> std::result::Result<PortableExportReceipt, String> {
     if !target
         .extension()
         .and_then(|value| value.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
     {
-        return Err("Choose a new .json file for the portable workspace copy.".into());
+        return Err(format!(
+            "Choose a new .json file for the portable {copy_kind} copy."
+        ));
     }
     if target.exists() {
-        return Err("Fable will not overwrite an existing workspace copy.".into());
+        return Err(format!(
+            "Fable will not overwrite an existing {copy_kind} copy."
+        ));
     }
     let parent = target
         .parent()
         .filter(|parent| parent.is_dir())
-        .ok_or_else(|| "Choose an existing folder for the workspace copy.".to_string())?;
+        .ok_or_else(|| format!("Choose an existing folder for the {copy_kind} copy."))?;
     if crate::paths::contains_symlink(parent) {
-        return Err("The workspace-copy folder cannot contain links.".into());
+        return Err(format!("The {copy_kind}-copy folder cannot contain links."));
     }
 
-    let manifest = export_workspace_for(store, workspace_id).map_err(|error| error.to_string())?;
-    let encoded = serde_json::to_vec_pretty(&manifest)
-        .map_err(|_| "Fable could not encode the workspace copy.".to_string())?;
+    let encoded = serde_json::to_vec_pretty(manifest)
+        .map_err(|_| format!("Fable could not encode the {copy_kind} copy."))?;
     let sha256 = format!("{:x}", Sha256::digest(&encoded));
     let bytes = u64::try_from(encoded.len())
-        .map_err(|_| "The workspace copy is too large to save.".to_string())?;
+        .map_err(|_| format!("The {copy_kind} copy is too large to save."))?;
 
     let mut staged = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|_| "Fable could not prepare the workspace-copy file.".to_string())?;
+        .map_err(|_| format!("Fable could not prepare the {copy_kind}-copy file."))?;
     staged
         .write_all(&encoded)
         .and_then(|_| staged.as_file().sync_all())
-        .map_err(|_| "Fable could not write the workspace copy.".to_string())?;
+        .map_err(|_| format!("Fable could not write the {copy_kind} copy."))?;
     staged.persist_noclobber(target).map_err(|_| {
-        "Fable could not save the workspace copy without overwriting a file.".to_string()
+        format!("Fable could not save the {copy_kind} copy without overwriting a file.")
     })?;
 
     Ok(PortableExportReceipt {
@@ -3692,6 +3941,25 @@ pub fn export_workspace_archive_to_file(
     let workspace_id = authorized_workspace_id(store, workspace_id)?;
     let target = PathBuf::from(destination);
     write_workspace_archive_file(store, &workspace_id, &target)
+}
+
+/// Atomically save one exact private project as a credential-free plaintext
+/// subset of the portable workspace format. The destination must be new.
+#[tauri::command]
+pub fn export_project_archive_to_file(
+    destination: String,
+    workspace_id: Option<String>,
+    project_id: String,
+) -> std::result::Result<PortableExportReceipt, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let workspace_id = authorized_workspace_id(store, workspace_id)?;
+    let project_id = project_id.trim();
+    if project_id.is_empty() || project_id.chars().count() > 256 {
+        return Err("Choose an available project to export.".into());
+    }
+    let target = PathBuf::from(destination);
+    write_project_archive_file(store, &workspace_id, project_id, &target)
 }
 
 fn read_workspace_archive_file(
@@ -3962,6 +4230,147 @@ mod tests {
                 )
             })
             .unwrap();
+    }
+
+    #[test]
+    fn project_copy_requires_the_exact_private_owner_and_filters_private_documents() {
+        let source = store();
+        bind_member_owner(&source);
+        let workspace = crate::store::repos::scope::DataScope::workspace("default").unwrap();
+        let owner_a = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            workspace.clone(),
+            "user-a",
+            Some("member-a"),
+        )
+        .unwrap();
+        let owner_b = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            workspace.clone(),
+            "user-b",
+            Some("member-b"),
+        )
+        .unwrap();
+        let project_a_document = format!(
+            "{}{}knowledge",
+            private_document_owner_prefix(&owner_a),
+            project_document_marker("project-a")
+        );
+        let project_b_document = format!(
+            "{}{}knowledge",
+            private_document_owner_prefix(&owner_b),
+            project_document_marker("project-b")
+        );
+
+        source
+            .transaction(|tx| {
+                crate::store::repos::project::create(
+                    tx,
+                    &source,
+                    &workspace,
+                    "project-a",
+                    "member-a",
+                    "user-a",
+                    "Project A",
+                    None,
+                    None,
+                    "t",
+                )?;
+                crate::store::repos::project::create(
+                    tx,
+                    &source,
+                    &workspace,
+                    "project-b",
+                    "member-b",
+                    "user-b",
+                    "Project B",
+                    None,
+                    None,
+                    "t",
+                )?;
+                crate::store::repos::thread::create(
+                    tx,
+                    &source,
+                    &workspace,
+                    "thread-a",
+                    Some("project-a"),
+                    "A",
+                    "t",
+                    &serde_json::json!({}),
+                )?;
+                crate::store::repos::thread::create(
+                    tx,
+                    &source,
+                    &workspace,
+                    "thread-b",
+                    Some("project-b"),
+                    "B",
+                    "t",
+                    &serde_json::json!({}),
+                )?;
+                tx.execute(
+                    "UPDATE thread SET owner_member_id='member-a' WHERE id='thread-a'",
+                    [],
+                )?;
+                tx.execute(
+                    "UPDATE thread SET owner_member_id='member-b' WHERE id='thread-b'",
+                    [],
+                )?;
+                for (key, value) in [
+                    (&project_a_document, serde_json::json!({"title":"A"})),
+                    (&project_b_document, serde_json::json!({"title":"B"})),
+                ] {
+                    let sealed =
+                        source.seal_json_owned(&value, &format!("preferences:default:{key}"))?;
+                    tx.execute(
+                        "INSERT INTO preferences(workspace_id,key,updated_at,payload,payload_nonce)
+                         VALUES ('default',?1,'t',?2,?3)",
+                        rusqlite::params![key, sealed.ciphertext, sealed.nonce],
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        let workspace_copy = export_workspace(&source).unwrap();
+        assert!(workspace_copy
+            .sections
+            .preferences
+            .iter()
+            .any(|record| record.key == project_a_document));
+        assert!(workspace_copy
+            .sections
+            .preferences
+            .iter()
+            .all(|record| record.key != project_b_document));
+
+        let project_copy = export_project_for(&source, "default", "project-a").unwrap();
+        assert_eq!(
+            project_copy
+                .sections
+                .projects
+                .iter()
+                .map(|record| record.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project-a"]
+        );
+        assert_eq!(
+            project_copy
+                .sections
+                .threads
+                .iter()
+                .map(|record| record.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["thread-a"]
+        );
+        assert_eq!(
+            project_copy
+                .sections
+                .preferences
+                .iter()
+                .map(|record| record.key.as_str())
+                .collect::<Vec<_>>(),
+            vec![project_a_document.as_str()]
+        );
+        assert!(export_project_for(&source, "default", "project-b").is_err());
     }
 
     fn seed_portable_routine(store: &Store) {
