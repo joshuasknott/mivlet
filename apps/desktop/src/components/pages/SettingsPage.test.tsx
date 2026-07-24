@@ -385,6 +385,18 @@ describe("Settings → Privacy UX states", () => {
   it("keeps local restore explicit and truthful outside the desktop runtime", async () => {
     renderPrivacy(stubRuntime());
 
+    const portablePath = screen.getByLabelText("New workspace-copy file");
+    const portableExport = screen.getByRole("button", { name: "Export workspace copy" });
+    expect(portableExport).toBeDisabled();
+    fireEvent.change(portablePath, { target: { value: "C:\\Backups\\workspace.json" } });
+    expect(portableExport).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(portableExport);
+    });
+    expect(
+      await screen.findByText("Portable workspace export is available only in the Fable desktop app.")
+    ).toBeTruthy();
+
     const backupPath = screen.getByLabelText("New backup file");
     const restorePath = screen.getByLabelText("Restore from backup");
     const confirmation = screen.getByLabelText(/Type restore local data to confirm/i);

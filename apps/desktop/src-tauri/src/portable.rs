@@ -16,7 +16,8 @@
 //!   the DB), not encrypted-away.
 //! - Not a backup: `backup_local_data` (`VACUUM INTO`) is the raw-DB backup.
 //!   This is the portable, forward-compatible, re-importable surface.
-//! - Not wired to UI: the Tauri commands here are the seam.
+//! - Export is wired to Privacy settings through an atomic new-file command.
+//!   Import remains a validated native seam without a product UI.
 //!
 //! ## Local-first guarantees
 //! - No network, no telemetry, no connector activation, no schedule activation.
@@ -30,6 +31,8 @@
 //! pre-import state byte-for-byte.
 
 use std::collections::BTreeMap;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension};
@@ -3116,6 +3119,81 @@ pub fn export_workspace_archive(
         .map_err(|_| "Fable could not encode the workspace archive.".into())
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortableExportReceipt {
+    path: String,
+    format_version: u32,
+    schema_version: u32,
+    bytes: u64,
+    sha256: String,
+    credentials_included: bool,
+}
+
+fn write_workspace_archive_file(
+    store: &Store,
+    workspace_id: &str,
+    target: &Path,
+) -> std::result::Result<PortableExportReceipt, String> {
+    if !target
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+    {
+        return Err("Choose a new .json file for the portable workspace copy.".into());
+    }
+    if target.exists() {
+        return Err("Fable will not overwrite an existing workspace copy.".into());
+    }
+    let parent = target
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or_else(|| "Choose an existing folder for the workspace copy.".to_string())?;
+    if crate::paths::contains_symlink(parent) {
+        return Err("The workspace-copy folder cannot contain links.".into());
+    }
+
+    let manifest = export_workspace_for(store, workspace_id).map_err(|error| error.to_string())?;
+    let encoded = serde_json::to_vec_pretty(&manifest)
+        .map_err(|_| "Fable could not encode the workspace copy.".to_string())?;
+    let sha256 = format!("{:x}", Sha256::digest(&encoded));
+    let bytes = u64::try_from(encoded.len())
+        .map_err(|_| "The workspace copy is too large to save.".to_string())?;
+
+    let mut staged = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|_| "Fable could not prepare the workspace-copy file.".to_string())?;
+    staged
+        .write_all(&encoded)
+        .and_then(|_| staged.as_file().sync_all())
+        .map_err(|_| "Fable could not write the workspace copy.".to_string())?;
+    staged.persist_noclobber(target).map_err(|_| {
+        "Fable could not save the workspace copy without overwriting a file.".to_string()
+    })?;
+
+    Ok(PortableExportReceipt {
+        path: target.to_string_lossy().to_string(),
+        format_version: manifest.format_version,
+        schema_version: manifest.schema_version,
+        bytes,
+        sha256,
+        credentials_included: false,
+    })
+}
+
+/// Atomically save the active authenticated workspace as a credential-free,
+/// plaintext portable archive. The destination must be a new local JSON file.
+#[tauri::command]
+pub fn export_workspace_archive_to_file(
+    destination: String,
+    workspace_id: Option<String>,
+) -> std::result::Result<PortableExportReceipt, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let workspace_id = authorized_workspace_id(store, workspace_id)?;
+    let target = PathBuf::from(destination);
+    write_workspace_archive_file(store, &workspace_id, &target)
+}
+
 /// Import a portable manifest string. Validates before writing; applies inside
 /// a single transaction that rolls back on any failure. Never overwrites
 /// existing rows (skip-on-conflict). Imported connectors/schedules are disabled.
@@ -3949,6 +4027,68 @@ mod tests {
                 .map_err(StoreError::from)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn portable_file_export_is_atomic_non_overwriting_and_credential_free() {
+        let store = store();
+        seed(&store);
+        let directory = tempfile::TempDir::new().unwrap();
+        let target = directory.path().join("workspace-copy.json");
+
+        let receipt = write_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &target,
+        )
+        .unwrap();
+        let bytes = std::fs::read(&target).unwrap();
+        let manifest: Manifest = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(receipt.path, target.to_string_lossy());
+        assert_eq!(receipt.format_version, PORTABLE_FORMAT_VERSION);
+        assert_eq!(receipt.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(receipt.bytes, bytes.len() as u64);
+        assert_eq!(receipt.sha256, format!("{:x}", Sha256::digest(&bytes)));
+        assert!(!receipt.credentials_included);
+        assert!(!manifest.credentials_included);
+        assert!(serde_json::to_string(&manifest)
+            .unwrap()
+            .contains("\"credentialsIncluded\":false"));
+        assert!(write_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &target,
+        )
+        .unwrap_err()
+        .contains("will not overwrite"));
+        assert_eq!(std::fs::read(&target).unwrap(), bytes);
+    }
+
+    #[test]
+    fn portable_file_export_requires_a_json_target_in_an_existing_folder() {
+        let store = store();
+        let directory = tempfile::TempDir::new().unwrap();
+        assert!(write_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &directory.path().join("workspace-copy.txt"),
+        )
+        .unwrap_err()
+        .contains(".json"));
+        assert!(write_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &directory.path().join("missing").join("workspace-copy.json"),
+        )
+        .unwrap_err()
+        .contains("existing folder"));
+        assert!(write_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &directory.path().join("workspace-copy.JSON"),
+        )
+        .is_ok());
     }
 
     #[test]

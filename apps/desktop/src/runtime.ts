@@ -137,6 +137,15 @@ export interface RuntimeLocalRestorePreparation {
   credentialsIncluded: false;
 }
 
+export interface RuntimePortableExportReceipt {
+  path: string;
+  formatVersion: number;
+  schemaVersion: number;
+  bytes: number;
+  sha256: string;
+  credentialsIncluded: false;
+}
+
 export interface RuntimeLocalDiagnosticCategory {
   id: "storage" | "providers" | "connections" | "mcp" | "runs" | "routines" | "queues" | "migrations" | "sync";
   label: string;
@@ -206,6 +215,21 @@ export async function createRuntimeLocalBackup(
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<RuntimeLocalBackupReceipt>("backup_local_data", { destination });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function exportRuntimeWorkspaceArchive(
+  destination: string,
+  workspaceId: string
+): Promise<RuntimePortableExportReceipt | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimePortableExportReceipt>("export_workspace_archive_to_file", {
+      destination,
+      workspaceId
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }

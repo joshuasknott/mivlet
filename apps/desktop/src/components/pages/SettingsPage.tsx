@@ -31,6 +31,7 @@ import { PERMISSION_PROFILES } from "../../lib/agent-run";
 import {
   acceptRuntimePendingInvitation,
   createRuntimeLocalBackup,
+  exportRuntimeWorkspaceArchive,
   getRuntimeRemoteControlStatus,
   loadRuntimeExecutionControl,
   loadRuntimeLocalDiagnostics,
@@ -406,6 +407,8 @@ function PrivacySettingsView({
   const [disconnectingConnectorId, setDisconnectingConnectorId] = useState<string | null>(null);
   const [isBulkDisconnecting, setIsBulkDisconnecting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [portableExportPath, setPortableExportPath] = useState("");
+  const [portableExporting, setPortableExporting] = useState(false);
   const [backupPath, setBackupPath] = useState("");
   const [restorePath, setRestorePath] = useState("");
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
@@ -421,6 +424,7 @@ function PrivacySettingsView({
     let current = true;
     setExecutionControl(null);
     setExecutionConfirmation("");
+    setPortableExportPath("");
     void loadRuntimeExecutionControl(workspaceId)
       .then((state) => {
         if (current) setExecutionControl(state);
@@ -504,6 +508,27 @@ function PrivacySettingsView({
       onStatus(error instanceof Error ? error.message : "Fable could not create that backup.");
     } finally {
       setRecoveryAction(null);
+    }
+  };
+
+  const handlePortableExport = async () => {
+    if (!portableExportPath.trim()) return;
+    setPortableExporting(true);
+    try {
+      const receipt = await exportRuntimeWorkspaceArchive(
+        portableExportPath.trim(),
+        workspaceId
+      );
+      if (receipt) {
+        setPortableExportPath("");
+        onStatus("Portable workspace copy created. It contains no provider credentials.");
+      } else {
+        onStatus("Portable workspace export is available only in the Fable desktop app.");
+      }
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Fable could not export this workspace.");
+    } finally {
+      setPortableExporting(false);
     }
   };
 
@@ -717,6 +742,44 @@ function PrivacySettingsView({
                 >
                   {isExporting ? <Spinner size={14} /> : null}
                   <span>Export memory</span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="portable-export-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <LockKey size={19} />
+              </span>
+              <span>
+                <strong id="portable-export-title">Portable workspace copy</strong>
+                <small>Save projects, conversations, artifacts, routines, and other workspace data as plain JSON.</small>
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: "8px", marginTop: "16px" }}>
+              <label htmlFor="portable-export-path"><strong>New workspace-copy file</strong></label>
+              <input
+                id="portable-export-path"
+                className="input"
+                value={portableExportPath}
+                onChange={(event) => setPortableExportPath(event.target.value)}
+                placeholder="Choose a new .json file path"
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <small>
+                This copy contains no provider credentials, but its workspace content is readable without Fable. Store it privately. Fable will not overwrite an existing file.
+              </small>
+              <div>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => void handlePortableExport()}
+                  disabled={!portableExportPath.trim() || portableExporting}
+                >
+                  {portableExporting ? <Spinner size={14} /> : null}
+                  <span>Export workspace copy</span>
                 </button>
               </div>
             </div>
