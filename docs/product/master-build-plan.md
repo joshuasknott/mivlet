@@ -900,8 +900,11 @@ contract, evidence requirement, stop conditions, and the minimum of saved Run,
 Mission, Plan-step, and conservative default budgets are native-derived. Exact
 replay is idempotent; partial or changed preparation, worker-budget overflow, and
 capability-bearing steps fail the transaction before any append. Context, tools,
-grants, routes, credentials, approvals, and placement remain empty rather than
-being inferred. Starting/routing arbitrary ready workers, native grant composition
+grants, credentials, and approvals remain empty rather than being inferred. Each
+worker now retains an immutable no-fallback provider-route envelope from the
+Mission data boundary plus an exact local-desktop, no-transfer placement policy.
+A Mission that excludes local execution or repeats an authority identity fails
+before preparation. Starting arbitrary ready workers, native grant composition
 for tool-bearing steps, and general restart dispatch remain open.
 
 The existing native worker-start boundary now selects cited-policy quality
@@ -946,7 +949,12 @@ only when the ordered dependency workers identify one unambiguous target.
 Changed targets, worker order, declarations, event order, and browser-only
 execution fail closed. Provider execution remains an injected worker callback,
 so the adapter chooses no route, credential, grant, approval, placement, tool,
-or evaluator. Automatic route selection/worker start and restart dispatch still
+or evaluator. A desktop resolver can now choose a current route for a provider-only
+worker inside that saved policy. It filters to the exact workspace and required
+route identities, permits no fallback or placement transfer, and refuses to
+compare routes spanning different provider, billing, privacy, or placement
+boundaries; health, capability, tools, context, budget, cost, quality, and speed
+still pass through the portable selector. Worker start and restart dispatch still
 need product composition, so the Wave 4C checkboxes remain unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact

@@ -107,6 +107,7 @@ export function compileWorkerAssignment(input: CompileWorkerAssignmentInput): Wo
   }
 
   const budget = boundedBudget(mission.budget, step.estimatedBudget, input.requestedBudget);
+  const executionPolicy = workerExecutionPolicy(mission);
   const metadata = metadataFromMission(mission, input.now);
   return {
     ...metadata,
@@ -125,6 +126,8 @@ export function compileWorkerAssignment(input: CompileWorkerAssignmentInput): Wo
     capabilityIds: [...requiredCapabilities],
     capabilityGrantIds: [...requiredCapabilities].map((capability) => grantByCapability.get(capability)!),
     tools: input.tools,
+    routePreference: executionPolicy.routePreference,
+    placementPreference: executionPolicy.placementPreference,
     budget,
     stopConditions: [
       { kind: "objective-met", description: "Stop when the assigned objective and required outputs are complete." },
@@ -138,6 +141,42 @@ export function compileWorkerAssignment(input: CompileWorkerAssignmentInput): Wo
       delivery: input.handoff ? "handoff" : "run-result"
     },
     ...(input.handoff ? { handoffContract: input.handoff } : {})
+  };
+}
+
+function workerExecutionPolicy(mission: Mission): Pick<
+  Worker,
+  "routePreference" | "placementPreference"
+> {
+  const routeIds = [...(mission.dataBoundary?.allowedProviderRouteIds ?? [])];
+  const executionNodeIds = [...(mission.dataBoundary?.allowedExecutionNodeIds ?? [])];
+  if (new Set(routeIds).size !== routeIds.length || new Set(executionNodeIds).size !== executionNodeIds.length) {
+    throw new WorkerAssignmentError("Mission execution policy identities must be unique.");
+  }
+  if (
+    executionNodeIds.length > 0
+    && !executionNodeIds.includes("local-desktop" as Spine.Primitives.ExecutionNodeId)
+  ) {
+    throw new WorkerAssignmentError(
+      "The selected Mission does not permit local desktop execution."
+    );
+  }
+  return {
+    routePreference: {
+      policy: routeIds.length > 0 ? "require" : "automatic",
+      providerRouteIds: routeIds,
+      allowFallback: false,
+      reason: routeIds.length > 0
+        ? "Use only the provider routes saved by the Mission data boundary."
+        : "Resolve one authorized route at execution time without crossing route boundaries."
+    },
+    placementPreference: {
+      policy: "require",
+      executionNodeIds: ["local-desktop" as Spine.Primitives.ExecutionNodeId],
+      locality: "local",
+      allowTransfer: false,
+      reason: "This repository-local Mission runs only on the local desktop."
+    }
   };
 }
 

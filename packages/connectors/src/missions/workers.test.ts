@@ -56,9 +56,55 @@ describe("bounded worker assignment", () => {
     expect(worker).toMatchObject({
       status: "proposed", planStepKey: "write", capabilityIds: ["connected-source.search"],
       capabilityGrantIds: ["grant-1"],
+      routePreference: {
+        policy: "automatic", providerRouteIds: [], allowFallback: false
+      },
+      placementPreference: {
+        policy: "require", executionNodeIds: ["local-desktop"],
+        locality: "local", allowTransfer: false
+      },
       budget: { maxDurationMs: 120_000, maxInputTokens: 12_000, maxOutputTokens: 4_000, maxToolCalls: 5, maxAttempts: 1 },
       outputContract: { includeEvidence: true, includeUncertainty: true, delivery: "run-result" }
     });
+  });
+
+  it("retains the mission's exact provider-route envelope without fallback", () => {
+    const worker = compileWorkerAssignment(input({
+      mission: mission({
+        dataBoundary: {
+          allowedProviderRouteIds: [
+            id<"provider-route">("route-1"),
+            id<"provider-route">("route-2")
+          ],
+          allowedExecutionNodeIds: [id<"execution-node">("local-desktop")]
+        }
+      })
+    }));
+    expect(worker.routePreference).toMatchObject({
+      policy: "require",
+      providerRouteIds: ["route-1", "route-2"],
+      allowFallback: false
+    });
+  });
+
+  it("rejects ambiguous route identities and missions that exclude local execution", () => {
+    expect(() => compileWorkerAssignment(input({
+      mission: mission({
+        dataBoundary: {
+          allowedProviderRouteIds: [
+            id<"provider-route">("route-1"),
+            id<"provider-route">("route-1")
+          ]
+        }
+      })
+    }))).toThrow("identities must be unique");
+    expect(() => compileWorkerAssignment(input({
+      mission: mission({
+        dataBoundary: {
+          allowedExecutionNodeIds: [id<"execution-node">("hosted-node")]
+        }
+      })
+    }))).toThrow("does not permit local desktop execution");
   });
 
   it("never invents standing authority or accepts unrelated grants", () => {

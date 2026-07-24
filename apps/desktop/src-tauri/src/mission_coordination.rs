@@ -299,6 +299,64 @@ fn bounded_worker_budget(run: &Value, mission: &Value, step: &Value) -> Result<V
     Ok(Value::Object(budget))
 }
 
+fn mission_worker_execution_policy(mission: &Value) -> Result<(Value, Value), String> {
+    let boundary = mission.get("dataBoundary").and_then(Value::as_object);
+    let ids = |field: &str, label: &str| -> Result<Vec<String>, String> {
+        let values = boundary
+            .and_then(|boundary| boundary.get(field))
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        if values.len() > 64 {
+            return Err(format!("{label} exceeds its safe bound."));
+        }
+        let values = values
+            .iter()
+            .map(|value| {
+                bounded(
+                    value
+                        .as_str()
+                        .ok_or_else(|| format!("{label} is invalid."))?,
+                    label,
+                    200,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if values.iter().collect::<BTreeSet<_>>().len() != values.len() {
+            return Err(format!("{label} is ambiguous."));
+        }
+        Ok(values)
+    };
+    let route_ids = ids("allowedProviderRouteIds", "Mission provider route policy")?;
+    let execution_nodes = ids(
+        "allowedExecutionNodeIds",
+        "Mission execution placement policy",
+    )?;
+    if !execution_nodes.is_empty() && !execution_nodes.iter().any(|node| node == "local-desktop") {
+        return Err("The selected Mission does not permit local desktop execution.".into());
+    }
+    let route_reason = if route_ids.is_empty() {
+        "Resolve one authorized route at execution time without crossing route boundaries."
+    } else {
+        "Use only the provider routes saved by the Mission data boundary."
+    };
+    Ok((
+        json!({
+            "policy":if route_ids.is_empty() {"automatic"} else {"require"},
+            "providerRouteIds":route_ids,
+            "allowFallback":false,
+            "reason":route_reason
+        }),
+        json!({
+            "policy":"require",
+            "executionNodeIds":["local-desktop"],
+            "locality":"local",
+            "allowTransfer":false,
+            "reason":"This repository-local Mission runs only on the local desktop."
+        }),
+    ))
+}
+
 fn derived_provider_worker(
     authorized: &AuthorizedRun,
     step: &Value,
@@ -403,6 +461,7 @@ fn derived_provider_worker(
         .cloned()
         .ok_or_else(|| "Mission creator is invalid.".to_string())?;
     let budget = bounded_worker_budget(&authorized.journal.run, mission, step)?;
+    let (route_preference, placement_preference) = mission_worker_execution_policy(mission)?;
     Ok(json!({
         "workspaceId":workspace_id,"visibility":visibility,"ownerMemberId":owner,
         "authority":authority,"schemaVersion":schema_version,"revision":1,
@@ -413,6 +472,8 @@ fn derived_provider_worker(
             "responsibilities":[objective]},
         "planRevisionId":revision_id,"planStepKey":step_key,
         "context":[],"capabilityIds":[],"capabilityGrantIds":[],"tools":[],
+        "routePreference":route_preference,
+        "placementPreference":placement_preference,
         "budget":budget,
         "stopConditions":[
             {"kind":"objective-met","description":
@@ -3775,12 +3836,16 @@ mod tests {
                 "id":"mission-1","workspaceId":"workspace-1","visibility":"member-private",
                 "ownerMemberId":"member-1","authority":"local","schemaVersion":1,
                 "createdByInternalUserId":"user-1",
-                "budget":{"maxOutputTokens":3000,"maxAttempts":2}
+                "budget":{"maxOutputTokens":3000,"maxAttempts":2},
+                "dataBoundary":{
+                    "allowedProviderRouteIds":["route-1","route-2"],
+                    "allowedExecutionNodeIds":["local-desktop"]
+                }
             }),
             plan: json!({}),
             current_revision: json!({"id":"revision-1"}),
         };
-        let authorized = AuthorizedRun {
+        let mut authorized = AuthorizedRun {
             scope,
             member: "member-1".into(),
             actor: "user-1".into(),
@@ -3812,6 +3877,19 @@ mod tests {
         assert_eq!(worker["capabilityIds"], json!([]));
         assert_eq!(worker["capabilityGrantIds"], json!([]));
         assert_eq!(worker["tools"], json!([]));
+        assert_eq!(worker["routePreference"]["policy"], "require");
+        assert_eq!(
+            worker["routePreference"]["providerRouteIds"],
+            json!(["route-1", "route-2"])
+        );
+        assert_eq!(worker["routePreference"]["allowFallback"], false);
+        assert_eq!(worker["placementPreference"]["policy"], "require");
+        assert_eq!(
+            worker["placementPreference"]["executionNodeIds"],
+            json!(["local-desktop"])
+        );
+        assert_eq!(worker["placementPreference"]["locality"], "local");
+        assert_eq!(worker["placementPreference"]["allowTransfer"], false);
         assert_eq!(worker["outputContract"]["includeEvidence"], true);
 
         let capability_step = json!({
@@ -3823,6 +3901,14 @@ mod tests {
             derived_provider_worker(&authorized, &capability_step, "2026-07-23T10:00:00.000Z")
                 .unwrap_err()
                 .contains("explicit native grant composition")
+        );
+
+        authorized.lifecycle.mission["dataBoundary"]["allowedExecutionNodeIds"] =
+            json!(["hosted-node"]);
+        assert!(
+            derived_provider_worker(&authorized, &step, "2026-07-23T10:00:00.000Z")
+                .unwrap_err()
+                .contains("does not permit local desktop execution")
         );
     }
 
