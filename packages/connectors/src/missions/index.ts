@@ -5,5 +5,6 @@ export * from "./run-journal";
 export * from "./evaluation";
 export * from "./routing";
 export * from "./coordination";
+export * from "./continuation";
 export * from "./graph-runner";
 export * from "./result-aggregation";

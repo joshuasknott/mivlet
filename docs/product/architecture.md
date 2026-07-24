@@ -180,6 +180,12 @@ The provider-neutral graph runner nevertheless preserves durable worker waits:
 waiting human-input or approval work consumes no provider slot, independent work
 continues within the saved width, and later invocations resume from reloaded
 terminal facts rather than replaying completed workers.
+Bounded iterative work uses a provider-neutral continuation policy over
+contiguous durable facts. Saved execution budgets and explicit no-progress,
+deadline, cancellation, human-stop, policy-stop, and iteration limits determine
+whether work may continue. Only policy or identified human acceptance can close
+the work; retry and escalation are recommendations requiring fresh native
+authorization rather than implicit provider or grant reuse.
 
 ## Schedules And Commands
 

@@ -883,6 +883,19 @@ a future immutable output-selection contract exists. Automatic worker
 creation/routing, general evaluator production and waits, restart dispatch, and
 arbitrary artifact materialization remain open.
 
+A provider-neutral continuation policy now supplies the bounded decision layer
+for iterative workers. It accepts at most sixty-four contiguous durable
+iteration facts; enforces the worker's duration, token, tool, attempt,
+no-progress, deadline, cancellation, human-stop, policy-stop, and explicit
+iteration limits; and can recommend continue, complete, retry, escalate, or
+stop without performing an effect. Completion requires a trusted policy or
+identified human acceptance fact; worker and external model opinions cannot
+close the work. Retry requires the exact retained retryable error and remaining
+saved attempt budget. Retry and escalation are marked as requiring fresh
+authorization, so this layer cannot silently reuse a provider, credential,
+grant, approval, placement, or billing boundary. Native journal production and
+product composition of these general iteration facts remain open.
+
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
 hash-verifies both immutable receipts, derives the bounded reviewer prompt and
